@@ -1,0 +1,11 @@
+pandas
+numpy
+yfinance
+statsmodels
+scikit-learn
+hmmlearn
+pykalman
+matplotlib
+plotly
+streamlit
+pytest 
