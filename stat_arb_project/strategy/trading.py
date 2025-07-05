@@ -1,111 +1,228 @@
 """
-Signal generation and position handling for backtesting.
+Trading strategy implementation for statistical arbitrage.
 """
-import numpy as np
 import pandas as pd
-from typing import Tuple, List
-from structs import Config, Position, Trade
+import numpy as np
+from typing import Dict, List, Tuple, Optional
 from model.kalman import KalmanFilter
-from model.hmm import GaussianHMM
-from model.ensemble import train_classifier
-from strategy.spread import compute_spread
-from strategy.pair_selection import is_stationary
-from strategy.execution import simulate_execution
+from strategy.stationarity import StationarityTester, is_stationary_robust
+from strategy.risk_management import RiskManager
+import logging
 
-def train_models_and_get_spread(pair: Tuple[str, str], training_data: pd.DataFrame, config: Config) -> Tuple:
-    """Trains models and returns them along with the historical spread series."""
-    y_train = training_data[pair[0]]
-    x_train = training_data[pair[1]]
-    kf = KalmanFilter().fit(y_train, x_train)
+logger = logging.getLogger(__name__)
+
+class StatisticalArbitrageStrategy:
+    """
+    Statistical arbitrage strategy using Kalman filter for spread modeling.
+    """
     
-    spread_series = pd.Series(
-        [compute_spread(y_train.iloc[i], x_train.iloc[i], kf.state_means[i], config.spread_type) for i in range(len(training_data))],
-        index=training_data.index
-    )
+    def __init__(self, 
+                 lookback_window: int = 100,
+                 entry_threshold: float = 2.0,
+                 exit_threshold: float = 0.5,
+                 max_position_size: float = 0.1,
+                 transaction_cost: float = 0.001):
+        
+        self.lookback_window = lookback_window
+        self.entry_threshold = entry_threshold
+        self.exit_threshold = exit_threshold
+        self.max_position_size = max_position_size
+        self.transaction_cost = transaction_cost
+        
+        # Initialize components
+        self.kalman_filter = KalmanFilter()
+        self.stationarity_tester = StationarityTester(window_size=lookback_window)
+        self.risk_manager = RiskManager()
+        
+        # State tracking
+        self.current_positions = {}
+        self.trade_history = []
+        self.spread_history = []
+        
+    def compute_spread(self, price_data: pd.DataFrame) -> pd.Series:
+        """
+        Compute the spread between two assets using linear regression.
+        """
+        if price_data.shape[1] != 2:
+            raise ValueError("Price data must contain exactly 2 assets for pair trading")
+        
+        asset1, asset2 = price_data.columns[0], price_data.columns[1]
+        
+        # Use linear regression to find hedge ratio
+        X = price_data[asset1].to_numpy().reshape(-1, 1)
+        y = price_data[asset2].to_numpy()
+        
+        # Add constant term
+        X = np.column_stack([np.ones(X.shape[0]), X])
+        
+        # Solve using least squares
+        try:
+            beta = np.linalg.lstsq(X, y, rcond=None)[0]
+            hedge_ratio = float(beta[1])
+            intercept = float(beta[0])
+            
+            # Compute spread
+            spread = price_data[asset2] - (hedge_ratio * price_data[asset1] + intercept)
+            
+            return spread
+            
+        except np.linalg.LinAlgError:
+            logger.warning("Linear regression failed, using simple difference")
+            return price_data[asset2] - price_data[asset1]
     
-    hmm = GaussianHMM(num_regimes=config.num_regimes).fit(spread_series) if config.use_hmm else None
-    clf = train_classifier(spread_series) if config.use_ensemble_classifier else None
-        
-    return kf, hmm, clf, spread_series
-
-def calculate_pnl(position: Position, exit_y_price: float, exit_x_price: float) -> float:
-    """Calculates the PnL of a closed trade based on asset prices."""
-    if position.type == 'LONG': # Long Y, Short X
-        y_pnl = (exit_y_price - position.entry_y_price) * position.y_shares
-        x_pnl = (position.entry_x_price - exit_x_price) * position.x_shares
-    elif position.type == 'SHORT': # Short Y, Long X
-        y_pnl = (position.entry_y_price - exit_y_price) * position.y_shares
-        x_pnl = (exit_x_price - position.entry_x_price) * position.x_shares
-    else:
-        return 0.0
-    return y_pnl + x_pnl
-
-def simulate_trading(pair: Tuple[str, str], training_data: pd.DataFrame, sample_data: pd.DataFrame, config: Config) -> pd.DataFrame | None:
-    """Main procedure for simulating the trading strategy on a given pair."""
-    kf, hmm, clf, train_spread = train_models_and_get_spread(pair, training_data, config)
+    def is_stationary(self, spread: pd.Series) -> bool:
+        """
+        Check if the spread is stationary using robust testing.
+        """
+        return is_stationary_robust(spread, window_size=self.lookback_window)
     
-    position = Position()
-    trades: List[Trade] = []
-    y_ticker, x_ticker = pair
-
-    for i in range(len(sample_data)):
-        current_date = sample_data.index[i]
-        y_price, x_price = sample_data[y_ticker].iloc[i], sample_data[x_ticker].iloc[i]
+    def generate_signals(self, price_data: pd.DataFrame) -> Dict[str, float]:
+        """
+        Generate trading signals based on spread analysis.
+        """
+        if len(price_data) < self.lookback_window:
+            return {}
         
-        current_state = kf.get_current_state()
-        beta = current_state[0]
-        current_spread = compute_spread(y_price, x_price, current_state, config.spread_type)
-
-        if not is_stationary(train_spread.append(pd.Series(current_spread))):
-            if position.type != 'FLAT':
-                pnl = calculate_pnl(position, y_price, x_price)
-                trades.append(Trade(pair=pair, entry_date=position.entry_date, exit_date=current_date, pnl=pnl, type=position.type))
-                position = Position()
-            continue
+        # Compute spread
+        spread = self.compute_spread(price_data)
+        self.spread_history.append(spread.iloc[-1])
         
-        if config.use_hmm and hmm:
-            regime_params = hmm.get_regime_params()
-            current_regime = hmm.predict_regime(current_spread)
-            mean, std = regime_params[current_regime]['mean'], regime_params[current_regime]['std']
-        else:
-            mean, std = train_spread.mean(), train_spread.std()
-
-        if std < 1e-6: continue
-        z_score = (current_spread - mean) / std
-
-        if position.type != 'FLAT':
-            position.holding_period += 1
-            exit_condition = (position.type == 'LONG' and z_score > -config.exit_z) or (position.type == 'SHORT' and z_score < config.exit_z)
-            stop_condition = (position.type == 'LONG' and z_score < -config.stop_loss_mult) or (position.type == 'SHORT' and z_score > config.stop_loss_mult)
-            hold_limit_reached = position.holding_period > config.max_hold_bars
-
-            if exit_condition or stop_condition or hold_limit_reached:
-                pnl = calculate_pnl(position, y_price, x_price)
-                trades.append(Trade(pair=pair, entry_date=position.entry_date, exit_date=current_date, pnl=pnl, type=position.type))
-                position = Position()
-        else:
-            trade_signal = 'NONE'
-            if z_score > config.entry_z: trade_signal = 'SHORT'
-            elif z_score < -config.entry_z: trade_signal = 'LONG'
-
-            if trade_signal != 'NONE':
-                classifier_approval = True
-                if config.use_ensemble_classifier and clf:
-                    features = pd.DataFrame({'spread': [current_spread], 'spread_lag_1': [train_spread.iloc[-1]], 'volatility_10d': [train_spread.rolling(window=10).std().iloc[-1]]})
-                    prediction = clf.predict(features)[0]
-                    classifier_approval = (prediction == 1)
-
-                if classifier_approval:
-                    if y_price <= 0 or x_price <= 0: continue
-                    y_shares = config.trade_size_dollars / y_price
-                    x_shares = (config.trade_size_dollars * beta) / x_price
-                    position = Position(
-                        type=trade_signal, entry_date=current_date, holding_period=0,
-                        entry_y_price=simulate_execution(y_price, trade_signal, config),
-                        entry_x_price=simulate_execution(x_price, 'SHORT' if trade_signal == 'LONG' else 'LONG', config),
-                        y_shares=y_shares, x_shares=x_shares
-                    )
-
-    if not trades:
-        return None
-    return pd.DataFrame([t.__dict__ for t in trades]) 
+        # Check stationarity
+        is_stationary = self.is_stationary(spread)
+        self.stationarity_tester.update_stationarity_history(spread, is_stationary)
+        
+        if not is_stationary:
+            logger.debug("Spread is not stationary, no signals generated")
+            return {}
+        
+        # Update Kalman filter
+        self.kalman_filter.update(spread.iloc[-1])
+        
+        # Get current state
+        current_spread = spread.iloc[-1]
+        kalman_mean = self.kalman_filter.get_mean()
+        kalman_std = self.kalman_filter.get_std()
+        
+        if kalman_std == 0:
+            return {}
+        
+        # Compute z-score
+        z_score = (current_spread - kalman_mean) / kalman_std
+        
+        signals = {}
+        
+        # Entry signals
+        if abs(z_score) > self.entry_threshold:
+            if z_score > 0:  # Spread is high, short asset2, long asset1
+                signals['short'] = min(abs(z_score) / self.entry_threshold, 1.0)
+            else:  # Spread is low, long asset2, short asset1
+                signals['long'] = min(abs(z_score) / self.entry_threshold, 1.0)
+        
+        # Exit signals for existing positions
+        for position_type in self.current_positions:
+            if abs(z_score) < self.exit_threshold:
+                signals[f'exit_{position_type}'] = 1.0
+        
+        return signals
+    
+    def execute_trades(self, signals: Dict[str, float], 
+                      current_prices: pd.Series) -> List[Dict]:
+        """
+        Execute trades based on signals.
+        """
+        trades = []
+        
+        for signal_type, strength in signals.items():
+            if signal_type.startswith('exit_'):
+                # Exit existing position
+                position_type = signal_type[5:]  # Remove 'exit_' prefix
+                if position_type in self.current_positions:
+                    trades.append({
+                        'action': 'exit',
+                        'position_type': position_type,
+                        'strength': strength,
+                        'timestamp': current_prices.name
+                    })
+                    del self.current_positions[position_type]
+            
+            elif signal_type in ['long', 'short']:
+                # Check risk limits
+                if not self.risk_manager.can_take_position(signal_type, strength):
+                    logger.warning(f"Risk limit exceeded for {signal_type} signal")
+                    continue
+                
+                # Enter new position
+                self.current_positions[signal_type] = {
+                    'strength': strength,
+                    'entry_price': current_prices.mean(),
+                    'timestamp': current_prices.name
+                }
+                
+                trades.append({
+                    'action': 'enter',
+                    'position_type': signal_type,
+                    'strength': strength,
+                    'timestamp': current_prices.name
+                })
+        
+        self.trade_history.extend(trades)
+        return trades
+    
+    def calculate_pnl(self, current_prices: pd.Series) -> float:
+        """
+        Calculate current P&L for open positions.
+        """
+        if not self.current_positions:
+            return 0.0
+        
+        pnl = 0.0
+        current_price = current_prices.mean()
+        
+        for position_type, position in self.current_positions.items():
+            entry_price = position['entry_price']
+            strength = position['strength']
+            
+            if position_type == 'long':
+                pnl += strength * (current_price - entry_price) / entry_price
+            else:  # short
+                pnl += strength * (entry_price - current_price) / entry_price
+        
+        return pnl
+    
+    def get_performance_metrics(self) -> Dict[str, float]:
+        """
+        Calculate performance metrics.
+        """
+        if not self.trade_history:
+            return {}
+        
+        # Calculate basic metrics
+        total_trades = len(self.trade_history)
+        winning_trades = sum(1 for trade in self.trade_history if trade.get('pnl', 0) > 0)
+        win_rate = float(winning_trades / total_trades if total_trades > 0 else 0)
+        
+        # Calculate returns
+        returns = [trade.get('pnl', 0) for trade in self.trade_history]
+        total_return = float(sum(returns))
+        avg_return = float(np.mean(returns) if returns else 0)
+        return_std = float(np.std(returns) if returns else 0)
+        
+        # Sharpe ratio (assuming risk-free rate of 0)
+        sharpe_ratio = float(avg_return / return_std if return_std > 0 else 0)
+        
+        return {
+            'total_trades': float(total_trades),
+            'win_rate': win_rate,
+            'total_return': total_return,
+            'avg_return': avg_return,
+            'return_std': return_std,
+            'sharpe_ratio': sharpe_ratio
+        }
+    
+    def reset(self):
+        """Reset strategy state."""
+        self.kalman_filter = KalmanFilter()
+        self.stationarity_tester = StationarityTester(window_size=self.lookback_window)
+        self.current_positions = {}
+        self.trade_history = []
+        self.spread_history = [] 

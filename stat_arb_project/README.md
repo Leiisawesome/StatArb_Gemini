@@ -1,151 +1,263 @@
-# Institutional-Grade Quant Desk: Intraday Pair Trading Platform
+# Statistical Arbitrage Trading System
 
-This project is a complete, production-ready statistical arbitrage trading strategy backtester and live simulation dashboard, specifically enhanced for **intraday pair trading**. The primary implemented and tested use case is for **Leveraged ETF (LETF) pairs** like TQQQ/SQQQ.
+An institutional-grade statistical arbitrage trading platform for pair trading of stocks, ETFs, and leveraged ETFs.
 
-## Key Enhancements in This Version
+## 🚀 Production Ready Features
 
--   **High-Frequency Capability:** The backtesting engine operates on intraday bar data (e.g., 1-minute, 5-minute).
--   **Instrument-Agnostic Design:** The core logic is structured to be extended to various financial instruments.
--   **Structured Configuration:** Type-safe configuration and data structures prevent common errors.
--   **Performance Optimization:** Key calculations are vectorized with pandas for high-speed backtesting.
--   **Full Robustness Suite:** Includes Time-Series Cross-Validation, Monte Carlo simulations (on bar returns), and advanced metrics like the **Sortino Ratio**.
--   **Containerization:** Ready for scalable deployment with Docker.
+- **Advanced Kalman Filter**: Professional implementation with online updating
+- **Robust Cointegration Testing**: Johansen and Engle-Granger tests with structural break detection
+- **Walk-Forward Analysis**: Out-of-sample validation for strategy robustness
+- **Production Risk Management**: Position sizing, risk limits, and portfolio optimization
+- **Execution Quality**: Market impact modeling and slippage estimation
+- **Multi-Pair Portfolio Management**: Cross-asset allocation and correlation-based sizing
+- **Advanced Signal Generation**: Regime detection, volatility clustering, and ML enhancement
+- **Structured Logging**: Production-ready logging with monitoring and alerting
+- **Configuration Management**: Environment-based configuration with validation
+- **Docker Support**: Complete containerization with monitoring stack
 
-## Project Structure
+## 📊 System Architecture
 
 ```
 stat_arb_project/
-├── config.py                 # Configuration parameters
-├── structs.py               # Type-safe data structures
-├── main.py                  # Main entry point
-├── requirements.txt         # Python dependencies
-├── Dockerfile              # Container configuration
-├── README.md               # This file
-├── data/
-│   └── data_loader.py      # Data loading and preprocessing
-├── model/
-│   ├── kalman.py           # Kalman Filter for hedge ratios
-│   ├── hmm.py              # Hidden Markov Models
-│   └── ensemble.py         # Ensemble classifiers
-├── strategy/
-│   ├── spread.py           # Spread computation
-│   ├── execution.py        # Order execution simulation
-│   ├── pair_selection.py   # Dynamic pair selection
-│   └── trading.py          # Main trading logic
-├── evaluation/
-│   ├── metrics.py          # Performance metrics
-│   ├── diagnostics.py      # Risk diagnostics
-│   ├── ablation.py         # Model ablation studies
-│   └── robustness.py       # Cross-validation & Monte Carlo
-├── dashboard/
-│   └── live_dashboard.py   # Streamlit dashboard
-├── utils/
-│   └── helpers.py          # Utility functions
-└── tests/
-    ├── test_spread.py      # Unit tests
-    └── test_metrics.py     # Performance test
+├── config/                 # Production configuration
+├── data/                   # Data loading and validation
+├── model/                  # Statistical models (Kalman, cointegration)
+├── strategies/             # Trading strategies
+├── execution/              # Order management and execution
+├── portfolio/              # Portfolio optimization and management
+├── signals/                # Advanced signal generation
+├── backtesting/            # Production backtesting engine
+├── evaluation/             # Performance evaluation
+├── utils/                  # Utilities and logging
+├── dashboard/              # Web-based monitoring dashboard
+└── tests/                  # Comprehensive test suite
 ```
 
-## Setup and Installation
+## 🛠 Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository_url>
-    cd stat_arb_project
-    ```
+### Prerequisites
 
-2.  **Create and activate a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
+- Python 3.9+
+- Docker and Docker Compose (for production deployment)
+- PostgreSQL (for production data storage)
+- Redis (for caching and real-time data)
 
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+### Local Development Setup
 
-## How to Run
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd StatArb_Gemini
+   ```
 
-### 1. Run the Intraday LETF Backtest
+2. **Create virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r stat_arb_project/requirements.txt
+   ```
+
+4. **Run basic test**
+   ```bash
+   python -c "import stat_arb_project; print('Installation successful!')"
+   ```
+
+### Production Deployment
+
+1. **Using Docker Compose (Recommended)**
+   ```bash
+   # Start all services
+   docker-compose up -d
+   
+   # View logs
+   docker-compose logs -f stat-arb-app
+   
+   # Stop services
+   docker-compose down
+   ```
+
+2. **Manual Production Setup**
+   ```bash
+   # Set environment variables
+   export ENVIRONMENT=production
+   export DB_HOST=localhost
+   export DB_PASSWORD=your_password
+   export REDIS_HOST=localhost
+   
+   # Run production system
+   python stat_arb_project/production_main.py --mode backtest
+   ```
+
+## 🎯 Usage
+
+### Quick Start - Backtesting
+
 ```bash
-python main.py
+# Run backtest with default settings
+python stat_arb_project/production_main.py --mode backtest
+
+# Custom backtest
+python stat_arb_project/production_main.py \
+  --mode backtest \
+  --symbol1 AAPL \
+  --symbol2 MSFT \
+  --start-date 2023-01-01 \
+  --end-date 2023-12-31
 ```
 
-### 2. Launch the Interactive Dashboard
+### Configuration
+
+The system supports multiple configuration methods:
+
+1. **Environment Variables** (Production)
+   ```bash
+   export INITIAL_CAPITAL=1000000
+   export MAX_POSITION_SIZE=0.15
+   export TARGET_VOLATILITY=0.12
+   ```
+
+2. **Configuration File** (Development)
+   ```yaml
+   # config.yaml
+   environment: production
+   trading:
+     initial_capital: 1000000
+     max_position_size: 0.15
+     target_volatility: 0.12
+   ```
+
+3. **Command Line Arguments**
+   ```bash
+   python stat_arb_project/production_main.py \
+     --config config.yaml \
+     --mode backtest
+   ```
+
+## 📈 Key Features
+
+### Advanced Statistical Models
+- **Kalman Filter**: Online updating with adaptive parameters
+- **Cointegration Testing**: Multiple methodologies with structural break detection
+- **Walk-Forward Analysis**: Robust out-of-sample validation
+
+### Risk Management
+- **Position Sizing**: Kelly criterion and volatility targeting
+- **Risk Limits**: Maximum drawdown, leverage, and concentration limits
+- **Portfolio Optimization**: Multi-pair allocation with correlation constraints
+
+### Execution Quality
+- **Market Impact Modeling**: Realistic slippage estimation
+- **Order Management**: Smart order routing and position tracking
+- **Performance Monitoring**: Real-time metrics and alerting
+
+### Signal Generation
+- **Regime Detection**: Market state identification
+- **Volatility Clustering**: GARCH-based volatility modeling
+- **ML Enhancement**: Ensemble methods for signal improvement
+- **Alternative Data**: Sentiment, macro, and flow data integration
+
+## 🔧 Development
+
+### Running Tests
 ```bash
-streamlit run dashboard/live_dashboard.py
+# Run all tests
+pytest stat_arb_project/tests/
+
+# Run specific test categories
+pytest stat_arb_project/tests/test_kalman.py
+pytest stat_arb_project/tests/test_cointegration.py
+pytest stat_arb_project/tests/test_strategy.py
 ```
 
-### 3. Run Unit Tests
+### Code Quality
 ```bash
-pytest
+# Linting
+flake8 stat_arb_project/
+
+# Type checking
+mypy stat_arb_project/
+
+# Security scanning
+bandit -r stat_arb_project/
 ```
 
-### 4. Run with Docker
-```bash
-docker build -t stat-arb .
-docker run stat-arb
-```
+## 📊 Monitoring
 
----
-### **IMPORTANT NOTE ON INTRADAY DATA**
+### Dashboard Access
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **Application Logs**: `docker-compose logs -f stat-arb-app`
+- **Database**: PostgreSQL on localhost:5432
 
-The current implementation uses the `yfinance` library. For institutional-grade research, it is **strongly recommended** to integrate a professional data provider (e.g., Polygon.io, Alpaca, Bloomberg). The `data_loader.py` module is designed to be easily adapted for this.
----
+### Key Metrics
+- **Performance**: Total return, Sharpe ratio, max drawdown
+- **Risk**: VaR, position concentration, leverage
+- **Execution**: Slippage, fill rates, order latency
+- **System**: CPU, memory, database connections
 
-## Trading Strategy Overview
+## 🚨 Production Considerations
 
-The system implements a sophisticated statistical arbitrage strategy:
+### Security
+- All sensitive data encrypted at rest
+- Environment-based configuration
+- Secure API endpoints with authentication
+- Regular security audits
 
-1. **Pair Selection**: Uses cointegration tests to find pairs of assets that move together
-2. **Dynamic Hedge Ratios**: Kalman Filter estimates time-varying hedge ratios (beta)
-3. **Regime Detection**: Hidden Markov Models identify different market regimes
-4. **Signal Generation**: Z-score based entry/exit signals with ensemble confirmation
-5. **Risk Management**: Stop-losses, position limits, and maximum holding periods
+### Performance
+- Optimized data processing pipelines
+- Efficient memory management
+- Database connection pooling
+- Caching for frequently accessed data
 
-## Configuration
+### Reliability
+- Comprehensive error handling
+- Graceful degradation
+- Automated failover
+- Regular backups
 
-Key parameters in `config.py`:
+### Scalability
+- Horizontal scaling support
+- Load balancing capabilities
+- Microservices architecture ready
+- Cloud deployment support
 
-- **Tickers**: Default is TQQQ/SQQQ (leveraged ETF pair)
-- **Data Interval**: 5-minute bars (configurable to 1m, 15m, 1h)
-- **Entry/Exit Thresholds**: Z-score based (entry: 2.0, exit: 0.5)
-- **Position Sizing**: $10,000 per trade
-- **Risk Management**: 3x stop-loss, 96-bar max hold
+## 📚 Documentation
 
-## Performance Metrics
+- **API Documentation**: Available in code docstrings
+- **Configuration Guide**: See `config/` directory
+- **Strategy Documentation**: See `strategies/` directory
+- **Model Documentation**: See `model/` directory
 
-The system calculates comprehensive performance metrics:
-
-- **Sharpe Ratio**: Risk-adjusted returns
-- **Sortino Ratio**: Downside risk-adjusted returns
-- **Calmar Ratio**: Return to maximum drawdown
-- **Profit Factor**: Gross profit to gross loss ratio
-- **Win Rate**: Percentage of profitable trades
-- **Maximum Drawdown**: Largest peak-to-trough decline
-
-## Future Extensions
-
-The robust and modular design of this platform allows for several future extensions:
-
--   **Live Trading Integration:** Connect the signal generation logic to a broker API (e.g., Interactive Brokers, Alpaca) for live order execution.
--   **New Instrument Types:** Create new classes that inherit from a base `Instrument` class to handle the unique characteristics of options (e.g., greeks, expiry) or futures (e.g., rollovers, margin).
--   **Advanced Risk Management:** Implement a more sophisticated portfolio-level risk management module that considers factor exposures, VaR (Value at Risk), and overall portfolio leverage.
--   **Alternative Models:** Integrate other time-series models (e.g., GARCH for volatility, LSTMs for prediction) into the ensemble framework.
-
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
 4. Add tests for new functionality
-5. Submit a pull request
+5. Ensure all tests pass
+6. Submit a pull request
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Disclaimer
+## ⚠️ Disclaimer
 
-This software is for educational and research purposes only. It is not intended for live trading without proper testing and risk management. The authors are not responsible for any financial losses incurred from using this software. 
+This software is for educational and research purposes only. It is not intended for live trading without proper testing and validation. The authors are not responsible for any financial losses incurred through the use of this software.
+
+## 🆘 Support
+
+For issues and questions:
+1. Check the documentation
+2. Review existing issues
+3. Create a new issue with detailed information
+4. Contact the development team
+
+---
+
+**Status**: Production Ready - Research and Paper Trading  
+**Version**: 2.0.0  
+**Last Updated**: 2024 

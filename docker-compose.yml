@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  stat-arb-app:
+    build: .
+    container_name: stat-arb-trading
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=stat_arb
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - stat-arb-network
+
+  postgres:
+    image: postgres:15
+    container_name: stat-arb-postgres
+    environment:
+      - POSTGRES_DB=stat_arb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - stat-arb-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: stat-arb-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - stat-arb-network
+
+  monitoring:
+    image: grafana/grafana:latest
+    container_name: stat-arb-monitoring
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks:
+      - stat-arb-network
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+networks:
+  stat-arb-network:
+    driver: bridge 
