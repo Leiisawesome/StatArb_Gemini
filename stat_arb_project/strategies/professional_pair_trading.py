@@ -8,8 +8,8 @@ from typing import Dict, List, Tuple, Optional, Any
 import logging
 from datetime import datetime, timedelta
 
-from ..models.kalman_filter import AdvancedKalmanFilter
-from ..models.cointegration import CointegrationTester
+from ..model.kalman import AdvancedKalmanFilter
+from ..strategy.cointegration import CointegrationTester
 from ..risk_management import RiskManager
 from ..execution import (
     OrderManager, PositionManager, MarketImpactModel, 

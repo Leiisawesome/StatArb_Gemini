@@ -1,0 +1,41 @@
+# Data Configuration for Statistical Arbitrage System
+# Modify this file to change data sources and directories
+
+data:
+  # Data source: yfinance, polygon_offline, polygon_api
+  source: "polygon_offline"
+  
+  # Directory containing Polygon.io CSV files
+  # Change this path to point to your data directory
+  data_directory: "/Users/lei/Documents/data/polygon"
+  
+  # Cache settings
+  cache_enabled: true
+  cache_directory: "data/cache"
+  
+  # Data quality settings
+  validate_quality: true
+  filter_market_hours: true
+  handle_outliers: true
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay: 1.0
+
+# Example configurations for different environments
+environments:
+  development:
+    data_directory: "/Users/lei/Documents/data/polygon"
+    cache_enabled: true
+    validate_quality: true
+  
+  production:
+    data_directory: "/Users/lei/Documents/data/polygon"
+    cache_enabled: true
+    validate_quality: true
+    filter_market_hours: true
+  
+  testing:
+    data_directory: "/Users/lei/Documents/data/polygon/test"
+    cache_enabled: false
+    validate_quality: false 

@@ -94,6 +94,25 @@ stat_arb_project/
 
 ## 🎯 Usage
 
+### Data Loading
+
+The system supports loading data from Polygon.io CSV files for high-quality backtesting:
+
+```bash
+# Place your Polygon.io CSV files in /Users/lei/Documents/data/polygon/ directory
+# The system will automatically detect and load available data
+
+# Test data loading
+python test_data_loading.py
+```
+
+**Configuration Options:**
+
+1. **Default Configuration**: Uses `/Users/lei/Documents/data/polygon` by default
+2. **Custom Configuration**: Modify `stat_arb_project/config/data_config.yaml`
+3. **Environment Variables**: Set `POLYGON_DATA_DIR` environment variable
+4. **Code Configuration**: Pass custom `DataConfig` to loaders
+
 ### Quick Start - Backtesting
 
 ```bash
@@ -115,9 +134,13 @@ The system supports multiple configuration methods:
 
 1. **Environment Variables** (Production)
    ```bash
+   # Trading parameters
    export INITIAL_CAPITAL=1000000
    export MAX_POSITION_SIZE=0.15
    export TARGET_VOLATILITY=0.12
+   
+   # Data directory (optional - defaults to /Users/lei/Documents/data/polygon)
+   export POLYGON_DATA_DIR="/Users/lei/Documents/data/polygon"
    ```
 
 2. **Configuration File** (Development)
