@@ -466,12 +466,37 @@ class SpreadCalculator:
             return self._calculate_ols_spread(price1, price2)
         
         try:
+            # Debug: Check input data
+            logger.info(f"Kalman input data - Price1 range: {price1.min():.2f} to {price1.max():.2f}")
+            logger.info(f"Kalman input data - Price2 range: {price2.min():.2f} to {price2.max():.2f}")
+            logger.info(f"Kalman input data - Length: {len(price1)}")
+            
+            # Check for any data quality issues
+            if price1.isna().any() or price2.isna().any():
+                logger.warning("NaN values detected in input data")
+                price1 = price1.fillna(method='ffill')
+                price2 = price2.fillna(method='ffill')
+            
+            if (price1 <= 0).any() or (price2 <= 0).any():
+                logger.warning("Zero or negative values detected in input data")
+                price1 = price1[price1 > 0]
+                price2 = price2[price2 > 0]
+                # Realign after filtering
+                common_idx = price1.index.intersection(price2.index)
+                price1 = price1.loc[common_idx]
+                price2 = price2.loc[common_idx]
+            
             # Use Kalman filter to estimate dynamic hedge ratio
             kalman_result = create_kalman_filter(
                 x=price2.values,
                 y=price1.values,
                 auto_tune=True
             )
+            
+            # Debug: Check Kalman results
+            logger.info(f"Kalman results - Hedge ratios range: {kalman_result.hedge_ratios.min():.4f} to {kalman_result.hedge_ratios.max():.4f}")
+            logger.info(f"Kalman results - Filtered spreads range: {kalman_result.filtered_spreads.min():.4f} to {kalman_result.filtered_spreads.max():.4f}")
+            logger.info(f"Kalman results - Spreads std: {kalman_result.filtered_spreads.std():.6f}")
             
             # Create hedge ratio series aligned with prices
             hedge_ratio_series = pd.Series(
@@ -482,9 +507,20 @@ class SpreadCalculator:
             # Calculate spread using dynamic hedge ratios
             spread = price1 - hedge_ratio_series * price2
             
+            # Debug: Check final spread
+            logger.info(f"Final spread - Range: {spread.min():.4f} to {spread.max():.4f}")
+            logger.info(f"Final spread - Std: {spread.std():.6f}")
+            
             # Calculate statistics
             spread_mean = spread.mean()
             spread_std = spread.std()
+            
+            # Check for numerical issues
+            if spread_std == 0 or np.isnan(spread_std):
+                logger.error(f"Spread std is zero or NaN: {spread_std}")
+                logger.error("Falling back to OLS method")
+                return self._calculate_ols_spread(price1, price2)
+            
             z_score = (spread - spread_mean) / spread_std
             
             statistics = {

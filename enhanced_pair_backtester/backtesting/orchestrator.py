@@ -258,8 +258,14 @@ class BacktestOrchestrator:
         try:
             self.logger.info("Starting simplified backtesting process...")
             
-            # Combine all data for backtesting
-            all_data = pd.concat([self.training_data, self.testing_data])
+            # Calculate spread on testing data using trained models
+            test_price1 = self.testing_data[f'{self.config.symbol1}_close']
+            test_price2 = self.testing_data[f'{self.config.symbol2}_close']
+            
+            # Calculate spread on testing data
+            test_spread_result = self.spread_calculator.calculate_spread(
+                test_price1, test_price2, self.config.symbol1, self.config.symbol2
+            )
             
             # Initialize tracking variables
             equity_curve = []
@@ -269,53 +275,58 @@ class BacktestOrchestrator:
             current_position = 0
             current_capital = self.config.initial_capital
             
-            # Simple backtesting logic
-            for i in range(len(self.training_data), len(all_data)):
-                current_date = all_data.index[i]
+            # Simple backtesting logic on testing data
+            for i in range(len(self.testing_data)):
+                current_date = self.testing_data.index[i]
                 
-                # Simple signal generation based on spread
-                if self.spread_result:
-                    # Calculate current z-score
-                    current_spread = self.spread_result.spread.iloc[i] if i < len(self.spread_result.spread) else 0
-                    z_score = (current_spread - self.spread_result.spread_mean) / self.spread_result.spread_std
-                    
-                    # Simple signal logic
+                # Get current spread and z-score from testing data
+                current_spread = test_spread_result.spread.iloc[i]
+                current_z_score = test_spread_result.z_score.iloc[i]
+                
+                # Simple signal logic
+                signal_type = 'HOLD'
+                if current_z_score > self.config.entry_threshold:
+                    signal_type = 'SHORT'
+                elif current_z_score < -self.config.entry_threshold:
+                    signal_type = 'LONG'
+                elif abs(current_z_score) < self.config.exit_threshold:
                     signal_type = 'HOLD'
-                    if z_score > self.config.entry_threshold:
-                        signal_type = 'SHORT'
-                    elif z_score < -self.config.entry_threshold:
-                        signal_type = 'LONG'
-                    elif abs(z_score) < self.config.exit_threshold:
-                        signal_type = 'HOLD'
-                    
-                    # Record signal
-                    signal_history.append({
-                        'date': current_date,
-                        'signal_type': signal_type,
-                        'z_score': z_score,
-                        'spread': current_spread
-                    })
-                    
-                    # Simple position management
-                    if signal_type == 'LONG' and current_position <= 0:
-                        current_position = 1
-                        trade_log.append({
-                            'date': current_date,
-                            'action': 'BUY',
-                            'z_score': z_score
-                        })
-                    elif signal_type == 'SHORT' and current_position >= 0:
-                        current_position = -1
-                        trade_log.append({
-                            'date': current_date,
-                            'action': 'SELL',
-                            'z_score': z_score
-                        })
-                    elif signal_type == 'HOLD':
-                        current_position = 0
                 
-                # Simple portfolio valuation
-                portfolio_value = current_capital + current_position * 1000  # Simplified
+                # Record signal
+                signal_history.append({
+                    'date': current_date,
+                    'signal_type': signal_type,
+                    'z_score': current_z_score,
+                    'spread': current_spread
+                })
+                
+                # Simple position management
+                if signal_type == 'LONG' and current_position <= 0:
+                    current_position = 1
+                    trade_log.append({
+                        'date': current_date,
+                        'action': 'BUY',
+                        'z_score': current_z_score
+                    })
+                elif signal_type == 'SHORT' and current_position >= 0:
+                    current_position = -1
+                    trade_log.append({
+                        'date': current_date,
+                        'action': 'SELL',
+                        'z_score': current_z_score
+                    })
+                elif signal_type == 'HOLD':
+                    current_position = 0
+                
+                # Simple portfolio valuation (improved)
+                if current_position != 0:
+                    # Calculate P&L from spread movement
+                    if i > 0:
+                        spread_change = current_spread - test_spread_result.spread.iloc[i-1]
+                        pnl = current_position * spread_change * 1000  # Position size multiplier
+                        current_capital += pnl
+                
+                portfolio_value = current_capital
                 
                 # Record equity curve
                 equity_curve.append({

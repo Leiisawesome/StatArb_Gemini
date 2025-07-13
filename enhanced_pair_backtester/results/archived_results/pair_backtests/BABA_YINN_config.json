@@ -1,0 +1,90 @@
+{
+  "symbol1": "BABA",
+  "symbol2": "YINN",
+  "pair_name": "BABA_YINN",
+  "training_start": "2023-01-01",
+  "training_end": "2024-12-31",
+  "testing_start": "2025-01-01",
+  "testing_end": "2025-06-30",
+  "data_source": "clickhouse",
+  "data_frequency": "5min",
+  "database_config": {
+    "host": "localhost",
+    "port": 8123,
+    "user": "default",
+    "password": "",
+    "database": "polygon_data"
+  },
+  "initial_capital": 1000000,
+  "max_position_size": 0.25,
+  "lookback_window": 60,
+  "entry_threshold": 2.5,
+  "exit_threshold": 1.0,
+  "stop_loss_threshold": 3.0,
+  "use_kalman_filter": true,
+  "use_hmm_regime": true,
+  "use_ensemble_filter": true,
+  "kalman_config": {
+    "process_noise_beta": 1e-06,
+    "process_noise_alpha": 1e-06,
+    "observation_noise": 0.0001,
+    "initial_beta": 1.0,
+    "initial_alpha": 0.0
+  },
+  "hmm_config": {
+    "num_regimes": 3,
+    "regime_thresholds": {
+      "0": 2.0,
+      "1": 2.5,
+      "2": 3.0
+    }
+  },
+  "ensemble_config": {
+    "min_confidence": 0.6,
+    "n_estimators": 100,
+    "max_depth": 5,
+    "lookback_periods": [
+      5,
+      10,
+      20
+    ]
+  },
+  "transaction_costs": {
+    "commission_per_trade": 0.5,
+    "bid_ask_spread_bps": 2.0,
+    "market_impact_bps": 1.0,
+    "borrowing_rate_annual": 0.015
+  },
+  "order_type": "market",
+  "execution_delay": 0,
+  "slippage_bps": 1.0,
+  "max_drawdown_limit": 0.05,
+  "daily_var_limit": 0.01,
+  "position_concentration_limit": 0.25,
+  "benchmark_symbol": "SPY",
+  "risk_free_rate": 0.02,
+  "confidence_levels": [
+    0.95,
+    0.99
+  ],
+  "output_dir": "results",
+  "save_trades": true,
+  "save_daily_pnl": true,
+  "save_plots": true,
+  "plot_format": "png",
+  "walk_forward_analysis": false,
+  "walk_forward_window": 252,
+  "walk_forward_step": 21,
+  "use_walk_forward": false,
+  "monte_carlo_runs": 0,
+  "bootstrap_samples": 1000,
+  "performance_analysis": true,
+  "risk_analysis": true,
+  "save_all": false,
+  "quick_test": false,
+  "parallel": false,
+  "debug": false,
+  "verbose": true,
+  "log_level": "INFO",
+  "save_intermediate_results": false
+}

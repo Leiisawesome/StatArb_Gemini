@@ -158,11 +158,20 @@ class SimpleEnsembleFilter:
         features = self._calculate_features(spread)
         
         # Add regime information if available
-        if hmm_result is not None and hasattr(hmm_result, 'states'):
-            if len(hmm_result.states) == len(spread):
-                features['regime'] = hmm_result.states
-            else:
-                # Use a simple volatility-based regime
+        if hmm_result is not None:
+            try:
+                # Check if HMM result has states and they're the right length
+                if hasattr(hmm_result, 'states') and len(hmm_result.states) == len(spread):
+                    features['regime'] = hmm_result.states
+                elif hasattr(hmm_result, 'regime_probabilities') and len(hmm_result.regime_probabilities) == len(spread):
+                    # Use most likely regime
+                    features['regime'] = np.argmax(hmm_result.regime_probabilities, axis=1)
+                else:
+                    # Fallback to volatility-based regime
+                    vol = features['spread_returns'].rolling(20).std()
+                    features['regime'] = (vol > vol.rolling(60).median()).astype(int)
+            except Exception as e:
+                logger.warning(f"Error processing HMM result: {e}, using volatility-based regime")
                 vol = features['spread_returns'].rolling(20).std()
                 features['regime'] = (vol > vol.rolling(60).median()).astype(int)
         else:
@@ -206,8 +215,9 @@ class SimpleEnsembleFilter:
         
         # Feature importance
         feature_importance = {}
-        for i, feature in enumerate(self.feature_names):
-            feature_importance[feature] = self.model.feature_importances_[i]
+        if hasattr(self.model, 'feature_importances_'):
+            for i, feature in enumerate(self.feature_names):
+                feature_importance[feature] = self.model.feature_importances_[i]
         
         self.is_fitted = True
         
@@ -229,10 +239,17 @@ class SimpleEnsembleFilter:
         features = self._calculate_features(spread)
         
         # Add regime information
-        if hmm_result is not None and hasattr(hmm_result, 'states'):
-            if len(hmm_result.states) == len(spread):
-                features['regime'] = hmm_result.states
-            else:
+        if hmm_result is not None:
+            try:
+                if hasattr(hmm_result, 'states') and len(hmm_result.states) == len(spread):
+                    features['regime'] = hmm_result.states
+                elif hasattr(hmm_result, 'regime_probabilities') and len(hmm_result.regime_probabilities) == len(spread):
+                    features['regime'] = np.argmax(hmm_result.regime_probabilities, axis=1)
+                else:
+                    vol = features['spread_returns'].rolling(20).std()
+                    features['regime'] = (vol > vol.rolling(60).median()).astype(int)
+            except Exception as e:
+                logger.warning(f"Error processing HMM result in predict: {e}")
                 vol = features['spread_returns'].rolling(20).std()
                 features['regime'] = (vol > vol.rolling(60).median()).astype(int)
         else:
@@ -240,6 +257,9 @@ class SimpleEnsembleFilter:
             features['regime'] = (vol > vol.rolling(60).median()).astype(int)
         
         # Get latest features
+        if len(features) == 0:
+            raise ValueError("No features available for prediction")
+        
         latest_features = features.iloc[-1:][self.feature_names]
         
         # Handle any remaining NaN or infinite values
@@ -251,15 +271,22 @@ class SimpleEnsembleFilter:
         
         # Get prediction
         prediction = self.model.predict(X_scaled)[0]
-        probability = self.model.predict_proba(X_scaled)[0][1]
+        probabilities = self.model.predict_proba(X_scaled)[0]
+        
+        # Handle case where only one class is predicted
+        if len(probabilities) == 1:
+            probability = probabilities[0] if prediction == 1 else 1 - probabilities[0]
+        else:
+            probability = probabilities[1] if len(probabilities) > 1 else 0.5
         
         # Generate signal
         current_signal = self._generate_signal(spread, prediction, probability, latest_features, hmm_result)
         
         # Feature importance
         feature_importance = {}
-        for i, feature in enumerate(self.feature_names):
-            feature_importance[feature] = self.model.feature_importances_[i]
+        if hasattr(self.model, 'feature_importances_'):
+            for i, feature in enumerate(self.feature_names):
+                feature_importance[feature] = self.model.feature_importances_[i]
         
         return SimpleEnsembleResult(
             current_signal=current_signal,

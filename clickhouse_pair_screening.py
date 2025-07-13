@@ -77,6 +77,12 @@ class ScreeningConfig:
     min_lookback_days: int = 252
     max_pairs_to_test: int = 1000
     
+    # Regime-aware settings
+    regime_window: int = 60  # Days for regime detection
+    min_regime_stability: float = 0.5  # Minimum stability score
+    max_regime_transitions: int = 50  # Maximum regime changes allowed
+    min_correlation_consistency: float = 0.3  # Minimum cross-regime correlation consistency
+    
     # Performance settings
     max_workers: int = 4
     batch_size: int = 10000
@@ -326,6 +332,339 @@ class PairAnalyzer:
     """Analyzes pairs for cointegration and trading signals"""
     
     @staticmethod
+    def analyze_liquidity_profile(symbol1: str, symbol2: str, 
+                                 data1: pd.DataFrame, data2: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze liquidity profile and microstructure characteristics"""
+        try:
+            # Volume analysis
+            vol1_stats = {
+                'avg_volume': data1['volume_sum'].mean() if 'volume_sum' in data1.columns else 0,
+                'volume_std': data1['volume_sum'].std() if 'volume_sum' in data1.columns else 0,
+                'zero_volume_pct': (data1['volume_sum'] == 0).mean() * 100 if 'volume_sum' in data1.columns else 0
+            }
+            
+            vol2_stats = {
+                'avg_volume': data2['volume_sum'].mean() if 'volume_sum' in data2.columns else 0,
+                'volume_std': data2['volume_sum'].std() if 'volume_sum' in data2.columns else 0,
+                'zero_volume_pct': (data2['volume_sum'] == 0).mean() * 100 if 'volume_sum' in data2.columns else 0
+            }
+            
+            # Price movement analysis (proxy for bid-ask spread)
+            price1_changes = data1['close'].pct_change().abs()
+            price2_changes = data2['close'].pct_change().abs()
+            
+            # Minimum price movements (tick size proxy)
+            min_move1 = price1_changes[price1_changes > 0].min() if len(price1_changes[price1_changes > 0]) > 0 else 0.01
+            min_move2 = price2_changes[price2_changes > 0].min() if len(price2_changes[price2_changes > 0]) > 0 else 0.01
+            
+            # Liquidity asymmetry metrics
+            volume_ratio = vol1_stats['avg_volume'] / max(vol2_stats['avg_volume'], 1)
+            tick_size_ratio = min_move1 / max(min_move2, 1e-6)
+            
+            # Execution timing analysis
+            price1_volatility = price1_changes.std()
+            price2_volatility = price2_changes.std()
+            volatility_asymmetry = abs(price1_volatility - price2_volatility) / max(price1_volatility, price2_volatility, 1e-6)
+            
+            # Time-of-day liquidity patterns (simplified)
+            if 'timestamp' in data1.index.names or hasattr(data1.index, 'hour'):
+                try:
+                    hourly_volume1 = data1.groupby(data1.index.hour)['volume_sum'].mean() if 'volume_sum' in data1.columns else None
+                    hourly_volume2 = data2.groupby(data2.index.hour)['volume_sum'].mean() if 'volume_sum' in data2.columns else None
+                    
+                    if hourly_volume1 is not None and hourly_volume2 is not None:
+                        liquidity_correlation = hourly_volume1.corr(hourly_volume2)
+                    else:
+                        liquidity_correlation = 1.0
+                except:
+                    liquidity_correlation = 1.0
+            else:
+                liquidity_correlation = 1.0
+            
+            # Calculate liquidity score (0-1, higher is better)
+            liquidity_score = 1.0
+            
+            # Penalize volume asymmetry
+            if volume_ratio > 10 or volume_ratio < 0.1:
+                liquidity_score *= 0.5
+            elif volume_ratio > 5 or volume_ratio < 0.2:
+                liquidity_score *= 0.7
+            
+            # Penalize tick size asymmetry
+            if tick_size_ratio > 2 or tick_size_ratio < 0.5:
+                liquidity_score *= 0.8
+            
+            # Penalize high zero volume percentage
+            avg_zero_vol = (vol1_stats['zero_volume_pct'] + vol2_stats['zero_volume_pct']) / 2
+            if avg_zero_vol > 20:
+                liquidity_score *= 0.3
+            elif avg_zero_vol > 10:
+                liquidity_score *= 0.6
+            
+            # Penalize volatility asymmetry
+            if volatility_asymmetry > 0.5:
+                liquidity_score *= 0.7
+            
+            # Penalize poor liquidity correlation
+            if liquidity_correlation < 0.5:
+                liquidity_score *= 0.8
+            
+            return {
+                'symbol1_liquidity': vol1_stats,
+                'symbol2_liquidity': vol2_stats,
+                'volume_ratio': volume_ratio,
+                'tick_size_ratio': tick_size_ratio,
+                'volatility_asymmetry': volatility_asymmetry,
+                'liquidity_correlation': liquidity_correlation,
+                'liquidity_score': liquidity_score,
+                'execution_risk': 1.0 - liquidity_score,  # Higher score = higher execution risk
+                'min_move1': min_move1,
+                'min_move2': min_move2
+            }
+            
+        except Exception as e:
+            logger.error(f"Liquidity analysis failed: {e}")
+            return {
+                'liquidity_score': 0.0,
+                'execution_risk': 1.0,
+                'volume_ratio': 1.0,
+                'tick_size_ratio': 1.0,
+                'volatility_asymmetry': 0.0,
+                'liquidity_correlation': 0.0
+            }
+    
+    @staticmethod
+    def estimate_transaction_costs(symbol1: str, symbol2: str, 
+                                  liquidity_profile: Dict[str, Any],
+                                  typical_position_size: float = 100000) -> Dict[str, float]:
+        """Estimate comprehensive transaction costs"""
+        try:
+            # Base commission (typical retail)
+            base_commission = 1.0  # $1 per leg
+            
+            # Bid-ask spread estimation (based on volatility and liquidity)
+            vol_proxy1 = liquidity_profile.get('symbol1_liquidity', {}).get('volume_std', 0)
+            vol_proxy2 = liquidity_profile.get('symbol2_liquidity', {}).get('volume_std', 0)
+            
+            # Estimate spread as percentage of price
+            estimated_spread1 = max(0.0005, min(0.01, vol_proxy1 / 1000000))  # 0.05% to 1%
+            estimated_spread2 = max(0.0005, min(0.01, vol_proxy2 / 1000000))
+            
+            # Market impact (square root law)
+            avg_volume1 = liquidity_profile.get('symbol1_liquidity', {}).get('avg_volume', 1000000)
+            avg_volume2 = liquidity_profile.get('symbol2_liquidity', {}).get('avg_volume', 1000000)
+            
+            participation_rate1 = typical_position_size / max(avg_volume1, 1)
+            participation_rate2 = typical_position_size / max(avg_volume2, 1)
+            
+            market_impact1 = 0.0001 * np.sqrt(participation_rate1)  # Square root law
+            market_impact2 = 0.0001 * np.sqrt(participation_rate2)
+            
+            # Execution timing mismatch cost
+            execution_lag_cost = liquidity_profile.get('volatility_asymmetry', 0) * 0.001
+            
+            # Borrowing cost estimation (simplified)
+            # ETFs typically have lower borrow rates than individual stocks
+            etf_symbols = ['SPY', 'QQQ', 'IWM', 'TLT', 'TMF', 'TQQQ', 'TNA', 'SOXL']
+            
+            borrow_rate1 = 0.005 if symbol1 in etf_symbols else 0.02  # 0.5% vs 2%
+            borrow_rate2 = 0.005 if symbol2 in etf_symbols else 0.02
+            
+            # Leverage ETFs have higher borrow rates
+            leveraged_symbols = ['TQQQ', 'TNA', 'TMF', 'SOXL', 'TSLL', 'NVDL']
+            if symbol1 in leveraged_symbols:
+                borrow_rate1 *= 3
+            if symbol2 in leveraged_symbols:
+                borrow_rate2 *= 3
+            
+            # Total cost per round trip (open + close)
+            total_cost_bps = (
+                (estimated_spread1 + estimated_spread2) * 10000 +  # Spread in bps
+                (market_impact1 + market_impact2) * 10000 +        # Impact in bps
+                execution_lag_cost * 10000 +                       # Timing in bps
+                base_commission * 4 / typical_position_size * 10000 # Commission in bps
+            )
+            
+            return {
+                'total_cost_bps': total_cost_bps,
+                'spread_cost_bps': (estimated_spread1 + estimated_spread2) * 10000,
+                'market_impact_bps': (market_impact1 + market_impact2) * 10000,
+                'execution_lag_bps': execution_lag_cost * 10000,
+                'commission_bps': base_commission * 4 / typical_position_size * 10000,
+                'annual_borrow_cost_bps': (borrow_rate1 + borrow_rate2) * 10000 / 2,
+                'estimated_spread1': estimated_spread1,
+                'estimated_spread2': estimated_spread2,
+                'borrow_rate1': borrow_rate1,
+                'borrow_rate2': borrow_rate2
+            }
+            
+        except Exception as e:
+            logger.error(f"Transaction cost estimation failed: {e}")
+            return {
+                'total_cost_bps': 50.0,  # Default 5bp cost
+                'spread_cost_bps': 20.0,
+                'market_impact_bps': 10.0,
+                'execution_lag_bps': 5.0,
+                'commission_bps': 5.0,
+                'annual_borrow_cost_bps': 100.0
+            }
+    
+    @staticmethod
+    def detect_volatility_regimes(returns: pd.Series, window: int = 60) -> pd.Series:
+        """Detect volatility regimes using rolling volatility quantiles"""
+        vol = returns.rolling(window).std()
+        vol_quantiles = vol.quantile([0.33, 0.67])
+        
+        regime = pd.Series(index=returns.index, dtype=int)
+        regime[vol <= vol_quantiles.iloc[0]] = 0  # Low volatility
+        regime[(vol > vol_quantiles.iloc[0]) & (vol <= vol_quantiles.iloc[1])] = 1  # Medium
+        regime[vol > vol_quantiles.iloc[1]] = 2  # High volatility
+        
+        return regime.fillna(1)  # Default to medium regime
+    
+    @staticmethod
+    def test_regime_stability(price1: pd.Series, price2: pd.Series) -> Dict[str, Any]:
+        """Test cointegration stability across volatility regimes"""
+        try:
+            # Calculate returns and detect regimes
+            returns1 = price1.pct_change().dropna()
+            returns2 = price2.pct_change().dropna()
+            
+            # Align data
+            common_idx = returns1.index.intersection(returns2.index)
+            if len(common_idx) < 100:
+                return {'stable': False, 'regime_breakdown': {}}
+            
+            returns1_aligned = returns1.loc[common_idx]
+            returns2_aligned = returns2.loc[common_idx]
+            price1_aligned = price1.loc[common_idx]
+            price2_aligned = price2.loc[common_idx]
+            
+            # Detect volatility regimes
+            combined_vol = (returns1_aligned.abs() + returns2_aligned.abs()) / 2
+            regimes = PairAnalyzer.detect_volatility_regimes(combined_vol)
+            
+            # Test cointegration in each regime
+            regime_results = {}
+            regime_stability = True
+            
+            for regime_id in [0, 1, 2]:  # Low, Medium, High volatility
+                regime_mask = regimes == regime_id
+                regime_observations = regime_mask.sum()
+                
+                if regime_observations < 30:  # Minimum observations per regime
+                    regime_results[regime_id] = {
+                        'cointegrated': False,
+                        'pvalue': 1.0,
+                        'correlation': 0.0,
+                        'observations': regime_observations,
+                        'regime_name': ['Low_Vol', 'Med_Vol', 'High_Vol'][regime_id]
+                    }
+                    continue
+                
+                # Test cointegration in this regime
+                regime_price1 = price1_aligned[regime_mask]
+                regime_price2 = price2_aligned[regime_mask]
+                
+                if len(regime_price1) >= 30 and len(regime_price2) >= 30:
+                    regime_coint = PairAnalyzer.test_cointegration(regime_price1, regime_price2)
+                    regime_corr = regime_price1.corr(regime_price2)
+                    
+                    regime_results[regime_id] = {
+                        'cointegrated': regime_coint['cointegrated'],
+                        'pvalue': regime_coint['pvalue'],
+                        'correlation': regime_corr,
+                        'observations': regime_observations,
+                        'regime_name': ['Low_Vol', 'Med_Vol', 'High_Vol'][regime_id]
+                    }
+                    
+                    # Check if cointegration breaks down in high volatility
+                    if regime_id == 2 and not regime_coint['cointegrated']:
+                        regime_stability = False
+                else:
+                    regime_results[regime_id] = {
+                        'cointegrated': False,
+                        'pvalue': 1.0,
+                        'correlation': 0.0,
+                        'observations': regime_observations,
+                        'regime_name': ['Low_Vol', 'Med_Vol', 'High_Vol'][regime_id]
+                    }
+            
+            # Calculate regime transition impact
+            regime_changes = (regimes != regimes.shift(1)).sum()
+            regime_persistence = len(regimes) / max(1, regime_changes)
+            
+            return {
+                'stable': regime_stability,
+                'regime_breakdown': regime_results,
+                'regime_changes': regime_changes,
+                'regime_persistence': regime_persistence,
+                'total_observations': len(common_idx)
+            }
+            
+        except Exception as e:
+            logger.error(f"Regime stability test failed: {e}")
+            return {'stable': False, 'regime_breakdown': {}}
+    
+    @staticmethod
+    def calculate_regime_adjusted_score(price1: pd.Series, price2: pd.Series) -> Dict[str, Any]:
+        """Calculate regime-adjusted composite score"""
+        try:
+            # Basic cointegration test
+            basic_coint = PairAnalyzer.test_cointegration(price1, price2)
+            
+            # Regime stability test
+            regime_stability = PairAnalyzer.test_regime_stability(price1, price2)
+            
+            # Calculate regime-adjusted penalties
+            stability_penalty = 1.0
+            if not regime_stability['stable']:
+                stability_penalty = 0.5  # 50% penalty for regime instability
+            
+            # Regime transition penalty
+            transition_penalty = 1.0
+            if regime_stability['regime_changes'] > 0:
+                transition_frequency = regime_stability['regime_changes'] / regime_stability['total_observations']
+                transition_penalty = max(0.3, 1.0 - (transition_frequency * 10))  # Penalty for frequent transitions
+            
+            # Cross-regime correlation consistency
+            regime_breakdown = regime_stability['regime_breakdown']
+            correlation_consistency = 1.0
+            
+            if len(regime_breakdown) >= 2:
+                correlations = [r['correlation'] for r in regime_breakdown.values() if r['observations'] >= 30]
+                if len(correlations) >= 2:
+                    correlation_std = np.std(correlations)
+                    correlation_consistency = max(0.1, 1.0 - (correlation_std * 2))  # Penalty for inconsistent correlations
+            
+            # Calculate regime-adjusted score
+            base_score = basic_coint['score']
+            regime_adjusted_score = (base_score * 
+                                   stability_penalty * 
+                                   transition_penalty * 
+                                   correlation_consistency)
+            
+            return {
+                'regime_adjusted_score': regime_adjusted_score,
+                'base_score': base_score,
+                'stability_penalty': stability_penalty,
+                'transition_penalty': transition_penalty,
+                'correlation_consistency': correlation_consistency,
+                'regime_stability': regime_stability
+            }
+            
+        except Exception as e:
+            logger.error(f"Regime-adjusted score calculation failed: {e}")
+            return {
+                'regime_adjusted_score': 0.0,
+                'base_score': 0.0,
+                'stability_penalty': 0.0,
+                'transition_penalty': 0.0,
+                'correlation_consistency': 0.0,
+                'regime_stability': {'stable': False}
+            }
+
+    @staticmethod
     def calculate_hedge_ratio(price1: pd.Series, price2: pd.Series) -> float:
         """Calculate hedge ratio using OLS regression"""
         try:
@@ -495,28 +834,92 @@ class ClickHousePairScreener:
                     )
                     
                     if coint_result['cointegrated']:
-                        # Calculate additional statistics using the hedge ratio
-                        spread_stats = self.analyzer.calculate_spread_stats(
-                            data1['close'], data2['close'], coint_result['hedge_ratio']
+                        # Calculate regime-adjusted analysis
+                        regime_analysis = self.analyzer.calculate_regime_adjusted_score(
+                            data1['close'], data2['close']
                         )
                         
-                        result = {
-                            'symbol1': symbol1,
-                            'symbol2': symbol2,
-                            'correlation': correlation,
-                            'cointegration_pvalue': coint_result['pvalue'],
-                            'cointegration_score': coint_result['score'],
-                            'hedge_ratio': coint_result['hedge_ratio'],
-                            'spread_mean': spread_stats['mean'],
-                            'spread_std': spread_stats['std'],
-                            'spread_skew': spread_stats['skew'],
-                            'spread_kurtosis': spread_stats['kurtosis'],
-                            'current_zscore': spread_stats['z_score'],
-                            'data_points': coint_result['data_points']
-                        }
+                        # Analyze liquidity profile and microstructure
+                        liquidity_profile = self.analyzer.analyze_liquidity_profile(
+                            symbol1, symbol2, data1, data2
+                        )
                         
-                        self.results.append(result)
-                        logger.info(f"Found cointegrated pair: {symbol1}-{symbol2} (p={coint_result['pvalue']:.4f})")
+                        # Estimate transaction costs
+                        transaction_costs = self.analyzer.estimate_transaction_costs(
+                            symbol1, symbol2, liquidity_profile
+                        )
+                        
+                        # Combined screening criteria
+                        regime_stable = (regime_analysis['regime_stability']['stable'] or 
+                                       regime_analysis['regime_adjusted_score'] > 0.1)
+                        
+                        liquidity_adequate = liquidity_profile['liquidity_score'] > 0.3
+                        transaction_costs_acceptable = transaction_costs['total_cost_bps'] < 100  # 10bp threshold
+                        
+                        # Only proceed if all criteria are met
+                        if regime_stable and liquidity_adequate and transaction_costs_acceptable:
+                            
+                            # Calculate additional statistics using the hedge ratio
+                            spread_stats = self.analyzer.calculate_spread_stats(
+                                data1['close'], data2['close'], coint_result['hedge_ratio']
+                            )
+                            
+                            result = {
+                                'symbol1': symbol1,
+                                'symbol2': symbol2,
+                                'correlation': correlation,
+                                'cointegration_pvalue': coint_result['pvalue'],
+                                'cointegration_score': coint_result['score'],
+                                'regime_adjusted_score': regime_analysis['regime_adjusted_score'],
+                                'regime_stable': regime_analysis['regime_stability']['stable'],
+                                'regime_changes': regime_analysis['regime_stability']['regime_changes'],
+                                'stability_penalty': regime_analysis['stability_penalty'],
+                                'transition_penalty': regime_analysis['transition_penalty'],
+                                'correlation_consistency': regime_analysis['correlation_consistency'],
+                                
+                                # Liquidity metrics
+                                'liquidity_score': liquidity_profile['liquidity_score'],
+                                'execution_risk': liquidity_profile['execution_risk'],
+                                'volume_ratio': liquidity_profile['volume_ratio'],
+                                'tick_size_ratio': liquidity_profile['tick_size_ratio'],
+                                'volatility_asymmetry': liquidity_profile['volatility_asymmetry'],
+                                'liquidity_correlation': liquidity_profile['liquidity_correlation'],
+                                
+                                # Transaction cost metrics
+                                'total_cost_bps': transaction_costs['total_cost_bps'],
+                                'spread_cost_bps': transaction_costs['spread_cost_bps'],
+                                'market_impact_bps': transaction_costs['market_impact_bps'],
+                                'execution_lag_bps': transaction_costs['execution_lag_bps'],
+                                'commission_bps': transaction_costs['commission_bps'],
+                                'annual_borrow_cost_bps': transaction_costs['annual_borrow_cost_bps'],
+                                'borrow_rate1': transaction_costs['borrow_rate1'],
+                                'borrow_rate2': transaction_costs['borrow_rate2'],
+                                
+                                'hedge_ratio': coint_result['hedge_ratio'],
+                                'spread_mean': spread_stats['mean'],
+                                'spread_std': spread_stats['std'],
+                                'spread_skew': spread_stats['skew'],
+                                'spread_kurtosis': spread_stats['kurtosis'],
+                                'current_zscore': spread_stats['z_score'],
+                                'data_points': coint_result['data_points']
+                            }
+                            
+                            self.results.append(result)
+                            logger.info(f"Found viable pair: {symbol1}-{symbol2} "
+                                      f"(p={coint_result['pvalue']:.4f}, "
+                                      f"regime_score={regime_analysis['regime_adjusted_score']:.4f}, "
+                                      f"liquidity={liquidity_profile['liquidity_score']:.3f}, "
+                                      f"cost={transaction_costs['total_cost_bps']:.1f}bps)")
+                        else:
+                            rejection_reasons = []
+                            if not regime_stable:
+                                rejection_reasons.append("regime-unstable")
+                            if not liquidity_adequate:
+                                rejection_reasons.append(f"poor-liquidity({liquidity_profile['liquidity_score']:.2f})")
+                            if not transaction_costs_acceptable:
+                                rejection_reasons.append(f"high-costs({transaction_costs['total_cost_bps']:.1f}bps)")
+                            
+                            logger.info(f"Rejected pair: {symbol1}-{symbol2} - {', '.join(rejection_reasons)}")
                     
                 except Exception as e:
                     logger.error(f"Error testing pair {symbol1}-{symbol2}: {e}")
@@ -538,7 +941,10 @@ class ClickHousePairScreener:
             (1 - df_results['cointegration_pvalue']) * 
             df_results['correlation'] * 
             (1 / (1 + df_results['spread_std'])) *
-            np.log(df_results['data_points'])
+            np.log(df_results['data_points']) *
+            df_results['regime_adjusted_score'] *  # Include regime adjustment
+            df_results['liquidity_score'] *         # Include liquidity quality
+            (1 / (1 + df_results['total_cost_bps'] / 100))  # Penalize high transaction costs
         )
         
         # Sort by composite score

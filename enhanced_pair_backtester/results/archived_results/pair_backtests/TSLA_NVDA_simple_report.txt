@@ -1,0 +1,21 @@
+
+================================================================================
+SIMPLIFIED PAIR TRADING BACKTEST REPORT
+================================================================================
+
+PAIR INFORMATION:
+  Trading Pair: TSLA_NVDA
+  Testing Period: 2025-01-01 to 2025-06-30
+  Total Days: 23339
+
+PERFORMANCE METRICS:
+  Total Return: -7.52%
+  Annualized Return: -0.08%
+  Volatility: 0.04%
+  Sharpe Ratio: -2.099
+  Maximum Drawdown: -7.52%
+
+TRADING STATISTICS:
+  Total Trades: 577
+
+================================================================================
