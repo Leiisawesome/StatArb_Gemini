@@ -1,0 +1,58 @@
+# Production Configuration Overrides
+# Optimized settings for production deployment
+
+database:
+  pool_size: 20
+  max_execution_time: 600
+  slow_query_threshold_ms: 500
+
+monitoring:
+  metrics_buffer_size: 5000
+  aggregation_interval_minutes: 1
+  alert_thresholds:
+    latency_warning_ms: 50
+    latency_critical_ms: 200
+    memory_warning_mb: 1024
+    memory_critical_mb: 2048
+  enable_performance_tracking: true
+
+messaging:
+  max_history_size: 10000
+  enable_history: true
+  default_queue_size: 1000
+
+strategies:
+  pair_trading:
+    max_pairs_per_strategy: 50
+    
+  risk_management:
+    max_position_size: 0.05
+    stop_loss_threshold: 0.03
+    daily_var_limit: 0.015
+
+logging:
+  level: WARNING
+  file_rotation_mb: 500
+  backup_count: 10
+
+# AI/LLM Configuration for Production
+ai:
+  enable_ai_agents: true
+  max_concurrent_agents: 10
+  agent_timeout_seconds: 60
+  knowledge_base:
+    enable_vector_db: true
+    embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+    max_context_tokens: 8000
+
+# Feature Flags
+features:
+  real_time_processing: true
+  advanced_analytics: true
+  ai_integration: true
+  performance_monitoring: true
+
+# Market Data Settings
+market_data:
+  data_retention_days: 1095  # 3 years
+  batch_size: 5000 

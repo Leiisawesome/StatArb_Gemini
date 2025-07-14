@@ -1,0 +1,131 @@
+{
+    "project_name": "StatArb_AI_Ready_Migration",
+    "phases": [
+        {
+            "name": "infrastructure",
+            "description": "Core infrastructure setup",
+            "source_dirs": ["enhanced_pair_backtester/"],
+            "target_dirs": ["new_structure/infrastructure/"],
+            "components": [
+                "database",
+                "messaging",
+                "monitoring",
+                "config"
+            ],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": []
+        },
+        {
+            "name": "market_data",
+            "description": "Market data layer migration",
+            "source_dirs": [
+                "enhanced_pair_backtester/data/",
+                "enhanced_pair_backtester/clickhouse_pair_screening.py"
+            ],
+            "target_dirs": ["new_structure/market_data/"],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["infrastructure"]
+        },
+        {
+            "name": "signal_generation",
+            "description": "Signal generation and model migration",
+            "source_dirs": ["enhanced_pair_backtester/models/"],
+            "target_dirs": ["new_structure/signal_generation/"],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["market_data"]
+        },
+        {
+            "name": "strategy_engine",
+            "description": "Strategy framework migration",
+            "source_dirs": [
+                "enhanced_pair_backtester/strategies/",
+                "enhanced_pair_backtester/phase_components/phase4_advanced/strategies/"
+            ],
+            "target_dirs": ["new_structure/strategy_engine/"],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["signal_generation"]
+        },
+        {
+            "name": "portfolio_risk",
+            "description": "Portfolio and risk management migration",
+            "source_dirs": [
+                "enhanced_pair_backtester/portfolio/",
+                "enhanced_pair_backtester/strategies/comprehensive_risk_management.py"
+            ],
+            "target_dirs": [
+                "new_structure/portfolio_mgmt/",
+                "new_structure/risk_management/"
+            ],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["strategy_engine"]
+        },
+        {
+            "name": "execution",
+            "description": "Execution engine migration",
+            "source_dirs": ["enhanced_pair_backtester/execution/"],
+            "target_dirs": ["new_structure/execution/"],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["portfolio_risk"]
+        },
+        {
+            "name": "analytics",
+            "description": "Analytics and research migration",
+            "source_dirs": [
+                "enhanced_pair_backtester/analysis/",
+                "enhanced_pair_backtester/visualization/"
+            ],
+            "target_dirs": [
+                "new_structure/analytics/performance/",
+                "new_structure/analytics/attribution/"
+            ],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["execution"]
+        },
+        {
+            "name": "ai_integration",
+            "description": "AI and LLM integration setup",
+            "source_dirs": [],
+            "target_dirs": [
+                "new_structure/ai_agents/",
+                "new_structure/llm_integration/",
+                "new_structure/agent_coordination/",
+                "new_structure/knowledge_base/"
+            ],
+            "validation_rules": ["directory_structure", "imports", "tests"],
+            "dependencies": ["analytics"]
+        }
+    ],
+    "validation_rules": {
+        "directory_structure": {
+            "enabled": true,
+            "strict": true,
+            "rules": {
+                "required_files": ["__init__.py", "README.md"],
+                "naming_convention": "snake_case",
+                "max_depth": 4
+            }
+        },
+        "imports": {
+            "enabled": true,
+            "strict": false,
+            "rules": {
+                "absolute_imports": true,
+                "banned_imports": ["*"],
+                "circular_check": true
+            }
+        },
+        "tests": {
+            "enabled": true,
+            "rules": {
+                "coverage_threshold": 80,
+                "required_test_types": ["unit", "integration"],
+                "performance_benchmark": true
+            }
+        }
+    },
+    "backup": {
+        "enabled": true,
+        "backup_dir": "migration_backups/",
+        "keep_versions": 3
+    }
+} 
