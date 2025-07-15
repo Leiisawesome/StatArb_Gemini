@@ -806,14 +806,26 @@ class EndToEndWorkflowTester:
         success_rate = successful_tests / total_tests if total_tests > 0 else 0
         
         # Calculate average performance grade
-        grades = []
+        grade_values = []
+        grade_to_value = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0}
+        value_to_grade = {4.0: 'A', 3.0: 'B', 2.0: 'C', 1.0: 'D', 0.0: 'F'}
+        
         for result in self.test_results.values():
             if 'performance_grade' in result:
-                grades.append(result['performance_grade'])
+                grade = result['performance_grade']
+                if grade in grade_to_value:
+                    grade_values.append(grade_to_value[grade])
         
-        avg_grade = sum(grades) / len(grades) if grades else "N/A"
+        if grade_values:
+            avg_value = sum(grade_values) / len(grade_values)
+            # Find closest grade
+            closest_value = min(value_to_grade.keys(), key=lambda x: abs(x - avg_value))
+            avg_grade = value_to_grade[closest_value]
+        else:
+            avg_grade = "N/A"
         
         report = {
+            'success': success_rate >= 0.8,  # 80% success rate required
             'test_summary': {
                 'total_tests': total_tests,
                 'successful_tests': successful_tests,

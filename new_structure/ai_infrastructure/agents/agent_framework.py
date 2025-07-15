@@ -104,9 +104,9 @@ class BaseAgent(ABC):
         self.task_start_time: Optional[datetime] = None
         
         # Agent capabilities
-        self.max_conversation_length = config.get('max_conversation_length', 50)
-        self.response_timeout = config.get('response_timeout', 30)
-        self.retry_attempts = config.get('retry_attempts', 3)
+        self.max_conversation_length = self.config.get('max_conversation_length', 50)
+        self.response_timeout = self.config.get('response_timeout', 30)
+        self.retry_attempts = self.config.get('retry_attempts', 3)
         
         self.logger.info(f"Agent {agent_id} ({agent_type.value}) initialized")
     
@@ -356,8 +356,8 @@ class RiskAgent(BaseAgent):
     
     def __init__(self, agent_id: str = "risk_monitor", config: Dict[str, Any] = None):
         super().__init__(agent_id, AgentType.RISK_MONITORING, config)
-        self.risk_limits = config.get('risk_limits', {})
-        self.alert_thresholds = config.get('alert_thresholds', {})
+        self.risk_limits = self.config.get('risk_limits', {})
+        self.alert_thresholds = self.config.get('alert_thresholds', {})
     
     async def _initialize(self):
         """Initialize risk monitoring components"""

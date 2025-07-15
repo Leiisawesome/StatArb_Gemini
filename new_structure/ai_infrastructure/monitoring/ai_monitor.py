@@ -115,6 +115,9 @@ class AIMonitor:
         # Performance history (keep last 1000 data points)
         self.performance_history = defaultdict(lambda: deque(maxlen=1000))
         
+        # Time series data for analytics
+        self.time_series_data = defaultdict(list)
+        
         # Monitoring configuration
         self.monitoring_config = {
             'health_check_interval': 30,  # seconds
@@ -720,4 +723,82 @@ class AIMonitor:
             
         except Exception as e:
             logger.error(f"Error detecting anomalies: {e}")
-            return [] 
+            return []
+    
+    async def record_agent_activity(self, agent_id: str, response_time: float, 
+                                   success: bool, memory_mb: float = 0.0, 
+                                   cpu_percent: float = 0.0):
+        """Record agent activity for monitoring"""
+        try:
+            # Update agent metrics
+            if agent_id not in self.agent_metrics:
+                self.agent_metrics[agent_id] = PerformanceMetrics()
+            
+            metrics = self.agent_metrics[agent_id]
+            
+            # Update response time (moving average)
+            if metrics.response_time_ms == 0:
+                metrics.response_time_ms = response_time
+            else:
+                metrics.response_time_ms = 0.9 * metrics.response_time_ms + 0.1 * response_time
+            
+            # Update success/error rates
+            if success:
+                metrics.success_rate = 0.95 * metrics.success_rate + 0.05 * 1.0
+                metrics.error_rate = 0.95 * metrics.error_rate + 0.05 * 0.0
+            else:
+                metrics.success_rate = 0.95 * metrics.success_rate + 0.05 * 0.0
+                metrics.error_rate = 0.95 * metrics.error_rate + 0.05 * 1.0
+            
+            # Update resource usage
+            metrics.memory_usage_mb = memory_mb
+            metrics.cpu_usage_percent = cpu_percent
+            metrics.last_updated = datetime.now()
+            
+            # Store in time series
+            self.time_series_data['agent_activity'].append({
+                'timestamp': datetime.now(),
+                'agent_id': agent_id,
+                'response_time': response_time,
+                'success': success,
+                'memory_mb': memory_mb,
+                'cpu_percent': cpu_percent
+            })
+            
+            # Trim old data
+            cutoff = datetime.now() - timedelta(hours=24)
+            self.time_series_data['agent_activity'] = [
+                record for record in self.time_series_data['agent_activity']
+                if record['timestamp'] > cutoff
+            ]
+            
+            logger.debug(f"Recorded activity for agent {agent_id}: {response_time:.2f}ms, success={success}")
+            
+        except Exception as e:
+            logger.error(f"Failed to record agent activity for {agent_id}: {e}")
+    
+    async def perform_health_check(self, agent_id: str) -> HealthStatus:
+        """Perform health check on specific agent"""
+        try:
+            if agent_id not in self.agent_health:
+                return HealthStatus.OFFLINE
+            
+            agent_health = self.agent_health[agent_id]
+            
+            # Check if agent has been active recently
+            time_since_heartbeat = (datetime.now() - agent_health.last_heartbeat).total_seconds()
+            
+            if time_since_heartbeat > 300:  # 5 minutes
+                return HealthStatus.OFFLINE
+            elif time_since_heartbeat > 120:  # 2 minutes
+                return HealthStatus.WARNING
+            elif agent_health.success_rate < 0.8:
+                return HealthStatus.CRITICAL
+            elif agent_health.success_rate < 0.95:
+                return HealthStatus.WARNING
+            else:
+                return HealthStatus.HEALTHY
+                
+        except Exception as e:
+            logger.error(f"Health check failed for agent {agent_id}: {e}")
+            return HealthStatus.CRITICAL
