@@ -1,0 +1,39 @@
+{
+  "api_key": "kwnaUOlnQq7lLqRU0KQg2MqndGblHPnR",
+  "symbols": [
+    "QQQ",
+    "TQQQ",
+    "SPY",
+    "ARKK",
+    "SPXL",
+    "SPXS"
+  ],
+  "initial_capital": 1000000,
+  "max_position_size": 0.1,
+  "max_total_exposure": 0.5,
+  "reserve_cash": 0.2,
+  "max_drawdown": 0.2,
+  "stop_loss_pct": 0.05,
+  "position_timeout_hours": 24,
+  "entry_z_threshold": 2.0,
+  "exit_z_threshold": 0.5,
+  "min_confidence": 0.3,
+  "sma_short_period": 20,
+  "sma_long_period": 50,
+  "ema_period": 20,
+  "rsi_period": 14,
+  "macd_fast": 12,
+  "macd_slow": 26,
+  "macd_signal": 9,
+  "websocket_timeout": 30,
+  "reconnect_attempts": 5,
+  "heartbeat_interval": 60,
+  "performance_update_interval": 60,
+  "alert_thresholds": {
+    "drawdown_warning": 0.1,
+    "drawdown_critical": 0.15,
+    "profit_target": 0.2,
+    "position_limit": 5,
+    "daily_loss_limit": 0.05
+  }
+}
