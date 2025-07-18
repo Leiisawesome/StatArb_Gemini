@@ -5,7 +5,7 @@ services:
   statarb-gemini:
     build:
       context: ../../..
-      dockerfile: new_structure/infrastructure/deployment/Dockerfile
+      dockerfile: core_structure/infrastructure/deployment/Dockerfile
     image: statarb-gemini:latest
     container_name: statarb-gemini
     restart: unless-stopped

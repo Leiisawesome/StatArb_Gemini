@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
-COPY new_structure/infrastructure/deployment/requirements.txt .
+COPY core_structure/infrastructure/deployment/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Stage 2: Production stage
@@ -39,7 +39,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /home/trader/.local
 
 # Copy application code
-COPY new_structure/ ./
+COPY core_structure/ ./
 COPY config/ ./config/
 
 # Create necessary directories
