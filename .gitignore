@@ -189,3 +189,29 @@ config/production_secrets.py
 # Docker
 .dockerignore
 docker-compose.override.yml 
+
+# Removed files - prevent reappearance
+core_structure/signal_generation/stat_arb_ensemble_integration.py
+core_structure/signal_generation/stat_arb_models.py
+
+# Deprecated directories (prevent recreation)
+deprecated/
+archived/
+old_*/
+
+# Additional cache and temporary files
+.cache/
+.pytest_cache/
+*.tmp
+*.temp
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Log files
+*.log
+logs/
+Tests/mvs/logs/
+Tests/mvs/results/
