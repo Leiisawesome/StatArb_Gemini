@@ -171,7 +171,7 @@ class MarketDataTestRunner:
         ]
         
         cmd = self._build_pytest_command(test_files, False, verbose)
-        cmd.extend(["-m", "performance", "--benchmark-only"])
+        cmd.extend(["-m", "performance"])
         
         result = self._execute_pytest(cmd, "Performance Tests")
         
@@ -182,31 +182,31 @@ class MarketDataTestRunner:
     
     def _build_pytest_command(self, test_files: List[str], coverage: bool, verbose: bool) -> List[str]:
         """Build pytest command"""
-        cmd = ["python", "-m", "pytest"]
-        
+        cmd = [str(self.project_root / "venv/bin/python"), "-m", "pytest"]
+
         # Add test files
         for test_file in test_files:
             file_path = self.test_dir / test_file
             if file_path.exists():
                 cmd.append(str(file_path))
-        
+
         # Add options
         if verbose:
             cmd.append("-v")
-        
+
         if coverage:
             cmd.extend([
                 "--cov=core_structure.market_data",
                 "--cov-report=html",
                 "--cov-report=term-missing"
             ])
-        
+
         # Add output formatting
         cmd.extend([
             "--tb=short",
             "--show-capture=no"
         ])
-        
+
         return cmd
     
     def _execute_pytest(self, cmd: List[str], test_name: str) -> Dict:

@@ -121,7 +121,8 @@ def test_managers_initialization():
         config = {
             'cache_ttl_seconds': 300,
             'real_time_enabled': False,  # Disable to avoid external connections
-            'max_symbols_per_query': 10
+            'max_symbols_per_query': 10,
+            'host': 'localhost'  # Default host for testing
         }
         
         # This might fail if it tries to connect to ClickHouse

@@ -306,21 +306,20 @@ class TestEnhancedClickHouseLoaderIntegration:
     @pytest.mark.integration
     async def test_real_data_loading(self, real_config):
         """Test loading real data from ClickHouse"""
-        # This test would be enabled when we have proper ClickHouse setup
-        config_manager = Mock()
-        config_manager.get.side_effect = lambda key, default=None: real_config.get(key, default)
-        
+        config_manager = ConfigManager(config_dir=None)
+        config_manager.config = real_config
+
         loader = EnhancedClickHouseLoader(config_manager)
-        
+
         request = DataRequest(
             symbols=['AAPL'],
             start_date=datetime.now() - timedelta(days=7),
             end_date=datetime.now(),
             interval='1d'
         )
-        
+
         data = await loader.load_market_data(request)
-        
+
         # Verify data structure
         assert isinstance(data, pd.DataFrame)
         if not data.empty:
@@ -331,11 +330,11 @@ class TestEnhancedClickHouseLoaderIntegration:
     @pytest.mark.integration  
     async def test_real_pair_screening(self, real_config):
         """Test pair screening with real data"""
-        config_manager = Mock()
-        config_manager.get.side_effect = lambda key, default=None: real_config.get(key, default)
-        
+        config_manager = ConfigManager(config_dir=None)
+        config_manager.config = real_config
+
         loader = EnhancedClickHouseLoader(config_manager)
-        
+
         # Use a small universe for testing
         universe = ['AAPL', 'MSFT', 'GOOGL']
         criteria = PairScreeningCriteria(
@@ -343,9 +342,9 @@ class TestEnhancedClickHouseLoaderIntegration:
             max_correlation=0.95,
             min_trading_days=50
         )
-        
+
         pairs = await loader.screen_pairs(universe, criteria, lookback_days=100)
-        
+
         # Verify results
         assert isinstance(pairs, list)
         for pair in pairs:

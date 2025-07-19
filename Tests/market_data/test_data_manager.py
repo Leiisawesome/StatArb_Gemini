@@ -74,23 +74,22 @@ class TestDataCache:
         """Test basic cache operations"""
         cache = DataCache(default_ttl=300, max_size=100)
         
-        # Test setting and getting
+        # Test setting and getting (using put method instead of set)
         test_data = {"symbol": "AAPL", "price": 150.0}
-        cache.set("test_key", test_data)
+        cache.put("test_key", test_data)
         
         retrieved = cache.get("test_key")
         assert retrieved == test_data
         
-        # Test key existence
-        assert cache.has_key("test_key")
-        assert not cache.has_key("nonexistent_key")
+        # Test non-existent key
+        assert cache.get("nonexistent_key") is None
     
     def test_cache_ttl_expiration(self):
         """Test cache TTL expiration"""
         cache = DataCache(default_ttl=1, max_size=100)  # 1 second TTL
         
         test_data = {"symbol": "AAPL", "price": 150.0}
-        cache.set("test_key", test_data)
+        cache.put("test_key", test_data)
         
         # Should be available immediately
         assert cache.get("test_key") == test_data
@@ -111,7 +110,7 @@ class TestDataCache:
         
         # Fill cache to capacity
         for i in range(5):
-            cache.set(f"key_{i}", {"data": i})
+            cache.put(f"key_{i}", {"data": i})
         
         # Cache should not exceed max_size
         assert len(cache.cache) <= 3
@@ -172,6 +171,7 @@ def sample_ohlcv_data():
     return pd.DataFrame(data)
 
 
+@patch('core_structure.market_data.data_manager.EnhancedClickHouseLoader')
 class TestDataManager:
     """Test DataManager core functionality"""
     
@@ -179,12 +179,13 @@ class TestDataManager:
     @patch('core_structure.market_data.data_manager.MetricsCollector')
     @patch('core_structure.market_data.data_manager.MessageBus')
     @patch('core_structure.market_data.data_manager.ConfigManager')
-    def test_data_manager_initialization(self, mock_config_mgr, mock_msg_bus, mock_metrics, mock_clickhouse):
+    def test_data_manager_initialization(self, mock_config_mgr, mock_msg_bus, mock_metrics, mock_clickhouse, mock_enhanced_loader):
         """Test DataManager initialization"""
         mock_clickhouse.return_value = Mock()
         mock_metrics.return_value = Mock()
         mock_msg_bus.return_value = Mock()
         mock_config_mgr.return_value = Mock()
+        mock_enhanced_loader.return_value = Mock()
         
         config = {'cache_ttl_seconds': 300}
         dm = DataManager(config=config)
