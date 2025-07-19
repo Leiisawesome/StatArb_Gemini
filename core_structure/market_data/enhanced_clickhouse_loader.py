@@ -352,6 +352,7 @@ class EnhancedClickHouseLoader:
             
         except Exception as e:
             self.logger.error(f"Error loading data for {symbol}: {e}")
+            self.metrics.increment_counter("clickhouse_loader.errors")
             return pd.DataFrame()
     
     async def screen_pairs(

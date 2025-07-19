@@ -101,6 +101,48 @@ class ClickHouseClient:
         return self._process_market_data(results, symbols, fields)
     
     @with_metrics
+    async def execute_query(
+        self,
+        query: str,
+        params: Optional[Dict] = None
+    ) -> pd.DataFrame:
+        """
+        Execute a custom query and return results as DataFrame
+        
+        Args:
+            query: SQL query string
+            params: Query parameters
+            
+        Returns:
+            DataFrame with query results
+        """
+        # Execute query using thread executor for async compatibility
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        def _sync_execute():
+            results = self._execute_query(query, params)
+            if not results:
+                return pd.DataFrame()
+            
+            # Convert results to DataFrame
+            # Assuming first row contains column names or we extract from query
+            if results:
+                columns = [f'col_{i}' for i in range(len(results[0]))]
+                # Try to infer columns from query
+                if 'SELECT' in query.upper():
+                    select_part = query.upper().split('SELECT')[1].split('FROM')[0]
+                    if 'timestamp' in select_part.lower():
+                        columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol'][:len(results[0])]
+                
+                df = pd.DataFrame(results, columns=columns[:len(results[0])])
+                return df
+            
+            return pd.DataFrame()
+        
+        return await loop.run_in_executor(None, _sync_execute)
+    
+    @with_metrics
     def insert_market_data(
         self,
         symbol: str,
@@ -218,6 +260,16 @@ class ClickHouseClient:
                 dataframes[symbol] = df
         
         return dataframes
+    
+    async def close(self):
+        """Close ClickHouse connections"""
+        try:
+            for client in self.connections:
+                client.disconnect()
+            self.pool.shutdown(wait=True)
+            logger.info("ClickHouse connections closed")
+        except Exception as e:
+            logger.error(f"Error closing ClickHouse connections: {e}")
     
     def __del__(self):
         """Cleanup connections"""
