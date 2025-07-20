@@ -82,7 +82,7 @@ DATABASE_CONFIG = {
     "clickhouse": {
         "host": os.getenv("CLICKHOUSE_HOST", "localhost"),
         "port": int(os.getenv("CLICKHOUSE_PORT", 9000)),
-        "database": os.getenv("CLICKHOUSE_DB", "market_data"),
+        "database": os.getenv("CLICKHOUSE_DB", "ticks"),
         "user": os.getenv("CLICKHOUSE_USER", "default"),
         "password": os.getenv("CLICKHOUSE_PASSWORD", ""),
         "timeout": 30,
