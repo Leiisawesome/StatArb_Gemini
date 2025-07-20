@@ -1,0 +1,25 @@
+# Core dependencies
+pandas>=1.5.0
+numpy>=1.21.0
+scipy>=1.9.0
+scikit-learn>=1.1.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# Configuration and utilities
+pyyaml>=6.0
+python-dotenv>=0.19.0
+
+# Optional: For enhanced plotting
+jupyter>=1.0.0
+ipywidgets>=7.6.0
+
+# Optional: For advanced analytics
+statsmodels>=0.13.0
+arch>=5.0.0
+
+# Core system dependencies (handled by core system)
+# No additional data source dependencies needed for simplified integration 

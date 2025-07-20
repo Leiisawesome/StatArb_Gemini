@@ -161,10 +161,15 @@ class SmartCache:
 class EnhancedClickHouseLoader:
     """Enhanced ClickHouse data loader with caching and pair screening"""
     
-    def __init__(self, config: ConfigManager):
+    def __init__(self, config: Optional[ConfigManager] = None):
+        if config is None:
+            # Create a default config manager if none provided
+            config = ConfigManager()
+        
         self.config = config
         self.logger = logging.getLogger("clickhouse_loader")
-        self.clickhouse = ClickHouseClient(config)
+        # Pass the database config dict to ClickHouseClient
+        self.clickhouse = ClickHouseClient(config.get_database_config())
         self.metrics = MetricsCollector()
         
         # Caching
@@ -252,32 +257,17 @@ class EnhancedClickHouseLoader:
             raise
     
     async def _load_parallel(self, request: DataRequest) -> pd.DataFrame:
-        """Load data for multiple symbols in parallel"""
-        loop = asyncio.get_event_loop()
-        
-        # Create tasks for parallel execution
-        tasks = []
-        for symbol in request.symbols:
-            task = loop.run_in_executor(
-                self.executor,
-                self._load_symbol_sync,
-                symbol,
-                request
-            )
-            tasks.append(task)
-        
-        # Execute in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Combine results
+        """Load data for multiple symbols sequentially to avoid connection issues"""
         dataframes = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                self.logger.error(f"Error loading {request.symbols[i]}: {result}")
+        
+        for symbol in request.symbols:
+            try:
+                data = await self._load_single_symbol(symbol, request)
+                if data is not None and not data.empty:
+                    dataframes.append(data)
+            except Exception as e:
+                self.logger.error(f"Error loading {symbol}: {e}")
                 continue
-            
-            if result is not None and not result.empty:
-                dataframes.append(result)
         
         if not dataframes:
             return pd.DataFrame()
@@ -294,6 +284,49 @@ class EnhancedClickHouseLoader:
         
         return combined_data
     
+    def load_symbol_data(
+        self,
+        symbol: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        days_back: Optional[int] = None
+    ) -> pd.DataFrame:
+        """
+        Load data for a single symbol (synchronous wrapper for DataManager compatibility)
+        
+        Args:
+            symbol: Symbol to load
+            start_date: Start date (optional)
+            end_date: End date (optional)
+            days_back: Days back from today (optional)
+            
+        Returns:
+            DataFrame with symbol data
+        """
+        # Set default dates
+        if end_date is None:
+            end_date = datetime.now()
+        if start_date is None:
+            if days_back is not None:
+                start_date = end_date - timedelta(days=days_back)
+            else:
+                start_date = end_date - timedelta(days=252)  # Default to 1 year
+        
+        # Create data request
+        request = DataRequest(
+            symbols=[symbol],
+            start_date=start_date,
+            end_date=end_date,
+            interval='1d'  # Default to daily data
+        )
+        
+        # Use synchronous execution
+        try:
+            return asyncio.run(self.load_market_data(request))
+        except Exception as e:
+            self.logger.error(f"Error loading data for {symbol}: {e}")
+            return pd.DataFrame()
+    
     def _load_symbol_sync(self, symbol: str, request: DataRequest) -> pd.DataFrame:
         """Synchronous symbol loading for executor"""
         return asyncio.run(self._load_single_symbol(symbol, request))
@@ -301,54 +334,80 @@ class EnhancedClickHouseLoader:
     async def _load_single_symbol(self, symbol: str, request: DataRequest) -> pd.DataFrame:
         """Load data for single symbol"""
         try:
-            # Build query based on interval
-            if request.interval == '1min':
-                table = 'market_data_1min'
-            elif request.interval == '5min':
-                table = 'market_data_5min'
-            elif request.interval == '1h':
-                table = 'market_data_1h'
+            # Build query based on interval - using the actual table name 'ticks'
+            table = 'ticks'
+            
+            # Convert datetime to nanoseconds for window_start
+            start_date_ns = int(request.start_date.timestamp() * 1_000_000_000)
+            end_date_ns = int(request.end_date.timestamp() * 1_000_000_000)
+            
+            # Query to aggregate minute data to daily data
+            if request.interval == '1d':
+                query = f"""
+                SELECT 
+                    toDate(toDateTime(window_start / 1000000000)) as date,
+                    argMin(open, window_start) as open,
+                    max(high) as high,
+                    min(low) as low,
+                    argMax(close, window_start) as close,
+                    sum(volume) as volume
+                FROM {table}
+                WHERE ticker = '{symbol}'
+                AND window_start >= {start_date_ns}
+                AND window_start <= {end_date_ns}
+                GROUP BY toDate(toDateTime(window_start / 1000000000))
+                ORDER BY date
+                """
             else:
-                table = 'market_data_daily'
+                # For minute data, just select directly
+                query = f"""
+                SELECT 
+                    toDateTime(window_start / 1000000000) as timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume
+                FROM {table}
+                WHERE ticker = '{symbol}'
+                AND window_start >= {start_date_ns}
+                AND window_start <= {end_date_ns}
+                ORDER BY window_start
+                """
             
-            # Base query
-            query = f"""
-            SELECT 
-                timestamp,
-                open,
-                high,
-                low,
-                close,
-                {'volume,' if request.include_volume else ''}
-                symbol
-            FROM {table}
-            WHERE symbol = %(symbol)s
-            AND timestamp >= %(start_date)s
-            AND timestamp <= %(end_date)s
-            ORDER BY timestamp
-            """
+            # Execute query using synchronous method to avoid connection issues
+            data = self.clickhouse._execute_query(query)
             
-            params = {
-                'symbol': symbol,
-                'start_date': request.start_date,
-                'end_date': request.end_date
-            }
-            
-            # Execute query
-            data = await self.clickhouse.execute_query(query, params)
-            
-            if data.empty:
+            if not data:
                 self.logger.warning(f"No data found for {symbol}")
                 return pd.DataFrame()
             
-            # Set timestamp as index
-            data['timestamp'] = pd.to_datetime(data['timestamp'])
-            data.set_index('timestamp', inplace=True)
+            # Convert to DataFrame
+            df = pd.DataFrame(data)
             
-            # Add symbol prefix to columns
-            data.columns = [f"{symbol}_{col}" if col != 'symbol' else col for col in data.columns]
+            if request.interval == '1d':
+                df.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+            else:
+                df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df.set_index('timestamp', inplace=True)
             
-            return data
+            # Clean data types
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Remove any rows with NaN values
+            df = df.dropna()
+            
+            if df.empty:
+                self.logger.warning(f"No valid data after processing for {symbol}")
+                return pd.DataFrame()
+            
+            self.logger.info(f"Loaded {len(df)} rows for {symbol} from {df.index.min()} to {df.index.max()}")
+            return df
             
         except Exception as e:
             self.logger.error(f"Error loading data for {symbol}: {e}")

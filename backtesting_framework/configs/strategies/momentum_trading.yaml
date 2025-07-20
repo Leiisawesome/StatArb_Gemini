@@ -1,0 +1,52 @@
+# Momentum Trading Strategy Configuration
+
+# Experiment identification
+name: "Multi-Asset Momentum Strategy"
+description: "Momentum-based trading strategy with volatility scaling across multiple assets"
+version: "1.0.0"
+
+# Data configuration
+symbols: ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
+start_date: "2023-01-01"
+end_date: "2023-12-31"
+
+# Strategy configuration
+strategy_class: "MomentumStrategy"
+strategy_params:
+  # Momentum parameters
+  lookback_period: 20
+  momentum_threshold: 0.02
+  volatility_lookback: 30
+  
+  # Position sizing
+  position_size: 0.1
+  max_positions: 5
+  
+  # Risk management
+  stop_loss: 0.05
+  take_profit: 0.03
+  max_drawdown: 0.15
+  
+  # Volatility scaling
+  volatility_scaling: true
+  target_volatility: 0.15
+
+# Execution configuration
+initial_capital: 100000.0
+commission_rate: 0.001
+slippage_rate: 0.0005
+
+# Risk management
+max_position_size: 0.15
+stop_loss: 0.05
+take_profit: 0.03
+
+# Output configuration
+output_dir: "results/momentum_trading"
+save_trades: true
+save_signals: true
+generate_plots: true
+
+# Performance tracking
+benchmark_symbol: "SPY"
+risk_free_rate: 0.02 
