@@ -72,6 +72,9 @@ class MomentumConfig(StrategyConfig):
     bid_ask_spread: float = 0.0008  # 8 bps average spread
     market_impact_rate: float = 0.0012  # 12 bps market impact
     
+    # Capital management
+    initial_capital: float = 250000.0  # $250K for momentum strategy
+    
     # Training and trading periods
     training_start: str = "2023-01-01"
     training_end: str = "2023-12-31" 
@@ -130,6 +133,12 @@ class MomentumStrategy(BaseStrategy):
             config: Momentum strategy configuration
         """
         super().__init__(config)
+        
+        # Handle enum conversion if needed (for JSON/dict config inputs)
+        if hasattr(config, 'momentum_type') and isinstance(config.momentum_type, str):
+            # Convert string to enum
+            config.momentum_type = MomentumType(config.momentum_type)
+        
         self.config = config
         
         # Initialize core structure modules (lazy loading)
@@ -311,12 +320,17 @@ class MomentumStrategy(BaseStrategy):
             # Initialize signal generator
             self._init_signal_generator()
             
+            # Get momentum type value safely
+            momentum_type_value = (self.config.momentum_type.value 
+                                 if hasattr(self.config.momentum_type, 'value') 
+                                 else self.config.momentum_type)
+            
             # Try to use core structure signal generator with expected API
             raw_signals = self._signal_generator.generate_momentum_signals(
                 data=data,
                 lookback_period=self.config.lookback_period,
                 skip_period=self.config.skip_period,
-                momentum_type=self.config.momentum_type.value,
+                momentum_type=momentum_type_value,
                 threshold=self.config.momentum_threshold
             )
             
@@ -391,49 +405,147 @@ class MomentumStrategy(BaseStrategy):
             # Fallback to simple position sizing
             return self._fallback_position_sizing(signals, available_cash)
     
-    def execute_trades(self, target_positions: Dict[str, float], 
-                      current_positions: Dict[str, Position],
-                      market_data: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+    def execute_trades(self, signals: List[Any], 
+                      current_prices: Dict[str, float]) -> List[Dict[str, Any]]:
         """
-        Execute trades using core structure execution engine
+        Execute trades based on signals and current prices (base strategy interface)
         
         Args:
-            target_positions: Target position sizes
-            current_positions: Current portfolio positions
-            market_data: Current market data
+            signals: List of trading signals
+            current_prices: Current prices for all symbols
             
         Returns:
             List of executed trades
         """
         try:
+            # Convert signals to target positions if needed
+            if not signals:
+                logger.info("No signals to execute")
+                return []
+            
+            # Convert TradingSignal objects to position targets
+            target_positions = {}
+            
+            if isinstance(signals, list) and signals:
+                # Get available cash (use current portfolio value as proxy)
+                available_cash = getattr(self, 'portfolio_value', getattr(self, 'initial_capital', 250000))
+                
+                # Calculate position targets from signals using position sizing logic
+                target_positions = self._calculate_position_targets_from_signals(signals, current_prices, available_cash)
+                
+                logger.info(f"Converted {len(signals)} signals to {len(target_positions)} position targets")
+            elif isinstance(signals, dict):
+                target_positions = signals
+            
+            if not target_positions:
+                logger.info("No valid position targets from signals")
+                return []
+            
+            # Get current positions (simplified for backtesting)
+            current_positions = getattr(self, 'current_positions', {})
+            
             # Calculate required trades
-            trades_to_execute = self._calculate_required_trades(
-                target_positions, current_positions
+            trades_to_execute = self._calculate_required_trades_simple(
+                target_positions, current_positions, current_prices
             )
             
             if not trades_to_execute:
                 return []
             
-            # Initialize execution engine
-            self._init_execution_engine()
+            # Execute trades with current prices (simplified for backtesting)
+            executed_trades = []
+            for trade in trades_to_execute:
+                symbol = trade['symbol']
+                quantity = trade['quantity']
+                action = trade['action']
+                
+                if symbol in current_prices:
+                    price = current_prices[symbol]
+                    executed_trade = {
+                        'symbol': symbol,
+                        'quantity': abs(quantity),
+                        'action': action,
+                        'price': price,
+                        'timestamp': datetime.now(),
+                        'commission': abs(quantity) * price * self.config.commission_rate
+                    }
+                    executed_trades.append(executed_trade)
+                    
+                    # Update self.positions for portfolio value calculation
+                    from strategies.base_strategy import Position
+                    
+                    if symbol not in self.positions:
+                        # Create new position
+                        self.positions[symbol] = Position(
+                            symbol=symbol,
+                            quantity=abs(quantity) if action == 'BUY' else -abs(quantity),
+                            entry_price=price,
+                            entry_time=datetime.now(),
+                            current_price=price,
+                            pnl=0.0
+                        )
+                    else:
+                        # Update existing position
+                        existing_pos = self.positions[symbol]
+                        if action == 'BUY':
+                            new_quantity = existing_pos.quantity + abs(quantity)
+                            # Update average entry price
+                            total_cost = (existing_pos.quantity * existing_pos.entry_price) + (abs(quantity) * price)
+                            existing_pos.entry_price = total_cost / new_quantity if new_quantity != 0 else price
+                            existing_pos.quantity = new_quantity
+                        elif action == 'SELL':
+                            existing_pos.quantity -= abs(quantity)
+                            # Remove position if quantity becomes zero or negative
+                            if existing_pos.quantity <= 0:
+                                del self.positions[symbol]
+                        
+                        if symbol in self.positions:
+                            self.positions[symbol].current_price = price
+                    
+                    # Also update cash position
+                    trade_value = abs(quantity) * price
+                    commission = trade_value * self.config.commission_rate
+                    if action == 'BUY':
+                        self.cash -= (trade_value + commission)
+                    elif action == 'SELL':
+                        self.cash += (trade_value - commission)
+                    
+                    # Update current_positions for compatibility (if needed)
+                    if not hasattr(self, 'current_positions'):
+                        self.current_positions = {}
+                    
+                    current_qty = self.current_positions.get(symbol, 0)
+                    if action == 'BUY':
+                        self.current_positions[symbol] = current_qty + abs(quantity)
+                    elif action == 'SELL':
+                        self.current_positions[symbol] = current_qty - abs(quantity)
             
-            # Use core structure execution engine
-            executed_trades = self._execution_engine.execute_trades(
-                trades=trades_to_execute,
-                market_data=market_data,
-                execution_params={
-                    'commission_rate': self.config.commission_rate,
-                    'bid_ask_spread': self.config.bid_ask_spread,
-                    'market_impact_rate': self.config.market_impact_rate
-                }
-            )
-            
-            logger.info(f"Executed {len(executed_trades)} trades")
+            self.logger.info(f"Executed {len(executed_trades)} trades")
             return executed_trades
             
         except Exception as e:
-            logger.error(f"Trade execution failed: {e}")
+            self.logger.error(f"Trade execution failed: {e}")
             return []
+    
+    def _calculate_required_trades_simple(self, target_positions: Dict[str, float], 
+                                        current_positions: Dict[str, float],
+                                        current_prices: Dict[str, float]) -> List[Dict[str, Any]]:
+        """Calculate required trades with simplified interface"""
+        trades = []
+        
+        for symbol, target_size in target_positions.items():
+            current_size = current_positions.get(symbol, 0)
+            required_change = target_size - current_size
+            
+            if abs(required_change) > 0.001:  # Minimum trade threshold
+                action = 'BUY' if required_change > 0 else 'SELL'
+                trades.append({
+                    'symbol': symbol,
+                    'quantity': abs(required_change),
+                    'action': action
+                })
+        
+        return trades
     
     def get_strategy_metrics(self) -> Dict[str, Any]:
         """
@@ -445,9 +557,13 @@ class MomentumStrategy(BaseStrategy):
         base_metrics = super().get_performance_metrics()
         
         # Add momentum-specific metrics
+        momentum_type_value = (self.config.momentum_type.value 
+                             if hasattr(self.config.momentum_type, 'value') 
+                             else self.config.momentum_type)
+        
         momentum_metrics = {
             'momentum_config': {
-                'type': self.config.momentum_type.value,
+                'type': momentum_type_value,
                 'lookback_period': self.config.lookback_period,
                 'skip_period': self.config.skip_period,
                 'threshold': self.config.momentum_threshold,
@@ -541,6 +657,10 @@ class MomentumStrategy(BaseStrategy):
             else:
                 continue  # Skip weak signals
             
+            momentum_type_value = (self.config.momentum_type.value 
+                                  if hasattr(self.config.momentum_type, 'value') 
+                                  else self.config.momentum_type)
+            
             signals.append(TradingSignal(
                 timestamp=current_time,
                 symbol=symbol,
@@ -549,7 +669,7 @@ class MomentumStrategy(BaseStrategy):
                 confidence=confidence,
                 price=current_price,
                 metadata={
-                    'momentum_type': self.config.momentum_type.value,
+                    'momentum_type': momentum_type_value,
                     'lookback_period': self.config.lookback_period,
                     'skip_period': self.config.skip_period
                 }
@@ -562,6 +682,104 @@ class MomentumStrategy(BaseStrategy):
         # Apply signal decay if we have previous signals
         # For now, return signals as-is
         return signals
+    
+    def _calculate_position_targets_from_signals(self, signals: List[TradingSignal], 
+                                               current_prices: Dict[str, float], 
+                                               available_cash: float) -> Dict[str, float]:
+        """
+        Convert trading signals to position targets using portfolio optimization
+        
+        Args:
+            signals: List of trading signals
+            current_prices: Current market prices
+            available_cash: Available cash for trading
+            
+        Returns:
+            Dictionary mapping symbols to target position quantities
+        """
+        if not signals:
+            return {}
+        
+        try:
+            # Convert signals to a simple signal dictionary
+            signal_dict = {}
+            valid_signals = []
+            
+            for signal in signals:
+                if signal.symbol in current_prices:
+                    # Use signal strength with direction based on signal type
+                    strength = signal.strength
+                    if signal.signal_type == SignalType.SHORT:
+                        strength = -strength
+                    signal_dict[signal.symbol] = strength
+                    valid_signals.append(signal)
+            
+            if not signal_dict:
+                logger.info("No valid signals with current prices")
+                return {}
+            
+            # Simple position sizing based on signal strength
+            # This replaces the complex optimizer for now
+            total_signal_strength = sum(abs(s) for s in signal_dict.values())
+            max_position_value = available_cash * self.config.max_weight_per_asset
+            
+            position_targets = {}
+            
+            for symbol, strength in signal_dict.items():
+                if symbol in current_prices and current_prices[symbol] > 0:
+                    # Calculate position size based on signal strength proportion
+                    strength_proportion = abs(strength) / total_signal_strength if total_signal_strength > 0 else 0
+                    position_value = available_cash * strength_proportion * min(self.config.max_weight_per_asset, 0.1)
+                    
+                    # Convert to position quantity
+                    position_qty = position_value / current_prices[symbol]
+                    
+                    # Apply direction (negative for short signals)
+                    if strength < 0:
+                        position_qty = -position_qty
+                    
+                    position_targets[symbol] = position_qty
+                    
+                    logger.debug(f"Position target for {symbol}: {position_qty:.2f} shares "
+                               f"(strength={strength:.4f}, value=${position_value:.2f})")
+            
+            logger.info(f"Calculated {len(position_targets)} position targets from {len(signals)} signals")
+            return position_targets
+            
+        except Exception as e:
+            logger.error(f"Failed to calculate position targets: {e}")
+            # Fallback to simple equal weight
+            return self._simple_equal_weight_positions(signals, current_prices, available_cash)
+    
+    def _simple_equal_weight_positions(self, signals: List[TradingSignal], 
+                                     current_prices: Dict[str, float], 
+                                     available_cash: float) -> Dict[str, float]:
+        """Simple equal-weight position sizing fallback"""
+        position_targets = {}
+        
+        if not signals:
+            return position_targets
+        
+        # Filter signals that have current prices
+        valid_signals = [s for s in signals if s.symbol in current_prices and current_prices[s.symbol] > 0]
+        
+        if not valid_signals:
+            return position_targets
+        
+        # Equal weight allocation
+        position_value_per_signal = available_cash / len(valid_signals) * 0.95  # Use 95% of cash
+        
+        for signal in valid_signals:
+            position_qty = position_value_per_signal / current_prices[signal.symbol]
+            
+            # Apply direction (negative for short signals)
+            if signal.signal_type == SignalType.SHORT:
+                position_qty = -position_qty
+            
+            position_targets[signal.symbol] = position_qty
+        
+        logger.info(f"Simple equal weight: {len(position_targets)} positions, ${position_value_per_signal:.2f} each")
+        return position_targets
     
     def _positions_to_weights(self, positions: Dict[str, Position], 
                             total_capital: float) -> Dict[str, float]:

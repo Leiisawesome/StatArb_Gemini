@@ -1,0 +1,40 @@
+{
+  "name": "Momentum Strategy Backtest",
+  "description": "Real backtest of momentum strategy with universe selection",
+  "version": "1.0.0",
+  "symbols": [
+    "AAPL",
+    "MSFT",
+    "GOOGL"
+  ],
+  "start_date": "2022-01-01",
+  "end_date": "2022-12-31",
+  "strategy_class": "MomentumStrategy",
+  "strategy_params": {
+    "universe_size": 50,
+    "min_market_cap": 2000000000.0,
+    "min_avg_volume": 1000000.0,
+    "training_start": "2023-01-01",
+    "training_end": "2023-12-31",
+    "trading_start": "2024-01-01",
+    "trading_end": "2024-06-30",
+    "initial_capital": 250000,
+    "commission_rate": 0.0005,
+    "benchmark_symbol": "SPY",
+    "momentum_type": "risk_adjusted",
+    "lookback_period": 252,
+    "skip_period": 21,
+    "momentum_threshold": 0.1,
+    "target_volatility": 0.15,
+    "max_weight_per_asset": 0.08,
+    "rebalancing_frequency": "monthly"
+  },
+  "initial_capital": 100000,
+  "commission_rate": 0.001,
+  "slippage_rate": 0.0005,
+  "max_position_size": 0.2,
+  "stop_loss": null,
+  "take_profit": null,
+  "benchmark_symbol": null,
+  "risk_free_rate": 0.02
+}

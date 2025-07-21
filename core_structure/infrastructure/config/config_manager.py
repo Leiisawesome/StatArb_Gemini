@@ -103,7 +103,13 @@ class ConfigManager:
             'DB_PORT': 'port',
             'DB_NAME': 'database',
             'DB_USER': 'user',
-            'DB_PASSWORD': 'password'
+            'DB_PASSWORD': 'password',
+            # Also support CLICKHOUSE_ prefix
+            'CLICKHOUSE_HOST': 'host',
+            'CLICKHOUSE_PORT': 'port',
+            'CLICKHOUSE_DATABASE': 'database',
+            'CLICKHOUSE_USER': 'user',
+            'CLICKHOUSE_PASSWORD': 'password'
         }
         
         for env_var, config_key in env_mapping.items():

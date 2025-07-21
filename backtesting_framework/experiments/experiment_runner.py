@@ -10,23 +10,24 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
-import yaml
 import json
 import os
 from pathlib import Path
+
+# Optional import for config file loading
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
 
 # Import core system components
 import sys
 sys.path.append('../core_structure')
 
-# Try to import core system components
-try:
-    from core_structure.market_data.data_manager import DataManager
-    from core_structure.analytics.performance_analytics import PerformanceAnalyzer
-    CORE_SYSTEM_AVAILABLE = True
-except ImportError:
-    CORE_SYSTEM_AVAILABLE = False
-    logging.warning("Core system not available, using fallback components")
+# Import core system components (always available in this system)
+from core_structure.market_data.data_manager import DataManager
+from core_structure.analytics.performance_analytics import PerformanceAnalyzer
 
 from strategies.base_strategy import BaseStrategy, StrategyConfig
 
@@ -113,22 +114,13 @@ class ExperimentRunner:
         self.config = config or ExperimentConfig()
         self.logger = logging.getLogger(__name__)
         
-        # Initialize components
-        if CORE_SYSTEM_AVAILABLE:
-            try:
-                self.data_manager = DataManager()
-                self.performance_analyzer = PerformanceAnalyzer()
-            except Exception as e:
-                logger.warning(f"Failed to initialize core components: {e}")
-                self.data_manager = None
-                self.performance_analyzer = None
-        else:
-            self.data_manager = None
-            self.performance_analyzer = None
+        # Initialize core system components (required - no fallbacks)
+        self.data_manager = DataManager()
+        self.performance_analyzer = PerformanceAnalyzer()
         
-        # Initialize data integration manager
+        # Initialize data integration manager (required)
         from utils.data_integration import DataIntegrationManager
-        self.data_integration = DataIntegrationManager(use_core_system=CORE_SYSTEM_AVAILABLE)
+        self.data_integration = DataIntegrationManager(cache_data=True)
         
         # Results storage
         self.results: List[ExperimentResult] = []
@@ -199,23 +191,30 @@ class ExperimentRunner:
         """
         Load market data for the experiment
         
+        Strategy-first principle: Load data based on strategy requirements,
+        with experiment config providing infrastructure defaults.
+        
+        Requires core system integration - no fallback mechanisms.
+        
         Args:
             config: Experiment configuration
             
         Returns:
             Dictionary mapping symbols to DataFrames
         """
-        self.logger.info(f"Loading data for symbols: {config.symbols}")
+        self.logger.info("Loading data with strategy-first configuration resolution")
         
-        # Convert date strings to datetime
-        start_date = pd.to_datetime(config.start_date)
-        end_date = pd.to_datetime(config.end_date)
+        # Resolve strategy requirements (strategy config takes precedence)
+        data_requirements = self._resolve_data_requirements(config)
         
-        # Load data using data integration manager
+        self.logger.info(f"Loading data for symbols: {data_requirements['symbols']}")
+        self.logger.info(f"Date range: {data_requirements['start_date']} to {data_requirements['end_date']}")
+        
+        # Load data using resolved requirements
         data = self.data_integration.load_historical_data(
-            symbols=config.symbols,
-            start_date=start_date,
-            end_date=end_date
+            symbols=data_requirements['symbols'],
+            start_date=data_requirements['start_date'],
+            end_date=data_requirements['end_date']
         )
         
         # Validate data
@@ -229,24 +228,123 @@ class ExperimentRunner:
         data_info = self.data_integration.get_data_info(data)
         self.logger.info(f"Loaded data info: {data_info}")
         
-        return data
-        
-        # Validate data
-        for symbol, df in data.items():
-            if len(df) < 100:
-                raise ValueError(f"Insufficient data for {symbol}: {len(df)} observations")
-            
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                raise ValueError(f"Missing columns for {symbol}: {missing_columns}")
-        
         self.logger.info(f"Loaded {len(data)} symbols with {len(list(data.values())[0])} observations each")
         return data
     
+    def _resolve_data_requirements(self, config: ExperimentConfig) -> Dict[str, Any]:
+        """
+        Resolve data requirements using strategy-first principle
+        
+        Strategy configuration takes precedence over experiment configuration.
+        Experiment config provides infrastructure defaults only.
+        
+        Requires core system - no fallback mechanisms.
+        
+        Args:
+            config: Experiment configuration
+            
+        Returns:
+            Dictionary with resolved data requirements
+        """
+        strategy_params = config.strategy_params
+        
+        # Strategy-first symbol resolution
+        symbols = self._resolve_symbols(strategy_params, config.symbols)
+        
+        # Strategy-first date resolution
+        dates = self._resolve_dates(strategy_params, config.start_date, config.end_date)
+        
+        return {
+            'symbols': symbols,
+            'start_date': dates['start_date'],
+            'end_date': dates['end_date']
+        }
+    
+    def _resolve_symbols(self, strategy_params: Dict[str, Any], infrastructure_symbols: List[str]) -> List[str]:
+        """
+        Resolve symbol requirements with strategy-first principle
+        
+        Args:
+            strategy_params: Strategy configuration parameters
+            infrastructure_symbols: Infrastructure default symbols from experiment config
+            
+        Returns:
+            List of symbols to load
+        """
+        # Check if strategy specifies its own symbols
+        if 'symbols' in strategy_params:
+            symbols = strategy_params['symbols']
+            self.logger.info(f"Using strategy-specified symbols: {len(symbols)} symbols")
+            return symbols
+        
+        # Check if strategy needs universe-based symbol selection
+        if 'universe_size' in strategy_params:
+            universe_size = strategy_params['universe_size']
+            min_market_cap = strategy_params.get('min_market_cap', 1e9)
+            min_avg_volume = strategy_params.get('min_avg_volume', 1e6)
+            
+            self.logger.info(f"Strategy requires universe selection: {universe_size} symbols")
+            self.logger.info(f"Criteria: min_market_cap=${min_market_cap:,.0f}, min_volume=${min_avg_volume:,.0f}")
+            
+            # Use core system for universe selection (required - no fallbacks)
+            universe_symbols = self.data_integration.get_universe_symbols(
+                universe_size=universe_size,
+                min_market_cap=min_market_cap,
+                min_avg_volume=min_avg_volume
+            )
+            
+            if not universe_symbols:
+                raise RuntimeError(f"Core system failed to provide universe symbols for size={universe_size}")
+            
+            self.logger.info(f"Core system provided {len(universe_symbols)} universe symbols")
+            return universe_symbols
+        
+        # Use experiment infrastructure defaults (not fallbacks, but default infrastructure symbols)
+        self.logger.info(f"Using experiment infrastructure symbols: {infrastructure_symbols}")
+        return infrastructure_symbols
+    
+    def _resolve_dates(self, strategy_params: Dict[str, Any], 
+                      infrastructure_start: str, infrastructure_end: str) -> Dict[str, pd.Timestamp]:
+        """
+        Resolve date requirements with strategy-first principle
+        
+        Args:
+            strategy_params: Strategy configuration parameters
+            infrastructure_start: Infrastructure default start date from experiment config
+            infrastructure_end: Infrastructure default end date from experiment config
+            
+        Returns:
+            Dictionary with resolved start and end dates
+        """
+        # Strategy with training/trading phases (e.g., MomentumStrategy)
+        if 'training_start' in strategy_params and 'trading_end' in strategy_params:
+            start_date = pd.to_datetime(strategy_params['training_start'])
+            end_date = pd.to_datetime(strategy_params['trading_end'])
+            
+            self.logger.info(f"Strategy defines training/trading phases: {start_date} to {end_date}")
+            return {'start_date': start_date, 'end_date': end_date}
+        
+        # Strategy with explicit date overrides
+        elif 'start_date' in strategy_params and 'end_date' in strategy_params:
+            start_date = pd.to_datetime(strategy_params['start_date'])
+            end_date = pd.to_datetime(strategy_params['end_date'])
+            
+            self.logger.info(f"Strategy specifies explicit dates: {start_date} to {end_date}")
+            return {'start_date': start_date, 'end_date': end_date}
+        
+        # Use experiment infrastructure defaults
+        start_date = pd.to_datetime(infrastructure_start)
+        end_date = pd.to_datetime(infrastructure_end)
+        
+        self.logger.info(f"Using experiment infrastructure dates: {start_date} to {end_date}")
+        return {'start_date': start_date, 'end_date': end_date}
+    
     def _initialize_strategy(self, config: ExperimentConfig) -> BaseStrategy:
         """
-        Initialize strategy with configuration
+        Initialize strategy with strategy-first configuration resolution
+        
+        Strategy parameters take precedence over experiment parameters.
+        Experiment config provides infrastructure defaults only.
         
         Args:
             config: Experiment configuration
@@ -254,25 +352,50 @@ class ExperimentRunner:
         Returns:
             Initialized strategy instance
         """
-        # Create strategy configuration
-        strategy_config = StrategyConfig(
-            name=config.name,
-            symbols=config.symbols,
-            position_size=config.max_position_size,
-            stop_loss=config.stop_loss,
-            take_profit=config.take_profit,
-            commission_rate=config.commission_rate,
-            slippage_rate=config.slippage_rate,
-            benchmark_symbol=config.benchmark_symbol,
-            risk_free_rate=config.risk_free_rate,
-            **config.strategy_params
-        )
+        # Resolve configuration with strategy-first principle
+        resolved_config = self._resolve_strategy_configuration(config)
         
-        # Import and instantiate strategy
+        # Import strategy module first to get the config class
         try:
-            # Dynamic import based on strategy class name
-            strategy_module = __import__(f"strategies.{config.strategy_class.lower()}", 
+            # Convert CamelCase to snake_case for module name
+            module_name = config.strategy_class
+            # Convert CamelCase to snake_case
+            snake_case_name = ''.join(['_' + c.lower() if c.isupper() and i > 0 else c.lower() 
+                                     for i, c in enumerate(module_name)])
+            
+            strategy_module = __import__(f"strategies.{snake_case_name}", 
                                        fromlist=[config.strategy_class])
+            
+            # Try to find strategy-specific config class
+            strategy_config_class = getattr(strategy_module, f"{config.strategy_class}Config", None)
+            if strategy_config_class is None:
+                # Try alternative naming patterns
+                strategy_config_class = getattr(strategy_module, "MomentumConfig", None)
+                if strategy_config_class is None:
+                    # Fallback to base StrategyConfig
+                    strategy_config_class = StrategyConfig
+            
+            # Get field names from the config class
+            import dataclasses
+            if dataclasses.is_dataclass(strategy_config_class):
+                strategy_config_fields = {field.name for field in dataclasses.fields(strategy_config_class)}
+            else:
+                # Fallback to base StrategyConfig fields
+                strategy_config_fields = {
+                    'symbols', 'name', 'version', 'position_size', 'max_positions',
+                    'stop_loss', 'take_profit', 'max_drawdown', 'commission_rate',
+                    'slippage_rate', 'lookback_window', 'min_data_points',
+                    'benchmark_symbol', 'risk_free_rate'
+                }
+            
+            # Only pass parameters that the strategy config recognizes
+            filtered_config = {k: v for k, v in resolved_config.items() 
+                              if k in strategy_config_fields}
+            
+            # Create strategy configuration with strategy-specific config class
+            strategy_config = strategy_config_class(**filtered_config)
+            
+            # Get strategy class and instantiate
             strategy_class = getattr(strategy_module, config.strategy_class)
             strategy = strategy_class(strategy_config)
             
@@ -282,6 +405,112 @@ class ExperimentRunner:
         
         self.logger.info(f"Initialized strategy: {config.strategy_class}")
         return strategy
+    
+    def _resolve_strategy_configuration(self, config: ExperimentConfig) -> Dict[str, Any]:
+        """
+        Resolve strategy configuration using strategy-first principle
+        
+        Priority order:
+        1. Strategy-specific parameters (from strategy_params)
+        2. Experiment infrastructure parameters (fallback)
+        
+        Args:
+            config: Experiment configuration
+            
+        Returns:
+            Dictionary with resolved configuration parameters
+        """
+        strategy_params = config.strategy_params.copy()
+        
+        # Resolve symbols using strategy-first principle
+        resolved_symbols = self._resolve_symbols(strategy_params, config.symbols)
+        
+        # Define strategy-first parameter mappings
+        # Strategy parameters take precedence over experiment parameters
+        parameter_mappings = {
+            # Core parameters (use resolved values)
+            'name': config.name,
+            'symbols': resolved_symbols,  # Use strategy-resolved symbols, not experiment symbols
+            
+            # Financial parameters (strategy takes precedence)
+            'commission_rate': strategy_params.get('commission_rate', config.commission_rate),
+            'slippage_rate': strategy_params.get('slippage_rate', config.slippage_rate),
+            'benchmark_symbol': strategy_params.get('benchmark_symbol', config.benchmark_symbol),
+            'risk_free_rate': strategy_params.get('risk_free_rate', config.risk_free_rate),
+            
+            # Position sizing (strategy defines its own logic)
+            'position_size': strategy_params.get('position_size', config.max_position_size),
+            
+            # Risk management (strategy takes precedence)
+            'stop_loss': strategy_params.get('stop_loss', config.stop_loss),
+            'take_profit': strategy_params.get('take_profit', config.take_profit),
+        }
+        
+        # Add all strategy-specific parameters (these always take precedence)
+        resolved_config = {**parameter_mappings, **strategy_params}
+        
+        # Log configuration resolution
+        strategy_overrides = [k for k in strategy_params.keys() 
+                            if k in parameter_mappings and strategy_params.get(k) != parameter_mappings.get(k)]
+        
+        if strategy_overrides:
+            self.logger.info(f"Strategy overrides experiment config for: {strategy_overrides}")
+        
+        # Log symbol resolution
+        if len(resolved_symbols) != len(config.symbols) or set(resolved_symbols) != set(config.symbols):
+            self.logger.info(f"Strategy symbols differ from experiment: {len(resolved_symbols)} vs {len(config.symbols)} symbols")
+        
+        return resolved_config
+    
+    def _resolve_benchmark_symbol(self, config: ExperimentConfig) -> Optional[str]:
+        """
+        Resolve benchmark symbol using strategy-first principle
+        
+        Args:
+            config: Experiment configuration
+            
+        Returns:
+            Benchmark symbol to use, or None
+        """
+        strategy_params = config.strategy_params
+        
+        # Strategy-specified benchmark takes precedence
+        if 'benchmark_symbol' in strategy_params:
+            benchmark = strategy_params['benchmark_symbol']
+            if benchmark:
+                self.logger.info(f"Using strategy-specified benchmark: {benchmark}")
+                return benchmark
+        
+        # Fall back to experiment benchmark
+        if config.benchmark_symbol:
+            self.logger.info(f"Using experiment fallback benchmark: {config.benchmark_symbol}")
+            return config.benchmark_symbol
+        
+        # No benchmark specified
+        self.logger.info("No benchmark specified")
+        return None
+    
+    def _resolve_initial_capital(self, config: ExperimentConfig) -> float:
+        """
+        Resolve initial capital using strategy-first principle
+        
+        Args:
+            config: Experiment configuration
+            
+        Returns:
+            Initial capital to use
+        """
+        strategy_params = config.strategy_params
+        
+        # Strategy-specified initial capital takes precedence
+        if 'initial_capital' in strategy_params:
+            capital = strategy_params['initial_capital']
+            self.logger.info(f"Using strategy-specified initial capital: ${capital:,.0f}")
+            return capital
+        
+        # Fall back to experiment infrastructure defaults
+        self.logger.info(f"Using experiment infrastructure initial capital: ${config.initial_capital:,.0f}")
+        return config.initial_capital
     
     def _run_backtest(self, strategy: BaseStrategy, data: Dict[str, pd.DataFrame], 
                      config: ExperimentConfig) -> ExperimentResult:
@@ -298,15 +527,25 @@ class ExperimentRunner:
         """
         self.logger.info("Starting backtest simulation")
         
+        # Get resolved requirements (strategy-first)
+        data_requirements = self._resolve_data_requirements(config)
+        resolved_symbols = data_requirements['symbols']
+        
+        # Resolve initial capital (strategy can override experiment capital)
+        initial_capital = self._resolve_initial_capital(config)
+        
         # Align data timestamps
         aligned_data = self._align_data(data)
         timestamps = aligned_data.index
         
-        # Initialize result
+        # Initialize result with defaults for required fields
         result = ExperimentResult(
             config=config,
             start_time=datetime.now(),
-            equity_curve=[config.initial_capital],
+            end_time=datetime.now(),  # Will be updated at the end
+            duration=0.0,  # Will be calculated at the end
+            strategy_metrics={},  # Will be calculated at the end
+            equity_curve=[initial_capital],
             returns=[],
             trades=[],
             signals=[],
@@ -314,9 +553,10 @@ class ExperimentRunner:
             drawdown_series=[]
         )
         
-        # Load benchmark data if specified
-        if config.benchmark_symbol:
-            benchmark_data = self._load_benchmark_data(config.benchmark_symbol, timestamps)
+        # Load benchmark data if specified (strategy preference takes precedence)
+        benchmark_symbol = self._resolve_benchmark_symbol(config)
+        if benchmark_symbol:
+            benchmark_data = self._load_benchmark_data(benchmark_symbol, timestamps)
             result.benchmark_returns = []
         
         # Run simulation
@@ -325,7 +565,8 @@ class ExperimentRunner:
             current_data = {}
             current_prices = {}
             
-            for symbol in config.symbols:
+            # Use resolved symbols (strategy-first) instead of experiment symbols
+            for symbol in resolved_symbols:
                 if symbol in aligned_data.columns:
                     symbol_data = data[symbol].loc[:timestamp]
                     current_data[symbol] = symbol_data
@@ -340,8 +581,8 @@ class ExperimentRunner:
             # Update portfolio value
             strategy.update_portfolio_value(current_prices)
             
-            # Record data
-            result.equity_curve.append(strategy.portfolio_value * config.initial_capital)
+            # Record data (strategy.portfolio_value is already in dollars)
+            result.equity_curve.append(strategy.portfolio_value)
             result.trades.extend(trades)
             result.signals.extend([{
                 'timestamp': signal.timestamp,
@@ -368,7 +609,7 @@ class ExperimentRunner:
                 result.drawdown_series.append(drawdown)
             
             # Update benchmark returns
-            if config.benchmark_symbol and benchmark_data is not None:
+            if benchmark_symbol and benchmark_data is not None:
                 if i > 0:
                     benchmark_return = (benchmark_data.iloc[i] / benchmark_data.iloc[i-1]) - 1
                     result.benchmark_returns.append(benchmark_return)
@@ -415,7 +656,8 @@ class ExperimentRunner:
             Benchmark price series
         """
         try:
-            benchmark_data = self.data_manager.load_historical_data(
+            # Use the same data integration manager for consistency
+            benchmark_data = self.data_integration.load_historical_data(
                 symbols=[benchmark_symbol],
                 start_date=timestamps[0],
                 end_date=timestamps[-1]
@@ -626,6 +868,9 @@ class ExperimentRunner:
         Returns:
             ExperimentConfig instance
         """
+        if not YAML_AVAILABLE:
+            raise ImportError("PyYAML is required for loading config files. Install with: pip install PyYAML")
+            
         with open(config_file, 'r') as f:
             config_data = yaml.safe_load(f)
         

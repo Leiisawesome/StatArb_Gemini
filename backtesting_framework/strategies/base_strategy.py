@@ -48,7 +48,6 @@ class Position:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
-@dataclass
 class StrategyConfig:
     """Base configuration for strategies"""
     # Required fields (no defaults)
@@ -58,7 +57,8 @@ class StrategyConfig:
     name: str = "Base Strategy"
     version: str = "1.0.0"
     
-    # Trading parameters
+    # Capital and position management
+    initial_capital: float = 100000.0  # $100K default capital
     position_size: float = 0.1
     max_positions: int = 10
     
@@ -88,7 +88,7 @@ class BaseStrategy(ABC):
     
     def __init__(self, config: StrategyConfig):
         """
-        Initialize strategy with configuration
+        Initialize the base strategy
         
         Args:
             config: Strategy configuration
@@ -96,25 +96,29 @@ class BaseStrategy(ABC):
         self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
-        # State tracking
+        # Portfolio state
+        self.cash = config.initial_capital
         self.positions: Dict[str, Position] = {}
-        self.signals: List[TradingSignal] = []
-        self.trades: List[Dict[str, Any]] = []
-        self.portfolio_value: float = 1.0  # Starting with $1
-        self.cash: float = 1.0
+        self.portfolio_value = config.initial_capital
+        self.initial_capital = config.initial_capital  # Track for return calculations
+        self.equity_curve: List[float] = [config.initial_capital]
         
         # Performance tracking
         self.returns: List[float] = []
-        self.equity_curve: List[float] = [1.0]
+        self.trades: List[Dict[str, Any]] = []
         
-        # Data storage
+        # Market data storage
         self.market_data: Dict[str, pd.DataFrame] = {}
-        self.features: Dict[str, pd.DataFrame] = {}
         
-        # Validation
-        self._validate_config()
+        # Signal tracking
+        self.signals: List = []
         
-        self.logger.info(f"Initialized {self.config.name} strategy")
+        # Risk management
+        self.max_position_size = getattr(config, 'max_position_size', 0.1)
+        self.stop_loss_threshold = getattr(config, 'stop_loss_threshold', 0.05)
+        
+        self.logger.info(f"Strategy initialized: {config.name}")
+        self.logger.info(f"Initial capital: ${config.initial_capital:,.2f}")
     
     def _validate_config(self):
         """Validate strategy configuration"""
@@ -353,17 +357,29 @@ class BaseStrategy(ABC):
             Dictionary of performance metrics
         """
         if not self.returns:
-            return {}
+            return {
+                'total_return': 0.0,
+                'annualized_return': 0.0,
+                'volatility': 0.0,
+                'sharpe_ratio': 0.0,
+                'max_drawdown': 0.0,
+                'win_rate': 0.0,
+                'profit_factor': 0.0,
+                'total_trades': len(self.trades)
+            }
         
         returns = np.array(self.returns)
         
+        # Calculate total return using initial capital
+        total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
+        
         metrics = {
-            'total_return': (self.portfolio_value - 1.0) / 1.0,
+            'total_return': total_return,
             'annualized_return': self._calculate_annualized_return(returns),
             'volatility': np.std(returns) * np.sqrt(252),
             'sharpe_ratio': self._calculate_sharpe_ratio(returns),
             'max_drawdown': self._calculate_max_drawdown(),
-            'win_rate': np.mean(returns > 0),
+            'win_rate': np.mean(returns > 0) if len(returns) > 0 else 0.0,
             'profit_factor': self._calculate_profit_factor(returns),
             'total_trades': len(self.trades)
         }

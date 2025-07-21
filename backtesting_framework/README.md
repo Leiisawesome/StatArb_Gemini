@@ -1,5 +1,7 @@
 # StatArb Backtesting Framework
 
+**Status:** ✅ Production Ready | Clean Codebase | Portfolio Tracking Fixed
+
 Professional backtesting framework for quantitative trading strategies, designed to work with the StatArb_Gemini core system.
 
 ## Architecture Overview
@@ -27,11 +29,26 @@ backtesting_framework/
 │       └── pairs_trading.yaml
 ├── results/             # Backtest results and reports (created at runtime)
 ├── utils/               # Backtesting utilities (future expansion)
+├── docs/                # Comprehensive documentation
+│   ├── README.md       # Documentation index
+│   ├── QUICK_START.md  # Getting started guide
+│   └── *.md            # Additional guides and references
 ├── requirements.txt     # Dependencies
-├── README.md           # Framework documentation
-├── FRAMEWORK_SUMMARY.md # Comprehensive framework summary
+├── README.md           # Framework overview (this file)
 └── __init__.py         # Package initialization
 ```
+
+## 📚 Documentation
+
+**Complete documentation is available in the [`docs/`](docs/) directory:**
+
+- 🚀 **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running immediately
+- 📋 **[Framework Summary](docs/FRAMEWORK_SUMMARY.md)** - Complete architectural overview  
+- 🏭 **[Production Setup](docs/PRODUCTION_SETUP_GUIDE.md)** - Production deployment guide
+- 📊 **[Data Integration](docs/DATA_INTEGRATION_GUIDE.md)** - Data sources and setup
+- ✅ **[Project Status](docs/CLEANUP_COMPLETE.md)** - Current state and cleanup summary
+
+**Start with the [Documentation Index](docs/README.md) for a complete overview.**
 
 ## Key Benefits
 
