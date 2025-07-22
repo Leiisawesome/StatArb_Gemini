@@ -194,6 +194,19 @@ docker-compose.override.yml
 core_structure/signal_generation/stat_arb_ensemble_integration.py
 core_structure/signal_generation/stat_arb_models.py
 
+# Debug and temporary analysis files
+fixed_clickhouse_loader.py
+patch_datamanager.py
+run_momentum_real_data.py
+debug_data_loading.py
+simple_debug.py
+explore_clickhouse_data.py
+fix_clickhouse_timestamps.py
+
+# Backup files
+*.backup
+run_momentum_backtest.py.backup
+
 # Deprecated directories (prevent recreation)
 deprecated/
 archived/
@@ -213,5 +226,25 @@ ENV/
 # Log files
 *.log
 logs/
-Tests/mvs/logs/
-Tests/mvs/results/
+
+# Development and testing files (backtesting framework)
+test_*.py
+*_test.py
+debug_*.py
+temp_*.py
+scratch_*.py
+explore_*.py
+investigate_*.py
+*_investigation.py
+simple_*.py
+final_*.py
+resolution_*.py
+explain_*.py
+quick_*.py
+
+# Temporary backtest results (keep main results)
+backtesting_framework/results/test_*/
+backtesting_framework/results/*_test*/
+backtesting_framework/results/temp_*/
+backtesting_framework/results/quick_*/
+backtesting_framework/results/capital_test_*/

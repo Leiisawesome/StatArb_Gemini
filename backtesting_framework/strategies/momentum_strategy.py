@@ -316,6 +316,19 @@ class MomentumStrategy(BaseStrategy):
             # Try to train with provided data if available
             self.train(training_data=data if data else None)
         
+        # Check if we should rebalance today (NEW REBALANCING LOGIC)
+        current_date = self._get_current_date(data)
+        if not self._should_rebalance(current_date):
+            # Return cached signals if we're not rebalancing today
+            cached_signals = getattr(self, '_last_signals', [])
+            if cached_signals:
+                logger.info(f"Using cached signals - no rebalancing on {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
+                return cached_signals
+            else:
+                logger.info(f"No cached signals available - generating initial signals")
+        else:
+            logger.info(f"Rebalancing day: {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
+        
         try:
             # Initialize signal generator
             self._init_signal_generator()
@@ -340,8 +353,10 @@ class MomentumStrategy(BaseStrategy):
             # Apply signal filters and decay
             filtered_signals = self._apply_signal_filters(signals)
             
-            # Store current signals for tracking
+            # Store current signals for tracking and caching
             self.current_signals = {s.symbol: s.strength for s in filtered_signals}
+            self._last_signals = filtered_signals  # Cache for rebalancing frequency
+            self._last_rebalance_date = current_date  # Track last rebalance
             
             logger.info(f"Generated {len(filtered_signals)} momentum signals")
             return filtered_signals
@@ -359,6 +374,49 @@ class MomentumStrategy(BaseStrategy):
         except Exception as e:
             logger.error(f"Signal generation failed: {e}")
             return []
+    
+    def _get_current_date(self, data: Dict[str, pd.DataFrame]) -> datetime:
+        """Extract current date from data"""
+        try:
+            # Get the latest date from any available symbol data
+            for symbol, symbol_data in data.items():
+                if not symbol_data.empty:
+                    latest_date = symbol_data.index[-1]
+                    if isinstance(latest_date, pd.Timestamp):
+                        return latest_date.to_pydatetime()
+                    elif isinstance(latest_date, str):
+                        return pd.to_datetime(latest_date).to_pydatetime()
+                    else:
+                        return datetime.now()
+            return datetime.now()
+        except Exception:
+            return datetime.now()
+    
+    def _should_rebalance(self, current_date: datetime) -> bool:
+        """Determine if we should rebalance on the current date"""
+        frequency = getattr(self.config, 'rebalancing_frequency', 'daily')
+        last_rebalance = getattr(self, '_last_rebalance_date', None)
+        
+        if frequency == "daily":
+            return True
+        elif frequency == "weekly":
+            # Rebalance every Monday (weekday 0)
+            if last_rebalance is None:
+                return True
+            # Check if we've crossed into a new week
+            current_week = current_date.isocalendar()[1]
+            last_week = last_rebalance.isocalendar()[1]
+            return current_week != last_week
+        elif frequency == "monthly":
+            # Rebalance on first trading day of each month
+            if last_rebalance is None:
+                return True
+            # Check if we've crossed into a new month
+            return current_date.month != last_rebalance.month or current_date.year != last_rebalance.year
+        else:
+            # Default to daily if unknown frequency
+            logger.warning(f"Unknown rebalancing frequency: {frequency}, defaulting to daily")
+            return True
     
     def calculate_positions(self, signals: List[TradingSignal], 
                           current_positions: Dict[str, Position],

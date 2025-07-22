@@ -1,109 +1,240 @@
-# Documentation Index
+# StatArb Backtesting Framework
 
-## 📚 Complete Documentation for StatArb Backtesting Framework
+**Status:** ✅ Production Ready | Clean Codebase | Performance Calculation Fixed
 
-Welcome to the documentation hub for the StatArb Backtesting Framework. This directory contains comprehensive guides and references for all aspects of the framework.
+Professional backtesting framework for quantitative trading strategies, designed to work with the StatArb_Gemini core system.
 
----
+## 🚨 Recent Important Fix
+**Annualized Return Calculation Bug Fixed** - The framework now correctly calculates annualized returns using actual date ranges instead of hardcoded trading days. See [`docs/ANNUALIZED_RETURN_BUG_FIX.md`](docs/ANNUALIZED_RETURN_BUG_FIX.md) for details.
 
-## 📖 Getting Started
+## Architecture Overview
 
-### 🚀 [Quick Start Guide](QUICK_START.md)
-**Start here for immediate setup and usage**
-- Installation and setup
-- First backtest example
-- Basic configuration
-- Simple strategy examples
+This framework provides a clean separation between:
+- **Core System**: Production-ready trading infrastructure (`core_structure/`)
+- **Backtesting**: Research and development environment (`backtesting_framework/`)
 
-### 📋 [Framework Summary](FRAMEWORK_SUMMARY.md)
-**Complete architectural overview**
-- System architecture
-- Component breakdown
-- Development workflow
-- Best practices
-
----
-
-## 🔧 Setup and Configuration
-
-### 🏭 [Production Setup Guide](PRODUCTION_SETUP_GUIDE.md)
-**Production deployment and configuration**
-- Environment setup
-- Database configuration
-- Dependencies management
-- Production checklist
-
-### 📊 [Data Integration Guide](DATA_INTEGRATION_GUIDE.md)
-**Data sources and integration**
-- ClickHouse setup
-- Data loading patterns
-- Fallback mechanisms
-- Data quality validation
-
----
-
-## 🎯 Project Status
-
-### ✅ [Cleanup Complete](CLEANUP_COMPLETE.md)
-**Current state and cleanup summary**
-- Cleanup actions performed
-- Final directory structure
-- Quality metrics
-- Validation results
-
----
-
-## 📁 Document Organization
+## Directory Structure
 
 ```
-docs/
-├── README.md                    # This index file
-├── QUICK_START.md              # 🚀 Getting started guide
-├── FRAMEWORK_SUMMARY.md        # 📋 Complete overview
-├── PRODUCTION_SETUP_GUIDE.md   # 🏭 Production deployment
-├── DATA_INTEGRATION_GUIDE.md   # 📊 Data setup
-└── CLEANUP_COMPLETE.md         # ✅ Project status
+backtesting_framework/
+├── strategies/          # Strategy implementations
+│   ├── base_strategy.py # Base strategy class
+│   ├── pairs_trading.py # Statistical arbitrage strategy
+│   └── __init__.py
+├── experiments/         # Strategy experiments
+│   ├── experiment_runner.py # Main experiment orchestrator
+│   ├── parameter_sweep.py  # Parameter optimization
+│   ├── run_example.py      # Example usage script
+│   └── __init__.py
+├── configs/             # Strategy configurations
+│   ├── base_config.yaml # Base configuration
+│   └── strategies/      # Strategy-specific configs
+│       └── pairs_trading.yaml
+├── results/             # Backtest results and reports (created at runtime)
+├── utils/               # Backtesting utilities (future expansion)
+├── docs/                # Comprehensive documentation
+│   ├── README.md       # Documentation index
+│   ├── QUICK_START.md  # Getting started guide
+│   └── *.md            # Additional guides and references
+├── requirements.txt     # Dependencies
+├── README.md           # Framework overview (this file)
+└── __init__.py         # Package initialization
 ```
 
----
+## 📚 Documentation
 
-## 🎯 Usage Recommendations
+**Complete documentation is available in the [`docs/`](docs/) directory:**
 
-### For New Users
-1. **Start with:** [Quick Start Guide](QUICK_START.md)
-2. **Then read:** [Framework Summary](FRAMEWORK_SUMMARY.md)
-3. **For production:** [Production Setup Guide](PRODUCTION_SETUP_GUIDE.md)
+- 🚀 **[Quick Start Guide](docs/QUICK_START.md)** - Get up and running immediately
+- 📋 **[Framework Summary](docs/FRAMEWORK_SUMMARY.md)** - Complete architectural overview  
+- 🏭 **[Production Setup](docs/PRODUCTION_SETUP_GUIDE.md)** - Production deployment guide
+- 📊 **[Data Integration](docs/DATA_INTEGRATION_GUIDE.md)** - Data sources and setup
+- ✅ **[Project Status](docs/CLEANUP_COMPLETE.md)** - Current state and cleanup summary
+- 🔧 **[Bug Fix Summary](docs/ANNUALIZED_RETURN_BUG_FIX.md)** - Critical performance calculation fix
 
-### For Developers
-1. **Architecture:** [Framework Summary](FRAMEWORK_SUMMARY.md)
-2. **Data setup:** [Data Integration Guide](DATA_INTEGRATION_GUIDE.md)
-3. **Current state:** [Cleanup Complete](CLEANUP_COMPLETE.md)
+**Start with the [Documentation Index](docs/README.md) for a complete overview.**
 
-### For Operations
-1. **Deployment:** [Production Setup Guide](PRODUCTION_SETUP_GUIDE.md)
-2. **Data systems:** [Data Integration Guide](DATA_INTEGRATION_GUIDE.md)
-3. **Status check:** [Cleanup Complete](CLEANUP_COMPLETE.md)
+## Key Benefits
 
----
+### 1. **Clean Separation**
+- Core system remains production-ready
+- No risk of test code contaminating live systems
+- Independent versioning and development
 
-## 🔗 Quick Links
+### 2. **Rapid Strategy Development**
+- Quick iteration on strategy ideas
+- Easy parameter optimization
+- Comprehensive performance analysis
 
-- **Main README:** [`../README.md`](../README.md) - Framework overview
-- **Code Examples:** [`../experiments/run_example.py`](../experiments/run_example.py) - Usage examples
-- **Strategy Templates:** [`../strategies/`](../strategies/) - Strategy implementations
-- **Configuration:** [`../configs/`](../configs/) - Configuration files
+### 3. **Professional Workflow**
+- Structured experiment management
+- Reproducible results
+- Comprehensive reporting
 
----
+## Usage Examples
 
-## 📝 Document Status
+### Basic Strategy Backtest
+```python
+from backtesting_framework import ExperimentRunner, ExperimentConfig
 
-All documentation is current as of **July 21, 2025** and reflects the production-ready state of the backtesting framework with:
+# Create configuration
+config = ExperimentConfig(
+    name="My Strategy Test",
+    symbols=["AAPL", "MSFT"],
+    start_date="2023-01-01",
+    end_date="2023-12-31",
+    strategy_class="PairsTradingStrategy",
+    initial_capital=100000.0
+)
 
-✅ **Working portfolio value tracking** (6.86% returns)  
-✅ **Clean codebase** (no debug artifacts)  
-✅ **Production-ready architecture**  
-✅ **Comprehensive documentation**
+# Run experiment
+runner = ExperimentRunner()
+result = runner.run_experiment(config)
 
----
+# Analyze results
+print(f"Total Return: {result.strategy_metrics['total_return']:.2%}")
+print(f"Sharpe Ratio: {result.strategy_metrics['sharpe_ratio']:.2f}")
+```
 
-*For technical support or questions, refer to the individual guide sections or examine the code examples in the experiments directory.*
+### Parameter Optimization
+```python
+from backtesting_framework import ParameterSweep, OptimizationConfig
+
+# Define parameter ranges
+opt_config = OptimizationConfig(
+    optimization_metric="sharpe_ratio",
+    search_method="grid_search",
+    parameter_ranges={
+        'z_entry_threshold': [1.5, 2.0, 2.5, 3.0],
+        'lookback_window': [30, 60, 90, 120]
+    }
+)
+
+# Run optimization
+sweep = ParameterSweep(base_config, opt_config)
+opt_result = sweep.optimize(PairsTradingStrategy)
+
+# Get best parameters
+print(f"Best Sharpe: {opt_result.best_metric:.2f}")
+print(f"Best Params: {opt_result.best_params}")
+```
+
+### Configuration File Usage
+```python
+# Load from YAML file
+result = runner.run_experiment_from_file("configs/strategies/pairs_trading.yaml")
+```
+
+## Integration with Core System
+
+The backtesting framework seamlessly integrates with the StatArb_Gemini core system:
+
+```python
+# Import core components
+from core_structure.market_data.data_manager import DataManager
+from core_structure.analytics.performance_analytics import PerformanceAnalyzer
+
+# Use in backtesting
+data_manager = DataManager()
+performance_analyzer = PerformanceAnalyzer()
+```
+
+## Best Practices
+
+### 1. **Strategy Development**
+- Inherit from `BaseStrategy` class
+- Implement required methods: `generate_signals()`, `calculate_positions()`
+- Use proper error handling and logging
+
+### 2. **Experiment Management**
+- Use descriptive experiment names
+- Save all parameters and results
+- Include data versioning
+
+### 3. **Performance Analysis**
+- Use multiple performance metrics
+- Include benchmark comparisons
+- Analyze drawdowns and risk metrics
+
+### 4. **Reproducibility**
+- Set random seeds
+- Save all data and parameters
+- Use version control for configurations
+
+## Configuration
+
+Strategy configurations are stored in YAML format:
+
+```yaml
+# configs/strategies/pairs_trading.yaml
+name: "AAPL-MSFT Pairs Trading"
+description: "Statistical arbitrage between AAPL and MSFT"
+symbols: ["AAPL", "MSFT"]
+start_date: "2023-01-01"
+end_date: "2023-12-31"
+
+strategy_class: "PairsTradingStrategy"
+strategy_params:
+  z_entry_threshold: 2.0
+  z_exit_threshold: 0.5
+  lookback_window: 60
+  correlation_threshold: 0.8
+
+initial_capital: 100000.0
+commission_rate: 0.001
+slippage_rate: 0.0005
+max_position_size: 0.2
+benchmark_symbol: "SPY"
+```
+
+## Dependencies
+
+The framework requires the core system components plus additional backtesting-specific packages:
+
+```
+pandas>=1.5.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+scipy>=1.9.0
+scikit-learn>=1.1.0
+plotly>=5.0.0
+pyyaml>=6.0
+```
+
+## Getting Started
+
+1. **Install Dependencies**
+   ```bash
+   cd backtesting_framework
+   pip install -r requirements.txt
+   ```
+
+2. **Run Example**
+   ```bash
+   python experiments/run_example.py
+   ```
+
+3. **Create Custom Strategy**
+   ```bash
+   cp strategies/base_strategy.py strategies/my_strategy.py
+   # Edit my_strategy.py with your logic
+   ```
+
+4. **Run Experiment**
+   ```bash
+   python experiments/experiment_runner.py
+   ```
+
+## Contributing
+
+When adding new strategies or experiments:
+
+1. Follow the existing code structure
+2. Add comprehensive documentation
+3. Include unit tests
+4. Update this README if needed
+
+## License
+
+This framework is part of the StatArb_Gemini project and follows the same licensing terms. 

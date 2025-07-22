@@ -95,8 +95,12 @@ CLICKHOUSE_PASSWORD=your_password
 ### 3.1 Test Connection
 
 ```bash
-# Test ClickHouse connection directly
-python Tests/ClickHouse_Manager/clickhouse_manager.py list-tables
+# Test ClickHouse connection using core system
+python -c "
+from core_structure.market_data.enhanced_clickhouse_loader import ClickHouseLoader
+loader = ClickHouseLoader()
+print('ClickHouse connection successful!')
+"
 
 # Or test with the integration script
 python backtesting_framework/test_production_integration.py
@@ -107,14 +111,17 @@ python backtesting_framework/test_production_integration.py
 Verify you have market data available:
 
 ```bash
-# List all tables
-python Tests/ClickHouse_Manager/clickhouse_manager.py list-tables
+# List all tables (use ClickHouse client)
+echo "SHOW TABLES;" | clickhouse-client
 
-# Check a specific table
-python Tests/ClickHouse_Manager/clickhouse_manager.py query "SELECT COUNT(*) FROM your_market_data_table"
-
-# See sample data
-python Tests/ClickHouse_Manager/clickhouse_manager.py query "SELECT * FROM your_market_data_table LIMIT 5"
+# Check data using core system
+python -c "
+from core_structure.market_data.enhanced_clickhouse_loader import ClickHouseLoader
+loader = ClickHouseLoader()
+data = loader.load_data(['AAPL'], '2024-01-01', '2024-01-02')
+print(f'Sample data loaded: {len(data)} rows')
+print(data.head() if len(data) > 0 else 'No data found')
+"
 ```
 
 ### 3.3 Expected Data Format
@@ -226,16 +233,21 @@ docker ps | grep clickhouse
 docker run -d --name clickhouse -p 9000:9000 clickhouse/clickhouse-server
 
 # Test connection manually
-python Tests/ClickHouse_Manager/clickhouse_manager.py query "SELECT version()"
+echo "SELECT version();" | clickhouse-client
 ```
 
 **3. No data found in ClickHouse**
 ```bash
 # Check available tables
-python Tests/ClickHouse_Manager/clickhouse_manager.py list-tables
+echo "SHOW TABLES;" | clickhouse-client
 
-# Check if tables have data
-python Tests/ClickHouse_Manager/clickhouse_manager.py query "SELECT COUNT(*) FROM your_table"
+# Check if tables have data using core system
+python -c "
+from core_structure.market_data.enhanced_clickhouse_loader import ClickHouseLoader
+loader = ClickHouseLoader()
+print('Testing data availability...')
+# Add your data verification logic here
+"
 ```
 
 **4. Core system import failures**
@@ -327,10 +339,10 @@ strategy_params = {
 
 ## 🔗 Resources
 
-- **ClickHouse Manager**: `Tests/ClickHouse_Manager/README.md`
-- **Framework Documentation**: `backtesting_framework/README.md`
-- **Data Integration Guide**: `backtesting_framework/DATA_INTEGRATION_GUIDE.md`
-- **Strategy Development**: `backtesting_framework/strategies/README.md`
+- **Core Market Data**: `core_structure/market_data/enhanced_clickhouse_loader.py`
+- **Framework Documentation**: `backtesting_framework/docs/README.md`
+- **Data Integration Guide**: `backtesting_framework/docs/DATA_INTEGRATION_GUIDE.md`
+- **Strategy Development**: `backtesting_framework/strategies/`
 
 ## ✅ Success Checklist
 

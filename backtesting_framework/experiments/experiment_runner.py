@@ -152,15 +152,20 @@ class ExperimentRunner:
             # Run backtest
             result = self._run_backtest(strategy, data, experiment_config)
             
-            # Calculate performance metrics
+            # Extract trading dates from strategy params
+            trading_start = experiment_config.strategy_params.get('trading_start')
+            trading_end = experiment_config.strategy_params.get('trading_end')
+            
+            # Calculate performance metrics with proper date range
             result.strategy_metrics = self._calculate_performance_metrics(
-                result.returns, result.benchmark_returns
+                result.returns, result.benchmark_returns, trading_start, trading_end
             )
             
             # Generate benchmark comparison if available
             if result.benchmark_returns:
+                # Use same date range for benchmark
                 result.benchmark_metrics = self._calculate_performance_metrics(
-                    result.benchmark_returns
+                    result.benchmark_returns, None, trading_start, trading_end
                 )
             
             # Save results
@@ -672,13 +677,17 @@ class ExperimentRunner:
         return None
     
     def _calculate_performance_metrics(self, returns: List[float], 
-                                     benchmark_returns: Optional[List[float]] = None) -> Dict[str, float]:
+                                     benchmark_returns: Optional[List[float]] = None,
+                                     start_date: Optional[str] = None,
+                                     end_date: Optional[str] = None) -> Dict[str, float]:
         """
         Calculate comprehensive performance metrics
         
         Args:
             returns: Strategy returns
             benchmark_returns: Benchmark returns (optional)
+            start_date: Trading start date (optional)
+            end_date: Trading end date (optional)
             
         Returns:
             Dictionary of performance metrics
@@ -688,9 +697,24 @@ class ExperimentRunner:
         
         returns_array = np.array(returns)
         
+        # Calculate actual time period for proper annualization
+        if start_date and end_date:
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            time_period_days = (end_dt - start_dt).days
+            time_period_years = time_period_days / 365.25  # Account for leap years
+            
+            # Calculate annualized return using actual time period
+            total_return = (1 + returns_array).prod() - 1
+            annualized_return = ((1 + total_return) ** (1 / time_period_years)) - 1
+        else:
+            # Fallback to trading days assumption (legacy method)
+            total_return = (1 + returns_array).prod() - 1
+            annualized_return = (1 + total_return) ** (252 / len(returns_array)) - 1
+        
         metrics = {
-            'total_return': (1 + returns_array).prod() - 1,
-            'annualized_return': (1 + returns_array).prod() ** (252 / len(returns_array)) - 1,
+            'total_return': total_return,
+            'annualized_return': annualized_return,
             'volatility': np.std(returns_array) * np.sqrt(252),
             'sharpe_ratio': np.mean(returns_array) / np.std(returns_array) * np.sqrt(252) if np.std(returns_array) > 0 else 0,
             'max_drawdown': self._calculate_max_drawdown(returns_array),
@@ -707,10 +731,24 @@ class ExperimentRunner:
         # Add benchmark comparison if available
         if benchmark_returns:
             benchmark_array = np.array(benchmark_returns)
+            
+            # Calculate benchmark return using same time period method
+            if start_date and end_date:
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                time_period_days = (end_dt - start_dt).days
+                time_period_years = time_period_days / 365.25
+                
+                benchmark_total_return = (1 + benchmark_array).prod() - 1
+                benchmark_annualized_return = ((1 + benchmark_total_return) ** (1 / time_period_years)) - 1
+            else:
+                # Fallback method
+                benchmark_annualized_return = (1 + benchmark_array).prod() ** (252 / len(benchmark_array)) - 1
+            
             metrics.update({
-                'alpha': metrics['annualized_return'] - (1 + benchmark_array).prod() ** (252 / len(benchmark_array)) + 1,
+                'alpha': metrics['annualized_return'] - benchmark_annualized_return,
                 'beta': np.cov(returns_array, benchmark_array)[0, 1] / np.var(benchmark_array) if np.var(benchmark_array) > 0 else 0,
-                'information_ratio': (metrics['annualized_return'] - (1 + benchmark_array).prod() ** (252 / len(benchmark_array)) + 1) / 
+                'information_ratio': (metrics['annualized_return'] - benchmark_annualized_return) / 
                                    (np.std(returns_array - benchmark_array) * np.sqrt(252)) if np.std(returns_array - benchmark_array) > 0 else 0
             })
         

@@ -7,6 +7,9 @@ This script demonstrates the full backtesting pipeline:
 2. Core system data loading
 3. MomentumStrategy execution
 4. Performance analysis and reporting
+
+IMPORTANT: Includes fix for annualized return calculation bug.
+ExperimentRunner now uses actual date ranges instead of hardcoded 252 trading days.
 """
 
 import sys
@@ -73,12 +76,12 @@ def run_momentum_backtest():
                 
                 # Trading periods - strategy requirements
                 "training_start": "2023-01-01",
-                "training_end": "2023-12-31", 
-                "trading_start": "2024-01-01",
-                "trading_end": "2024-06-30",   # 6 months trading period
+                "training_end": "2024-12-31", 
+                "trading_start": "2025-01-01",
+                "trading_end": "2025-06-30",   # 12 months trading period
                 
                 # Financial parameters - strategy requirements
-                "initial_capital": 250000,      # $250K for testing
+                "initial_capital": 100000,      # $100K for testing
                 "commission_rate": 0.0005,      # 5 bps commission
                 "benchmark_symbol": "SPY",      # S&P 500 benchmark
                 
@@ -89,7 +92,7 @@ def run_momentum_backtest():
                 "momentum_threshold": 0.10,     # 10% minimum momentum
                 "target_volatility": 0.15,      # 15% target volatility
                 "max_weight_per_asset": 0.08,   # 8% max per asset
-                "rebalancing_frequency": "monthly"
+                "rebalancing_frequency": "daily"
             },
             
             # Output configuration
