@@ -194,20 +194,29 @@ docker-compose.override.yml
 core_structure/signal_generation/stat_arb_ensemble_integration.py
 core_structure/signal_generation/stat_arb_models.py
 
-# Debug and temporary analysis files
-fixed_clickhouse_loader.py
-patch_datamanager.py
-run_momentum_real_data.py
-debug_data_loading.py
-simple_debug.py
-explore_clickhouse_data.py
-fix_clickhouse_timestamps.py
+# Removed documentation files - prevent reappearance
+backtesting_framework/docs/ANNUALIZED_RETURN_BUG_FIX.md
+backtesting_framework/docs/CLEANUP_SUMMARY_JUL22.md
+backtesting_framework/docs/GITIGNORE_CONSOLIDATION.md
+backtesting_framework/docs/TESTS_REMOVAL_SUMMARY.md
 
-# Backup files
-*.backup
-run_momentum_backtest.py.backup
+# Empty or temporary files (prevent recreation)
+simple_debug.py
+debug_data_loading.py
+**/run_momentum_real_data.py
+**/quick_test_fix.py
+**/patch_datamanager.py
+**/fix_clickhouse_timestamps.py
+**/compare_rebalancing_frequencies.py
+**/test_capital_impact.py
+**/explore_clickhouse_data.py
+**/explain_annualized_return.py
+**/fixed_clickhouse_loader.py
+**/test_rebalancing_frequency.py
+**/test_fix.py
 
 # Deprecated directories (prevent recreation)
+Tests/
 deprecated/
 archived/
 old_*/
@@ -226,25 +235,5 @@ ENV/
 # Log files
 *.log
 logs/
-
-# Development and testing files (backtesting framework)
-test_*.py
-*_test.py
-debug_*.py
-temp_*.py
-scratch_*.py
-explore_*.py
-investigate_*.py
-*_investigation.py
-simple_*.py
-final_*.py
-resolution_*.py
-explain_*.py
-quick_*.py
-
-# Temporary backtest results (keep main results)
-backtesting_framework/results/test_*/
-backtesting_framework/results/*_test*/
-backtesting_framework/results/temp_*/
-backtesting_framework/results/quick_*/
-backtesting_framework/results/capital_test_*/
+Tests/mvs/logs/
+Tests/mvs/results/
