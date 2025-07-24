@@ -237,3 +237,7 @@ ENV/
 logs/
 Tests/mvs/logs/
 Tests/mvs/results/
+
+# Stop ignoring the tests folder
+!tests/
+!tests/**
