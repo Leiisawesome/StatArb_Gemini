@@ -17,7 +17,7 @@
     "training_start": "2023-01-01",
     "training_end": "2024-12-31",
     "trading_start": "2025-01-01",
-    "trading_end": "2025-06-30",
+    "trading_end": "2025-02-28",
     "initial_capital": 100000,
     "commission_rate": 0.0005,
     "benchmark_symbol": "SPY",

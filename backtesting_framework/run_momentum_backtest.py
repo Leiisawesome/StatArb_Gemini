@@ -78,7 +78,7 @@ def run_momentum_backtest():
                 "training_start": "2023-01-01",
                 "training_end": "2024-12-31", 
                 "trading_start": "2025-01-01",
-                "trading_end": "2025-06-30",   # 12 months trading period
+                "trading_end": "2025-02-28",   # 6 months trading period
                 
                 # Financial parameters - strategy requirements
                 "initial_capital": 100000,      # $100K for testing
