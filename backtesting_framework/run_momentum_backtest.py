@@ -61,8 +61,8 @@ def run_momentum_backtest():
             
             # Infrastructure defaults (will be overridden by strategy)
             symbols=["AAPL", "MSFT", "GOOGL"],  # Will be overridden by universe selection
-            start_date="2022-01-01",            # Will be overridden by strategy dates
-            end_date="2022-12-31",
+            start_date="2023-01-01",            # Aligned with strategy training start
+            end_date="2025-06-30",              # Aligned with strategy trading end
             initial_capital=100000,             # Will be overridden by strategy capital
             commission_rate=0.001,              # Will be overridden by strategy commission
             
@@ -78,7 +78,7 @@ def run_momentum_backtest():
                 "training_start": "2023-01-01",
                 "training_end": "2024-12-31", 
                 "trading_start": "2025-01-01",
-                "trading_end": "2025-02-28",   # 6 months trading period
+                "trading_end": "2025-06-30",   # 6 months trading period
                 
                 # Financial parameters - strategy requirements
                 "initial_capital": 100000,      # $100K for testing
