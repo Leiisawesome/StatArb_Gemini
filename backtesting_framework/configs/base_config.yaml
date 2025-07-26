@@ -1,39 +1,51 @@
-# Base Configuration for Backtesting Framework
+# Base Configuration for StatArb Framework
+# This file contains default configuration settings for the backtesting framework
 
-# Experiment identification
-name: "Base Experiment"
-description: "Base configuration for backtesting experiments"
-version: "1.0.0"
+# Database Configuration
+database:
+  type: "clickhouse"
+  host: "localhost"
+  port: 9000
+  database: "polygon_data"
+  username: "default"
+  password: ""
+  timeout: 30
 
-# Data configuration
-symbols: ["AAPL", "MSFT"]
-start_date: "2023-01-01"
-end_date: "2023-12-31"
+# Data Configuration
+data:
+  source: "polygon"
+  symbols: ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+  start_date: "2023-01-01"
+  end_date: "2025-01-31"
+  frequency: "daily"
+  fields: ["open", "high", "low", "close", "volume"]
 
-# Strategy configuration
-strategy_class: "PairsTradingStrategy"
-strategy_params:
-  z_entry_threshold: 2.0
-  z_exit_threshold: 0.5
-  lookback_window: 60
-  correlation_threshold: 0.8
+# Strategy Configuration
+strategy:
+  name: "momentum"
+  parameters:
+    lookback_period: 252
+    momentum_threshold: 0.10
+    max_weight_per_asset: 0.08
+    rebalancing_frequency: "daily"
+    commission_rate: 0.0005
 
-# Execution configuration
-initial_capital: 100000.0
-commission_rate: 0.001
-slippage_rate: 0.0005
+# Risk Management
+risk:
+  max_drawdown: 0.20
+  target_volatility: 0.15
+  position_sizing: "risk_parity"
+  stop_loss: 0.05
 
-# Risk management
-max_position_size: 0.2
-stop_loss: 0.05
-take_profit: 0.02
+# Performance Configuration
+performance:
+  benchmark: "SPY"
+  risk_free_rate: 0.02
+  metrics: ["sharpe_ratio", "max_drawdown", "calmar_ratio", "sortino_ratio"]
 
-# Output configuration
-output_dir: "results"
-save_trades: true
-save_signals: true
-generate_plots: true
-
-# Performance tracking
-benchmark_symbol: "SPY"
-risk_free_rate: 0.02 
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "backtest.log"
+  console: true 

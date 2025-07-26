@@ -22,6 +22,12 @@ from enum import Enum
 
 from .base_strategy import BaseStrategy, StrategyConfig, TradingSignal, SignalType, Position
 
+# Import flow monitoring
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.flow_monitor import get_flow_monitor, FlowStage, ComponentType, monitor_stage
+
 logger = logging.getLogger(__name__)
 
 class MomentumType(Enum):
@@ -141,6 +147,9 @@ class MomentumStrategy(BaseStrategy):
         
         self.config = config
         
+        # Initialize flow monitoring
+        self.flow_monitor = get_flow_monitor()
+        
         # Initialize core structure modules (lazy loading)
         self._data_manager = None
         self._signal_generator = None
@@ -240,6 +249,7 @@ class MomentumStrategy(BaseStrategy):
                 logger.info("Using enhanced fallback implementation")
                 self._optimizer = self._create_fallback_optimizer()
 
+    @monitor_stage(FlowStage.DATA_LOADING, ComponentType.STRATEGY)
     def train(self, training_data: Optional[Dict[str, pd.DataFrame]] = None) -> bool:
         """
         Train the momentum strategy using historical data
@@ -252,6 +262,12 @@ class MomentumStrategy(BaseStrategy):
         Returns:
             True if training successful, False otherwise
         """
+        context_id = self.flow_monitor.start_stage(
+            FlowStage.DATA_LOADING, 
+            ComponentType.STRATEGY,
+            metadata={'training_start': self.config.training_start, 'training_end': self.config.training_end}
+        )
+        
         try:
             logger.info("Starting momentum strategy training...")
             
@@ -259,6 +275,7 @@ class MomentumStrategy(BaseStrategy):
             if training_data is not None:
                 logger.info("Using provided training data")
                 self.training_data = training_data
+                data_size = sum(len(df) for df in training_data.values())
             else:
                 # Initialize data manager
                 self._init_data_manager()
@@ -273,34 +290,39 @@ class MomentumStrategy(BaseStrategy):
                 if not training_data:
                     logger.warning("No training data available from core system - strategy will train on first signal generation")
                     self.is_trained = True  # Mark as trained to avoid repeated attempts
+                    self.flow_monitor.complete_stage(context_id, data_size=0, output_data={})
                     return True
                 
                 self.training_data = training_data
+                data_size = sum(len(df) for df in training_data.values())
             
-            # Training steps:
-            # 1. Data quality validation
+            # Training steps with flow tracking
             self._validate_training_data()
-            
-            # 2. Universe filtering
             self._filter_universe()
-            
-            # 3. Calculate training statistics
             self._calculate_training_statistics()
-            
-            # 4. Validate momentum signals
             self._validate_momentum_approach()
             
             self.is_trained = True
             logger.info("Momentum strategy training completed successfully")
+            
+            self.flow_monitor.complete_stage(
+                context_id, 
+                data_size=data_size, 
+                output_data=self.training_data,
+                symbols_count=len(self.training_data) if self.training_data else 0
+            )
             return True
             
         except Exception as e:
             logger.error(f"Training failed: {e}")
+            self.flow_monitor.record_error(context_id, e)
             # Mark as trained to avoid repeated attempts when core system unavailable
             self.is_trained = True
             logger.info("Strategy marked as trained with fallback configuration")
+            self.flow_monitor.complete_stage(context_id, data_size=0, output_data={})
             return True
     
+    @monitor_stage(FlowStage.SIGNAL_GENERATION, ComponentType.STRATEGY)
     def generate_signals(self, data: Dict[str, pd.DataFrame]) -> List[TradingSignal]:
         """
         Generate momentum trading signals using core structure modules
@@ -311,55 +333,92 @@ class MomentumStrategy(BaseStrategy):
         Returns:
             List of trading signals
         """
-        if not self.is_trained:
-            logger.warning("Strategy not trained, training now...")
-            # Try to train with provided data if available
-            self.train(training_data=data if data else None)
-        
-        # Check if we should rebalance today (NEW REBALANCING LOGIC)
-        current_date = self._get_current_date(data)
-        if not self._should_rebalance(current_date):
-            # Return cached signals if we're not rebalancing today
-            cached_signals = getattr(self, '_last_signals', [])
-            if cached_signals:
-                logger.info(f"Using cached signals - no rebalancing on {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
-                return cached_signals
-            else:
-                logger.info(f"No cached signals available - generating initial signals")
-        else:
-            logger.info(f"Rebalancing day: {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
+        context_id = self.flow_monitor.start_stage(
+            FlowStage.SIGNAL_GENERATION,
+            ComponentType.STRATEGY,
+            metadata={
+                'symbols_count': len(data),
+                'rebalancing_frequency': self.config.rebalancing_frequency,
+                'momentum_type': getattr(self.config.momentum_type, 'value', str(self.config.momentum_type))
+            }
+        )
         
         try:
-            # Initialize signal generator
-            self._init_signal_generator()
+            if not self.is_trained:
+                logger.warning("Strategy not trained, training now...")
+                # Try to train with provided data if available
+                self.train(training_data=data if data else None)
             
-            # Get momentum type value safely
-            momentum_type_value = (self.config.momentum_type.value 
-                                 if hasattr(self.config.momentum_type, 'value') 
-                                 else self.config.momentum_type)
+            # Check if we should rebalance today (NEW REBALANCING LOGIC)
+            current_date = self._get_current_date(data)
+            if not self._should_rebalance(current_date):
+                # Return cached signals if we're not rebalancing today
+                cached_signals = getattr(self, '_last_signals', [])
+                if cached_signals:
+                    logger.info(f"Using cached signals - no rebalancing on {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
+                    self.flow_monitor.complete_stage(
+                        context_id,
+                        data_size=len(cached_signals),
+                        output_data=cached_signals,
+                        cached=True
+                    )
+                    return cached_signals
+                else:
+                    logger.info(f"No cached signals available - generating initial signals")
+            else:
+                logger.info(f"Rebalancing day: {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
             
-            # Try to use core structure signal generator with expected API
-            raw_signals = self._signal_generator.generate_momentum_signals(
-                data=data,
-                lookback_period=self.config.lookback_period,
-                skip_period=self.config.skip_period,
-                momentum_type=momentum_type_value,
-                threshold=self.config.momentum_threshold
-            )
-            
-            # Convert to standardized trading signals
-            signals = self._convert_to_trading_signals(raw_signals, data)
-            
-            # Apply signal filters and decay
-            filtered_signals = self._apply_signal_filters(signals)
-            
-            # Store current signals for tracking and caching
-            self.current_signals = {s.symbol: s.strength for s in filtered_signals}
-            self._last_signals = filtered_signals  # Cache for rebalancing frequency
-            self._last_rebalance_date = current_date  # Track last rebalance
-            
-            logger.info(f"Generated {len(filtered_signals)} momentum signals")
-            return filtered_signals
+                # Initialize signal generator
+                self._init_signal_generator()
+                
+                # Get momentum type value safely
+                momentum_type_value = (self.config.momentum_type.value 
+                                     if hasattr(self.config.momentum_type, 'value') 
+                                     else self.config.momentum_type)
+                
+                # Try to use core structure signal generator with expected API
+                raw_signals = self._signal_generator.generate_momentum_signals(
+                    data=data,
+                    lookback_period=self.config.lookback_period,
+                    skip_period=self.config.skip_period,
+                    momentum_type=momentum_type_value,
+                    threshold=self.config.momentum_threshold
+                )
+                
+                # Track data lineage
+                self.flow_monitor.track_data_lineage(
+                    input_data=data,
+                    output_data=raw_signals,
+                    transformation="momentum_signal_generation",
+                    metadata={
+                        'lookback_period': self.config.lookback_period,
+                        'momentum_type': momentum_type_value,
+                        'threshold': self.config.momentum_threshold
+                    }
+                )
+                
+                # Convert to standardized trading signals
+                signals = self._convert_to_trading_signals(raw_signals, data)
+                
+                # Apply signal filters and decay
+                filtered_signals = self._apply_signal_filters(signals)
+                
+                # Store current signals for tracking and caching
+                self.current_signals = {s.symbol: s.strength for s in filtered_signals}
+                self._last_signals = filtered_signals  # Cache for rebalancing frequency
+                self._last_rebalance_date = current_date  # Track last rebalance
+                
+                logger.info(f"Generated {len(filtered_signals)} momentum signals")
+                
+                self.flow_monitor.complete_stage(
+                    context_id,
+                    data_size=len(filtered_signals),
+                    output_data=filtered_signals,
+                    signals_count=len(filtered_signals),
+                    symbols_processed=len(data)
+                )
+                
+                return filtered_signals
             
         except AttributeError as e:
             if "generate_momentum_signals" in str(e):
@@ -370,9 +429,11 @@ class MomentumStrategy(BaseStrategy):
                 return self.generate_signals(data)
             else:
                 logger.error(f"Signal generation failed: {e}")
+                self.flow_monitor.record_error(context_id, e)
                 return []
         except Exception as e:
             logger.error(f"Signal generation failed: {e}")
+            self.flow_monitor.record_error(context_id, e)
             return []
     
     def _get_current_date(self, data: Dict[str, pd.DataFrame]) -> datetime:
@@ -418,6 +479,7 @@ class MomentumStrategy(BaseStrategy):
             logger.warning(f"Unknown rebalancing frequency: {frequency}, defaulting to daily")
             return True
     
+    @monitor_stage(FlowStage.POSITION_SIZING, ComponentType.STRATEGY)
     def calculate_positions(self, signals: List[TradingSignal], 
                           current_positions: Dict[str, Position],
                           available_cash: float) -> Dict[str, float]:
@@ -432,6 +494,16 @@ class MomentumStrategy(BaseStrategy):
         Returns:
             Dictionary mapping symbols to target position sizes
         """
+        context_id = self.flow_monitor.start_stage(
+            FlowStage.POSITION_SIZING,
+            ComponentType.OPTIMIZER,
+            metadata={
+                'signals_count': len(signals),
+                'current_positions': len(current_positions),
+                'available_cash': available_cash
+            }
+        )
+        
         try:
             # Prepare inputs for optimizer
             signal_dict = {s.symbol: s.strength for s in signals}
@@ -456,13 +528,30 @@ class MomentumStrategy(BaseStrategy):
             target_positions = self._weights_to_positions(optimal_weights, available_cash, signals)
             
             logger.info(f"Calculated positions for {len(target_positions)} symbols")
+            
+            self.flow_monitor.complete_stage(
+                context_id,
+                data_size=len(target_positions),
+                output_data=target_positions,
+                positions_count=len(target_positions)
+            )
+            
             return target_positions
             
         except Exception as e:
             logger.error(f"Position calculation failed: {e}")
+            self.flow_monitor.record_error(context_id, e)
             # Fallback to simple position sizing
-            return self._fallback_position_sizing(signals, available_cash)
+            fallback_positions = self._fallback_position_sizing(signals, available_cash)
+            self.flow_monitor.complete_stage(
+                context_id,
+                data_size=len(fallback_positions),
+                output_data=fallback_positions,
+                fallback=True
+            )
+            return fallback_positions
     
+    @monitor_stage(FlowStage.TRADE_EXECUTION, ComponentType.EXECUTION_ENGINE)
     def execute_trades(self, signals: List[Any], 
                       current_prices: Dict[str, float]) -> List[Dict[str, Any]]:
         """
@@ -475,10 +564,20 @@ class MomentumStrategy(BaseStrategy):
         Returns:
             List of executed trades
         """
+        context_id = self.flow_monitor.start_stage(
+            FlowStage.TRADE_EXECUTION,
+            ComponentType.EXECUTION_ENGINE,
+            metadata={
+                'signals_count': len(signals) if signals else 0,
+                'prices_available': len(current_prices)
+            }
+        )
+        
         try:
             # Convert signals to target positions if needed
             if not signals:
                 logger.info("No signals to execute")
+                self.flow_monitor.complete_stage(context_id, data_size=0, output_data=[])
                 return []
             
             # Convert TradingSignal objects to position targets
@@ -497,6 +596,7 @@ class MomentumStrategy(BaseStrategy):
             
             if not target_positions:
                 logger.info("No valid position targets from signals")
+                self.flow_monitor.complete_stage(context_id, data_size=0, output_data=[])
                 return []
             
             # Get current positions (simplified for backtesting)
@@ -508,6 +608,7 @@ class MomentumStrategy(BaseStrategy):
             )
             
             if not trades_to_execute:
+                self.flow_monitor.complete_stage(context_id, data_size=0, output_data=[])
                 return []
             
             # Execute trades with current prices (simplified for backtesting)
@@ -529,7 +630,7 @@ class MomentumStrategy(BaseStrategy):
                     }
                     executed_trades.append(executed_trade)
                     
-                    # Update self.positions for portfolio value calculation
+                    # Update portfolio tracking (existing code)
                     from strategies.base_strategy import Position
                     
                     if symbol not in self.positions:
@@ -579,10 +680,19 @@ class MomentumStrategy(BaseStrategy):
                         self.current_positions[symbol] = current_qty - abs(quantity)
             
             self.logger.info(f"Executed {len(executed_trades)} trades")
+            
+            self.flow_monitor.complete_stage(
+                context_id,
+                data_size=len(executed_trades),
+                output_data=executed_trades,
+                trades_executed=len(executed_trades)
+            )
+            
             return executed_trades
             
         except Exception as e:
             self.logger.error(f"Trade execution failed: {e}")
+            self.flow_monitor.record_error(context_id, e)
             return []
     
     def _calculate_required_trades_simple(self, target_positions: Dict[str, float], 
@@ -607,7 +717,7 @@ class MomentumStrategy(BaseStrategy):
     
     def get_strategy_metrics(self) -> Dict[str, Any]:
         """
-        Get comprehensive strategy performance metrics
+        Get comprehensive strategy performance metrics including flow analysis
         
         Returns:
             Dictionary of strategy metrics and statistics
@@ -648,6 +758,10 @@ class MomentumStrategy(BaseStrategy):
                 'trading_period': f"{self.config.trading_start} to {self.config.trading_end}"
             }
         }
+        
+        # Add flow monitoring metrics
+        flow_summary = self.flow_monitor.get_flow_summary()
+        momentum_metrics['flow_analysis'] = flow_summary
         
         return {**base_metrics, **momentum_metrics}
     

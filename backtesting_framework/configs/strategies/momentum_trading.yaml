@@ -1,52 +1,51 @@
 # Momentum Trading Strategy Configuration
+# This file contains specific configuration for the momentum trading strategy
 
-# Experiment identification
-name: "Multi-Asset Momentum Strategy"
-description: "Momentum-based trading strategy with volatility scaling across multiple assets"
-version: "1.0.0"
-
-# Data configuration
-symbols: ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
-start_date: "2023-01-01"
-end_date: "2023-12-31"
-
-# Strategy configuration
+strategy_name: "momentum_trading"
 strategy_class: "MomentumStrategy"
-strategy_params:
-  # Momentum parameters
-  lookback_period: 20
-  momentum_threshold: 0.02
-  volatility_lookback: 30
-  
-  # Position sizing
-  position_size: 0.1
-  max_positions: 5
-  
-  # Risk management
-  stop_loss: 0.05
-  take_profit: 0.03
-  max_drawdown: 0.15
-  
-  # Volatility scaling
-  volatility_scaling: true
+
+# Universe Definition
+universe:
+  size: 50
+  min_market_cap: 2000000000  # $2B minimum market cap
+  min_avg_volume: 1000000     # $1M average daily volume
+  exclude_sectors: ["financials", "utilities"]
+  include_sectors: ["technology", "healthcare", "consumer_discretionary"]
+
+# Momentum Parameters
+momentum:
+  type: "risk_adjusted"  # Options: "simple", "risk_adjusted", "relative"
+  lookback_period: 252   # 1 year momentum
+  skip_period: 21        # Skip last month
+  threshold: 0.10        # 10% minimum momentum
+  max_momentum: 0.50     # Maximum momentum to consider
+
+# Risk Management
+risk:
   target_volatility: 0.15
+  max_weight_per_asset: 0.08
+  min_weight_per_asset: 0.01
+  max_sector_weight: 0.30
+  stop_loss: 0.05
+  trailing_stop: 0.03
 
-# Execution configuration
-initial_capital: 100000.0
-commission_rate: 0.001
-slippage_rate: 0.0005
+# Trading Parameters
+trading:
+  rebalancing_frequency: "daily"
+  commission_rate: 0.0005  # 5 bps
+  slippage: 0.0001         # 1 bp slippage
+  min_trade_size: 1000     # Minimum trade size in dollars
+  max_trades_per_day: 50
 
-# Risk management
-max_position_size: 0.15
-stop_loss: 0.05
-take_profit: 0.03
+# Performance Targets
+performance:
+  target_return: 0.15      # 15% annual return target
+  max_drawdown: 0.20       # 20% maximum drawdown
+  sharpe_ratio_target: 1.5
+  information_ratio_target: 0.8
 
-# Output configuration
-output_dir: "results/momentum_trading"
-save_trades: true
-save_signals: true
-generate_plots: true
-
-# Performance tracking
-benchmark_symbol: "SPY"
-risk_free_rate: 0.02 
+# Data Requirements
+data:
+  required_fields: ["open", "high", "low", "close", "volume", "market_cap"]
+  min_data_points: 252     # At least 1 year of data
+  data_quality_threshold: 0.95  # 95% data completeness required 

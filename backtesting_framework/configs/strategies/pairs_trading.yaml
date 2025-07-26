@@ -1,45 +1,58 @@
 # Pairs Trading Strategy Configuration
+# This file contains specific configuration for the pairs trading strategy
 
-# Experiment identification
-name: "AAPL-MSFT Pairs Trading"
-description: "Statistical arbitrage between AAPL and MSFT using z-score based signals"
-version: "1.0.0"
-
-# Data configuration
-symbols: ["AAPL", "MSFT"]
-start_date: "2023-01-01"
-end_date: "2023-12-31"
-
-# Strategy configuration
+strategy_name: "pairs_trading"
 strategy_class: "PairsTradingStrategy"
-strategy_params:
-  z_entry_threshold: 2.0
-  z_exit_threshold: 0.5
-  lookback_window: 60
-  correlation_threshold: 0.8
-  cointegration_pvalue: 0.05
-  position_size: 0.2
-  max_positions: 5
-  stop_loss: 0.05
-  take_profit: 0.02
+
+# Universe Definition
+universe:
+  size: 100
+  min_market_cap: 1000000000  # $1B minimum market cap
+  min_avg_volume: 500000      # $500K average daily volume
+  sectors: ["technology", "healthcare", "consumer_discretionary", "industrials"]
+
+# Pairs Formation
+pairs:
+  formation_method: "correlation"  # Options: "correlation", "cointegration", "distance"
+  correlation_threshold: 0.8       # Minimum correlation for pair formation
+  lookback_period: 252            # 1 year for correlation calculation
+  min_pairs: 10                   # Minimum number of pairs to trade
+  max_pairs: 50                   # Maximum number of pairs to trade
+
+# Cointegration Parameters
+cointegration:
+  test_method: "engle_granger"    # Options: "engle_granger", "johansen"
+  significance_level: 0.05        # 5% significance level
+  min_half_life: 5                # Minimum half-life in days
+  max_half_life: 252              # Maximum half-life in days
+
+# Trading Parameters
+trading:
+  entry_threshold: 2.0            # Z-score threshold for entry
+  exit_threshold: 0.5             # Z-score threshold for exit
+  stop_loss: 4.0                  # Z-score stop loss
+  position_size: 0.02             # 2% position size per pair
+  max_position_size: 0.10         # 10% maximum position size
+  rebalancing_frequency: "daily"
+
+# Risk Management
+risk:
+  max_correlation: 0.95           # Maximum correlation between pairs
+  sector_diversification: true    # Ensure sector diversification
+  max_sector_pairs: 0.30          # Maximum 30% pairs from same sector
+  stop_loss: 0.05                 # 5% stop loss per pair
+  max_drawdown: 0.15              # 15% maximum drawdown
+
+# Performance Targets
+performance:
+  target_return: 0.12             # 12% annual return target
+  sharpe_ratio_target: 1.2
   max_drawdown: 0.15
+  win_rate_target: 0.55           # 55% win rate target
 
-# Execution configuration
-initial_capital: 100000.0
-commission_rate: 0.001
-slippage_rate: 0.0005
-
-# Risk management
-max_position_size: 0.2
-stop_loss: 0.05
-take_profit: 0.02
-
-# Output configuration
-output_dir: "results/pairs_trading"
-save_trades: true
-save_signals: true
-generate_plots: true
-
-# Performance tracking
-benchmark_symbol: "SPY"
-risk_free_rate: 0.02 
+# Data Requirements
+data:
+  required_fields: ["open", "high", "low", "close", "volume"]
+  min_data_points: 504            # At least 2 years of data
+  data_quality_threshold: 0.98    # 98% data completeness required
+  price_adjustment: "split_adjusted"  # Split and dividend adjusted prices 

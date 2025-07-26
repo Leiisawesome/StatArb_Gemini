@@ -375,10 +375,12 @@ class ExperimentRunner:
             strategy_config_class = getattr(strategy_module, f"{config.strategy_class}Config", None)
             if strategy_config_class is None:
                 # Try alternative naming patterns
-                strategy_config_class = getattr(strategy_module, "MomentumConfig", None)
+                strategy_config_class = getattr(strategy_module, "MultiFactorConfig", None)
                 if strategy_config_class is None:
-                    # Fallback to base StrategyConfig
-                    strategy_config_class = StrategyConfig
+                    strategy_config_class = getattr(strategy_module, "MomentumConfig", None)
+                    if strategy_config_class is None:
+                        # Fallback to base StrategyConfig
+                        strategy_config_class = StrategyConfig
             
             # Get field names from the config class
             import dataclasses

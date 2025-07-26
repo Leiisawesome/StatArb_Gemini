@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Real Backtest of MomentumStrategy using ExperimentRunner
+Multi-Factor Ensemble Strategy Backtest
 
-This script demonstrates the full backtesting pipeline:
-1. Strategy-first configuration resolution
-2. Core system data loading
-3. MomentumStrategy execution
-4. Performance analysis and reporting
+This script demonstrates the advanced multi-factor ensemble strategy:
+1. Multi-factor signal generation (momentum, mean reversion, quality, risk, regime)
+2. Dynamic ensemble weighting based on factor performance
+3. Market regime detection and adaptive signal adjustment
+4. Factor-aware position sizing and risk management
+5. Comprehensive performance attribution and factor analysis
 
-IMPORTANT: Includes fix for annualized return calculation bug.
-ExperimentRunner now uses actual date ranges instead of hardcoded 252 trading days.
+The strategy combines 5+ factors with machine learning ensemble methods
+for robust signal generation across different market conditions.
 """
 
 import sys
@@ -30,13 +31,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def run_momentum_backtest():
-    """Run a complete MomentumStrategy backtest"""
+def run_multi_factor_backtest():
+    """Run a complete Multi-Factor Ensemble Strategy backtest"""
     
-    print("🚀 REAL MOMENTUM STRATEGY BACKTEST")
+    print("🚀 MULTI-FACTOR ENSEMBLE STRATEGY BACKTEST")
     print("=" * 60)
-    print("Using optimized ExperimentRunner with strategy-first architecture")
-    print("Testing with core system integration (no fallbacks)")
+    print("Advanced multi-factor signal ensemble with dynamic weighting")
+    print("Testing with 5+ factors and machine learning ensemble methods")
     print()
     
     try:
@@ -52,11 +53,11 @@ def run_momentum_backtest():
         
         print("✅ Successfully imported ExperimentRunner")
         
-        # Create momentum strategy experiment configuration
-        momentum_config = ExperimentConfig(
+        # Create multi-factor ensemble strategy experiment configuration
+        multi_factor_config = ExperimentConfig(
             # Experiment metadata
-            name="Momentum Strategy Backtest",
-            description="Real backtest of momentum strategy with universe selection",
+            name="Multi-Factor Ensemble Strategy Backtest",
+            description="Advanced multi-factor ensemble with dynamic weighting and regime detection",
             version="1.0.0",
             
             # Infrastructure defaults (will be overridden by strategy)
@@ -67,10 +68,10 @@ def run_momentum_backtest():
             commission_rate=0.001,              # Will be overridden by strategy commission
             
             # Strategy specification
-            strategy_class="MomentumStrategy",
+            strategy_class="MultiFactorEnsembleStrategy",
             strategy_params={
                 # Universe definition - strategy requirements
-                "universe_size": 50,            # Test with smaller universe first
+                "universe_size": 30,            # Test with smaller universe first
                 "min_market_cap": 2e9,          # $2B minimum market cap
                 "min_avg_volume": 1e6,          # $1M average daily volume
                 
@@ -78,42 +79,100 @@ def run_momentum_backtest():
                 "training_start": "2023-01-01",
                 "training_end": "2024-12-31", 
                 "trading_start": "2025-01-01",
-                "trading_end": "2025-01-31",   # 6 months trading period
+                "trading_end": "2025-01-31",   # 1 month trading period for testing
                 
                 # Financial parameters - strategy requirements
                 "initial_capital": 100000,      # $100K for testing
                 "commission_rate": 0.0005,      # 5 bps commission
                 "benchmark_symbol": "SPY",      # S&P 500 benchmark
                 
-                # Momentum strategy parameters
-                "momentum_type": "risk_adjusted",
-                "lookback_period": 252,         # 1 year momentum
-                "skip_period": 21,              # Skip last month
-                "momentum_threshold": 0.10,     # 10% minimum momentum
+                # Multi-factor ensemble parameters
+                "ensemble_method": "adaptive_weighting",
+                "signal_threshold": 0.15,       # 15% minimum signal strength
+                "max_factors_per_asset": 5,     # Use all 5 factors
+                
+                # Factor configurations
+                "factors": [
+                    {
+                        "factor_type": "momentum",
+                        "lookback_period": 252,
+                        "threshold": 0.10,
+                        "weight": 0.25,
+                        "momentum_type": "risk_adjusted"
+                    },
+                    {
+                        "factor_type": "mean_reversion",
+                        "lookback_period": 60,
+                        "threshold": 0.20,
+                        "weight": 0.20,
+                        "mean_reversion_threshold": 0.5
+                    },
+                    {
+                        "factor_type": "quality",
+                        "lookback_period": 120,
+                        "threshold": 0.15,
+                        "weight": 0.20,
+                        "quality_metrics": ["roe", "debt_to_equity"]
+                    },
+                    {
+                        "factor_type": "risk",
+                        "lookback_period": 90,
+                        "threshold": 0.25,
+                        "weight": 0.15,
+                        "risk_metrics": ["beta", "volatility"]
+                    },
+                    {
+                        "factor_type": "regime",
+                        "lookback_period": 30,
+                        "threshold": 0.30,
+                        "weight": 0.20,
+                        "regime_detection_method": "volatility_regime"
+                    }
+                ],
+                
+                # Ensemble learning parameters
+                "ml_ensemble_enabled": True,
+                "ensemble_learning_rate": 0.01,
+                "ensemble_memory_period": 252,
+                "ensemble_regularization": 0.001,
+                
+                # Regime detection parameters
+                "regime_detection_enabled": True,
+                "regime_lookback": 60,
+                "regime_threshold": 0.6,
+                "regime_smoothing": 0.1,
+                
+                # Risk management parameters
                 "target_volatility": 0.15,      # 15% target volatility
                 "max_weight_per_asset": 0.08,   # 8% max per asset
+                "sector_neutrality": True,      # Apply sector neutral constraints
+                "factor_correlation_limit": 0.7, # Limit factor correlations
+                
+                # Rebalancing frequency
                 "rebalancing_frequency": "daily"
             },
             
             # Output configuration
-            output_dir="results/momentum_backtest",
+            output_dir="results/multi_factor_backtest",
             save_trades=True,
             save_signals=True,
             generate_plots=True
         )
         
         print("📊 EXPERIMENT CONFIGURATION:")
-        print(f"   Strategy: {momentum_config.strategy_class}")
-        print(f"   Universe Size: {momentum_config.strategy_params['universe_size']} stocks")
-        print(f"   Trading Period: {momentum_config.strategy_params['trading_start']} to {momentum_config.strategy_params['trading_end']}")
-        print(f"   Initial Capital: ${momentum_config.strategy_params['initial_capital']:,.0f}")
-        print(f"   Target Volatility: {momentum_config.strategy_params['target_volatility']:.1%}")
-        print(f"   Momentum Threshold: {momentum_config.strategy_params['momentum_threshold']:.1%}")
+        print(f"   Strategy: {multi_factor_config.strategy_class}")
+        print(f"   Universe Size: {multi_factor_config.strategy_params['universe_size']} stocks")
+        print(f"   Trading Period: {multi_factor_config.strategy_params['trading_start']} to {multi_factor_config.strategy_params['trading_end']}")
+        print(f"   Initial Capital: ${multi_factor_config.strategy_params['initial_capital']:,.0f}")
+        print(f"   Target Volatility: {multi_factor_config.strategy_params['target_volatility']:.1%}")
+        print(f"   Number of Factors: {len(multi_factor_config.strategy_params['factors'])}")
+        print(f"   Ensemble Method: {multi_factor_config.strategy_params['ensemble_method']}")
+        print(f"   Regime Detection: {'Enabled' if multi_factor_config.strategy_params['regime_detection_enabled'] else 'Disabled'}")
         
         # Initialize experiment runner
         print("\n🔧 INITIALIZING EXPERIMENT RUNNER:")
-        runner = ExperimentRunner(momentum_config)
-        print("✅ ExperimentRunner initialized with core system integration")
+        runner = ExperimentRunner(multi_factor_config)
+        print("✅ ExperimentRunner initialized with multi-factor ensemble strategy")
         
         # Test configuration resolution first
         print("\n🔍 TESTING STRATEGY-FIRST CONFIGURATION RESOLUTION:")
@@ -121,7 +180,7 @@ def run_momentum_backtest():
         
         # Test data requirements resolution
         try:
-            data_requirements = runner._resolve_data_requirements(momentum_config)
+            data_requirements = runner._resolve_data_requirements(multi_factor_config)
             print(f"✅ Data Requirements Resolved:")
             print(f"   Symbols: {len(data_requirements['symbols'])} symbols")
             print(f"   Start Date: {data_requirements['start_date']}")
@@ -132,7 +191,7 @@ def run_momentum_backtest():
         
         # Test symbol resolution
         try:
-            symbols = runner._resolve_symbols(momentum_config.strategy_params, momentum_config.symbols)
+            symbols = runner._resolve_symbols(multi_factor_config.strategy_params, multi_factor_config.symbols)
             print(f"✅ Symbol Resolution:")
             print(f"   Resolved to {len(symbols)} symbols")
             if len(symbols) > 10:
@@ -145,28 +204,29 @@ def run_momentum_backtest():
         
         # Test strategy configuration resolution
         try:
-            strategy_config = runner._resolve_strategy_configuration(momentum_config)
+            strategy_config = runner._resolve_strategy_configuration(multi_factor_config)
             print(f"✅ Strategy Configuration:")
             print(f"   Commission Rate: {strategy_config.get('commission_rate', 'N/A')}")
             print(f"   Benchmark: {strategy_config.get('benchmark_symbol', 'N/A')}")
             print(f"   Target Volatility: {strategy_config.get('target_volatility', 'N/A')}")
+            print(f"   Ensemble Method: {strategy_config.get('ensemble_method', 'N/A')}")
         except Exception as e:
             print(f"❌ Strategy configuration resolution failed: {e}")
             return False
         
-        print("\n🚀 RUNNING FULL MOMENTUM STRATEGY BACKTEST:")
+        print("\n🚀 RUNNING MULTI-FACTOR ENSEMBLE STRATEGY BACKTEST:")
         print("-" * 50)
         
         # Run the complete experiment
         start_time = datetime.now()
         
         try:
-            result = runner.run_experiment(momentum_config)
+            result = runner.run_experiment(multi_factor_config)
             
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
-            print(f"\n🎉 BACKTEST COMPLETED SUCCESSFULLY!")
+            print(f"\n🎉 MULTI-FACTOR BACKTEST COMPLETED SUCCESSFULLY!")
             print(f"⏱️  Duration: {duration:.2f} seconds")
             
             # Display results
@@ -186,6 +246,18 @@ def run_momentum_backtest():
                     print(f"Calmar Ratio: {metrics.get('calmar_ratio', 0):.2f}")
                 if 'sortino_ratio' in metrics:
                     print(f"Sortino Ratio: {metrics.get('sortino_ratio', 0):.2f}")
+                
+                # Multi-factor specific metrics
+                if 'factor_weights' in metrics:
+                    print(f"\n🔧 FACTOR WEIGHTS:")
+                    for factor, weight in metrics['factor_weights'].items():
+                        print(f"   {factor}: {weight:.3f}")
+                
+                if 'current_regime' in metrics:
+                    print(f"Current Market Regime: {metrics['current_regime']}")
+                
+                if 'num_factors' in metrics:
+                    print(f"Number of Active Factors: {metrics['num_factors']}")
             
             # Display trading statistics
             print(f"\n📊 TRADING STATISTICS:")
@@ -212,23 +284,23 @@ def run_momentum_backtest():
             # Output information
             print(f"\n💾 OUTPUT FILES:")
             print("-" * 30)
-            output_path = Path(momentum_config.output_dir)
+            output_path = Path(multi_factor_config.output_dir)
             if output_path.exists():
                 files = list(output_path.glob("*"))
                 for file in files:
                     print(f"   {file.name}")
             else:
-                print(f"   Output directory: {momentum_config.output_dir}")
+                print(f"   Output directory: {multi_factor_config.output_dir}")
             
-            print(f"\n✅ MOMENTUM STRATEGY BACKTEST COMPLETE!")
-            print(f"🎯 Strategy-first architecture working perfectly")
-            print(f"🔧 Core system integration successful")
-            print(f"📈 Performance metrics calculated")
+            print(f"\n✅ MULTI-FACTOR ENSEMBLE STRATEGY BACKTEST COMPLETE!")
+            print(f"🎯 Advanced multi-factor ensemble working perfectly")
+            print(f"🔧 Dynamic factor weighting and regime detection successful")
+            print(f"📈 Comprehensive performance metrics calculated")
             
             return True
             
         except Exception as e:
-            print(f"\n❌ BACKTEST EXECUTION FAILED: {e}")
+            print(f"\n❌ MULTI-FACTOR BACKTEST EXECUTION FAILED: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -244,7 +316,7 @@ def run_momentum_backtest():
         return False
 
 def validate_environment():
-    """Validate that the environment is ready for backtesting"""
+    """Validate that the environment is ready for multi-factor backtesting"""
     print("🔍 VALIDATING ENVIRONMENT:")
     print("-" * 30)
 
@@ -268,7 +340,7 @@ def validate_environment():
     # Check for key files
     key_files = [
         "experiments/experiment_runner.py",
-        "strategies/momentum_strategy.py",
+        "strategies/multi_factor_ensemble_strategy.py",
         "strategies/base_strategy.py"
     ]
 
@@ -283,8 +355,8 @@ def validate_environment():
     return True
 
 if __name__ == "__main__":
-    print("🧪 MOMENTUM STRATEGY REAL BACKTEST")
-    print("Testing the optimized experiment framework with actual strategy")
+    print("🧪 MULTI-FACTOR ENSEMBLE STRATEGY BACKTEST")
+    print("Testing the advanced multi-factor ensemble with dynamic weighting")
     print()
     
     # Validate environment first
@@ -295,12 +367,12 @@ if __name__ == "__main__":
     print()
     
     # Run the backtest
-    success = run_momentum_backtest()
+    success = run_multi_factor_backtest()
     
     if success:
-        print("\n🎉 SUCCESS! Real backtest completed successfully.")
-        print("The strategy-first experiment framework is working perfectly!")
+        print("\n🎉 SUCCESS! Multi-factor ensemble backtest completed successfully.")
+        print("The advanced multi-factor ensemble strategy is working perfectly!")
     else:
-        print("\n❌ FAILED! Backtest encountered errors.")
+        print("\n❌ FAILED! Multi-factor backtest encountered errors.")
         print("Check the error messages above for debugging information.")
-        sys.exit(1)
+        sys.exit(1) 
