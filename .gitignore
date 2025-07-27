@@ -199,6 +199,13 @@ backtesting_framework/docs/ANNUALIZED_RETURN_BUG_FIX.md
 backtesting_framework/docs/CLEANUP_SUMMARY_JUL22.md
 backtesting_framework/docs/GITIGNORE_CONSOLIDATION.md
 backtesting_framework/docs/TESTS_REMOVAL_SUMMARY.md
+backtesting_framework/docs/PRODUCTION_SETUP_GUIDE.md
+backtesting_framework/docs/CLEANUP_COMPLETE.md
+backtesting_framework/docs/README.md
+
+# Empty files (prevent recreation)
+*.md
+!*.md
 
 # Empty or temporary files (prevent recreation)
 simple_debug.py

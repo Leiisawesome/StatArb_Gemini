@@ -1,0 +1,15 @@
+{
+    "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"],
+    "data_providers": ["polygon", "alpha_vantage"],
+    "update_frequency_ms": 1000,
+    "demo_mode": true,
+    "simulated_data": true,
+    "min_confidence_threshold": 0.6,
+    "min_signal_strength": 0.3,
+    "enable_ml_features": true,
+    "max_position_size": 0.05,
+    "max_capital_risk": 0.02,
+    "execution_algorithm": "market",
+    "report_interval": 60,
+    "enable_monitoring": true
+} 

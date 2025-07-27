@@ -40,7 +40,7 @@ risk:
 # Performance Configuration
 performance:
   benchmark: "SPY"
-  risk_free_rate: 0.02
+  risk_free_rate: 0.02 
   metrics: ["sharpe_ratio", "max_drawdown", "calmar_ratio", "sortino_ratio"]
 
 # Logging Configuration

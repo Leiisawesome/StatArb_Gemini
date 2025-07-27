@@ -368,57 +368,57 @@ class MomentumStrategy(BaseStrategy):
             else:
                 logger.info(f"Rebalancing day: {current_date.strftime('%Y-%m-%d')} (frequency: {self.config.rebalancing_frequency})")
             
-                # Initialize signal generator
-                self._init_signal_generator()
-                
-                # Get momentum type value safely
-                momentum_type_value = (self.config.momentum_type.value 
-                                     if hasattr(self.config.momentum_type, 'value') 
-                                     else self.config.momentum_type)
-                
-                # Try to use core structure signal generator with expected API
-                raw_signals = self._signal_generator.generate_momentum_signals(
-                    data=data,
-                    lookback_period=self.config.lookback_period,
-                    skip_period=self.config.skip_period,
-                    momentum_type=momentum_type_value,
-                    threshold=self.config.momentum_threshold
-                )
-                
-                # Track data lineage
-                self.flow_monitor.track_data_lineage(
-                    input_data=data,
-                    output_data=raw_signals,
-                    transformation="momentum_signal_generation",
-                    metadata={
-                        'lookback_period': self.config.lookback_period,
-                        'momentum_type': momentum_type_value,
-                        'threshold': self.config.momentum_threshold
-                    }
-                )
-                
-                # Convert to standardized trading signals
-                signals = self._convert_to_trading_signals(raw_signals, data)
-                
-                # Apply signal filters and decay
-                filtered_signals = self._apply_signal_filters(signals)
-                
-                # Store current signals for tracking and caching
-                self.current_signals = {s.symbol: s.strength for s in filtered_signals}
-                self._last_signals = filtered_signals  # Cache for rebalancing frequency
-                self._last_rebalance_date = current_date  # Track last rebalance
-                
-                logger.info(f"Generated {len(filtered_signals)} momentum signals")
-                
-                self.flow_monitor.complete_stage(
-                    context_id,
-                    data_size=len(filtered_signals),
-                    output_data=filtered_signals,
-                    signals_count=len(filtered_signals),
-                    symbols_processed=len(data)
-                )
-                
-                return filtered_signals
+            # Initialize signal generator
+            self._init_signal_generator()
+            
+            # Get momentum type value safely
+            momentum_type_value = (self.config.momentum_type.value 
+                                 if hasattr(self.config.momentum_type, 'value') 
+                                 else self.config.momentum_type)
+            
+            # Try to use core structure signal generator with expected API
+            raw_signals = self._signal_generator.generate_momentum_signals(
+                data=data,
+                lookback_period=self.config.lookback_period,
+                skip_period=self.config.skip_period,
+                momentum_type=momentum_type_value,
+                threshold=self.config.momentum_threshold
+            )
+            
+            # Track data lineage
+            self.flow_monitor.track_data_lineage(
+                input_data=data,
+                output_data=raw_signals,
+                transformation="momentum_signal_generation",
+                metadata={
+                    'lookback_period': self.config.lookback_period,
+                    'momentum_type': momentum_type_value,
+                    'threshold': self.config.momentum_threshold
+                }
+            )
+            
+            # Convert to standardized trading signals
+            signals = self._convert_to_trading_signals(raw_signals, data)
+            
+            # Apply signal filters and decay
+            filtered_signals = self._apply_signal_filters(signals)
+            
+            # Store current signals for tracking and caching
+            self.current_signals = {s.symbol: s.strength for s in filtered_signals}
+            self._last_signals = filtered_signals  # Cache for rebalancing frequency
+            self._last_rebalance_date = current_date  # Track last rebalance
+            
+            logger.info(f"Generated {len(filtered_signals)} momentum signals")
+            
+            self.flow_monitor.complete_stage(
+                context_id,
+                data_size=len(filtered_signals),
+                output_data=filtered_signals,
+                signals_count=len(filtered_signals),
+                symbols_processed=len(data)
+            )
+            
+            return filtered_signals
             
         except AttributeError as e:
             if "generate_momentum_signals" in str(e):
