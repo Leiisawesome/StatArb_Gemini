@@ -196,7 +196,7 @@ class EnhancedTechnicalIndicatorEngine:
                 symbol_signals.update(crash_signals)
                 
                 # 5. Business cycle adjusted momentum (Chordia & Shivakumar, 2002)
-                macro_signals = self._calculate_macro_adjusted_momentum(symbol_data, spy_data)
+                macro_signals = self._calculate_macro_adjusted_momentum(symbol_data)
                 symbol_signals.update(macro_signals)
                 
                 signals[symbol] = symbol_signals
@@ -387,20 +387,18 @@ class EnhancedTechnicalIndicatorEngine:
             returns = data['close'].pct_change()
             base_momentum = returns.rolling(63).mean() / returns.rolling(63).std()
             
-            # Macro factor adjustments (simplified proxies)
-            # GDP growth proxy: Market trend
-            market_trend = spy_data['close'].pct_change(252).iloc[-1]
-            gdp_adjustment = market_trend * self.config.gdp_growth_weight
+            # Simplified macro adjustments (without SPY dependency)
+            # GDP growth proxy: Long-term trend
+            long_term_trend = returns.rolling(252).mean().iloc[-1]
+            gdp_adjustment = long_term_trend * self.config.gdp_growth_weight
             
             # Inflation proxy: Volatility trend
-            spy_volatility = spy_data['close'].pct_change().rolling(20).std()
-            inflation_proxy = spy_volatility.pct_change(60).iloc[-1]
-            inflation_adjustment = inflation_proxy * self.config.inflation_weight
+            volatility_trend = returns.rolling(20).std().pct_change(60).iloc[-1]
+            inflation_adjustment = volatility_trend * self.config.inflation_weight
             
-            # Interest rate proxy: Market beta
-            market_returns = spy_data['close'].pct_change()
-            beta = returns.rolling(60).cov(market_returns) / market_returns.rolling(60).var()
-            interest_rate_adjustment = beta.iloc[-1] * self.config.interest_rate_weight
+            # Interest rate proxy: Momentum persistence (simplified)
+            momentum_persistence = returns.rolling(60).mean().iloc[-1]
+            interest_rate_adjustment = momentum_persistence * self.config.interest_rate_weight
             
             # Apply macro adjustments
             macro_adjusted_momentum = (
