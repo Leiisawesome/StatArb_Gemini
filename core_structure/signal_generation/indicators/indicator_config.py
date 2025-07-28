@@ -355,7 +355,7 @@ config_manager = IndicatorConfigManager()
 # Export commonly used configurations
 def get_default_indicator_config():
     """Get default indicator configuration"""
-    from technical_indicators import IndicatorConfig
+    from .technical_indicators import IndicatorConfig
     
     return IndicatorConfig(
         clickhouse_host=config_manager.database_settings.clickhouse_host,

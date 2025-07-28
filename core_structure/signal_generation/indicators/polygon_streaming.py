@@ -22,7 +22,7 @@ import pandas as pd
 import numpy as np
 from collections import deque, defaultdict
 
-from technical_indicators import TechnicalIndicatorEngine, IndicatorResult, IndicatorConfig
+from .technical_indicators import TechnicalIndicatorEngine, IndicatorResult, IndicatorConfig
 
 class StreamingStatus(Enum):
     """Streaming connection status"""
