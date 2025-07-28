@@ -111,8 +111,14 @@ class EnhancedConfig:
 class EnhancedConfigManager:
     """Enhanced configuration manager with parameter persistence"""
     
-    def __init__(self, config_dir: str = "configs"):
-        self.config_dir = Path(config_dir)
+    def __init__(self, config_dir: str = None):
+        if config_dir is None:
+            # Use absolute path to the strategies config directory
+            import os
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            self.config_dir = Path(base_dir) / "backtesting_framework" / "configs" / "strategies"
+        else:
+            self.config_dir = Path(config_dir)
         self.config_dir.mkdir(exist_ok=True)
         self.current_config: Optional[EnhancedConfig] = None
         

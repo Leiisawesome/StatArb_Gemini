@@ -29,7 +29,7 @@ sys.path.append('../core_structure')
 from core_structure.market_data.data_manager import DataManager
 from core_structure.analytics.performance_analytics import PerformanceAnalyzer
 
-from strategies.base_strategy import BaseStrategy, StrategyConfig
+from ..strategies.base_strategy import BaseStrategy, StrategyConfig
 
 logger = logging.getLogger(__name__)
 
