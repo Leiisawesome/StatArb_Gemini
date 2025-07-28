@@ -1,0 +1,121 @@
+# Enhanced Momentum Strategy Configuration with Academic Foundation
+name: "enhanced_momentum"
+version: "2.0.0"
+
+# Academic Research Foundation
+academic_basis:
+  # Core momentum theories
+  jegadeesh_titman_1993: true  # Cross-sectional momentum
+  carhart_1997: true           # Four-factor model
+  moskowitz_grinblatt_1999: true  # Industry momentum
+  
+  # Enhanced academic theories
+  hong_stein_1999: true        # News diffusion model
+  chordia_shivakumar_2002: true  # Business cycle effects
+  cooper_gutierrez_hameed_2004: true  # Market states
+  moskowitz_ooi_pedersen_2012: true  # Time series momentum
+  gervais_kaniel_mingelgrin_2001: true  # Volume premium
+  daniel_moskowitz_2016: true  # Momentum crashes
+
+# Strategy Parameters (will be optimized during training)
+parameters:
+  # Multi-horizon momentum (Moskowitz et al., 2012)
+  momentum_lookback_short: 5    # 1 week
+  momentum_lookback_medium: 21  # 1 month
+  momentum_lookback_long: 63    # 3 months
+  momentum_lookback_intermediate: 126  # 6 months
+  
+  # Multi-horizon weights
+  short_term_weight: 0.2
+  medium_term_weight: 0.3
+  long_term_weight: 0.3
+  intermediate_weight: 0.2
+  
+  # Volume-weighted momentum (Gervais et al., 2001)
+  volume_weight: 0.3
+  volume_threshold: 1000000
+  volume_lookback: 20
+  
+  # Market regime detection (Cooper et al., 2004)
+  regime_lookback: 252
+  volatility_threshold: 0.25
+  market_state_threshold: 0.0
+  
+  # Crash protection (Daniel & Moskowitz, 2016)
+  crash_volatility_threshold: 0.40
+  crash_market_drawdown_threshold: -0.15
+  
+  # Business cycle effects (Chordia & Shivakumar, 2002)
+  gdp_growth_weight: 0.2
+  inflation_weight: 0.1
+  interest_rate_weight: 0.1
+  
+  # Signal combination parameters
+  signal_threshold: 0.7
+  confirmation_weight: 0.4
+  divergence_weight: 0.3
+  
+  # Risk management parameters
+  position_size: 0.1
+  max_positions: 10
+  stop_loss: 0.05
+  take_profit: 0.15
+
+# SPY Benchmark Configuration
+benchmark:
+  symbol: "SPY"
+  risk_free_rate: 0.02
+  target_information_ratio: 1.0
+  target_sharpe_ratio: 1.5
+  max_tracking_error: 0.15
+  max_beta: 0.3
+
+# Risk Limits
+risk_limits:
+  max_position_value: 5000000
+  max_daily_loss: 0.02
+  max_drawdown: 0.15
+  max_correlation: 0.7
+
+# Timeframes for multi-timeframe analysis
+timeframes:
+  - "1min"
+  - "5min"
+  - "15min"
+  - "1hour"
+  - "1day"
+
+# Trading symbols (including SPY for benchmark)
+symbols:
+  - "SPY"  # Benchmark
+  - "AAPL"
+  - "MSFT"
+  - "GOOGL"
+  - "AMZN"
+  - "TSLA"
+  - "NVDA"
+  - "META"
+  - "NFLX"
+  - "AMD"
+  - "CRM"
+
+# Minimal Quality Assurance
+data_quality:
+  enabled: true
+  min_data_points: 252
+  max_missing_data: 0.05
+  validate_price_range: true
+
+error_handling:
+  enabled: true
+  log_errors: true
+  skip_invalid_data: true
+
+academic_validation:
+  enabled: true
+  validate_parameters: true
+  parameter_ranges: true
+
+performance_attribution:
+  enabled: false  # Optional - can be enabled if needed
+  simple_correlation: true 
