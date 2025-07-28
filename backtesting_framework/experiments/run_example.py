@@ -52,7 +52,7 @@ def run_from_config_file():
     """Run a backtest from a configuration file"""
     print("\n=== Running from Config File ===")
     
-    config_file = "config/strategies/pairs_trading.yaml"
+    config_file = "configs/strategies/pairs_trading.yaml"
     
     if not os.path.exists(config_file):
         print(f"Config file {config_file} not found. Skipping this example.")
