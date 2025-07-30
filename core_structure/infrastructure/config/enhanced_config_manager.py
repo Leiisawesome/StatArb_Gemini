@@ -248,7 +248,7 @@ class EnhancedConfigManager:
         return param_data.get('parameters', {})
     
     def _load_strategy_config(self, strategy_name: str) -> StrategyConfig:
-        """Load strategy configuration"""
+        """Load strategy configuration (enhanced for technical momentum)"""
         
         strategy_file = self.config_dir / f"{strategy_name}_strategy.yaml"
         if not strategy_file.exists():
@@ -259,10 +259,54 @@ class EnhancedConfigManager:
         
         with open(strategy_file, 'r') as f:
             strategy_dict = yaml.safe_load(f)
-        # Only keep fields expected by StrategyConfig
+        
+        # Handle technical momentum strategy
+        if strategy_name == 'technical_momentum':
+            return self._load_technical_momentum_config(strategy_dict)
+        
+        # Default handling
         allowed_fields = {'name', 'version', 'parameters', 'risk_limits', 'timeframes', 'symbols'}
         filtered = {k: v for k, v in strategy_dict.items() if k in allowed_fields}
         return StrategyConfig(**filtered)
+    
+    def _load_technical_momentum_config(self, strategy_dict: Dict[str, Any]) -> StrategyConfig:
+        """Load technical momentum configuration"""
+        # Convert technical momentum config to StrategyConfig format
+        # Extract symbols from the nested structure
+        symbols = []
+        for symbol_group in strategy_dict.get('symbols', []):
+            if isinstance(symbol_group, str):
+                # Handle single symbol
+                symbols.append(symbol_group)
+            elif isinstance(symbol_group, list):
+                # Handle list of symbols
+                symbols.extend(symbol_group)
+        
+        # Extract parameters from factors
+        parameters = {}
+        if 'factors' in strategy_dict:
+            for factor in strategy_dict['factors']:
+                factor_type = factor.get('factor_type', '')
+                if factor_type == 'technical' and 'indicators' in factor:
+                    parameters.update(factor['indicators'])
+                parameters[f'{factor_type}_lookback'] = factor.get('lookback_period')
+                parameters[f'{factor_type}_threshold'] = factor.get('threshold')
+                parameters[f'{factor_type}_weight'] = factor.get('weight')
+        
+        # Extract risk limits
+        risk_limits = strategy_dict.get('risk_limits', {})
+        
+        # Extract timeframes
+        timeframes = strategy_dict.get('data', {}).get('timeframes', [])
+        
+        return StrategyConfig(
+            name=strategy_dict.get('name', 'technical_momentum'),
+            version=strategy_dict.get('version', '2.0.0'),
+            parameters=parameters,
+            risk_limits=risk_limits,
+            timeframes=timeframes,
+            symbols=symbols
+        )
     
     def _get_database_config(self) -> Dict[str, Any]:
         """Get database configuration"""

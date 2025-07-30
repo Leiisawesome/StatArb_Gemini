@@ -1,13 +1,19 @@
+#!/usr/bin/env python3
 """
-Optimization Package
-Advanced parameter optimization and performance tuning
+Portfolio Optimization Package
+Phase 3: Advanced Analytics & Optimization - Batch 3
 """
 
-__version__ = '1.0.0'
-__author__ = 'StatArb Gemini Team'
+from .mpt_optimizer import MPTOptimizer
+from .risk_parity import RiskParity
+from .black_litterman import BlackLitterman
+from .dynamic_allocation import DynamicAllocation
+from .factor_optimizer import FactorOptimizer
 
 __all__ = [
-    'AdvancedParameterOptimizer',
-    'MultiDimensionalSweeper',
-    'SPYBenchmarkOptimizer'
-] 
+    'MPTOptimizer',
+    'RiskParity',
+    'BlackLitterman',
+    'DynamicAllocation',
+    'FactorOptimizer'
+]

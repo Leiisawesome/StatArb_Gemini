@@ -66,9 +66,22 @@ class EnhancedBacktestingEngine:
                     symbol_data = data_loader.load_historical_data(
                         symbol, start_date, end_date
                     )
+                    
+                    # Handle different data formats
                     if symbol_data is not None and len(symbol_data) > 0:
-                        self.data[symbol] = symbol_data
-                        logger.info(f"Loaded {len(symbol_data)} rows for {symbol}")
+                        # If symbol_data is a dictionary, extract the DataFrame
+                        if isinstance(symbol_data, dict):
+                            # Get the first (and should be only) DataFrame from the dictionary
+                            actual_data = list(symbol_data.values())[0]
+                            if isinstance(actual_data, pd.DataFrame):
+                                self.data[symbol] = actual_data
+                                logger.info(f"Loaded {len(actual_data)} rows for {symbol}")
+                            else:
+                                logger.warning(f"Unexpected data type for {symbol}: {type(actual_data)}")
+                        else:
+                            # Direct DataFrame
+                            self.data[symbol] = symbol_data
+                            logger.info(f"Loaded {len(symbol_data)} rows for {symbol}")
                     else:
                         logger.warning(f"No data loaded for {symbol}")
                 except Exception as e:
@@ -81,7 +94,7 @@ class EnhancedBacktestingEngine:
             raise
     
     def initialize_strategy(self, strategy_config: Dict[str, Any] = None):
-        """Initialize enhanced academic strategy"""
+        """Initialize strategy (enhanced for multi-factor support)"""
         try:
             if strategy_config is None:
                 strategy_config = {
@@ -90,13 +103,69 @@ class EnhancedBacktestingEngine:
                     'parameters': {}
                 }
             
-            self.strategy = EnhancedAcademicStrategy(strategy_config)
-            self.strategy.initialize(self.data)
+            # Determine strategy class based on configuration
+            strategy_name = strategy_config.get('name', '')
             
-            logger.info("Enhanced academic strategy initialized successfully")
+            if strategy_name == 'technical_momentum':
+                from strategies.multi_factor_ensemble_strategy import MultiFactorEnsembleStrategy, MultiFactorConfig
+                # Convert config to MultiFactorConfig
+                multi_factor_config = self._convert_to_multi_factor_config(strategy_config)
+                self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
+                self.strategy.initialize(self.data)
+                logger.info(f"MultiFactorEnsembleStrategy initialized successfully")
+            else:
+                # Default to EnhancedAcademicStrategy
+                self.strategy = EnhancedAcademicStrategy(strategy_config)
+                self.strategy.initialize(self.data)
+                logger.info(f"EnhancedAcademicStrategy initialized successfully")
             
         except Exception as e:
             logger.error(f"Strategy initialization failed: {e}")
+            raise
+    
+    def _convert_to_multi_factor_config(self, strategy_config: Dict[str, Any]):
+        """Convert strategy config to MultiFactorConfig"""
+        try:
+            from strategies.multi_factor_ensemble_strategy import FactorConfig, FactorType, MultiFactorConfig
+            import yaml
+            
+            # Load the full strategy configuration from YAML directly
+            config_file = self.config_manager.config_dir / "technical_momentum_strategy.yaml"
+            with open(config_file, 'r') as f:
+                config_dict = yaml.safe_load(f)
+            
+            # Extract factors configuration
+            factors = []
+            for factor_data in config_dict.get('factors', []):
+                factor_type = FactorType(factor_data['factor_type'])
+                factor_config = FactorConfig(
+                    factor_type=factor_type,
+                    lookback_period=factor_data['lookback_period'],
+                    threshold=factor_data['threshold'],
+                    weight=factor_data['weight'],
+                    indicators=factor_data.get('indicators'),
+                    momentum_type=factor_data.get('momentum_type'),
+                    mean_reversion_threshold=factor_data.get('mean_reversion_threshold'),
+                    volatility_metrics=factor_data.get('volatility_metrics')
+                )
+                factors.append(factor_config)
+            
+            # Create MultiFactorConfig
+            multi_factor_config = MultiFactorConfig(
+                factors=factors,
+                ensemble_method=config_dict.get('ensemble_method', 'adaptive_weighting'),
+                factor_combination_method=config_dict.get('factor_combination_method', 'weighted_sum'),
+                signal_threshold=config_dict.get('signal_threshold', 0.15),
+                max_factors_per_asset=config_dict.get('max_factors_per_asset', 4),
+                initial_capital=config_dict.get('portfolio', {}).get('initial_capital', 100000),
+                max_position_value=config_dict.get('risk_limits', {}).get('max_position_value', 10000),
+                max_positions=config_dict.get('risk_limits', {}).get('max_positions', 15)
+            )
+            
+            return multi_factor_config
+            
+        except Exception as e:
+            logger.error(f"Failed to convert to MultiFactorConfig: {e}")
             raise
     
     def run_backtest(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
@@ -120,10 +189,13 @@ class EnhancedBacktestingEngine:
             results = self._execute_backtest(filtered_data)
             
             # Calculate performance metrics
-            performance_metrics = self.strategy.calculate_performance_metrics()
+            performance_metrics = self.strategy.get_performance_metrics()
             
-            # Run parameter optimization
-            optimization_results = self.strategy.optimize_parameters()
+            # Run parameter optimization (if available)
+            try:
+                optimization_results = self.strategy.optimize_parameters()
+            except AttributeError:
+                optimization_results = {}
             
             # Compile comprehensive results
             self.results = {
@@ -157,20 +229,52 @@ class EnhancedBacktestingEngine:
     def _execute_backtest(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         """Execute the actual backtesting"""
         try:
+            # Debug: Check data structure
+            logger.info(f"Executing backtest with {len(data)} symbols")
+            for symbol, df in data.items():
+                if isinstance(df, pd.DataFrame):
+                    logger.info(f"  {symbol}: {len(df)} rows, columns: {list(df.columns)}")
+                    if len(df) > 0:
+                        logger.info(f"    Date range: {df.index[0]} to {df.index[-1]}")
+                else:
+                    logger.info(f"  {symbol}: {type(df)} - {df}")
+            
             # Generate signals
             signals = self.strategy.generate_signals(data)
             
-            # Execute trades (simplified for now)
-            trades = self._execute_trades(signals, data)
-            
-            # Calculate portfolio performance
-            portfolio_performance = self._calculate_portfolio_performance(trades, data)
-            
-            return {
-                'signals_generated': len(signals),
-                'trades_executed': len(trades),
-                'portfolio_performance': portfolio_performance,
-                'signal_details': [
+            # Handle different signal formats
+            if isinstance(signals, dict):
+                # MultiFactorEnsembleStrategy returns Dict[str, float]
+                signal_count = len(signals)
+                non_zero_signals = sum(1 for s in signals.values() if abs(s) > 0)
+                
+                # Convert to simplified trade format for compatibility
+                trades = []
+                for symbol, signal_strength in signals.items():
+                    if abs(signal_strength) > 0 and symbol in data:
+                        trade = {
+                            'symbol': symbol,
+                            'type': 'LONG' if signal_strength > 0 else 'SHORT',
+                            'price': data[symbol]['close'].iloc[-1] if len(data[symbol]) > 0 else 0,
+                            'timestamp': data[symbol].index[-1] if len(data[symbol]) > 0 else None,
+                            'confidence': abs(signal_strength)
+                        }
+                        trades.append(trade)
+                
+                signal_details = [
+                    {
+                        'symbol': symbol,
+                        'type': 'LONG' if signal > 0 else 'SHORT',
+                        'confidence': abs(signal),
+                        'timestamp': data[symbol].index[-1].isoformat() if symbol in data and len(data[symbol]) > 0 else None
+                    } for symbol, signal in signals.items() if abs(signal) > 0
+                ]
+                
+            else:
+                # Original format (list of signal objects)
+                signal_count = len(signals)
+                trades = self._execute_trades(signals, data)
+                signal_details = [
                     {
                         'symbol': s.symbol,
                         'type': s.signal_type.value,
@@ -178,6 +282,15 @@ class EnhancedBacktestingEngine:
                         'timestamp': s.timestamp.isoformat()
                     } for s in signals
                 ]
+            
+            # Calculate portfolio performance
+            portfolio_performance = self._calculate_portfolio_performance(trades, data)
+            
+            return {
+                'signals_generated': signal_count,
+                'trades_executed': len(trades),
+                'portfolio_performance': portfolio_performance,
+                'signal_details': signal_details
             }
             
         except Exception as e:
@@ -244,8 +357,8 @@ class EnhancedBacktestingEngine:
                 'tracking_error_measured': 'tracking_error' in self.strategy.performance_metrics
             },
             'optimization_status': {
-                'parameters_optimized': len(self.strategy.optimization_results) > 0,
-                'optimization_score': self.strategy.optimization_results.get('optimization_score', 0)
+                'parameters_optimized': hasattr(self.strategy, 'optimization_results') and len(self.strategy.optimization_results) > 0,
+                'optimization_score': getattr(self.strategy, 'optimization_results', {}).get('optimization_score', 0)
             }
         }
         
