@@ -291,20 +291,26 @@ class MultiFactorEnsembleStrategy:
         return rsi
     
     def _generate_rsi_signal(self, rsi: pd.Series, indicators: Dict) -> float:
-        """Generate RSI signal"""
+        """Generate RSI signal (TUNED for more sensitivity)"""
         if len(rsi) == 0:
             return 0.0
             
         current_rsi = rsi.iloc[-1]
-        oversold = indicators['rsi_oversold']
-        overbought = indicators['rsi_overbought']
+        # TUNED: More sensitive RSI levels
+        oversold = indicators.get('rsi_oversold', 35)  # Increased from 30
+        overbought = indicators.get('rsi_overbought', 65)  # Decreased from 70
         
+        # TUNED: More aggressive signal generation
         if current_rsi < oversold:
-            return 0.5  # Buy signal
+            return 0.8  # Stronger buy signal (was 0.5)
         elif current_rsi > overbought:
-            return -0.5  # Sell signal
+            return -0.8  # Stronger sell signal (was -0.5)
+        elif current_rsi < 45:  # Additional buy zone
+            return 0.3
+        elif current_rsi > 55:  # Additional sell zone
+            return -0.3
         else:
-            return 0.0  # Neutral
+            return 0.0
     
     def _calculate_macd(self, df: pd.DataFrame, indicators: Dict) -> Dict[str, pd.Series]:
         """Calculate MACD indicator"""
@@ -321,24 +327,39 @@ class MultiFactorEnsembleStrategy:
         }
     
     def _generate_macd_signal(self, macd: Dict[str, pd.Series], indicators: Dict) -> float:
-        """Generate MACD signal"""
-        if len(macd['macd_line']) < 2:
+        """Generate MACD signal (TUNED for more sensitivity)"""
+        if not macd or 'macd' not in macd or 'signal' not in macd:
             return 0.0
             
-        current_macd = macd['macd_line'].iloc[-1]
-        current_signal = macd['signal_line'].iloc[-1]
-        current_histogram = macd['histogram'].iloc[-1]
-        prev_histogram = macd['histogram'].iloc[-2]
+        macd_line = macd['macd']
+        signal_line = macd['signal']
         
-        threshold = indicators['macd_threshold']
+        if len(macd_line) < 2 or len(signal_line) < 2:
+            return 0.0
         
-        # MACD crossover signal
-        if current_macd > current_signal and abs(current_macd - current_signal) > threshold:
-            return 0.5  # Buy signal
+        current_macd = macd_line.iloc[-1]
+        current_signal = signal_line.iloc[-1]
+        prev_macd = macd_line.iloc[-2]
+        prev_signal = signal_line.iloc[-2]
+        
+        # TUNED: More sensitive MACD threshold
+        threshold = indicators.get('macd_threshold', 0.0005)  # Reduced from 0.001
+        
+        # MACD crossover signals
+        macd_cross_above = (prev_macd <= prev_signal) and (current_macd > current_signal)
+        macd_cross_below = (prev_macd >= prev_signal) and (current_macd < current_signal)
+        
+        # TUNED: More aggressive signal generation
+        if macd_cross_above and abs(current_macd - current_signal) > threshold:
+            return 0.6  # Stronger buy signal (was 0.5)
+        elif macd_cross_below and abs(current_macd - current_signal) > threshold:
+            return -0.6  # Stronger sell signal (was -0.5)
+        elif current_macd > current_signal and abs(current_macd - current_signal) > threshold:
+            return 0.3  # Additional buy signal
         elif current_macd < current_signal and abs(current_macd - current_signal) > threshold:
-            return -0.5  # Sell signal
+            return -0.3  # Additional sell signal
         else:
-            return 0.0  # Neutral
+            return 0.0
     
     def _calculate_bollinger_bands(self, df: pd.DataFrame, indicators: Dict) -> Dict[str, pd.Series]:
         """Calculate Bollinger Bands"""
@@ -449,7 +470,7 @@ class MultiFactorEnsembleStrategy:
             return 0.0
     
     def _combine_factor_signals(self, symbol_signals: Dict[str, float]) -> float:
-        """Combine factor signals using weighted sum"""
+        """Combine factor signals using weighted sum (TUNED for more trades)"""
         combined_signal = 0.0
         total_weight = 0.0
         
@@ -462,11 +483,12 @@ class MultiFactorEnsembleStrategy:
         if total_weight > 0:
             combined_signal /= total_weight
         
-        # Apply overall signal threshold (reduced for testing)
+        # TUNED: More aggressive signal threshold for testing
         # Original: self.config.signal_threshold (0.15)
-        # Testing: 0.05 (lower threshold to generate more signals)
-        test_threshold = 0.05
-        if abs(combined_signal) < test_threshold:
+        # Previous test: 0.05
+        # New tuned: 0.02 (even lower threshold to generate more signals)
+        tuned_threshold = 0.02
+        if abs(combined_signal) < tuned_threshold:
             combined_signal = 0.0
             
         return combined_signal

@@ -18,12 +18,12 @@ from core_structure.infrastructure.config.enhanced_config_manager import Enhance
 
 # Portfolio Management Integration
 from portfolio.pnl_tracker import PnLTracker
-from portfolio.position_manager import PositionManager
-from portfolio.position_sizing import PositionSizer
+from portfolio.position_manager import PortfolioManager
+from portfolio.position_sizing import PositionSizing
 
 # Monitoring Integration
 from monitoring.performance_monitor import PerformanceMonitor
-from monitoring.reporting_engine import ReportingEngine
+from monitoring.reporting_engine import ReportGenerator
 
 # Execution Integration
 from execution.order_manager import OrderManager, OrderType, OrderSide
@@ -32,6 +32,7 @@ from execution.transaction_cost_optimizer import TransactionCostOptimizer
 
 import logging
 import json
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -48,8 +49,8 @@ class TechnicalMomentumIntegratedTest:
         
         # Portfolio Management Components
         self.pnl_tracker = None
-        self.position_manager = None
-        self.position_sizer = None
+        self.portfolio_manager = None
+        self.position_sizing = None
         
         # Monitoring Components
         self.performance_monitor = None
@@ -130,16 +131,16 @@ class TechnicalMomentumIntegratedTest:
         
         # Portfolio Management
         self.pnl_tracker = PnLTracker(initial_capital=self.initial_capital)
-        self.position_manager = PositionManager(initial_capital=self.initial_capital)
-        self.position_sizer = PositionSizer(initial_capital=self.initial_capital)
+        self.portfolio_manager = PortfolioManager(initial_capital=self.initial_capital)
+        self.position_sizing = PositionSizing(portfolio_value=self.initial_capital)
         
         # Monitoring
         self.performance_monitor = PerformanceMonitor(initial_capital=self.initial_capital)
-        self.reporting_engine = ReportingEngine()
+        self.reporting_engine = ReportGenerator()
         
         # Execution
         self.order_manager = OrderManager(initial_capital=self.initial_capital)
-        self.smart_order_router = SmartOrderRouter()
+        self.smart_order_router = SmartOrderRouter(self.order_manager)
         self.transaction_cost_optimizer = TransactionCostOptimizer()
         
         # Set up callbacks
@@ -157,14 +158,14 @@ class TechnicalMomentumIntegratedTest:
                 # Calculate P&L impact
                 if order.side == OrderSide.BUY:
                     # Opening position
-                    self.position_manager.add_position(order.symbol, fill_quantity, fill_price)
+                    self.portfolio_manager.add_position(order.symbol, fill_quantity, fill_price)
                 else:
                     # Closing position
-                    position = self.position_manager.get_position(order.symbol)
+                    position = self.portfolio_manager.get_position(order.symbol)
                     if position:
                         realized_pnl = (fill_price - position.avg_price) * fill_quantity
                         self.pnl_tracker.update_pnl(realized_pnl=realized_pnl, symbol=order.symbol)
-                        self.position_manager.update_position(order.symbol, -fill_quantity, fill_price)
+                        self.portfolio_manager.update_position(order.symbol, -fill_quantity, fill_price)
         
         self.order_manager.add_execution_callback(order_execution_callback)
         
@@ -172,8 +173,6 @@ class TechnicalMomentumIntegratedTest:
         def performance_callback(portfolio_value: float, daily_return: float):
             self.performance_monitor.update_performance(portfolio_value, daily_return)
             self.current_portfolio_value = portfolio_value
-        
-        self.pnl_tracker.add_performance_callback(performance_callback)
         
         logger.info("Callbacks set up successfully")
     
@@ -237,7 +236,7 @@ class TechnicalMomentumIntegratedTest:
                 'performance_history': performance_history,
                 'final_performance': final_performance,
                 'pnl_summary': self.pnl_tracker.get_pnl_summary(),
-                'position_summary': self.position_manager.get_portfolio_summary(),
+                'position_summary': self.portfolio_manager.get_portfolio_summary(),
                 'order_summary': self.order_manager.get_order_summary(),
                 'performance_summary': self.performance_monitor.get_performance_summary()
             }
@@ -260,7 +259,7 @@ class TechnicalMomentumIntegratedTest:
             current_price = data[symbol]['close'].iloc[-1]
             
             # Calculate position size using Kelly criterion
-            position_size = self.position_sizer.calculate_position_size(
+            position_size = self.position_sizing.calculate_position_size(
                 signal_strength, current_price, portfolio_state['total_value']
             )
             
@@ -593,7 +592,11 @@ def main():
     position_summary = results.get('position_summary', {})
     print(f"\nPosition Summary:")
     print(f"  Total Positions: {position_summary.get('total_positions', 'N/A')}")
-    print(f"  Portfolio Value: ${position_summary.get('portfolio_value', 'N/A'):,.2f}")
+    portfolio_value = position_summary.get('portfolio_value', 'N/A')
+    if isinstance(portfolio_value, (int, float)):
+        print(f"  Portfolio Value: ${portfolio_value:,.2f}")
+    else:
+        print(f"  Portfolio Value: {portfolio_value}")
     
     print("\nINTEGRATED RECOMMENDATIONS:")
     for rec in analysis.get('recommendations', []):
