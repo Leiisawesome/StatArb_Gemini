@@ -46,6 +46,17 @@ except ImportError:
     MetricsCollector = None
     DatabaseClient = None
 
+# Feature engineering imports
+try:
+    from .indicators.feature_engineering import FeatureEngineeringPipeline
+    FEATURE_ENGINEERING_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("FeatureEngineeringPipeline available for integration")
+except ImportError:
+    FEATURE_ENGINEERING_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("FeatureEngineeringPipeline not available - using internal calculations")
+
 # Market data imports
 try:
     from ..market_data.data_manager import DataManager
@@ -304,6 +315,12 @@ class SignalGenerator:
         self.feature_scaler: Optional[Any] = None
         self.model_weights: Dict[str, float] = {}
         
+        # Initialize FeatureEngineeringPipeline if available
+        self.feature_pipeline = None
+        if FEATURE_ENGINEERING_AVAILABLE:
+            self.feature_pipeline = FeatureEngineeringPipeline(self.config)
+            logger.info("FeatureEngineeringPipeline initialized for enhanced feature generation")
+        
         # Performance tracking
         self.signal_history: deque = deque(maxlen=10000)
         self.performance_metrics: Dict[str, float] = {}
@@ -497,11 +514,38 @@ class SignalGenerator:
             }
     
     async def _generate_ml_features(self, market_data: pd.DataFrame) -> Dict[str, Any]:
-        """Generate ML-ready features for AI models"""
+        """Generate ML-ready features for AI models using enhanced feature engineering"""
         try:
             if not self.config.enable_ml_features:
                 return {'features': {}, 'feature_names': []}
             
+            # Use FeatureEngineeringPipeline if available
+            if self.feature_pipeline is not None:
+                try:
+                    logger.debug("Using FeatureEngineeringPipeline for enhanced feature generation")
+                    enhanced_data = self.feature_pipeline.create_all_features(market_data)
+                    
+                    # Extract the most recent feature values
+                    features = {}
+                    for column in enhanced_data.columns:
+                        if column not in ['open', 'high', 'low', 'close', 'volume']:  # Skip original OHLCV
+                            if len(enhanced_data[column]) > 0:
+                                features[column] = enhanced_data[column].iloc[-1]
+                    
+                    logger.info(f"Generated {len(features)} enhanced features using FeatureEngineeringPipeline")
+                    
+                    return {
+                        'features': features,
+                        'feature_names': list(features.keys()),
+                        'feature_count': len(features),
+                        'feature_source': 'FeatureEngineeringPipeline'
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"FeatureEngineeringPipeline failed: {e}, falling back to internal calculations")
+            
+            # Fallback to internal calculations
+            logger.debug("Using internal ML feature calculations")
             features = {}
             
             # Price-based features
@@ -531,12 +575,13 @@ class SignalGenerator:
             return {
                 'features': features,
                 'feature_names': list(features.keys()),
-                'feature_count': len(features)
+                'feature_count': len(features),
+                'feature_source': 'internal_calculations'
             }
             
         except Exception as e:
             logger.error(f"ML feature generation failed: {e}")
-            return {'features': {}, 'feature_names': [], 'feature_count': 0}
+            return {'features': {}, 'feature_names': [], 'feature_count': 0, 'feature_source': 'error'}
     
     async def _calculate_risk_metrics(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """Calculate comprehensive risk metrics"""

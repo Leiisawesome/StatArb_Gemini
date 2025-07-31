@@ -45,15 +45,28 @@ class TechnicalMomentumHistoricalTest:
             validation_end="2025-06-30"
         )
         
+        # Set the configuration in the engine
+        self.engine.config = config
+        
         # Step 2: Load historical data
         logger.info("Step 2: Loading historical data...")
-        # Use actual symbols that exist in ClickHouse database
-        # Based on the debug output, we have: A, L, M, S, F, T, G, O, Z
-        symbols = ["A", "L", "M", "S", "F", "T", "G", "O", "Z"]  # Use actual symbols from ClickHouse
+        # Use symbols from the strategy configuration instead of hardcoded values
+        symbols = config.strategy.symbols
+        logger.info(f"Loading data for {len(symbols)} symbols from configuration: {symbols[:10]}...")  # Show first 10 symbols
+        
+        # For testing purposes, if we need to limit symbols due to data availability,
+        # we can use a subset but should document this clearly
+        if len(symbols) > 20:  # If we have the full 50+1 symbol list
+            # Use first 20 symbols for testing (can be expanded later)
+            test_symbols = symbols[:20]
+            logger.info(f"Using subset of {len(test_symbols)} symbols for testing: {test_symbols}")
+            symbols = test_symbols
+        
         self.engine.load_data(symbols, "2023-01-01", "2025-06-30")
         
         # Step 3: Initialize strategy
         logger.info("Step 3: Initializing strategy...")
+        # Pass the complete configuration to the engine
         strategy_config = {
             'name': 'technical_momentum',
             'version': '2.0.0',

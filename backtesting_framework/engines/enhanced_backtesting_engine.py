@@ -94,7 +94,7 @@ class EnhancedBacktestingEngine:
             raise
     
     def initialize_strategy(self, strategy_config: Dict[str, Any] = None):
-        """Initialize strategy (enhanced for multi-factor support)"""
+        """Initialize strategy (simplified for direct configuration usage)"""
         try:
             if strategy_config is None:
                 strategy_config = {
@@ -108,11 +108,24 @@ class EnhancedBacktestingEngine:
             
             if strategy_name == 'technical_momentum':
                 from strategies.multi_factor_ensemble_strategy import MultiFactorEnsembleStrategy, MultiFactorConfig
-                # Convert config to MultiFactorConfig
-                multi_factor_config = self._convert_to_multi_factor_config(strategy_config)
-                self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
-                self.strategy.initialize(self.data)
-                logger.info(f"MultiFactorEnsembleStrategy initialized successfully")
+                
+                # Simplified: Use the strategy configuration directly from the test case
+                # The configuration already contains all necessary parameters from the YAML file
+                if hasattr(self.config, 'strategy') and self.config.strategy:
+                    # Use the enhanced configuration that was already loaded
+                    strategy_params = self.config.strategy.parameters
+                    
+                    # Create MultiFactorConfig directly from the loaded configuration
+                    multi_factor_config = self._create_multi_factor_config_from_params(strategy_params)
+                    self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
+                    self.strategy.initialize(self.data)
+                    logger.info(f"MultiFactorEnsembleStrategy initialized successfully with direct configuration")
+                else:
+                    # Fallback to the original conversion method if needed
+                    multi_factor_config = self._convert_to_multi_factor_config(strategy_config)
+                    self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
+                    self.strategy.initialize(self.data)
+                    logger.info(f"MultiFactorEnsembleStrategy initialized successfully with conversion")
             else:
                 # Default to EnhancedAcademicStrategy
                 self.strategy = EnhancedAcademicStrategy(strategy_config)
@@ -166,6 +179,45 @@ class EnhancedBacktestingEngine:
             
         except Exception as e:
             logger.error(f"Failed to convert to MultiFactorConfig: {e}")
+            raise
+    
+    def _create_multi_factor_config_from_params(self, strategy_params: Dict[str, Any]):
+        """Create MultiFactorConfig directly from strategy parameters"""
+        try:
+            from strategies.multi_factor_ensemble_strategy import FactorConfig, FactorType, MultiFactorConfig
+            
+            # Extract factors from strategy parameters
+            factors = []
+            for factor_data in strategy_params.get('factors', []):
+                factor_type = FactorType(factor_data['factor_type'])
+                factor_config = FactorConfig(
+                    factor_type=factor_type,
+                    lookback_period=factor_data['lookback_period'],
+                    threshold=factor_data['threshold'],
+                    weight=factor_data['weight'],
+                    indicators=factor_data.get('indicators'),
+                    momentum_type=factor_data.get('momentum_type'),
+                    mean_reversion_threshold=factor_data.get('mean_reversion_threshold'),
+                    volatility_metrics=factor_data.get('volatility_metrics')
+                )
+                factors.append(factor_config)
+            
+            # Create MultiFactorConfig
+            multi_factor_config = MultiFactorConfig(
+                factors=factors,
+                ensemble_method=strategy_params.get('ensemble_method', 'adaptive_weighting'),
+                factor_combination_method=strategy_params.get('factor_combination_method', 'weighted_sum'),
+                signal_threshold=strategy_params.get('signal_threshold', 0.15),
+                max_factors_per_asset=strategy_params.get('max_factors_per_asset', 4),
+                initial_capital=strategy_params.get('portfolio', {}).get('initial_capital', 100000),
+                max_position_value=strategy_params.get('risk_limits', {}).get('max_position_value', 10000),
+                max_positions=strategy_params.get('risk_limits', {}).get('max_positions', 15)
+            )
+            
+            return multi_factor_config
+            
+        except Exception as e:
+            logger.error(f"Failed to create MultiFactorConfig from parameters: {e}")
             raise
     
     def run_backtest(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:

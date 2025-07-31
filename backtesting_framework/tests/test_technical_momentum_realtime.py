@@ -42,15 +42,28 @@ class TechnicalMomentumRealtimeTest:
             trading_start="2025-01-01"
         )
         
+        # Set the configuration in the engine
+        self.engine.config = config
+        
         # Step 2: Load real-time data (simulated for now)
         logger.info("Step 2: Loading real-time data...")
-        # Use a subset of symbols for testing (can be expanded to full 50+1 list)
-        symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY"]
+        # Use symbols from the strategy configuration instead of hardcoded values
+        symbols = config.strategy.symbols
+        logger.info(f"Loading data for {len(symbols)} symbols from configuration: {symbols[:10]}...")
+        
+        # For real-time testing, use a smaller subset for performance
+        if len(symbols) > 10:  # If we have the full 50+1 symbol list
+            # Use first 10 symbols for real-time testing
+            test_symbols = symbols[:10]
+            logger.info(f"Using subset of {len(test_symbols)} symbols for real-time testing: {test_symbols}")
+            symbols = test_symbols
+        
         end_date = datetime.now().strftime("%Y-%m-%d")
         self.engine.load_data(symbols, "2025-01-01", end_date)
         
         # Step 3: Initialize strategy with optimized parameters
         logger.info("Step 3: Initializing strategy with optimized parameters...")
+        # Pass the complete configuration to the engine
         strategy_config = {
             'name': 'technical_momentum',
             'version': '2.0.0',

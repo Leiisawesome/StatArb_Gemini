@@ -12,6 +12,17 @@ from dataclasses import dataclass
 import logging
 from datetime import datetime, timedelta
 
+# Import FeatureEngineer from ML module
+try:
+    from ..ml.feature_engineering import FeatureEngineer
+    FEATURE_ENGINEER_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("FeatureEngineer from ML module available for integration")
+except ImportError:
+    FEATURE_ENGINEER_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("FeatureEngineer from ML module not available - using internal calculations")
+
 logger = logging.getLogger(__name__)
 
 class FactorType(Enum):
@@ -61,6 +72,12 @@ class MultiFactorEnsembleStrategy:
         self.trade_history = []
         self.factor_signals = {}
         self.performance_metrics = {}
+        
+        # Initialize FeatureEngineer if available
+        self.feature_engineer = None
+        if FEATURE_ENGINEER_AVAILABLE:
+            self.feature_engineer = FeatureEngineer()
+            logger.info("FeatureEngineer initialized for enhanced feature generation")
         
         # Initialize factors
         self._initialize_factors()
@@ -125,7 +142,7 @@ class MultiFactorEnsembleStrategy:
         logger.info(f"Initialized strategy with {len(data)} symbols")
     
     def generate_signals(self, current_data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
-        """Generate trading signals for all symbols"""
+        """Generate trading signals for all symbols with ML-enhanced features"""
         signals = {}
         
         logger.info(f"Generating signals for {len(current_data)} symbols")
@@ -137,19 +154,23 @@ class MultiFactorEnsembleStrategy:
                 continue
                 
             logger.info(f"Processing {symbol} with {len(df)} rows of data")
+            
+            # Enhance data with ML features if FeatureEngineer is available
+            enhanced_df = self._enhance_data_with_ml_features(df, symbol)
+            
             symbol_signals = {}
             
-            # Calculate signals for each factor
+            # Calculate signals for each factor using enhanced data
             for factor_name, factor_model in self.factors.items():
                 try:
                     if factor_name == 'technical':
-                        signal = self._calculate_technical_signal(df, factor_model)
+                        signal = self._calculate_technical_signal(enhanced_df, factor_model)
                     elif factor_name == 'momentum':
-                        signal = self._calculate_momentum_signal(df, factor_model)
+                        signal = self._calculate_momentum_signal(enhanced_df, factor_model)
                     elif factor_name == 'mean_reversion':
-                        signal = self._calculate_mean_reversion_signal(df, factor_model)
+                        signal = self._calculate_mean_reversion_signal(enhanced_df, factor_model)
                     elif factor_name == 'volatility':
-                        signal = self._calculate_volatility_signal(df, factor_model)
+                        signal = self._calculate_volatility_signal(enhanced_df, factor_model)
                     else:
                         signal = 0.0
                         
@@ -172,26 +193,80 @@ class MultiFactorEnsembleStrategy:
         logger.info(f"Generated signals for {len(signals)} symbols")
         return signals
     
+    def _enhance_data_with_ml_features(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Enhance data with ML features using FeatureEngineer"""
+        if self.feature_engineer is not None:
+            try:
+                logger.debug(f"Enhancing data for {symbol} with ML features")
+                enhanced_df = self.feature_engineer.create_features(df, symbol)
+                
+                if not enhanced_df.empty:
+                    logger.info(f"Enhanced {symbol} data with {len(enhanced_df.columns)} features")
+                    return enhanced_df
+                else:
+                    logger.warning(f"Feature engineering returned empty DataFrame for {symbol}")
+                    return df
+                    
+            except Exception as e:
+                logger.error(f"Error enhancing data with ML features for {symbol}: {e}")
+                return df
+        else:
+            logger.debug(f"FeatureEngineer not available, using original data for {symbol}")
+            return df
+    
     def _calculate_technical_signal(self, df: pd.DataFrame, factor_model: Dict) -> float:
-        """Calculate technical indicator signals"""
+        """Calculate technical indicator signals using enhanced features"""
         try:
             indicators = factor_model['indicators']
             signals = []
             
-            # RSI Signal
-            rsi = self._calculate_rsi(df, indicators['rsi_period'])
-            rsi_signal = self._generate_rsi_signal(rsi, indicators)
-            signals.append(rsi_signal)
-            
-            # MACD Signal
-            macd = self._calculate_macd(df, indicators)
-            macd_signal = self._generate_macd_signal(macd, indicators)
-            signals.append(macd_signal)
-            
-            # Bollinger Bands Signal
-            bb = self._calculate_bollinger_bands(df, indicators)
-            bb_signal = self._generate_bb_signal(bb, indicators)
-            signals.append(bb_signal)
+            # Check if we have enhanced features from FeatureEngineer
+            if self.feature_engineer is not None and 'rsi' in df.columns:
+                # Use pre-calculated features from FeatureEngineer
+                logger.debug("Using enhanced features from FeatureEngineer")
+                
+                # RSI Signal from enhanced features
+                if 'rsi' in df.columns:
+                    rsi_signal = self._generate_rsi_signal_from_enhanced(df['rsi'], indicators)
+                    signals.append(rsi_signal)
+                
+                # MACD Signal from enhanced features
+                if 'macd' in df.columns and 'macd_signal' in df.columns:
+                    macd_signal = self._generate_macd_signal_from_enhanced(df, indicators)
+                    signals.append(macd_signal)
+                
+                # Bollinger Bands Signal from enhanced features
+                if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
+                    bb_signal = self._generate_bb_signal_from_enhanced(df, indicators)
+                    signals.append(bb_signal)
+                
+                # Additional ML-enhanced features
+                if 'price_change' in df.columns:
+                    momentum_signal = self._generate_momentum_signal_from_enhanced(df)
+                    signals.append(momentum_signal)
+                
+                if 'volatility' in df.columns:
+                    volatility_signal = self._generate_volatility_signal_from_enhanced(df)
+                    signals.append(volatility_signal)
+                
+            else:
+                # Fallback to internal calculations
+                logger.debug("Using internal technical indicator calculations")
+                
+                # RSI Signal
+                rsi = self._calculate_rsi(df, indicators['rsi_period'])
+                rsi_signal = self._generate_rsi_signal(rsi, indicators)
+                signals.append(rsi_signal)
+                
+                # MACD Signal
+                macd = self._calculate_macd(df, indicators)
+                macd_signal = self._generate_macd_signal(macd, indicators)
+                signals.append(macd_signal)
+                
+                # Bollinger Bands Signal
+                bb = self._calculate_bollinger_bands(df, indicators)
+                bb_signal = self._generate_bb_signal(bb, indicators)
+                signals.append(bb_signal)
             
             # Combine signals (equal weight)
             combined_signal = np.mean(signals)
@@ -457,4 +532,87 @@ class MultiFactorEnsembleStrategy:
     
     def get_strategy_summary(self) -> str:
         """Get strategy summary"""
-        return f"MultiFactorEnsembleStrategy with {len(self.factors)} factors: {list(self.factors.keys())}" 
+        ml_status = "with ML enhancement" if self.feature_engineer else "without ML enhancement"
+        return f"MultiFactorEnsembleStrategy with {len(self.factors)} factors: {list(self.factors.keys())} ({ml_status})"
+    
+    # Enhanced feature signal generation methods
+    def _generate_rsi_signal_from_enhanced(self, rsi_series: pd.Series, indicators: Dict) -> float:
+        """Generate RSI signal from enhanced features"""
+        if len(rsi_series) == 0:
+            return 0.0
+            
+        current_rsi = rsi_series.iloc[-1]
+        oversold = indicators.get('rsi_oversold', 30)
+        overbought = indicators.get('rsi_overbought', 70)
+        
+        if current_rsi < oversold:
+            return 0.5  # Buy signal
+        elif current_rsi > overbought:
+            return -0.5  # Sell signal
+        else:
+            return 0.0  # Neutral
+    
+    def _generate_macd_signal_from_enhanced(self, df: pd.DataFrame, indicators: Dict) -> float:
+        """Generate MACD signal from enhanced features"""
+        if len(df) < 2:
+            return 0.0
+            
+        current_macd = df['macd'].iloc[-1]
+        current_signal = df['macd_signal'].iloc[-1]
+        current_histogram = df['macd_histogram'].iloc[-1]
+        
+        threshold = indicators.get('macd_threshold', 0.001)
+        
+        # MACD crossover signal
+        if current_macd > current_signal and abs(current_macd - current_signal) > threshold:
+            return 0.5  # Buy signal
+        elif current_macd < current_signal and abs(current_macd - current_signal) > threshold:
+            return -0.5  # Sell signal
+        else:
+            return 0.0  # Neutral
+    
+    def _generate_bb_signal_from_enhanced(self, df: pd.DataFrame, indicators: Dict) -> float:
+        """Generate Bollinger Bands signal from enhanced features"""
+        if len(df) == 0:
+            return 0.0
+            
+        current_price = df['close'].iloc[-1]
+        upper_band = df['bb_upper'].iloc[-1]
+        lower_band = df['bb_lower'].iloc[-1]
+        
+        threshold = indicators.get('bollinger_threshold', 0.02)
+        
+        # Price position relative to bands
+        if current_price < lower_band and abs(current_price - lower_band) / current_price > threshold:
+            return 0.5  # Buy signal (oversold)
+        elif current_price > upper_band and abs(current_price - upper_band) / current_price > threshold:
+            return -0.5  # Sell signal (overbought)
+        else:
+            return 0.0  # Neutral
+    
+    def _generate_momentum_signal_from_enhanced(self, df: pd.DataFrame) -> float:
+        """Generate momentum signal from enhanced features"""
+        if len(df) == 0:
+            return 0.0
+            
+        # Use price change features
+        price_change = df['price_change'].iloc[-1]
+        price_change_5d = df['price_change_5d'].iloc[-1] if 'price_change_5d' in df.columns else 0.0
+        
+        # Combine short-term and medium-term momentum
+        momentum_signal = (price_change + price_change_5d) / 2
+        
+        # Normalize to [-0.5, 0.5] range
+        return np.clip(momentum_signal * 10, -0.5, 0.5)
+    
+    def _generate_volatility_signal_from_enhanced(self, df: pd.DataFrame) -> float:
+        """Generate volatility signal from enhanced features"""
+        if len(df) == 0:
+            return 0.0
+            
+        # Use volatility features
+        volatility = df['volatility'].iloc[-1] if 'volatility' in df.columns else 0.0
+        
+        # Volatility signal (higher volatility = lower signal)
+        signal = 1.0 - volatility  # Inverse relationship
+        return np.clip(signal, -1.0, 1.0) 
