@@ -24,6 +24,9 @@ from core_structure.infrastructure.config.enhanced_config_manager import (
 from core_structure.performance.benchmark_analyzer import BenchmarkAnalyzer
 from utils.data_integration import DataIntegrationManager
 
+# Add Core System SignalGenerator import
+from core_structure.signal_generation.signal_generator import SignalGenerator, SignalConfig, TradingSignal
+
 logger = logging.getLogger(__name__)
 
 class EnhancedBacktestingEngine:
@@ -36,6 +39,20 @@ class EnhancedBacktestingEngine:
         self.data = {}
         self.results = {}
         self.optimization_history = []
+        
+        # Initialize Core System SignalGenerator for consistency
+        self.core_signal_generator = None
+        try:
+            signal_config = SignalConfig(
+                lookback_window=60,
+                min_confidence_threshold=0.6,
+                enable_ml_features=True,
+                enable_real_time=False  # Disable for backtesting
+            )
+            self.core_signal_generator = SignalGenerator(signal_config)
+            logger.info("Core System SignalGenerator initialized for backtesting consistency")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Core SignalGenerator: {e}")
         
         # Load configuration
         if config_path:
@@ -361,7 +378,14 @@ class EnhancedBacktestingEngine:
                 
                 # Generate signals for current interval
                 try:
-                    signals = self.strategy.generate_signals(current_data)
+                    # Use Core System SignalGenerator if available for consistency
+                    if self.core_signal_generator is not None:
+                        signals = self._generate_signals_with_core_system(current_data, current_date)
+                        logger.info(f"Using Core System SignalGenerator for signal generation")
+                    else:
+                        signals = self.strategy.generate_signals(current_data)
+                        logger.info(f"Using strategy SignalGenerator for signal generation")
+                    
                     if isinstance(signals, dict):
                         signal_count = len(signals)
                         non_zero_signals = sum(1 for s in signals.values() if abs(s) > 0)
@@ -932,3 +956,65 @@ class EnhancedBacktestingEngine:
             'portfolio_history': [100000.0],
             'rebalancing_intervals': 0
         } 
+
+    def _generate_signals_with_core_system(self, current_data: Dict[str, pd.DataFrame], current_date: pd.Timestamp) -> Dict[str, float]:
+        """Generate signals using Core System's SignalGenerator for consistency"""
+        if self.core_signal_generator is None:
+            logger.warning("Core SignalGenerator not available, falling back to strategy signals")
+            return self.strategy.generate_signals(current_data)
+        
+        signals = {}
+        logger.info(f"Generating signals using Core System SignalGenerator for {len(current_data)} symbols")
+        
+        for symbol, df in current_data.items():
+            try:
+                # Use Core System's SignalGenerator
+                trading_signal = self.core_signal_generator.generate_signal(
+                    symbol_pair=symbol,
+                    market_data=df,
+                    real_time_data=None
+                )
+                
+                if trading_signal:
+                    # Convert TradingSignal to simple float for backtesting compatibility
+                    signal_value = self._convert_trading_signal_to_float(trading_signal)
+                    signals[symbol] = signal_value
+                    logger.debug(f"Core signal for {symbol}: {signal_value:.4f}")
+                else:
+                    signals[symbol] = 0.0
+                    
+            except Exception as e:
+                logger.error(f"Failed to generate core signal for {symbol}: {e}")
+                signals[symbol] = 0.0
+        
+        logger.info(f"Generated {len(signals)} signals using Core System")
+        return signals
+    
+    def _convert_trading_signal_to_float(self, trading_signal: TradingSignal) -> float:
+        """Convert Core System TradingSignal to simple float for backtesting"""
+        # Map signal types to float values
+        signal_mapping = {
+            'LONG': 1.0,
+            'SHORT': -1.0,
+            'HOLD': 0.0,
+            'CLOSE_LONG': 0.5,
+            'CLOSE_SHORT': -0.5
+        }
+        
+        base_signal = signal_mapping.get(trading_signal.signal_type.name, 0.0)
+        
+        # Adjust by confidence and strength
+        adjusted_signal = base_signal * trading_signal.confidence
+        
+        # Apply regime adjustments if available
+        if trading_signal.regime and trading_signal.regime != 'UNKNOWN':
+            regime_adjustments = {
+                'TRENDING': 1.2,
+                'MEAN_REVERTING': 0.8,
+                'VOLATILE': 0.6,
+                'STABLE': 1.5
+            }
+            regime_multiplier = regime_adjustments.get(trading_signal.regime.value, 1.0)
+            adjusted_signal *= regime_multiplier
+        
+        return adjusted_signal 
