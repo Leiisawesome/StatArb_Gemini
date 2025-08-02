@@ -72,7 +72,6 @@ class MultiFactorEnsembleStrategy:
         self.trade_history = []
         self.factor_signals = {}
         self.performance_metrics = {}
-        self.optimization_results = {}  # Add optimization results storage
         
         # Initialize FeatureEngineer if available
         self.feature_engineer = None
@@ -545,165 +544,13 @@ class MultiFactorEnsembleStrategy:
         return positions
     
     def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get performance metrics for the strategy"""
+        """Get strategy performance metrics"""
         return {
-            'total_return': 0.0,  # Placeholder
-            'sharpe_ratio': 0.0,  # Placeholder
-            'max_drawdown': 0.0,  # Placeholder
-            'volatility': 0.0,    # Placeholder
-            'factor_performance': self.factor_signals
+            'portfolio_value': self.portfolio_value,
+            'total_positions': len(self.positions),
+            'factor_signals': self.factor_signals,
+            'trade_history': self.trade_history
         }
-    
-    def optimize_parameters(self) -> Dict[str, Any]:
-        """Optimize multi-factor ensemble parameters based on performance"""
-        try:
-            # Calculate current performance metrics
-            current_metrics = self.get_performance_metrics()
-            
-            # Initialize optimization results
-            optimization_results = {
-                'current_metrics': current_metrics,
-                'optimization_score': 0.0,
-                'recommended_adjustments': {},
-                'factor_optimization': {}
-            }
-            
-            # Get current factor weights
-            current_weights = {}
-            for factor_config in self.config.factors:
-                factor_name = factor_config.factor_type.value
-                current_weights[factor_name] = factor_config.weight
-            
-            # Optimize based on performance metrics
-            sharpe_ratio = current_metrics.get('sharpe_ratio', 0.0)
-            total_return = current_metrics.get('total_return', 0.0)
-            max_drawdown = current_metrics.get('max_drawdown', 0.0)
-            
-            # Factor-specific optimization based on performance
-            factor_adjustments = {}
-            
-            if sharpe_ratio < 0.5:  # Low Sharpe ratio - need improvement
-                logger.info("Low Sharpe ratio detected - optimizing factor weights")
-                
-                # Increase technical factor weight (more reliable signals)
-                factor_adjustments['technical'] = min(current_weights.get('technical', 0.4) * 1.2, 0.6)
-                
-                # Decrease momentum weight (may be too volatile)
-                factor_adjustments['momentum'] = max(current_weights.get('momentum', 0.3) * 0.8, 0.1)
-                
-                # Adjust mean reversion and volatility weights
-                factor_adjustments['mean_reversion'] = current_weights.get('mean_reversion', 0.2)
-                factor_adjustments['volatility'] = current_weights.get('volatility', 0.1)
-                
-                # Normalize weights to sum to 1.0
-                total_weight = sum(factor_adjustments.values())
-                for factor in factor_adjustments:
-                    factor_adjustments[factor] /= total_weight
-                
-                optimization_results['optimization_score'] = min(sharpe_ratio / 0.5, 1.0)
-                
-            elif sharpe_ratio > 1.0:  # High Sharpe ratio - current weights working well
-                logger.info("High Sharpe ratio detected - maintaining current weights")
-                factor_adjustments = current_weights
-                optimization_results['optimization_score'] = min(sharpe_ratio / 1.5, 1.0)
-                
-            else:  # Moderate performance - fine-tune
-                logger.info("Moderate performance - fine-tuning factor weights")
-                
-                # Slight adjustments based on performance
-                factor_adjustments = current_weights.copy()
-                
-                # Increase best performing factor slightly
-                if 'technical' in self.factor_signals:
-                    factor_adjustments['technical'] = min(current_weights.get('technical', 0.4) * 1.1, 0.5)
-                
-                # Normalize weights
-                total_weight = sum(factor_adjustments.values())
-                for factor in factor_adjustments:
-                    factor_adjustments[factor] /= total_weight
-                
-                optimization_results['optimization_score'] = min(sharpe_ratio / 1.0, 1.0)
-            
-            # Threshold optimization
-            threshold_adjustments = {}
-            if max_drawdown > 0.15:  # High drawdown - increase thresholds
-                logger.info("High drawdown detected - increasing signal thresholds")
-                threshold_adjustments['signal_threshold'] = min(self.config.signal_threshold * 1.2, 0.25)
-                threshold_adjustments['max_positions'] = max(self.config.max_positions - 2, 10)
-            elif max_drawdown < 0.05:  # Low drawdown - can be more aggressive
-                logger.info("Low drawdown detected - decreasing signal thresholds")
-                threshold_adjustments['signal_threshold'] = max(self.config.signal_threshold * 0.8, 0.05)
-                threshold_adjustments['max_positions'] = min(self.config.max_positions + 2, 25)
-            
-            # Compile recommended adjustments
-            optimization_results['recommended_adjustments'] = {
-                'factor_weights': factor_adjustments,
-                'thresholds': threshold_adjustments,
-                'optimization_reason': f"Sharpe: {sharpe_ratio:.3f}, Drawdown: {max_drawdown:.3f}"
-            }
-            
-            # Factor-specific optimization analysis
-            for factor_name, factor_config in self.factors.items():
-                factor_performance = self._analyze_factor_performance(factor_name)
-                optimization_results['factor_optimization'][factor_name] = factor_performance
-            
-            # Store optimization results
-            self.optimization_results = optimization_results
-            
-            logger.info(f"Multi-factor parameter optimization completed - score: {optimization_results['optimization_score']:.4f}")
-            logger.info(f"Recommended factor weights: {factor_adjustments}")
-            
-            return optimization_results
-            
-        except Exception as e:
-            logger.error(f"Multi-factor parameter optimization failed: {e}")
-            return {
-                'current_metrics': {},
-                'optimization_score': 0.0,
-                'recommended_adjustments': {},
-                'error': str(e)
-            }
-    
-    def _analyze_factor_performance(self, factor_name: str) -> Dict[str, Any]:
-        """Analyze performance of individual factors"""
-        try:
-            factor_performance = {
-                'factor_name': factor_name,
-                'signal_count': 0,
-                'avg_signal_strength': 0.0,
-                'performance_score': 0.0
-            }
-            
-            # Count signals from this factor
-            signal_count = 0
-            total_strength = 0.0
-            
-            for symbol, signals in self.factor_signals.items():
-                if factor_name in signals:
-                    signal_strength = abs(signals[factor_name])
-                    if signal_strength > 0:
-                        signal_count += 1
-                        total_strength += signal_strength
-            
-            factor_performance['signal_count'] = signal_count
-            factor_performance['avg_signal_strength'] = total_strength / signal_count if signal_count > 0 else 0.0
-            
-            # Calculate performance score (simplified)
-            factor_performance['performance_score'] = min(
-                (signal_count * factor_performance['avg_signal_strength']) / 100, 1.0
-            )
-            
-            return factor_performance
-            
-        except Exception as e:
-            logger.error(f"Factor performance analysis failed for {factor_name}: {e}")
-            return {
-                'factor_name': factor_name,
-                'signal_count': 0,
-                'avg_signal_strength': 0.0,
-                'performance_score': 0.0,
-                'error': str(e)
-            }
     
     def get_strategy_summary(self) -> str:
         """Get strategy summary"""

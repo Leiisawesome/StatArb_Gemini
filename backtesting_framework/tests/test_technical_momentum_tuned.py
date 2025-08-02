@@ -30,11 +30,11 @@ class TechnicalMomentumTunedTest:
     
     def __init__(self):
         self.config_manager = EnhancedConfigManager()
-        self.engine = EnhancedBacktestingEngine()
+        self.initial_capital = 100000
+        self.engine = EnhancedBacktestingEngine(initial_capital=self.initial_capital)
         self.results = {}
         
         # Test state
-        self.initial_capital = 100000
         self.trade_history = []
         
     def run_test(self):
@@ -79,9 +79,13 @@ class TechnicalMomentumTunedTest:
         logger.info("Step 5: Analyzing results...")
         analysis = self._analyze_tuned_results(results)
         
-        # Step 6: Save results
-        logger.info("Step 6: Saving results...")
+        # Step 6: Save results and optimized parameters
+        logger.info("Step 6: Saving results and optimized parameters...")
         self._save_tuned_results(results, analysis)
+        self._save_optimized_parameters_for_core_system(results, analysis)
+        
+        # Display integration status
+        self._display_integration_status()
         
         logger.info("Tuned test completed successfully!")
         return results, analysis
@@ -200,10 +204,22 @@ class TechnicalMomentumTunedTest:
         trades_executed = results.get('trades_executed', 0)
         signal_details = results.get('signal_details', [])
         
+        # Count actual signals (not trades) for signal analysis
+        long_signals = len([s for s in signal_details if s.get('type') == 'LONG'])
+        short_signals = len([s for s in signal_details if s.get('type') == 'SHORT'])
+        
+        # For trade analysis, we need to estimate based on signals since we don't have actual trade details
+        # This is a rough approximation - in a real system, we'd have separate trade records
+        estimated_long_trades = int(trades_executed * (long_signals / (long_signals + short_signals)) if (long_signals + short_signals) > 0 else 0)
+        estimated_short_trades = trades_executed - estimated_long_trades
+        
         return {
             'total_trades': trades_executed,
-            'long_trades': len([s for s in signal_details if s.get('type') == 'LONG']),
-            'short_trades': len([s for s in signal_details if s.get('type') == 'SHORT']),
+            'long_trades': estimated_long_trades,
+            'short_trades': estimated_short_trades,
+            'total_signals': len(signal_details),
+            'long_signals': long_signals,
+            'short_signals': short_signals,
             'trades_per_symbol': self._count_trades_per_symbol(signal_details),
             'avg_trade_size': 1000,  # Default trade size
             'trade_frequency': trades_executed / 180  # trades per day over 6 months
@@ -306,6 +322,160 @@ class TechnicalMomentumTunedTest:
         
         logger.info(f"Tuned results saved to {results_filename}")
         logger.info(f"Tuned analysis saved to {analysis_filename}")
+    
+    def _save_optimized_parameters_for_core_system(self, results: Dict, analysis: Dict):
+        """Save optimized parameters in format that core system can load for real-time trading"""
+        
+        # Extract performance metrics
+        backtest_results = results.get('backtest_results', results)
+        performance_metrics = backtest_results.get('portfolio_performance', {})
+        
+        # Define the optimized parameters that were used in the test
+        optimized_parameters = {
+            'factors': [
+                {
+                    'factor_type': 'technical',
+                    'lookback_period': 14,
+                    'threshold': 0.05,
+                    'weight': 0.4,
+                    'indicators': {
+                        'rsi_period': 10,
+                        'macd_fast': 8,
+                        'macd_slow': 21,
+                        'macd_signal': 7,
+                        'bollinger_period': 15,
+                        'bollinger_std': 1.5,
+                        'rsi_oversold': 35,
+                        'rsi_overbought': 65,
+                        'macd_threshold': 0.0005,
+                        'bollinger_threshold': 0.01
+                    }
+                },
+                {
+                    'factor_type': 'momentum',
+                    'lookback_period': 60,
+                    'threshold': 0.03,
+                    'weight': 0.3
+                },
+                {
+                    'factor_type': 'mean_reversion',
+                    'lookback_period': 30,
+                    'threshold': 0.08,
+                    'weight': 0.2
+                },
+                {
+                    'factor_type': 'volatility',
+                    'lookback_period': 20,
+                    'threshold': 0.10,
+                    'weight': 0.1
+                }
+            ],
+            'signal_threshold': 0.03,
+            'max_positions': 20,
+            'max_position_value': 15000,
+            'ensemble_method': 'adaptive_weighting',
+            'factor_combination_method': 'weighted_sum',
+            'max_factors_per_asset': 4,
+            'initial_capital': 100000,
+            'trading_config': {
+                'rebalancing_frequency': 'intraday',
+                'rebalancing_interval': '5min',
+                'min_trade_size': 50,
+                'max_trades_per_day': 30,
+                'commission_rate': 0.0005,
+                'slippage': 0.0001
+            },
+            'risk_limits': {
+                'max_daily_loss': 0.02,
+                'max_drawdown': 0.15,
+                'max_position_size': 0.15,
+                'max_sector_exposure': 0.35,
+                'max_single_stock_weight': 0.08
+            }
+        }
+        
+        # Save using core system's method
+        try:
+            # Set up training configuration for the config manager
+            if not hasattr(self.config_manager, 'current_config') or self.config_manager.current_config is None:
+                # Create a basic config if none exists
+                from core_structure.infrastructure.config.enhanced_config_manager import Environment, TrainingConfig
+                self.config_manager.current_config = type('Config', (), {
+                    'training': TrainingConfig(
+                        start_date="2023-01-01",
+                        end_date="2024-12-31"
+                    )
+                })()
+            
+            self.config_manager.save_optimized_parameters(
+                strategy_name="technical_momentum_strategy_tuned",
+                parameters=optimized_parameters,
+                performance_metrics=performance_metrics
+            )
+            logger.info("✅ Optimized parameters saved for core system deployment")
+        except Exception as e:
+            logger.error(f"❌ Failed to save optimized parameters for core system: {e}")
+            # Fallback: save to results directory
+            self._save_optimized_parameters_fallback(optimized_parameters, performance_metrics)
+    
+    def _save_optimized_parameters_fallback(self, parameters: Dict, performance_metrics: Dict):
+        """Fallback method to save optimized parameters if core system method fails"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Ensure results directory exists
+        os.makedirs("results", exist_ok=True)
+        
+        # Save optimized parameters
+        param_filename = f"results/technical_momentum_strategy_tuned_optimized_params_{timestamp}.json"
+        param_data = {
+            'parameters': parameters,
+            'performance_metrics': performance_metrics,
+            'optimization_date': datetime.now().isoformat(),
+            'strategy_name': 'technical_momentum_strategy_tuned',
+            'deployment_ready': True,
+            'notes': 'Optimized parameters ready for core system deployment'
+        }
+        
+        with open(param_filename, 'w') as f:
+            json.dump(param_data, f, indent=2, default=str)
+        
+        logger.info(f"📁 Optimized parameters saved to {param_filename} (fallback)")
+    
+    def _display_integration_status(self):
+        """Display the integration status of all modules"""
+        try:
+            integration_status = self.engine.get_integration_status()
+            
+            print("\n" + "="*60)
+            print("🔧 BACKTESTING FRAMEWORK INTEGRATION STATUS")
+            print("="*60)
+            
+            status_icons = {True: "✅", False: "❌"}
+            
+            for module, status in integration_status.items():
+                icon = status_icons[status]
+                module_name = module.replace('_', ' ').title()
+                print(f"{icon} {module_name}: {'ACTIVE' if status else 'NOT AVAILABLE'}")
+            
+            active_modules = sum(integration_status.values())
+            total_modules = len(integration_status)
+            integration_percentage = (active_modules / total_modules) * 100
+            
+            print(f"\n📊 Integration Completeness: {integration_percentage:.1f}% ({active_modules}/{total_modules} modules)")
+            
+            if integration_percentage >= 80:
+                print("🎉 Excellent integration! All major modules are active.")
+            elif integration_percentage >= 60:
+                print("✅ Good integration! Most modules are active.")
+            elif integration_percentage >= 40:
+                print("⚠️  Partial integration. Some modules are missing.")
+            else:
+                print("❌ Limited integration. Many modules are not available.")
+            
+            print("="*60)
+            
+        except Exception as e:
+            logger.error(f"Failed to display integration status: {e}")
 
 def main():
     """Main execution function"""
@@ -346,9 +516,15 @@ def main():
     print(f"  Trade Frequency: {trade_analysis.get('trade_frequency', 0):.2f} trades/day")
     
     # Signal Analysis
-    signal_analysis = analysis.get('performance_analysis', {}).get('signal_analysis', {})
     print(f"\nSignal Analysis:")
-    print(f"  Total Signals: {signal_analysis.get('total_signals', 0)}")
+    print(f"  Total Signals: {trade_analysis.get('total_signals', 0)}")
+    print(f"  Long Signals: {trade_analysis.get('long_signals', 0)}")
+    print(f"  Short Signals: {trade_analysis.get('short_signals', 0)}")
+    print(f"  Signal-to-Trade Ratio: {trade_analysis.get('total_signals', 0) / trade_analysis.get('total_trades', 1):.2f}")
+    
+    # Signal Quality Analysis
+    signal_analysis = analysis.get('performance_analysis', {}).get('signal_analysis', {})
+    print(f"\nSignal Quality Analysis:")
     print(f"  Strong Signals: {signal_analysis.get('strong_signals', 0)}")
     print(f"  Weak Signals: {signal_analysis.get('weak_signals', 0)}")
     print(f"  Avg Signal Strength: {signal_analysis.get('avg_signal_strength', 0):.4f}")

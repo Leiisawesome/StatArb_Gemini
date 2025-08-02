@@ -245,6 +245,15 @@ logs/
 Tests/mvs/logs/
 Tests/mvs/results/
 
+# Test results (keep only latest)
+results/*.json
+!results/README.md
+
+# Temporary test files
+test_*.py
+*_test.py
+!backtesting_framework/tests/
+
 # Stop ignoring the tests folder
 !tests/
 !tests/**
