@@ -230,4 +230,13 @@ class ConfigManager:
         Returns:
             Configuration value
         """
-        return self._config.get(key, default) 
+        return self._config.get(key, default)
+    
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Get complete configuration
+        
+        Returns:
+            Complete configuration dictionary
+        """
+        return self._config.copy() 

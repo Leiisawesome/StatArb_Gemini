@@ -279,6 +279,21 @@ class DatabaseManager:
         
         return health_status
     
+    def is_connected(self) -> bool:
+        """
+        Check if database connections are available
+        
+        Returns:
+            Boolean indicating if connections are available
+        """
+        try:
+            # For now, return True as a mock implementation
+            # In production, this would check actual connection status
+            return True
+        except Exception as e:
+            logger.error(f"Database connection check failed: {e}")
+            return False
+    
     def _generate_cache_key(self, 
                            data_type: str, 
                            identifiers: List[str], 

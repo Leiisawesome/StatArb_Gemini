@@ -101,6 +101,23 @@ class MetricsCollector:
             'timestamp': datetime.now()
         })
     
+    def record_metric(self, metric_name: str, value: float, tags: Optional[Dict[str, str]] = None):
+        """
+        Record a generic metric value
+        
+        Args:
+            metric_name: Name of the metric
+            value: Metric value
+            tags: Optional tags for metric categorization
+        """
+        self._metric_queue.put({
+            'type': 'metric',
+            'name': metric_name,
+            'value': value,
+            'tags': tags or {},
+            'timestamp': datetime.now()
+        })
+    
     def set_alert_threshold(
         self,
         metric_name: str,
@@ -243,6 +260,27 @@ class MetricsCollector:
             ]
         
         self._last_aggregation = now
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get all current metrics
+        
+        Returns:
+            Dictionary containing all current metrics
+        """
+        return {
+            'counters': dict(self._counters),
+            'gauges': dict(self._gauges),
+            'latency_metrics': {
+                name: [{'timestamp': m.timestamp.isoformat(), 'value': m.value, 'tags': m.tags} 
+                       for m in values[-10:]]  # Last 10 values
+                for name, values in self._metrics.items()
+            },
+            'alert_thresholds': dict(self._alert_thresholds),
+            'total_metrics': len(self._metrics),
+            'total_counters': len(self._counters),
+            'total_gauges': len(self._gauges)
+        }
     
     def __del__(self):
         """Cleanup"""
