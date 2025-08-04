@@ -99,8 +99,8 @@ git clone <repository-url>
 cd StatArb_Gemini
 
 # Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv ai_integration_env
+source ai_integration_env/bin/activate  # On Windows: ai_integration_env\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt

@@ -257,3 +257,18 @@ test_*.py
 # Stop ignoring the tests folder
 !tests/
 !tests/**
+
+# Test logs and temporary directories
+test_logs/
+test_logs_*/
+*.test.log
+integration_test_logs/
+
+# Temporary validation files
+validation/*_validation.py
+!validation/README.md
+
+# Analysis files (temporary)
+analysis/
+*.analysis.json
+*.report.json
