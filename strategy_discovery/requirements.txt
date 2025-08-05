@@ -1,0 +1,40 @@
+# Hybrid Strategy Discovery System Requirements
+
+# Core dependencies
+numpy>=1.21.0
+pandas>=1.3.0
+requests>=2.25.0
+jsonschema>=3.2.0
+
+# Academic paper mining
+arxiv>=1.4.0
+scholarly>=1.7.0
+beautifulsoup4>=4.9.0
+lxml>=4.6.0
+
+# NLP and text processing
+nltk>=3.6.0
+spacy>=3.1.0
+textblob>=0.15.0
+
+# Machine learning and optimization
+scikit-learn>=1.0.0
+scipy>=1.7.0
+optuna>=2.10.0
+
+# Data handling
+yfinance>=0.1.70
+alpha-vantage>=2.3.0
+polygon-api-client>=1.0.0
+
+# Logging and monitoring
+loguru>=0.5.0
+
+# Testing
+pytest>=6.2.0
+pytest-cov>=2.12.0
+
+# Development
+black>=21.0.0
+flake8>=3.9.0
+mypy>=0.910 

@@ -239,9 +239,9 @@ class EnhancedBacktestingEngine:
                     logger.info(f"MultiFactorEnsembleStrategy initialized successfully with direct configuration")
                 else:
                     # Fallback to the original conversion method if needed
-                    multi_factor_config = self._convert_to_multi_factor_config(strategy_config)
-                    self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
-                    self.strategy.initialize(self.data)
+                multi_factor_config = self._convert_to_multi_factor_config(strategy_config)
+                self.strategy = MultiFactorEnsembleStrategy(multi_factor_config)
+                self.strategy.initialize(self.data)
                     logger.info(f"MultiFactorEnsembleStrategy initialized successfully with conversion")
             else:
                 # Default to EnhancedAcademicStrategy
@@ -437,19 +437,19 @@ class EnhancedBacktestingEngine:
     
     def _execute_trades(self, signals: List, data: Dict[str, pd.DataFrame]) -> List[Dict]:
         """Execute trades based on signals (simplified implementation)"""
-        trades = []
+                trades = []
         
         for signal in signals:
             if signal.symbol in data:
-                trade = {
+                        trade = {
                     'symbol': signal.symbol,
                     'type': signal.signal_type.value,
                     'price': signal.price,
                     'timestamp': signal.timestamp,
                     'confidence': signal.confidence
-                }
-                trades.append(trade)
-        
+                        }
+                        trades.append(trade)
+                
         return trades
     
     def _execute_backtest_with_rebalancing(self, data: Dict[str, pd.DataFrame], rebalancing_interval_minutes: int = 5) -> Dict[str, Any]:
@@ -640,12 +640,12 @@ class EnhancedBacktestingEngine:
                             
                             # Record signals
                             all_signals.extend([
-                                {
-                                    'symbol': symbol,
-                                    'type': 'LONG' if signal > 0 else 'SHORT',
-                                    'confidence': abs(signal),
+                    {
+                        'symbol': symbol,
+                        'type': 'LONG' if signal > 0 else 'SHORT',
+                        'confidence': abs(signal),
                                     'timestamp': current_date.isoformat()
-                                } for symbol, signal in signals.items() if abs(signal) > 0
+                    } for symbol, signal in signals.items() if abs(signal) > 0
                             ])
                 
                 except Exception as e:
@@ -863,15 +863,15 @@ class EnhancedBacktestingEngine:
                     quantity = int(position_size / current_price)
                     
                     if quantity > 0:
-                        trade = {
+                trade = {
                             'symbol': symbol,
                             'type': 'LONG' if signal_strength > 0 else 'SHORT',
                             'price': current_price,
                             'timestamp': current_date,
                             'confidence': abs(signal_strength),
                             'quantity': quantity
-                        }
-                        trades.append(trade)
+                }
+                trades.append(trade)
         
         return trades
     
@@ -946,7 +946,7 @@ class EnhancedBacktestingEngine:
         # Calculate Sharpe ratio
         if volatility > 0:
             sharpe_ratio = (total_return - 0.02) / volatility  # Assuming 2% risk-free rate
-        else:
+            else:
             sharpe_ratio = 0.0
         
         return {
