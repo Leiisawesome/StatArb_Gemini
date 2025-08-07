@@ -35,7 +35,7 @@ from collections import defaultdict, deque
 
 # Core infrastructure imports
 try:
-    from ..infrastructure.config_manager import ConfigManager
+    from ..infrastructure.config import UnifiedConfigManager as ConfigManager
     from ..infrastructure.message_bus import MessageBus
     from ..infrastructure.metrics_collector import MetricsCollector
 except ImportError:

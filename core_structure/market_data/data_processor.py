@@ -19,7 +19,7 @@ import ta  # Technical analysis library
 from .feeds import MarketTick, DataType
 from ..infrastructure.messaging.message_bus import MessageBus
 from ..infrastructure.monitoring.metrics_collector import MetricsCollector
-from ..infrastructure.config.config_manager import ConfigManager
+from ..infrastructure.config import UnifiedConfigManager as ConfigManager
 
 
 class ProcessingStage(Enum):

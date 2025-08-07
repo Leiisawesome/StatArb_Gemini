@@ -22,7 +22,7 @@ This document outlines the implementation of a Hybrid Strategy Discovery system 
 
 **A. Academic Paper Mining Engine**
 ```python
-# File: strategy_discovery/academic_miner.py
+# File: docs/archive/strategy_discovery/academic_miner.py (ARCHIVED)
 class AcademicStrategyMiner:
     def __init__(self):
         self.sources = {
@@ -76,7 +76,7 @@ class AcademicStrategyMiner:
 
 **B. Public Repository Mining Engine**
 ```python
-# File: strategy_discovery/public_miner.py
+# File: docs/archive/strategy_discovery/public_miner.py (ARCHIVED)
 class PublicStrategyMiner:
     def __init__(self):
         self.repositories = {
@@ -103,7 +103,7 @@ class PublicStrategyMiner:
 
 **A. JSON Strategy Standard**
 ```python
-# File: strategy_discovery/standards.py
+# File: docs/archive/strategy_discovery/standards.py (ARCHIVED)
 STRATEGY_JSON_SCHEMA = {
     "type": "object",
     "properties": {
@@ -171,7 +171,7 @@ STRATEGY_JSON_SCHEMA = {
 
 **B. Strategy Converter**
 ```python
-# File: strategy_discovery/converter.py
+# File: docs/archive/strategy_discovery/converter.py (ARCHIVED)
 class StrategyConverter:
     def __init__(self):
         self.converters = {
@@ -204,7 +204,7 @@ class StrategyConverter:
 
 **A. Modern Technique Integration**
 ```python
-# File: strategy_discovery/enhancer.py
+# File: docs/archive/strategy_discovery/enhancer.py (ARCHIVED)
 class StrategyEnhancer:
     def __init__(self):
         self.enhancement_modules = {
@@ -249,7 +249,7 @@ class StrategyEnhancer:
 
 **B. Risk Management Enhancer**
 ```python
-# File: strategy_discovery/enhancers/risk_management.py
+# File: docs/archive/strategy_discovery/enhancers/risk_management.py (ARCHIVED)
 class RiskManagementEnhancer:
     def enhance(self, risk_management: dict) -> dict:
         """Enhance risk management with modern techniques"""
@@ -286,7 +286,7 @@ class RiskManagementEnhancer:
 
 **A. Meta-Strategy Generator**
 ```python
-# File: strategy_discovery/combiner.py
+# File: docs/archive/strategy_discovery/combiner.py (ARCHIVED)
 class StrategyCombiner:
     def __init__(self):
         self.combination_methods = {
@@ -326,7 +326,7 @@ class StrategyCombiner:
 
 **A. Multi-Level Validation**
 ```python
-# File: strategy_discovery/validator.py
+# File: docs/archive/strategy_discovery/validator.py (ARCHIVED)
 class StrategyValidator:
     def __init__(self):
         self.validators = {
@@ -370,7 +370,7 @@ class StrategyValidator:
 
 **B. Performance Validator**
 ```python
-# File: strategy_discovery/validators/performance.py
+# File: docs/archive/strategy_discovery/validators/performance.py (ARCHIVED)
 class PerformanceValidator:
     def __init__(self):
         self.minimum_criteria = {
@@ -405,7 +405,7 @@ class PerformanceValidator:
 
 **A. Strategy Parser Integration**
 ```python
-# File: strategy_discovery/integration/strategy_parser.py
+# File: docs/archive/strategy_discovery/integration/strategy_parser.py (ARCHIVED)
 class StrategyParserIntegration:
     def __init__(self):
         self.parser = StrategyParser()  # From existing Trading Strategy Layer
@@ -430,7 +430,7 @@ class StrategyParserIntegration:
 
 **B. Bridge Layer Integration**
 ```python
-# File: strategy_discovery/integration/bridge_layer.py
+# File: docs/archive/strategy_discovery/integration/bridge_layer.py (ARCHIVED)
 class BridgeLayerIntegration:
     def __init__(self):
         self.bridge_scripts = BridgeLayerScripts()  # From existing system
@@ -454,7 +454,7 @@ class BridgeLayerIntegration:
 
 **A. Strategy Deployment Pipeline**
 ```python
-# File: strategy_discovery/deployment.py
+# File: docs/archive/strategy_discovery/deployment.py (ARCHIVED)
 class StrategyDeploymentPipeline:
     def __init__(self):
         self.stages = [
@@ -496,7 +496,7 @@ class StrategyDeploymentPipeline:
 
 **A. Real-Time Performance Tracker**
 ```python
-# File: strategy_discovery/monitoring.py
+# File: docs/archive/strategy_discovery/monitoring.py (ARCHIVED)
 class PerformanceMonitor:
     def __init__(self):
         self.metrics_calculator = MetricsCalculator()
@@ -525,7 +525,7 @@ class PerformanceMonitor:
 
 **A. Continuous Optimization**
 ```python
-# File: strategy_discovery/optimizer.py
+# File: docs/archive/strategy_discovery/optimizer.py (ARCHIVED)
 class StrategyOptimizer:
     def __init__(self):
         self.optimization_methods = {

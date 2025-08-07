@@ -420,11 +420,35 @@ class FeatureEngine:
                     features['support_level'] = support
                     features['distance_to_support'] = (close.iloc[-1] - support) / close.iloc[-1]
             
+            # Williams %R (from backtesting feature engineering)
+            if len(high) > 14 and len(low) > 14:
+                features['williams_r'] = self._calculate_williams_r(data)
+            
             return features
             
         except Exception as e:
             logger.error(f"Technical feature generation failed: {e}")
             return {}
+    
+    def _calculate_williams_r(self, data: pd.DataFrame, window: int = 14) -> float:
+        """Calculate Williams %R (from backtesting feature engineering)"""
+        try:
+            if len(data) < window:
+                return 0.0
+            
+            high = data.get('high', data['close'])
+            low = data.get('low', data['close'])
+            close = data['close']
+            
+            highest_high = high.rolling(window=window).max()
+            lowest_low = low.rolling(window=window).min()
+            
+            williams_r = -100 * (highest_high - close) / (highest_high - lowest_low)
+            return williams_r.iloc[-1] if not pd.isna(williams_r.iloc[-1]) else 0.0
+            
+        except Exception as e:
+            logger.error(f"Williams %R calculation failed: {e}")
+            return 0.0
     
     async def _generate_statistical_features(self, data: pd.DataFrame) -> Dict[str, float]:
         """Generate statistical features"""

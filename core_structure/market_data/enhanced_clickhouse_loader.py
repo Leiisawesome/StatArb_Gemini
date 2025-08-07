@@ -19,7 +19,7 @@ import pickle
 
 from ..infrastructure.database.clickhouse_client import ClickHouseClient
 from ..infrastructure.monitoring.metrics_collector import MetricsCollector
-from ..infrastructure.config.config_manager import ConfigManager
+from ..infrastructure.config import UnifiedConfigManager as ConfigManager
 
 
 @dataclass

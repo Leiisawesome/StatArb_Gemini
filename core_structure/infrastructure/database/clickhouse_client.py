@@ -11,7 +11,7 @@ from functools import wraps
 import time
 
 from ..monitoring import MetricsCollector
-from ..config import ConfigManager
+from ..config import UnifiedConfigManager as ConfigManager
 
 logger = logging.getLogger(__name__)
 

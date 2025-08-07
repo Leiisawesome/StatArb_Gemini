@@ -12,8 +12,9 @@ from typing import Dict, Any
 
 from tests.integration.conftest import (
     test_config, mock_services, data_generator, 
-    signal_bridge, execution_bridge, risk_bridge, 
-    data_bridge, portfolio_bridge, config_bridge, analytics_bridge
+    # Bridge components removed - using core components directly
+# signal_bridge, execution_bridge, risk_bridge,
+# data_bridge, portfolio_bridge, config_bridge, analytics_bridge
 )
 from tests.integration.mock_services import (
     MockSignalGenerator, MockExecutionEngine, MockRiskManager, MockPortfolioManager,
@@ -310,13 +311,13 @@ class TestInfrastructureValidation:
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_bridge_components_initialization(self):
-        """Test that bridge components are properly initialized."""
+        """Test that bridge components are properly initialized (DEPRECATED - Bridge components removed)."""
         with monitoring_context("bridge_components_initialization") as logger:
-            logger.log_test_event("Validating bridge components")
+            logger.log_test_event("Validating bridge components (DEPRECATED)")
             
-            # For Batch 1, we'll just validate that the bridge infrastructure is ready
-            # The actual bridge testing will be done in Batch 2
-            logger.log_test_event("Bridge components infrastructure ready for Batch 2 testing", {
+            # Bridge components have been removed - core components are used directly
+            # This test is kept for historical reference but marked as deprecated
+            logger.log_test_event("Bridge components removed - using core components directly", {
                 'status': 'ready_for_batch_2'
             })
     

@@ -45,10 +45,10 @@ class TestEnvironmentConfig:
     mock_delay_ms: int = 1
     mock_failure_rate: float = 0.0
     
-    # Bridge settings
-    bridge_cache_enabled: bool = True
-    bridge_cache_ttl: int = 300
-    bridge_performance_tracking: bool = True
+    # Bridge settings (DEPRECATED - Bridge components removed)
+bridge_cache_enabled: bool = False
+bridge_cache_ttl: int = 0
+bridge_performance_tracking: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""

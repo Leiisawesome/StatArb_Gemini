@@ -1,8 +1,27 @@
 """
-Market Data Module
-Enhanced market data processing with real-time feeds and AI integration
+Enhanced Unified Market Data System
+==================================
+
+Professional market data management system consolidating all data functionality:
+- ClickHouse integration for high-performance data storage
+- Real-time data streaming and processing
+- Data quality monitoring and validation
+- Market regime detection and liquidity analysis
+- AI-ready data preparation and feature engineering
+- Unified data management with caching and streaming
 """
 
+from .enhanced_data_manager import (
+    EnhancedDataManager,
+    DataQualityMonitor,
+    DataStreamManager,
+    DataCache,
+    MarketDataConfig,
+    DataQualityThresholds,
+    DataStreamConfig
+)
+
+# Legacy exports for backward compatibility
 from .data_manager import DataManager
 from .feeds import (
     FeedManager, PolygonFeed, AlphaVantageFeed, 
@@ -19,6 +38,13 @@ except ImportError as e:
     print(f"Data processor not available due to missing dependencies: {e}")
 
 __all__ = [
+    'EnhancedDataManager',
+    'DataQualityMonitor',
+    'DataStreamManager',
+    'DataCache',
+    'MarketDataConfig',
+    'DataQualityThresholds',
+    'DataStreamConfig',
     'DataManager',
     'FeedManager', 
     'PolygonFeed', 

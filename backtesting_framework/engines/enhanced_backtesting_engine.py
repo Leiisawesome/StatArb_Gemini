@@ -18,28 +18,29 @@ import yaml
 from pathlib import Path
 
 from strategies.enhanced_academic_strategy import EnhancedAcademicStrategy
-from core_structure.infrastructure.config.enhanced_config_manager import (
-    EnhancedConfigManager, Environment
+from core_structure.infrastructure.config import (
+    UnifiedConfigManager, Environment
 )
 from core_structure.performance.benchmark_analyzer import BenchmarkAnalyzer
-from utils.data_integration import DataIntegrationManager
+from core_structure.market_data import EnhancedDataManager
 
 # Add Core System SignalGenerator import
 from core_structure.signal_generation.signal_generator import SignalGenerator, SignalConfig, TradingSignal
 
-# Portfolio Management Modules
-from portfolio.position_manager import PortfolioManager
-from portfolio.pnl_tracker import PnLTracker
-from portfolio.position_sizing import PositionSizing
+# Portfolio Management Modules - Using core system
+from core_structure.portfolio import PortfolioManager, PnLTracker
+# Position sizing moved to core risk management
+# from portfolio.position_sizing import PositionSizing
 
 # Execution System Modules
 from execution.order_manager import OrderManager
 from execution.smart_order_router import SmartOrderRouter
 from execution.transaction_cost_optimizer import TransactionCostOptimizer
 
-# Risk Management Modules
-from risk.risk_manager import RiskManager
-from risk.stop_loss_manager import StopLossManager
+# Risk Management Modules - Using core system
+from core_structure.risk import RiskManager
+# Stop loss functionality integrated into core RiskManager
+# from risk.stop_loss_manager import StopLossManager
 
 # Analytics Modules
 from analytics.factor_analyzer import FactorAnalyzer
@@ -62,7 +63,7 @@ class EnhancedBacktestingEngine:
     """Enhanced backtesting engine with academic foundations"""
     
     def __init__(self, config_path: str = None, initial_capital: float = 100000):
-        self.config_manager = EnhancedConfigManager()
+        self.config_manager = UnifiedConfigManager()
         self.config = None
         self.strategy = None
         self.data = {}
@@ -88,13 +89,14 @@ class EnhancedBacktestingEngine:
         try:
             self.portfolio_manager = PortfolioManager(initial_capital=initial_capital)
             self.pnl_tracker = PnLTracker()
-            self.position_sizer = PositionSizing(portfolio_value=initial_capital)
+            # Position sizing moved to core risk management
+            # self.position_sizer = PositionSizing(portfolio_value=initial_capital)
             logger.info("Portfolio management modules initialized successfully")
         except Exception as e:
             logger.warning(f"Failed to initialize portfolio modules: {e}")
             self.portfolio_manager = None
             self.pnl_tracker = None
-            self.position_sizer = None
+            # self.position_sizer = None
         
         # Initialize Execution System Modules
         try:
@@ -111,12 +113,13 @@ class EnhancedBacktestingEngine:
         # Initialize Risk Management Modules
         try:
             self.risk_manager = RiskManager()
-            self.stop_loss_manager = StopLossManager()
+            # Stop loss functionality integrated into core RiskManager
+            # self.stop_loss_manager = StopLossManager()
             logger.info("Risk management modules initialized successfully")
         except Exception as e:
             logger.warning(f"Failed to initialize risk modules: {e}")
             self.risk_manager = None
-            self.stop_loss_manager = None
+            # self.stop_loss_manager = None
         
         # Initialize Analytics Modules
         try:
@@ -171,7 +174,7 @@ class EnhancedBacktestingEngine:
     def load_data(self, symbols: List[str], start_date: str, end_date: str):
         """Load historical data for backtesting"""
         try:
-            data_loader = DataIntegrationManager()
+            data_loader = EnhancedDataManager()
             
             # Add SPY for benchmark analysis
             if 'SPY' not in symbols:
@@ -477,9 +480,10 @@ class EnhancedBacktestingEngine:
                 # Risk manager is already initialized
                 logger.info("Risk manager ready for backtesting")
             
-            if self.stop_loss_manager is not None:
-                # Stop loss manager is already initialized
-                logger.info("Stop loss manager ready for backtesting")
+            # Stop loss functionality integrated into core RiskManager
+            # if self.stop_loss_manager is not None:
+            #     # Stop loss manager is already initialized
+            #     logger.info("Stop loss manager ready for backtesting")
             
             # Initialize monitoring if available
             if self.performance_monitor is not None:
@@ -608,12 +612,12 @@ class EnhancedBacktestingEngine:
                                     except Exception as e:
                                         logger.warning(f"PnL tracking failed: {e}")
                                 
-                                # Update stop loss manager if available
-                                if self.stop_loss_manager is not None:
+                                # Update stop loss manager if available (using core risk manager)
+                                if self.risk_manager is not None:
                                     try:
                                         # Create stop loss for new positions
                                         if trade['type'] == 'LONG':
-                                            self.stop_loss_manager.create_stop_loss(
+                                            self.risk_manager.create_stop_loss(
                                                 symbol=trade['symbol'],
                                                 quantity=trade['quantity'],
                                                 avg_price=trade['price']
@@ -1659,8 +1663,8 @@ class EnhancedBacktestingEngine:
         
         logger.info(f"Calculating positions for {len(active_signals)} active signals with ${available_capital:,.2f} capital")
         
-        # Method 1: Try integrated position sizing first
-        if self.position_sizer is not None:
+        # Method 1: Try core risk manager position sizing first
+        if self.risk_manager is not None:
             try:
                 for symbol, signal in active_signals.items():
                     price = current_prices[symbol]
@@ -1668,25 +1672,25 @@ class EnhancedBacktestingEngine:
                         logger.warning(f"Invalid price for {symbol}: {price}")
                         continue
                     
-                    # Calculate position size using integrated position sizer
-                    position_size = self.position_sizer.calculate_position_size(
+                    # Calculate position size using core risk manager
+                    position_size_result = self.risk_manager.calculate_position_size(
                         symbol=symbol,
                         signal_strength=signal,
                         method="signal_strength"
                     )
                     
                     # Convert to quantity
-                    quantity = int((position_size * available_capital) / price)
+                    quantity = int((position_size_result.position_size * available_capital) / price)
                     
                     # Ensure minimum quantity
                     if quantity >= 1:  # Minimum 1 share
                         position_sizes[symbol] = quantity
-                        logger.debug(f"Integrated sizing: {symbol} = {quantity} shares")
+                        logger.debug(f"Core risk manager sizing: {symbol} = {quantity} shares")
                     else:
-                        logger.debug(f"Integrated sizing too small for {symbol}: {quantity}")
+                        logger.debug(f"Core risk manager sizing too small for {symbol}: {quantity}")
                         
             except Exception as e:
-                logger.warning(f"Integrated position sizing failed: {e}")
+                logger.warning(f"Core risk manager position sizing failed: {e}")
         
         # Method 2: If integrated sizing didn't work, use signal-weighted allocation
         if len(position_sizes) == 0:

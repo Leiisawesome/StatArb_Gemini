@@ -21,7 +21,7 @@ from queue import Queue, Empty
 
 from ..infrastructure.messaging.message_bus import MessageBus
 from ..infrastructure.monitoring.metrics_collector import MetricsCollector
-from ..infrastructure.config.config_manager import ConfigManager
+from ..infrastructure.config import UnifiedConfigManager as ConfigManager
 
 # Optional websocket dependency
 try:

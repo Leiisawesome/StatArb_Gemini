@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 
 # Import FeatureEngineer from ML module
 try:
-    from ..ml.feature_engineering import FeatureEngineer
+    # Feature engineering moved to core_structure/signal_generation/feature_engine.py
+# from ..ml.feature_engineering import FeatureEngineer
     FEATURE_ENGINEER_AVAILABLE = True
     logger = logging.getLogger(__name__)
     logger.info("FeatureEngineer from ML module available for integration")

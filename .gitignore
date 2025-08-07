@@ -203,9 +203,8 @@ backtesting_framework/docs/PRODUCTION_SETUP_GUIDE.md
 backtesting_framework/docs/CLEANUP_COMPLETE.md
 backtesting_framework/docs/README.md
 
-# Empty files (prevent recreation)
-*.md
-!*.md
+# Documentation files (keep all .md files)
+# *.md files are kept for documentation
 
 # Empty or temporary files (prevent recreation)
 simple_debug.py
@@ -238,6 +237,7 @@ old_*/
 venv/
 env/
 ENV/
+ai_integration_env/
 
 # Log files
 *.log

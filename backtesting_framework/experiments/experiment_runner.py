@@ -119,8 +119,8 @@ class ExperimentRunner:
         self.performance_analyzer = PerformanceAnalyzer()
         
         # Initialize data integration manager (required)
-        from utils.data_integration import DataIntegrationManager
-        self.data_integration = DataIntegrationManager(cache_data=True)
+        from core_structure.market_data import EnhancedDataManager
+        self.data_integration = EnhancedDataManager()
         
         # Results storage
         self.results: List[ExperimentResult] = []

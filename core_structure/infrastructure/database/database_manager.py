@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from .clickhouse_client import ClickHouseClient
 from .redis_client import RedisClient
 from .cache_strategy import CacheStrategy
-from ..config import ConfigManager
+from ..config import UnifiedConfigManager as ConfigManager
 from ..monitoring import MetricsCollector
 
 logger = logging.getLogger(__name__)

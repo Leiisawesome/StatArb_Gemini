@@ -1,59 +1,70 @@
 """
-Execution Engine Module
+Enhanced Unified Execution Engine Module
+======================================
 
-Professional-grade execution engine providing:
+Professional execution engine consolidating all execution functionality:
 - Advanced execution algorithms (TWAP, VWAP, Implementation Shortfall)
 - Smart order routing and venue selection
 - Market impact modeling and prediction
 - Transaction cost optimization
 - Order management with real-time tracking
 - Execution quality analytics
+- Unified execution management system
 
 This module transforms raw trading signals into optimal market executions
 with institutional-grade performance and risk controls.
 """
 
-from .execution_engine import ExecutionEngine, ExecutionResult, ExecutionStatus
-from .order_manager import OrderManager, Order, OrderStatus, OrderType, OrderSide
+from .enhanced_execution_engine import (
+    EnhancedExecutionEngine,
+    OrderManager,
+    SmartOrderRouter,
+    TransactionCostOptimizer,
+    Order,
+    OrderStatus,
+    OrderType,
+    OrderSide,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+    ExecutionStrategy,
+    ExecutionMetrics
+)
+
+# Legacy exports for backward compatibility
+from .execution_engine import ExecutionEngine
 from .market_impact import MarketImpactModel, MarketConditions, SquareRootImpactModel
-from .transaction_cost_optimizer import TransactionCostOptimizer, BrokerType
 from .advanced_algorithms import (
     TWAPAlgorithm, VWAPAlgorithm, ImplementationShortfallAlgorithm,
     PairExecutionCoordinator, ExecutionAlgorithmFactory
 )
-from .smart_order_router import SmartOrderRouter, VenueSelector, ExecutionVenue
 
 __all__ = [
-    # Core execution engine
-    'ExecutionEngine',
-    'ExecutionResult', 
-    'ExecutionStatus',
-    
-    # Order management
+    # Enhanced unified execution engine
+    'EnhancedExecutionEngine',
     'OrderManager',
+    'SmartOrderRouter',
+    'TransactionCostOptimizer',
     'Order',
     'OrderStatus',
     'OrderType',
     'OrderSide',
+    'ExecutionRequest',
+    'ExecutionResult',
+    'ExecutionStatus',
+    'ExecutionStrategy',
+    'ExecutionMetrics',
     
-    # Market impact and costs
+    # Legacy components
+    'ExecutionEngine',
     'MarketImpactModel',
     'SquareRootImpactModel',
     'MarketConditions',
-    'TransactionCostOptimizer',
-    'BrokerType',
-    
-    # Advanced algorithms
     'TWAPAlgorithm',
     'VWAPAlgorithm', 
     'ImplementationShortfallAlgorithm',
     'PairExecutionCoordinator',
-    'ExecutionAlgorithmFactory',
-    
-    # Smart routing
-    'SmartOrderRouter',
-    'VenueSelector',
-    'ExecutionVenue'
+    'ExecutionAlgorithmFactory'
 ]
 
-__version__ = "1.0.0" 
+__version__ = "2.0.0" 

@@ -6,7 +6,7 @@ The tests validate end-to-end functionality, performance, and reliability across
 
 Test Structure:
 - test_infrastructure.py: Core test infrastructure and utilities
-- test_bridge_infrastructure.py: Bridge architecture integration tests
+- test_bridge_infrastructure.py: Bridge architecture integration tests (ARCHIVED)
 - test_signal_generation_infrastructure.py: Signal generation integration tests
 - test_real_time_data_infrastructure.py: Real-time data processing tests
 - test_risk_management_infrastructure.py: Risk management integration tests

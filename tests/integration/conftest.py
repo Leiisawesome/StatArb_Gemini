@@ -17,8 +17,10 @@ import os
 import json
 
 # Import core system components (using mock versions for now)
-# These will be replaced with actual bridge components when they're implemented
-class SignalBridge:
+# Bridge components have been removed - using core components directly
+
+# Core Signal Generation
+class SignalGenerator:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -26,12 +28,13 @@ class SignalBridge:
     def clear_cache(self):
         pass
 
-class SignalBridgeConfig:
+class SignalConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class ExecutionBridge:
+# Core Execution Engine
+class ExecutionEngine:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -39,12 +42,13 @@ class ExecutionBridge:
     def clear_cache(self):
         pass
 
-class ExecutionBridgeConfig:
+class ExecutionConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class RiskBridge:
+# Core Risk Manager
+class RiskManager:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -52,12 +56,13 @@ class RiskBridge:
     def clear_cache(self):
         pass
 
-class RiskBridgeConfig:
+class RiskConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class DataBridge:
+# Core Data Manager
+class DataManager:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -65,12 +70,13 @@ class DataBridge:
     def clear_cache(self):
         pass
 
-class DataBridgeConfig:
+class DataConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class PortfolioBridge:
+# Core Portfolio Manager
+class PortfolioManager:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -78,12 +84,13 @@ class PortfolioBridge:
     def clear_cache(self):
         pass
 
-class PortfolioBridgeConfig:
+class PortfolioConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class ConfigBridge:
+# Core Config Manager
+class ConfigManager:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -91,12 +98,13 @@ class ConfigBridge:
     def clear_cache(self):
         pass
 
-class ConfigBridgeConfig:
+class ConfigConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-class AnalyticsBridge:
+# Core Analytics Engine
+class AnalyticsEngine:
     def __init__(self, config):
         self.config = config
         self.mode = config.get('mode', 'backtesting')
@@ -104,7 +112,7 @@ class AnalyticsBridge:
     def clear_cache(self):
         pass
 
-class AnalyticsBridgeConfig:
+class AnalyticsConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -359,115 +367,115 @@ def temp_test_dir():
 
 
 @pytest.fixture(scope="function")
-async def signal_bridge(test_config) -> SignalBridge:
-    """Provide SignalBridge instance for testing."""
-    config = SignalBridgeConfig(
+async def signal_generator(test_config) -> SignalGenerator:
+    """Provide SignalGenerator instance for testing."""
+    config = SignalConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = SignalBridge(config)
-    yield bridge
+    generator = SignalGenerator(config)
+    yield generator
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(generator, 'clear_cache'):
+        generator.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def execution_bridge(test_config) -> ExecutionBridge:
-    """Provide ExecutionBridge instance for testing."""
-    config = ExecutionBridgeConfig(
+async def execution_engine(test_config) -> ExecutionEngine:
+    """Provide ExecutionEngine instance for testing."""
+    config = ExecutionConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = ExecutionBridge(config)
-    yield bridge
+    engine = ExecutionEngine(config)
+    yield engine
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(engine, 'clear_cache'):
+        engine.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def risk_bridge(test_config) -> RiskBridge:
-    """Provide RiskBridge instance for testing."""
-    config = RiskBridgeConfig(
+async def risk_manager(test_config) -> RiskManager:
+    """Provide RiskManager instance for testing."""
+    config = RiskConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = RiskBridge(config)
-    yield bridge
+    manager = RiskManager(config)
+    yield manager
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(manager, 'clear_cache'):
+        manager.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def data_bridge(test_config) -> DataBridge:
-    """Provide DataBridge instance for testing."""
-    config = DataBridgeConfig(
+async def data_manager(test_config) -> DataManager:
+    """Provide DataManager instance for testing."""
+    config = DataConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = DataBridge(config)
-    yield bridge
+    manager = DataManager(config)
+    yield manager
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(manager, 'clear_cache'):
+        manager.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def portfolio_bridge(test_config) -> PortfolioBridge:
-    """Provide PortfolioBridge instance for testing."""
-    config = PortfolioBridgeConfig(
+async def portfolio_manager(test_config) -> PortfolioManager:
+    """Provide PortfolioManager instance for testing."""
+    config = PortfolioConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = PortfolioBridge(config)
-    yield bridge
+    manager = PortfolioManager(config)
+    yield manager
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(manager, 'clear_cache'):
+        manager.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def config_bridge(test_config) -> ConfigBridge:
-    """Provide ConfigBridge instance for testing."""
-    config = ConfigBridgeConfig(
+async def config_manager(test_config) -> ConfigManager:
+    """Provide ConfigManager instance for testing."""
+    config = ConfigConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = ConfigBridge(config)
-    yield bridge
+    manager = ConfigManager(config)
+    yield manager
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(manager, 'clear_cache'):
+        manager.clear_cache()
 
 
 @pytest.fixture(scope="function")
-async def analytics_bridge(test_config) -> AnalyticsBridge:
-    """Provide AnalyticsBridge instance for testing."""
-    config = AnalyticsBridgeConfig(
+async def analytics_engine(test_config) -> AnalyticsEngine:
+    """Provide AnalyticsEngine instance for testing."""
+    config = AnalyticsConfig(
         mode="backtesting",
         cache_enabled=True,
         cache_ttl=300,
         performance_tracking=True
     )
-    bridge = AnalyticsBridge(config)
-    yield bridge
+    engine = AnalyticsEngine(config)
+    yield engine
     # Cleanup
-    if hasattr(bridge, 'clear_cache'):
-        bridge.clear_cache()
+    if hasattr(engine, 'clear_cache'):
+        engine.clear_cache()
 
 
 @pytest.fixture(scope="function")

@@ -80,7 +80,7 @@ StatArb_Gemini/
 ├── validation/                    # Validation scripts
 ├── docs/                         # Documentation
 ├── tests/                        # Test suite
-├── examples/                     # Usage examples
+├── docs/archive/examples/        # Archived usage examples
 └── results/                      # Results and reports
     └── validation_reports/       # Validation reports
 ```
@@ -271,7 +271,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ### Getting Help
 - Check the documentation in the `docs/` directory
-- Review the examples in the `examples/` directory
+- Review the archived examples in the `docs/archive/examples/` directory
 - Run validation tests to verify system functionality
 
 ### Reporting Issues

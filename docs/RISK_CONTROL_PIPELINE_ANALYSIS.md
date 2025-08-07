@@ -255,7 +255,7 @@ def _calculate_robust_position_sizes(self, signals: Dict[str, float], portfolio_
 
 ### **Signal Approval Process:**
 ```python
-# examples/module_integration_examples.py
+# Archived example: docs/archive/examples/module_integration_examples.py
 async def risk_handler(message):
     if message.message_type == MessageType.COMMAND and message.payload.get('action') == 'check_risk':
         signal = message.payload.get('signal', {})

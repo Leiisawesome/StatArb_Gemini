@@ -33,7 +33,8 @@ class SystemIntegrator:
             
             # Import ML components
             from backtesting_framework.ml.model_registry import ModelRegistry
-            from backtesting_framework.ml.feature_engineering import FeatureEngineer
+            # Feature engineering moved to core_structure/signal_generation/feature_engine.py
+# from backtesting_framework.ml.feature_engineering import FeatureEngineer
             from backtesting_framework.ml.training_pipeline import TrainingPipeline
             
             # Initialize components

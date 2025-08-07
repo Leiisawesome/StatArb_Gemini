@@ -5,7 +5,8 @@ Phase 3: Advanced Analytics & Optimization - Batch 1
 """
 
 from .model_registry import ModelRegistry
-from .feature_engineering import FeatureEngineer
+# Feature engineering moved to core_structure/signal_generation/feature_engine.py
+# from .feature_engineering import FeatureEngineer
 from .training_pipeline import TrainingPipeline
 
 __all__ = [

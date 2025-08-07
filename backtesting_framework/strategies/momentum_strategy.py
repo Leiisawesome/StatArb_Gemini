@@ -172,8 +172,8 @@ class MomentumStrategy(BaseStrategy):
         """Initialize data manager with fallback"""
         if self._data_manager is None:
             try:
-                from utils.data_integration import DataIntegrationManager
-                self._data_manager = DataIntegrationManager(cache_data=True)
+                from core_structure.market_data import EnhancedDataManager
+                self._data_manager = EnhancedDataManager()
                 logger.info("Using core structure data manager")
             except ImportError as e:
                 logger.error(f"Core system not available - DataManager import failed: {e}")

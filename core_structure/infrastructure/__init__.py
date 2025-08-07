@@ -5,7 +5,7 @@ Provides core services and utilities for the application
 
 from .database.clickhouse_client import ClickHouseClient
 from .monitoring.metrics_collector import MetricsCollector
-from .config.config_manager import ConfigManager
+from .config import UnifiedConfigManager as ConfigManager
 from .messaging.message_bus import MessageBus, Message
 
 __all__ = [
