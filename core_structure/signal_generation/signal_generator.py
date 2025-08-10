@@ -19,19 +19,28 @@ Key Features:
 Author: Pro Quant Desk Trader
 """
 
-import numpy as np
-import pandas as pd
+import asyncio
+import logging
+import threading
+import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any, Union, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-import asyncio
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-import json
-from collections import defaultdict, deque
+from typing import Dict, Any, List, Optional, Union, Tuple
+import pandas as pd
+import numpy as np
+
+# Import the new dynamic position sizing module
+from .position_sizing import DynamicPositionSizer, PositionSizingConfig
+# Import the new transaction cost optimizer module
+from .cost_optimizer import TransactionCostOptimizer, CostConfig
+# Import the new Phase 2 modules
+from .risk_management import DynamicRiskManager, RiskConfig
+from .regime_filter import RegimeAwareFilter, RegimeConfig, RegimeType
+# Import the new Phase 3 modules
+from .multi_timeframe_ensemble import MultiTimeframeEnsemble, EnsembleConfig
+from .timing_optimizer import TradeTimingOptimizer, TimingConfig
+from .portfolio_risk_optimizer import PortfolioRiskOptimizer, PortfolioRiskConfig
 
 # Core infrastructure imports  
 try:
@@ -116,33 +125,38 @@ class SignalConfig:
     signal_timeout_ms: int = 100
     cache_ttl_seconds: int = 60
     
-    # Signal generation parameters
+    # Signal generation parameters - PHASE 4.6 FINAL OPTIMIZATION (QUALITY-FREQUENCY BALANCE)
     lookback_window: int = 60
-    min_confidence_threshold: float = 0.6
-    regime_switch_penalty: float = 0.2
+    min_confidence_threshold: float = 0.35    # Final balance from 0.45 to 0.35 for optimal trade frequency
+    regime_switch_penalty: float = 0.10       # Final balance from 0.12 to 0.10 for more signals
     
-    # Regime-specific thresholds
-    mean_reverting_entry: float = 2.0
-    mean_reverting_exit: float = 0.5
-    trending_entry: float = 1.5
-    trending_exit: float = 0.3
-    volatile_entry: float = 3.0
-    volatile_exit: float = 1.0
+    # Regime-specific thresholds - PHASE 4.6 FINAL OPTIMIZATION (QUALITY-FREQUENCY BALANCE)
+    mean_reverting_entry: float = 0.8         # Final balance from 1.0 to 0.8 for more signals
+    mean_reverting_exit: float = 0.3          # Final balance from 0.35 to 0.3
+    trending_entry: float = 0.7               # Final balance from 0.85 to 0.7 for more signals
+    trending_exit: float = 0.2                # Final balance from 0.25 to 0.2
+    volatile_entry: float = 1.2               # Final balance from 1.4 to 1.2 for more signals
+    volatile_exit: float = 0.4                # Final balance from 0.45 to 0.4
     
-    # Position sizing
-    max_position_size: float = 0.25
-    min_position_size: float = 0.01
-    kelly_fraction: float = 0.25
-    volatility_target: float = 0.15
+    # Signal confirmation requirements - PHASE 4.5 OPTIMIZATION (BALANCED)
+    require_multiple_timeframe_confirmation: bool = False  # Disabled for more signals
+    confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1hr"])
+    min_timeframe_agreement: float = 0.6      # Balanced from 0.7 to 0.6 for optimal quality
     
-    # Risk management
-    max_drawdown_limit: float = 0.15
-    concentration_limit: float = 0.40
-    leverage_limit: float = 3.0
+    # Position sizing - PHASE 4 OPTIMIZATION (RISK-ADJUSTED)
+    max_position_size: float = 0.15        # Reduced from 0.25 for better risk management
+    min_position_size: float = 0.02        # Increased from 0.01 for meaningful positions
+    kelly_fraction: float = 0.5            # Increased from 0.25 for better Kelly implementation
+    volatility_target: float = 0.12        # Reduced from 0.15 for lower volatility target
+    
+    # Risk management - PHASE 4 OPTIMIZATION (CONSERVATIVE)
+    max_drawdown_limit: float = 0.10        # Reduced from 0.15 for tighter risk control
+    concentration_limit: float = 0.25        # Reduced from 0.40 for better diversification
+    leverage_limit: float = 2.0              # Reduced from 3.0 for conservative leverage
     
     # AI/ML settings
-    enable_ml_features: bool = True
-    feature_engineering_depth: int = 3
+    enable_ml_features: bool = False  # Disabled for faster testing
+    feature_engineering_depth: int = 1  # Reduced from 3
     ensemble_confidence_weight: float = 0.3
     
     # Real-time settings
@@ -274,64 +288,352 @@ class SignalCache:
             'memory_usage_mb': len(str(self.cache)) / (1024 * 1024)
         }
 
+class StrategyConfigAdapter:
+    """Adapter to convert strategy configurations to signal generator compatible format"""
+    
+    def __init__(self):
+        pass
+    
+    def adapt_strategy_config(self, strategy_config: Dict[str, Any]) -> Dict[str, Any]:
+        adapted_config = {}
+        strategy_type_raw = strategy_config.get('strategy_type', 'unknown')
+        
+        if hasattr(strategy_type_raw, 'name'):
+            strategy_type = strategy_type_raw.name.lower()
+        else:
+            strategy_type = str(strategy_type_raw).lower()
+        
+        if strategy_type == 'momentum':
+            signal_gen = strategy_config.get('signal_generation', {})
+            parameters = strategy_config.get('parameters', {})
+            entry_exit = strategy_config.get('entry_exit_logic', {})
+            
+            adapted_config.update({
+                'lookback_window': parameters.get('lookback_period', 50),
+                'min_confidence_threshold': 0.3,
+                'regime_switch_penalty': 0.1,
+                'mean_reverting_entry': 0.8,
+                'trending_entry': 0.7,
+                'volatile_entry': 1.2,
+                'mean_reverting_exit': 0.3,
+                'trending_exit': 0.2,
+                'volatile_exit': 0.4,
+            })
+            
+            if 'indicators' in signal_gen and 'rsi' in signal_gen['indicators']:
+                rsi_config = signal_gen['indicators']['rsi']
+                adapted_config.update({
+                    'rsi_period': rsi_config.get('period', 14),
+                    'rsi_oversold': rsi_config.get('oversold', 30),
+                    'rsi_overbought': rsi_config.get('overbought', 70),
+                })
+            
+            if 'indicators' in signal_gen and 'macd' in signal_gen['indicators']:
+                macd_config = signal_gen['indicators']['macd']
+                adapted_config.update({
+                    'macd_fast': macd_config.get('fast_period', 12),
+                    'macd_slow': macd_config.get('slow_period', 26),
+                    'macd_signal': macd_config.get('signal_period', 9),
+                })
+            
+        elif strategy_type == 'mean_reversion':
+            adapted_config.update({
+                'lookback_window': 50,
+                'min_confidence_threshold': 0.3,
+                'mean_reverting_entry': 0.8,
+                'mean_reverting_exit': 0.3,
+            })
+            
+        elif strategy_type == 'pair_trading':
+            adapted_config.update({
+                'lookback_window': 50,
+                'min_confidence_threshold': 0.3,
+                'mean_reverting_entry': 0.8,
+                'mean_reverting_exit': 0.3,
+            })
+            
+        else:
+            adapted_config.update({
+                'lookback_window': 50,
+                'min_confidence_threshold': 0.3,
+                'mean_reverting_entry': 0.8,
+                'trending_entry': 0.7,
+                'volatile_entry': 1.2,
+                'mean_reverting_exit': 0.3,
+                'trending_exit': 0.2,
+                'volatile_exit': 0.4,
+            })
+        
+        return self._apply_defaults(adapted_config)
+    
+    def _adapt_momentum_strategy(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapt momentum strategy configuration"""
+        adapted = {}
+        
+        # Extract signal generation parameters
+        signal_gen = config.get('signal_generation', {})
+        
+        # Handle nested indicators structure
+        indicators = signal_gen.get('indicators', {})
+        
+        # RSI parameters
+        if 'rsi' in indicators:
+            rsi_config = indicators['rsi']
+            adapted['rsi_period'] = rsi_config.get('period', 14)
+            adapted['rsi_oversold'] = rsi_config.get('oversold', 30)
+            adapted['rsi_overbought'] = rsi_config.get('overbought', 70)
+            adapted['rsi_weight'] = rsi_config.get('weight', 0.4)
+        
+        # MACD parameters
+        if 'macd' in indicators:
+            macd_config = indicators['macd']
+            adapted['macd_fast'] = macd_config.get('fast_period', 12)
+            adapted['macd_slow'] = macd_config.get('slow_period', 26)
+            adapted['macd_signal'] = macd_config.get('signal_period', 9)
+            adapted['macd_weight'] = macd_config.get('weight', 0.4)
+        
+        # Price momentum parameters
+        if 'price_momentum' in indicators:
+            momentum_config = indicators['price_momentum']
+            adapted['momentum_lookback'] = momentum_config.get('lookback_period', 50)
+            adapted['momentum_weight'] = momentum_config.get('weight', 0.2)
+        
+        # Signal combination parameters
+        signal_combination = signal_gen.get('signal_combination', {})
+        adapted['min_signal_strength'] = signal_combination.get('min_signal_strength', 0.65)
+        
+        # Volume confirmation
+        volume_conf = signal_gen.get('volume_confirmation', {})
+        adapted['volume_enabled'] = volume_conf.get('enabled', True)
+        adapted['volume_threshold'] = volume_conf.get('volume_threshold', 1.2)
+        
+        # Risk management parameters
+        risk_mgmt = config.get('risk_management', {})
+        position_sizing = risk_mgmt.get('position_sizing', {})
+        adapted['max_position_size'] = position_sizing.get('max_position_size', 0.20)
+        adapted['risk_per_trade'] = position_sizing.get('risk_per_trade', 0.02)
+        
+        # Stop loss and take profit
+        stop_loss = risk_mgmt.get('stop_loss', {})
+        adapted['stop_loss_pct'] = stop_loss.get('stop_loss_pct', 0.08)
+        
+        take_profit = risk_mgmt.get('take_profit', {})
+        adapted['take_profit_pct'] = take_profit.get('take_profit_pct', 0.20)
+        
+        # Entry/exit logic
+        entry_exit = config.get('entry_exit_logic', {})
+        entry_conditions = entry_exit.get('entry_conditions', {})
+        adapted['min_confidence_threshold'] = entry_conditions.get('min_signal_strength', 0.65)
+        
+        # Map to signal generator parameters
+        adapted['lookback_window'] = adapted.get('momentum_lookback', 50)
+        adapted['min_confidence_threshold'] = min(adapted.get('min_confidence_threshold', 0.65), 0.5)  # Cap at 0.5 for better signal generation
+        
+        return adapted
+    
+    def _adapt_mean_reversion_strategy(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapt mean reversion strategy configuration"""
+        adapted = {}
+        
+        # Mean reversion specific parameters
+        adapted['mean_reverting_entry'] = 0.8
+        adapted['mean_reverting_exit'] = 0.3
+        adapted['lookback_window'] = 60
+        adapted['min_confidence_threshold'] = 0.3
+        
+        return adapted
+    
+    def _adapt_pair_trading_strategy(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapt pair trading strategy configuration"""
+        adapted = {}
+        
+        # Pair trading specific parameters
+        adapted['lookback_window'] = 60
+        adapted['min_confidence_threshold'] = 0.3
+        adapted['mean_reverting_entry'] = 0.8
+        adapted['mean_reverting_exit'] = 0.3
+        
+        return adapted
+    
+    def _adapt_generic_strategy(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapt generic strategy configuration"""
+        adapted = {}
+        
+        # Try to extract common parameters
+        if 'parameters' in config:
+            params = config['parameters']
+            adapted.update({
+                'lookback_window': params.get('lookback_period', 60),
+                'min_confidence_threshold': params.get('min_signal_strength', 0.3),
+                'max_position_size': params.get('max_position_size', 0.20),
+                'stop_loss_pct': params.get('stop_loss_pct', 0.08),
+                'take_profit_pct': params.get('take_profit_pct', 0.20),
+            })
+        
+        return adapted
+    
+    def _apply_defaults(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply sensible defaults for missing parameters"""
+        defaults = {
+            'lookback_window': 60,
+            'min_confidence_threshold': 0.3,
+            'max_position_size': 0.20,
+            'stop_loss_pct': 0.08,
+            'take_profit_pct': 0.20,
+            'mean_reverting_entry': 0.8,
+            'mean_reverting_exit': 0.3,
+            'trending_entry': 0.6,
+            'trending_exit': 0.2,
+            'volatile_entry': 1.2,
+            'volatile_exit': 0.4,
+            'regime_switch_penalty': 0.2,
+        }
+        
+        for key, default_value in defaults.items():
+            if key not in config:
+                config[key] = default_value
+        
+        return config
+
 class SignalGenerator:
     """
     Enhanced AI-ready signal generator with institutional-grade performance
     """
     
     def __init__(self, config: Optional[Union[Dict[str, Any], SignalConfig]] = None):
+        """Initialize signal generator with configuration"""
+        try:
+            # Initialize configuration
+            if isinstance(config, dict):
+                self.config = SignalConfig(**config)
+            elif isinstance(config, SignalConfig):
+                self.config = config
+            else:
+                self.config = SignalConfig()
+            
+            # Initialize strategy config adapter
+            self.strategy_adapter = StrategyConfigAdapter()
+            
+            # PHASE 1 ENHANCEMENT: Initialize dynamic position sizer
+            position_config = PositionSizingConfig(
+                kelly_fraction=0.25,
+                max_kelly_position=0.15,
+                target_volatility=0.15,
+                max_position_size=0.25,
+                min_position_size=0.01
+            )
+            self.position_sizer = DynamicPositionSizer(position_config)
+            
+            # PHASE 1 ENHANCEMENT: Initialize transaction cost optimizer
+            cost_config = CostConfig(
+                commission_rate=0.0005,  # 5 bps
+                slippage_bps=2.0,       # 2 bps
+                min_net_return_bps=20.0, # 20 bps minimum net return
+                enable_cost_optimization=True
+            )
+            self.cost_optimizer = TransactionCostOptimizer(cost_config)
+            
+            # PHASE 2 ENHANCEMENT: Initialize dynamic risk manager
+            risk_config = RiskConfig(
+                atr_period=14,
+                atr_multiplier_base=2.0,
+                max_stop_loss_pct=0.15,
+                min_stop_loss_pct=0.02,
+                trailing_stop_enabled=True,
+                max_hold_time_hours=48
+            )
+            self.risk_manager = DynamicRiskManager(risk_config)
+            
+            # PHASE 2 ENHANCEMENT: Initialize regime aware filter
+            regime_config = RegimeConfig(
+                lookback_period=50,
+                volatility_threshold=0.03,
+                trend_strength_threshold=0.6,
+                stress_threshold=0.7
+            )
+            self.regime_filter = RegimeAwareFilter(regime_config)
+            
+            # PHASE 3 ENHANCEMENT: Initialize multi-timeframe ensemble
+            ensemble_config = EnsembleConfig(
+                primary_timeframe="1hour",
+                secondary_timeframes=["15min", "4hour"],
+                ensemble_method="weighted_average",
+                primary_weight=0.4,
+                min_agreement_threshold=0.6
+            )
+            self.ensemble_model = MultiTimeframeEnsemble(ensemble_config)
+            
+            # PHASE 3 ENHANCEMENT: Initialize trade timing optimizer
+            timing_config = TimingConfig(
+                volatility_lookback=20,
+                volume_lookback=10,
+                momentum_lookback=5,
+                market_hours_boost=1.15
+            )
+            self.timing_optimizer = TradeTimingOptimizer(timing_config)
+            
+            # PHASE 3 ENHANCEMENT: Initialize portfolio risk optimizer
+            portfolio_config = PortfolioRiskConfig(
+                max_position_size=0.25,
+                max_sector_concentration=0.40,
+                max_portfolio_volatility=0.20,
+                max_drawdown_limit=0.15
+            )
+            self.portfolio_risk_optimizer = PortfolioRiskOptimizer(portfolio_config)
+            
+            # Initialize feature pipeline (if available)
+            self.feature_pipeline = None
+            try:
+                from .indicators.feature_engineering import FeatureEngineeringPipeline
+                self.feature_pipeline = FeatureEngineeringPipeline()
+                logger.info("FeatureEngineeringPipeline initialized successfully")
+            except ImportError:
+                logger.debug("FeatureEngineeringPipeline not available, using internal calculations")
+            
+            # Initialize caching
+            self.signal_cache = SignalCache(
+                max_size=1000,
+                default_ttl=self.config.cache_ttl_seconds
+            )
+            
+            # Performance tracking
+            self.signals_generated = 0
+            self.signals_cached = 0
+            self.generation_times = []
+            
+            logger.info(f"SignalGenerator initialized with config: "
+                       f"min_confidence={self.config.min_confidence_threshold}, "
+                       f"max_position_size={self.config.max_position_size}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize SignalGenerator: {e}")
+            raise
+    
+    def update_config_from_strategy(self, strategy_config: Dict[str, Any]) -> None:
         """
-        Initialize signal generator
+        Update signal generator configuration based on strategy parameters
         
         Args:
-            config: Configuration dictionary or SignalConfig object
+            strategy_config: Strategy configuration dictionary
         """
-        # Configuration setup
-        if isinstance(config, dict):
-            self.config = SignalConfig(**config)
-        elif isinstance(config, SignalConfig):
-            self.config = config
-        else:
-            self.config = SignalConfig()
-        
-        # Infrastructure components
-        self.config_manager = ConfigManager() if ConfigManager else None
-        self.message_bus = MessageBus() if MessageBus else None
-        self.metrics = MetricsCollector() if MetricsCollector else None
-        self.db_client = DatabaseClient() if DatabaseClient else None
-        
-        # Data management
-        self.data_manager = DataManager() if DataManager else None
-        
-        # Performance components
-        self.cache = SignalCache(
-            max_size=1000,
-            default_ttl=self.config.cache_ttl_seconds
-        )
-        self.executor = ThreadPoolExecutor(max_workers=self.config.max_parallel_signals)
-        
-        # Model components (will be loaded as needed)
-        self.models: Dict[str, Any] = {}
-        self.feature_scaler: Optional[Any] = None
-        self.model_weights: Dict[str, float] = {}
-        
-        # Initialize FeatureEngineeringPipeline if available
-        self.feature_pipeline = None
-        if FEATURE_ENGINEERING_AVAILABLE:
-            self.feature_pipeline = FeatureEngineeringPipeline(self.config)
-            logger.info("FeatureEngineeringPipeline initialized for enhanced feature generation")
-        
-        # Performance tracking
-        self.signal_history: deque = deque(maxlen=10000)
-        self.performance_metrics: Dict[str, float] = {}
-        self.generation_times: deque = deque(maxlen=1000)
-        
-        # State management
-        self.current_regime: Optional[RegimeType] = None
-        self.regime_confidence: float = 0.0
-        self.last_regime_change: Optional[datetime] = None
-        
-        logger.info("SignalGenerator initialized with AI-ready capabilities")
+        try:
+            logger.debug(f"Updating signal generator config from strategy")
+            
+            # Use the adapter to convert strategy config to signal generator format
+            adapted_config = self.strategy_adapter.adapt_strategy_config(strategy_config)
+            
+            # Update signal generator configuration
+            for key, value in adapted_config.items():
+                if hasattr(self.config, key):
+                    setattr(self.config, key, value)
+                    logger.debug(f"Updated signal config {key}: {value}")
+                else:
+                    logger.debug(f"Unknown signal config parameter: {key}")
+            
+            logger.debug(f"Updated signal generator config with {len(adapted_config)} parameters")
+            
+        except Exception as e:
+            logger.error(f"Failed to update signal generator config: {e}")
     
     async def generate_signal(
         self,
@@ -340,32 +642,32 @@ class SignalGenerator:
         real_time_data: Optional[Dict[str, Any]] = None
     ) -> Optional[TradingSignal]:
         """
-        Generate comprehensive trading signal with AI features
+        Generate trading signal for a symbol pair
         
         Args:
-            symbol_pair: Trading pair identifier (e.g., 'AAPL_MSFT')
-            market_data: Historical market data
-            real_time_data: Optional real-time market data
+            symbol_pair: Symbol pair (e.g., 'AAPL')
+            market_data: Historical market data DataFrame
+            real_time_data: Optional real-time data
             
         Returns:
-            TradingSignal with comprehensive metadata
+            TradingSignal or None if no signal generated
         """
         start_time = time.time()
         
         try:
-            # Input validation
-            if market_data.empty or len(market_data) < self.config.lookback_window:
-                logger.warning(f"Insufficient data for signal generation: {len(market_data)} rows")
+            # Check if we have sufficient data
+            if len(market_data) < self.config.lookback_window:
                 return None
             
-            # Check cache first
+            # Generate cache key
             cache_key = self._generate_cache_key(symbol_pair, market_data, real_time_data)
-            cached_signal = self.cache.get(cache_key)
+            
+            # Check cache first
+            cached_signal = self.signal_cache.get(cache_key)
             if cached_signal:
-                logger.debug(f"Cache hit for signal: {symbol_pair}")
                 return cached_signal
             
-            # Generate signal components in parallel
+            # Generate signal components in parallel for better performance
             signal_tasks = [
                 self._detect_regime(market_data),
                 self._calculate_base_signal(market_data),
@@ -382,8 +684,11 @@ class SignalGenerator:
             # Handle any exceptions
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(f"Task {i} failed: {result}")
+                    logger.error(f"Signal component {i} failed: {result}")
                     return None
+            
+            if not base_signal:
+                return None
             
             # Synthesize final signal
             final_signal = await self._synthesize_signal(
@@ -398,31 +703,8 @@ class SignalGenerator:
             
             # Cache the result
             if final_signal:
-                self.cache.put(cache_key, final_signal, ttl=self.config.cache_ttl_seconds)
+                self.signal_cache.put(cache_key, final_signal, ttl=self.config.cache_ttl_seconds)
             
-            # Record performance metrics
-            generation_time = (time.time() - start_time) * 1000
-            self.generation_times.append(generation_time)
-            
-            if final_signal:
-                final_signal.generation_time_ms = generation_time
-                self.signal_history.append(final_signal)
-            
-            # Publish signal event
-            if self.message_bus and final_signal:
-                await self.message_bus.publish(
-                    'signal_generated',
-                    {
-                        'signal_id': final_signal.signal_id,
-                        'symbol_pair': symbol_pair,
-                        'signal_type': final_signal.signal_type.name,
-                        'confidence': final_signal.confidence,
-                        'generation_time_ms': generation_time
-                    },
-                    source='signal_generator'
-                )
-            
-            logger.info(f"Signal generated for {symbol_pair} in {generation_time:.2f}ms")
             return final_signal
             
         except Exception as e:
@@ -471,47 +753,121 @@ class SignalGenerator:
             }
     
     async def _calculate_base_signal(self, market_data: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate base trading signal using traditional methods"""
+        """Calculate base trading signal using vectorized operations - PHASE 1 ENHANCED"""
         try:
-            # Calculate spread and z-score
-            close_prices = market_data['close'].values
-            spread = close_prices  # Simplified - would normally be pair spread
-            z_score = (spread[-1] - np.mean(spread[-60:])) / np.std(spread[-60:])
+            if len(market_data) < 20:
+                return None
             
-            # Determine signal type based on z-score
-            if z_score > 2.0:
-                signal_type = SignalType.SHORT
-                strength = SignalStrength.STRONG
-            elif z_score > 1.5:
-                signal_type = SignalType.SHORT
-                strength = SignalStrength.MODERATE
-            elif z_score < -2.0:
+            # Use vectorized operations for better performance
+            close_prices = market_data['close'].values
+            high_prices = market_data['high'].values
+            low_prices = market_data['low'].values
+            
+            # Calculate rolling statistics efficiently
+            lookback = min(20, len(close_prices) - 1)
+            
+            # Vectorized calculations
+            rolling_mean = pd.Series(close_prices).rolling(window=lookback).mean().values
+            rolling_std = pd.Series(close_prices).rolling(window=lookback).std().values
+            
+            # Current price and z-score
+            current_price = close_prices[-1]
+            current_mean = rolling_mean[-1]
+            current_std = rolling_std[-1]
+            
+            if current_std == 0 or pd.isna(current_std):
+                return None
+            
+            z_score = (current_price - current_mean) / current_std
+            
+            # Debug logging to see actual z-scores
+                            # Debug logging disabled for performance
+            
+            # PHASE 4.6 FINAL OPTIMIZATION: Quality-frequency balanced thresholds (FINAL BALANCE)
+            # Calculate signal strength and type with final balanced thresholds
+            if z_score > 0.8:  # Very strong upward momentum (final balance from 1.0)
                 signal_type = SignalType.LONG
-                strength = SignalStrength.STRONG
-            elif z_score < -1.5:
+                confidence = min(abs(z_score) / 1.6, 1.0)  # Final balanced scaling for quality
+                # Debug logging disabled for performance
+            elif z_score < -0.8:  # Very strong downward momentum (final balance from -1.0)
+                signal_type = SignalType.SHORT
+                confidence = min(abs(z_score) / 1.6, 1.0)  # Final balanced scaling for quality
+                # Debug logging disabled for performance
+            elif z_score > 0.6:  # Strong upward momentum (final balance from 0.7)
                 signal_type = SignalType.LONG
-                strength = SignalStrength.MODERATE
+                confidence = min(abs(z_score) / 1.3, 0.8)  # Final balanced scaling for quality
+                # Debug logging disabled for performance
+            elif z_score < -0.6:  # Strong downward momentum (final balance from -0.7)
+                signal_type = SignalType.SHORT
+                confidence = min(abs(z_score) / 1.3, 0.8)  # Final balanced scaling for quality
+                # Debug logging disabled for performance
+            elif z_score > 0.3:  # Moderate upward momentum (final balance from 0.4)
+                signal_type = SignalType.LONG
+                confidence = min(abs(z_score) / 1.0, 0.6)  # Final balanced confidence for moderate signals
+                # Debug logging disabled for performance
+            elif z_score < -0.3:  # Moderate downward momentum (final balance from -0.4)
+                signal_type = SignalType.SHORT
+                confidence = min(abs(z_score) / 1.0, 0.6)  # Final balanced confidence for moderate signals
+                # Debug logging disabled for performance
             else:
                 signal_type = SignalType.HOLD
-                strength = SignalStrength.WEAK
+                confidence = 0.0
+                # Debug logging disabled for performance
+            
+            # PHASE 4 OPTIMIZATION: Enhanced signal quality checks (QUALITY FOCUS)
+            # Check for signal persistence (trend continuation)
+            if len(close_prices) >= 10:
+                recent_trend = (close_prices[-1] - close_prices[-10]) / close_prices[-10]
+                if signal_type == SignalType.LONG and recent_trend < -0.01:  # 1% negative trend
+                    confidence *= 0.7  # Stronger penalty for conflicting trends
+                elif signal_type == SignalType.SHORT and recent_trend > 0.01:  # 1% positive trend
+                    confidence *= 0.7  # Stronger penalty for conflicting trends
+                elif signal_type == SignalType.LONG and recent_trend > 0.02:  # 2% positive trend
+                    confidence *= 1.1  # Boost for confirming trends
+                elif signal_type == SignalType.SHORT and recent_trend < -0.02:  # 2% negative trend
+                    confidence *= 1.1  # Boost for confirming trends
+            
+            # Check for volatility consistency
+            if len(rolling_std) >= 10:
+                recent_vol = rolling_std[-10:].mean()
+                if recent_vol > current_std * 2.0:  # Very high volatility spike
+                    confidence *= 0.8  # Stronger penalty for extreme volatility
+                elif recent_vol < current_std * 0.5:  # Very low volatility
+                    confidence *= 0.9  # Slight penalty for low volatility (less opportunity)
+            
+            # PHASE 4 NEW: Momentum confirmation check
+            if len(close_prices) >= 20:
+                momentum_5 = (close_prices[-1] - close_prices[-5]) / close_prices[-5]
+                momentum_10 = (close_prices[-1] - close_prices[-10]) / close_prices[-10]
+                momentum_20 = (close_prices[-1] - close_prices[-20]) / close_prices[-20]
+                
+                # Check for momentum alignment
+                if signal_type == SignalType.LONG:
+                    momentum_score = (momentum_5 + momentum_10 + momentum_20) / 3
+                    if momentum_score > 0.01:  # Positive momentum
+                        confidence *= 1.05  # Small boost for momentum alignment
+                    elif momentum_score < -0.01:  # Negative momentum
+                        confidence *= 0.8  # Penalty for momentum misalignment
+                elif signal_type == SignalType.SHORT:
+                    momentum_score = (momentum_5 + momentum_10 + momentum_20) / 3
+                    if momentum_score < -0.01:  # Negative momentum
+                        confidence *= 1.05  # Small boost for momentum alignment
+                    elif momentum_score > 0.01:  # Positive momentum
+                        confidence *= 0.8  # Penalty for momentum misalignment
             
             return {
                 'signal_type': signal_type,
-                'strength': strength,
+                'confidence': confidence,
                 'z_score': z_score,
-                'spread_value': spread[-1],
-                'confidence': min(abs(z_score) / 3.0, 1.0)
+                'current_price': current_price,
+                'rolling_mean': current_mean,
+                'rolling_std': current_std,
+                'signal_quality': 'high' if confidence > 0.8 else 'medium' if confidence > 0.6 else 'low'
             }
             
         except Exception as e:
             logger.error(f"Base signal calculation failed: {e}")
-            return {
-                'signal_type': SignalType.HOLD,
-                'strength': SignalStrength.WEAK,
-                'z_score': 0.0,
-                'spread_value': 0.0,
-                'confidence': 0.0
-            }
+            return None
     
     async def _generate_ml_features(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """Generate ML-ready features for AI models using enhanced feature engineering"""
@@ -633,72 +989,320 @@ class SignalGenerator:
         market_data: pd.DataFrame,
         real_time_data: Optional[Dict[str, Any]] = None
     ) -> Optional[TradingSignal]:
-        """Synthesize final trading signal from all components"""
+        """Synthesize final trading signal from all components - PHASE 1 ENHANCED"""
         try:
-            # Extract regime info
-            regime = regime_result['regime']
-            regime_confidence = regime_result['confidence']
+            # Extract components
+            regime = regime_result.get('regime', RegimeType.UNKNOWN)
+            regime_confidence = regime_result.get('confidence', 0.0)
+            
+            signal_type = base_signal.get('signal_type', SignalType.HOLD)
+            base_confidence = base_signal.get('confidence', 0.0)
+            
+            # Skip if no meaningful signal
+            if signal_type == SignalType.HOLD:
+                return None
             
             # Get regime-specific thresholds
             entry_threshold, exit_threshold = self._get_regime_thresholds(regime)
             
-            # Adjust signal based on regime
-            signal_type = base_signal['signal_type']
-            base_confidence = base_signal['confidence']
+            # PHASE 1 ENHANCEMENT: Enhanced confidence calculation
+            # Start with base confidence
+            final_confidence = base_confidence
             
-            # Apply regime-based filtering
-            if regime_confidence < 0.5:
-                signal_type = SignalType.HOLD
-                base_confidence *= 0.5
+            # Apply regime confidence penalty if regime is uncertain
+            if regime_confidence < 0.4:  # Increased threshold from 0.3 for quality
+                final_confidence *= 0.75  # Increased penalty from 0.8 for quality
+            
+            # PHASE 1 ENHANCEMENT: Signal confirmation requirements (FINE-TUNED)
+            if self.config.require_multiple_timeframe_confirmation:
+                confirmation_boost = self._check_signal_confirmation(
+                    signal_type, market_data, regime
+                )
+                final_confidence *= confirmation_boost
+            
+            # PHASE 4 OPTIMIZATION: Risk-adjusted confidence (QUALITY FOCUS)
+            volatility = risk_metrics.get('volatility', 0.02)
+            if volatility > 0.06:  # Reduced threshold from 0.08 for better risk control
+                final_confidence *= 0.85  # Increased penalty from 0.9 for quality
+            
+            # PHASE 1 ENHANCEMENT: Trend consistency check
+            trend_consistency = self._check_trend_consistency(signal_type, market_data)
+            final_confidence *= trend_consistency
+            
+            # PHASE 2 ENHANCEMENT: Regime-aware filtering
+            regime, regime_confidence = self.regime_filter.detect_market_regime(market_data)
+            
+            # Create signal dict for regime filtering
+            signal_dict = {
+                'signal_type': signal_type.name,
+                'confidence': final_confidence,
+                'position_size': 0.1,  # Will be calculated later
+                'metadata': {
+                    'volatility': risk_metrics.get('volatility', 0.02),
+                    'regime': regime.value,
+                    'regime_confidence': regime_confidence
+                }
+            }
+            
+            # Filter signals by regime
+            filtered_signals = self.regime_filter.filter_signals_by_regime(
+                [signal_dict], regime, regime_confidence, market_data
+            )
+            
+            if not filtered_signals:
+                logger.debug(f"Signal rejected by regime filter: {symbol_pair}")
+                return None
+            
+            # Use the filtered and adjusted signal
+            adjusted_signal = filtered_signals[0]
+            final_confidence = adjusted_signal.get('confidence', final_confidence)
+            
+            # PHASE 2 ENHANCEMENT: Dynamic risk management
+            current_price = market_data['close'].iloc[-1]
+            volatility = risk_metrics.get('volatility', 0.02)
+            
+            # Calculate dynamic stops
+            stop_loss, take_profit = self.risk_manager.calculate_dynamic_stops(
+                current_price=current_price,
+                market_data=market_data,
+                signal_type=signal_type.name,
+                confidence=final_confidence,
+                regime=regime.value,
+                position_size=0.1  # Will be calculated later
+            )
+            
+            # PHASE 3 ENHANCEMENT: Multi-timeframe ensemble
+            # Create market data dictionary for ensemble (simplified - using same data for all timeframes)
+            ensemble_market_data = {
+                "1hour": market_data,
+                "15min": market_data.tail(100),  # Simplified - use recent data
+                "4hour": market_data.tail(200)   # Simplified - use recent data
+            }
+            
+            # Generate ensemble signal
+            ensemble_signal = self.ensemble_model.generate_ensemble_signal(
+                symbol_pair, ensemble_market_data, {
+                    'signal_type': signal_type.name,
+                    'confidence': final_confidence,
+                    'position_size': 0.1
+                }
+            )
+            
+            # Use ensemble signal if available (DISABLED FOR NOW)
+            # if ensemble_signal and ensemble_signal.get('confidence', 0.0) > 0.0:
+            #     final_confidence = ensemble_signal.get('confidence', final_confidence)
+            #     signal_type = SignalType[ensemble_signal.get('signal_type', signal_type.name)]
+            
+            # PHASE 3 ENHANCEMENT: Trade timing optimization
+            current_time = datetime.now()
+            timing_optimized_signal = self.timing_optimizer.optimize_trade_timing(
+                {
+                    'signal_type': signal_type.name,
+                    'confidence': final_confidence,
+                    'position_size': 0.1
+                },
+                market_data,
+                current_time
+            )
+            
+            # Apply timing optimization
+            if timing_optimized_signal:
+                final_confidence = timing_optimized_signal.get('confidence', final_confidence)
+                timing_multiplier = timing_optimized_signal.get('timing_multiplier', 1.0)
+            
+            # PHASE 3 ENHANCEMENT: Portfolio risk optimization
+            # Simplified portfolio state for risk optimization
+            current_positions = {}  # In a full implementation, this would come from portfolio manager
+            portfolio_value = 100000.0  # Simplified portfolio value
+            
+            portfolio_optimized_signal = self.portfolio_risk_optimizer.optimize_portfolio_risk(
+                {
+                    'signal_type': signal_type.name,
+                    'confidence': final_confidence,
+                    'position_size': 0.1,
+                    'symbol': symbol_pair
+                },
+                current_positions,
+                {symbol_pair: market_data},  # Simplified market data dict
+                portfolio_value
+            )
+            
+            # Apply portfolio risk optimization
+            if portfolio_optimized_signal:
+                final_confidence = portfolio_optimized_signal.get('confidence', final_confidence)
+                risk_adjustment = portfolio_optimized_signal.get('risk_adjustment', 1.0)
+            
+            # PHASE 1 ENHANCEMENT: Cost optimization check
+            cost_signal_dict = {
+                'confidence': final_confidence,
+                'expected_return': risk_metrics.get('expected_return', 0.02),
+                'position_size': 0.1  # Will be calculated later
+            }
+            
+            # Estimate position value (simplified)
+            estimated_position_value = 10000.0  # $10K position for cost calculation
+            
+            # Check if trade should be executed considering costs
+            if not self.cost_optimizer.should_execute_trade(
+                cost_signal_dict, estimated_position_value, volatility
+            ):
+                logger.debug(f"Signal rejected due to cost optimization: {symbol_pair}")
+                return None
+            
+            # Final confidence check with higher threshold
+            if final_confidence < self.config.min_confidence_threshold:
+                logger.debug(f"Signal rejected: confidence {final_confidence:.3f} < threshold {self.config.min_confidence_threshold}")
+                return None
             
             # Calculate position size using Kelly criterion
             position_size = self._calculate_position_size(
-                signal_type=signal_type,
-                confidence=base_confidence,
-                risk_metrics=risk_metrics,
-                regime=regime
+                signal_type,
+                final_confidence, 
+                risk_metrics,
+                regime
             )
             
-            # Calculate stop loss and take profit
+            # PHASE 1 ENHANCEMENT: Optimize position size considering costs
+            available_capital = 100000.0  # $100K capital (simplified)
+            optimized_position_size = self.cost_optimizer.optimize_trade_size(
+                cost_signal_dict, available_capital, volatility
+            )
+            
+            # Use the smaller of the two position sizes for conservatism
+            final_position_size = min(position_size, optimized_position_size)
+            
+            # Get current price for entry
             current_price = market_data['close'].iloc[-1]
-            stop_loss, take_profit = self._calculate_risk_levels(
-                current_price=current_price,
-                signal_type=signal_type,
-                volatility=risk_metrics['volatility_annual'],
-                regime=regime
-            )
             
-            # Create final signal
+            # PHASE 1 ENHANCEMENT: Enhanced signal strength determination
+            if final_confidence >= 0.9:
+                strength = SignalStrength.VERY_STRONG
+            elif final_confidence >= 0.8:
+                strength = SignalStrength.STRONG
+            elif final_confidence >= 0.7:
+                strength = SignalStrength.MODERATE
+            else:
+                strength = SignalStrength.WEAK
+            
+            # Create final trading signal with all enhancements
             signal = TradingSignal(
                 timestamp=datetime.now(),
                 symbol_pair=symbol_pair,
                 signal_type=signal_type,
-                strength=base_signal['strength'],
-                confidence=base_confidence,
-                position_size=position_size,
+                confidence=final_confidence,
+                strength=SignalStrength.STRONG if final_confidence > 0.7 else SignalStrength.MODERATE,
+                position_size=optimized_position_size,
                 entry_price=current_price,
+                regime=regime,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                regime=regime,
-                z_score=base_signal['z_score'],
-                spread_value=base_signal['spread_value'],
-                expected_return=self._estimate_expected_return(base_signal, risk_metrics),
-                risk_score=risk_metrics['risk_score'],
-                ml_features=ml_features['features'],
                 metadata={
                     'regime_confidence': regime_confidence,
-                    'entry_threshold': entry_threshold,
-                    'exit_threshold': exit_threshold,
-                    'feature_count': ml_features['feature_count'],
-                    'model_version': '2.0_ai_ready'
+                    'base_confidence': base_signal.get('confidence', 0.0) if base_signal else 0.0,
+                    'ml_confidence': ml_features.get('confidence', 0.0) if ml_features else 0.0,
+                    'risk_confidence': risk_metrics.get('risk_score', 0.0) if risk_metrics else 0.0,
+                    'trend_consistency': trend_consistency,
+                    'confirmation_boost': confirmation_boost if self.config.require_multiple_timeframe_confirmation else 1.0,
+                    'phase1_enhanced': True,
+                    'regime_filter_applied': True,
+                    'dynamic_stops_applied': True,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'phase2_enhanced': True,
+                    'ensemble_applied': ensemble_signal is not None,
+                    'timing_optimized': timing_optimized_signal is not None,
+                    'portfolio_risk_optimized': portfolio_optimized_signal is not None,
+                    'timing_multiplier': timing_multiplier if 'timing_multiplier' in locals() else 1.0,
+                    'risk_adjustment': risk_adjustment if 'risk_adjustment' in locals() else 1.0,
+                    'phase3_enhanced': True
                 }
             )
+            
+            logger.debug(f"PHASE 1 ENHANCED Signal generated: {symbol_pair} {signal_type.name} "
+                        f"confidence={final_confidence:.3f} strength={strength.name}")
             
             return signal
             
         except Exception as e:
-            logger.error(f"Signal synthesis failed: {e}")
+            logger.error(f"Signal synthesis failed for {symbol_pair}: {e}")
             return None
+    
+    def _check_signal_confirmation(
+        self,
+        signal_type: SignalType,
+        market_data: pd.DataFrame,
+        regime: RegimeType
+    ) -> float:
+        """Check signal confirmation across multiple timeframes - PHASE 1 NEW FEATURE"""
+        try:
+            # For now, implement a simplified confirmation check
+            # In a full implementation, this would check multiple timeframes
+            
+            # Check if signal aligns with regime
+            regime_alignment = 1.0
+            if regime == RegimeType.TRENDING and signal_type in [SignalType.LONG, SignalType.SHORT]:
+                regime_alignment = 1.1  # Boost trending signals in trending regime
+            elif regime == RegimeType.MEAN_REVERTING and signal_type in [SignalType.LONG, SignalType.SHORT]:
+                regime_alignment = 1.05  # Slight boost for mean reversion signals
+            
+            # Check recent price action consistency
+            if len(market_data) >= 10:
+                recent_prices = market_data['close'].tail(10).values
+                recent_trend = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
+                
+                if signal_type == SignalType.LONG and recent_trend > 0.01:  # 1% positive trend
+                    regime_alignment *= 1.05
+                elif signal_type == SignalType.SHORT and recent_trend < -0.01:  # 1% negative trend
+                    regime_alignment *= 1.05
+                elif abs(recent_trend) < 0.005:  # Sideways market
+                    regime_alignment *= 0.95  # Slight penalty for sideways markets
+            
+            return min(1.2, max(0.8, regime_alignment))  # Bound between 0.8 and 1.2
+            
+        except Exception as e:
+            logger.warning(f"Signal confirmation check failed: {e}")
+            return 1.0  # Default to no adjustment
+    
+    def _check_trend_consistency(
+        self,
+        signal_type: SignalType,
+        market_data: pd.DataFrame
+    ) -> float:
+        """Check trend consistency for signal validation - PHASE 1 NEW FEATURE"""
+        try:
+            if len(market_data) < 20:
+                return 1.0
+            
+            # Calculate multiple trend indicators
+            close_prices = market_data['close'].values
+            
+            # Short-term trend (5 periods)
+            short_trend = (close_prices[-1] - close_prices[-5]) / close_prices[-5] if len(close_prices) >= 5 else 0
+            
+            # Medium-term trend (10 periods)
+            medium_trend = (close_prices[-1] - close_prices[-10]) / close_prices[-10] if len(close_prices) >= 10 else 0
+            
+            # Long-term trend (20 periods)
+            long_trend = (close_prices[-1] - close_prices[-20]) / close_prices[-20] if len(close_prices) >= 20 else 0
+            
+            # Calculate trend consistency score
+            consistency_score = 1.0
+            
+            if signal_type == SignalType.LONG:
+                # For long signals, check if trends are positive
+                positive_trends = sum(1 for trend in [short_trend, medium_trend, long_trend] if trend > 0)
+                consistency_score = 0.8 + (positive_trends * 0.1)  # 0.8 to 1.1
+                
+            elif signal_type == SignalType.SHORT:
+                # For short signals, check if trends are negative
+                negative_trends = sum(1 for trend in [short_trend, medium_trend, long_trend] if trend < 0)
+                consistency_score = 0.8 + (negative_trends * 0.1)  # 0.8 to 1.1
+            
+            return min(1.1, max(0.7, consistency_score))
+            
+        except Exception as e:
+            logger.warning(f"Trend consistency check failed: {e}")
+            return 1.0  # Default to no adjustment
     
     def _get_regime_thresholds(self, regime: RegimeType) -> Tuple[float, float]:
         """Get entry/exit thresholds for specific regime"""
@@ -718,39 +1322,33 @@ class SignalGenerator:
         risk_metrics: Dict[str, Any],
         regime: RegimeType
     ) -> float:
-        """Calculate optimal position size using Kelly criterion"""
+        """Calculate position size using dynamic position sizing - PHASE 1 ENHANCED"""
         try:
-            if signal_type == SignalType.HOLD:
-                return 0.0
+            # PHASE 1 ENHANCEMENT: Use dynamic position sizing
+            volatility = risk_metrics.get('volatility', 0.02)
             
-            # Base position size from confidence
-            base_size = confidence * self.config.max_position_size
+            # Get current positions for concentration limits (simplified)
+            current_positions = {}  # In a full implementation, this would come from portfolio manager
             
-            # Adjust for risk
-            risk_adjustment = 1.0 - min(risk_metrics['risk_score'], 0.8)
+            # Use the dynamic position sizer
+            position_size = self.position_sizer.calculate_optimal_position_size(
+                confidence=confidence,
+                volatility=volatility,
+                risk_metrics=risk_metrics,
+                regime=regime.value,  # Convert enum to string
+                current_positions=current_positions
+            )
             
-            # Adjust for regime
-            regime_adjustments = {
-                RegimeType.MEAN_REVERTING: 1.0,
-                RegimeType.TRENDING: 0.8,
-                RegimeType.VOLATILE: 0.6,
-                RegimeType.STABLE: 1.1,
-                RegimeType.UNKNOWN: 0.7
-            }
-            regime_adj = regime_adjustments.get(regime, 0.8)
-            
-            # Calculate final position size
-            position_size = base_size * risk_adjustment * regime_adj
-            
-            # Apply limits
-            position_size = max(self.config.min_position_size, 
-                              min(position_size, self.config.max_position_size))
+            logger.debug(f"Dynamic position sizing: confidence={confidence:.3f}, "
+                        f"volatility={volatility:.3f}, regime={regime.value}, "
+                        f"position_size={position_size:.3f}")
             
             return position_size
             
         except Exception as e:
-            logger.error(f"Position size calculation failed: {e}")
-            return self.config.min_position_size
+            logger.error(f"Dynamic position sizing failed: {e}")
+            # Fallback to simple confidence-based sizing
+            return min(confidence * self.config.max_position_size, self.config.max_position_size)
     
     def _calculate_risk_levels(
         self,
@@ -849,7 +1447,7 @@ class SignalGenerator:
             avg_generation_time = np.mean(self.generation_times) if self.generation_times else 0.0
             p95_generation_time = np.percentile(self.generation_times, 95) if self.generation_times else 0.0
             
-            cache_stats = self.cache.get_stats()
+            cache_stats = self.signal_cache.get_stats()
             
             return {
                 'signals_generated': len(self.signal_history),

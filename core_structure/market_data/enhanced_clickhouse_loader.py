@@ -363,6 +363,7 @@ class EnhancedClickHouseLoader:
                 query = f"""
                 SELECT 
                     toDateTime(window_start / 1000000000) as timestamp,
+                    ticker as symbol,
                     open,
                     high,
                     low,
@@ -390,8 +391,9 @@ class EnhancedClickHouseLoader:
                 df['date'] = pd.to_datetime(df['date'])
                 df.set_index('date', inplace=True)
             else:
-                df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                df.columns = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
+                # Keep symbol as a column (don't set as index)
                 df.set_index('timestamp', inplace=True)
             
             # Clean data types

@@ -180,16 +180,7 @@ if __name__ == "__main__":
     # Test the configuration loader
     config = SecureConfigManager()
     
-    print("=== API Keys ===")
-    print(f"Polygon API Key: {'*' * 20 if config.get_api_key('polygon') else 'Not found'}")
-    print(f"Alpha Vantage API Key: {'*' * 20 if config.get_api_key('alpha_vantage') else 'Not found'}")
     
-    print("\n=== Database Config ===")
     db_config = config.get_database_config()
-    print(f"Host: {db_config['host']}")
-    print(f"Port: {db_config['port']}")
-    print(f"Database: {db_config['database']}")
     
-    print("\n=== Feeds Config ===")
     feeds_config = config.get_feeds_config()
-    print(f"Available feeds: {list(feeds_config['feeds'].keys())}")

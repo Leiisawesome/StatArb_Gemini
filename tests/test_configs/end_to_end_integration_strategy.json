@@ -1,0 +1,103 @@
+{
+  "strategy_id": "end_to_end_integration_test",
+  "name": "Comprehensive Integration Test Strategy",
+  "description": "Multi-symbol momentum strategy for end-to-end integration validation",
+  "strategy_type": "momentum",
+  "version": "1.0.0",
+  "symbols": ["AAPL", "GOOGL", "MSFT"],
+  
+  "signal_generation": {
+    "indicators": [
+      {
+        "type": "RSI",
+        "period": 14,
+        "oversold": 30,
+        "overbought": 70,
+        "weight": 0.4
+      },
+      {
+        "type": "MACD", 
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9,
+        "weight": 0.4
+      },
+      {
+        "type": "BOLLINGER_BANDS",
+        "period": 20,
+        "std_dev": 2,
+        "weight": 0.2
+      }
+    ],
+    "signal_combination": "weighted_average",
+    "signal_threshold": 0.6,
+    "lookback_period": 50
+  },
+  
+  "risk_management": {
+    "max_position_size": 0.33,
+    "max_portfolio_risk": 0.15,
+    "stop_loss_percent": 0.05,
+    "take_profit_percent": 0.10,
+    "max_drawdown": 0.20,
+    "position_sizing_method": "volatility_adjusted",
+    "risk_free_rate": 0.02
+  },
+  
+  "portfolio_management": {
+    "initial_capital": 100000,
+    "cash_reserve": 0.10,
+    "rebalance_frequency": "daily",
+    "position_sizing": "equal_weight",
+    "max_positions": 5,
+    "min_trade_size": 1000
+  },
+  
+  "execution": {
+    "order_type": "market",
+    "slippage_tolerance": 0.001,
+    "commission_per_share": 0.005,
+    "market_impact_model": "linear",
+    "execution_delay_ms": 100
+  },
+  
+  "entry_exit_logic": {
+    "entry_conditions": {
+      "signal_strength_min": 0.7,
+      "volume_confirmation": true,
+      "trend_alignment": true
+    },
+    "exit_conditions": {
+      "signal_reversal": true,
+      "stop_loss_trigger": true,
+      "take_profit_trigger": true,
+      "time_based_exit": false
+    }
+  },
+  
+  "optimization": {
+    "parameter_ranges": {
+      "rsi_period": [10, 20],
+      "macd_fast": [8, 16],
+      "signal_threshold": [0.5, 0.8]
+    },
+    "optimization_metric": "sharpe_ratio",
+    "walk_forward_periods": 12
+  },
+  
+  "validation": {
+    "min_trades": 5,
+    "max_drawdown_threshold": 0.25,
+    "min_sharpe_ratio": -1.0,
+    "profit_factor_min": 0.8
+  },
+  
+  "metadata": {
+    "created_by": "End-to-End Integration Test",
+    "created_date": "2024-08-09",
+    "test_purpose": "Validate complete Capital → P&L flow",
+    "market_regime": "all_weather",
+    "asset_class": "equities",
+    "frequency": "daily"
+  }
+}

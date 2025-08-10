@@ -202,7 +202,6 @@ class IndicatorConfigManager:
                     self._update_dataclass(self.performance_settings, config_data['performance'])
                     
         except Exception as e:
-            print(f"Warning: Could not load configuration file: {e}")
     
     def load_from_environment(self):
         """Load configuration from environment variables"""
@@ -243,7 +242,6 @@ class IndicatorConfigManager:
                 json.dump(config_data, f, indent=2, default=str)
                 
         except Exception as e:
-            print(f"Error saving configuration: {e}")
     
     def get_profile_settings(self, profile: IndicatorProfile) -> IndicatorSettings:
         """Get settings for specific indicator profile"""

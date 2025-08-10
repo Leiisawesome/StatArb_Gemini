@@ -54,7 +54,6 @@ class FeatureEngineeringPipeline:
         """
         features_df = df.copy()
         
-        print("🔧 Starting comprehensive feature engineering...")
         
         # Basic price features
         features_df = self._create_price_features(features_df)
@@ -92,7 +91,6 @@ class FeatureEngineeringPipeline:
         # Final normalization
         features_df = self._normalize_features(features_df)
         
-        print(f"✅ Feature engineering complete: {len(features_df.columns)} features created")
         
         return features_df
     
@@ -462,7 +460,6 @@ class FeatureEngineeringPipeline:
             try:
                 df[features_to_normalize] = self.robust_scaler.fit_transform(df_clean)
             except Exception as e:
-                print(f"Warning: Scaling failed, using simple normalization: {e}")
                 # Fallback to simple standardization
                 for col in features_to_normalize:
                     if df[col].std() > 0:

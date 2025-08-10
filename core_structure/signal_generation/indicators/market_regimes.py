@@ -62,7 +62,6 @@ class MarketRegimeDetector:
         """
         regime_df = df.copy()
         
-        print("🔍 Detecting market regimes...")
         
         # Basic regime indicators
         regime_df = self._calculate_regime_indicators(regime_df)
@@ -85,7 +84,6 @@ class MarketRegimeDetector:
         # Regime persistence and quality metrics
         regime_df = self._calculate_regime_metrics(regime_df)
         
-        print(f"✅ Market regime detection complete")
         
         return regime_df
     

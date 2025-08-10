@@ -35,7 +35,6 @@ try:
     DATA_PROCESSOR_AVAILABLE = True
 except ImportError as e:
     DATA_PROCESSOR_AVAILABLE = False
-    print(f"Data processor not available due to missing dependencies: {e}")
 
 __all__ = [
     'EnhancedDataManager',

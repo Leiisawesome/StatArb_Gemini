@@ -71,7 +71,7 @@ class DatabaseConfig:
     """Database configuration"""
     host: str = "localhost"
     port: int = 9000
-    database: str = "statarb"
+    database: str = "polygon_data"
     user: str = "default"
     password: str = ""
     pool_size: int = 5

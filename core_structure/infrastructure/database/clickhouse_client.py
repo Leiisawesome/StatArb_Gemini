@@ -82,14 +82,24 @@ class ClickHouseClient:
         """
         end_date = end_date or datetime.now()
         start_date = start_date or (end_date - timedelta(days=252))
-        fields = fields or ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        fields = fields or ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
+        
+        # Map to polygon_data schema: ticker->symbol, window_start->timestamp
+        polygon_fields = []
+        for field in fields:
+            if field == 'timestamp':
+                polygon_fields.append('toDateTime64(window_start/1000000000, 0) as timestamp')
+            elif field == 'symbol':
+                polygon_fields.append('ticker as symbol')
+            else:
+                polygon_fields.append(field)
         
         query = f"""
-            SELECT {', '.join(fields)}
-            FROM market_data
-            WHERE symbol IN {tuple(symbols)}
-                AND timestamp BETWEEN %(start_date)s AND %(end_date)s
-            ORDER BY symbol, timestamp
+            SELECT {', '.join(polygon_fields)}
+            FROM ticks
+            WHERE ticker IN {tuple(symbols)}
+                AND toDateTime64(window_start/1000000000, 0) BETWEEN %(start_date)s AND %(end_date)s
+            ORDER BY ticker, window_start
         """
         
         params = {

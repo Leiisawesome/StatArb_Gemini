@@ -40,13 +40,7 @@ try:
         MarketRegime
     )
     
-    from .model_ensemble import (
-        ModelEnsemble,
-        ModelConfig,
-        EnsembleResult,
-        ModelWeights,
-        PredictionMetrics
-    )
+    # ModelEnsemble removed - functionality moved to strategy_layer
     
     from .feature_engine import (
         FeatureEngine,
@@ -63,7 +57,6 @@ except ImportError as e:
     # Graceful degradation - define minimal interface
     SignalGenerator = None
     RegimeDetector = None
-    ModelEnsemble = None
     FeatureEngine = None
 
 # Module exports
@@ -82,12 +75,7 @@ __all__ = [
     'RegimeState',
     'MarketRegime',
     
-    # Model ensemble
-    'ModelEnsemble',
-    'ModelConfig',
-    'EnsembleResult', 
-    'ModelWeights',
-    'PredictionMetrics',
+    # Model ensemble (moved to strategy_layer)
     
     # Feature engineering
     'FeatureEngine',
@@ -147,7 +135,6 @@ def get_module_health() -> Dict[str, Any]:
     components = {
         'SignalGenerator': SignalGenerator is not None,
         'RegimeDetector': RegimeDetector is not None,
-        'ModelEnsemble': ModelEnsemble is not None,
         'FeatureEngine': FeatureEngine is not None
     }
     

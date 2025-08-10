@@ -10,9 +10,7 @@ Professional risk management system with:
 - Real-time risk monitoring and alerting
 
 This module consolidates all risk management functionality from:
-- backtesting_framework/risk/risk_manager.py
-- backtesting_framework/risk/stop_loss_manager.py
-- backtesting_framework/portfolio/position_sizing.py
+- [REMOVED] Old backtesting framework components (superseded by strategy_layer)
 """
 
 from .risk_manager import (

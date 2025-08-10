@@ -9,8 +9,7 @@ Professional portfolio management system with:
 - Real-time portfolio monitoring
 
 This module consolidates all portfolio management functionality from:
-- backtesting_framework/portfolio/pnl_tracker.py
-- backtesting_framework/portfolio/position_manager.py
+- [REMOVED] Old backtesting framework components (superseded by strategy_layer)
 """
 
 from .portfolio_manager import (

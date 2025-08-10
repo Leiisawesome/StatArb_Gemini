@@ -151,7 +151,6 @@ class IndicatorIntegration:
         }
 
 # Module initialization message
-print(f"""
 🎯 Technical Indicators Module Loaded - v{__version__}
 ================================================
 ✅ 105+ Technical Indicators Available

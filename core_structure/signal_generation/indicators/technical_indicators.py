@@ -31,14 +31,12 @@ try:
     TA_AVAILABLE = True
 except ImportError:
     TA_AVAILABLE = False
-    print("Warning: 'ta' library not available. Some indicators may be limited.")
 
 try:
     from clickhouse_driver import Client as ClickHouseClient
     CLICKHOUSE_AVAILABLE = True
 except ImportError:
     CLICKHOUSE_AVAILABLE = False
-    print("Warning: ClickHouse not available. Using mock data.")
 
 class MarketRegime(Enum):
     """Market regime classifications"""

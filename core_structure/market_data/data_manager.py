@@ -8,7 +8,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import logging
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..infrastructure import (
     ClickHouseClient,
@@ -28,6 +28,7 @@ class MarketDataConfig:
     default_lookback_days: int = 252
     enable_regime_detection: bool = True
     enable_liquidity_analysis: bool = True
+    default_symbols: List[str] = field(default_factory=lambda: ["SPY", "QQQ", "IWM"])
 
 
 class DataCache:
@@ -227,7 +228,16 @@ class DataManager:
         
         # Market data specific configuration
         market_config = self.config_manager.get('market_data', {})
-        self.data_config = MarketDataConfig(**market_config)
+        
+        # Filter out parameters that don't exist in MarketDataConfig
+        valid_params = {
+            'cache_ttl_seconds', 'real_time_enabled', 'max_symbols_per_query',
+            'default_lookback_days', 'enable_regime_detection', 
+            'enable_liquidity_analysis', 'default_symbols'
+        }
+        
+        filtered_config = {k: v for k, v in market_config.items() if k in valid_params}
+        self.data_config = MarketDataConfig(**filtered_config)
         
         # Component initialization
         cache_size = market_config.get('cache_max_size', 1000)
