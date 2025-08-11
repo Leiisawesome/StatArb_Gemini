@@ -2,7 +2,7 @@
 
 ## 🎯 Executive Summary
 
-This document outlines the comprehensive re-architecture plan to achieve **single source of truth** for strategy definitions using strategy templates. The goal is to eliminate all duplication of strategy definitions across the 3-layer architecture and centralize all strategy logic in template files.
+This document outlines the comprehensive re-architecture plan to achieve **single source of truth** for strategy definitions using a **hybrid template approach**. The goal is to eliminate all duplication of strategy definitions across the 3-layer architecture and centralize all strategy logic in a three-tier template system: **base/generic templates**, **specific templates**, and **composite templates**.
 
 ## 🏗️ Current Architecture Issues
 
@@ -22,52 +22,120 @@ This document outlines the comprehensive re-architecture plan to achieve **singl
    - Risk of inconsistent strategy behavior
    - Difficult to version control strategy evolution
 
-### ✅ Target Architecture
+### ✅ Target Architecture: Hybrid Three-Tier Template System
 1. **Single source of truth**: All strategy definitions in template files
-2. **Template-based assembly**: Strategy creation through template + customization
-3. **Zero duplication**: No strategy definitions outside templates
-4. **Easy maintenance**: Update template once, all tests automatically updated
+2. **Three-tier template architecture**: Base → Specific → Composite
+3. **Template inheritance and composition**: Reusable building blocks
+4. **Zero duplication**: No strategy definitions outside templates
+5. **Easy maintenance**: Update template once, all tests automatically updated
 
-## 📋 Implementation Phases
+## 🏗️ Hybrid Template Architecture
 
-### Phase 1: Template Infrastructure Foundation (Week 1)
-
-#### 1.1 Create Template Directory Structure
+### **Three-Tier Template Structure**
 ```bash
 strategies/
 ├── templates/
-│   ├── momentum_v1.json
-│   ├── mean_reversion_v1.json
-│   ├── trend_following_v1.json
-│   ├── pairs_trading_v1.json
-│   └── volatility_strategy_v1.json
+│   ├── base/                    # Generic base templates
+│   │   ├── generic_strategy_v1.json
+│   │   ├── generic_multi_asset_v1.json
+│   │   └── generic_risk_management_v1.json
+│   ├── specific/                # Strategy-specific templates
+│   │   ├── momentum_v1.json
+│   │   ├── mean_reversion_v1.json
+│   │   ├── pairs_trading_v1.json
+│   │   ├── trend_following_v1.json
+│   │   └── volatility_strategy_v1.json
+│   └── composite/               # Composite/hybrid templates
+│       ├── momentum_mean_reversion_v1.json
+│       ├── multi_factor_v1.json
+│       └── adaptive_momentum_v1.json
 ├── registry.py
 ├── assembler.py
 ├── validator.py
+├── inheritance_manager.py       # NEW: Template inheritance system
 └── __init__.py
 ```
 
-#### 1.2 Implement Strategy Template Registry
+### **Template Inheritance Hierarchy**
+```
+generic_strategy_v1 (Base)
+├── momentum_v1 (Specific)
+│   ├── momentum_mean_reversion_v1 (Composite)
+│   └── adaptive_momentum_v1 (Composite)
+├── mean_reversion_v1 (Specific)
+│   └── momentum_mean_reversion_v1 (Composite)
+└── pairs_trading_v1 (Specific)
+    └── multi_factor_v1 (Composite)
+```
+
+## 📋 Implementation Phases
+
+### Phase 1: Hybrid Template Infrastructure Foundation (Week 1)
+
+#### 1.1 Create Three-Tier Template Directory Structure
+```bash
+strategies/
+├── templates/
+│   ├── base/                    # Generic base templates
+│   │   ├── generic_strategy_v1.json
+│   │   ├── generic_multi_asset_v1.json
+│   │   └── generic_risk_management_v1.json
+│   ├── specific/                # Strategy-specific templates
+│   │   ├── momentum_v1.json
+│   │   ├── mean_reversion_v1.json
+│   │   ├── pairs_trading_v1.json
+│   │   ├── trend_following_v1.json
+│   │   └── volatility_strategy_v1.json
+│   └── composite/               # Composite/hybrid templates
+│       ├── momentum_mean_reversion_v1.json
+│       ├── multi_factor_v1.json
+│       └── adaptive_momentum_v1.json
+├── registry.py
+├── assembler.py
+├── validator.py
+├── inheritance_manager.py       # NEW: Template inheritance system
+└── __init__.py
+```
+
+#### 1.2 Implement Enhanced Strategy Template Registry
 ```python
 # strategies/registry.py
 class StrategyTemplateRegistry:
-    """Central registry for all strategy templates"""
+    """Central registry for all strategy templates with inheritance support"""
     
     def __init__(self, templates_directory: str = "strategies/templates"):
         self.templates_directory = templates_directory
         self.templates = {}
+        self.template_hierarchy = {}
         self._load_all_templates()
+        self._build_inheritance_hierarchy()
     
     def get_template(self, template_id: str) -> Dict[str, Any]:
-        """Single access point for strategy definitions"""
+        """Single access point for strategy definitions with inheritance"""
         if template_id not in self.templates:
             available_templates = list(self.templates.keys())
             raise ValueError(f"Template {template_id} not found. Available: {available_templates}")
         return self.templates[template_id]
     
-    def list_templates(self) -> List[str]:
-        """Get all available template IDs"""
-        return list(self.templates.keys())
+    def get_inherited_template(self, template_id: str) -> Dict[str, Any]:
+        """Get template with all inherited properties resolved"""
+        template = self.get_template(template_id)
+        if 'extends' in template:
+            base_template = self.get_inherited_template(template['extends'])
+            return self._merge_templates(base_template, template)
+        return template
+    
+    def list_templates_by_category(self) -> Dict[str, List[str]]:
+        """Get templates organized by category"""
+        categories = {'base': [], 'specific': [], 'composite': []}
+        for template_id in self.templates.keys():
+            if template_id.startswith('generic_'):
+                categories['base'].append(template_id)
+            elif template_id in ['momentum_v1', 'mean_reversion_v1', 'pairs_trading_v1', 'trend_following_v1', 'volatility_strategy_v1']:
+                categories['specific'].append(template_id)
+            else:
+                categories['composite'].append(template_id)
+        return categories
     
     def get_template_metadata(self, template_id: str) -> Dict[str, Any]:
         """Get template metadata for selection"""
@@ -76,22 +144,140 @@ class StrategyTemplateRegistry:
             'template_id': template['template_id'],
             'template_name': template['template_name'],
             'template_type': template['template_type'],
+            'template_category': self._get_template_category(template_id),
+            'extends': template.get('extends'),
             'version': template['version'],
             'description': template.get('description', ''),
             'tags': template.get('metadata', {}).get('tags', []),
             'expected_return': template.get('metadata', {}).get('expected_return'),
             'expected_volatility': template.get('metadata', {}).get('expected_volatility')
         }
+    
+    def _get_template_category(self, template_id: str) -> str:
+        """Determine template category"""
+        if template_id.startswith('generic_'):
+            return 'base'
+        elif template_id in ['momentum_v1', 'mean_reversion_v1', 'pairs_trading_v1', 'trend_following_v1', 'volatility_strategy_v1']:
+            return 'specific'
+        else:
+            return 'composite'
 ```
 
-#### 1.3 Create Sample Strategy Templates
+#### 1.3 Create Base Generic Templates
 ```json
-// strategies/templates/momentum_v1.json
+// strategies/templates/base/generic_strategy_v1.json
+{
+    "template_id": "generic_strategy_v1",
+    "template_name": "Generic Strategy Template",
+    "template_type": "generic",
+    "template_category": "base",
+    "version": "1.0.0",
+    "description": "Base template for any trading strategy with common structure",
+    
+    "base_parameters": {
+        "signal_generation": {
+            "indicators": {},
+            "signal_logic": {},
+            "signal_thresholds": {}
+        },
+        "risk_management": {
+            "position_sizing": {},
+            "stop_loss": {},
+            "take_profit": {},
+            "max_positions": {}
+        },
+        "entry_exit_logic": {
+            "entry_conditions": {},
+            "exit_conditions": {},
+            "position_management": {}
+        },
+        "execution": {
+            "order_types": {},
+            "execution_algorithms": {},
+            "slippage_models": {}
+        },
+        "portfolio_management": {
+            "rebalancing": {},
+            "correlation_management": {},
+            "diversification": {}
+        }
+    },
+    
+    "customization_points": {
+        "required_fields": ["signal_generation", "risk_management"],
+        "optional_fields": ["entry_exit_logic", "execution", "portfolio_management"],
+        "validation_rules": {}
+    },
+    
+    "metadata": {
+        "tags": ["base", "generic", "foundation"],
+        "expected_return": null,
+        "expected_volatility": null,
+        "sharpe_ratio": null,
+        "max_drawdown": null,
+        "suitable_markets": ["equity", "forex", "crypto", "commodities"],
+        "suitable_timeframes": ["1min", "5min", "15min", "1hour", "1day"]
+    }
+}
+```
+
+```json
+// strategies/templates/base/generic_risk_management_v1.json
+{
+    "template_id": "generic_risk_management_v1",
+    "template_name": "Generic Risk Management Template",
+    "template_type": "risk_management",
+    "template_category": "base",
+    "version": "1.0.0",
+    "description": "Base risk management template with common risk controls",
+    
+    "base_parameters": {
+        "risk_management": {
+            "position_sizing": {
+                "type": "signal_based",
+                "max_position_size": 0.25,
+                "risk_per_trade": 0.02
+            },
+            "stop_loss": {
+                "type": "percentage",
+                "stop_loss_pct": 0.05,
+                "trailing_stop": true
+            },
+            "take_profit": {
+                "type": "percentage",
+                "take_profit_pct": 0.15
+            },
+            "max_positions": {
+                "max_concurrent_positions": 10,
+                "max_sector_exposure": 0.3,
+                "max_single_position": 0.2
+            },
+            "volatility_adjustment": {
+                "enabled": true,
+                "lookback_period": 20,
+                "adjustment_factor": 10
+            }
+        }
+    },
+    
+    "metadata": {
+        "tags": ["base", "risk_management", "foundation"],
+        "suitable_markets": ["equity", "forex", "crypto", "commodities"],
+        "suitable_timeframes": ["1min", "5min", "15min", "1hour", "1day"]
+    }
+}
+```
+
+#### 1.4 Create Specific Strategy Templates
+```json
+// strategies/templates/specific/momentum_v1.json
 {
     "template_id": "momentum_v1",
     "template_name": "Momentum Strategy",
     "template_type": "momentum",
+    "template_category": "specific",
     "version": "1.0.0",
+    "extends": "generic_strategy_v1",
     "description": "Multi-indicator momentum strategy with RSI, MACD, and price momentum",
     
     "base_parameters": {
@@ -212,21 +398,166 @@ class StrategyTemplateRegistry:
 }
 ```
 
-#### 1.4 Implement Strategy Assembler
+#### 1.5 Create Composite Templates
+```json
+// strategies/templates/composite/momentum_mean_reversion_v1.json
+{
+    "template_id": "momentum_mean_reversion_v1",
+    "template_name": "Momentum-Mean Reversion Hybrid",
+    "template_type": "hybrid",
+    "template_category": "composite",
+    "version": "1.0.0",
+    "extends": ["momentum_v1", "mean_reversion_v1"],
+    "description": "Hybrid strategy combining momentum and mean reversion signals",
+    
+    "base_parameters": {
+        "signal_generation": {
+            "indicators": {
+                "momentum_indicators": {
+                    "rsi": {"period": 14, "weight": 0.3},
+                    "macd": {"fast_period": 12, "slow_period": 26, "weight": 0.3}
+                },
+                "mean_reversion_indicators": {
+                    "bollinger_bands": {"period": 20, "std_dev": 2, "weight": 0.2},
+                    "stochastic": {"k_period": 14, "d_period": 3, "weight": 0.2}
+                }
+            },
+            "signal_combination": {
+                "method": "regime_based",
+                "momentum_regime_threshold": 0.6,
+                "mean_reversion_regime_threshold": 0.4
+            }
+        },
+        
+        "regime_detection": {
+            "volatility_regime": {
+                "enabled": true,
+                "lookback_period": 50,
+                "high_volatility_threshold": 0.25
+            },
+            "trend_regime": {
+                "enabled": true,
+                "ma_short": 20,
+                "ma_long": 50
+            }
+        }
+    },
+    
+    "hybrid_specific": {
+        "regime_weights": {
+            "momentum_regime": {
+                "momentum_weight": 0.8,
+                "mean_reversion_weight": 0.2
+            },
+            "mean_reversion_regime": {
+                "momentum_weight": 0.2,
+                "mean_reversion_weight": 0.8
+            }
+        },
+        "regime_transition": {
+            "smoothing_period": 5,
+            "transition_threshold": 0.1
+        }
+    },
+    
+    "metadata": {
+        "tags": ["hybrid", "momentum", "mean_reversion", "regime_detection"],
+        "expected_return": 0.18,
+        "expected_volatility": 0.18,
+        "sharpe_ratio": 1.0,
+        "max_drawdown": 0.12,
+        "suitable_markets": ["equity", "forex", "crypto"],
+        "suitable_timeframes": ["15min", "1hour", "1day"]
+    }
+}
+```
+
+#### 1.6 Implement Template Inheritance Manager
 ```python
-# strategies/assembler.py
-class StrategyAssembler:
-    """Assemble strategy from template with customization"""
+# strategies/inheritance_manager.py - NEW
+class TemplateInheritanceManager:
+    """Manages template inheritance and composition"""
     
     def __init__(self, template_registry: StrategyTemplateRegistry):
         self.template_registry = template_registry
+    
+    def extend_template(self, base_template_id: str, extensions: Dict[str, Any]) -> Dict[str, Any]:
+        """Extend a base template with specific customizations"""
+        base_template = self.template_registry.get_inherited_template(base_template_id)
+        extended_template = self._deep_merge(base_template, extensions)
+        return extended_template
+    
+    def compose_templates(self, template_ids: List[str], composition_rules: Dict[str, Any]) -> Dict[str, Any]:
+        """Compose multiple templates into a single strategy"""
+        templates = [self.template_registry.get_inherited_template(tid) for tid in template_ids]
+        composed_template = self._compose_templates(templates, composition_rules)
+        return composed_template
+    
+    def create_composite_template(self, base_templates: List[str], composite_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new composite template from base templates"""
+        # Get all base templates
+        base_template_data = []
+        for template_id in base_templates:
+            template = self.template_registry.get_inherited_template(template_id)
+            base_template_data.append(template)
+        
+        # Create composite template
+        composite_template = {
+            "template_id": composite_config["template_id"],
+            "template_name": composite_config["template_name"],
+            "template_type": "composite",
+            "template_category": "composite",
+            "version": composite_config.get("version", "1.0.0"),
+            "extends": base_templates,
+            "description": composite_config.get("description", ""),
+            "base_parameters": self._merge_base_parameters(base_template_data, composite_config),
+            "composite_specific": composite_config.get("composite_specific", {}),
+            "metadata": composite_config.get("metadata", {})
+        }
+        
+        return composite_template
+    
+    def _merge_base_parameters(self, base_templates: List[Dict[str, Any]], composite_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge base parameters from multiple templates"""
+        merged_parameters = {}
+        
+        for template in base_templates:
+            if 'base_parameters' in template:
+                merged_parameters = self._deep_merge(merged_parameters, template['base_parameters'])
+        
+        # Apply composite-specific overrides
+        if 'base_parameters' in composite_config:
+            merged_parameters = self._deep_merge(merged_parameters, composite_config['base_parameters'])
+        
+        return merged_parameters
+    
+    def _deep_merge(self, dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep merge two dictionaries"""
+        result = dict1.copy()
+        for key, value in dict2.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+```
+
+#### 1.7 Enhanced Strategy Assembler
+```python
+# strategies/assembler.py
+class StrategyAssembler:
+    """Assemble strategy from template with inheritance and customization"""
+    
+    def __init__(self, template_registry: StrategyTemplateRegistry, inheritance_manager: TemplateInheritanceManager):
+        self.template_registry = template_registry
+        self.inheritance_manager = inheritance_manager
         self.strategy_parser = StrategyParser()
     
     def assemble_strategy(self, template_id: str, customizations: Dict[str, Any] = None) -> StrategyConfig:
-        """Create strategy from template only"""
+        """Create strategy from template with inheritance resolution"""
         
-        # Get base template
-        template = self.template_registry.get_template(template_id)
+        # Get template with inheritance resolved
+        template = self.template_registry.get_inherited_template(template_id)
         
         # Apply customizations
         if customizations:
@@ -261,6 +592,14 @@ class StrategyAssembler:
         
         return strategy_config
     
+    def create_composite_strategy(self, base_templates: List[str], composite_config: Dict[str, Any], customizations: Dict[str, Any] = None) -> StrategyConfig:
+        """Create strategy from composite template"""
+        # Create composite template
+        composite_template = self.inheritance_manager.create_composite_template(base_templates, composite_config)
+        
+        # Assemble strategy from composite template
+        return self.assemble_strategy(composite_template['template_id'], customizations)
+    
     def _apply_customizations(self, template: Dict[str, Any], customizations: Dict[str, Any]) -> Dict[str, Any]:
         """Apply customizations to template"""
         assembled = template.copy()
@@ -275,13 +614,16 @@ class StrategyAssembler:
         return assembled
 ```
 
-#### 1.5 Deliverables for Phase 1
-- [ ] Template directory structure created
-- [ ] Strategy template registry implemented
-- [ ] Strategy assembler implemented
-- [ ] Sample strategy templates created (momentum, mean_reversion, trend_following)
-- [ ] Unit tests for template registry and assembler
-- [ ] Documentation for template format and usage
+#### 1.8 Deliverables for Phase 1
+- [ ] Three-tier template directory structure created
+- [ ] Enhanced strategy template registry with inheritance support
+- [ ] Template inheritance manager implemented
+- [ ] Base generic templates created (generic_strategy_v1, generic_risk_management_v1)
+- [ ] Specific strategy templates created (momentum_v1, mean_reversion_v1, pairs_trading_v1)
+- [ ] Composite templates created (momentum_mean_reversion_v1, multi_factor_v1)
+- [ ] Enhanced strategy assembler with inheritance support
+- [ ] Unit tests for template inheritance and composition
+- [ ] Documentation for hybrid template architecture
 
 ### Phase 2: Strategy Layer Re-Architecture (Week 2)
 

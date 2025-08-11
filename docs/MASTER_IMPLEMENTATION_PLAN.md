@@ -2,14 +2,15 @@
 
 ## 🎯 Executive Summary
 
-This **Master Plan** orchestrates the implementation of three critical sub-plans into a seamless, coordinated execution strategy:
+This **Master Plan** orchestrates the implementation of **four critical sub-plans** into a seamless, coordinated execution strategy:
 
 1. **Unified Core Engine Performance Audit & Improvement Plan**
-2. **Single Source Strategy Template Implementation Plan** 
-3. **Academic Research Integration Plan**
+2. **Single Source Strategy Template Implementation Plan (Hybrid Approach)**
+3. **Dynamic Adaptation Implementation Plan (Hybrid Template Integration)**
+4. **Academic Research Integration Plan (Hybrid Template Integration)**
 
-**Total Timeline**: 28 weeks (7 months)
-**Critical Success Factor**: Flawless coordination and dependency management
+**Total Timeline**: 32 weeks (8 months)
+**Critical Success Factor**: Flawless coordination and dependency management across hybrid template architecture
 
 ## 🏗️ Master Architecture Overview
 
@@ -21,10 +22,13 @@ This **Master Plan** orchestrates the implementation of three critical sub-plans
 │  └── Core Engine Performance Audit & Improvement            │
 │                                                             │
 │  PHASE 2: INFRASTRUCTURE (Weeks 9-20)                      │
-│  └── Strategy Template Implementation                       │
+│  └── Hybrid Strategy Template Implementation                │
 │                                                             │
-│  PHASE 3: INNOVATION (Weeks 21-28)                         │
-│  └── Academic Research Integration                          │
+│  PHASE 3: ADAPTATION (Weeks 21-25)                         │
+│  └── Dynamic Adaptation Implementation                     │
+│                                                             │
+│  PHASE 4: INNOVATION (Weeks 26-32)                         │
+│  └── Academic Research Integration                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -98,168 +102,210 @@ Week 8:
 ```
 
 ### **Phase 2: Infrastructure (Weeks 9-20)**
-**🎯 PRIORITY 2: Single Source Strategy Template Implementation**
+**🎯 PRIORITY 2: Hybrid Strategy Template Implementation**
 
-#### **Week 9-10: Template Infrastructure Foundation**
+#### **Week 9-10: Hybrid Template Infrastructure Foundation**
 ```python
-# Master Task: Template Infrastructure Setup
+# Master Task: Three-Tier Template Infrastructure Setup
 Week 9:
-├── Day 1-2: Template directory structure
-├── Day 3-4: Strategy template registry
-├── Day 5-6: Strategy assembler
-└── Day 7: Sample strategy templates
+├── Day 1-2: Three-tier template directory structure
+│   ├── Base/generic templates
+│   ├── Specific strategy templates
+│   └── Composite/hybrid templates
+├── Day 3-4: Enhanced strategy template registry with inheritance
+├── Day 5-6: Template inheritance manager implementation
+└── Day 7: Base generic templates creation
 
 Week 10:
-├── Day 1-2: Template validation framework
-├── Day 3-4: Template testing infrastructure
-├── Day 5-6: Template documentation
+├── Day 1-2: Specific strategy templates (momentum, mean_reversion, pairs)
+├── Day 3-4: Composite templates (hybrid strategies)
+├── Day 5-6: Enhanced strategy assembler with inheritance support
 └── Day 7: Phase 2.1 completion validation
 ```
 
-#### **Week 11-12: Strategy Layer Re-Architecture**
+#### **Week 11-12: Strategy Layer Re-Architecture with Inheritance**
 ```python
-# Master Task: Strategy Layer Template Integration
+# Master Task: Strategy Layer Template Integration with Hybrid Approach
 Week 11:
-├── Day 1-2: Template-centric strategy layer
+├── Day 1-2: Template-centric strategy layer with inheritance support
 ├── Day 3-4: Remove hardcoded definitions
-├── Day 5-6: Update strategy parser
-└── Day 7: Strategy layer testing
+├── Day 5-6: Update strategy parser for template inheritance
+└── Day 7: Strategy layer testing with hybrid templates
 
 Week 12:
-├── Day 1-2: Strategy layer integration
-├── Day 3-4: Template-based strategy execution
-├── Day 5-6: Performance validation
+├── Day 1-2: Strategy layer integration with composite templates
+├── Day 3-4: Template-based strategy execution with inheritance
+├── Day 5-6: Performance validation for hybrid approach
 └── Day 7: Phase 2.2 completion validation
 ```
 
-#### **Week 13-14: Scenario Layer Re-Architecture**
+#### **Week 13-14: Scenario Layer Re-Architecture with Template Categories**
 ```python
-# Master Task: Scenario Layer Template Integration
+# Master Task: Scenario Layer Template Integration with Three-Tier System
 Week 13:
-├── Day 1-2: Template-aware backtesting engine
-├── Day 3-4: Template-aware scenario layer
+├── Day 1-2: Template-aware backtesting engine with category support
+├── Day 3-4: Template-aware scenario layer with inheritance
 ├── Day 5-6: Remove old scenario methods
-└── Day 7: Scenario layer testing
+└── Day 7: Scenario layer testing with hybrid templates
 
 Week 14:
-├── Day 1-2: Template-based testing
-├── Day 3-4: Scenario layer integration
-├── Day 5-6: Performance validation
+├── Day 1-2: Template-based testing with base/specific/composite templates
+├── Day 3-4: Scenario layer integration with template inheritance
+├── Day 5-6: Performance validation for three-tier system
 └── Day 7: Phase 2.3 completion validation
 ```
 
-#### **Week 15-16: Core Engine Re-Architecture**
+#### **Week 15-16: Core Engine Re-Architecture with Template Inheritance**
 ```python
-# Master Task: Core Engine Template Integration
+# Master Task: Core Engine Template Integration with Hybrid System
 Week 15:
-├── Day 1-2: Template-compatible core engine
-├── Day 3-4: Template mode functionality
-├── Day 5-6: Template-based trading cycles
-└── Day 7: Core engine testing
+├── Day 1-2: Template-compatible core engine with inheritance support
+├── Day 3-4: Template mode functionality with three-tier categories
+├── Day 5-6: Template-based trading cycles with composite templates
+└── Day 7: Core engine testing with hybrid approach
 
 Week 16:
-├── Day 1-2: Core engine integration
-├── Day 3-4: Template-based execution
-├── Day 5-6: Performance validation
+├── Day 1-2: Core engine integration with template inheritance
+├── Day 3-4: Template-based execution with base/specific/composite
+├── Day 5-6: Performance validation for hybrid template system
 └── Day 7: Phase 2.4 completion validation
 ```
 
-#### **Week 17-18: Test Cases Re-Architecture**
+#### **Week 17-18: Test Cases Re-Architecture with Template Categories**
 ```python
-# Master Task: Test Cases Template Integration
+# Master Task: Test Cases Template Integration with Three-Tier System
 Week 17:
-├── Day 1-2: Template-based test cases
+├── Day 1-2: Template-based test cases with inheritance testing
 ├── Day 3-4: Remove old test cases
-├── Day 5-6: Template comparison tests
-└── Day 7: Test framework validation
+├── Day 5-6: Template comparison tests across categories
+└── Day 7: Test framework validation with hybrid templates
 
 Week 18:
-├── Day 1-2: Performance validation tests
-├── Day 3-4: Integration testing
-├── Day 5-6: Test automation
+├── Day 1-2: Performance validation tests for base/specific/composite
+├── Day 3-4: Integration testing with template inheritance
+├── Day 5-6: Test automation for three-tier system
 └── Day 7: Phase 2.5 completion validation
 ```
 
-#### **Week 19-20: Integration and Validation**
+#### **Week 19-20: Integration and Validation of Hybrid Template System**
 ```python
-# Master Task: Complete Template System Integration
+# Master Task: Complete Hybrid Template System Integration
 Week 19:
-├── Day 1-2: End-to-end integration testing
-├── Day 3-4: Template workflow validation
-├── Day 5-6: Performance consistency tests
-└── Day 7: System validation
+├── Day 1-2: End-to-end integration testing with three-tier templates
+├── Day 3-4: Template workflow validation with inheritance
+├── Day 5-6: Performance consistency tests across template categories
+└── Day 7: System validation for hybrid approach
 
 Week 20:
-├── Day 1-2: Complete system validation
-├── Day 3-4: Performance optimization
-├── Day 5-6: Documentation completion
+├── Day 1-2: Complete system validation with template inheritance
+├── Day 3-4: Performance optimization for hybrid template system
+├── Day 5-6: Documentation completion for three-tier architecture
 └── Day 7: Phase 2 completion and handoff
 ```
 
-### **Phase 3: Innovation (Weeks 21-28)**
-**🎯 PRIORITY 3: Academic Research Integration**
+### **Phase 3: Adaptation (Weeks 21-25)**
+**🎯 PRIORITY 3: Dynamic Adaptation Implementation with Hybrid Templates**
 
-#### **Week 21-22: Academic Research Infrastructure**
+#### **Week 21-22: Dynamic Adaptation Foundation with Template Inheritance**
 ```python
-# Master Task: Academic Infrastructure Setup
+# Master Task: Dynamic Adaptation Framework with Hybrid Templates
 Week 21:
-├── Day 1-2: Academic strategy registry
-├── Day 3-4: Academic strategy validator
-├── Day 5-6: Research-to-production pipeline
-└── Day 7: Academic strategy enhancer
+├── Day 1-2: Enhanced dynamic adaptation framework with template inheritance
+├── Day 3-4: Template-category-aware performance adaptation
+├── Day 5-6: Template-inheritance-aware market regime adaptation
+└── Day 7: Dynamic adaptation testing with hybrid templates
 
 Week 22:
-├── Day 1-2: Academic infrastructure testing
-├── Day 3-4: Pipeline validation
-├── Day 5-6: Performance optimization
+├── Day 1-2: Performance-based adaptation with template categories
+├── Day 3-4: Market regime detection with inheritance support
+├── Day 5-6: Parameter optimization with template bounds
 └── Day 7: Phase 3.1 completion validation
 ```
 
-#### **Week 23-24: Academic Collaboration Framework**
+#### **Week 23-24: Component-Specific Dynamic Adaptation**
 ```python
-# Master Task: Academic Collaboration Setup
+# Master Task: Component-Specific Adaptation with Template Categories
 Week 23:
-├── Day 1-2: Academic-industry collaboration
-├── Day 3-4: Academic strategy repository
-├── Day 5-6: Strategy search and filtering
-└── Day 7: Partnership management
+├── Day 1-2: Signal generation adaptation with template inheritance
+├── Day 3-4: Risk management adaptation with category-specific rules
+├── Day 5-6: Portfolio management adaptation with composite templates
+└── Day 7: Component adaptation testing
 
 Week 24:
-├── Day 1-2: Collaboration framework testing
-├── Day 3-4: Repository validation
-├── Day 5-6: Search functionality testing
+├── Day 1-2: Execution adaptation with template bounds
+├── Day 3-4: Multi-component coordination with inheritance
+├── Day 5-6: Adaptation validation across template categories
 └── Day 7: Phase 3.2 completion validation
 ```
 
-#### **Week 25-26: Research-to-Production Testing**
+#### **Week 25: Integration of Dynamic Adaptation**
 ```python
-# Master Task: Academic Integration Testing
+# Master Task: Complete Dynamic Adaptation Integration
 Week 25:
-├── Day 1-2: Academic strategy testing framework
-├── Day 3-4: Research-to-production pipeline testing
-├── Day 5-6: Academic strategy search testing
-└── Day 7: Integration validation
-
-Week 26:
-├── Day 1-2: Complete academic integration validation
-├── Day 3-4: Performance testing
-├── Day 5-6: Workflow optimization
-└── Day 7: Phase 3.3 completion validation
+├── Day 1-2: Template-compatible core engine with dynamic adaptation
+├── Day 3-4: Template-based testing with dynamic adaptation
+├── Day 5-6: End-to-end dynamic adaptation workflow
+└── Day 7: Phase 3 completion and handoff
 ```
 
-#### **Week 27-28: Integration and Validation**
-```python
-# Master Task: Complete System Integration
-Week 27:
-├── Day 1-2: End-to-end academic workflow
-├── Day 3-4: Performance validation
-├── Day 5-6: Collaboration framework testing
-└── Day 7: System integration
+### **Phase 4: Innovation (Weeks 26-32)**
+**🎯 PRIORITY 4: Academic Research Integration with Hybrid Templates**
 
+#### **Week 26-27: Academic Research Infrastructure with Template Categories**
+```python
+# Master Task: Academic Infrastructure with Hybrid Template Support
+Week 26:
+├── Day 1-2: Academic strategy registry with template inheritance
+├── Day 3-4: Academic strategy validator with category-specific rules
+├── Day 5-6: Research-to-production pipeline with hybrid templates
+└── Day 7: Academic strategy enhancer with inheritance support
+
+Week 27:
+├── Day 1-2: Academic infrastructure testing with template categories
+├── Day 3-4: Pipeline validation with hybrid approach
+├── Day 5-6: Performance optimization for academic integration
+└── Day 7: Phase 4.1 completion validation
+```
+
+#### **Week 28-29: Academic Collaboration Framework with Template Inheritance**
+```python
+# Master Task: Academic Collaboration with Hybrid Template System
 Week 28:
-├── Day 1-2: Complete system validation
-├── Day 3-4: Performance optimization
-├── Day 5-6: Documentation completion
+├── Day 1-2: Academic-industry collaboration with template categories
+├── Day 3-4: Academic strategy repository with inheritance support
+├── Day 5-6: Strategy search and filtering with template categories
+└── Day 7: Partnership management with hybrid templates
+
+Week 29:
+├── Day 1-2: Collaboration framework testing with template inheritance
+├── Day 3-4: Repository validation with three-tier system
+├── Day 5-6: Search functionality testing with hybrid approach
+└── Day 7: Phase 4.2 completion validation
+```
+
+#### **Week 30-31: Research-to-Production Testing with Template Categories**
+```python
+# Master Task: Academic Integration Testing with Hybrid Templates
+Week 30:
+├── Day 1-2: Academic strategy testing framework with template inheritance
+├── Day 3-4: Research-to-production pipeline testing with hybrid approach
+├── Day 5-6: Academic strategy search testing with template categories
+└── Day 7: Integration validation with inheritance support
+
+Week 31:
+├── Day 1-2: Complete academic integration validation with hybrid templates
+├── Day 3-4: Performance testing with template inheritance
+├── Day 5-6: Workflow optimization with three-tier system
+└── Day 7: Phase 4.3 completion validation
+```
+
+#### **Week 32: Integration and Validation**
+```python
+# Master Task: Complete System Integration with All Components
+Week 32:
+├── Day 1-2: End-to-end academic workflow with hybrid templates
+├── Day 3-4: Performance validation with dynamic adaptation
+├── Day 5-6: Complete system validation with all components
 └── Day 7: Master Plan completion
 ```
 
@@ -268,7 +314,7 @@ Week 28:
 ### **Critical Dependencies**
 ```python
 # Master Dependency Matrix
-Phase 1 (Core Engine) → Phase 2 (Templates) → Phase 3 (Academic)
+Phase 1 (Core Engine) → Phase 2 (Templates) → Phase 3 (Adaptation) → Phase 4 (Academic)
 
 # Phase 1 Dependencies
 Core_Engine_Performance → Template_Infrastructure
@@ -276,13 +322,19 @@ Core_Engine_Stability → Template_Reliability
 Core_Engine_Scalability → Template_Scalability
 
 # Phase 2 Dependencies
-Template_Infrastructure → Academic_Registry
-Template_Validation → Academic_Validation
-Template_Execution → Academic_Execution
+Template_Infrastructure → Template_Strategy_Layer
+Template_Validation → Template_Reliability
+Template_Execution → Template_Execution_Engine
 
 # Phase 3 Dependencies
+Adaptation_Framework → Template_Execution_Engine
+Adaptation_Testing → Template_Reliability
+Adaptation_Validation → Template_Scalability
+
+# Phase 4 Dependencies
 Academic_Infrastructure → Complete_System
-Academic_Collaboration → Innovation_Pipeline
+Academic_Collaboration → Academic_Registry
+Academic_Testing → Academic_Validation
 ```
 
 ### **Critical Path Analysis**
@@ -299,6 +351,9 @@ Critical_Path = [
     "Template_Core_Engine_Integration",
     "Template_Testing",
     "Template_Integration",
+    "Adaptation_Framework",
+    "Adaptation_Testing",
+    "Adaptation_Validation",
     "Academic_Infrastructure",
     "Academic_Collaboration",
     "Academic_Testing",
@@ -315,18 +370,26 @@ Critical_Path = [
 - [ ] **Reliability**: 99.99% availability maintained
 - [ ] **Monitoring**: Real-time performance monitoring operational
 
-### **Phase 2 Success Criteria (Templates)**
-- [ ] **Single Source**: All strategy definitions moved to templates
+### **Phase 2 Success Criteria (Hybrid Template System)**
+- [ ] **Three-Tier Architecture**: Base/specific/composite template system operational
+- [ ] **Template Inheritance**: Template inheritance and composition system working
+- [ ] **Single Source**: All strategy definitions moved to hybrid templates
 - [ ] **Zero Hardcoding**: No hardcoded strategy definitions remain
-- [ ] **Template Testing**: Template-based testing fully operational
-- [ ] **Performance**: Performance maintained with template system
-- [ ] **Integration**: Seamless integration with core engine
+- [ ] **Template Categories**: Base, specific, and composite templates fully functional
+- [ ] **Template Testing**: Template-based testing with inheritance fully operational
+- [ ] **Performance**: Performance maintained with hybrid template system
+- [ ] **Integration**: Seamless integration with core engine using template inheritance
 
-### **Phase 3 Success Criteria (Academic Integration)**
-- [ ] **Academic Registry**: Academic strategy registry operational
-- [ ] **Research Pipeline**: Research-to-production pipeline working
-- [ ] **Collaboration**: Academic-industry collaboration functional
-- [ ] **Strategy Conversion**: Academic strategies successfully converted
+### **Phase 3 Success Criteria (Dynamic Adaptation)**
+- [ ] **Dynamic Adaptation Framework**: Template-category-aware and template-inheritance-aware adaptation mechanisms operational
+- [ ] **Component-Specific Adaptation**: Signal generation, risk management, portfolio management, and execution adaptation working
+- [ ] **Template Integration**: Dynamic adaptation framework seamlessly integrated with core engine and template system
+
+### **Phase 4 Success Criteria (Academic Integration)**
+- [ ] **Academic Registry**: Academic strategy registry operational with template inheritance
+- [ ] **Research Pipeline**: Research-to-production pipeline working with hybrid templates
+- [ ] **Collaboration**: Academic-industry collaboration functional with template categories
+- [ ] **Strategy Conversion**: Academic strategies successfully converted and integrated
 - [ ] **Innovation Pipeline**: Complete innovation pipeline established
 
 ## 🚀 Master Implementation Strategy
@@ -344,7 +407,12 @@ Week 9-20: Template Development
 ├── Secondary: Core engine optimization
 └── Tertiary: Academic infrastructure planning
 
-Week 21-28: Academic Development
+Week 21-25: Adaptation Development
+├── Primary: Dynamic adaptation framework
+├── Secondary: Component-specific adaptation
+└── Tertiary: Template integration
+
+Week 26-32: Academic Development
 ├── Primary: Academic integration
 ├── Secondary: Template optimization
 └── Tertiary: Core engine monitoring
@@ -379,12 +447,20 @@ Phase_1_QA:
 └── Integration testing at each milestone
 
 Phase_2_QA:
-├── Template validation at each milestone
-├── Performance consistency testing
-├── Integration testing with core engine
-└── End-to-end workflow testing
+├── Three-tier template validation at each milestone
+├── Template inheritance and composition testing
+├── Base/specific/composite template functionality testing
+├── Performance consistency testing across template categories
+├── Integration testing with core engine using template inheritance
+└── End-to-end workflow testing with hybrid template system
 
 Phase_3_QA:
+├── Dynamic adaptation framework testing
+├── Component-specific adaptation testing
+├── Template integration testing
+└── End-to-end dynamic adaptation workflow testing
+
+Phase_4_QA:
 ├── Academic integration testing
 ├── Research-to-production validation
 ├── Collaboration framework testing
@@ -435,17 +511,28 @@ Phase_X_Completion = {
 - [ ] Optimization documentation
 - [ ] Performance benchmarks
 
-### **Phase 2 Deliverables**
+### **Phase 2 Deliverables (Hybrid Template System)**
+- [ ] Three-tier template architecture (base/specific/composite)
+- [ ] Template inheritance and composition system
+- [ ] Enhanced template registry with inheritance support
+- [ ] Template inheritance manager
+- [ ] Enhanced strategy assembler with inheritance support
 - [ ] Complete template-based strategy system
-- [ ] Template registry and assembler
-- [ ] Template-based testing framework
-- [ ] Integration documentation
-- [ ] Template examples and samples
+- [ ] Template-based testing framework with inheritance
+- [ ] Integration documentation for hybrid template system
+- [ ] Template examples across all categories (base/specific/composite)
+- [ ] Template inheritance and composition examples
 
 ### **Phase 3 Deliverables**
-- [ ] Academic strategy registry
-- [ ] Research-to-production pipeline
-- [ ] Academic collaboration framework
+- [ ] Dynamic adaptation framework with template inheritance
+- [ ] Component-specific adaptation testing
+- [ ] Template integration testing
+- [ ] End-to-end dynamic adaptation workflow
+
+### **Phase 4 Deliverables**
+- [ ] Academic strategy registry with template inheritance
+- [ ] Research-to-production pipeline with hybrid templates
+- [ ] Academic collaboration framework with template categories
 - [ ] Academic integration documentation
 - [ ] Innovation pipeline examples
 
@@ -459,7 +546,7 @@ Phase_X_Completion = {
 - [ ] **Efficiency**: 90% reduction in strategy development time
 
 ### **Timeline Success Metrics**
-- [ ] **On-Time Delivery**: All phases completed within 28 weeks
+- [ ] **On-Time Delivery**: All phases completed within 32 weeks
 - [ ] **Quality Delivery**: All success criteria met for each phase
 - [ ] **Integration Success**: Seamless integration between all phases
 - [ ] **Performance Achievement**: All performance targets met

@@ -2,141 +2,207 @@
 
 ## 🎯 Executive Summary
 
-This document outlines the **dynamic adaptation components** that need to be added to the template-based foundation to achieve a complete **2-step strategy procedure**: Initial Definition (Templates) + Dynamic Adaptation (Runtime Evolution).
+This document outlines the **dynamic adaptation components** that need to be added to the **hybrid template-based foundation** to achieve a complete **2-step strategy procedure**: Initial Definition (Hybrid Templates) + Dynamic Adaptation (Runtime Evolution).
 
-## 🏗️ Dynamic Adaptation Architecture
+The dynamic adaptation system works with the **three-tier template architecture**:
+- **Base/Generic Templates**: Foundation for adaptation framework
+- **Specific Templates**: Strategy-specific adaptation rules
+- **Composite Templates**: Multi-strategy adaptation coordination
+
+## 🏗️ Dynamic Adaptation Architecture with Hybrid Templates
 
 ### **Phase 7: Dynamic Adaptation Foundation (Week 7)**
 
-#### 7.1 Dynamic Adaptation Framework
+#### 7.1 Enhanced Dynamic Adaptation Framework with Template Inheritance
 ```python
 # strategies/adaptation/dynamic_adaptation_framework.py
 class DynamicAdaptationFramework:
-    """🎯 DYNAMIC: Framework for runtime strategy adaptation"""
+    """🎯 DYNAMIC: Framework for runtime strategy adaptation with hybrid templates"""
     
-    def __init__(self, strategy_config: StrategyConfig):
+    def __init__(self, strategy_config: StrategyConfig, template_registry: StrategyTemplateRegistry):
         self.strategy_config = strategy_config
+        self.template_registry = template_registry
         self.adaptation_framework = strategy_config.adaptation_framework
         self.performance_tracker = PerformanceTracker()
         self.market_regime_detector = MarketRegimeDetector()
         self.parameter_optimizer = ParameterOptimizer()
+        self.template_inheritance_manager = TemplateInheritanceManager(template_registry)
         
     async def check_adaptation_triggers(self, market_data: Dict[str, Any], performance_metrics: Dict[str, float]) -> bool:
-        """🎯 DYNAMIC: Check if adaptation is needed"""
+        """🎯 DYNAMIC: Check if adaptation is needed with template category awareness"""
         triggers = self.adaptation_framework['adaptation_triggers']
         
-        # Check performance degradation
-        if self._check_performance_degradation(performance_metrics, triggers['performance_degradation']):
+        # Get template category for adaptation rules
+        template_category = self._get_template_category()
+        
+        # Check performance degradation with category-specific thresholds
+        if self._check_performance_degradation(performance_metrics, triggers['performance_degradation'], template_category):
             return True
             
-        # Check volatility change
-        if self._check_volatility_change(market_data, triggers['volatility_change']):
+        # Check volatility change with template-specific sensitivity
+        if self._check_volatility_change(market_data, triggers['volatility_change'], template_category):
             return True
             
-        # Check market regime change
-        if self._check_regime_change(market_data, triggers['regime_change']):
+        # Check market regime change with inheritance-aware rules
+        if self._check_regime_change(market_data, triggers['regime_change'], template_category):
             return True
             
         return False
     
     async def execute_adaptation(self, market_data: Dict[str, Any], performance_metrics: Dict[str, float]) -> StrategyConfig:
-        """🎯 DYNAMIC: Execute parameter adaptation"""
+        """🎯 DYNAMIC: Execute parameter adaptation with template inheritance"""
         # Analyze current conditions
         market_analysis = self._analyze_market_conditions(market_data)
         performance_analysis = self._analyze_performance_patterns(performance_metrics)
         
-        # Calculate optimal parameters
-        optimal_params = await self.parameter_optimizer.optimize_parameters(
-            self.strategy_config, market_analysis, performance_analysis
+        # Get template inheritance chain for adaptation rules
+        template_chain = self._get_template_inheritance_chain()
+        
+        # Calculate optimal parameters with inheritance-aware optimization
+        optimal_params = await self.parameter_optimizer.optimize_parameters_with_inheritance(
+            self.strategy_config, market_analysis, performance_analysis, template_chain
         )
         
-        # Apply adaptation within bounds
-        adapted_config = self._apply_adaptation_within_bounds(optimal_params)
+        # Apply adaptation within template bounds
+        adapted_config = self._apply_adaptation_within_template_bounds(optimal_params, template_chain)
         
         # Update strategy configuration
         self.strategy_config = adapted_config
         
         return adapted_config
+    
+    def _get_template_category(self) -> str:
+        """Get template category for adaptation rules"""
+        template_id = self.strategy_config.assembled_from_template
+        template = self.template_registry.get_template(template_id)
+        return template.get('template_category', 'specific')
+    
+    def _get_template_inheritance_chain(self) -> List[str]:
+        """Get template inheritance chain for adaptation rules"""
+        template_id = self.strategy_config.assembled_from_template
+        return self.template_inheritance_manager.get_inheritance_chain(template_id)
 ```
 
-#### 7.2 Performance-Based Adaptation
+#### 7.2 Template-Category-Aware Performance Adaptation
 ```python
 # strategies/adaptation/performance_adaptation.py
 class PerformanceAdaptation:
-    """🎯 DYNAMIC: Performance-based strategy adaptation"""
+    """🎯 DYNAMIC: Performance-based strategy adaptation with template categories"""
     
-    def __init__(self, adaptation_framework: Dict[str, Any]):
+    def __init__(self, adaptation_framework: Dict[str, Any], template_registry: StrategyTemplateRegistry):
         self.adaptation_framework = adaptation_framework
+        self.template_registry = template_registry
         self.performance_history = PerformanceHistory()
         self.adaptation_history = AdaptationHistory()
     
-    def check_performance_degradation(self, current_performance: Dict[str, float]) -> bool:
-        """🎯 DYNAMIC: Check if performance has degraded"""
+    def check_performance_degradation(self, current_performance: Dict[str, float], template_category: str) -> bool:
+        """🎯 DYNAMIC: Check if performance has degraded with category-specific thresholds"""
         baseline_performance = self.performance_history.get_baseline_performance()
         
-        # Calculate performance degradation
-        degradation = self._calculate_performance_degradation(
-            current_performance, baseline_performance
+        # Get category-specific degradation thresholds
+        category_thresholds = self._get_category_specific_thresholds(template_category)
+        
+        # Calculate performance degradation with category weights
+        degradation = self._calculate_performance_degradation_with_category(
+            current_performance, baseline_performance, template_category
         )
         
-        threshold = self.adaptation_framework['adaptation_triggers']['performance_degradation']
+        threshold = category_thresholds.get('performance_degradation', 
+                                          self.adaptation_framework['adaptation_triggers']['performance_degradation'])
         return degradation > threshold
     
-    def adapt_based_on_performance(self, current_performance: Dict[str, float]) -> Dict[str, Any]:
-        """🎯 DYNAMIC: Adapt strategy based on performance patterns"""
-        # Analyze performance patterns
-        patterns = self._analyze_performance_patterns(current_performance)
+    def adapt_based_on_performance(self, current_performance: Dict[str, float], template_category: str) -> Dict[str, Any]:
+        """🎯 DYNAMIC: Adapt strategy based on performance patterns with template inheritance"""
+        # Analyze performance patterns with category-specific analysis
+        patterns = self._analyze_performance_patterns_with_category(current_performance, template_category)
         
-        # Generate adaptation recommendations
-        adaptations = self._generate_adaptation_recommendations(patterns)
+        # Generate adaptation recommendations with inheritance rules
+        adaptations = self._generate_adaptation_recommendations_with_inheritance(patterns, template_category)
         
-        # Apply adaptations within bounds
-        return self._apply_adaptations_within_bounds(adaptations)
+        # Apply adaptations within template bounds
+        return self._apply_adaptations_within_template_bounds(adaptations, template_category)
+    
+    def _get_category_specific_thresholds(self, template_category: str) -> Dict[str, float]:
+        """Get category-specific adaptation thresholds"""
+        category_thresholds = {
+            'base': {
+                'performance_degradation': 0.15,
+                'volatility_change': 0.25,
+                'regime_change': 0.30
+            },
+            'specific': {
+                'performance_degradation': 0.10,
+                'volatility_change': 0.20,
+                'regime_change': 0.25
+            },
+            'composite': {
+                'performance_degradation': 0.08,
+                'volatility_change': 0.15,
+                'regime_change': 0.20
+            }
+        }
+        return category_thresholds.get(template_category, category_thresholds['specific'])
 ```
 
-#### 7.3 Market Regime Detection and Adaptation
+#### 7.3 Template-Inheritance-Aware Market Regime Adaptation
 ```python
 # strategies/adaptation/market_regime_adaptation.py
 class MarketRegimeAdaptation:
-    """🎯 DYNAMIC: Market regime detection and adaptation"""
+    """🎯 DYNAMIC: Market regime detection and adaptation with template inheritance"""
     
-    def __init__(self, adaptation_framework: Dict[str, Any]):
+    def __init__(self, adaptation_framework: Dict[str, Any], template_registry: StrategyTemplateRegistry):
         self.adaptation_framework = adaptation_framework
+        self.template_registry = template_registry
         self.regime_detector = MarketRegimeDetector()
         self.regime_history = RegimeHistory()
     
-    def detect_market_regime(self, market_data: Dict[str, Any]) -> str:
-        """🎯 DYNAMIC: Detect current market regime"""
-        return self.regime_detector.detect_regime(market_data)
+    def detect_regime_change(self, market_data: Dict[str, Any], template_category: str) -> bool:
+        """🎯 DYNAMIC: Detect regime change with template-specific sensitivity"""
+        # Get category-specific regime detection parameters
+        regime_params = self._get_category_specific_regime_params(template_category)
+        
+        # Detect regime change with category-specific thresholds
+        regime_change = self.regime_detector.detect_regime_change_with_category(
+            market_data, regime_params
+        )
+        
+        return regime_change
     
-    def adapt_to_regime(self, current_regime: str, strategy_config: StrategyConfig) -> StrategyConfig:
-        """🎯 DYNAMIC: Adapt strategy to current market regime"""
-        regime_adaptations = {
-            "TRENDING": self._adapt_to_trending_regime,
-            "MEAN_REVERTING": self._adapt_to_mean_reverting_regime,
-            "VOLATILE": self._adapt_to_volatile_regime,
-            "SIDEWAYS": self._adapt_to_sideways_regime
+    def adapt_to_regime_change(self, market_data: Dict[str, Any], template_category: str) -> Dict[str, Any]:
+        """🎯 DYNAMIC: Adapt strategy to regime change with template inheritance"""
+        # Get current regime
+        current_regime = self.regime_detector.get_current_regime(market_data)
+        
+        # Get template inheritance chain for regime adaptation
+        template_chain = self._get_template_inheritance_chain()
+        
+        # Generate regime-specific adaptations with inheritance
+        adaptations = self._generate_regime_adaptations_with_inheritance(
+            current_regime, template_category, template_chain
+        )
+        
+        return adaptations
+    
+    def _get_category_specific_regime_params(self, template_category: str) -> Dict[str, Any]:
+        """Get category-specific regime detection parameters"""
+        regime_params = {
+            'base': {
+                'volatility_threshold': 0.25,
+                'trend_threshold': 0.30,
+                'correlation_threshold': 0.40
+            },
+            'specific': {
+                'volatility_threshold': 0.20,
+                'trend_threshold': 0.25,
+                'correlation_threshold': 0.35
+            },
+            'composite': {
+                'volatility_threshold': 0.15,
+                'trend_threshold': 0.20,
+                'correlation_threshold': 0.30
+            }
         }
-        
-        if current_regime in regime_adaptations:
-            return regime_adaptations[current_regime](strategy_config)
-        
-        return strategy_config
-    
-    def _adapt_to_trending_regime(self, strategy_config: StrategyConfig) -> StrategyConfig:
-        """🎯 DYNAMIC: Adapt for trending markets"""
-        adapted_config = strategy_config.copy()
-        
-        # Adjust signal generation for trending markets
-        adapted_config.signal_generation['indicators']['rsi']['period'] = 21
-        adapted_config.signal_generation['indicators']['macd']['fast_period'] = 8
-        adapted_config.signal_generation['indicators']['macd']['slow_period'] = 21
-        
-        # Adjust risk management for trending markets
-        adapted_config.risk_management['position_sizing']['max_position_size'] *= 1.2
-        adapted_config.risk_management['stop_loss']['stop_loss_pct'] *= 1.1
-        
-        return adapted_config
+        return regime_params.get(template_category, regime_params['specific'])
 ```
 
 ### **Phase 8: Component-Specific Dynamic Adaptation (Week 8)**

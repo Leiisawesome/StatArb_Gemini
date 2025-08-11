@@ -2,7 +2,12 @@
 
 ## 🎯 Executive Summary
 
-This document outlines the integration of academic research with the template-based architecture to create a **research-to-production pipeline** that accelerates innovation and bridges the gap between academic findings and production trading.
+This document outlines the integration of academic research with the **hybrid template-based architecture** to create a **research-to-production pipeline** that accelerates innovation and bridges the gap between academic findings and production trading.
+
+The academic integration system works with the **three-tier template architecture**:
+- **Base/Generic Templates**: Foundation for academic strategy conversion
+- **Specific Templates**: Academic strategy-specific implementations
+- **Composite Templates**: Multi-academic strategy combinations
 
 ## 🏛️ Academic Research Integration Architecture
 
