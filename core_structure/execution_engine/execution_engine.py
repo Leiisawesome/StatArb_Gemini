@@ -357,7 +357,11 @@ class ExecutionEngine:
         try:
             # Check order value
             if self.real_time_feed:
-                current_price = self.real_time_feed.get_current_price(request.symbol)
+                # Use backtesting data if available, otherwise real-time feed
+                if hasattr(self, 'backtesting_mode') and self.backtesting_mode:
+                    current_price = self._get_backtesting_price(request.symbol)
+                else:
+                    current_price = self.real_time_feed.get_current_price(request.symbol) if self.real_time_feed else None
                 if current_price:
                     order_value = request.quantity * current_price
                     if order_value > self.max_order_value:
@@ -377,6 +381,20 @@ class ExecutionEngine:
             self.logger.error(f"Validation error: {str(e)}")
             return False
     
+
+    # Backtesting mode support
+    def set_backtesting_data_provider(self, data_provider):
+        """Set backtesting data provider for historical price lookups"""
+        self.backtesting_data_provider = data_provider
+        self.backtesting_mode = True
+        self.logger.info("✅ Execution engine set to backtesting mode with ClickHouse data")
+    
+    def _get_backtesting_price(self, symbol: str) -> Optional[float]:
+        """Get price from backtesting data provider"""
+        if hasattr(self, 'backtesting_data_provider') and self.backtesting_data_provider:
+            return self.backtesting_data_provider.get_current_price(symbol)
+        return None
+
     async def _get_market_conditions(self, symbol: str) -> MarketConditions:
         """Get current market conditions for symbol"""
         # This would typically fetch from market data feed

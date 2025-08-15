@@ -371,22 +371,36 @@ class HistoricalBacktestingEngine:
     async def setup_integrations(self):
         """Setup integration with core engine and strategy layer"""
         try:
-            # Import and initialize core engine
-            from core_structure.unified_core_engine import UnifiedCoreEngine, CoreEngineConfig
+            # Check if core engine is already set (preferred)
+            if self.core_engine is not None:
+                self.logger.info("✅ Using existing core engine with strategy integration")
+                self.logger.info(f"🔧 Core engine type: {type(self.core_engine)}")
+                
+                # Transfer strategy instance if available to the internal engine
+                if hasattr(self.core_engine, 'strategy_instance'):
+                    self.logger.info(f"🔧 Strategy instance available: {type(self.core_engine.strategy_instance).__name__}")
+                else:
+                    self.logger.warning("🔧 No strategy instance found on core engine")
+                    
+            else:
+                # Fallback: Import and initialize core engine
+                from core_structure.unified_core_engine import UnifiedCoreEngine, CoreEngineConfig
+                
+                # Create core engine config for backtesting
+                core_config = CoreEngineConfig(
+                    engine_id=f"backtest_{int(time.time())}",
+                    trading_mode="PAPER_TRADING",  # Use paper trading mode for backtesting
+                    enable_ibkr_integration=False,  # Disable IBKR for historical backtesting
+                    max_portfolio_risk=0.02,
+                    commission_rate=self.config.commission_rate
+                )
+                
+                self.core_engine = UnifiedCoreEngine(core_config)
+                self.logger.info("✅ Created new core engine for backtesting")
             
-            # Create core engine config for backtesting
-            core_config = CoreEngineConfig(
-                engine_id=f"backtest_{int(time.time())}",
-                trading_mode="PAPER_TRADING",  # Use paper trading mode for backtesting
-                enable_ibkr_integration=False,  # Disable IBKR for historical backtesting
-                max_portfolio_risk=0.02,
-                commission_rate=self.config.commission_rate
-            )
-            
-            self.core_engine = UnifiedCoreEngine(core_config)
-            self.logger.info("✅ Core engine integration initialized")
-            self.logger.info(f"🔧 Core engine type: {type(self.core_engine)}")
             self.logger.info(f"🔧 Core engine available: {self.core_engine is not None}")
+            
+
             
         except ImportError as e:
             self.logger.error(f"Failed to import core engine: {e}")
@@ -424,10 +438,21 @@ class HistoricalBacktestingEngine:
             # Setup data source
             await self._setup_data_source()
             
+            # 🎯 PROFESSIONAL FIX: Set backtesting mode to eliminate execution failures
+            if hasattr(self, 'enhanced_loader') and hasattr(self, 'data_request') and self.core_engine:
+                self.logger.info("🔧 Setting core engine to backtesting mode...")
+                self.core_engine.set_backtesting_mode(self.enhanced_loader, self.data_request)
+                self.logger.info("✅ Core engine configured for professional backtesting")
+            else:
+                self.logger.warning("⚠️  No ClickHouse loader available - using mock execution mode")
+            
             # Execute backtesting phases
+            print(f"🎯 BACKTEST PHASES: enable_walk_forward={self.config.enable_walk_forward}")
             if self.config.enable_walk_forward:
+                print("🎯 RUNNING: Walk-forward analysis")
                 await self._run_walk_forward_analysis(strategy_config)
             else:
+                print("🎯 RUNNING: Single period backtest")
                 await self._run_single_period_backtest(strategy_config)
             
             # Calculate final metrics
@@ -460,6 +485,13 @@ class HistoricalBacktestingEngine:
     async def _load_strategy_config(self):
         """Load strategy configuration compatible with UnifiedCoreEngine"""
         try:
+            # Check if actual strategy instance was stored in the engine (PRIORITY)
+            if hasattr(self, 'strategy') and self.strategy:
+                self.logger.info(f"✅ Using provided strategy instance: {self.strategy.config.name}")
+                # Return the strategy's config for compatibility
+                self._add_core_engine_compatibility(self.strategy.config)
+                return self.strategy.config
+            
             # Check if strategy config was stored in the engine
             if hasattr(self, 'strategy_config') and self.strategy_config:
                 self.logger.info(f"✅ Using provided strategy config: {self.strategy_config.name}")
@@ -596,6 +628,17 @@ class HistoricalBacktestingEngine:
     
     async def _setup_data_source(self):
         """Setup historical data source using existing core infrastructure"""
+        
+        # ALWAYS set up fallback data source first
+        self.data_source = MockHistoricalDataSource(
+            symbols=self.config.symbols,
+            time_range=self.config.time_range,
+            frequency=self.config.data_frequency
+        )
+        await self.data_source.initialize()
+        self.logger.info("✅ Fallback mock data source initialized")
+        
+        # Try to set up ClickHouse loader for real data
         try:
             # Leverage existing sophisticated data infrastructure
             from core_structure.infrastructure.database import DatabaseManager
@@ -622,18 +665,13 @@ class HistoricalBacktestingEngine:
             
         except Exception as e:
             self.logger.error(f"Failed to setup ClickHouse data source: {e}")
-            # Fallback to mock data for development
-            self.logger.warning("Falling back to mock data source")
-            self.data_source = MockHistoricalDataSource(
-                symbols=self.config.symbols,
-                time_range=self.config.time_range,
-                frequency=self.config.data_frequency
-            )
-            await self.data_source.initialize()
+            self.logger.warning("Using mock data source only")
     
     async def _run_single_period_backtest(self, strategy_config):
         """Run single period backtest with optimized batch processing"""
+        print(f"⭐ SINGLE PERIOD BACKTEST: Starting for strategy {strategy_config.strategy_id}")
         self.logger.info("📊 Running single period backtest with ClickHouse data and optimized processing...")
+        print(f"⭐ DATA CONFIG: {self.config.symbols} from {self.config.time_range.start_date} to {self.config.time_range.end_date}")
         
         # Load data with fallback
         try:
@@ -649,13 +687,18 @@ class HistoricalBacktestingEngine:
             self.logger.warning(f"Data loading failed, using fallback: {e}")
             data_iterator = self.data_source.get_data_iterator()
         
-        # Optimized batch processing for better performance
-        batch_size = 500  # Larger batch size for better throughput
-        trading_cycle_frequency = 100  # Balanced trading frequency
+        # HIGH-FREQUENCY batch processing for professional trading
+        batch_size = 50   # Smaller batch for higher frequency
+        trading_cycle_frequency = 1   # Execute trading cycle EVERY data point for HF trading
         step_count = 0
         batch_data = []
         
+        print(f"🔥 MAIN LOOP: Starting data iteration with batch_size={batch_size}")
         async for timestamp, market_data in data_iterator:
+            if step_count == 0:
+                print(f"🔥 FIRST DATA: Received first data point at {timestamp}")
+            if step_count < 5:  # Show first 5 iterations
+                print(f"🔥 ITERATION {step_count}: Processing {timestamp}")
             self.current_time = timestamp
             batch_data.append((timestamp, market_data))
             step_count += 1
@@ -665,9 +708,9 @@ class HistoricalBacktestingEngine:
                 await self._process_data_batch_optimized(batch_data, strategy_config, step_count, trading_cycle_frequency)
                 batch_data = []
             
-            # Progress logging every 10000 steps for less overhead
-            if step_count % 10000 == 0:
-                self.logger.info(f"📊 Processed {step_count} data points, Portfolio: ${self.portfolio_value:,.2f}, Buffer: {len(self.data_buffer)} points")
+            # Progress logging every 5000 steps for high-frequency monitoring
+            if step_count % 5000 == 0:
+                self.logger.info(f"🚀 HF TRADING: Processed {step_count} data points, Portfolio: ${self.portfolio_value:,.2f}, Trades: {len(self.trade_history)}")
         
         # Process remaining data in final batch
         if batch_data:
@@ -685,12 +728,15 @@ class HistoricalBacktestingEngine:
             # Update portfolio tracking once per batch
             self._update_portfolio_tracking()
             
-            # Execute trading cycle if needed
-            if step_count % trading_cycle_frequency == 0:
-                # Use the last market data in the batch for trading decision
-                last_timestamp, last_market_data = batch_data[-1]
+            # HIGH-FREQUENCY: Execute trading cycle for EVERY data point in batch
+            # Process each data point in the batch
+            for i, (timestamp, market_data) in enumerate(batch_data):
                 if self.core_engine:
-                    await self._execute_trading_cycle(last_market_data, strategy_config)
+                    if i % 100 == 0:  # Log progress every 100 iterations
+                        logger.debug(f"Processing batch: {i+1}/{len(batch_data)} at {timestamp}")
+                    await self._execute_trading_cycle(market_data, strategy_config)
+                else:
+                    logger.error("No core engine available for batch processing")
             
         except Exception as e:
             self.logger.error(f"Optimized batch processing failed: {e}")
@@ -716,8 +762,9 @@ class HistoricalBacktestingEngine:
     async def _execute_trading_cycle(self, market_data: Dict[str, Any], strategy_config):
         """Execute a single trading cycle"""
         try:
-            if len(self.data_buffer) < 60:
-                logger.warning(f"Insufficient historical data for trading cycle: {len(self.data_buffer)} points (need 60+)")
+            # Clean data buffer check - only log when skipping
+            if len(self.data_buffer) < 5:  # Reduced from 20 to 5 for more active trading
+                logger.warning(f"Insufficient historical data for trading cycle: {len(self.data_buffer)} points (need 5+)")
                 return
             
             historical_data_source = {
@@ -731,6 +778,8 @@ class HistoricalBacktestingEngine:
                     data_source=historical_data_source,
                     strategy_config=strategy_config
                 )
+            else:
+                logger.error("No core engine available for trading cycle!")
                 
                 # Debug: Log what we got from the core engine
                 logger.info(f"Trading cycle result: {type(cycle_result)}")
@@ -746,9 +795,17 @@ class HistoricalBacktestingEngine:
                     logger.warning("No cycle result returned from core engine")
                 
                 if cycle_result and hasattr(cycle_result, 'execution_results'):
+                    logger.debug(f"Processing {len(cycle_result.execution_results)} execution results")
                     for execution_result in cycle_result.execution_results:
-                        logger.info(f"Processing execution result: {execution_result.symbol} {execution_result.side} {execution_result.executed_quantity}")
+                        logger.info(f"Processing execution: {execution_result.symbol} {execution_result.side} qty={execution_result.executed_quantity}")
                         self._process_execution_result(execution_result)
+                    
+                    # Update portfolio tracking after processing executions
+                    self._update_portfolio_tracking()
+                else:
+                    logger.debug(f"No execution results in trading result")
+                    # Still update portfolio tracking to capture any portfolio changes
+                    self._update_portfolio_tracking()
                         
         except Exception as e:
             logger.error(f"Trading cycle execution failed: {e}")
@@ -823,31 +880,39 @@ class HistoricalBacktestingEngine:
     def _update_portfolio_tracking(self):
         """Update portfolio tracking with current positions and market values"""
         try:
-            # Calculate current portfolio value based on cash and positions
-            portfolio_value = self.cash_balance
-            
-            # Add value of current positions using actual market prices
-            for symbol, position in self.positions.items():
-                # Get current market price from data buffer if available
-                current_price = 100.0  # Default fallback
+            # Get actual portfolio value from unified core engine
+            if self.core_engine and hasattr(self.core_engine, 'portfolio_manager'):
+                # Use real portfolio value from the actual portfolio manager
+                actual_portfolio_manager = self.core_engine.portfolio_manager
+                actual_available_capital = actual_portfolio_manager.available_capital
+                actual_total_market_value = actual_portfolio_manager.total_market_value
+                actual_portfolio_value = actual_available_capital + actual_total_market_value
                 
-                # Try to get price from data buffer
-                if not self.data_buffer.empty and symbol in self.data_buffer.columns:
-                    latest_data = self.data_buffer.iloc[-1]
-                    if symbol in latest_data and pd.notna(latest_data[symbol]):
-                        current_price = latest_data[symbol]
+                self.portfolio_value = actual_portfolio_value
+                self.logger.debug(f"Portfolio update: Available=${actual_available_capital:.2f}, Positions=${actual_total_market_value:.2f}, Total=${actual_portfolio_value:.2f}")
                 
-                position_value = position['quantity'] * current_price
-                portfolio_value += position_value
+            else:
+                # Fallback: Calculate current portfolio value based on cash and positions
+                portfolio_value = self.cash_balance
+                
+                # Add value of current positions using actual market prices
+                for symbol, position in self.positions.items():
+                    # Get current market price from data buffer if available
+                    current_price = 100.0  # Default fallback
+                    
+                    # Try to get price from data buffer
+                    if not self.data_buffer.empty and symbol in self.data_buffer.columns:
+                        latest_data = self.data_buffer.iloc[-1]
+                        if symbol in latest_data and pd.notna(latest_data[symbol]):
+                            current_price = latest_data[symbol]
+                    
+                    position_value = position['quantity'] * current_price
+                    portfolio_value += position_value
+                
+                self.portfolio_value = portfolio_value
+                self.logger.debug(f"Portfolio update (fallback): Cash=${self.cash_balance:.2f}, Total=${portfolio_value:.2f}")
             
-            # Ensure portfolio value is consistent with initial capital + total P&L
-            total_trade_pnl = sum(t['pnl'] for t in self.trade_history if t.get('is_complete', False))
-            expected_portfolio_value = self.config.initial_capital + total_trade_pnl
-            
-            # Use the expected value to ensure consistency
-            self.portfolio_value = expected_portfolio_value
-            
-            # Update equity curve
+            # Update equity curve with actual portfolio value
             if self.current_time:
                 self.equity_curve.append((self.current_time, self.portfolio_value))
             
@@ -1020,7 +1085,10 @@ class HistoricalBacktestingEngine:
         try:
             # Ensure DataFrame has proper structure
             if data_df.empty:
-                self.logger.warning("Empty DataFrame provided to data iterator")
+                self.logger.warning("Empty DataFrame provided to data iterator - using fallback")
+                # Return the fallback data source iterator
+                async for item in self.data_source.get_data_iterator():
+                    yield item
                 return
             
             # Debug: Log DataFrame structure

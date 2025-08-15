@@ -151,13 +151,14 @@ class IndicatorIntegration:
         }
 
 # Module initialization message
-🎯 Technical Indicators Module Loaded - v{__version__}
+print(f"""
+Technical Indicators Module Loaded - v{__version__}
 ================================================
-✅ 105+ Technical Indicators Available
-✅ Real-time Polygon Streaming Ready  
-✅ Market Regime Detection Active
-✅ Feature Engineering Pipeline Loaded
-✅ new_structure Integration: {'Available' if NEW_STRUCTURE_AVAILABLE else 'Standalone Mode'}
+105+ Technical Indicators Available
+Real-time Polygon Streaming Ready  
+Market Regime Detection Active
+Feature Engineering Pipeline Loaded
+new_structure Integration: {'Available' if NEW_STRUCTURE_AVAILABLE else 'Standalone Mode'}
 
-Ready for specialized technical analysis! 🚀
+Ready for specialized technical analysis!
 """)

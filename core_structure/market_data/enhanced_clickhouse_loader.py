@@ -334,15 +334,16 @@ class EnhancedClickHouseLoader:
     async def _load_single_symbol(self, symbol: str, request: DataRequest) -> pd.DataFrame:
         """Load data for single symbol"""
         try:
-            # Build query based on interval - using the actual table name 'ticks'
-            table = 'ticks'
+            # Build query based on interval - using the full polygon_data.ticks table
+            table = 'polygon_data.ticks'
             
             # Convert datetime to nanoseconds for window_start
             start_date_ns = int(request.start_date.timestamp() * 1_000_000_000)
             end_date_ns = int(request.end_date.timestamp() * 1_000_000_000)
             
-            # Query to aggregate minute data to daily data
+            # Build query based on interval
             if request.interval == '1d':
+                # Aggregate to daily data
                 query = f"""
                 SELECT 
                     toDate(toDateTime(window_start / 1000000000)) as date,
@@ -358,8 +359,26 @@ class EnhancedClickHouseLoader:
                 GROUP BY toDate(toDateTime(window_start / 1000000000))
                 ORDER BY date
                 """
+            elif request.interval == '5min':
+                # Aggregate to 5-minute data
+                query = f"""
+                SELECT 
+                    toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute) as timestamp,
+                    ticker as symbol,
+                    argMin(open, window_start) as open,
+                    max(high) as high,
+                    min(low) as low,
+                    argMax(close, window_start) as close,
+                    sum(volume) as volume
+                FROM {table}
+                WHERE ticker = '{symbol}'
+                AND window_start >= {start_date_ns}
+                AND window_start <= {end_date_ns}
+                GROUP BY toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute), ticker
+                ORDER BY timestamp
+                """
             else:
-                # For minute data, just select directly
+                # For 1-minute data, select directly
                 query = f"""
                 SELECT 
                     toDateTime(window_start / 1000000000) as timestamp,

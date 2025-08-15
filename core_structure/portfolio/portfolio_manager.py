@@ -346,7 +346,14 @@ class PortfolioManager:
             # Check if we have the position
             if symbol not in self.positions or self.positions[symbol].quantity < quantity:
                 logger.warning(f"Insufficient position for {symbol} sell: {quantity} > {self.positions[symbol].quantity if symbol in self.positions else 0}")
-                return False
+                # PROFESSIONAL FIX: Auto-correct sell quantity to available position
+                available_quantity = self.positions[symbol].quantity if symbol in self.positions else 0
+                if available_quantity > 0:
+                    logger.info(f"Auto-correcting {symbol} sell: {quantity} → {available_quantity} shares")
+                    quantity = available_quantity
+                else:
+                    logger.info(f"Skipping {symbol} sell - no position to close")
+                    return False
             
             # Update position
             self.positions[symbol].update_position(quantity, price, "SELL")

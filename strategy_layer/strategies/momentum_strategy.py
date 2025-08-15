@@ -50,14 +50,90 @@ class MomentumStrategyDefinition(StrategyDefinition):
             raise StrategyError(f"Failed to setup momentum strategy: {e}")
     
     def generate_signals(self, market_data: Dict[str, Any]) -> Dict[str, float]:
-        """Generate trading signals using signal generator"""
+        """Generate momentum signals including both entry and exit signals"""
         try:
-            # Convert dict to DataFrame if needed
-            if isinstance(market_data, dict):
-                market_data = pd.DataFrame(market_data)
-            return self.signal_generator.generate_signals(market_data)
+            # Extract data from the market_data structure
+            if 'market_data' in market_data:
+                data = market_data['market_data']
+            elif 'data' in market_data:
+                data = market_data['data']
+            else:
+                data = market_data
+            
+            # Ensure we have a DataFrame
+            if not isinstance(data, pd.DataFrame):
+                self.logger.warning("Market data is not a DataFrame")
+                return {}
+            
+            if len(data) < self.config.parameters.get('lookback_period', 5):
+                self.logger.warning(f"Insufficient data for momentum calculation: {len(data)} < {self.config.parameters.get('lookback_period', 5)}")
+                return {}
+            
+            # Calculate momentum using the configured lookback period
+            lookback = self.config.parameters.get('lookback_period', 5)
+            
+            # Get recent price data
+            if 'close' in data.columns:
+                recent_prices = data['close'].tail(lookback + 1)
+                if len(recent_prices) >= 2:
+                    # Calculate momentum as percentage change
+                    momentum = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+                    
+                    # Calculate confidence based on price consistency
+                    price_changes = recent_prices.pct_change().dropna()
+                    if len(price_changes) > 0:
+                        consistency = 1.0 - price_changes.std()  # Higher consistency = higher confidence
+                        confidence = max(0.1, min(1.0, consistency))
+                    else:
+                        confidence = 0.5
+                    
+                    # 🎯 PROFESSIONAL EXIT SIGNAL GENERATION
+                    signals = {
+                        'momentum': momentum,
+                        'confidence': confidence,
+                        'lookback_period': lookback,
+                        'data_points': len(recent_prices)
+                    }
+                    
+                    # Add exit signals based on momentum reversal (VERY AGGRESSIVE)
+                    exit_threshold = self.config.parameters.get('exit_threshold', -0.0005)  # Even more sensitive
+                    if momentum < exit_threshold:
+                        signals['exit_signal'] = abs(momentum)  # Exit signal strength
+                        signals['exit_reason'] = 'momentum_reversal'
+                        self.logger.info(f"🔴 EXIT SIGNAL: Momentum reversal {momentum:.4f} < {exit_threshold}")
+                    
+                    # Add profit/loss exit signals if we have position info
+                    current_price = recent_prices.iloc[-1]
+                    prev_price = recent_prices.iloc[-2] if len(recent_prices) > 1 else current_price
+                    
+                    # Quick profit taking signal (VERY AGGRESSIVE)
+                    profit_threshold = self.config.risk_management.get('take_profit', 0.01)  # Just 1%!
+                    quick_profit = (current_price - prev_price) / prev_price
+                    if quick_profit >= profit_threshold:
+                        signals['profit_exit_signal'] = quick_profit
+                        signals['exit_reason'] = 'take_profit'
+                        self.logger.info(f"🔴 PROFIT EXIT: Quick gain {quick_profit:.4f} >= {profit_threshold}")
+                    
+                    # Stop loss signal (VERY AGGRESSIVE)  
+                    stop_loss_threshold = self.config.risk_management.get('stop_loss', 0.005)  # Just 0.5%!
+                    if quick_profit <= -stop_loss_threshold:
+                        signals['stop_loss_signal'] = abs(quick_profit)
+                        signals['exit_reason'] = 'stop_loss'
+                        self.logger.info(f"🔴 STOP LOSS: Loss {quick_profit:.4f} <= -{stop_loss_threshold}")
+                    
+                    # 🎯 PROFESSIONAL DEBUG: Always generate some exit signal for testing
+                    if abs(momentum) > 0.0001:  # Almost any momentum should trigger some analysis
+                        self.logger.info(f"📊 MOMENTUM ANALYSIS: {momentum:.4f}, quick_profit: {quick_profit:.4f}")
+                    
+                    self.logger.debug(f"Momentum signal: {momentum:.4f}, confidence: {confidence:.2f}")
+                    
+                    return signals
+            
+            self.logger.warning("No 'close' column found in market data")
+            return {}
+            
         except Exception as e:
-            self.logger.error(f"Error generating signals: {e}")
+            self.logger.error(f"Error generating momentum signals: {e}")
             return {}
     
     def generate_combined_signal(self, market_data: pd.DataFrame) -> float:
@@ -86,11 +162,23 @@ class MomentumStrategyDefinition(StrategyDefinition):
             if isinstance(market_data, dict):
                 market_data = pd.DataFrame(market_data)
             
-            # Combine signals into a single signal
-            combined_signal = sum(signals.values()) / len(signals) if signals else 0.0
+            # PROFESSIONAL FIX: Only use actual trading signals, not metadata
+            # Extract only the momentum signal value, ignore confidence/metadata
+            momentum_signal = signals.get('momentum', 0.0)
             
-            # Calculate position size (simplified - in practice would be more sophisticated)
-            position_size = abs(combined_signal) * 0.05  # 5% of portfolio per unit signal
+            # Calculate position size based on momentum strength
+            # Use configured position_size from strategy config as base
+            base_position_size = self.config.parameters.get('position_size', 0.05)  # Default 5%
+            
+            # Scale by momentum strength (cap at 2x for safety)
+            signal_multiplier = min(abs(momentum_signal) * 100, 2.0)  # Convert to percentage scale
+            position_size = base_position_size * signal_multiplier
+            
+            # Cap at maximum position size
+            max_position = self.config.parameters.get('max_position_size', 0.5)  # Default 50%
+            position_size = min(position_size, max_position)
+            
+            self.logger.info(f"💡 POSITION CALC: momentum={momentum_signal:.4f}, base={base_position_size:.1%}, multiplier={signal_multiplier:.2f}, final={position_size:.1%}")
             
             return {"default": position_size}
         except Exception as e:

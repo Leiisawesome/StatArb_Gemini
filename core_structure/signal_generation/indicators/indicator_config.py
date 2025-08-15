@@ -202,6 +202,7 @@ class IndicatorConfigManager:
                     self._update_dataclass(self.performance_settings, config_data['performance'])
                     
         except Exception as e:
+            pass
     
     def load_from_environment(self):
         """Load configuration from environment variables"""
@@ -242,6 +243,7 @@ class IndicatorConfigManager:
                 json.dump(config_data, f, indent=2, default=str)
                 
         except Exception as e:
+            pass
     
     def get_profile_settings(self, profile: IndicatorProfile) -> IndicatorSettings:
         """Get settings for specific indicator profile"""
