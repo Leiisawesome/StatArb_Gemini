@@ -204,6 +204,32 @@ class TradingSignal:
     
     # Metadata
     metadata: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert TradingSignal to dictionary for risk validation"""
+        # Ensure position_size is always present and valid
+        position_size = getattr(self, 'position_size', 0.1)
+        if position_size is None:
+            position_size = 0.1
+            
+        return {
+            'symbol': self.symbol_pair,
+            'signal_type': self.signal_type.value if hasattr(self.signal_type, 'value') else str(self.signal_type),
+            'strength': self.strength.value if hasattr(self.strength, 'value') else float(self.strength),
+            'confidence': float(self.confidence) if self.confidence is not None else 0.5,
+            'position_size': float(position_size),  # Ensure this is always present and numeric
+            'entry_price': float(self.entry_price) if self.entry_price is not None else 0.0,
+            'stop_loss': float(self.stop_loss) if self.stop_loss is not None else None,
+            'take_profit': float(self.take_profit) if self.take_profit is not None else None,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'regime': self.regime.value if hasattr(self.regime, 'value') else str(self.regime),
+            'expected_return': float(self.expected_return) if self.expected_return is not None else None,
+            'risk_score': float(self.risk_score) if self.risk_score is not None else None,
+            'metadata': self.metadata or {},
+            # Additional fields that risk validation might expect
+            'current_price': float(self.entry_price) if self.entry_price is not None else 100.0,
+            'direction': 'buy' if hasattr(self.signal_type, 'value') and 'LONG' in str(self.signal_type.value).upper() else 'sell'
+        }
 
 class SignalCache:
     """High-performance signal caching with TTL"""

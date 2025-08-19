@@ -168,7 +168,21 @@ class MeanReversionStrategyDefinition(StrategyDefinition):
         try:
             # Convert dict to DataFrame if needed
             if isinstance(market_data, dict):
-                market_data = pd.DataFrame(market_data)
+                if 'data' in market_data and isinstance(market_data['data'], pd.DataFrame):
+                    # Use the DataFrame from the data key
+                    market_data = market_data['data']
+                else:
+                    # Convert dict to DataFrame with proper index handling
+                    try:
+                        market_data = pd.DataFrame(market_data, index=[0])
+                    except ValueError:
+                        # If still fails, create empty DataFrame
+                        market_data = pd.DataFrame()
+            
+            # Check if we have valid data
+            if market_data.empty:
+                self.logger.warning("Empty market data provided to mean reversion strategy")
+                return {}
             
             # Get base signals from signal generator
             base_signals = self.signal_generator.generate_signals(market_data)

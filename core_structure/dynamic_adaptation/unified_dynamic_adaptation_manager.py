@@ -218,6 +218,8 @@ class UnifiedDynamicAdaptationManager:
             
             # Check if integration is needed
             integration_needed, integration_reasons = self._check_integration_triggers(current_metrics)
+            self.logger.info(f"🔄 Integration Check: needed={integration_needed}, reasons={integration_reasons}")
+            self.logger.info(f"🔄 System Metrics: performance={current_metrics.overall_performance_score:.3f}, signal_quality={current_metrics.signal_quality_score:.3f}, risk={current_metrics.risk_score:.3f}")
             
             if not integration_needed:
                 return IntegrationResult(
@@ -528,8 +530,8 @@ class UnifiedDynamicAdaptationManager:
             # Risk Control Adaptation
             if self.risk_control and len(component_adaptations) < max_adaptations:
                 try:
-                    # Convert current_signals to expected format
-                    signal_dicts = [{'symbol': 'TEST', 'side': 'buy', 'quantity': 100, 'strength': 0.7}] if current_signals else []
+                    # Use actual current_signals instead of hardcoded test data
+                    signal_dicts = current_signals if current_signals else []
                     portfolio_state = {'portfolio_value': 100000.0, 'current_drawdown': 0.05}
                     
                     validated_signals, risk_summary = await self.risk_control.validate_adaptive_risk(
@@ -661,7 +663,17 @@ class UnifiedDynamicAdaptationManager:
                 return 0.5
             
             # Analyze signal strength and consistency
-            strengths = [signal.get('strength', 0.5) for signal in current_signals if 'strength' in signal]
+            strengths = []
+            for signal in current_signals:
+                if 'strength' in signal:
+                    strength = signal['strength']
+                    # Convert SignalStrength enum to numeric value
+                    if hasattr(strength, 'value'):
+                        strengths.append(strength.value / 4.0)  # Normalize to 0.25-1.0 range
+                    elif isinstance(strength, (int, float)):
+                        strengths.append(float(strength))
+                    else:
+                        strengths.append(0.5)  # Default fallback
             
             if not strengths:
                 return 0.5

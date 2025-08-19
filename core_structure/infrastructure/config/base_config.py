@@ -341,6 +341,7 @@ class ConfigurationManager:
                     elif config_name == 'monitoring':
                         self.configs[config_name] = MonitoringConfig.from_yaml_file(config_path)
                 except Exception as e:
+                    self.logger.error(f"Failed to load {config_name} config: {e}")
     
     def get_config(self, config_type: str) -> Optional[BaseConfig]:
         """Get configuration by type"""

@@ -317,19 +317,43 @@ class EnhancedClickHouseLoader:
             symbols=[symbol],
             start_date=start_date,
             end_date=end_date,
-            interval='1d'  # Default to daily data
+            interval='5m'  # 5-minute bars for trading
         )
         
-        # Use synchronous execution
+        # Use proper async handling - check if we're in an event loop
         try:
-            return asyncio.run(self.load_market_data(request))
+            loop = asyncio.get_running_loop()
+            # We're in an event loop, use asyncio.ensure_future and wait
+            future = asyncio.ensure_future(self.load_market_data(request))
+            # This is a hack but works: use a thread to run the async code
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return executor.submit(asyncio.run, self.load_market_data(request)).result(timeout=30)
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run
+            try:
+                return asyncio.run(self.load_market_data(request))
+            except Exception as e:
+                self.logger.error(f"Error loading data for {symbol}: {e}")
+                return pd.DataFrame()
         except Exception as e:
             self.logger.error(f"Error loading data for {symbol}: {e}")
             return pd.DataFrame()
     
     def _load_symbol_sync(self, symbol: str, request: DataRequest) -> pd.DataFrame:
         """Synchronous symbol loading for executor"""
-        return asyncio.run(self._load_single_symbol(symbol, request))
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an event loop, use a thread to run the async code
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return executor.submit(asyncio.run, self._load_single_symbol(symbol, request)).result(timeout=30)
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run
+            return asyncio.run(self._load_single_symbol(symbol, request))
+        except Exception as e:
+            self.logger.error(f"Error loading symbol {symbol}: {e}")
+            return pd.DataFrame()
     
     async def _load_single_symbol(self, symbol: str, request: DataRequest) -> pd.DataFrame:
         """Load data for single symbol"""

@@ -645,7 +645,10 @@ class DynamicRiskControl:
             
         except Exception as e:
             self.logger.error(f"Error validating signal risk: {e}")
-            return None, {'error': str(e)}
+            # Provide more detailed error information for debugging
+            self.logger.debug(f"Signal data: {signal}")
+            self.logger.debug(f"Signal keys: {list(signal.keys()) if isinstance(signal, dict) else 'Not a dict'}")
+            return None, {'error': str(e), 'signal_keys': list(signal.keys()) if isinstance(signal, dict) else []}
     
     def _passes_risk_validation(self, signal: Dict[str, Any], risk_metrics: Dict[str, Any]) -> bool:
         """Check if signal passes all risk validation checks"""

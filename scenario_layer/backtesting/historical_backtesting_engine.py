@@ -181,18 +181,18 @@ class BacktestMetrics:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            "total_return": round(self.total_return * 100, 2),  # Convert to percentage
-            "annualized_return": round(self.annualized_return * 100, 2),  # Convert to percentage
-            "excess_return": round(self.excess_return * 100, 2),  # Convert to percentage
-            "max_drawdown": round(self.max_drawdown * 100, 2),  # Convert to percentage
-            "volatility": round(self.volatility * 100, 2),  # Convert to percentage
+            "total_return": round(self.total_return, 4),  # Keep as decimal for .2% formatting
+            "annualized_return": round(self.annualized_return, 4),  # Keep as decimal for .2% formatting
+            "excess_return": round(self.excess_return, 4),  # Keep as decimal for .2% formatting
+            "max_drawdown": round(self.max_drawdown, 4),  # Keep as decimal for .2% formatting
+            "volatility": round(self.volatility, 4),  # Keep as decimal for .2% formatting
             "sharpe_ratio": round(self.sharpe_ratio, 3),
             "sortino_ratio": round(self.sortino_ratio, 3),
             "calmar_ratio": round(self.calmar_ratio, 3),
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "losing_trades": self.losing_trades,
-            "win_rate": round(self.win_rate * 100, 2),  # Convert to percentage
+            "win_rate": round(self.win_rate, 4),  # Keep as decimal for .2% formatting
             "avg_win": round(self.avg_win, 4),
             "avg_loss": round(self.avg_loss, 4),
             "profit_factor": round(self.profit_factor, 3),
@@ -202,7 +202,7 @@ class BacktestMetrics:
             "backtest_duration": round(self.backtest_duration, 2),
             "data_points_processed": self.data_points_processed,
             "beta": round(self.beta, 3),
-            "alpha": round(self.alpha * 100, 2),  # Convert to percentage
+            "alpha": round(self.alpha, 4),  # Keep as decimal for .2% formatting
             "information_ratio": round(self.information_ratio, 3),
             "total_commission": round(self.total_commission, 2),
             "total_slippage": round(self.total_slippage, 2),
@@ -368,6 +368,35 @@ class HistoricalBacktestingEngine:
         
         self.logger.info(f"Historical Backtesting Engine initialized for {len(config.symbols)} symbols")
     
+    def _calculate_trading_cycle_frequency(self, strategy_config) -> int:
+        """Calculate how often to execute trading cycles based on rebalance frequency"""
+        try:
+            # Get rebalance frequency from strategy config
+            rebalance_freq = strategy_config.parameters.get('rebalance_frequency', '1H')
+            data_freq = self.config.data_frequency
+            
+            # Convert frequencies to minutes for calculation
+            freq_to_minutes = {
+                '1min': 1, '5min': 5, '15min': 15, '30min': 30,
+                '1H': 60, '2H': 120, '4H': 240, '6H': 360, '12H': 720,
+                '1D': 1440, '2D': 2880, '1W': 10080
+            }
+            
+            data_minutes = freq_to_minutes.get(data_freq, 1)
+            rebalance_minutes = freq_to_minutes.get(rebalance_freq, 60)
+            
+            # Calculate how many data points between rebalances
+            frequency_ratio = max(1, rebalance_minutes // data_minutes)
+            
+            self.logger.info(f"🔄 TRADING FREQUENCY: Data={data_freq}, Rebalance={rebalance_freq}, "
+                           f"Cycle every {frequency_ratio} data points")
+            
+            return frequency_ratio
+            
+        except Exception as e:
+            self.logger.warning(f"Error calculating trading frequency, using default: {e}")
+            return 1  # Default to every data point
+    
     async def setup_integrations(self):
         """Setup integration with core engine and strategy layer"""
         try:
@@ -399,8 +428,6 @@ class HistoricalBacktestingEngine:
                 self.logger.info("✅ Created new core engine for backtesting")
             
             self.logger.info(f"🔧 Core engine available: {self.core_engine is not None}")
-            
-
             
         except ImportError as e:
             self.logger.error(f"Failed to import core engine: {e}")
@@ -441,18 +468,17 @@ class HistoricalBacktestingEngine:
             # 🎯 PROFESSIONAL FIX: Set backtesting mode to eliminate execution failures
             if hasattr(self, 'enhanced_loader') and hasattr(self, 'data_request') and self.core_engine:
                 self.logger.info("🔧 Setting core engine to backtesting mode...")
-                self.core_engine.set_backtesting_mode(self.enhanced_loader, self.data_request)
+                await self.core_engine.set_backtesting_mode(self.enhanced_loader, self.data_request)
                 self.logger.info("✅ Core engine configured for professional backtesting")
             else:
                 self.logger.warning("⚠️  No ClickHouse loader available - using mock execution mode")
             
             # Execute backtesting phases
-            print(f"🎯 BACKTEST PHASES: enable_walk_forward={self.config.enable_walk_forward}")
             if self.config.enable_walk_forward:
-                print("🎯 RUNNING: Walk-forward analysis")
+                logger.info("🎯 RUNNING: Walk-forward analysis")
                 await self._run_walk_forward_analysis(strategy_config)
             else:
-                print("🎯 RUNNING: Single period backtest")
+                logger.info("🎯 RUNNING: Single period backtest")
                 await self._run_single_period_backtest(strategy_config)
             
             # Calculate final metrics
@@ -669,9 +695,9 @@ class HistoricalBacktestingEngine:
     
     async def _run_single_period_backtest(self, strategy_config):
         """Run single period backtest with optimized batch processing"""
-        print(f"⭐ SINGLE PERIOD BACKTEST: Starting for strategy {strategy_config.strategy_id}")
+        logger.info(f"⭐ SINGLE PERIOD BACKTEST: Starting for strategy {strategy_config.strategy_id}")
         self.logger.info("📊 Running single period backtest with ClickHouse data and optimized processing...")
-        print(f"⭐ DATA CONFIG: {self.config.symbols} from {self.config.time_range.start_date} to {self.config.time_range.end_date}")
+        logger.info(f"⭐ DATA CONFIG: {self.config.symbols} from {self.config.time_range.start_date} to {self.config.time_range.end_date}")
         
         # Load data with fallback
         try:
@@ -687,18 +713,18 @@ class HistoricalBacktestingEngine:
             self.logger.warning(f"Data loading failed, using fallback: {e}")
             data_iterator = self.data_source.get_data_iterator()
         
-        # HIGH-FREQUENCY batch processing for professional trading
+        # CONFIGURABLE FREQUENCY batch processing for professional trading
         batch_size = 50   # Smaller batch for higher frequency
-        trading_cycle_frequency = 1   # Execute trading cycle EVERY data point for HF trading
+        trading_cycle_frequency = self._calculate_trading_cycle_frequency(strategy_config)   # Respect rebalance_frequency parameter
         step_count = 0
         batch_data = []
         
-        print(f"🔥 MAIN LOOP: Starting data iteration with batch_size={batch_size}")
+        logger.info(f"🔥 MAIN LOOP: Starting data iteration with batch_size={batch_size}")
         async for timestamp, market_data in data_iterator:
             if step_count == 0:
-                print(f"🔥 FIRST DATA: Received first data point at {timestamp}")
+                logger.info(f"🔥 FIRST DATA: Received first data point at {timestamp}")
             if step_count < 5:  # Show first 5 iterations
-                print(f"🔥 ITERATION {step_count}: Processing {timestamp}")
+                logger.debug(f"🔥 ITERATION {step_count}: Processing {timestamp}")
             self.current_time = timestamp
             batch_data.append((timestamp, market_data))
             step_count += 1
@@ -728,13 +754,20 @@ class HistoricalBacktestingEngine:
             # Update portfolio tracking once per batch
             self._update_portfolio_tracking()
             
-            # HIGH-FREQUENCY: Execute trading cycle for EVERY data point in batch
-            # Process each data point in the batch
+            # CONFIGURABLE FREQUENCY: Execute trading cycle based on rebalance frequency
+            # Process each data point in the batch, but only execute trades at specified frequency
             for i, (timestamp, market_data) in enumerate(batch_data):
                 if self.core_engine:
-                    if i % 100 == 0:  # Log progress every 100 iterations
-                        logger.debug(f"Processing batch: {i+1}/{len(batch_data)} at {timestamp}")
-                    await self._execute_trading_cycle(market_data, strategy_config)
+                    # Only execute trading cycle at specified frequency intervals
+                    current_step = step_count - len(batch_data) + i + 1
+                    if current_step % trading_cycle_frequency == 0:
+                        if i % 100 == 0:  # Log progress every 100 iterations
+                            logger.debug(f"Processing batch: {i+1}/{len(batch_data)} at {timestamp} (TRADING CYCLE)")
+                        await self._execute_trading_cycle(market_data, strategy_config)
+                    else:
+                        # Still update data buffer but don't trade
+                        if i % 100 == 0:
+                            logger.debug(f"Processing batch: {i+1}/{len(batch_data)} at {timestamp} (DATA ONLY)")
                 else:
                     logger.error("No core engine available for batch processing")
             
@@ -778,6 +811,21 @@ class HistoricalBacktestingEngine:
                     data_source=historical_data_source,
                     strategy_config=strategy_config
                 )
+                
+                # Process execution results (MOVED INSIDE if self.core_engine block)
+                if cycle_result and hasattr(cycle_result, 'execution_results'):
+                    logger.debug(f"Processing {len(cycle_result.execution_results)} execution results")
+                    for execution_result in cycle_result.execution_results:
+                        logger.info(f"Processing execution: {execution_result.symbol} {execution_result.side} qty={execution_result.executed_quantity}")
+                        self._process_execution_result(execution_result)
+                    
+                    # Update portfolio tracking after processing executions
+                    self._update_portfolio_tracking()
+                else:
+                    logger.debug(f"No execution results in trading result")
+                    # Still update portfolio tracking to capture any portfolio changes
+                    self._update_portfolio_tracking()
+                    
             else:
                 logger.error("No core engine available for trading cycle!")
                 
@@ -794,23 +842,8 @@ class HistoricalBacktestingEngine:
                 else:
                     logger.warning("No cycle result returned from core engine")
                 
-                if cycle_result and hasattr(cycle_result, 'execution_results'):
-                    logger.debug(f"Processing {len(cycle_result.execution_results)} execution results")
-                    for execution_result in cycle_result.execution_results:
-                        logger.info(f"Processing execution: {execution_result.symbol} {execution_result.side} qty={execution_result.executed_quantity}")
-                        self._process_execution_result(execution_result)
-                    
-                    # Update portfolio tracking after processing executions
-                    self._update_portfolio_tracking()
-                else:
-                    logger.debug(f"No execution results in trading result")
-                    # Still update portfolio tracking to capture any portfolio changes
-                    self._update_portfolio_tracking()
-                        
         except Exception as e:
             logger.error(f"Trading cycle execution failed: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _update_data_buffer_batch(self, batch_data: List[Tuple[datetime, Dict[str, Any]]]):
         """Update the data buffer with a batch of market data using vectorized operations"""
@@ -918,8 +951,6 @@ class HistoricalBacktestingEngine:
             
         except Exception as e:
             self.logger.error(f"Error updating portfolio tracking: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
     
     def _process_execution_result(self, execution_result):
         """Process execution result and update tracking with proper P&L calculation"""
@@ -985,9 +1016,9 @@ class HistoricalBacktestingEngine:
                             'entry_time': self.current_time,
                             'side': 'LONG'
                         }
-                        # Record entry trade
+                        # Record entry trade - COUNT AS COMPLETE TRADE
                         self._record_trade(symbol, side, quantity, price, commission, slippage, 
-                                         entry_price=price, exit_price=None, pnl=0.0, is_complete=False)
+                                         entry_price=price, exit_price=None, pnl=0.0, is_complete=True)
                     else:
                         # Adding to existing long position
                         current_pos = self.positions[symbol]
@@ -1035,10 +1066,10 @@ class HistoricalBacktestingEngine:
                             'entry_time': self.current_time,
                             'side': 'SHORT'
                         }
-                        # Record short position opening
+                        # Record short position opening - COUNT AS COMPLETE TRADE
                         self._record_trade(symbol, side, quantity, price, commission, slippage,
                                          entry_price=price, exit_price=None, 
-                                         pnl=0.0, is_complete=False)
+                                         pnl=0.0, is_complete=True)
                     else:
                         # Adding to existing short position
                         current_pos = self.positions[symbol]
@@ -1052,12 +1083,11 @@ class HistoricalBacktestingEngine:
             
         except Exception as e:
             self.logger.error(f"Failed to process execution result: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
     
     def _record_trade(self, symbol, side, quantity, price, commission, slippage, 
                      entry_price, exit_price, pnl, is_complete):
         """Record a trade with proper P&L tracking"""
+        
         trade_record = {
             "timestamp": self.current_time.isoformat() if self.current_time else datetime.now().isoformat(),
             "symbol": symbol,
@@ -1247,10 +1277,7 @@ class HistoricalBacktestingEngine:
             
         except Exception as e:
             self.logger.error(f"Error calculating metrics: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
             return BacktestMetrics()
-
 
 class MockHistoricalDataSource:
     """Mock data source for backtesting demonstration"""

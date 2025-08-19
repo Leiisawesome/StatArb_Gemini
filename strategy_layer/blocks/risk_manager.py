@@ -432,6 +432,7 @@ class RiskManager:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
+
         self.risk_managers = self._create_risk_managers()
     
     def _create_risk_managers(self) -> List[BaseRiskManager]:
@@ -439,15 +440,24 @@ class RiskManager:
         try:
             risk_managers = []
             
-            # Create risk config
+            # Create risk config - handle both simple and nested config formats
+            if isinstance(self.config.get('stop_loss'), dict):
+                # Nested format
+                stop_loss_enabled = self.config.get('stop_loss', {}).get('enabled', True)
+                stop_loss_percentage = self.config.get('stop_loss', {}).get('percentage', 0.02)
+            else:
+                # Simple format
+                stop_loss_enabled = True
+                stop_loss_percentage = self.config.get('stop_loss', 0.02)
+            
             risk_config = RiskConfig(
-                stop_loss_enabled=self.config.get('stop_loss', {}).get('enabled', True),
-                stop_loss_percentage=self.config.get('stop_loss', {}).get('percentage', 0.02),
-                stop_loss_trailing=self.config.get('stop_loss', {}).get('trailing', False),
-                stop_loss_atr_multiplier=self.config.get('stop_loss', {}).get('atr_multiplier', 2.0),
-                take_profit_enabled=self.config.get('take_profit', {}).get('enabled', True),
-                take_profit_percentage=self.config.get('take_profit', {}).get('percentage', 0.04),
-                take_profit_atr_multiplier=self.config.get('take_profit', {}).get('atr_multiplier', 4.0),
+                stop_loss_enabled=stop_loss_enabled,
+                stop_loss_percentage=stop_loss_percentage,
+                stop_loss_trailing=False,  # Simple format doesn't support trailing
+                stop_loss_atr_multiplier=2.0,  # Default value
+                take_profit_enabled=True,
+                take_profit_percentage=self.config.get('take_profit', 0.04),
+                take_profit_atr_multiplier=4.0,  # Default value
                 max_daily_loss=self.config.get('max_daily_loss', 0.05),
                 max_drawdown=self.config.get('max_drawdown', 0.15),
                 max_portfolio_risk=self.config.get('max_portfolio_risk', 0.10),

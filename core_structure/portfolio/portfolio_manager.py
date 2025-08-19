@@ -355,11 +355,17 @@ class PortfolioManager:
                     logger.info(f"Skipping {symbol} sell - no position to close")
                     return False
             
+            # Calculate P&L BEFORE updating position (for accurate avg_price)
+            realized_pnl = (price - self.positions[symbol].avg_price) * quantity
+            
             # Update position
             self.positions[symbol].update_position(quantity, price, "SELL")
             
             # Update available capital
             self.available_capital += trade_value
+            
+            # Update P&L tracker immediately after position update
+            self.pnl_tracker.update_pnl(realized_pnl=realized_pnl, symbol=symbol, position_pnl=realized_pnl)
             
             # Remove empty positions
             if self.positions[symbol].quantity == 0:
@@ -370,11 +376,6 @@ class PortfolioManager:
         
         # Record portfolio state
         self._record_portfolio_state()
-        
-        # Update P&L tracker
-        if trade_type == "SELL":
-            realized_pnl = (price - self.positions[symbol].avg_price) * quantity if symbol in self.positions else 0
-            self.pnl_tracker.update_pnl(realized_pnl=realized_pnl, symbol=symbol, position_pnl=realized_pnl)
         
         # Notify callbacks
         for callback in self.portfolio_callbacks:

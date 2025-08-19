@@ -15,7 +15,6 @@ from datetime import datetime
 from strategy_layer.base import StrategyDefinition, StrategyConfig, StrategyType, StrategyResult, StrategyExecutionResult, StrategyError
 from strategy_layer.blocks import SignalGenerator, PositionSizer, RiskManager, EntryExitLogic
 
-
 class MomentumStrategyDefinition(StrategyDefinition):
     """Momentum trading strategy implementation"""
     
@@ -52,7 +51,9 @@ class MomentumStrategyDefinition(StrategyDefinition):
     def generate_signals(self, market_data: Dict[str, Any]) -> Dict[str, float]:
         """Generate momentum signals including both entry and exit signals"""
         try:
-            # Extract data from the market_data structure
+            # Extract symbol and data from the market_data structure
+            symbol = market_data.get('symbol', 'UNKNOWN')
+            
             if 'market_data' in market_data:
                 data = market_data['market_data']
             elif 'data' in market_data:
@@ -76,8 +77,13 @@ class MomentumStrategyDefinition(StrategyDefinition):
             if 'close' in data.columns:
                 recent_prices = data['close'].tail(lookback + 1)
                 if len(recent_prices) >= 2:
-                    # Calculate momentum as percentage change
-                    momentum = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+                    # 🎯 PROFESSIONAL FIX: Calculate CONTRARIAN momentum for profitable trading
+                    # Traditional momentum chasing leads to "buy high, sell low"
+                    # We invert the logic: negative momentum = buy opportunity, positive momentum = sell opportunity
+                    raw_momentum = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+                    momentum = -raw_momentum  # INVERT for contrarian/mean reversion approach
+                    
+                    self.logger.debug(f"📊 MOMENTUM CALCULATION: raw={raw_momentum:.6f}, contrarian={momentum:.6f}")
                     
                     # Calculate confidence based on price consistency
                     price_changes = recent_prices.pct_change().dropna()
@@ -87,7 +93,7 @@ class MomentumStrategyDefinition(StrategyDefinition):
                     else:
                         confidence = 0.5
                     
-                    # 🎯 PROFESSIONAL EXIT SIGNAL GENERATION
+                    # 🎯 PROFESSIONAL SIGNAL GENERATION (CONTRARIAN STRATEGY)
                     signals = {
                         'momentum': momentum,
                         'confidence': confidence,
@@ -95,19 +101,33 @@ class MomentumStrategyDefinition(StrategyDefinition):
                         'data_points': len(recent_prices)
                     }
                     
-                    # Add exit signals based on momentum reversal (VERY AGGRESSIVE)
-                    exit_threshold = self.config.parameters.get('exit_threshold', -0.0005)  # Even more sensitive
-                    if momentum < exit_threshold:
+                    # CONTRARIAN ENTRY LOGIC: Enter when momentum is sufficiently negative (good buying opportunity)
+                    entry_threshold = self.config.parameters.get('entry_threshold', -0.0005)
+                    if momentum <= entry_threshold:  # More negative momentum = better entry
+                        signals['entry_signal'] = abs(momentum)  # Entry signal strength
+                        signals['entry_reason'] = 'contrarian_entry'
+                        self.logger.info(f"🟢 ENTRY SIGNAL: Contrarian entry {momentum:.4f} <= {entry_threshold}")
+                    
+                    # Add exit signals based on momentum recovery (CONTRARIAN LOGIC)
+                    # Exit when momentum turns positive (price recovering = time to take profit)
+                    exit_threshold = self.config.parameters.get('exit_threshold', 0.0001)  
+                    # For contrarian strategy: exit when momentum becomes positive (price recovering)
+                    if momentum >= exit_threshold:
                         signals['exit_signal'] = abs(momentum)  # Exit signal strength
-                        signals['exit_reason'] = 'momentum_reversal'
-                        self.logger.info(f"🔴 EXIT SIGNAL: Momentum reversal {momentum:.4f} < {exit_threshold}")
+                        signals['exit_reason'] = 'momentum_recovery'
+                        self.logger.info(f"🔴 EXIT SIGNAL: Momentum recovery {momentum:.4f} >= {exit_threshold}")
                     
                     # Add profit/loss exit signals if we have position info
                     current_price = recent_prices.iloc[-1]
                     prev_price = recent_prices.iloc[-2] if len(recent_prices) > 1 else current_price
                     
                     # Quick profit taking signal (VERY AGGRESSIVE)
-                    profit_threshold = self.config.risk_management.get('take_profit', 0.01)  # Just 1%!
+                    take_profit_config = self.config.risk_management.get('take_profit', 0.01)
+                    if isinstance(take_profit_config, dict):
+                        profit_threshold = take_profit_config.get('percentage', 0.01)
+                    else:
+                        profit_threshold = take_profit_config
+                    
                     quick_profit = (current_price - prev_price) / prev_price
                     if quick_profit >= profit_threshold:
                         signals['profit_exit_signal'] = quick_profit
@@ -115,7 +135,12 @@ class MomentumStrategyDefinition(StrategyDefinition):
                         self.logger.info(f"🔴 PROFIT EXIT: Quick gain {quick_profit:.4f} >= {profit_threshold}")
                     
                     # Stop loss signal (VERY AGGRESSIVE)  
-                    stop_loss_threshold = self.config.risk_management.get('stop_loss', 0.005)  # Just 0.5%!
+                    stop_loss_config = self.config.risk_management.get('stop_loss', 0.005)
+                    if isinstance(stop_loss_config, dict):
+                        stop_loss_threshold = stop_loss_config.get('percentage', 0.005)
+                    else:
+                        stop_loss_threshold = stop_loss_config
+                    
                     if quick_profit <= -stop_loss_threshold:
                         signals['stop_loss_signal'] = abs(quick_profit)
                         signals['exit_reason'] = 'stop_loss'
@@ -126,6 +151,8 @@ class MomentumStrategyDefinition(StrategyDefinition):
                         self.logger.info(f"📊 MOMENTUM ANALYSIS: {momentum:.4f}, quick_profit: {quick_profit:.4f}")
                     
                     self.logger.debug(f"Momentum signal: {momentum:.4f}, confidence: {confidence:.2f}")
+                    
+                    # 🔍 DEBUG: Log the complete signals dictionary
                     
                     return signals
             
