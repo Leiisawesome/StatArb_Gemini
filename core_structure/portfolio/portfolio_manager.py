@@ -49,7 +49,7 @@ class PortfolioMetrics:
 class Position:
     """Position object for tracking individual symbol positions"""
     
-    def __init__(self, symbol: str, quantity: int = 0, avg_price: float = 0.0):
+    def __init__(self, symbol: str, quantity: int = 0, avg_price: float = 0.0, entry_slice: int = -1):
         self.symbol = symbol
         self.quantity = quantity
         self.avg_price = avg_price
@@ -60,6 +60,7 @@ class Position:
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
         self.trades = []
+        self.entry_slice = entry_slice  # Track which slice this position was opened in
         
         logger.debug(f"Created position for {symbol}: {quantity} shares @ ${avg_price:.2f}")
     

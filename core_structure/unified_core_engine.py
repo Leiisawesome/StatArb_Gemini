@@ -248,6 +248,9 @@ class UnifiedCoreEngine:
             # Initialize portfolio manager with configurable capital
             self.portfolio_manager = PortfolioManager(initial_capital=self.config.initial_capital)
             
+            # 🎯 ANTI-CHURNING: Track symbols traded in current slice
+            self.slice_trading_locks = {}  # {slice_index: set(symbols_traded)}
+            
             # Initialize data manager
             self.data_manager = DataManager()
             
@@ -921,15 +924,12 @@ class UnifiedCoreEngine:
                 entry_signal = strategy_signals.get('entry_signal', 0.0)
                 entry_reason = strategy_signals.get('entry_reason', '')
                 
-                # 🔧 FIX 1: Handle momentum-based entry logic properly
-                # Instead of converting exit to entry, interpret momentum signals correctly
-                if not has_position and exit_signal > 0 and 'momentum_recovery' in exit_reason:
-                    # This is actually a momentum following signal - positive momentum = buy signal
-                    logger.info(f"🔄 MOMENTUM FOLLOWING: {symbol} - positive momentum {exit_signal:.6f} indicates upward trend, generating entry")
-                    entry_signal = exit_signal
-                    entry_reason = f"momentum_following_{exit_reason}"
+                # 🚫 REMOVED CONTRADICTORY LOGIC: Do not convert exit signals to entry signals
+                # This was causing churning by flip-flopping between entry and exit logic
+                # Let each signal type maintain its own consistent logic
                 
-                # Prioritize exit signals ONLY if we have a position
+                # 🎯 CONSISTENCY CHECK: Only process signals that make logical sense
+                # Exit signals ONLY if we have a position, Entry signals ONLY if we don't
                 if has_position and (exit_signal > 0 or profit_exit > 0 or stop_loss > 0):
                     from .signal_generation.signal_generator import SignalStrength
                     
@@ -942,7 +942,7 @@ class UnifiedCoreEngine:
                     try:
                         trading_signal = TradingSignal(
                         symbol_pair=symbol,
-                        signal_type=SignalType.SHORT,  # SELL signal to close long positions
+                        signal_type=SignalType.CLOSE_LONG,  # CLOSE signal to close long positions only
                         strength=exit_strength,
                         confidence=confidence,
                         position_size=1.0,  # Close entire position
@@ -1023,6 +1023,31 @@ class UnifiedCoreEngine:
                 
                 # 🎯 INTELLIGENT POSITION-AWARE SIGNAL GENERATION
                 if has_position:
+                    # Check minimum holding period to prevent churning
+                    current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
+                    if current_position and hasattr(current_position, 'created_at'):
+                        from datetime import timedelta
+                        # Use slice timestamp for backtesting instead of system time
+                        current_time = datetime.now()  # Default to system time
+                        if 'slice_timestamp' in locals():
+                            current_time = slice_timestamp
+                        elif hasattr(strategy_config, 'signal_params') and 'slice_timestamp' in strategy_config.signal_params:
+                            current_time = strategy_config.signal_params['slice_timestamp']
+                        
+                        time_held = current_time - current_position.created_at
+                        min_holding_period = timedelta(minutes=5)  # Minimum 5-minute hold
+                        
+                        # 🎯 SLICE-BASED ANTI-CHURNING: Prevent trading same symbol multiple times in same slice
+                        if hasattr(strategy_config, 'signal_params'):
+                            current_slice = strategy_config.signal_params.get('slice_index', 0)
+                            position_slice = getattr(current_position, 'entry_slice', -1)
+                            if current_slice == position_slice:
+                                logger.info(f"🚫 SLICE LOCK: {symbol} already traded in slice {current_slice} - preventing churning")
+                                return None
+                        if time_held < min_holding_period:
+                            logger.info(f"⏰ HOLDING PERIOD: {symbol} held for {time_held}, minimum {min_holding_period} - skipping exit")
+                            return None
+                    
                     # We have a position - generate exit signals based on momentum direction
                     # For contrarian strategy: exit when momentum turns positive (price recovering)
                     should_exit = False
@@ -1046,7 +1071,7 @@ class UnifiedCoreEngine:
                         try:
                             trading_signal = TradingSignal(
                                 symbol_pair=symbol,
-                                signal_type=SignalType.SHORT,  # SELL signal to close position
+                                signal_type=SignalType.CLOSE_LONG,  # CLOSE signal to close position only
                                 strength=SignalStrength.STRONG if abs(signal_strength) > 0.001 else SignalStrength.MODERATE,
                                 confidence=confidence,
                                 position_size=1.0,  # Close entire position
@@ -1270,6 +1295,28 @@ class UnifiedCoreEngine:
         try:
             execution_results = []
             
+            # 🎯 STRATEGY-AWARE ANTI-CHURNING: Only prevent churning within the same strategy
+            # Each strategy can trade the same symbol independently (separate portfolios)
+            current_slice = strategy_config.signal_params.get('slice_index', -1) if hasattr(strategy_config, 'signal_params') and strategy_config.signal_params else -1
+            strategy_id = getattr(strategy_config, 'strategy_id', 'unknown')
+            
+            if current_slice >= 0:
+                # Create strategy-specific slice lock key
+                strategy_slice_key = f"{strategy_id}_{current_slice}"
+                
+                if strategy_slice_key not in self.slice_trading_locks:
+                    self.slice_trading_locks[strategy_slice_key] = set()
+                
+                # Filter out signals for symbols already traded by THIS STRATEGY in this slice
+                filtered_signals = []
+                for signal in signals:
+                    if signal.symbol_pair in self.slice_trading_locks[strategy_slice_key]:
+                        logger.info(f"🚫 STRATEGY SLICE LOCK: {signal.symbol_pair} already traded by {strategy_id} in slice {current_slice} - skipping to prevent churning")
+                        continue
+                    filtered_signals.append(signal)
+                
+                signals = filtered_signals
+            
             for signal in signals:
                 # Calculate proper quantity based on ACTUAL available capital
                 # position_size is a fraction (e.g., 0.5 for 50% of current portfolio)
@@ -1318,6 +1365,19 @@ class UnifiedCoreEngine:
                     max_affordable_shares = int(usable_capital / current_price) 
                     quantity = min(quantity, max_affordable_shares)
                     
+                elif signal.signal_type == SignalType.CLOSE_LONG:
+                    # CLOSE LONG: Close existing long position only
+                    current_position = self.portfolio_manager.get_position(signal.symbol_pair) if self.portfolio_manager else None
+                    
+                    if current_position and current_position.quantity > 0:
+                        # Close the entire long position
+                        quantity = current_position.quantity
+                        logger.info(f"📊 CLOSE LONG: {signal.symbol_pair} closing {quantity} shares")
+                    else:
+                        # No long position to close - skip this signal
+                        logger.info(f"⚠️ CLOSE LONG IGNORED: {signal.symbol_pair} has no long position to close")
+                        return None
+                        
                 elif signal.signal_type == SignalType.SHORT:
                     # SELL: Calculate based on EXISTING POSITION
                     current_position = self.portfolio_manager.get_position(signal.symbol_pair) if self.portfolio_manager else None
@@ -1402,6 +1462,15 @@ class UnifiedCoreEngine:
                     )
                 
                 execution_results.append(result)
+                
+                # 🎯 ADD STRATEGY SLICE LOCK: Mark symbol as traded by this strategy in this slice
+                # Check if execution was successful using ExecutionResult.status instead of .success
+                is_successful = hasattr(result, 'status') and result.status == ExecutionStatus.SUCCESS
+                if current_slice >= 0 and is_successful:
+                    strategy_slice_key = f"{strategy_id}_{current_slice}"
+                    if strategy_slice_key in self.slice_trading_locks:
+                        self.slice_trading_locks[strategy_slice_key].add(signal.symbol_pair)
+                        logger.info(f"🔒 STRATEGY SLICE LOCK ADDED: {signal.symbol_pair} locked for {strategy_id} in slice {current_slice}")
             
             logger.debug(f"Executed {len(execution_results)} orders for {strategy_config.strategy_id}")
             return execution_results

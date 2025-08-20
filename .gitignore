@@ -272,3 +272,11 @@ validation/*_validation.py
 analysis/
 *.analysis.json
 *.report.json
+
+# Multi-strategy backtest temporary files
+multi_strategy_backtest_*.log
+multi_strategy_backtest_report_*.txt
+
+# Testing framework temporary files
+testing_framework/test_report_*.txt
+testing_framework/test_run_*.log

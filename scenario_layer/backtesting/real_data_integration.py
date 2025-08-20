@@ -213,16 +213,35 @@ class MultiStrategySignalAggregator:
             all_signals = []
             for strategy_id, signals in strategy_signals.items():
                 for signal in signals:
-                    signal['strategy_id'] = strategy_id
-                    all_signals.append(signal)
+                    # Handle both TradingSignal objects and dictionaries
+                    if hasattr(signal, 'metadata'):
+                        # TradingSignal object - add strategy_id to metadata
+                        if signal.metadata is None:
+                            signal.metadata = {}
+                        signal.metadata['strategy_id'] = strategy_id
+                        all_signals.append(signal)
+                    else:
+                        # Dictionary signal - add strategy_id directly
+                        signal['strategy_id'] = strategy_id
+                        all_signals.append(signal)
                     aggregated['total_signals'] += 1
             
             # Separate by signal type
             for signal in all_signals:
-                if signal.get('signal_type') == 'BUY':
-                    aggregated['buy_signals'].append(signal)
-                elif signal.get('signal_type') == 'SELL':
-                    aggregated['sell_signals'].append(signal)
+                # Handle both TradingSignal objects and dictionaries
+                if hasattr(signal, 'signal_type'):
+                    # TradingSignal object
+                    signal_type = str(signal.signal_type)
+                    if 'LONG' in signal_type or 'BUY' in signal_type:
+                        aggregated['buy_signals'].append(signal)
+                    elif 'SHORT' in signal_type or 'SELL' in signal_type:
+                        aggregated['sell_signals'].append(signal)
+                else:
+                    # Dictionary signal
+                    if signal.get('signal_type') == 'BUY':
+                        aggregated['buy_signals'].append(signal)
+                    elif signal.get('signal_type') == 'SELL':
+                        aggregated['sell_signals'].append(signal)
             
             # Resolve conflicts
             final_signals = await self._resolve_signal_conflicts(all_signals)
@@ -247,7 +266,14 @@ class MultiStrategySignalAggregator:
             # Group signals by symbol
             symbol_signals = {}
             for signal in signals:
-                symbol = signal.get('symbol')
+                # Handle both TradingSignal objects and dictionaries
+                if hasattr(signal, 'symbol_pair'):
+                    # TradingSignal object
+                    symbol = signal.symbol_pair
+                else:
+                    # Dictionary signal
+                    symbol = signal.get('symbol')
+                
                 if symbol not in symbol_signals:
                     symbol_signals[symbol] = []
                 symbol_signals[symbol].append(signal)
@@ -276,23 +302,48 @@ class MultiStrategySignalAggregator:
     ) -> List[Dict[str, Any]]:
         """Resolve conflicts for a specific symbol"""
         try:
+            # Helper function to get signal type
+            def get_signal_type(signal):
+                if hasattr(signal, 'signal_type'):
+                    return str(signal.signal_type)
+                else:
+                    return signal.get('signal_type', '')
+            
+            # Helper function to get signal strength
+            def get_signal_strength(signal):
+                if hasattr(signal, 'strength'):
+                    # Convert SignalStrength enum to float if needed
+                    strength = signal.strength
+                    if hasattr(strength, 'value'):
+                        return float(strength.value)
+                    else:
+                        return float(strength)
+                else:
+                    return signal.get('strength', 0)
+            
             # Check for opposite signals (BUY vs SELL)
-            buy_signals = [s for s in signals if s.get('signal_type') == 'BUY']
-            sell_signals = [s for s in signals if s.get('signal_type') == 'SELL']
+            buy_signals = []
+            sell_signals = []
+            
+            for s in signals:
+                signal_type = get_signal_type(s)
+                if 'BUY' in signal_type or 'LONG' in signal_type:
+                    buy_signals.append(s)
+                elif 'SELL' in signal_type or 'SHORT' in signal_type:
+                    sell_signals.append(s)
             
             if buy_signals and sell_signals:
-                # Opposite signals - use strongest signal
-                all_signals_with_strength = buy_signals + sell_signals
-                strongest = max(all_signals_with_strength, key=lambda x: x.get('strength', 0))
-                return [strongest]
+                # Opposite signals - PREVENT CHURNING by skipping conflicting signals
+                logger.info(f"🚫 CONFLICT DETECTED: {symbol} has both BUY ({len(buy_signals)}) and SELL ({len(sell_signals)}) signals - SKIPPING ALL to prevent churning")
+                return []  # Skip all conflicting signals to prevent churning
             
             elif len(buy_signals) > 1:
                 # Multiple BUY signals - combine or select strongest
-                return [max(buy_signals, key=lambda x: x.get('strength', 0))]
+                return [max(buy_signals, key=get_signal_strength)]
             
             elif len(sell_signals) > 1:
                 # Multiple SELL signals - combine or select strongest
-                return [max(sell_signals, key=lambda x: x.get('strength', 0))]
+                return [max(sell_signals, key=get_signal_strength)]
             
             else:
                 # No conflicts
@@ -348,10 +399,19 @@ class CoordinatedPortfolioManager:
             final_signals = aggregated_signals.get('final_signals', [])
             
             for signal in final_signals:
-                strategy_id = signal.get('strategy_id')
-                symbol = signal.get('symbol')
-                signal_type = signal.get('signal_type')
-                strength = signal.get('strength', 0)
+                # Handle both TradingSignal objects and dictionaries
+                if hasattr(signal, 'metadata'):
+                    # TradingSignal object
+                    strategy_id = signal.metadata.get('strategy_id') if signal.metadata else None
+                    symbol = signal.symbol_pair
+                    signal_type = str(signal.signal_type)
+                    strength = signal.strength
+                else:
+                    # Dictionary signal
+                    strategy_id = signal.get('strategy_id')
+                    symbol = signal.get('symbol')
+                    signal_type = signal.get('signal_type')
+                    strength = signal.get('strength', 0)
                 
                 # Calculate position size based on strategy allocation
                 position_size = await self._calculate_position_size(
@@ -398,7 +458,13 @@ class CoordinatedPortfolioManager:
             available_cash = strategy_portfolio['available_cash']
             
             # Base position size on signal strength and available capital
-            base_position_value = available_cash * 0.1 * strength  # 10% max per signal
+            # Convert SignalStrength enum to float if needed
+            if hasattr(strength, 'value'):
+                strength_value = float(strength.value)
+            else:
+                strength_value = float(strength)
+            
+            base_position_value = available_cash * 0.1 * strength_value  # 10% max per signal
             
             # Mock price for calculation (in production, use real market price)
             mock_price = 100.0

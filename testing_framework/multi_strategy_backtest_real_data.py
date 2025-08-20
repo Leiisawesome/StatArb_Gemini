@@ -50,16 +50,16 @@ logger = logging.getLogger(__name__)
 class MultiStrategyBacktestConfig:
     """Configuration for multi-strategy backtesting"""
     # Test period
-    start_date: datetime = datetime(2025, 1, 1)
-    end_date: datetime = datetime(2025, 1, 31)
-    universe: List[str] = field(default_factory=lambda: ['TSLA', 'NVDA'])
-    initial_capital: float = 1_000_000.0
+    start_date: datetime = datetime(2025, 1, 3)
+    end_date: datetime = datetime(2025, 1, 3, 23, 59, 59)
+    universe: List[str] = field(default_factory=lambda: ['TSLA'])
+    initial_capital: float = 10_000.0
     
     # Strategy configurations
     strategies: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         'momentum': {
             'name': 'Momentum Strategy',
-            'allocation': 0.5,
+            'allocation': 0.5,  # Back to 50% allocation
             'params': {
                 'lookback_period': 20,
                 'momentum_threshold': 0.02,
@@ -70,7 +70,7 @@ class MultiStrategyBacktestConfig:
         },
         'mean_reversion': {
             'name': 'Mean Reversion Strategy',
-            'allocation': 0.5,
+            'allocation': 0.5,  # Re-enabled with 50% allocation
             'params': {
                 'lookback_period': 14,
                 'z_score_threshold': 2.0,
@@ -147,9 +147,10 @@ class MultiStrategyBacktester:
             allocation_per_strategy = 1.0 / len(strategy_configs)
             
             # Map strategy configs to actual template IDs from registry
+            # NOTE: Currently using momentum templates for both strategies due to registry limitations
             strategy_to_template_map = {
                 'momentum': 'momentum_base_template',
-                'mean_reversion': 'base_momentum',  # Use another momentum template for mean reversion
+                'mean_reversion': 'equity_momentum_template',  # Use different momentum template for mean reversion
                 'MomentumStrategy': 'momentum_base_template',
                 'MeanReversionStrategy': 'equity_momentum_template'
             }
@@ -246,7 +247,8 @@ class MultiStrategyBacktester:
             core_config = CoreEngineConfig(
                 engine_id=f"backtest_engine_{self.results.test_id}",
                 enable_monitoring=True,
-                trading_mode=TradingMode.BACKTESTING
+                trading_mode=TradingMode.BACKTESTING,
+                initial_capital=self.config.initial_capital
             )
             
             self.core_engine = UnifiedCoreEngine(config=core_config)
@@ -557,7 +559,8 @@ class MultiStrategyBacktester:
         # Map strategy result keys to config keys
         strategy_mapping = {
             'momentum': 'momentum',
-            'mean': 'mean_reversion'
+            'mean': 'mean_reversion',
+            'MeanReversionStrategy': 'mean_reversion'  # Handle class name mapping
         }
         
         total_allocation = 0
@@ -673,7 +676,11 @@ class MultiStrategyBacktester:
         ]
         
         # Strategy mapping for report generation
-        strategy_mapping = {'momentum': 'momentum', 'mean': 'mean_reversion'}
+        strategy_mapping = {
+            'momentum': 'momentum', 
+            'mean': 'mean_reversion',
+            'MeanReversionStrategy': 'mean_reversion'  # Handle class name mapping
+        }
         
         for strategy_id, results in self.results.strategy_results.items():
             mapped_id = strategy_mapping.get(strategy_id, strategy_id)

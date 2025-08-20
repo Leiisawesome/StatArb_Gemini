@@ -382,10 +382,16 @@ class MultiStrategyBacktestingEngine:
         total_processed_slices = 0
         total_empty_slices = 0
         
+        # 🎯 ANTI-CHURNING: Track symbols traded in current slice to prevent conflicts
+        slice_trading_locks = set()  # Symbols already traded in current slice
+        
         for time_index, (current_time, slice_data) in enumerate(time_slices):
             try:
                 total_processed_slices += 1
                 slice_had_signals = False
+                
+                # 🎯 RESET TRADING LOCKS for new time slice
+                slice_trading_locks.clear()
                 
                 # 🎯 UPDATE ROLLING DATA WINDOWS with current slice data
                 for symbol in self.config.universe:
@@ -402,6 +408,29 @@ class MultiStrategyBacktestingEngine:
                 
                 logger.info(f"🔄 Slice {time_index+1}/{len(time_slices)}: Rolling windows - " + 
                            ", ".join([f"{sym}: {len(data)} periods" for sym, data in rolling_data_windows.items() if data]))
+                
+                # 📊 LOG CURRENT PORTFOLIO POSITIONS BEFORE PROCESSING THIS SLICE
+                if hasattr(core_engine, 'portfolio_manager') and core_engine.portfolio_manager:
+                    try:
+                        current_positions = core_engine.portfolio_manager.positions
+                        available_capital = core_engine.portfolio_manager.available_capital
+                        
+                        position_summary = []
+                        total_position_value = 0.0
+                        for symbol in self.config.universe:
+                            if symbol in current_positions:
+                                pos = current_positions[symbol]
+                                position_value = pos.quantity * pos.avg_price
+                                total_position_value += position_value
+                                position_summary.append(f"{symbol}: {pos.quantity} shares @ ${pos.avg_price:.2f} = ${position_value:.2f}")
+                            else:
+                                position_summary.append(f"{symbol}: 0 shares")
+                        
+                        total_portfolio_value = total_position_value + available_capital
+                        logger.info(f"📊 SLICE {time_index+1} POSITIONS: {' | '.join(position_summary)}")
+                        logger.info(f"💰 SLICE {time_index+1} CAPITAL: Portfolio=${total_portfolio_value:,.2f}, Available=${available_capital:,.2f}")
+                    except Exception as e:
+                        logger.warning(f"Could not log positions for slice {time_index+1}: {e}")
                 
                 # 🎯 SIGNAL GENERATION WARMUP PERIOD - Only start after sufficient data accumulation
                 min_periods_required = 5  # Minimum periods needed for momentum calculation
@@ -441,6 +470,19 @@ class MultiStrategyBacktestingEngine:
                             results[template_id]['trades_executed'] += execution_count
                             total_trades += execution_count
                             logger.info(f"✅ TRADES COUNTED: {template_id} executed {execution_count} trades")
+                            
+                            # 📊 LOG POSITION CHANGES AFTER TRADE EXECUTION
+                            if hasattr(core_engine, 'portfolio_manager') and core_engine.portfolio_manager:
+                                try:
+                                    updated_positions = core_engine.portfolio_manager.positions
+                                    for symbol in self.config.universe:
+                                        if symbol in updated_positions:
+                                            pos = updated_positions[symbol]
+                                            logger.info(f"📈 POST-TRADE: {symbol} = {pos.quantity} shares @ ${pos.avg_price:.2f}, P&L: ${pos.unrealized_pnl:.2f}")
+                                        else:
+                                            logger.info(f"📈 POST-TRADE: {symbol} = 0 shares (no position)")
+                                except Exception as e:
+                                    logger.warning(f"Could not log post-trade positions: {e}")
                         
                         # Only count VALID signals (not None or failed conversions)
                         valid_signals = self._extract_valid_signals(response)
@@ -917,11 +959,12 @@ class MultiStrategyBacktestingEngine:
                 # Create a UnifiedCoreEngine instance for this strategy if engine doesn't have process_trading_cycle
                 from core_structure.unified_core_engine import UnifiedCoreEngine, CoreEngineConfig, TradingMode
                 
-                # Create core engine config
+                # Create core engine config with correct initial capital
                 core_config = CoreEngineConfig(
                     engine_id=f"template_engine_{template_id}",
                     enable_monitoring=True,
-                    trading_mode=TradingMode.BACKTESTING
+                    trading_mode=TradingMode.BACKTESTING,
+                    initial_capital=core_engine.config.initial_capital
                 )
                 
                 # Create UnifiedCoreEngine instance
@@ -981,11 +1024,10 @@ class MultiStrategyBacktestingEngine:
                 logger.info("🔄 Loading time-series data through core engine data manager...")
                 
                 # Use core engine's historical data loading
-                symbol_data = await core_engine.data_manager.load_historical_data(
+                symbol_data = core_engine.data_manager.load_historical_data(
                     symbols=self.config.universe,
                     start_date=start_date,
-                    end_date=end_date,
-                    interval=self.config.data_frequency
+                    end_date=end_date
                 )
                 
                 if symbol_data:

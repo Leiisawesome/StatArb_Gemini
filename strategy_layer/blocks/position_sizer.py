@@ -401,8 +401,19 @@ class RiskBasedPositionSizer(BasePositionSizer):
 class PositionSizer:
     """Main position sizer that uses different sizing methods"""
     
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
+    def __init__(self, config: Union[Dict[str, Any], str]):
+        # Handle case where config is passed as string instead of dict
+        if isinstance(config, str):
+            self.logger = logging.getLogger(self.__class__.__name__)
+            self.logger.warning(f"Position sizer config passed as string '{config}', using default config")
+            self.config = {'method': 'fixed', 'fixed_size': 0.05}
+        elif isinstance(config, dict):
+            self.config = config
+        else:
+            self.logger = logging.getLogger(self.__class__.__name__)
+            self.logger.warning(f"Position sizer config has invalid type {type(config)}, using default config")
+            self.config = {'method': 'fixed', 'fixed_size': 0.05}
+            
         self.logger = logging.getLogger(self.__class__.__name__)
         self.sizer = self._create_position_sizer()
     
