@@ -47,6 +47,9 @@ from trade_engine.templates import (
 )
 from trade_engine.analytics.risk_analyzer import RiskAnalyzer
 
+# Testing framework configuration
+from testing_framework.config.config_manager import TestConfigManager, TradingPeriod, StrategyConfig
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -172,10 +175,14 @@ class AdvancedTestResults:
 class AdvancedEnhancedMomentumBacktest:
     """Advanced momentum strategy backtest with comprehensive risk management"""
     
-    def __init__(self):
+    def __init__(self, config_name: str = "advanced_momentum", custom_config: Optional[Dict] = None):
         self.logger = logging.getLogger(__name__)
         self.core_engine: Optional[UnifiedCoreEngine] = None
         self.data_provider: Optional[BacktestingDataProvider] = None
+        
+        # Load test configuration
+        self.config_manager = TestConfigManager()
+        self.test_config = self._load_test_config(config_name, custom_config)
         
         # Advanced components
         self.risk_manager: Optional[DynamicRiskManager] = None
@@ -199,6 +206,100 @@ class AdvancedEnhancedMomentumBacktest:
         
         # Price history for momentum calculation
         self.price_history: Dict[str, List[float]] = {}
+    
+    def _load_test_config(self, config_name: str, custom_config: Optional[Dict]) -> Dict[str, Any]:
+        """Load and validate test configuration"""
+        try:
+            # Load strategy configuration
+            strategy_config = self.config_manager.get_strategy_config(config_name)
+            
+            # Get trading period
+            trading_period = self.config_manager.get_trading_period(strategy_config.period)
+            
+            # Build complete test configuration
+            test_config = {
+                'strategy': {
+                    'name': config_name,
+                    'template': strategy_config.template,
+                    'symbols': strategy_config.symbols,
+                    'parameters': strategy_config.parameters
+                },
+                'trading_period': {
+                    'start_date': trading_period.start_date,
+                    'end_date': trading_period.end_date,
+                    'start_time': trading_period.start_time,
+                    'end_time': trading_period.end_time,
+                    'timezone': trading_period.timezone,
+                    'description': trading_period.description
+                },
+                'data': {
+                    'interval': strategy_config.interval,
+                    'validation': self.config_manager.get_validation_config()
+                },
+                'capital': strategy_config.capital,
+                'risk': self.config_manager.get_risk_config().__dict__
+            }
+            
+            # Apply custom overrides
+            if custom_config:
+                self._apply_config_overrides(test_config, custom_config)
+            
+            self.logger.info(f"✅ Loaded test configuration: {config_name}")
+            self.logger.info(f"  • Symbols: {test_config['strategy']['symbols']}")
+            self.logger.info(f"  • Period: {test_config['trading_period']['start_date']} to {test_config['trading_period']['end_date']}")
+            self.logger.info(f"  • Interval: {test_config['data']['interval']}")
+            self.logger.info(f"  • Capital: ${test_config['capital']:,.2f}")
+            
+            return test_config
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️  Failed to load config '{config_name}': {e}")
+            # Return default configuration
+            return self._get_default_test_config()
+    
+    def _apply_config_overrides(self, base_config: Dict, overrides: Dict):
+        """Apply configuration overrides recursively"""
+        def deep_update(base_dict, update_dict):
+            for key, value in update_dict.items():
+                if key in base_dict and isinstance(base_dict[key], dict) and isinstance(value, dict):
+                    deep_update(base_dict[key], value)
+                else:
+                    base_dict[key] = value
+        
+        deep_update(base_config, overrides)
+    
+    def _get_default_test_config(self) -> Dict[str, Any]:
+        """Return default test configuration"""
+        return {
+            'strategy': {
+                'name': 'default_momentum',
+                'template': 'professional_momentum_v1',
+                'symbols': ['TSLA'],
+                'parameters': {
+                    'lookback_period': 20,
+                    'momentum_threshold': 0.6,
+                    'max_position_size': 0.15
+                }
+            },
+            'trading_period': {
+                'start_date': '2024-12-20',
+                'end_date': '2024-12-20',
+                'start_time': '09:30:00',
+                'end_time': '16:00:00',
+                'timezone': 'US/Eastern',
+                'description': 'Default single day test'
+            },
+            'data': {
+                'interval': '1min',
+                'validation': {'enable_validation': True}
+            },
+            'capital': 100000.0,
+            'risk': {
+                'max_portfolio_risk': 0.02,
+                'max_position_size': 0.20,
+                'max_drawdown_limit': 0.10
+            }
+        }
         
     async def setup(self) -> bool:
         """Setup the advanced backtest with all risk management components"""
@@ -211,23 +312,33 @@ class AdvancedEnhancedMomentumBacktest:
             # Create ClickHouse loader and data request for BacktestingDataProvider
             clickhouse_loader = EnhancedClickHouseLoader()
             
-            # Create data request for TSLA 1-minute data
-            est_tz = pytz.timezone('US/Eastern')
+            # Create data request using configuration
+            symbols = self.test_config['strategy']['symbols']
+            period = self.test_config['trading_period']
+            interval = self.test_config['data']['interval']
+            
+            est_tz = pytz.timezone(period['timezone'])
             utc_tz = pytz.timezone('UTC')
             
-            # Market hours: 9:30 AM - 4:00 PM EST on 2024-12-20
-            start_est = est_tz.localize(datetime(2024, 12, 20, 9, 30, 0))
-            end_est = est_tz.localize(datetime(2024, 12, 20, 16, 0, 0))
+            # Parse dates from configuration
+            start_date = datetime.strptime(period['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(period['end_date'], '%Y-%m-%d').date()
+            start_time = datetime.strptime(period['start_time'], '%H:%M:%S').time()
+            end_time = datetime.strptime(period['end_time'], '%H:%M:%S').time()
+            
+            # Combine date and time
+            start_est = est_tz.localize(datetime.combine(start_date, start_time))
+            end_est = est_tz.localize(datetime.combine(end_date, end_time))
             
             # Convert to UTC
             start_utc = start_est.astimezone(utc_tz)
             end_utc = end_est.astimezone(utc_tz)
             
             data_request = DataRequest(
-                symbols=['TSLA'],
+                symbols=symbols,
                 start_date=start_utc,
                 end_date=end_utc,
-                interval='1m'
+                interval=interval
             )
             
             # Initialize data provider with required parameters
@@ -255,17 +366,21 @@ class AdvancedEnhancedMomentumBacktest:
             # Initialize trade_engine template system
             self.strategy_template = ProfessionalMomentumTemplate()
             
-            # Setup template configuration with enhanced parameters
+            # Get strategy parameters from configuration
+            strategy_params = self.test_config['strategy']['parameters']
+            primary_symbol = symbols[0] if symbols else 'UNKNOWN'
+            
+            # Setup template configuration with parameters from config
             template_config = TemplateConfiguration(
-                template_id='professional_momentum_v1',
-                strategy_instance_id='advanced_momentum_tsla',
+                template_id=self.test_config['strategy']['template'],
+                strategy_instance_id=f"advanced_momentum_{primary_symbol.lower()}",
                 parameters={
-                    'lookback_period': self.momentum_config.lookback_period,
-                    'momentum_threshold': self.momentum_config.momentum_threshold,
+                    'lookback_period': strategy_params.get('lookback_period', self.momentum_config.lookback_period),
+                    'momentum_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
                     'confidence_threshold': 0.75,  # 75% confidence threshold (within 0.5-0.95 range)
                     'volume_lookback': 10,
                     'volume_threshold': 1.5,
-                    'position_size': self.config.max_position_size,
+                    'position_size': strategy_params.get('max_position_size', self.config.max_position_size),
                     'stop_loss_pct': self.config.stop_loss_percentage,
                     'take_profit_pct': self.config.take_profit_percentage,
                     'volatility_percentile': 80
@@ -302,24 +417,34 @@ class AdvancedEnhancedMomentumBacktest:
             # Use real ClickHouse data
             loader = EnhancedClickHouseLoader()
             
-            # Create data request for TSLA 1-minute data
+            # Get configuration
+            symbols = self.test_config['strategy']['symbols']
+            period = self.test_config['trading_period']
+            interval = self.test_config['data']['interval']
+            
             # Convert EST market hours to UTC for ClickHouse query
-            est_tz = pytz.timezone('US/Eastern')
+            est_tz = pytz.timezone(period['timezone'])
             utc_tz = pytz.timezone('UTC')
             
-            # Market hours: 9:30 AM - 4:00 PM EST on 2024-12-20
-            start_est = est_tz.localize(datetime(2024, 12, 20, 9, 30, 0))
-            end_est = est_tz.localize(datetime(2024, 12, 20, 16, 0, 0))
+            # Parse dates from configuration
+            start_date = datetime.strptime(period['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(period['end_date'], '%Y-%m-%d').date()
+            start_time = datetime.strptime(period['start_time'], '%H:%M:%S').time()
+            end_time = datetime.strptime(period['end_time'], '%H:%M:%S').time()
+            
+            # Combine date and time
+            start_est = est_tz.localize(datetime.combine(start_date, start_time))
+            end_est = est_tz.localize(datetime.combine(end_date, end_time))
             
             # Convert to UTC
             start_utc = start_est.astimezone(utc_tz)
             end_utc = end_est.astimezone(utc_tz)
             
             request = DataRequest(
-                symbols=['TSLA'],
+                symbols=symbols,
                 start_date=start_utc,
                 end_date=end_utc,
-                interval='1min'
+                interval=interval
             )
             
             self.logger.info("Loading historical data from ClickHouse...")
@@ -327,6 +452,9 @@ class AdvancedEnhancedMomentumBacktest:
             
             if data is not None and not data.empty:
                 self.logger.info(f"✅ Loaded {len(data)} data points from ClickHouse")
+                
+                # Get primary symbol for processing (use first symbol from config)
+                primary_symbol = symbols[0]
                 
                 # Convert to test data format and build market data history
                 test_data = []
@@ -345,11 +473,11 @@ class AdvancedEnhancedMomentumBacktest:
                         'volume': getattr(row, 'volume', 0)
                     })
                     
-                    # Create test slice
+                    # Create test slice with primary symbol
                     slice_data = {
                         'timestamp': timestamp,
                         'data': {
-                            'TSLA': {
+                            primary_symbol: {
                                 'open': getattr(row, 'open', 0),
                                 'high': getattr(row, 'high', 0),
                                 'low': getattr(row, 'low', 0),
@@ -361,7 +489,7 @@ class AdvancedEnhancedMomentumBacktest:
                     test_data.append(slice_data)
                 
                 # Store market data history for technical analysis
-                self.market_data_history['TSLA'] = pd.DataFrame(market_data_rows)
+                self.market_data_history[primary_symbol] = pd.DataFrame(market_data_rows)
                 return test_data
             else:
                 self.logger.warning("No ClickHouse data found, generating synthetic data...")
@@ -1142,11 +1270,16 @@ class AdvancedEnhancedMomentumBacktest:
             self.logger.error(f"Results display failed: {e}")
 
 
-async def main():
-    """Main function to run the advanced backtest"""
+async def main(config_name: str = "advanced_momentum", custom_config: Optional[Dict] = None):
+    """Main function to run the advanced backtest
+    
+    Args:
+        config_name: Name of the strategy configuration to use
+        custom_config: Optional custom configuration overrides
+    """
     try:
-        # Create and run the advanced backtest
-        backtest = AdvancedEnhancedMomentumBacktest()
+        # Create and run the advanced backtest with configuration
+        backtest = AdvancedEnhancedMomentumBacktest(config_name, custom_config)
         
         # Setup
         if await backtest.setup():
@@ -1159,5 +1292,59 @@ async def main():
         logger.error(f"Main execution failed: {e}")
 
 
+def run_quick_test():
+    """Run a quick test with default configuration"""
+    asyncio.run(main())
+
+def run_custom_test(symbols: List[str], period: str = "single_day", interval: str = "1min"):
+    """Run a test with custom parameters
+    
+    Args:
+        symbols: List of symbols to test
+        period: Trading period name from config
+        interval: Data interval
+    """
+    custom_config = {
+        'strategy': {
+            'symbols': symbols
+        },
+        'trading_period': {
+            'period': period
+        },
+        'data': {
+            'interval': interval
+        }
+    }
+    asyncio.run(main("advanced_momentum", custom_config))
+
+def run_scenario_test(scenario_name: str):
+    """Run a predefined test scenario
+    
+    Args:
+        scenario_name: Name of the scenario from config
+    """
+    try:
+        config_manager = TestConfigManager()
+        scenario_config = config_manager.get_scenario_config(scenario_name)
+        
+        if 'strategy' in scenario_config:
+            config_name = scenario_config['strategy']
+            custom_config = {k: v for k, v in scenario_config.items() if k != 'strategy'}
+        else:
+            config_name = "advanced_momentum"
+            custom_config = scenario_config
+        
+        asyncio.run(main(config_name, custom_config))
+        
+    except Exception as e:
+        print(f"❌ Failed to run scenario '{scenario_name}': {e}")
+
+
 if __name__ == "__main__":
+    # Example usage:
+    # Default run: python advanced_momentum_backtest.py
+    # Custom run in code:
+    # run_custom_test(['AAPL', 'MSFT'], 'one_week', '5min')
+    # run_scenario_test('quick_test')
+    
     asyncio.run(main())

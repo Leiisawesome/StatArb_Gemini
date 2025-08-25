@@ -1,0 +1,57 @@
+# ================================================================================
+# QUICK TEST CONFIGURATION OVERRIDES
+# ================================================================================
+# Simple configuration overrides for quick testing without editing main config
+# ================================================================================
+
+# Quick test with AAPL instead of TSLA
+quick_aapl_test:
+  strategy:
+    symbols: ["AAPL"]
+  
+# Test with multiple symbols
+multi_symbol_test:
+  strategy:
+    symbols: ["TSLA", "AAPL", "MSFT"]
+  trading_period:
+    period: "one_week"
+
+# High frequency test
+high_freq_test:
+  data:
+    interval: "1min"
+  strategy:
+    parameters:
+      lookback_period: 10
+      momentum_threshold: 0.7
+
+# Conservative risk test  
+conservative_test:
+  strategy:
+    parameters:
+      max_position_size: 0.05
+      momentum_threshold: 0.8
+  risk:
+    max_portfolio_risk: 0.01
+
+# Extended period test
+extended_test:
+  trading_period:
+    start_date: "2024-12-16"
+    end_date: "2024-12-20"
+  strategy:
+    symbols: ["TSLA"]
+    
+# Tech stocks test
+tech_test:
+  strategy:
+    symbols: ["AAPL", "MSFT", "GOOGL", "NVDA"]
+  trading_period:
+    period: "one_week"
+    
+# ETF test
+etf_test:
+  strategy:
+    symbols: ["SPY", "QQQ"]
+  trading_period:
+    period: "one_month"
