@@ -38,8 +38,20 @@ class MomentumStrategyDefinition(StrategyDefinition):
             risk_config = self.config.risk_management
             self.risk_manager = RiskManager(risk_config)
             
-            # Setup entry/exit logic
-            logic_config = self.config.entry_exit_logic
+            # Setup entry/exit logic with proper take_profit configuration
+            logic_config = self.config.entry_exit_logic if hasattr(self.config, 'entry_exit_logic') else {}
+            
+            # 🎯 CRITICAL FIX: Inject take_profit from risk_params into exit logic
+            if hasattr(self.config, 'risk_params') and 'take_profit' in self.config.risk_params:
+                logic_config['profit_target'] = self.config.risk_params['take_profit']
+                self.logger.info(f"🎯 TAKE PROFIT CONFIG: Set profit_target to {self.config.risk_params['take_profit']}")
+            elif hasattr(self.config, 'risk_management') and 'take_profit' in self.config.risk_management:
+                logic_config['profit_target'] = self.config.risk_management['take_profit']
+                self.logger.info(f"🎯 TAKE PROFIT CONFIG: Set profit_target to {self.config.risk_management['take_profit']}")
+            else:
+                logic_config['profit_target'] = 0.05  # 5% default
+                self.logger.warning(f"🎯 TAKE PROFIT CONFIG: Using default 5% profit target")
+            
             self.entry_exit_logic = EntryExitLogic(logic_config)
             
             self.logger.info("Momentum strategy building blocks setup completed")
@@ -77,80 +89,125 @@ class MomentumStrategyDefinition(StrategyDefinition):
             if 'close' in data.columns:
                 recent_prices = data['close'].tail(lookback + 1)
                 if len(recent_prices) >= 2:
-                    # 🎯 PROFESSIONAL FIX: Calculate CONTRARIAN momentum for profitable trading
-                    # Traditional momentum chasing leads to "buy high, sell low"
-                    # We invert the logic: negative momentum = buy opportunity, positive momentum = sell opportunity
-                    raw_momentum = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
-                    momentum = -raw_momentum  # INVERT for contrarian/mean reversion approach
+                    # 🎯 PROPER MOMENTUM STRATEGY: Buy low, sell high
+                    # Calculate price momentum and identify optimal entry/exit points
+                    current_price = recent_prices.iloc[-1]
+                    lookback_price = recent_prices.iloc[0]
+                    raw_momentum = (current_price - lookback_price) / lookback_price
                     
-                    self.logger.debug(f"📊 MOMENTUM CALCULATION: raw={raw_momentum:.6f}, contrarian={momentum:.6f}")
+                    # Calculate moving average for trend identification
+                    ma_short = recent_prices.tail(3).mean() if len(recent_prices) >= 3 else current_price
+                    ma_long = recent_prices.mean()
                     
-                    # Calculate confidence based on price consistency
+                    # Calculate price position relative to recent range
+                    recent_high = recent_prices.max()
+                    recent_low = recent_prices.min()
+                    price_range = recent_high - recent_low
+                    
+                    if price_range > 0:
+                        price_position = (current_price - recent_low) / price_range  # 0 = at low, 1 = at high
+                    else:
+                        price_position = 0.5
+                    
+                    self.logger.info(f"📊 MOMENTUM ANALYSIS: {raw_momentum:.4f}, price_pos: {price_position:.2f} (0=low, 1=high)")
+                    
+                    # Calculate confidence based on trend strength
                     price_changes = recent_prices.pct_change().dropna()
                     if len(price_changes) > 0:
-                        consistency = 1.0 - price_changes.std()  # Higher consistency = higher confidence
-                        confidence = max(0.1, min(1.0, consistency))
+                        trend_strength = abs(raw_momentum)
+                        volatility = price_changes.std()
+                        confidence = min(1.0, trend_strength / (volatility + 0.001))  # Higher trend/vol ratio = higher confidence
+                        confidence = max(0.1, min(1.0, confidence))
                     else:
                         confidence = 0.5
                     
-                    # 🎯 PROFESSIONAL SIGNAL GENERATION (CONTRARIAN STRATEGY)
+                    # 🎯 PROFESSIONAL MOMENTUM SIGNAL GENERATION
                     signals = {
-                        'momentum': momentum,
+                        'momentum': raw_momentum,
                         'confidence': confidence,
                         'lookback_period': lookback,
-                        'data_points': len(recent_prices)
+                        'data_points': len(recent_prices),
+                        'price_position': price_position,
+                        'ma_short': ma_short,
+                        'ma_long': ma_long
                     }
                     
-                    # CONTRARIAN ENTRY LOGIC: Enter when momentum is sufficiently negative (good buying opportunity)
-                    entry_threshold = self.config.parameters.get('entry_threshold', -0.0005)
-                    if momentum <= entry_threshold:  # More negative momentum = better entry
-                        signals['entry_signal'] = abs(momentum)  # Entry signal strength
-                        signals['entry_reason'] = 'contrarian_entry'
-                        self.logger.info(f"🟢 ENTRY SIGNAL: Contrarian entry {momentum:.4f} <= {entry_threshold}")
+                    # PROPER MOMENTUM ENTRY LOGIC: Buy when price is LOW with positive momentum building
+                    # Entry conditions: 1) Price in lower part of range, 2) Positive momentum starting, 3) Short MA > Long MA
+                    entry_momentum_threshold = self.config.parameters.get('entry_momentum_threshold', 0.001)  # Positive momentum
+                    entry_price_threshold = self.config.parameters.get('entry_price_threshold', 0.3)  # Lower 30% of range
                     
-                    # Add exit signals based on momentum recovery (CONTRARIAN LOGIC)
-                    # Exit when momentum turns positive (price recovering = time to take profit)
-                    exit_threshold = self.config.parameters.get('exit_threshold', 0.0001)  
-                    # For contrarian strategy: exit when momentum becomes positive (price recovering)
-                    if momentum >= exit_threshold:
-                        signals['exit_signal'] = abs(momentum)  # Exit signal strength
-                        signals['exit_reason'] = 'momentum_recovery'
-                        self.logger.info(f"🔴 EXIT SIGNAL: Momentum recovery {momentum:.4f} >= {exit_threshold}")
+                    if (price_position <= entry_price_threshold and  # Price is low
+                        raw_momentum >= entry_momentum_threshold and  # Positive momentum building
+                        ma_short >= ma_long):  # Short-term trend is up
+                        signals['entry_signal'] = raw_momentum * (1 - price_position)  # Stronger signal when price is lower
+                        signals['entry_reason'] = 'momentum_breakout_from_low'
+                        self.logger.info(f"🟢 ENTRY SIGNAL: Momentum breakout from low - momentum: {raw_momentum:.4f}, price_pos: {price_position:.2f}")
                     
-                    # Add profit/loss exit signals if we have position info
-                    current_price = recent_prices.iloc[-1]
-                    prev_price = recent_prices.iloc[-2] if len(recent_prices) > 1 else current_price
+                    # 🎯 ENHANCED EXIT LOGIC: Check both momentum and profit targets
+                    # Get portfolio data to check for existing positions
+                    portfolio_data = market_data.get('portfolio_data', {})
+                    current_positions = portfolio_data.get('current_positions', {})
                     
-                    # Quick profit taking signal (VERY AGGRESSIVE)
-                    take_profit_config = self.config.risk_management.get('take_profit', 0.01)
-                    if isinstance(take_profit_config, dict):
-                        profit_threshold = take_profit_config.get('percentage', 0.01)
+                    # 🔍 DEBUG: Log portfolio data
+                    self.logger.info(f"🔍 PORTFOLIO DEBUG: {symbol} - portfolio_data keys: {list(portfolio_data.keys())}")
+                    self.logger.info(f"🔍 POSITION DEBUG: {symbol} - current_positions: {current_positions}")
+                    
+                    # PROPER MOMENTUM EXIT LOGIC: Sell when price is HIGH or momentum weakens
+                    # Exit conditions: 1) Price in upper part of range, 2) Momentum weakening, 3) Profit targets hit
+                    exit_price_threshold = self.config.parameters.get('exit_price_threshold', 0.7)  # Upper 70% of range
+                    exit_momentum_threshold = self.config.parameters.get('exit_momentum_threshold', -0.001)  # Negative momentum
+                    
+                    # Check for position-specific exits
+                    if symbol in current_positions and current_positions[symbol] != 0:
+                        position = current_positions[symbol]
+                        entry_price = portfolio_data.get('entry_prices', {}).get(symbol, 0.0)
+                        
+                        # 1. PROFIT TARGET EXIT (Primary)
+                        profit_target = self.config.risk_params.get('take_profit', 0.05) if hasattr(self.config, 'risk_params') else 0.05  # 5% target
+                        if entry_price > 0:
+                            profit_pct = (current_price - entry_price) / entry_price
+                            if profit_pct >= profit_target:
+                                signals['exit_signal'] = 1.0
+                                signals['exit_reason'] = f'profit_target_{profit_pct:.1%}'
+                                self.logger.info(f"🎯 PROFIT EXIT: {symbol} profit {profit_pct:.1%} >= {profit_target:.1%} (${entry_price:.2f} -> ${current_price:.2f})")
+                        
+                        # 2. HIGH PRICE EXIT (Secondary)
+                        elif price_position >= exit_price_threshold:
+                            signals['exit_signal'] = price_position  # Stronger signal when price is higher
+                            signals['exit_reason'] = 'high_price_exit'
+                            self.logger.info(f"🔴 HIGH PRICE EXIT: {symbol} at {price_position:.1%} of range (threshold: {exit_price_threshold:.1%})")
+                        
+                        # 3. MOMENTUM REVERSAL EXIT (Tertiary)
+                        elif raw_momentum <= exit_momentum_threshold:
+                            signals['exit_signal'] = abs(raw_momentum)
+                            signals['exit_reason'] = 'momentum_reversal'
+                            self.logger.info(f"🔴 MOMENTUM REVERSAL EXIT: {symbol} momentum {raw_momentum:.4f} <= {exit_momentum_threshold}")
+                    
+                    # If no position detected, we can't generate exit signals
                     else:
-                        profit_threshold = take_profit_config
+                        self.logger.debug(f"📊 NO POSITION: {symbol} - no exit signals generated")
                     
-                    quick_profit = (current_price - prev_price) / prev_price
-                    if quick_profit >= profit_threshold:
-                        signals['profit_exit_signal'] = quick_profit
-                        signals['exit_reason'] = 'take_profit'
-                        self.logger.info(f"🔴 PROFIT EXIT: Quick gain {quick_profit:.4f} >= {profit_threshold}")
+                    # General exit signals (for any position) - DEPRECATED, using fallback above
+                    # elif price_position >= exit_price_threshold and raw_momentum <= 0:
+                    #     signals['exit_signal'] = price_position
+                    #     signals['exit_reason'] = 'general_high_price_exit'
+                    #     self.logger.info(f"🔴 GENERAL EXIT: Price at {price_position:.1%} with negative momentum {raw_momentum:.4f}")
                     
-                    # Stop loss signal (VERY AGGRESSIVE)  
-                    stop_loss_config = self.config.risk_management.get('stop_loss', 0.005)
-                    if isinstance(stop_loss_config, dict):
-                        stop_loss_threshold = stop_loss_config.get('percentage', 0.005)
-                    else:
-                        stop_loss_threshold = stop_loss_config
+                    # 🎯 PROPER RISK MANAGEMENT
+                    # Stop loss protection (only for existing positions)
+                    if symbol in current_positions and current_positions[symbol] != 0:
+                        entry_price = portfolio_data.get('entry_prices', {}).get(symbol, 0.0)
+                        if entry_price > 0:
+                            loss_pct = (current_price - entry_price) / entry_price
+                            stop_loss_threshold = self.config.parameters.get('stop_loss_threshold', -0.03)  # 3% stop loss
+                            
+                            if loss_pct <= stop_loss_threshold:
+                                signals['exit_signal'] = 1.0  # Override other signals
+                                signals['exit_reason'] = f'stop_loss_{loss_pct:.1%}'
+                                self.logger.info(f"🛑 STOP LOSS: {symbol} loss {loss_pct:.1%} <= {stop_loss_threshold:.1%}")
                     
-                    if quick_profit <= -stop_loss_threshold:
-                        signals['stop_loss_signal'] = abs(quick_profit)
-                        signals['exit_reason'] = 'stop_loss'
-                        self.logger.info(f"🔴 STOP LOSS: Loss {quick_profit:.4f} <= -{stop_loss_threshold}")
-                    
-                    # 🎯 PROFESSIONAL DEBUG: Always generate some exit signal for testing
-                    if abs(momentum) > 0.0001:  # Almost any momentum should trigger some analysis
-                        self.logger.info(f"📊 MOMENTUM ANALYSIS: {momentum:.4f}, quick_profit: {quick_profit:.4f}")
-                    
-                    self.logger.debug(f"Momentum signal: {momentum:.4f}, confidence: {confidence:.2f}")
+                    self.logger.debug(f"Momentum signal: {raw_momentum:.4f}, confidence: {confidence:.2f}, price_position: {price_position:.2f}")
                     
                     # 🔍 DEBUG: Log the complete signals dictionary
                     
@@ -228,17 +285,46 @@ class MomentumStrategyDefinition(StrategyDefinition):
             self.logger.error(f"Error checking entry conditions: {e}")
             return False
     
-    def should_exit_position(self, symbol: str, position: float, market_data: Dict[str, Any]) -> bool:
+    def should_exit_position(self, symbol: str, position: float, market_data: Dict[str, Any], 
+                           portfolio_data: Optional[Dict[str, Any]] = None) -> bool:
         """Determine if should exit a position"""
         try:
             # Convert dict to DataFrame if needed
             if isinstance(market_data, dict):
                 market_data = pd.DataFrame(market_data)
             
+            # Ensure portfolio_data is provided
+            if portfolio_data is None:
+                portfolio_data = {}
+            
+            # 🎯 CRITICAL FIX: Extract entry_price and current_price for profit calculation
+            entry_price = portfolio_data.get('entry_price', 0.0)
+            current_price = portfolio_data.get('current_price', 0.0)
+            
+            # If prices not in portfolio_data, try to get from market_data
+            if current_price == 0.0 and not market_data.empty:
+                current_price = market_data['close'].iloc[-1] if 'close' in market_data.columns else 0.0
+            
+            # Create enhanced portfolio data with price information
+            enhanced_portfolio_data = {
+                **portfolio_data,
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'symbol': symbol,
+                'position': position
+            }
+            
+            # Generate current signal for exit logic
+            current_signal = self.generate_combined_signal(market_data) if not market_data.empty else 0.0
+            
             # Use entry/exit logic to determine if should exit
-            should_exit, _ = self.entry_exit_logic.should_exit_position(
-                symbol, position, 0.0, market_data, {}
+            should_exit, exit_reason = self.entry_exit_logic.should_exit_position(
+                symbol, position, current_signal, market_data, enhanced_portfolio_data
             )
+            
+            if should_exit:
+                self.logger.info(f"🔴 EXIT CONDITION MET: {symbol} - {exit_reason} (entry: ${entry_price:.2f}, current: ${current_price:.2f})")
+            
             return should_exit
         except Exception as e:
             self.logger.error(f"Error checking exit conditions: {e}")

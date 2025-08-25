@@ -18,6 +18,7 @@ import hashlib
 import pickle
 
 from ..infrastructure.database.clickhouse_client import ClickHouseClient
+from .data_validation_monitor import DataValidationMonitor, ValidationSeverity
 from ..infrastructure.monitoring.metrics_collector import MetricsCollector
 from ..infrastructure.config import UnifiedConfigManager as ConfigManager
 
@@ -191,6 +192,10 @@ class EnhancedClickHouseLoader:
             'avg_query_time': 0.0,
             'data_points_loaded': 0
         }
+        
+        # Data validation and monitoring
+        self.validation_monitor = DataValidationMonitor()
+        self.enable_validation = config.get("clickhouse_loader.enable_validation", True)
         
     async def load_market_data(
         self,
@@ -452,6 +457,23 @@ class EnhancedClickHouseLoader:
                 return pd.DataFrame()
             
             self.logger.info(f"Loaded {len(df)} rows for {symbol} from {df.index.min()} to {df.index.max()}")
+            
+            # 🔍 CRITICAL: Data validation and monitoring
+            if self.enable_validation and not df.empty:
+                validation_results = self.validation_monitor.validate_market_data(df, symbol)
+                
+                # Check for critical errors
+                critical_errors = [r for r in validation_results if r.severity == ValidationSeverity.ERROR]
+                if critical_errors:
+                    error_messages = [r.message for r in critical_errors]
+                    self.logger.error(f"❌ CRITICAL DATA VALIDATION ERRORS for {symbol}: {error_messages}")
+                    # Still return data but log the issues for monitoring
+                
+                # Log validation summary
+                warnings = [r for r in validation_results if r.severity == ValidationSeverity.WARNING]
+                if warnings:
+                    self.logger.warning(f"⚠️  Data validation warnings for {symbol}: {len(warnings)} issues")
+            
             return df
             
         except Exception as e:

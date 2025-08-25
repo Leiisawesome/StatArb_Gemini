@@ -1,53 +1,59 @@
-# StatArb_Gemini: Statistical Arbitrage Trading System
+# StatArb_Gemini: Advanced Statistical Arbitrage Trading System
+
+[![System Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)](./SYSTEM_STATUS.py)
+[![Version](https://img.shields.io/badge/Version-v5B.1.0-blue)](./SYSTEM_STATUS.py)
+[![Phase 5B](https://img.shields.io/badge/Phase%205B-Complete-success)](./docs/phase_reports/)
 
 ## 🎯 Project Overview
 
-StatArb_Gemini is a comprehensive statistical arbitrage trading system that implements a complete bridge architecture connecting production trading systems with backtesting frameworks. The system provides seamless integration between real-time trading operations and historical backtesting capabilities.
+StatArb_Gemini is a production-ready statistical arbitrage trading system featuring **advanced ML-powered analytics**, comprehensive risk management, and real-time market regime detection. The system implements a complete bridge architecture with **Phase 5B Advanced Analytics** now fully integrated.
 
-## 🏗️ Architecture Overview
+## ✨ Latest Updates - Phase 5B Complete!
 
-### Complete Bridge Architecture
-The system implements a comprehensive bridge architecture with 7 specialized bridge components:
+**🎉 Advanced Analytics Suite Now Complete!**
+- **🎯 Risk Analyzer**: ML-powered VaR/CVaR calculation with stress testing
+- **📈 Attribution Analyzer**: Multi-model performance attribution
+- **🔄 Regime Detector**: Market regime identification with HMM and clustering
+- **⚡ Optimization Engine**: Bayesian and genetic algorithm optimization
+- **🧪 100% Tested Core**: All Phase 5A components with full test coverage
 
-- **SignalBridge** - Signal generation and management
-- **ExecutionBridge** - Order execution and management  
-- **RiskBridge** - Risk management and monitoring
-- **DataBridge** - Market data management and quality monitoring
-- **PortfolioBridge** - Portfolio management and position tracking
-- **ConfigBridge** - Configuration management and validation
-- **AnalyticsBridge** - Performance analytics and reporting
+## 🏗️ System Architecture
 
-### System Architecture
+### Advanced ML-Powered Analytics Architecture
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Production    │    │   Bridge Layer  │    │   Backtesting   │
-│   Systems       │◄──►│                 │◄──►│   Framework     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │   Bridge        │
-                    │   Components    │
-                    │                 │
-                    │ • SignalBridge  │
-                    │ • ExecutionBridge│
-                    │ • RiskBridge    │
-                    │ • DataBridge    │
-                    │ • PortfolioBridge│
-                    │ • ConfigBridge  │
-                    │ • AnalyticsBridge│
-                    └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    StatArb_Gemini v5B.1.0 Architecture                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─ Core Trading Engine ──────────────────────────────────────────────────┐ │
+│  │ • Async Trading Engine     • Market Data Feeds    • Portfolio Mgmt    │ │
+│  │ • Risk Management          • Execution Engine     • Strategy Layer    │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                      │
+│  ┌─ Phase 5A Analytics (100% Tested) ───────────────────────────────────────┐ │
+│  │ • Performance Analyzer     • Predictive Monitor   • Anomaly Detector   │ │
+│  │ • ML Models: RF, GB        • Early Warning        • Multi-Algorithm    │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                      │
+│  ┌─ Phase 5B Advanced Analytics (Ready for Testing) ──────────────────────┐ │
+│  │ • Risk Analyzer            • Attribution Analyzer • Regime Detector   │ │
+│  │ • VaR/CVaR + Stress Test   • Multi-Model Attrib. • HMM + Clustering   │ │
+│  │ • Optimization Engine: Bayesian + Genetic + Multi-objective          │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Key Features
 
-### ✅ Complete Bridge Implementation
-- **7 Bridge Components**: All bridges implemented and validated
-- **100% Test Coverage**: Comprehensive validation with 100% success rate
-- **Production Ready**: Robust error handling and performance optimization
-- **Scalable Architecture**: Modular and extensible design
+### ✅ Advanced Analytics (Phase 5B - Complete)
+- **🤖 12+ ML Algorithms**: RandomForest, GradientBoosting, SVR, HMM, Clustering
+- **🎯 Risk Management**: VaR/CVaR calculation, 8 stress test scenarios  
+- **📊 Performance Attribution**: Multi-model ensemble attribution analysis
+- **🔄 Market Regimes**: Hidden Markov Models for regime detection
+- **⚡ Optimization**: Bayesian, Genetic, Grid/Random search methods
 
-### ✅ Core Capabilities
+### ✅ Production-Ready Core
 - **Real-time Signal Generation**: AI-powered signal generation and enhancement
 - **Advanced Risk Management**: VaR calculation, position sizing, and risk monitoring
 - **Portfolio Management**: Comprehensive position tracking and PnL attribution

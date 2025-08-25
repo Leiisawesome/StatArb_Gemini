@@ -49,7 +49,7 @@ class PortfolioMetrics:
 class Position:
     """Position object for tracking individual symbol positions"""
     
-    def __init__(self, symbol: str, quantity: int = 0, avg_price: float = 0.0, entry_slice: int = -1):
+    def __init__(self, symbol: str, quantity: int = 0, avg_price: float = 0.0, entry_slice: int = -1, created_at: datetime = None):
         self.symbol = symbol
         self.quantity = quantity
         self.avg_price = avg_price
@@ -57,12 +57,12 @@ class Position:
         self.unrealized_pnl = 0.0
         self.total_pnl = 0.0
         self.market_value = 0.0
-        self.created_at = datetime.now()
+        self.created_at = created_at if created_at is not None else datetime.now()
         self.updated_at = datetime.now()
         self.trades = []
         self.entry_slice = entry_slice  # Track which slice this position was opened in
         
-        logger.debug(f"Created position for {symbol}: {quantity} shares @ ${avg_price:.2f}")
+        logger.debug(f"Created position for {symbol}: {quantity} shares @ ${avg_price:.2f} at {self.created_at}")
     
     def update_position(self, trade_quantity: int, trade_price: float, trade_type: str):
         """Update position with new trade"""
@@ -322,7 +322,7 @@ class PortfolioManager:
         self.portfolio_callbacks.append(callback)
         logger.info(f"Added portfolio callback: {callback.__name__}")
     
-    def process_trade(self, symbol: str, quantity: int, price: float, trade_type: str):
+    def process_trade(self, symbol: str, quantity: int, price: float, trade_type: str, timestamp: datetime = None):
         """Process a trade and update portfolio"""
         
         # Calculate trade value
@@ -339,7 +339,8 @@ class PortfolioManager:
             
             # Create or update position
             if symbol not in self.positions:
-                self.positions[symbol] = Position(symbol)
+                # 🎯 CRITICAL FIX: Pass timestamp for backtesting
+                self.positions[symbol] = Position(symbol, created_at=timestamp)
             
             self.positions[symbol].update_position(quantity, price, "BUY")
             
@@ -514,6 +515,35 @@ class PortfolioManager:
         
         return position_metrics
     
+    def reset_for_backtesting(self):
+        """Reset portfolio manager for backtesting - clear all positions and history"""
+        logger.info("🔄 Resetting portfolio manager for backtesting")
+        
+        # Clear all positions
+        self.positions.clear()
+        
+        # Reset capital to initial amount
+        self.available_capital = self.initial_capital
+        
+        # Reset all P&L metrics
+        self.total_market_value = 0.0
+        self.total_realized_pnl = 0.0
+        self.total_unrealized_pnl = 0.0
+        self.total_pnl = 0.0
+        
+        # Reset performance tracking
+        self.peak_value = self.initial_capital
+        self.max_drawdown = 0.0
+        self.current_drawdown = 0.0
+        
+        # Clear history
+        self.portfolio_history.clear()
+        
+        # Reset P&L tracker
+        self.pnl_tracker = PnLTracker(self.initial_capital)
+        
+        logger.info(f"✅ Portfolio manager reset: ${self.initial_capital:,.2f} capital, 0 positions")
+
     def shutdown(self):
         """Shutdown portfolio manager"""
         logger.info("Shutting down PortfolioManager") 

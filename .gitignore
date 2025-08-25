@@ -3,6 +3,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Temporary log files
+*.log
+*_backtest_*.log
+momentum_backtest_*.log
+
+# Debug and temporary files
+debug_*.py
+*_debug.py
+simple_debug_*.py
+temp_*.py
+
 # C extensions
 *.so
 
@@ -225,6 +236,8 @@ debug_data_loading.py
 Tests/
 deprecated/
 archived/
+demos/
+scenario_layer/
 old_*/
 
 # Additional cache and temporary files
@@ -239,9 +252,11 @@ env/
 ENV/
 ai_integration_env/
 
-# Log files
+# Log files and directories
 *.log
 logs/
+logs/*.log
+logs/*.txt
 Tests/mvs/logs/
 Tests/mvs/results/
 

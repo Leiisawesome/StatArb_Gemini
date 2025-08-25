@@ -59,10 +59,16 @@ class BacktestingExecutionEngine:
         start_time = datetime.now()
         
         try:
-            # Get current market price from backtesting data
-            current_price = self._get_simulation_price(request.symbol)
+            # Get current market price from backtesting data - NO FALLBACKS!
+            # 🎯 REALISTIC EXECUTION: Use appropriate price based on order side
+            side_str = "BUY" if request.side == OrderSide.BUY else "SELL"
+            current_price = self._get_simulation_price(request.symbol, side_str)
             if current_price is None:
-                current_price = 100.0  # Fallback price for missing data
+                raise ValueError(f"❌ BACKTESTING ERROR: No price data available for {request.symbol}. "
+                               f"Data provider: {type(self.backtesting_data_provider).__name__ if self.backtesting_data_provider else 'None'}. "
+                               f"This indicates a data provider connection issue - fix the root cause instead of using fallbacks!")
+            
+            logger.info(f"🎯 REALISTIC EXECUTION: {request.symbol} {side_str} using {side_str.lower()} price: ${current_price:.2f}")
             
             # Calculate execution price with realistic market effects
             execution_price = self._calculate_execution_price(
@@ -96,8 +102,12 @@ class BacktestingExecutionEngine:
                 algorithm_used=request.algorithm
             )
             
+            logger.info(f"🔍 DEBUG EXECUTION RESULT CREATION: quantity={request.quantity}, executed_quantity={result.executed_quantity}")
+            
             # Store execution for analytics
             self.execution_history.append(result)
+            
+            logger.info(f"🔍 DEBUG AFTER STORAGE: executed_quantity={result.executed_quantity}")
             
             logger.debug(f"✅ SIMULATED EXECUTION: {request.symbol} {request.side} "
                         f"{request.quantity} @ ${final_price:.2f} (commission: ${commission:.2f})")
@@ -118,10 +128,15 @@ class BacktestingExecutionEngine:
                 error_message=f"Simulation error: {str(e)}"
             )
     
-    def _get_simulation_price(self, symbol: str) -> Optional[float]:
-        """Get current price from backtesting data provider"""
+    def _get_simulation_price(self, symbol: str, side: str = None) -> Optional[float]:
+        """Get realistic execution price from backtesting data provider"""
         if self.backtesting_data_provider:
-            return self.backtesting_data_provider.get_current_price(symbol)
+            # Use realistic execution pricing if side is provided
+            if side and hasattr(self.backtesting_data_provider, 'get_execution_price'):
+                return self.backtesting_data_provider.get_execution_price(symbol, side)
+            else:
+                # Fallback to current price
+                return self.backtesting_data_provider.get_current_price(symbol)
         return None
     
     def _calculate_execution_price(self, symbol: str, side: OrderSide, 

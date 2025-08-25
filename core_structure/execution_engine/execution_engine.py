@@ -106,7 +106,10 @@ class ExecutionResult:
             
             if total_quantity > 0:
                 self.average_price = total_value / total_quantity
-                self.executed_quantity = total_quantity
+                # Only override executed_quantity if we have actual order data
+                # For backtesting, executed_quantity is set directly without orders
+                if self.executed_quantity == 0.0:  # Only if not already set
+                    self.executed_quantity = total_quantity
     
     @property
     def fill_rate(self) -> float:
@@ -438,14 +441,10 @@ class ExecutionEngine:
                 order.submitted_time = datetime.now()
                 self.order_manager.orders[order.order_id] = order
             
-            # Simulate execution with realistic price
-            current_price = 100.0  # Base price for backtesting
-            # Add some price variation based on market conditions
-            price_variation = np.random.normal(0, market_conditions.volatility * 0.1)
-            execution_price = current_price * (1 + price_variation)
-            
-            # Ensure execution price is positive
-            execution_price = max(execution_price, 1.0)
+            # ❌ BACKTESTING ERROR: This execution engine should NOT be used in backtesting!
+            # The BacktestingExecutionEngine should be used instead.
+            raise RuntimeError(f"❌ BACKTESTING ERROR: Main ExecutionEngine being used in backtesting mode for {request.symbol}. "
+                             f"This should use BacktestingExecutionEngine instead. Check your engine initialization!")
             
             # Calculate commission
             commission = request.quantity * execution_price * self.commission_rate

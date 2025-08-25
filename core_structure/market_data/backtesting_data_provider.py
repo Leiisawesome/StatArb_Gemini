@@ -59,21 +59,69 @@ class BacktestingDataProvider:
         if self.historical_data is not None and not self.historical_data.empty and index < len(self.historical_data):
             row = self.historical_data.iloc[index]
             
-            # Extract prices for all symbols from the row
+            # Extract OHLC prices for all symbols from the row
             for symbol in self.data_request.symbols:
-                # Assuming columns like 'AAPL_close', 'MSFT_close', etc.
-                close_col = f"{symbol}_close"
-                if close_col in row:
-                    self.symbol_prices[symbol] = row[close_col]
-                elif 'close' in row:  # Single symbol case
-                    self.symbol_prices[symbol] = row['close']
-                else:
-                    # Fallback price
-                    self.symbol_prices[symbol] = 100.0
+                # Store OHLC data for realistic execution pricing
+                symbol_data = {}
+                
+                # Try symbol-specific columns first (e.g., 'TSLA_close', 'TSLA_high')
+                for price_type in ['open', 'high', 'low', 'close']:
+                    symbol_col = f"{symbol}_{price_type}"
+                    if symbol_col in row:
+                        symbol_data[price_type] = row[symbol_col]
+                    elif price_type in row:  # Single symbol case
+                        symbol_data[price_type] = row[price_type]
+                
+                if not symbol_data:
+                    # ❌ NO FALLBACKS: Fail fast with clear error message
+                    raise ValueError(f"❌ DATA ERROR: No price columns found for {symbol} in historical data. "
+                                   f"Available columns: {list(row.index)}. "
+                                   f"Expected: '{symbol}_open/high/low/close' or 'open/high/low/close'. "
+                                   f"Fix the data loading or column mapping!")
+                
+                # Store the complete OHLC data for this symbol
+                self.symbol_prices[symbol] = symbol_data
+                
+                # Also store a default 'current_price' for backward compatibility
+                # Use close price as the default current price
+                if 'close' in symbol_data:
+                    self.symbol_prices[f"{symbol}_current"] = symbol_data['close']
     
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for symbol (equivalent to real-time feed)"""
+        # Check for backward compatibility first
+        if f"{symbol}_current" in self.symbol_prices:
+            return self.symbol_prices[f"{symbol}_current"]
+        
+        # Check if we have OHLC data
+        symbol_data = self.symbol_prices.get(symbol)
+        if isinstance(symbol_data, dict) and 'close' in symbol_data:
+            return symbol_data['close']
+        
+        # Fallback to direct symbol lookup (old format)
         return self.symbol_prices.get(symbol)
+    
+    def get_execution_price(self, symbol: str, side: str) -> Optional[float]:
+        """
+        Get realistic execution price based on order side
+        - BUY orders: Use close price (realistic market entry)
+        - SELL orders: Use high price (capture profitable exits)
+        This allows the system to capture profitable opportunities while being realistic
+        """
+        symbol_data = self.symbol_prices.get(symbol)
+        if not isinstance(symbol_data, dict):
+            # Fallback to current price if OHLC not available
+            return self.get_current_price(symbol)
+        
+        if side.upper() == 'BUY':
+            # For BUY orders, use close price (realistic entry)
+            return symbol_data.get('close', symbol_data.get('high'))
+        elif side.upper() == 'SELL':
+            # For SELL orders, use high price (capture profitable exits)
+            return symbol_data.get('high', symbol_data.get('close'))
+        else:
+            # Default to close price
+            return symbol_data.get('close')
     
     def get_historical_data(self, symbol: str, lookback_periods: int = 100) -> pd.DataFrame:
         """Get historical data for symbol with lookback"""

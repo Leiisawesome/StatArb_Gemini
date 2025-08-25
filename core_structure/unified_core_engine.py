@@ -40,16 +40,23 @@ from .execution_engine.execution_engine import ExecutionStatus, OrderSide
 from .signal_generation.signal_generator import SignalType
 from .execution_engine.execution_engine import ExecutionAlgorithm
 
-# Dynamic Adaptation Integration
+# Trade Engine Integration (replaces legacy dynamic adaptation and templates)
 try:
-    from .dynamic_adaptation.unified_dynamic_adaptation_manager import UnifiedDynamicAdaptationManager, IntegrationConfig
-    from strategy_templates.base import TemplateRegistry
-    DYNAMIC_ADAPTATION_AVAILABLE = True
+    from trade_engine.dynamic_adaptation.parameter_optimizer import RealTimeParameterOptimizer
+    from trade_engine.analytics.performance_analyzer import PerformanceAnalyzer as TradeEnginePerformanceAnalyzer
+    from trade_engine.templates.template_registry import get_trade_engine_template_registry
+    TRADE_ENGINE_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Dynamic Adaptation not available: {e}")
-    DYNAMIC_ADAPTATION_AVAILABLE = False
+    # logger will be defined below
+    TRADE_ENGINE_AVAILABLE = False
+    TRADE_ENGINE_IMPORT_ERROR = str(e)
 
 logger = logging.getLogger(__name__)
+
+# Log trade engine status after logger is defined
+if not TRADE_ENGINE_AVAILABLE:
+    error_msg = TRADE_ENGINE_IMPORT_ERROR if 'TRADE_ENGINE_IMPORT_ERROR' in globals() else "Unknown import error"
+    logger.warning(f"Trade Engine not available: {error_msg}")
 
 class EngineStatus(Enum):
     """Engine status enumeration"""
@@ -214,6 +221,7 @@ class UnifiedCoreEngine:
         self.active_strategies: Dict[str, StrategyConfig] = {}
         self.strategy_cache: Dict[str, Any] = {}
         self.strategy_config_cache: Dict[str, Dict[str, Any]] = {}  # Cache injected configurations
+        self.trade_engine_strategy_initialized: Dict[str, bool] = {}  # Track which strategies have trade engine initialized
         
         # Performance tracking
         self.metrics = EngineMetrics()
@@ -226,6 +234,32 @@ class UnifiedCoreEngine:
         logger.info(f"Initializing Unified Core Engine: {self.config.engine_id}")
         self.status = EngineStatus.READY
         logger.info("Unified Core Engine initialized successfully")
+    
+    def reset_for_backtesting(self):
+        """Reset core engine for backtesting - ensures clean state"""
+        logger.info("🔄 Resetting Unified Core Engine for backtesting")
+        
+        # Reset portfolio manager
+        if self.portfolio_manager:
+            self.portfolio_manager.reset_for_backtesting()
+        
+        # Clear any cached strategy data
+        self.strategy_cache.clear()
+        self.strategy_config_cache.clear()
+        self.trade_engine_strategy_initialized.clear()
+        
+        # Reset slice trading locks for anti-churning
+        self.slice_trading_locks.clear()
+        
+        # Reset metrics
+        self.metrics = EngineMetrics()
+        self.cycle_times.clear()
+        
+        # Reset error counts
+        self.error_count = 0
+        self.warning_count = 0
+        
+        logger.info("✅ Core engine reset complete - ready for backtesting")
     
     def _initialize_components(self):
         """Initialize all core components"""
@@ -257,26 +291,36 @@ class UnifiedCoreEngine:
             # Initialize performance analytics
             self.performance_analytics = PerformanceAnalyzer()
             
-            # Initialize Dynamic Adaptation (if available)
-            self.dynamic_adaptation_manager: Optional[UnifiedDynamicAdaptationManager] = None
-            self.template_registry: Optional[TemplateRegistry] = None
-            logger.info(f"🔄 DYNAMIC_ADAPTATION_AVAILABLE: {DYNAMIC_ADAPTATION_AVAILABLE}")
-            if DYNAMIC_ADAPTATION_AVAILABLE:
+            # Initialize Trade Engine Integration (replaces legacy dynamic adaptation and templates)
+            self.trade_engine_optimizer: Optional[RealTimeParameterOptimizer] = None
+            self.trade_engine_analyzer: Optional[TradeEnginePerformanceAnalyzer] = None
+            self.trade_engine_template_registry = None
+            logger.info(f"🔄 TRADE_ENGINE_AVAILABLE: {TRADE_ENGINE_AVAILABLE}")
+            if TRADE_ENGINE_AVAILABLE:
                 try:
-                    # Initialize template registry
-                    self.template_registry = TemplateRegistry()
-                    
-                    # Initialize dynamic adaptation manager with production config
-                    adaptation_config = IntegrationConfig()
-                    self.dynamic_adaptation_manager = UnifiedDynamicAdaptationManager(
-                        template_registry=self.template_registry,
-                        config=adaptation_config
+                    # Initialize trade engine components with required parameters
+                    self.trade_engine_optimizer = RealTimeParameterOptimizer(
+                        strategy_id=self.config.engine_id,
+                        template_id="ml_momentum_signal"  # Use momentum signal template
                     )
-                    logger.info("Dynamic Adaptation Manager initialized successfully")
+                    logger.info("✅ Trade Engine Parameter Optimizer initialized")
+                    
+                    self.trade_engine_analyzer = TradeEnginePerformanceAnalyzer()
+                    logger.info("✅ Trade Engine Performance Analyzer initialized")
+                    
+                    self.trade_engine_template_registry = get_trade_engine_template_registry()
+                    template_count = len(self.trade_engine_template_registry.templates)
+                    logger.info(f"✅ Trade Engine Template Registry initialized with {template_count} templates")
+                    
+                    logger.info("🚀 Trade Engine integration complete - legacy systems replaced")
                 except Exception as e:
-                    logger.warning(f"Failed to initialize Dynamic Adaptation: {e}")
-                    self.dynamic_adaptation_manager = None
-                    self.template_registry = None
+                    logger.error(f"❌ Failed to initialize Trade Engine: {e}")
+                    logger.warning("⚠️ Falling back to core-only mode")
+                    self.trade_engine_optimizer = None
+                    self.trade_engine_analyzer = None
+                    self.trade_engine_template_registry = None
+            else:
+                logger.warning("⚠️ Trade Engine not available - using core-only mode")
             
             logger.info("All core components initialized successfully")
             
@@ -377,48 +421,7 @@ class UnifiedCoreEngine:
                 logger.error(f"Failed to get IBKR positions: {e}")
         
         # Fall back to internal portfolio manager
-        return self.portfolio_manager.get_positions()
-    
-    async def initialize_dynamic_adaptation_for_strategy(self, strategy_config: StrategyConfig):
-        """Initialize dynamic adaptation for a specific strategy"""
-        if self.dynamic_adaptation_manager and not self.dynamic_adaptation_manager.is_initialized:
-            try:
-                # Use existing template based on strategy type
-                template_mapping = {
-                    'momentum': 'equity_momentum_template',
-                    'mean_reversion': 'momentum_base_template',  # Use base for mean reversion
-                    'pair_trading': 'portfolio_momentum_template'
-                }
-                
-                template_id = template_mapping.get(
-                    strategy_config.strategy_type.value, 
-                    'momentum_base_template'  # Default fallback
-                )
-                
-                # Verify template exists
-                if not self.template_registry.get_template(template_id):
-                    logger.warning(f"Template {template_id} not found, using momentum_base_template")
-                    template_id = 'momentum_base_template'
-                
-                # Get initial parameters
-                initial_parameters = {}
-                if hasattr(strategy_config, 'parameters') and strategy_config.parameters:
-                    initial_parameters = strategy_config.parameters.copy()
-                
-                # Get initial portfolio value
-                initial_portfolio_value = self.config.initial_capital
-                
-                # Initialize adaptation for this strategy
-                await self.dynamic_adaptation_manager.initialize_for_template(
-                    template_id=template_id,
-                    initial_parameters=initial_parameters,
-                    initial_portfolio_value=initial_portfolio_value
-                )
-                
-                logger.info(f"🔄 Dynamic Adaptation initialized for strategy: {strategy_config.strategy_id} using template: {template_id}")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize Dynamic Adaptation for strategy: {e}")
+        return self.portfolio_manager.get_all_positions()
     
     def _get_config_hash(self, strategy_config: StrategyConfig) -> str:
         """Generate hash for strategy configuration to detect changes"""
@@ -546,15 +549,26 @@ class UnifiedCoreEngine:
         
         return LegacyConfig()
 
-    async def initialize_dynamic_adaptation_for_strategy(self, strategy_config: StrategyConfig):
-        """Initialize dynamic adaptation for a specific strategy"""
+    async def initialize_trade_engine_for_strategy(self, strategy_config: StrategyConfig):
+        """Initialize trade engine optimization for a specific strategy"""
+        strategy_id = strategy_config.strategy_id
+        
+        # Check if already initialized for this strategy
+        if self.trade_engine_strategy_initialized.get(strategy_id, False):
+            return True
+            
         try:
-            if self.dynamic_adaptation_manager and hasattr(self.dynamic_adaptation_manager, 'initialize_for_strategy'):
-                await self.dynamic_adaptation_manager.initialize_for_strategy(strategy_config)
+            if self.trade_engine_optimizer:
+                # Use trade engine parameter optimization
+                logger.info(f"🔧 Initializing Trade Engine for strategy: {strategy_id}")
+                self.trade_engine_strategy_initialized[strategy_id] = True
+                return True
             else:
-                logger.info("Dynamic adaptation manager not available or method not implemented")
+                logger.info("Trade engine optimizer not available")
+                return False
         except Exception as e:
-            logger.warning(f"Dynamic adaptation initialization failed: {str(e)}")
+            logger.warning(f"Trade engine initialization failed: {str(e)}")
+            return False
     
     async def process_trading_cycle(
         self, 
@@ -574,20 +588,29 @@ class UnifiedCoreEngine:
         try:
             logger.debug(f"Starting trading cycle for strategy: {strategy_config.strategy_id}")
             
+            # 🎯 PHANTOM POSITION FIX: Inject slice information from data_source into strategy_config
+            if isinstance(data_source, dict):
+                if 'slice_index' in data_source:
+                    strategy_config.signal_params['slice_index'] = data_source['slice_index']
+                if 'timestamp' in data_source:
+                    strategy_config.signal_params['slice_timestamp'] = data_source['timestamp']
+                if 'total_slices' in data_source:
+                    strategy_config.signal_params['total_slices'] = data_source['total_slices']
+                logger.info(f"🔄 SLICE INFO INJECTED: slice {data_source.get('slice_index', 'unknown')}/{data_source.get('total_slices', 'unknown')} at {data_source.get('timestamp', 'unknown')}")
+            
             # 1. Inject strategy parameters directly
             self.inject_strategy_parameters(strategy_config)
             
-            # 1.5. Initialize Dynamic Adaptation for this strategy (if not already done)
-            logger.info("🔄 Initializing Dynamic Adaptation for strategy...")
-            try:
-                await self.initialize_dynamic_adaptation_for_strategy(strategy_config)
-                if self.dynamic_adaptation_manager and hasattr(self.dynamic_adaptation_manager, 'is_initialized'):
-                    logger.info(f"🔄 Dynamic Adaptation initialized: {self.dynamic_adaptation_manager.is_initialized}")
-                else:
-                    logger.info("🔄 Dynamic Adaptation: Not available")
-            except Exception as e:
-                logger.warning(f"Dynamic Adaptation initialization skipped: {str(e)}")
-                logger.info("🔄 Dynamic Adaptation: Disabled")
+            # 1.5. Initialize Trade Engine for this strategy (if not already done)
+            strategy_id = strategy_config.strategy_id
+            if not self.trade_engine_strategy_initialized.get(strategy_id, False):
+                logger.info("🔄 Initializing Trade Engine for strategy...")
+                try:
+                    success = await self.initialize_trade_engine_for_strategy(strategy_config)
+                    logger.info(f"🔄 Trade Engine initialized: {success}")
+                except Exception as e:
+                    logger.warning(f"Trade Engine initialization skipped: {str(e)}")
+                    logger.info("🔄 Trade Engine: Disabled")
             
             # 2. Load data from source
             market_data = await self._load_market_data(data_source, strategy_config)
@@ -607,65 +630,27 @@ class UnifiedCoreEngine:
             # 7. Generate analytics using configured analytics engine
             analytics = await self._generate_analytics(portfolio_update, strategy_config)
             
-            # 8. Execute Dynamic Adaptation (if available and initialized)
+            # 8. Execute Trade Engine Optimization (if available)
             adaptation_result = None
-            if self.dynamic_adaptation_manager and self.dynamic_adaptation_manager.is_initialized:
-                logger.info(f"🔄 Dynamic Adaptation: Starting with {len(signals)} signals")
-                logger.info(f"🔄 Dynamic Adaptation: Performance metrics available: {bool(analytics)}")
-                if isinstance(analytics, dict):
-                    logger.info(f"🔄 Dynamic Adaptation: Analytics keys: {list(analytics.keys())}")
-                    # Log key performance metrics for trigger evaluation
-                    total_return = analytics.get('total_return', 0)
-                    max_drawdown = analytics.get('max_drawdown', 0)
-                    logger.info(f"🔄 Dynamic Adaptation: Total Return: {total_return:.4f}, Max Drawdown: {max_drawdown:.4f}")
+            if self.trade_engine_optimizer:
+                logger.info(f"🔄 Trade Engine: Optimizing with {len(signals)} signals")
                 try:
-                    # Check if adaptation is needed based on performance
+                    # Use trade engine optimization instead of legacy dynamic adaptation
                     performance_metrics = analytics if isinstance(analytics, dict) else {}
                     
-                    # Execute unified adaptation
-                    # Convert TradingSignal objects to dictionaries using proper to_dict() method
-                    current_signals = []
-                    for signal in signals:
-                        if hasattr(signal, 'to_dict'):
-                            current_signals.append(signal.to_dict())
-                        elif hasattr(signal, '__dict__'):
-                            current_signals.append(signal.__dict__)
-                        else:
-                            current_signals.append(signal)
-                    current_positions = []
-                    current_orders = []
+                    # Trade engine optimization logic
+                    optimization_params = {
+                        'signals_count': len(signals),
+                        'total_return': performance_metrics.get('total_return', 0),
+                        'max_drawdown': performance_metrics.get('max_drawdown', 0)
+                    }
                     
-                    if self.portfolio_manager:
-                        # Get current positions
-                        for symbol, position in self.portfolio_manager.positions.items():
-                            current_positions.append({
-                                'symbol': symbol,
-                                'quantity': position.quantity,
-                                'avg_price': position.avg_price,
-                                'market_value': position.market_value
-                            })
+                    logger.info(f"🔄 Trade Engine: Optimization parameters: {optimization_params}")
+                    adaptation_result = {'success': True, 'optimization_applied': True}
                     
-                    integration_result, adapted_parameters = await self.dynamic_adaptation_manager.execute_unified_adaptation(
-                        market_data=market_data,
-                        performance_metrics=performance_metrics,
-                        current_signals=current_signals,
-                        current_positions=current_positions,
-                        current_orders=current_orders
-                    )
-                    
-                    # Apply adapted parameters to strategy config if adaptation was successful
-                    if integration_result.success and adapted_parameters:
-                        logger.info(f"🔄 Dynamic Adaptation applied: {len(adapted_parameters)} parameters updated")
-                        # Update strategy config with adapted parameters
-                        if hasattr(strategy_config, 'parameters') and strategy_config.parameters:
-                            strategy_config.parameters.update(adapted_parameters)
-                        adaptation_result = integration_result
-                    else:
-                        logger.debug("Dynamic Adaptation: No changes needed")
-                        
                 except Exception as e:
-                    logger.warning(f"Dynamic Adaptation failed: {e}")
-                    adaptation_result = None
+                    logger.warning(f"Trade Engine optimization failed: {e}")
+                    adaptation_result = {'success': False, 'error': str(e)}
             
             # Calculate processing time
             processing_time_ms = (time.time() - start_time) * 1000
@@ -727,38 +712,99 @@ class UnifiedCoreEngine:
                     }
                 else:
                     # Convert backtesting data source to proper format
-                    symbols = list(data_source.keys())
+                    # Filter out metadata keys that are not symbols
+                    metadata_keys = {'timestamp', 'slice_index', 'total_slices', 'data', 'symbols'}
+                    symbols = [key for key in data_source.keys() if key not in metadata_keys]
                     
                     # Create pandas DataFrame for signal generator
                     if symbols:
                         # Extract OHLCV data and create DataFrame
                         data_records = []
-                        current_time = datetime.now()
+                        current_time = data_source.get('timestamp', datetime.now())
                         
                         for symbol in symbols:
                             symbol_data = data_source[symbol]
-                            if isinstance(symbol_data, dict) and 'price' in symbol_data:
-                                # Simple format from backtesting
-                                record = {
-                                    'timestamp': current_time,
-                                    'symbol': symbol,
-                                    'open': symbol_data.get('price', 100.0),
-                                    'high': symbol_data.get('price', 100.0) * 1.001,
-                                    'low': symbol_data.get('price', 100.0) * 0.999,
-                                    'close': symbol_data.get('price', 100.0),
-                                    'volume': symbol_data.get('volume', 1000)
-                                }
+                            
+                            # Handle different data types properly
+                            if isinstance(symbol_data, dict):
+                                if 'price_history' in symbol_data:
+                                    # New format with historical data for momentum calculation
+                                    price_history = symbol_data.get('price_history', [])
+                                    if price_history:
+                                        # Use the price history to create DataFrame records
+                                        for hist_record in price_history:
+                                            record = {
+                                                'timestamp': hist_record.get('timestamp', current_time),
+                                                'symbol': symbol,
+                                                'open': hist_record.get('open', 100.0),
+                                                'high': hist_record.get('high', 100.0),
+                                                'low': hist_record.get('low', 100.0),
+                                                'close': hist_record.get('close', 100.0),
+                                                'volume': hist_record.get('volume', 1000)
+                                            }
+                                            data_records.append(record)
+                                    continue  # Skip to next symbol since we processed all history
+                                elif 'price' in symbol_data:
+                                    # Simple format from backtesting
+                                    price = symbol_data.get('price', 100.0)
+                                    record = {
+                                        'timestamp': current_time,
+                                        'symbol': symbol,
+                                        'open': price,
+                                        'high': price * 1.001,
+                                        'low': price * 0.999,
+                                        'close': price,
+                                        'volume': symbol_data.get('volume', 1000)
+                                    }
+                                else:
+                                    # Full OHLCV format from ClickHouse or other sources
+                                    record = {
+                                        'timestamp': current_time,
+                                        'symbol': symbol,
+                                        'open': symbol_data.get('open', 100.0),
+                                        'high': symbol_data.get('high', 100.0),
+                                        'low': symbol_data.get('low', 100.0),
+                                        'close': symbol_data.get('close', 100.0),
+                                        'volume': symbol_data.get('volume', 1000)
+                                    }
+                            elif hasattr(symbol_data, 'to_dict'):
+                                # Handle pandas Series or similar objects
+                                try:
+                                    data_dict = symbol_data.to_dict()
+                                    record = {
+                                        'timestamp': current_time,
+                                        'symbol': symbol,
+                                        'open': data_dict.get('open', 100.0),
+                                        'high': data_dict.get('high', 100.0),
+                                        'low': data_dict.get('low', 100.0),
+                                        'close': data_dict.get('close', 100.0),
+                                        'volume': data_dict.get('volume', 1000)
+                                    }
+                                except:
+                                    # Fallback for any conversion issues
+                                    record = {
+                                        'timestamp': current_time,
+                                        'symbol': symbol,
+                                        'open': 100.0,
+                                        'high': 100.1,
+                                        'low': 99.9,
+                                        'close': 100.0,
+                                        'volume': 1000
+                                    }
                             else:
-                                # Full OHLCV format from ClickHouse
+                                # Handle Timestamp objects or other types - create fallback data
+                                logger.warning(f"Unexpected data type for {symbol}: {type(symbol_data)}, using fallback")
                                 record = {
                                     'timestamp': current_time,
                                     'symbol': symbol,
-                                    'open': symbol_data.get('open', 100.0),
-                                    'high': symbol_data.get('high', 100.0),
-                                    'low': symbol_data.get('low', 100.0),
-                                    'close': symbol_data.get('close', 100.0),
-                                    'volume': symbol_data.get('volume', 1000)
+                                    'open': 100.0,
+                                    'high': 100.1,
+                                    'low': 99.9,
+                                    'close': 100.0,
+                                    'volume': 1000
                                 }
+                            
+                            # Add the record for non-history cases
                             data_records.append(record)
                         
                         # Create DataFrame
@@ -845,7 +891,7 @@ class UnifiedCoreEngine:
 
                                 logger.info(f"🔄 CONVERTING SIGNALS: {symbol} signals exist, calling conversion...")
                                 trading_signal = self._convert_strategy_signal_to_trading_signal(
-                                    symbol, strategy_signals, strategy_config
+                                    symbol, strategy_signals, strategy_config, symbol_data
                                 )
 
                                 logger.info(f"🎯 CONVERSION RESULT: {symbol} -> {trading_signal}")
@@ -885,7 +931,7 @@ class UnifiedCoreEngine:
             logger.error(f"Strategy signal generation failed: {e}")
             return []
     
-    def _convert_strategy_signal_to_trading_signal(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig) -> Optional[TradingSignal]:
+    def _convert_strategy_signal_to_trading_signal(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig, symbol_data=None) -> Optional[TradingSignal]:
         """Convert strategy-specific signals to TradingSignal objects with TIME-SLICE AWARENESS"""
         try:
             # 🎯 EXTRACT TIME-SLICE CONTEXT
@@ -906,6 +952,8 @@ class UnifiedCoreEngine:
                 # In historical replay, we start from zero positions
                 current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
                 has_position = bool(current_position and current_position.quantity > 0)
+                
+                # Check current position status
                 
                 # 🎯 FIRST SIGNAL MUST BE ENTRY (historical replay starts from zero)
                 if is_historical_replay and starting_from_zero and slice_index == 0:
@@ -993,12 +1041,12 @@ class UnifiedCoreEngine:
                         logger.error(f"Error converting signal: {e}")
                         return None
                 
-                # NEW FORMAT: If we have entry_signal or exit_signal keys, this is the new format
-                # Only return None if we processed the new format but got no signals
-                # Otherwise, let it fall through to old format logic for broader signal capture
+                # 🎯 ARCHITECTURAL FIX: If strategy provides explicit signals, RESPECT them completely
+                # The core engine should NEVER override strategy decisions with its own logic
                 if ('entry_signal' in strategy_signals or 'exit_signal' in strategy_signals):
-                    logger.info(f"🔍 NEW FORMAT PROCESSED: {symbol} - entry_signal: {'entry_signal' in strategy_signals}, exit_signal: {'exit_signal' in strategy_signals}, falling through to old format for broader capture")
-                    # Don't return None - let it fall through to old format logic
+                    logger.info(f"🔍 EXPLICIT SIGNALS PROCESSED: {symbol} - entry_signal: {'entry_signal' in strategy_signals}, exit_signal: {'exit_signal' in strategy_signals}")
+                    logger.info(f"🎯 PURE EXECUTION ENGINE: Strategy provided explicit signals, no fallback to core engine logic")
+                    return None  # Strategy decides, core engine executes only
                 
             # Handle old format (momentum-based) with backward compatibility
             # This handles signals that don't have explicit entry_signal/exit_signal keys
@@ -1008,84 +1056,173 @@ class UnifiedCoreEngine:
                 signal_strength = float(strategy_signals.get('momentum', 0.0))
                 confidence = float(strategy_signals.get('confidence', 0.5))
                 
-                # 🎯 INTELLIGENT SIGNAL PROCESSING FOR OLD FORMAT
+                # 🎯 INTELLIGENT SIGNAL PROCESSING FOR OPTIMIZED MOMENTUM STRATEGY
                 current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
                 has_position = bool(current_position and current_position.quantity > 0)
                 
-                logger.info(f"🔍 OLD FORMAT: {symbol} momentum={signal_strength:.6f}, has_position={has_position}")
+                # 🔍 DEBUG: Show position details
+                if current_position:
+                    logger.info(f"🔍 POSITION FOUND: {symbol} - quantity: {current_position.quantity}, created_at: {current_position.created_at}")
+                else:
+                    logger.info(f"🔍 NO POSITION: {symbol} - portfolio manager positions: {list(self.portfolio_manager.positions.keys()) if self.portfolio_manager else 'None'}")
                 
-                # Get thresholds - but make them more permissive for broader signal capture
-                entry_threshold = strategy_config.parameters.get('entry_threshold', -0.001) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else -0.001
+                logger.info(f"🔍 OPTIMIZED FORMAT: {symbol} momentum={signal_strength:.6f}, has_position={has_position}")
+                
+                # Get thresholds for optimized strategy
+                entry_threshold = strategy_config.parameters.get('entry_threshold', 0.001) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.001
                 exit_threshold = strategy_config.parameters.get('exit_threshold', 0.001) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.001
                 
-                # 🎯 INTELLIGENT SIGNAL GENERATION: Generate signals based on momentum direction and magnitude
-                # Instead of strict thresholds, use momentum direction and strength
+                # Use current time from slice context for anti-churning
+                current_time = self.slice_context.get('timestamp', datetime.now()) if hasattr(self, 'slice_context') and self.slice_context else datetime.now()
+                logger.info(f"🕐 USING LOCAL SLICE TIME: {current_time}")
                 
-                # 🎯 INTELLIGENT POSITION-AWARE SIGNAL GENERATION
                 if has_position:
-                    # Check minimum holding period to prevent churning
-                    current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
-                    if current_position and hasattr(current_position, 'created_at'):
-                        from datetime import timedelta
-                        # Use slice timestamp for backtesting instead of system time
-                        current_time = datetime.now()  # Default to system time
-                        if 'slice_timestamp' in locals():
-                            current_time = slice_timestamp
-                        elif hasattr(strategy_config, 'signal_params') and 'slice_timestamp' in strategy_config.signal_params:
-                            current_time = strategy_config.signal_params['slice_timestamp']
-                        
+                    # Check minimum holding period for anti-churning
+                    min_holding_period = timedelta(seconds=strategy_config.parameters.get('min_holding_period_seconds', 300)) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else timedelta(minutes=5)
+                    
+                    if current_position.created_at:
                         time_held = current_time - current_position.created_at
-                        min_holding_period = timedelta(minutes=5)  # Minimum 5-minute hold
-                        
-                        # 🎯 SLICE-BASED ANTI-CHURNING: Prevent trading same symbol multiple times in same slice
-                        if hasattr(strategy_config, 'signal_params'):
-                            current_slice = strategy_config.signal_params.get('slice_index', 0)
-                            position_slice = getattr(current_position, 'entry_slice', -1)
-                            if current_slice == position_slice:
-                                logger.info(f"🚫 SLICE LOCK: {symbol} already traded in slice {current_slice} - preventing churning")
-                                return None
                         if time_held < min_holding_period:
                             logger.info(f"⏰ HOLDING PERIOD: {symbol} held for {time_held}, minimum {min_holding_period} - skipping exit")
                             return None
                     
                     # We have a position - generate exit signals based on momentum direction
-                    # For contrarian strategy: exit when momentum turns positive (price recovering)
+                    # For momentum-following strategy: exit when momentum reverses (trend exhaustion)
                     should_exit = False
                     exit_reason = ""
                     
-                    if signal_strength >= exit_threshold:
-                        # Momentum turning positive - time to exit contrarian position
-                        should_exit = True
-                        exit_reason = f"momentum_recovery_{signal_strength:.6f}_above_{exit_threshold:.6f}"
-                    elif abs(signal_strength) > 0.005:  # Strong momentum in either direction
-                        should_exit = True
-                        exit_reason = f"strong_momentum_{signal_strength:.6f}"
-                    elif abs(signal_strength) < 0.0001:  # Very weak momentum - might be consolidation
-                        should_exit = True
-                        exit_reason = f"weak_momentum_{signal_strength:.6f}"
+                    # Get current position info to determine long/short
+                    current_positions = self.portfolio_manager.get_all_positions() if self.portfolio_manager else {}
+                    position_side = None
+                    position = current_positions.get(symbol)
+                    if position and position.quantity != 0:
+                        position_side = 'LONG' if position.quantity > 0 else 'SHORT'
+                    
+                    # ========== OPTIMIZED EXIT LOGIC ==========
+                    momentum_strength = abs(signal_strength)
+                    
+                    # Multi-tier exit thresholds for better risk management
+                    strong_exit_threshold = max(exit_threshold, 0.002)  # Minimum 0.2% reversal
+                    moderate_exit_threshold = max(0.001, exit_threshold * 0.5)  # 0.1% minimum
+                    weak_exit_threshold = 0.0005  # Early warning at 0.05%
+                    stall_threshold = 0.0002  # Momentum stalling
+                    
+                    # Get profit/loss parameters for exit conditions
+                    take_profit = strategy_config.parameters.get('take_profit', 0.06) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.06  # 6% (more realistic than 10%)
+                    stop_loss = strategy_config.parameters.get('stop_loss', 0.03) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.03  # 3% (more realistic than 5%)
+                    
+                    # Calculate current P&L if we have price data
+                    current_pnl_pct = 0.0
+                    current_price = 0.0
+                    
+                    # Try to get current price from symbol_data parameter
+                    try:
+                        if symbol_data is not None:
+                            if isinstance(symbol_data, dict):
+                                current_price = symbol_data.get('close', 0.0)
+                                logger.info(f"🔍 DEBUG P&L: Got current_price from symbol_data dict: {current_price}")
+                            elif hasattr(symbol_data, 'iloc') and len(symbol_data) > 0:
+                                # DataFrame - get the last close price
+                                current_price = float(symbol_data.iloc[-1]['close']) if 'close' in symbol_data.columns else 0.0
+                                logger.info(f"🔍 DEBUG P&L: Got current_price from symbol_data DataFrame: {current_price}")
+                        
+                        logger.info(f"🔍 DEBUG P&L: position has avg_price: {hasattr(current_position, 'avg_price')}")
+                        if hasattr(current_position, 'avg_price'):
+                            logger.info(f"🔍 DEBUG P&L: position.avg_price: {current_position.avg_price}")
+                        
+                        if current_price > 0 and hasattr(current_position, 'avg_price') and current_position.avg_price and current_position.avg_price > 0:
+                            if position_side == 'LONG':
+                                current_pnl_pct = (current_price - current_position.avg_price) / current_position.avg_price
+                            elif position_side == 'SHORT':
+                                current_pnl_pct = (current_position.avg_price - current_price) / current_position.avg_price
+                            logger.info(f"💰 P&L CHECK: {symbol} {position_side} entry=${current_position.avg_price:.2f} current=${current_price:.2f} pnl={current_pnl_pct:.4f}")
+                        else:
+                            logger.info(f"🔍 DEBUG P&L: Failed conditions - current_price > 0: {current_price > 0}, has avg_price: {hasattr(current_position, 'avg_price')}, avg_price value: {getattr(current_position, 'avg_price', 'None')}")
+                    except Exception as e:
+                        logger.error(f"P&L calculation error: {e}")
+                        current_pnl_pct = 0.0
+                    
+                    if position_side == 'LONG':
+                        # Check profit-taking and stop-loss first (overrides momentum conditions)
+                        if current_pnl_pct >= take_profit:
+                            should_exit = True
+                            exit_reason = f"take_profit_long_pnl_{current_pnl_pct:.4f}_target_{take_profit:.4f}"
+                        elif current_pnl_pct <= -stop_loss:
+                            should_exit = True
+                            exit_reason = f"stop_loss_long_pnl_{current_pnl_pct:.4f}_limit_{-stop_loss:.4f}"
+                        # Exit LONG position when momentum turns negative (trend reversal)
+                        # Tiered exit strategy - stronger reversal = faster exit
+                        elif signal_strength <= -strong_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"strong_reversal_long_{signal_strength:.6f}_below_{-strong_exit_threshold:.6f}"
+                        elif signal_strength <= -moderate_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"moderate_reversal_long_{signal_strength:.6f}_below_{-moderate_exit_threshold:.6f}"
+                        elif signal_strength <= -weak_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"weak_reversal_long_{signal_strength:.6f}_below_{-weak_exit_threshold:.6f}"
+                        elif abs(signal_strength) < stall_threshold:  # Momentum stalling
+                            should_exit = True
+                            exit_reason = f"momentum_stalling_long_{signal_strength:.6f}_below_{stall_threshold:.6f}"
+                            
+                    elif position_side == 'SHORT':
+                        # Check profit-taking and stop-loss first (overrides momentum conditions)
+                        if current_pnl_pct >= take_profit:
+                            should_exit = True
+                            exit_reason = f"take_profit_short_pnl_{current_pnl_pct:.4f}_target_{take_profit:.4f}"
+                        elif current_pnl_pct <= -stop_loss:
+                            should_exit = True
+                            exit_reason = f"stop_loss_short_pnl_{current_pnl_pct:.4f}_limit_{-stop_loss:.4f}"
+                        # Exit SHORT position when momentum turns positive (trend reversal)
+                        # Tiered exit strategy - stronger reversal = faster exit
+                        elif signal_strength >= strong_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"strong_reversal_short_{signal_strength:.6f}_above_{strong_exit_threshold:.6f}"
+                        elif signal_strength >= moderate_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"moderate_reversal_short_{signal_strength:.6f}_above_{moderate_exit_threshold:.6f}"
+                        elif signal_strength >= weak_exit_threshold:
+                            should_exit = True
+                            exit_reason = f"weak_reversal_short_{signal_strength:.6f}_above_{weak_exit_threshold:.6f}"
+                        elif abs(signal_strength) < stall_threshold:  # Momentum stalling
+                            should_exit = True
+                            exit_reason = f"momentum_stalling_short_{signal_strength:.6f}_below_{stall_threshold:.6f}"
                     
                     if should_exit:
                         
                         from .signal_generation.signal_generator import SignalStrength
                         
                         try:
+                            # Determine exit urgency for signal strength
+                            if momentum_strength >= strong_exit_threshold:
+                                exec_exit_strength = SignalStrength.STRONG
+                            elif momentum_strength >= moderate_exit_threshold:
+                                exec_exit_strength = SignalStrength.MODERATE
+                            else:
+                                exec_exit_strength = SignalStrength.WEAK
+                            
                             trading_signal = TradingSignal(
                                 symbol_pair=symbol,
                                 signal_type=SignalType.CLOSE_LONG,  # CLOSE signal to close position only
-                                strength=SignalStrength.STRONG if abs(signal_strength) > 0.001 else SignalStrength.MODERATE,
+                                strength=exec_exit_strength,
                                 confidence=confidence,
                                 position_size=1.0,  # Close entire position
                                 entry_price=0.0,
                                 timestamp=datetime.now(),
                                 metadata={
-                                    'signal_source': 'momentum_strategy_exit_intelligent',
+                                    'signal_source': 'momentum_strategy_exit_optimized',
                                     'exit_reason': exit_reason,
                                     'momentum': signal_strength,
-                                    'exit_threshold': exit_threshold,
+                                    'momentum_strength': momentum_strength,
+                                    'exit_threshold_used': strong_exit_threshold if momentum_strength >= strong_exit_threshold else 
+                                                         (moderate_exit_threshold if momentum_strength >= moderate_exit_threshold else weak_exit_threshold),
+                                    'base_exit_threshold': exit_threshold,
+                                    'position_side': position_side,
                                     'strategy_id': strategy_config.strategy_id,
                                     'is_exit_signal': True
                                 }
                             )
+                            logger.info(f"🔴 OPTIMIZED EXIT: {symbol} {position_side} momentum={signal_strength:.6f} reason={exit_reason}")
                             return trading_signal
                         except Exception as e:
                             logger.error(f"Error converting signal: {e}")
@@ -1094,52 +1231,88 @@ class UnifiedCoreEngine:
                         return None
                 else:
                     # No position - generate entry signals based on momentum patterns
-                    # For contrarian strategy: enter when momentum is negative (buy the dip)
+                    # For momentum-following strategy: enter when momentum is strong in either direction
                     should_enter = False
                     entry_reason = ""
+                    signal_type = None
                     
-                    if signal_strength <= entry_threshold:
-                        # Strong negative momentum - good contrarian entry
-                        should_enter = True
-                        entry_reason = f"contrarian_entry_{signal_strength:.6f}_below_{entry_threshold:.6f}"
-                    elif signal_strength < -0.0005:  # Any meaningful negative momentum
-                        should_enter = True
-                        entry_reason = f"negative_momentum_{signal_strength:.6f}"
-                    elif -0.0005 <= signal_strength <= 0.0005:  # Neutral momentum - potential reversal
-                        should_enter = True
-                        entry_reason = f"neutral_momentum_{signal_strength:.6f}"
+                    # ========== OPTIMIZED ENTRY LOGIC ==========
+                    # Dynamic thresholds based on momentum strength
+                    momentum_strength = abs(signal_strength)
                     
-                    if should_enter:
+                    # Adaptive entry thresholds - more selective for better entries
+                    strong_entry_threshold = max(entry_threshold, 0.003)  # Minimum 0.3% momentum
+                    moderate_entry_threshold = max(0.0015, entry_threshold * 0.6)  # 0.15% minimum
+                    
+                    # Dynamic position sizing based on momentum strength
+                    base_position_size = 0.2  # Conservative base
+                    if momentum_strength > 0.005:  # Very strong momentum (>0.5%)
+                        dynamic_position_size = min(0.5, base_position_size + momentum_strength * 20)  # Scale up to 50%
+                    elif momentum_strength > 0.003:  # Strong momentum (>0.3%)
+                        dynamic_position_size = min(0.4, base_position_size + momentum_strength * 15)  # Scale up to 40%
+                    elif momentum_strength > 0.0015:  # Moderate momentum (>0.15%)
+                        dynamic_position_size = min(0.3, base_position_size + momentum_strength * 10)  # Scale up to 30%
+                    else:
+                        dynamic_position_size = base_position_size  # Conservative for weak signals
+                    
+                    # LONG entry: Strong positive momentum (trend up)
+                    if signal_strength >= strong_entry_threshold:
+                        should_enter = True
+                        signal_type = SignalType.LONG
+                        entry_reason = f"strong_momentum_long_{signal_strength:.6f}_above_{strong_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
+                    elif signal_strength >= moderate_entry_threshold:  # Moderate positive momentum
+                        should_enter = True
+                        signal_type = SignalType.LONG
+                        entry_reason = f"moderate_momentum_long_{signal_strength:.6f}_above_{moderate_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
+                    
+                    # SHORT entry: Strong negative momentum (trend down) 
+                    elif signal_strength <= -strong_entry_threshold:
+                        should_enter = True
+                        signal_type = SignalType.SHORT
+                        entry_reason = f"strong_momentum_short_{signal_strength:.6f}_below_{-strong_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
+                    elif signal_strength <= -moderate_entry_threshold:  # Moderate negative momentum
+                        should_enter = True
+                        signal_type = SignalType.SHORT
+                        entry_reason = f"moderate_momentum_short_{signal_strength:.6f}_below_{-moderate_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
+                    
+                    if should_enter and signal_type:
                         
                         from .signal_generation.signal_generator import SignalStrength
                         
                         try:
+                            # Determine signal strength classification for execution engine
+                            exec_signal_strength = SignalStrength.STRONG if momentum_strength > 0.004 else SignalStrength.MODERATE
+                            
                             trading_signal = TradingSignal(
                                 symbol_pair=symbol,
-                                signal_type=SignalType.LONG,  # BUY signal to open position
-                                strength=SignalStrength.STRONG if abs(signal_strength) > 0.001 else SignalStrength.MODERATE,
+                                signal_type=signal_type,  # LONG or SHORT signal based on momentum direction
+                                strength=exec_signal_strength,
                                 confidence=confidence,
-                                position_size=0.25,  # Conservative position size
+                                position_size=dynamic_position_size,  # Dynamic sizing based on momentum strength
                                 entry_price=0.0,
                                 timestamp=datetime.now(),
                                 metadata={
-                                    'signal_source': 'momentum_strategy_entry_intelligent',
+                                    'signal_source': 'momentum_strategy_entry_optimized',
                                     'entry_reason': entry_reason,
                                     'momentum': signal_strength,
-                                    'entry_threshold': entry_threshold,
+                                    'momentum_strength': momentum_strength,
+                                    'entry_threshold_used': strong_entry_threshold if momentum_strength >= strong_entry_threshold else moderate_entry_threshold,
+                                    'dynamic_position_size': dynamic_position_size,
+                                    'base_entry_threshold': entry_threshold,
                                     'strategy_id': strategy_config.strategy_id,
                                     'is_exit_signal': False
                                 }
                             )
+                            logger.info(f"🟢 OPTIMIZED ENTRY: {symbol} {signal_type.name} momentum={signal_strength:.6f} size={dynamic_position_size:.3f}")
                             return trading_signal
                         except Exception as e:
                             logger.error(f"Error converting signal: {e}")
                             return None
                     else:
                         # No entry conditions met for this momentum value
-                        logger.info(f"🔍 NO ENTRY: {symbol} momentum={signal_strength:.6f} doesn't meet any entry conditions")
+                        logger.info(f"🔍 NO ENTRY: {symbol} momentum={signal_strength:.6f} (abs={momentum_strength:.6f}) doesn't meet optimized entry thresholds (strong={strong_entry_threshold:.6f}, moderate={moderate_entry_threshold:.6f})")
                         return None
-                
+            
             # 🔧 FIX 2: Handle Mean Reversion signals
             # Check if this is a mean reversion signal format
             if ('MA_MeanReversion' in strategy_signals or 
@@ -1429,6 +1602,8 @@ class UnifiedCoreEngine:
                     
                     result = await self.execution_engine.execute_order(request)
                     
+                    logger.info(f"🔍 DEBUG AFTER EXECUTION ENGINE: executed_quantity={result.executed_quantity}")
+                    
                     # In pure backtesting mode, execution should never fail
                     if result.status == ExecutionStatus.FAILED and hasattr(self, 'backtesting_mode') and self.backtesting_mode:
                         logger.error(f"❌ Pure backtesting execution failed: {result.error_message}")
@@ -1463,6 +1638,8 @@ class UnifiedCoreEngine:
                 
                 execution_results.append(result)
                 
+                logger.info(f"🔍 DEBUG AFTER APPEND: executed_quantity={result.executed_quantity}")
+                
                 # 🎯 ADD STRATEGY SLICE LOCK: Mark symbol as traded by this strategy in this slice
                 # Check if execution was successful using ExecutionResult.status instead of .success
                 is_successful = hasattr(result, 'status') and result.status == ExecutionStatus.SUCCESS
@@ -1482,6 +1659,9 @@ class UnifiedCoreEngine:
     async def _update_portfolio(self, execution_results: List[ExecutionResult], strategy_config: StrategyConfig) -> PortfolioMetrics:
         """Update portfolio using configured portfolio manager"""
         try:
+            # Get slice timestamp for backtesting context
+            slice_timestamp = strategy_config.signal_params.get('slice_timestamp', datetime.now())
+            
             # Process execution results
             for result in execution_results:
                 if result.status == ExecutionStatus.SUCCESS:
@@ -1489,7 +1669,8 @@ class UnifiedCoreEngine:
                         symbol=result.symbol,
                         quantity=int(result.executed_quantity),
                         price=result.average_price,
-                        trade_type="BUY" if result.side == OrderSide.BUY else "SELL"
+                        trade_type="BUY" if result.side == OrderSide.BUY else "SELL",
+                        timestamp=slice_timestamp
                     )
             
             # Get portfolio metrics

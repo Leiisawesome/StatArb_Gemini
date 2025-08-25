@@ -36,7 +36,21 @@ class ClickHouseClient:
     """High-performance ClickHouse client with connection pooling"""
     
     def __init__(self, config: Optional[Dict] = None):
-        self.config = config or ConfigManager().get_database_config()
+        if config is None:
+            self.config = ConfigManager().get_database_config()
+            logger.info(f"🔧 ClickHouseClient config from ConfigManager: {self.config}")
+        else:
+            self.config = config
+            logger.info(f"🔧 ClickHouseClient config provided: {self.config}")
+        
+        # Ensure required keys exist with defaults
+        if 'host' not in self.config:
+            self.config['host'] = 'localhost'
+            logger.warning("🔧 Missing 'host' in config, using default: localhost")
+        if 'database' not in self.config:
+            self.config['database'] = 'polygon_data'
+            logger.warning("🔧 Missing 'database' in config, using default: polygon_data")
+        
         self.metrics = MetricsCollector()
         self._init_connection_pool()
         

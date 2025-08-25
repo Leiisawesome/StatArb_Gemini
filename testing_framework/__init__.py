@@ -2,13 +2,13 @@
 Testing Framework for StatArb Gemini
 ====================================
 
-Comprehensive testing infrastructure for the statistical arbitrage trading system.
+Focused testing infrastructure for core trading strategies.
 
 This framework includes:
-- Multi-strategy backtesting with real ClickHouse data
-- End-to-end system validation
-- Performance metrics calculation and validation
-- Time-series backtesting with proper signal generation
+- Advanced momentum strategy backtesting with risk management
+- Mean reversion strategy backtesting
+- Real ClickHouse data integration
+- Performance metrics and validation
 
 Author: Pro Quant Desk Trader
 """
@@ -25,22 +25,21 @@ __author__ = "Pro Quant Desk Trader"
 
 # Test categories
 TEST_CATEGORIES = {
-    "multi_strategy": "Multi-strategy backtesting with real data",
-    "end_to_end": "Comprehensive end-to-end system validation",
-    "performance": "Performance metrics and analytics validation",
-    "integration": "System integration and data flow validation"
+    "strategy_backtesting": "Core strategy backtesting with real data",
+    "momentum": "Advanced momentum strategy testing",
+    "mean_reversion": "Mean reversion strategy testing"
 }
 
 # Available test suites
 AVAILABLE_TESTS = {
-    "multi_strategy_backtest_real_data": {
-        "description": "Real multi-strategy backtesting with ClickHouse data",
-        "category": "multi_strategy",
-        "file": "multi_strategy_backtest_real_data.py"
+    "advanced_momentum_backtest": {
+        "description": "Advanced momentum strategy with comprehensive risk management",
+        "category": "momentum",
+        "file": "advanced_momentum_backtest.py"
     },
-    "comprehensive_end_to_end_test_suite": {
-        "description": "Comprehensive end-to-end system validation",
-        "category": "end_to_end", 
-        "file": "comprehensive_end_to_end_test_suite.py"
+    "mean_reversion_strategy_backtest": {
+        "description": "Mean reversion strategy backtesting",
+        "category": "mean_reversion", 
+        "file": "mean_reversion_strategy_backtest.py"
     }
 }
