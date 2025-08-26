@@ -44,6 +44,15 @@ except ImportError as e:
     TRADE_ENGINE_AVAILABLE = False
     TRADE_ENGINE_IMPORT_ERROR = str(e)
 
+# Monitoring Dashboard Integration
+try:
+    from trade_engine.monitoring.dashboard import PerformanceDashboard
+    from trade_engine.monitoring.metrics_collector import metrics_collector
+    MONITORING_AVAILABLE = True
+except ImportError as e:
+    MONITORING_AVAILABLE = False
+    MONITORING_IMPORT_ERROR = str(e)
+
 logger = logging.getLogger(__name__)
 
 # ================================================================================
@@ -79,6 +88,11 @@ class CoreEngineConfig:
     enable_monitoring: bool = True
     enable_caching: bool = True
     cache_ttl_seconds: int = 300
+    
+    # Monitoring Dashboard Settings
+    enable_dashboard: bool = True
+    dashboard_update_interval: float = 1.0
+    dashboard_port: int = 8080
     
     # Risk Management
     max_portfolio_risk: float = 0.02  # 2% VaR limit
@@ -179,6 +193,9 @@ class UnifiedCoreEngine:
         # Trade Engine Integration (Trade Engine Layer)
         self._initialize_trade_engine()
         
+        # Monitoring Dashboard Integration
+        self._initialize_monitoring_dashboard()
+        
         # IBKR Integration
         self._initialize_ibkr_integration()
         
@@ -274,6 +291,160 @@ class UnifiedCoreEngine:
         except Exception as e:
             self.logger.error(f"❌ Trade Engine initialization failed: {e}")
             self.logger.warning("⚠️ Falling back to core-only mode")
+    
+    def _initialize_monitoring_dashboard(self):
+        """Initialize monitoring dashboard for real-time backtesting visibility"""
+        self.performance_dashboard: Optional[PerformanceDashboard] = None
+        self.dashboard_data: Dict[str, Any] = {}
+        
+        if not self.config.enable_dashboard:
+            self.logger.info("Monitoring dashboard disabled")
+            return
+        
+        if not MONITORING_AVAILABLE:
+            self.logger.warning(f"⚠️ Monitoring Dashboard not available: {MONITORING_IMPORT_ERROR}")
+            return
+        
+        try:
+            # Initialize Performance Dashboard
+            self.performance_dashboard = PerformanceDashboard(
+                update_interval=self.config.dashboard_update_interval
+            )
+            self.logger.info("✅ Performance Dashboard initialized")
+            
+            # Initialize dashboard data structure
+            self.dashboard_data = {
+                'engine_id': self.config.engine_id,
+                'trading_mode': self.config.trading_mode.value,
+                'backtesting_progress': {
+                    'current_slice': 0,
+                    'total_slices': 0,
+                    'progress_pct': 0.0,
+                    'elapsed_time': 0.0,
+                    'eta_seconds': 0.0
+                },
+                'performance_metrics': {
+                    'total_return': 0.0,
+                    'sharpe_ratio': 0.0,
+                    'max_drawdown': 0.0,
+                    'win_rate': 0.0,
+                    'total_trades': 0
+                },
+                'current_positions': {},
+                'recent_trades': [],
+                'system_metrics': {
+                    'avg_cycle_time_ms': 0.0,
+                    'cache_hit_rate': 0.0,
+                    'optimization_rate': 0.0
+                },
+                'alerts': [],
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            self.logger.info("🚀 Monitoring Dashboard integration complete")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Monitoring Dashboard initialization failed: {e}")
+            self.performance_dashboard = None
+    
+    def _collect_dashboard_metrics(self) -> Dict[str, Any]:
+        """Collect current system metrics for dashboard update"""
+        try:
+            # Get portfolio metrics if available
+            portfolio_metrics = {}
+            if hasattr(self, 'portfolio_manager') and self.portfolio_manager:
+                try:
+                    portfolio_metrics = {
+                        'total_value': getattr(self.portfolio_manager, 'total_value', 0.0),
+                        'total_pnl': getattr(self.portfolio_manager, 'total_pnl', 0.0),
+                        'position_count': len(getattr(self.portfolio_manager, 'positions', {})),
+                        'margin_usage': getattr(self.portfolio_manager, 'margin_usage', 0.0)
+                    }
+                except Exception as e:
+                    self.logger.debug(f"Portfolio metrics collection error: {e}")
+            
+            # Get execution metrics
+            execution_metrics = {}
+            if hasattr(self, 'execution_engine') and self.execution_engine:
+                try:
+                    execution_metrics = {
+                        'orders_processed': getattr(self.execution_engine, 'orders_processed', 0),
+                        'avg_execution_time': getattr(self.execution_engine, 'avg_execution_time', 0.0),
+                        'execution_success_rate': getattr(self.execution_engine, 'success_rate', 0.0)
+                    }
+                except Exception as e:
+                    self.logger.debug(f"Execution metrics collection error: {e}")
+            
+            # Get risk metrics  
+            risk_metrics = {}
+            if hasattr(self, 'risk_manager') and self.risk_manager:
+                try:
+                    risk_metrics = {
+                        'risk_exposure': getattr(self.risk_manager, 'total_exposure', 0.0),
+                        'var_estimate': getattr(self.risk_manager, 'var_estimate', 0.0),
+                        'risk_violations': getattr(self.risk_manager, 'violations_count', 0)
+                    }
+                except Exception as e:
+                    self.logger.debug(f"Risk metrics collection error: {e}")
+            
+            return {
+                'portfolio': portfolio_metrics,
+                'execution': execution_metrics,
+                'risk': risk_metrics,
+                'cycle_time_ms': getattr(self, '_last_cycle_time_ms', 0.0),
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        except Exception as e:
+            self.logger.debug(f"Dashboard metrics collection error: {e}")
+            return {'timestamp': datetime.now().isoformat()}
+    
+    def _update_dashboard(self, **kwargs):
+        """Update monitoring dashboard with latest metrics"""
+        if not self.performance_dashboard or not self.config.enable_dashboard:
+            return
+        
+        try:
+            # Update dashboard data with new information
+            if kwargs:
+                for key, value in kwargs.items():
+                    if key in self.dashboard_data:
+                        if isinstance(self.dashboard_data[key], dict) and isinstance(value, dict):
+                            self.dashboard_data[key].update(value)
+                        else:
+                            self.dashboard_data[key] = value
+            
+            # Add current system metrics
+            self.dashboard_data['system_metrics'].update(self._collect_dashboard_metrics())
+            self.dashboard_data['last_updated'] = datetime.now().isoformat()
+            
+            # Update the dashboard 
+            self.performance_dashboard.update_metrics(self.dashboard_data)
+            
+        except Exception as e:
+            self.logger.debug(f"Dashboard update error: {e}")
+    
+    async def start_dashboard_server(self):
+        """Start dashboard server for backtesting monitoring"""
+        if not self.performance_dashboard or not self.config.enable_dashboard:
+            return
+        
+        try:
+            await self.performance_dashboard.start_dashboard()
+            self.logger.info(f"🌐 Dashboard started with update interval {self.config.dashboard_update_interval}s")
+        except Exception as e:
+            self.logger.error(f"Dashboard start failed: {e}")
+    
+    async def stop_dashboard_server(self):
+        """Stop dashboard server"""
+        if not self.performance_dashboard:
+            return
+        
+        try:
+            await self.performance_dashboard.stop_dashboard()
+            self.logger.info("🛑 Dashboard stopped")
+        except Exception as e:
+            self.logger.error(f"Dashboard stop failed: {e}")
     
     def _initialize_ibkr_integration(self):
         """Initialize IBKR broker integration"""
@@ -473,7 +644,20 @@ class UnifiedCoreEngine:
             # Calculate performance metrics
             processing_time_ms = (time.time() - start_time) * 1000
             self.cycle_times.append(processing_time_ms)
+            self._last_cycle_time_ms = processing_time_ms  # Store for dashboard
             self._update_metrics(True, processing_time_ms)
+            
+            # Update dashboard with trading cycle results
+            dashboard_update = {
+                'performance_metrics': {
+                    'total_trades': len(execution_results.get('executed_orders', [])),
+                    'cycle_success': True,
+                    'avg_cycle_time_ms': sum(self.cycle_times[-10:]) / min(len(self.cycle_times), 10)
+                },
+                'recent_trades': execution_results.get('executed_orders', [])[-5:],  # Last 5 trades
+                'alerts': []  # Add any alerts from risk management or execution
+            }
+            self._update_dashboard(**dashboard_update)
             
             # Create successful result
             result = TradingResult(
@@ -493,6 +677,13 @@ class UnifiedCoreEngine:
         except Exception as e:
             processing_time_ms = (time.time() - start_time) * 1000
             self._update_metrics(False, processing_time_ms)
+            
+            # Update dashboard with error information
+            dashboard_update = {
+                'alerts': [f"Trading cycle error: {str(e)}"],
+                'performance_metrics': {'cycle_success': False}
+            }
+            self._update_dashboard(**dashboard_update)
             
             self.logger.error(f"❌ Trading cycle failed: {strategy_config.strategy_id} - {e}")
             

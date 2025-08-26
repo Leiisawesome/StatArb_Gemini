@@ -87,6 +87,22 @@ class PerformanceDashboard:
     def get_dashboard_data(self) -> Dict[str, Any]:
         """Get current dashboard data"""
         return self.dashboard_data
+    
+    def update_metrics(self, new_data: Dict[str, Any]):
+        """Update dashboard with new metrics data"""
+        try:
+            # Deep merge the new data with existing dashboard data
+            for key, value in new_data.items():
+                if key in self.dashboard_data and isinstance(self.dashboard_data[key], dict) and isinstance(value, dict):
+                    self.dashboard_data[key].update(value)
+                else:
+                    self.dashboard_data[key] = value
+            
+            self.dashboard_data['last_updated'] = datetime.now().isoformat()
+            logger.debug(f"Dashboard metrics updated with {len(new_data)} fields")
+            
+        except Exception as e:
+            logger.error(f"Dashboard metrics update failed: {e}")
 
 # Global dashboard instance
 performance_dashboard = PerformanceDashboard()
