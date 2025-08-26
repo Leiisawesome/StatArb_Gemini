@@ -121,38 +121,37 @@ pip install -r requirements.txt
 
 ### Basic Usage Example
 ```python
-from core_structure.signal_generation.signal_bridge import create_signal_bridge
-from core_structure.execution_engine.execution_bridge import create_execution_bridge
-from core_structure.risk.risk_bridge import create_risk_bridge
+from trade_engine.interfaces import TradingSignal, ExecutionInterface
+from trade_engine.core import DelegatedCoreEngine
+from trade_engine.configuration import UnifiedConfigurationManager
 
-# Initialize bridges
-signal_bridge = create_signal_bridge()
-execution_bridge = create_execution_bridge()
-risk_bridge = create_risk_bridge()
+# Initialize engine
+config_manager = UnifiedConfigurationManager()
+core_engine = DelegatedCoreEngine(config_manager)
 
-# Generate signals
-signals = await signal_bridge.generate_signals("AAPL")
+# Generate signals through strategy interface
+signals = await core_engine.generate_signals("AAPL")
 
-# Execute trades
-execution_result = await execution_bridge.execute_trades(signals)
+# Execute trades through execution interface  
+execution_result = await core_engine.execute_trades(signals)
 
-# Monitor risk
-risk_metrics = await risk_bridge.calculate_risk_metrics(execution_result)
+# Monitor risk through analytics
+risk_metrics = await core_engine.get_risk_metrics()
 ```
 
-### Bridge Integration Example
+### Trade Engine Integration Example
 ```python
 # Configuration management
-from core_structure.infrastructure.config.config_bridge import get_config_for_backtesting
-config = get_config_for_backtesting("trading_config")
+from trade_engine.configuration import UnifiedConfigurationManager
+config_manager = UnifiedConfigurationManager()
 
 # Analytics
-from core_structure.analytics.analytics_bridge import get_analytics_for_backtesting
-analytics = get_analytics_for_backtesting("performance_analytics")
+from trade_engine.analytics.performance_analyzer import PerformanceAnalyzer
+analytics = PerformanceAnalyzer()
 
-# Portfolio management
-from core_structure.portfolio.portfolio_bridge import get_portfolio_for_backtesting
-portfolio = get_portfolio_for_backtesting("main_portfolio")
+# Portfolio management through interfaces
+from trade_engine.interfaces import PortfolioInterface
+# Implementation provided by DelegatedCoreEngine
 ```
 
 ## 🧪 Testing & Validation
@@ -195,14 +194,16 @@ python validation/portfolio_bridge_validation.py
 
 ## 🔧 Configuration
 
-### Bridge Configuration
-Each bridge can be configured independently:
+### Trade Engine Configuration
+The trade engine can be configured through the unified configuration manager:
 
 ```python
-from core_structure.signal_generation.signal_bridge import SignalBridgeConfig
+from trade_engine.configuration import UnifiedConfigurationManager, StrategyConfig
+from trade_engine.conversion import SignalConversionConfig
 
-config = SignalBridgeConfig(
-    signal_mode=SignalMode.BACKTESTING,
+config_manager = UnifiedConfigurationManager()
+strategy_config = StrategyConfig(
+    strategy_name="momentum_strategy",
     enable_ai_enhancement=True,
     max_concurrent_operations=10,
     cache_size=1000

@@ -29,7 +29,8 @@ from .optimized_interfaces import get_interface_coordinator, initialize_optimize
 
 # Import core components
 from ..interfaces import StrategyInterface, PortfolioInterface, ExecutionInterface
-from ...core_structure.signal_generation.signal_generator import SignalConfig, TradingSignal
+from trade_engine.interfaces import TradingSignal
+from trade_engine.configuration import StrategyConfig
 from ...core_structure.unified_core_engine import StrategyConfig, TradingResult, EngineStatus
 
 logger = logging.getLogger(__name__)

@@ -28,7 +28,8 @@ from trade_engine.optimization.integration_adapter import (
     TwoLayerIntegrationAdapter, IntegrationConfig, IntegrationMode,
     OptimizedTradingEngine, create_integration_adapter
 )
-from core_structure.unified_core_engine import StrategyConfig, TradingResult
+from trade_engine.configuration import StrategyConfig
+from trade_engine.optimization.standalone_demo import MockTradingResult as TradingResult
 
 # Configure logging
 logging.basicConfig(

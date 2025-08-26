@@ -1,18 +1,16 @@
 """
-Strategy Implementations Module
+Strategy Implementations Module - Minimal Version
 
-Concrete strategy implementations for different trading strategies.
+Minimal strategy implementations for momentum and mean reversion strategies.
 
 Author: Pro Quant Desk Trader
 """
 
 # Import actual strategy implementations
 from .momentum_strategy import MomentumStrategyDefinition
-from .pair_trading_strategy import PairTradingStrategyDefinition
 from .mean_reversion_strategy import MeanReversionStrategyDefinition
 
 __all__ = [
     'MomentumStrategyDefinition',
-    'PairTradingStrategyDefinition',
     'MeanReversionStrategyDefinition'
 ]
