@@ -277,15 +277,13 @@ class EnhancedClickHouseLoader:
         if not dataframes:
             return pd.DataFrame()
         
-        # Merge on timestamp
-        combined_data = dataframes[0]
-        for df in dataframes[1:]:
-            combined_data = pd.merge(
-                combined_data, df,
-                left_index=True, right_index=True,
-                how='outer',
-                suffixes=('', f'_{df.columns[0].split("_")[0]}')
-            )
+        # For multi-symbol data, concatenate vertically to maintain symbol column
+        if len(dataframes) > 1:
+            combined_data = pd.concat(dataframes, ignore_index=False)
+            combined_data = combined_data.sort_index()  # Sort by timestamp
+            self.logger.info(f"Combined {len(dataframes)} symbol datasets into {len(combined_data)} total rows")
+        else:
+            combined_data = dataframes[0]
         
         return combined_data
     
