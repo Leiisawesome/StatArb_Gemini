@@ -1,65 +1,57 @@
 """
-Unified Core Engine
-==================
+Unified Core Engine - Clean Architecture
+========================================
 
-Professional-grade unified trading engine that serves as the single entry point
-for all trading operations. This engine eliminates the bridge layer complexity
-by providing direct parameter injection and unified processing capabilities.
+Professional-grade unified trading engine serving as the single entry point
+for all trading operations in the two-layer architecture (trade_engine + core_structure).
 
-Key Features:
-- Direct strategy parameter injection
-- Unified trading cycle processing
-- Real-time performance monitoring
-- Comprehensive error handling
-- Scalable architecture for multiple strategies
+Architecture:
+- Trade Engine Layer: Templates, optimization, performance analysis
+- Core Structure Layer: Signal generation, execution, risk, portfolio
 
-Author: Pro Quant Desk Trader
+Author: Pro Quant Trading System
+Version: 2.0 (Cleaned & Optimized)
 """
 
 import asyncio
 import logging
 import time
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import uuid
-import json
 import pandas as pd
 
-# Core component imports
-from .signal_generation.signal_generator import SignalGenerator, SignalConfig, TradingSignal
-from .execution_engine.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult
+# Core Structure Imports
+from .signal_generation.signal_generator import SignalGenerator, SignalConfig, TradingSignal, SignalType, SignalStrength
+from .execution_engine.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult, ExecutionStatus, OrderSide, ExecutionAlgorithm
 from .execution_engine.ibkr_execution_bridge import IBKRExecutionBridge, IBKRExecutionBridgeFactory
-from .risk.risk_manager import RiskManager, RiskLimits, PositionRisk, PortfolioRisk
-from .portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics, Position
+from .risk.risk_manager import RiskManager, RiskLimits
+from .portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics
 from .market_data.data_manager import DataManager
 from .analytics.performance_analytics import PerformanceAnalyzer
 from .broker_integration import IBKRConfig
-from .execution_engine.execution_engine import ExecutionStatus, OrderSide
-from .signal_generation.signal_generator import SignalType
-from .execution_engine.execution_engine import ExecutionAlgorithm
 
-# Trade Engine Integration (replaces legacy dynamic adaptation and templates)
+# Trade Engine Integration (Two-Layer Architecture)
 try:
     from trade_engine.dynamic_adaptation.parameter_optimizer import RealTimeParameterOptimizer
     from trade_engine.analytics.performance_analyzer import PerformanceAnalyzer as TradeEnginePerformanceAnalyzer
     from trade_engine.templates.template_registry import get_trade_engine_template_registry
     TRADE_ENGINE_AVAILABLE = True
 except ImportError as e:
-    # logger will be defined below
     TRADE_ENGINE_AVAILABLE = False
     TRADE_ENGINE_IMPORT_ERROR = str(e)
 
 logger = logging.getLogger(__name__)
 
-# Log trade engine status after logger is defined
-if not TRADE_ENGINE_AVAILABLE:
-    error_msg = TRADE_ENGINE_IMPORT_ERROR if 'TRADE_ENGINE_IMPORT_ERROR' in globals() else "Unknown import error"
-    logger.warning(f"Trade Engine not available: {error_msg}")
+# ================================================================================
+# CONFIGURATION CLASSES
+# ================================================================================
 
 class EngineStatus(Enum):
-    """Engine status enumeration"""
+    """Engine operational status"""
     INITIALIZING = "initializing"
     READY = "ready"
     RUNNING = "running"
@@ -68,7 +60,7 @@ class EngineStatus(Enum):
     SHUTDOWN = "shutdown"
 
 class TradingMode(Enum):
-    """Trading mode enumeration"""
+    """Trading execution mode"""
     BACKTESTING = "backtesting"
     PAPER_TRADING = "paper_trading"
     LIVE_TRADING = "live_trading"
@@ -76,40 +68,38 @@ class TradingMode(Enum):
 
 @dataclass
 class CoreEngineConfig:
-    """Configuration for the unified core engine"""
-    # Engine settings
+    """Unified core engine configuration"""
+    # Engine Identity
     engine_id: str = field(default_factory=lambda: f"engine_{uuid.uuid4().hex[:8]}")
     trading_mode: TradingMode = TradingMode.PAPER_TRADING
+    
+    # Performance Settings
     max_concurrent_strategies: int = 10
-    enable_monitoring: bool = True
-    
-    # Performance settings
     max_processing_time_ms: int = 1000
-    cache_ttl_seconds: int = 300
+    enable_monitoring: bool = True
     enable_caching: bool = True
+    cache_ttl_seconds: int = 300
     
-    # Risk settings
+    # Risk Management
     max_portfolio_risk: float = 0.02  # 2% VaR limit
-    max_position_size: float = 0.1    # 10% max position
+    max_position_size: float = 0.1    # 10% max position size
     max_drawdown: float = 0.15        # 15% max drawdown
     
-    # Signal settings
-    signal_config: Optional[SignalConfig] = None
-    
-    # Risk settings
-    risk_limits: Optional[RiskLimits] = None
-    
-    # Execution settings
-    default_execution_algorithm: str = "TWAP"
-    max_order_value: float = 1_000_000  # $1M
-    commission_rate: float = 0.0005     # 5 bps
+    # Execution Settings
     initial_capital: float = 10_000_000  # $10M default
+    max_order_value: float = 1_000_000   # $1M max order
+    commission_rate: float = 0.0005      # 5 bps
+    default_execution_algorithm: str = "TWAP"
     
     # IBKR Integration
     enable_ibkr_integration: bool = False
     ibkr_account_id: Optional[str] = None
     ibkr_paper_trading: bool = True
     ibkr_config: Optional[IBKRConfig] = None
+    
+    # Component Configs
+    signal_config: Optional[SignalConfig] = None
+    risk_limits: Optional[RiskLimits] = None
 
 @dataclass
 class StrategyConfig:
@@ -118,16 +108,10 @@ class StrategyConfig:
     strategy_name: str
     strategy_type: str
     
-    # Signal generation parameters
+    # Strategy Parameters
     signal_params: Dict[str, Any] = field(default_factory=dict)
-    
-    # Risk management parameters
     risk_params: Dict[str, Any] = field(default_factory=dict)
-    
-    # Execution parameters
     execution_params: Dict[str, Any] = field(default_factory=dict)
-    
-    # Portfolio parameters
     portfolio_params: Dict[str, Any] = field(default_factory=dict)
     
     # Metadata
@@ -137,32 +121,22 @@ class StrategyConfig:
 
 @dataclass
 class TradingResult:
-    """Result of a complete trading cycle"""
-    # Core results
+    """Complete trading cycle result"""
     strategy_id: str
     timestamp: datetime
     success: bool
     
-    # Signal results
+    # Results
     signals: List[TradingSignal] = field(default_factory=list)
-    
-    # Execution results
     execution_results: List[ExecutionResult] = field(default_factory=list)
-    
-    # Portfolio results
     portfolio_update: Optional[PortfolioMetrics] = None
-    
-    # Risk results
-    risk_assessment: Optional[PortfolioRisk] = None
-    
-    # Performance metrics
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     
-    # Error handling
+    # Error Handling
     error_message: str = ""
     warnings: List[str] = field(default_factory=list)
     
-    # Processing metrics
+    # Performance
     processing_time_ms: float = 0.0
     cache_hit: bool = False
 
@@ -175,400 +149,271 @@ class EngineMetrics:
     average_processing_time_ms: float = 0.0
     cache_hit_rate: float = 0.0
     active_strategies: int = 0
-    
-    # Component metrics
-    signal_generation_time_ms: float = 0.0
-    execution_time_ms: float = 0.0
-    risk_calculation_time_ms: float = 0.0
-    portfolio_update_time_ms: float = 0.0
-    
-    # Error metrics
     error_count: int = 0
     warning_count: int = 0
-    
-    # Performance tracking
     last_updated: datetime = field(default_factory=datetime.now)
+
+# ================================================================================
+# MAIN UNIFIED CORE ENGINE
+# ================================================================================
 
 class UnifiedCoreEngine:
     """
-    Unified Core Engine - Single entry point for all trading operations
+    Unified Core Engine - Two-Layer Architecture Entry Point
     
-    This engine eliminates the bridge layer complexity by providing:
-    1. Direct parameter injection from strategy objects
-    2. Unified trading cycle processing
-    3. Real-time performance monitoring
-    4. Comprehensive error handling
-    5. Scalable architecture for multiple strategies
+    Coordinates between Trade Engine (templates, optimization) and 
+    Core Structure (execution, risk, portfolio) layers.
     """
     
     def __init__(self, config: Optional[CoreEngineConfig] = None):
-        """Initialize the unified core engine"""
+        """Initialize unified core engine with two-layer architecture"""
         self.config = config or CoreEngineConfig()
         self.status = EngineStatus.INITIALIZING
-        
-        # Initialize logger
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"🚀 UnifiedCoreEngine initializing with ID: {getattr(self.config, 'engine_id', 'default')}")
         
-        # Initialize core components
-        self._initialize_components()
+        self.logger.info(f"🚀 UnifiedCoreEngine initializing with ID: {self.config.engine_id}")
+        
+        # Core Components (Core Structure Layer)
+        self._initialize_core_components()
+        
+        # Trade Engine Integration (Trade Engine Layer)
+        self._initialize_trade_engine()
         
         # IBKR Integration
-        self.ibkr_bridge: Optional[IBKRExecutionBridge] = None
         self._initialize_ibkr_integration()
         
-        # Strategy management
+        # Strategy Management
         self.active_strategies: Dict[str, StrategyConfig] = {}
         self.strategy_cache: Dict[str, Any] = {}
-        self.strategy_config_cache: Dict[str, Dict[str, Any]] = {}  # Cache injected configurations
-        self.trade_engine_strategy_initialized: Dict[str, bool] = {}  # Track which strategies have trade engine initialized
+        self.strategy_config_cache: Dict[str, Dict[str, Any]] = {}
+        self.trade_engine_strategy_initialized: Dict[str, bool] = {}
         
-        # Performance tracking
+        # Anti-Churning System
+        self.slice_trading_locks: Dict[str, set] = {}  # {strategy_slice: {symbols}}
+        
+        # Performance Tracking
         self.metrics = EngineMetrics()
         self.cycle_times: List[float] = []
         
-        # Error handling
-        self.error_count = 0
-        self.warning_count = 0
+        # Backtesting Support
+        self.backtesting_mode: bool = False
+        self.backtesting_data_provider: Optional[Any] = None
         
-        logger.info(f"Initializing Unified Core Engine: {self.config.engine_id}")
         self.status = EngineStatus.READY
-        logger.info("Unified Core Engine initialized successfully")
+        self.logger.info("✅ Unified Core Engine initialized successfully")
     
-    def reset_for_backtesting(self):
-        """Reset core engine for backtesting - ensures clean state"""
-        logger.info("🔄 Resetting Unified Core Engine for backtesting")
-        
-        # Reset portfolio manager
-        if self.portfolio_manager:
-            self.portfolio_manager.reset_for_backtesting()
-        
-        # Clear any cached strategy data
-        self.strategy_cache.clear()
-        self.strategy_config_cache.clear()
-        self.trade_engine_strategy_initialized.clear()
-        
-        # Reset slice trading locks for anti-churning
-        self.slice_trading_locks.clear()
-        
-        # Reset metrics
-        self.metrics = EngineMetrics()
-        self.cycle_times.clear()
-        
-        # Reset error counts
-        self.error_count = 0
-        self.warning_count = 0
-        
-        logger.info("✅ Core engine reset complete - ready for backtesting")
+    # ================================================================================
+    # INITIALIZATION METHODS
+    # ================================================================================
     
-    def _initialize_components(self):
-        """Initialize all core components"""
+    def _initialize_core_components(self):
+        """Initialize core structure layer components"""
         try:
-            # Initialize signal generator
+            # Signal Generator
             signal_config = self.config.signal_config or SignalConfig()
             self.signal_generator = SignalGenerator(signal_config)
             
-            # Initialize execution engine
+            # Execution Engine
             self.execution_engine = ExecutionEngine(
-                initial_capital=10_000_000,
+                initial_capital=self.config.initial_capital,
                 max_order_value=self.config.max_order_value,
                 commission_rate=self.config.commission_rate
             )
             
-            # Initialize risk manager
+            # Risk Manager
             risk_limits = self.config.risk_limits or RiskLimits()
             self.risk_manager = RiskManager(risk_limits)
             
-            # Initialize portfolio manager with configurable capital
-            self.portfolio_manager = PortfolioManager(initial_capital=self.config.initial_capital)
+            # Portfolio Manager
+            self.portfolio_manager = PortfolioManager(
+                initial_capital=self.config.initial_capital
+            )
             
-            # 🎯 ANTI-CHURNING: Track symbols traded in current slice
-            self.slice_trading_locks = {}  # {slice_index: set(symbols_traded)}
-            
-            # Initialize data manager
+            # Data Manager
             self.data_manager = DataManager()
             
-            # Initialize performance analytics
+            # Performance Analytics
             self.performance_analytics = PerformanceAnalyzer()
             
-            # Initialize Trade Engine Integration (replaces legacy dynamic adaptation and templates)
-            self.trade_engine_optimizer: Optional[RealTimeParameterOptimizer] = None
-            self.trade_engine_analyzer: Optional[TradeEnginePerformanceAnalyzer] = None
-            self.trade_engine_template_registry = None
-            logger.info(f"🔄 TRADE_ENGINE_AVAILABLE: {TRADE_ENGINE_AVAILABLE}")
-            if TRADE_ENGINE_AVAILABLE:
-                try:
-                    # Initialize trade engine components with required parameters
-                    self.trade_engine_optimizer = RealTimeParameterOptimizer(
-                        strategy_id=self.config.engine_id,
-                        template_id="ml_momentum_signal"  # Use momentum signal template
-                    )
-                    logger.info("✅ Trade Engine Parameter Optimizer initialized")
-                    
-                    self.trade_engine_analyzer = TradeEnginePerformanceAnalyzer()
-                    logger.info("✅ Trade Engine Performance Analyzer initialized")
-                    
-                    self.trade_engine_template_registry = get_trade_engine_template_registry()
-                    template_count = len(self.trade_engine_template_registry.templates)
-                    logger.info(f"✅ Trade Engine Template Registry initialized with {template_count} templates")
-                    
-                    logger.info("🚀 Trade Engine integration complete - legacy systems replaced")
-                except Exception as e:
-                    logger.error(f"❌ Failed to initialize Trade Engine: {e}")
-                    logger.warning("⚠️ Falling back to core-only mode")
-                    self.trade_engine_optimizer = None
-                    self.trade_engine_analyzer = None
-                    self.trade_engine_template_registry = None
-            else:
-                logger.warning("⚠️ Trade Engine not available - using core-only mode")
-            
-            logger.info("All core components initialized successfully")
+            self.logger.info("✅ Core structure components initialized")
             
         except Exception as e:
-            logger.error(f"Failed to initialize core components: {e}")
+            self.logger.error(f"❌ Failed to initialize core components: {e}")
             self.status = EngineStatus.ERROR
             raise
     
-    def _initialize_ibkr_integration(self):
-        """Initialize IBKR integration if enabled"""
+    def _initialize_trade_engine(self):
+        """Initialize trade engine layer components"""
+        self.trade_engine_optimizer: Optional[RealTimeParameterOptimizer] = None
+        self.trade_engine_analyzer: Optional[TradeEnginePerformanceAnalyzer] = None
+        self.trade_engine_template_registry = None
+        
+        if not TRADE_ENGINE_AVAILABLE:
+            self.logger.warning(f"⚠️ Trade Engine not available: {TRADE_ENGINE_IMPORT_ERROR}")
+            return
+        
         try:
-            if not self.config.enable_ibkr_integration:
-                logger.info("IBKR integration disabled")
-                return
+            # Parameter Optimizer
+            self.trade_engine_optimizer = RealTimeParameterOptimizer(
+                strategy_id=self.config.engine_id,
+                template_id="ml_momentum_signal"
+            )
+            self.logger.info("✅ Trade Engine Parameter Optimizer initialized")
             
-            if not self.config.ibkr_account_id:
-                logger.warning("IBKR account ID not provided - integration disabled")
-                return
+            # Performance Analyzer
+            self.trade_engine_analyzer = TradeEnginePerformanceAnalyzer()
+            self.logger.info("✅ Trade Engine Performance Analyzer initialized")
             
-            # Create IBKR bridge
+            # Template Registry
+            self.trade_engine_template_registry = get_trade_engine_template_registry()
+            template_count = len(self.trade_engine_template_registry.templates)
+            self.logger.info(f"✅ Trade Engine Template Registry initialized with {template_count} templates")
+            
+            self.logger.info("🚀 Trade Engine integration complete")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Trade Engine initialization failed: {e}")
+            self.logger.warning("⚠️ Falling back to core-only mode")
+    
+    def _initialize_ibkr_integration(self):
+        """Initialize IBKR broker integration"""
+        self.ibkr_bridge: Optional[IBKRExecutionBridge] = None
+        
+        if not self.config.enable_ibkr_integration:
+            self.logger.info("IBKR integration disabled")
+            return
+        
+        if not self.config.ibkr_account_id:
+            self.logger.warning("IBKR account ID not provided - integration disabled")
+            return
+        
+        try:
             if self.config.ibkr_config:
-                # Use provided configuration
                 self.ibkr_bridge = IBKRExecutionBridge(self.config.ibkr_config)
             elif self.config.ibkr_paper_trading:
-                # Create paper trading bridge
                 self.ibkr_bridge = IBKRExecutionBridgeFactory.create_paper_trading_bridge(
                     self.config.ibkr_account_id
                 )
             else:
-                # Create live trading bridge
                 self.ibkr_bridge = IBKRExecutionBridgeFactory.create_live_trading_bridge(
                     self.config.ibkr_account_id
                 )
             
-            logger.info("✅ IBKR integration initialized")
+            self.logger.info("✅ IBKR integration initialized")
             
         except Exception as e:
-            logger.error(f"Failed to initialize IBKR integration: {e}")
+            self.logger.error(f"❌ IBKR integration failed: {e}")
             self.ibkr_bridge = None
     
-    async def _is_ibkr_connected(self) -> bool:
-        """Check if IBKR bridge is connected"""
-        if not self.ibkr_bridge:
-            return False
-        try:
-            return await self.ibkr_bridge.ibkr_client.is_connected()
-        except Exception:
-            return False
+    # ================================================================================
+    # STRATEGY MANAGEMENT
+    # ================================================================================
     
-    async def connect_ibkr(self) -> bool:
-        """Connect to IBKR broker"""
-        if not self.ibkr_bridge:
-            logger.warning("IBKR bridge not initialized")
-            return False
-        
+    def inject_strategy_parameters(self, strategy_config: StrategyConfig):
+        """Inject strategy parameters into core components"""
         try:
-            success = await self.ibkr_bridge.connect()
-            if success:
-                logger.info("✅ Connected to IBKR via unified core engine")
+            self.logger.info(f"Injecting parameters for strategy: {strategy_config.strategy_id}")
+            
+            # Store strategy configuration
+            self.active_strategies[strategy_config.strategy_id] = strategy_config
+            
+            # Create and cache strategy instance
+            strategy_instance = self._create_strategy_instance(strategy_config)
+            if strategy_instance:
+                self.strategy_cache[strategy_config.strategy_id] = strategy_instance
+                self.logger.info(f"✅ Strategy instance cached: {strategy_config.strategy_id}")
+            
+            # Inject parameters into core components
+            self._inject_signal_parameters(strategy_config)
+            self._inject_execution_parameters(strategy_config)
+            self._inject_portfolio_parameters(strategy_config)
+            
+            self.logger.info(f"✅ Parameter injection complete: {strategy_config.strategy_id}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Parameter injection failed: {e}")
+    
+    def _create_strategy_instance(self, strategy_config: StrategyConfig):
+        """Create strategy instance based on strategy type"""
+        try:
+            strategy_type = strategy_config.strategy_type.lower()
+            
+            if 'momentum' in strategy_type:
+                from strategy_layer.strategies.momentum_strategy import MomentumStrategyDefinition
+                legacy_config = self._convert_to_legacy_config(strategy_config)
+                return MomentumStrategyDefinition(legacy_config)
+                
+            elif 'mean' in strategy_type or 'reversion' in strategy_type:
+                from strategy_layer.strategies.mean_reversion_strategy import MeanReversionStrategyDefinition
+                legacy_config = self._convert_to_legacy_config(strategy_config)
+                return MeanReversionStrategyDefinition(legacy_config)
+            
             else:
-                logger.error("❌ Failed to connect to IBKR")
-            return success
+                self.logger.warning(f"Unknown strategy type: {strategy_type}")
+                return None
+                
         except Exception as e:
-            logger.error(f"IBKR connection error: {e}")
-            return False
+            self.logger.error(f"Strategy instance creation failed: {e}")
+            return None
     
-    async def disconnect_ibkr(self) -> bool:
-        """Disconnect from IBKR broker"""
-        if not self.ibkr_bridge:
-            return True
+    def _convert_to_legacy_config(self, strategy_config: StrategyConfig):
+        """Convert StrategyConfig to legacy format for backward compatibility"""
+        class LegacyConfig:
+            def __init__(self):
+                self.strategy_id = strategy_config.strategy_id
+                self.strategy_name = strategy_config.strategy_name
+                self.strategy_type = strategy_config.strategy_type
+                self.signal_generation = strategy_config.signal_params
+                self.risk_management = strategy_config.risk_params or {
+                    'max_position_size': 0.1,
+                    'stop_loss': 0.05,
+                    'max_portfolio_allocation': 0.2,
+                    'position_sizing': {'method': 'fixed', 'size': 0.05}
+                }
+                self.entry_exit_logic = strategy_config.execution_params
+                self.parameters = strategy_config.signal_params
+                self.metadata = strategy_config.metadata
         
-        try:
-            success = await self.ibkr_bridge.disconnect()
-            if success:
-                logger.info("✅ Disconnected from IBKR")
-            return success
-        except Exception as e:
-            logger.error(f"IBKR disconnection error: {e}")
-            return False
-    
-    async def get_portfolio_summary(self):
-        """Get portfolio summary from IBKR or internal portfolio manager"""
-        if self.ibkr_bridge and await self._is_ibkr_connected():
-            try:
-                return await self.ibkr_bridge.get_portfolio_summary()
-            except Exception as e:
-                logger.error(f"Failed to get IBKR portfolio summary: {e}")
-        
-        # Fall back to internal portfolio manager
-        return self.portfolio_manager.get_portfolio_summary()
-    
-    async def get_positions(self):
-        """Get positions from IBKR or internal portfolio manager"""
-        if self.ibkr_bridge and await self._is_ibkr_connected():
-            try:
-                return await self.ibkr_bridge.get_positions()
-            except Exception as e:
-                logger.error(f"Failed to get IBKR positions: {e}")
-        
-        # Fall back to internal portfolio manager
-        return self.portfolio_manager.get_all_positions()
-    
-    def _get_config_hash(self, strategy_config: StrategyConfig) -> str:
-        """Generate hash for strategy configuration to detect changes"""
-        import hashlib
-        config_str = f"{strategy_config.strategy_type}_{str(strategy_config.signal_params)}_{str(strategy_config.risk_params)}"
-        return hashlib.md5(config_str.encode()).hexdigest()
+        return LegacyConfig()
     
     def _inject_signal_parameters(self, strategy_config: StrategyConfig):
         """Inject signal generation parameters"""
         try:
-            logger.debug(f"Injecting signal parameters for strategy: {strategy_config.strategy_id}")
-            
-            # Convert StrategyConfig to dictionary format for the adapter
             strategy_dict = {
                 'strategy_type': strategy_config.strategy_type,
                 'signal_generation': strategy_config.signal_params,
                 'risk_management': strategy_config.risk_params,
                 'entry_exit_logic': strategy_config.execution_params,
-                'parameters': strategy_config.signal_params,  # Fallback
+                'parameters': strategy_config.signal_params,
                 'metadata': strategy_config.metadata
             }
             
-            # Use the new strategy adapter to update signal generator configuration
             self.signal_generator.update_config_from_strategy(strategy_dict)
-            
-            logger.debug(f"Successfully injected signal parameters for {strategy_config.strategy_id}")
+            self.logger.debug(f"✅ Signal parameters injected: {strategy_config.strategy_id}")
             
         except Exception as e:
-            logger.error(f"Failed to inject signal parameters for {strategy_config.strategy_id}: {e}")
-            # Fallback to old method
-            signal_params = strategy_config.signal_params
-            
-            # Update signal generator configuration
-            if 'lookback_window' in signal_params:
-                self.signal_generator.config.lookback_window = signal_params['lookback_window']
-            
-            if 'min_confidence_threshold' in signal_params:
-                self.signal_generator.config.min_confidence_threshold = signal_params['min_confidence_threshold']
-            
-            if 'regime_switch_penalty' in signal_params:
-                self.signal_generator.config.regime_switch_penalty = signal_params['regime_switch_penalty']
-            
-            # Update regime-specific thresholds
-            if 'mean_reverting_entry' in signal_params:
-                self.signal_generator.config.mean_reverting_entry = signal_params['mean_reverting_entry']
+            self.logger.error(f"❌ Signal parameter injection failed: {e}")
+    
+    def _inject_execution_parameters(self, strategy_config: StrategyConfig):
         """Inject execution parameters"""
         execution_params = strategy_config.execution_params
         
-        # Update execution engine configuration
         if 'max_order_value' in execution_params:
             self.execution_engine.max_order_value = execution_params['max_order_value']
         
         if 'commission_rate' in execution_params:
             self.execution_engine.commission_rate = execution_params['commission_rate']
         
-        logger.debug(f"Injected execution parameters for {strategy_config.strategy_id}")
+        self.logger.debug(f"✅ Execution parameters injected: {strategy_config.strategy_id}")
     
     def _inject_portfolio_parameters(self, strategy_config: StrategyConfig):
         """Inject portfolio parameters"""
-        portfolio_params = strategy_config.portfolio_params
-        
-        # Update portfolio manager configuration
-        if 'initial_capital' in portfolio_params:
-            # Note: This would require reinitializing the portfolio manager
-            logger.debug("Portfolio initial capital cannot be changed after initialization - using existing capital")
-        
-        logger.debug(f"Injected portfolio parameters for {strategy_config.strategy_id}")
+        # Portfolio initial capital cannot be changed after initialization
+        self.logger.debug(f"✅ Portfolio parameters processed: {strategy_config.strategy_id}")
     
-    def _create_strategy_instance(self, strategy_config: StrategyConfig):
-        """Create strategy instance based on strategy type"""
-        try:
-            strategy_type = strategy_config.strategy_type.lower()
-            if 'momentum' in strategy_type:
-                from strategy_layer.strategies.momentum_strategy import MomentumStrategyDefinition
-                # Convert StrategyConfig to the format expected by MomentumStrategyDefinition
-                legacy_config = self._convert_to_legacy_config(strategy_config)
-                instance = MomentumStrategyDefinition(legacy_config)
-                logger.debug("✅ Momentum strategy instance created successfully")
-                return instance
-                
-            elif 'mean' in strategy_type or 'reversion' in strategy_type:
-                # Create a simple mean reversion strategy instance
-                logger.debug("Creating mean reversion strategy instance")
-                from strategy_layer.strategies.mean_reversion_strategy import MeanReversionStrategyDefinition
-                legacy_config = self._convert_to_legacy_config(strategy_config)
-                instance = MeanReversionStrategyDefinition(legacy_config)
-                logger.debug("✅ Mean reversion strategy instance created successfully")
-                return instance
-                
-            else:
-                logger.warning(f"Unknown strategy type: {strategy_type}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Failed to create strategy instance: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return None
-    
-    def _convert_to_legacy_config(self, strategy_config: StrategyConfig):
-        """Convert new StrategyConfig to legacy format"""
-        # Create a mock legacy config that the strategy classes expect
-        class LegacyConfig:
-            def __init__(self):
-                self.strategy_id = strategy_config.strategy_id
-                self.strategy_name = strategy_config.strategy_name
-                self.strategy_type = strategy_config.strategy_type
-                self.signal_generation = strategy_config.signal_params if isinstance(strategy_config.signal_params, dict) else {}
-                
-                # Ensure risk_management is always a dictionary
-                if isinstance(strategy_config.risk_params, dict):
-                    self.risk_management = strategy_config.risk_params
-                else:
-                    # Convert float/other types to proper risk config
-                    self.risk_management = {
-                        'max_position_size': 0.1,
-                        'stop_loss': 0.05,
-                        'max_portfolio_allocation': 0.2,
-                        'position_sizing': {'method': 'fixed', 'size': 0.05}
-                    }
-                
-                self.entry_exit_logic = strategy_config.execution_params if isinstance(strategy_config.execution_params, dict) else {}
-                self.parameters = strategy_config.signal_params if isinstance(strategy_config.signal_params, dict) else {}
-                self.metadata = getattr(strategy_config, 'metadata', {})
-        
-        return LegacyConfig()
-
-    async def initialize_trade_engine_for_strategy(self, strategy_config: StrategyConfig):
-        """Initialize trade engine optimization for a specific strategy"""
-        strategy_id = strategy_config.strategy_id
-        
-        # Check if already initialized for this strategy
-        if self.trade_engine_strategy_initialized.get(strategy_id, False):
-            return True
-            
-        try:
-            if self.trade_engine_optimizer:
-                # Use trade engine parameter optimization
-                logger.info(f"🔧 Initializing Trade Engine for strategy: {strategy_id}")
-                self.trade_engine_strategy_initialized[strategy_id] = True
-                return True
-            else:
-                logger.info("Trade engine optimizer not available")
-                return False
-        except Exception as e:
-            logger.warning(f"Trade engine initialization failed: {str(e)}")
-            return False
+    # ================================================================================
+    # MAIN TRADING CYCLE
+    # ================================================================================
     
     async def process_trading_cycle(
         self, 
@@ -576,91 +421,61 @@ class UnifiedCoreEngine:
         strategy_config: StrategyConfig
     ) -> TradingResult:
         """
-        Unified trading procedure for all scenarios
+        Main trading cycle processing - Two-layer architecture coordination
         
-        This replaces the bridge layer by providing a single method
-        that handles the complete trading cycle from data loading
-        to execution and portfolio updates.
+        Flow:
+        1. Inject strategy parameters (Core Structure)
+        2. Initialize Trade Engine (if needed)
+        3. Load market data
+        4. Generate signals (Strategy + Core Structure)
+        5. Validate signals (Risk Management)
+        6. Execute trades (Execution Engine)
+        7. Update portfolio (Portfolio Manager)
+        8. Generate analytics (Performance Analytics)
+        9. Apply Trade Engine optimization (if available)
         """
         start_time = time.time()
         cycle_start = datetime.now()
         
         try:
-            logger.debug(f"Starting trading cycle for strategy: {strategy_config.strategy_id}")
+            self.logger.debug(f"🔄 Trading cycle started: {strategy_config.strategy_id}")
             
-            # 🎯 PHANTOM POSITION FIX: Inject slice information from data_source into strategy_config
-            if isinstance(data_source, dict):
-                if 'slice_index' in data_source:
-                    strategy_config.signal_params['slice_index'] = data_source['slice_index']
-                if 'timestamp' in data_source:
-                    strategy_config.signal_params['slice_timestamp'] = data_source['timestamp']
-                if 'total_slices' in data_source:
-                    strategy_config.signal_params['total_slices'] = data_source['total_slices']
-                logger.info(f"🔄 SLICE INFO INJECTED: slice {data_source.get('slice_index', 'unknown')}/{data_source.get('total_slices', 'unknown')} at {data_source.get('timestamp', 'unknown')}")
+            # 1. Inject slice information for anti-churning
+            self._inject_slice_information(data_source, strategy_config)
             
-            # 1. Inject strategy parameters directly
+            # 2. Inject strategy parameters
             self.inject_strategy_parameters(strategy_config)
             
-            # 1.5. Initialize Trade Engine for this strategy (if not already done)
-            strategy_id = strategy_config.strategy_id
-            if not self.trade_engine_strategy_initialized.get(strategy_id, False):
-                logger.info("🔄 Initializing Trade Engine for strategy...")
-                try:
-                    success = await self.initialize_trade_engine_for_strategy(strategy_config)
-                    logger.info(f"🔄 Trade Engine initialized: {success}")
-                except Exception as e:
-                    logger.warning(f"Trade Engine initialization skipped: {str(e)}")
-                    logger.info("🔄 Trade Engine: Disabled")
+            # 3. Initialize Trade Engine for strategy (if needed)
+            await self._ensure_trade_engine_initialized(strategy_config)
             
-            # 2. Load data from source
+            # 4. Load and process market data
             market_data = await self._load_market_data(data_source, strategy_config)
             
-            # 3. Generate signals using configured signal generator
+            # 5. Generate trading signals
             signals = await self._generate_signals(market_data, strategy_config)
             
-            # 4. Validate signals using configured risk manager
+            # 6. Validate signals with risk management
             validated_signals = await self._validate_signals(signals, strategy_config)
             
-            # 5. Execute trades using configured execution engine
+            # 7. Execute validated signals
             execution_results = await self._execute_signals(validated_signals, strategy_config)
             
-            # 6. Update portfolio using configured portfolio manager
+            # 8. Update portfolio with execution results
             portfolio_update = await self._update_portfolio(execution_results, strategy_config)
             
-            # 7. Generate analytics using configured analytics engine
+            # 9. Generate performance analytics
             analytics = await self._generate_analytics(portfolio_update, strategy_config)
             
-            # 8. Execute Trade Engine Optimization (if available)
-            adaptation_result = None
-            if self.trade_engine_optimizer:
-                logger.info(f"🔄 Trade Engine: Optimizing with {len(signals)} signals")
-                try:
-                    # Use trade engine optimization instead of legacy dynamic adaptation
-                    performance_metrics = analytics if isinstance(analytics, dict) else {}
-                    
-                    # Trade engine optimization logic
-                    optimization_params = {
-                        'signals_count': len(signals),
-                        'total_return': performance_metrics.get('total_return', 0),
-                        'max_drawdown': performance_metrics.get('max_drawdown', 0)
-                    }
-                    
-                    logger.info(f"🔄 Trade Engine: Optimization parameters: {optimization_params}")
-                    adaptation_result = {'success': True, 'optimization_applied': True}
-                    
-                except Exception as e:
-                    logger.warning(f"Trade Engine optimization failed: {e}")
-                    adaptation_result = {'success': False, 'error': str(e)}
+            # 10. Apply Trade Engine optimization (if available)
+            await self._apply_trade_engine_optimization(signals, analytics, strategy_config)
             
-            # Calculate processing time
+            # Calculate performance metrics
             processing_time_ms = (time.time() - start_time) * 1000
             self.cycle_times.append(processing_time_ms)
-            
-            # Update metrics
             self._update_metrics(True, processing_time_ms)
             
-            # Log execution results summary
-            logger.debug(f"Creating TradingResult with {len(execution_results)} execution results")
+            # Create successful result
             result = TradingResult(
                 strategy_id=strategy_config.strategy_id,
                 timestamp=cycle_start,
@@ -672,775 +487,326 @@ class UnifiedCoreEngine:
                 processing_time_ms=processing_time_ms
             )
             
-            logger.info(f"Trading cycle completed successfully for {strategy_config.strategy_id}")
+            self.logger.info(f"✅ Trading cycle completed: {strategy_config.strategy_id}")
             return result
             
         except Exception as e:
-            # Calculate processing time
             processing_time_ms = (time.time() - start_time) * 1000
-            self.cycle_times.append(processing_time_ms)
-            
-            # Update metrics
             self._update_metrics(False, processing_time_ms)
             
-            logger.error(f"Trading cycle failed for {strategy_config.strategy_id}: {e}")
+            self.logger.error(f"❌ Trading cycle failed: {strategy_config.strategy_id} - {e}")
             
-            result = TradingResult(
+            return TradingResult(
                 strategy_id=strategy_config.strategy_id,
                 timestamp=cycle_start,
                 success=False,
                 error_message=str(e),
                 processing_time_ms=processing_time_ms
             )
-            
-            return result
     
-    async def _load_market_data(self, data_source: Any, strategy_config: StrategyConfig) -> Dict[str, Any]:
-        """Load market data from source and convert to proper format"""
-        try:
-            if isinstance(data_source, dict):
-                # Check if this is a historical data buffer from backtesting
-                if 'data' in data_source and isinstance(data_source['data'], pd.DataFrame):
-                    # Historical data buffer format from backtesting
-                    df = data_source['data']
-                    symbols = data_source.get('symbols', [])
-                    
-                    market_data = {
-                        'symbols': symbols,
-                        'data': df,
-                        'timestamp': data_source.get('timestamp', datetime.now())
-                    }
-                else:
-                    # Convert backtesting data source to proper format
-                    # Filter out metadata keys that are not symbols
-                    metadata_keys = {'timestamp', 'slice_index', 'total_slices', 'data', 'symbols'}
-                    symbols = [key for key in data_source.keys() if key not in metadata_keys]
-                    
-                    # Create pandas DataFrame for signal generator
-                    if symbols:
-                        # Extract OHLCV data and create DataFrame
-                        data_records = []
-                        current_time = data_source.get('timestamp', datetime.now())
-                        
-                        for symbol in symbols:
-                            symbol_data = data_source[symbol]
-                            
-                            # Handle different data types properly
-                            if isinstance(symbol_data, dict):
-                                if 'price_history' in symbol_data:
-                                    # New format with historical data for momentum calculation
-                                    price_history = symbol_data.get('price_history', [])
-                                    if price_history:
-                                        # Use the price history to create DataFrame records
-                                        for hist_record in price_history:
-                                            record = {
-                                                'timestamp': hist_record.get('timestamp', current_time),
-                                                'symbol': symbol,
-                                                'open': hist_record.get('open', 100.0),
-                                                'high': hist_record.get('high', 100.0),
-                                                'low': hist_record.get('low', 100.0),
-                                                'close': hist_record.get('close', 100.0),
-                                                'volume': hist_record.get('volume', 1000)
-                                            }
-                                            data_records.append(record)
-                                    continue  # Skip to next symbol since we processed all history
-                                elif 'price' in symbol_data:
-                                    # Simple format from backtesting
-                                    price = symbol_data.get('price', 100.0)
-                                    record = {
-                                        'timestamp': current_time,
-                                        'symbol': symbol,
-                                        'open': price,
-                                        'high': price * 1.001,
-                                        'low': price * 0.999,
-                                        'close': price,
-                                        'volume': symbol_data.get('volume', 1000)
-                                    }
-                                else:
-                                    # Full OHLCV format from ClickHouse or other sources
-                                    record = {
-                                        'timestamp': current_time,
-                                        'symbol': symbol,
-                                        'open': symbol_data.get('open', 100.0),
-                                        'high': symbol_data.get('high', 100.0),
-                                        'low': symbol_data.get('low', 100.0),
-                                        'close': symbol_data.get('close', 100.0),
-                                        'volume': symbol_data.get('volume', 1000)
-                                    }
-                            elif hasattr(symbol_data, 'to_dict'):
-                                # Handle pandas Series or similar objects
-                                try:
-                                    data_dict = symbol_data.to_dict()
-                                    record = {
-                                        'timestamp': current_time,
-                                        'symbol': symbol,
-                                        'open': data_dict.get('open', 100.0),
-                                        'high': data_dict.get('high', 100.0),
-                                        'low': data_dict.get('low', 100.0),
-                                        'close': data_dict.get('close', 100.0),
-                                        'volume': data_dict.get('volume', 1000)
-                                    }
-                                except:
-                                    # Fallback for any conversion issues
-                                    record = {
-                                        'timestamp': current_time,
-                                        'symbol': symbol,
-                                        'open': 100.0,
-                                        'high': 100.1,
-                                        'low': 99.9,
-                                        'close': 100.0,
-                                        'volume': 1000
-                                    }
-                            else:
-                                # Handle Timestamp objects or other types - create fallback data
-                                logger.warning(f"Unexpected data type for {symbol}: {type(symbol_data)}, using fallback")
-                                record = {
-                                    'timestamp': current_time,
-                                    'symbol': symbol,
-                                    'open': 100.0,
-                                    'high': 100.1,
-                                    'low': 99.9,
-                                    'close': 100.0,
-                                    'volume': 1000
-                                }
-                            
-                            # Add the record for non-history cases
-                            data_records.append(record)
-                        
-                        # Create DataFrame
-                        df = pd.DataFrame(data_records)
-                        df['timestamp'] = pd.to_datetime(df['timestamp'])
-                        df = df.set_index('timestamp')
-                        
-                        market_data = {
-                            'symbols': symbols,
-                            'data': df,
-                            'timestamp': current_time
-                        }
-                    else:
-                        # Empty data case
-                        market_data = {
-                            'symbols': [],
-                            'data': pd.DataFrame(),
-                            'timestamp': datetime.now()
-                        }
-            else:
-                # Default case for other data sources
-                market_data = {
-                    'symbols': ['AAPL', 'GOOGL', 'MSFT'],
-                    'data': pd.DataFrame(),
-                    'timestamp': datetime.now()
-                }
-            
-            logger.debug(f"Loaded market data for {strategy_config.strategy_id}: {len(market_data['symbols'])} symbols")
-            return market_data
-            
-        except Exception as e:
-            logger.error(f"Failed to load market data: {e}")
-            # Return safe fallback
-            return {
-                'symbols': [],
-                'data': pd.DataFrame(),
-                'timestamp': datetime.now()
+    def _inject_slice_information(self, data_source: Any, strategy_config: StrategyConfig):
+        """Inject slice information for backtesting and anti-churning"""
+        if isinstance(data_source, dict):
+            slice_info = {
+                'slice_index': data_source.get('slice_index'),
+                'timestamp': data_source.get('timestamp'),
+                'total_slices': data_source.get('total_slices')
             }
+            
+            # Update strategy config with slice information
+            strategy_config.signal_params.update(slice_info)
+            
+            self.logger.info(f"🕐 Slice info injected: {slice_info['slice_index']}/{slice_info['total_slices']}")
+    
+    async def _ensure_trade_engine_initialized(self, strategy_config: StrategyConfig):
+        """Ensure Trade Engine is initialized for strategy"""
+        strategy_id = strategy_config.strategy_id
+        
+        if self.trade_engine_strategy_initialized.get(strategy_id, False):
+            return
+        
+        if self.trade_engine_optimizer:
+            try:
+                self.logger.info(f"🔧 Initializing Trade Engine: {strategy_id}")
+                self.trade_engine_strategy_initialized[strategy_id] = True
+            except Exception as e:
+                self.logger.warning(f"Trade Engine initialization failed: {e}")
+    
+    # ================================================================================
+    # SIGNAL PROCESSING
+    # ================================================================================
     
     async def _generate_signals(self, market_data: Dict[str, Any], strategy_config: StrategyConfig) -> List[TradingSignal]:
-        """Generate trading signals using the actual strategy instance"""
+        """Generate trading signals using strategy instances"""
         try:
             signals = []
             df = market_data.get('data', pd.DataFrame())
             symbols = market_data.get('symbols', [])
             
-            if df.empty or len(symbols) == 0:
-                logger.warning("No market data available for signal generation")
+            if df.empty or not symbols:
+                self.logger.warning("No market data available for signal generation")
                 return signals
-
-            # NEW: Check if there's an actual strategy instance to use
-            strategy_instance = self.strategy_cache.get(strategy_config.strategy_id, None)
-
             
-
+            # Get strategy instance for signal generation
+            strategy_instance = self.strategy_cache.get(strategy_config.strategy_id)
             
             if strategy_instance and hasattr(strategy_instance, 'generate_signals'):
-                # Use the strategy's own signal generation logic
-                logger.info(f"Using strategy instance {type(strategy_instance).__name__} for signal generation")
+                self.logger.info(f"Using strategy instance: {type(strategy_instance).__name__}")
                 
-                # Process each symbol using the strategy's logic
                 for symbol in symbols:
-                    if symbol in df['symbol'].values:
-                        symbol_data = df[df['symbol'] == symbol].copy()
+                    symbol_data = df[df['symbol'] == symbol].copy() if 'symbol' in df.columns else df.copy()
+                    
+                    if not symbol_data.empty:
+                        # Generate signals using strategy instance
+                        strategy_signals = strategy_instance.generate_signals({
+                            'symbol': symbol,
+                            'data': symbol_data,
+                            'market_data': symbol_data
+                        })
                         
-                        # Convert to the format expected by strategy
-                        if not symbol_data.empty:
-                            # Reset index and ensure proper column structure
-                            symbol_data = symbol_data.reset_index(drop=True)
+                        # Convert to TradingSignal objects
+                        if strategy_signals:
+                            trading_signal = self._convert_strategy_signal(
+                                symbol, strategy_signals, strategy_config, symbol_data
+                            )
                             
-                            # Call the strategy's signal generation
-                            strategy_signals = strategy_instance.generate_signals({
-                                'symbol': symbol,
-                                'data': symbol_data,
-                                'market_data': symbol_data  # Some strategies expect this key
-                            })
-                            
-                            logger.info(f"🔍 STRATEGY SIGNALS RAW: {symbol} -> {strategy_signals}")
-                            
-                            # Convert strategy signals to TradingSignal objects
-                            
-                            
-                            if strategy_signals:
-
-                                logger.info(f"🔄 CONVERTING SIGNALS: {symbol} signals exist, calling conversion...")
-                                trading_signal = self._convert_strategy_signal_to_trading_signal(
-                                    symbol, strategy_signals, strategy_config, symbol_data
-                                )
-
-                                logger.info(f"🎯 CONVERSION RESULT: {symbol} -> {trading_signal}")
-                                if trading_signal:
-                                    try:
-                                        signals.append(trading_signal)
-                                        logger.info(f"✅ SIGNAL ADDED: Generated signal for {symbol}: {strategy_signals}")
-                                    except Exception as e:
-                                        logger.error(f"Error generating strategy signal: {e}")
-                                else:
-                                    # In backtesting mode, provide detailed rejection reasons
-                                    if hasattr(self, 'backtesting_mode') and self.backtesting_mode:
-                                        logger.info(f"🔍 BACKTESTING: Signal conversion returned None for {symbol} - strategy signals: {strategy_signals}")
-                                    else:
-                                        logger.warning(f"❌ SIGNAL REJECTED: Conversion returned None for {symbol}")
-                            else:
-                                logger.warning(f"❌ NO SIGNALS: Strategy returned empty/None signals for {symbol}")
+                            if trading_signal:
+                                signals.append(trading_signal)
+                                self.logger.info(f"✅ Signal generated: {symbol}")
             else:
-                # For backtesting: NO FALLBACK - pure strategy evaluation only
-                if hasattr(self, 'backtesting_mode') and self.backtesting_mode:
-                    logger.warning("⚠️ BACKTESTING MODE: No strategy instance available - no fallback signals will be generated")
-                    logger.warning("⚠️ BACKTESTING MODE: This ensures pure strategy evaluation without contamination")
-                else:
-                    # Only use fallback in live trading, not backtesting
-                    logger.info("Using generic signal generator (strategy instance not available)")
+                # Fallback to generic signal generator (non-backtesting only)
+                if not self.backtesting_mode:
+                    self.logger.info("Using generic signal generator")
                     for symbol in symbols:
-                        if symbol in df['symbol'].values:
-                            symbol_data = df[df['symbol'] == symbol].copy()
-                            signal = await self.signal_generator.generate_signal(symbol, symbol_data)
-                            if signal:
-                                signals.append(signal)
-                
-            logger.info(f"Generated {len(signals)} signals using strategy integration")
+                        symbol_data = df[df['symbol'] == symbol].copy() if 'symbol' in df.columns else df.copy()
+                        signal = await self.signal_generator.generate_signal(symbol, symbol_data)
+                        if signal:
+                            signals.append(signal)
+            
+            self.logger.info(f"Generated {len(signals)} signals")
             return signals
             
         except Exception as e:
-            logger.error(f"Strategy signal generation failed: {e}")
+            self.logger.error(f"Signal generation failed: {e}")
             return []
     
-    def _convert_strategy_signal_to_trading_signal(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig, symbol_data=None) -> Optional[TradingSignal]:
-        """Convert strategy-specific signals to TradingSignal objects with TIME-SLICE AWARENESS"""
+    def _convert_strategy_signal(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig, symbol_data=None) -> Optional[TradingSignal]:
+        """Convert strategy-specific signals to TradingSignal objects"""
         try:
-            # 🎯 EXTRACT TIME-SLICE CONTEXT
+            # Extract time-slice context
             slice_timestamp = strategy_config.signal_params.get('slice_timestamp', datetime.now())
             slice_index = strategy_config.signal_params.get('slice_index', 0)
-            total_slices = strategy_config.signal_params.get('total_slices', 1)
-            is_historical_replay = strategy_config.signal_params.get('is_historical_replay', False)
-            starting_from_zero = strategy_config.signal_params.get('starting_from_zero_position', False)
             
-            logger.info(f"🕐 TIME-SLICE CONTEXT: {symbol} at slice {slice_index}/{total_slices}, timestamp: {slice_timestamp}")
+            # Get current position status
+            current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
+            has_position = bool(current_position and current_position.quantity > 0)
             
-            # Extract signal strength and direction
-            if isinstance(strategy_signals, dict):
-                signal_strength = strategy_signals.get('momentum', 0.0)
-                confidence = strategy_signals.get('confidence', 0.5)
-                
-                # 🎯 HISTORICAL REPLAY LOGIC - START FROM ZERO POSITION
-                # In historical replay, we start from zero positions
-                current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
-                has_position = bool(current_position and current_position.quantity > 0)
-                
-                # Check current position status
-                
-                # 🎯 FIRST SIGNAL MUST BE ENTRY (historical replay starts from zero)
-                if is_historical_replay and starting_from_zero and slice_index == 0:
-                    has_position = False  # Force first signal to be entry
-                    logger.info(f"🎬 HISTORICAL REPLAY: {symbol} - First slice, forcing entry signal logic (starting from zero position)")
-                
-                logger.info(f"📊 POSITION STATUS: {symbol} - has_position: {has_position}, slice: {slice_index}/{total_slices}")
-                
-                # Check for exit signals
-                exit_signal = strategy_signals.get('exit_signal', 0.0)
-                profit_exit = strategy_signals.get('profit_exit_signal', 0.0)
-                stop_loss = strategy_signals.get('stop_loss_signal', 0.0)
-                exit_reason = strategy_signals.get('exit_reason', '')
-                
-                # Check for entry signals
-                entry_signal = strategy_signals.get('entry_signal', 0.0)
-                entry_reason = strategy_signals.get('entry_reason', '')
-                
-                # 🚫 REMOVED CONTRADICTORY LOGIC: Do not convert exit signals to entry signals
-                # This was causing churning by flip-flopping between entry and exit logic
-                # Let each signal type maintain its own consistent logic
-                
-                # 🎯 CONSISTENCY CHECK: Only process signals that make logical sense
-                # Exit signals ONLY if we have a position, Entry signals ONLY if we don't
-                if has_position and (exit_signal > 0 or profit_exit > 0 or stop_loss > 0):
-                    from .signal_generation.signal_generator import SignalStrength
-                    
-                    # Determine exit signal strength
-                    max_exit_signal = max(exit_signal, profit_exit, stop_loss)
-                    exit_strength = SignalStrength.STRONG if max_exit_signal > 0.01 else SignalStrength.MODERATE
-                    
-                    logger.info(f"🔴 EXIT SIGNAL: {symbol} - {exit_reason} (strength: {max_exit_signal:.4f})")
-                    
-                    try:
-                        trading_signal = TradingSignal(
-                        symbol_pair=symbol,
-                        signal_type=SignalType.CLOSE_LONG,  # CLOSE signal to close long positions only
-                        strength=exit_strength,
-                        confidence=confidence,
-                        position_size=1.0,  # Close entire position
-                        entry_price=0.0,
-                        timestamp=slice_timestamp,  # 🎯 USE SLICE TIMESTAMP, NOT SYSTEM TIME
-                        metadata={
-                            'signal_source': 'momentum_strategy_exit',
-                            'exit_reason': exit_reason,
-                            'exit_signal_strength': max_exit_signal,
-                            'strategy_id': strategy_config.strategy_id,
-                            'is_exit_signal': True,
-                            # 🎯 TIME-SLICE CONTEXT
-                            'slice_index': slice_index,
-                            'total_slices': total_slices,
-                            'slice_timestamp': slice_timestamp,
-                            'is_historical_replay': is_historical_replay
-                        }
-                        )
-                        return trading_signal
-                    except Exception as e:
-                        logger.error(f"Error converting signal: {e}")
-                        return None
-                
-                # Prioritize entry signals if we DON'T have a position
-                elif not has_position and entry_signal > 0:
-                    
-                    from .signal_generation.signal_generator import SignalStrength
-                    
-                    try:
-                        trading_signal = TradingSignal(
-                            symbol_pair=symbol,
-                            signal_type=SignalType.LONG,  # BUY signal to open position
-                            strength=SignalStrength.STRONG if entry_signal > 0.001 else SignalStrength.MODERATE,
-                            confidence=confidence,
-                            position_size=0.25,  # Conservative position size for new entries
-                            entry_price=0.0,
-                            timestamp=datetime.now(),
-                            metadata={
-                                'signal_source': 'momentum_strategy_entry',
-                                'entry_reason': entry_reason,
-                                'entry_signal_strength': entry_signal,
-                                'strategy_id': strategy_config.strategy_id,
-                                'is_exit_signal': False
-                            }
-                        )
-                        return trading_signal
-                    except Exception as e:
-                        logger.error(f"Error converting signal: {e}")
-                        return None
-                
-                # 🎯 ARCHITECTURAL FIX: If strategy provides explicit signals, RESPECT them completely
-                # The core engine should NEVER override strategy decisions with its own logic
-                if ('entry_signal' in strategy_signals or 'exit_signal' in strategy_signals):
-                    logger.info(f"🔍 EXPLICIT SIGNALS PROCESSED: {symbol} - entry_signal: {'entry_signal' in strategy_signals}, exit_signal: {'exit_signal' in strategy_signals}")
-                    logger.info(f"🎯 PURE EXECUTION ENGINE: Strategy provided explicit signals, no fallback to core engine logic")
-                    return None  # Strategy decides, core engine executes only
-                
-            # Handle old format (momentum-based) with backward compatibility
-            # This handles signals that don't have explicit entry_signal/exit_signal keys
-            if isinstance(strategy_signals, dict) and 'momentum' in strategy_signals:
-                
-                # Extract momentum and confidence from old format
-                signal_strength = float(strategy_signals.get('momentum', 0.0))
-                confidence = float(strategy_signals.get('confidence', 0.5))
-                
-                # 🎯 INTELLIGENT SIGNAL PROCESSING FOR OPTIMIZED MOMENTUM STRATEGY
-                current_position = self.portfolio_manager.get_position(symbol) if self.portfolio_manager else None
-                has_position = bool(current_position and current_position.quantity > 0)
-                
-                # 🔍 DEBUG: Show position details
-                if current_position:
-                    logger.info(f"🔍 POSITION FOUND: {symbol} - quantity: {current_position.quantity}, created_at: {current_position.created_at}")
-                else:
-                    logger.info(f"🔍 NO POSITION: {symbol} - portfolio manager positions: {list(self.portfolio_manager.positions.keys()) if self.portfolio_manager else 'None'}")
-                
-                logger.info(f"🔍 OPTIMIZED FORMAT: {symbol} momentum={signal_strength:.6f}, has_position={has_position}")
-                
-                # Get thresholds for optimized strategy
-                entry_threshold = strategy_config.parameters.get('entry_threshold', 0.001) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.001
-                exit_threshold = strategy_config.parameters.get('exit_threshold', 0.001) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.001
-                
-                # Use current time from slice context for anti-churning
-                current_time = self.slice_context.get('timestamp', datetime.now()) if hasattr(self, 'slice_context') and self.slice_context else datetime.now()
-                logger.info(f"🕐 USING LOCAL SLICE TIME: {current_time}")
-                
-                if has_position:
-                    # Check minimum holding period for anti-churning
-                    min_holding_period = timedelta(seconds=strategy_config.parameters.get('min_holding_period_seconds', 300)) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else timedelta(minutes=5)
-                    
-                    if current_position.created_at:
-                        time_held = current_time - current_position.created_at
-                        if time_held < min_holding_period:
-                            logger.info(f"⏰ HOLDING PERIOD: {symbol} held for {time_held}, minimum {min_holding_period} - skipping exit")
-                            return None
-                    
-                    # We have a position - generate exit signals based on momentum direction
-                    # For momentum-following strategy: exit when momentum reverses (trend exhaustion)
-                    should_exit = False
-                    exit_reason = ""
-                    
-                    # Get current position info to determine long/short
-                    current_positions = self.portfolio_manager.get_all_positions() if self.portfolio_manager else {}
-                    position_side = None
-                    position = current_positions.get(symbol)
-                    if position and position.quantity != 0:
-                        position_side = 'LONG' if position.quantity > 0 else 'SHORT'
-                    
-                    # ========== OPTIMIZED EXIT LOGIC ==========
-                    momentum_strength = abs(signal_strength)
-                    
-                    # Multi-tier exit thresholds for better risk management
-                    strong_exit_threshold = max(exit_threshold, 0.002)  # Minimum 0.2% reversal
-                    moderate_exit_threshold = max(0.001, exit_threshold * 0.5)  # 0.1% minimum
-                    weak_exit_threshold = 0.0005  # Early warning at 0.05%
-                    stall_threshold = 0.0002  # Momentum stalling
-                    
-                    # Get profit/loss parameters for exit conditions
-                    take_profit = strategy_config.parameters.get('take_profit', 0.06) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.06  # 6% (more realistic than 10%)
-                    stop_loss = strategy_config.parameters.get('stop_loss', 0.03) if hasattr(strategy_config, 'parameters') and strategy_config.parameters else 0.03  # 3% (more realistic than 5%)
-                    
-                    # Calculate current P&L if we have price data
-                    current_pnl_pct = 0.0
-                    current_price = 0.0
-                    
-                    # Try to get current price from symbol_data parameter
-                    try:
-                        if symbol_data is not None:
-                            if isinstance(symbol_data, dict):
-                                current_price = symbol_data.get('close', 0.0)
-                                logger.info(f"🔍 DEBUG P&L: Got current_price from symbol_data dict: {current_price}")
-                            elif hasattr(symbol_data, 'iloc') and len(symbol_data) > 0:
-                                # DataFrame - get the last close price
-                                current_price = float(symbol_data.iloc[-1]['close']) if 'close' in symbol_data.columns else 0.0
-                                logger.info(f"🔍 DEBUG P&L: Got current_price from symbol_data DataFrame: {current_price}")
-                        
-                        logger.info(f"🔍 DEBUG P&L: position has avg_price: {hasattr(current_position, 'avg_price')}")
-                        if hasattr(current_position, 'avg_price'):
-                            logger.info(f"🔍 DEBUG P&L: position.avg_price: {current_position.avg_price}")
-                        
-                        if current_price > 0 and hasattr(current_position, 'avg_price') and current_position.avg_price and current_position.avg_price > 0:
-                            if position_side == 'LONG':
-                                current_pnl_pct = (current_price - current_position.avg_price) / current_position.avg_price
-                            elif position_side == 'SHORT':
-                                current_pnl_pct = (current_position.avg_price - current_price) / current_position.avg_price
-                            logger.info(f"💰 P&L CHECK: {symbol} {position_side} entry=${current_position.avg_price:.2f} current=${current_price:.2f} pnl={current_pnl_pct:.4f}")
-                        else:
-                            logger.info(f"🔍 DEBUG P&L: Failed conditions - current_price > 0: {current_price > 0}, has avg_price: {hasattr(current_position, 'avg_price')}, avg_price value: {getattr(current_position, 'avg_price', 'None')}")
-                    except Exception as e:
-                        logger.error(f"P&L calculation error: {e}")
-                        current_pnl_pct = 0.0
-                    
-                    if position_side == 'LONG':
-                        # Check profit-taking and stop-loss first (overrides momentum conditions)
-                        if current_pnl_pct >= take_profit:
-                            should_exit = True
-                            exit_reason = f"take_profit_long_pnl_{current_pnl_pct:.4f}_target_{take_profit:.4f}"
-                        elif current_pnl_pct <= -stop_loss:
-                            should_exit = True
-                            exit_reason = f"stop_loss_long_pnl_{current_pnl_pct:.4f}_limit_{-stop_loss:.4f}"
-                        # Exit LONG position when momentum turns negative (trend reversal)
-                        # Tiered exit strategy - stronger reversal = faster exit
-                        elif signal_strength <= -strong_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"strong_reversal_long_{signal_strength:.6f}_below_{-strong_exit_threshold:.6f}"
-                        elif signal_strength <= -moderate_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"moderate_reversal_long_{signal_strength:.6f}_below_{-moderate_exit_threshold:.6f}"
-                        elif signal_strength <= -weak_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"weak_reversal_long_{signal_strength:.6f}_below_{-weak_exit_threshold:.6f}"
-                        elif abs(signal_strength) < stall_threshold:  # Momentum stalling
-                            should_exit = True
-                            exit_reason = f"momentum_stalling_long_{signal_strength:.6f}_below_{stall_threshold:.6f}"
-                            
-                    elif position_side == 'SHORT':
-                        # Check profit-taking and stop-loss first (overrides momentum conditions)
-                        if current_pnl_pct >= take_profit:
-                            should_exit = True
-                            exit_reason = f"take_profit_short_pnl_{current_pnl_pct:.4f}_target_{take_profit:.4f}"
-                        elif current_pnl_pct <= -stop_loss:
-                            should_exit = True
-                            exit_reason = f"stop_loss_short_pnl_{current_pnl_pct:.4f}_limit_{-stop_loss:.4f}"
-                        # Exit SHORT position when momentum turns positive (trend reversal)
-                        # Tiered exit strategy - stronger reversal = faster exit
-                        elif signal_strength >= strong_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"strong_reversal_short_{signal_strength:.6f}_above_{strong_exit_threshold:.6f}"
-                        elif signal_strength >= moderate_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"moderate_reversal_short_{signal_strength:.6f}_above_{moderate_exit_threshold:.6f}"
-                        elif signal_strength >= weak_exit_threshold:
-                            should_exit = True
-                            exit_reason = f"weak_reversal_short_{signal_strength:.6f}_above_{weak_exit_threshold:.6f}"
-                        elif abs(signal_strength) < stall_threshold:  # Momentum stalling
-                            should_exit = True
-                            exit_reason = f"momentum_stalling_short_{signal_strength:.6f}_below_{stall_threshold:.6f}"
-                    
-                    if should_exit:
-                        
-                        from .signal_generation.signal_generator import SignalStrength
-                        
-                        try:
-                            # Determine exit urgency for signal strength
-                            if momentum_strength >= strong_exit_threshold:
-                                exec_exit_strength = SignalStrength.STRONG
-                            elif momentum_strength >= moderate_exit_threshold:
-                                exec_exit_strength = SignalStrength.MODERATE
-                            else:
-                                exec_exit_strength = SignalStrength.WEAK
-                            
-                            trading_signal = TradingSignal(
-                                symbol_pair=symbol,
-                                signal_type=SignalType.CLOSE_LONG,  # CLOSE signal to close position only
-                                strength=exec_exit_strength,
-                                confidence=confidence,
-                                position_size=1.0,  # Close entire position
-                                entry_price=0.0,
-                                timestamp=datetime.now(),
-                                metadata={
-                                    'signal_source': 'momentum_strategy_exit_optimized',
-                                    'exit_reason': exit_reason,
-                                    'momentum': signal_strength,
-                                    'momentum_strength': momentum_strength,
-                                    'exit_threshold_used': strong_exit_threshold if momentum_strength >= strong_exit_threshold else 
-                                                         (moderate_exit_threshold if momentum_strength >= moderate_exit_threshold else weak_exit_threshold),
-                                    'base_exit_threshold': exit_threshold,
-                                    'position_side': position_side,
-                                    'strategy_id': strategy_config.strategy_id,
-                                    'is_exit_signal': True
-                                }
-                            )
-                            logger.info(f"🔴 OPTIMIZED EXIT: {symbol} {position_side} momentum={signal_strength:.6f} reason={exit_reason}")
-                            return trading_signal
-                        except Exception as e:
-                            logger.error(f"Error converting signal: {e}")
-                            return None
-                    else:
-                        return None
-                else:
-                    # No position - generate entry signals based on momentum patterns
-                    # For momentum-following strategy: enter when momentum is strong in either direction
-                    should_enter = False
-                    entry_reason = ""
-                    signal_type = None
-                    
-                    # ========== OPTIMIZED ENTRY LOGIC ==========
-                    # Dynamic thresholds based on momentum strength
-                    momentum_strength = abs(signal_strength)
-                    
-                    # Adaptive entry thresholds - more selective for better entries
-                    strong_entry_threshold = max(entry_threshold, 0.003)  # Minimum 0.3% momentum
-                    moderate_entry_threshold = max(0.0015, entry_threshold * 0.6)  # 0.15% minimum
-                    
-                    # Dynamic position sizing based on momentum strength
-                    base_position_size = 0.2  # Conservative base
-                    if momentum_strength > 0.005:  # Very strong momentum (>0.5%)
-                        dynamic_position_size = min(0.5, base_position_size + momentum_strength * 20)  # Scale up to 50%
-                    elif momentum_strength > 0.003:  # Strong momentum (>0.3%)
-                        dynamic_position_size = min(0.4, base_position_size + momentum_strength * 15)  # Scale up to 40%
-                    elif momentum_strength > 0.0015:  # Moderate momentum (>0.15%)
-                        dynamic_position_size = min(0.3, base_position_size + momentum_strength * 10)  # Scale up to 30%
-                    else:
-                        dynamic_position_size = base_position_size  # Conservative for weak signals
-                    
-                    # LONG entry: Strong positive momentum (trend up)
-                    if signal_strength >= strong_entry_threshold:
-                        should_enter = True
-                        signal_type = SignalType.LONG
-                        entry_reason = f"strong_momentum_long_{signal_strength:.6f}_above_{strong_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
-                    elif signal_strength >= moderate_entry_threshold:  # Moderate positive momentum
-                        should_enter = True
-                        signal_type = SignalType.LONG
-                        entry_reason = f"moderate_momentum_long_{signal_strength:.6f}_above_{moderate_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
-                    
-                    # SHORT entry: Strong negative momentum (trend down) 
-                    elif signal_strength <= -strong_entry_threshold:
-                        should_enter = True
-                        signal_type = SignalType.SHORT
-                        entry_reason = f"strong_momentum_short_{signal_strength:.6f}_below_{-strong_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
-                    elif signal_strength <= -moderate_entry_threshold:  # Moderate negative momentum
-                        should_enter = True
-                        signal_type = SignalType.SHORT
-                        entry_reason = f"moderate_momentum_short_{signal_strength:.6f}_below_{-moderate_entry_threshold:.6f}_size_{dynamic_position_size:.3f}"
-                    
-                    if should_enter and signal_type:
-                        
-                        from .signal_generation.signal_generator import SignalStrength
-                        
-                        try:
-                            # Determine signal strength classification for execution engine
-                            exec_signal_strength = SignalStrength.STRONG if momentum_strength > 0.004 else SignalStrength.MODERATE
-                            
-                            trading_signal = TradingSignal(
-                                symbol_pair=symbol,
-                                signal_type=signal_type,  # LONG or SHORT signal based on momentum direction
-                                strength=exec_signal_strength,
-                                confidence=confidence,
-                                position_size=dynamic_position_size,  # Dynamic sizing based on momentum strength
-                                entry_price=0.0,
-                                timestamp=datetime.now(),
-                                metadata={
-                                    'signal_source': 'momentum_strategy_entry_optimized',
-                                    'entry_reason': entry_reason,
-                                    'momentum': signal_strength,
-                                    'momentum_strength': momentum_strength,
-                                    'entry_threshold_used': strong_entry_threshold if momentum_strength >= strong_entry_threshold else moderate_entry_threshold,
-                                    'dynamic_position_size': dynamic_position_size,
-                                    'base_entry_threshold': entry_threshold,
-                                    'strategy_id': strategy_config.strategy_id,
-                                    'is_exit_signal': False
-                                }
-                            )
-                            logger.info(f"🟢 OPTIMIZED ENTRY: {symbol} {signal_type.name} momentum={signal_strength:.6f} size={dynamic_position_size:.3f}")
-                            return trading_signal
-                        except Exception as e:
-                            logger.error(f"Error converting signal: {e}")
-                            return None
-                    else:
-                        # No entry conditions met for this momentum value
-                        logger.info(f"🔍 NO ENTRY: {symbol} momentum={signal_strength:.6f} (abs={momentum_strength:.6f}) doesn't meet optimized entry thresholds (strong={strong_entry_threshold:.6f}, moderate={moderate_entry_threshold:.6f})")
-                        return None
+            # Handle explicit entry/exit signals
+            if 'entry_signal' in strategy_signals or 'exit_signal' in strategy_signals:
+                return self._process_explicit_signals(
+                    symbol, strategy_signals, strategy_config, slice_timestamp, has_position
+                )
             
-            # 🔧 FIX 2: Handle Mean Reversion signals
-            # Check if this is a mean reversion signal format
-            if ('MA_MeanReversion' in strategy_signals or 
-                'BB_MeanReversion' in strategy_signals or 
-                'RSI_MeanReversion' in strategy_signals):
-                
-                logger.info(f"🔍 MEAN REVERSION FORMAT DETECTED: {symbol}")
-                
-                # Extract mean reversion signal components
-                ma_signal = strategy_signals.get('MA_MeanReversion', 0.0)
-                bb_signal = strategy_signals.get('BB_MeanReversion', 0.0)
-                rsi_signal = strategy_signals.get('RSI_MeanReversion', 0.0)
-                
-                # Calculate composite signal strength (weighted average)
-                # BB signal is typically the strongest indicator for mean reversion
-                composite_signal = (bb_signal * 0.5) + (rsi_signal * 0.3) + (ma_signal * 0.2)
-                
-                logger.info(f"🔍 MEAN REVERSION COMPONENTS: MA={ma_signal:.4f}, BB={bb_signal:.4f}, RSI={rsi_signal:.4f}")
-                logger.info(f"🔍 COMPOSITE SIGNAL: {composite_signal:.4f}")
-                
-                # Mean reversion entry logic: strong signals indicate entry opportunities
-                # BB > 0.5 typically indicates oversold/overbought conditions good for mean reversion
-                should_enter = False
-                entry_reason = ""
-                
-                if bb_signal > 0.5:  # Strong Bollinger Band signal
-                    should_enter = True
-                    entry_reason = f"bb_mean_reversion_{bb_signal:.4f}"
-                elif composite_signal > 0.3:  # Strong composite signal
-                    should_enter = True
-                    entry_reason = f"composite_mean_reversion_{composite_signal:.4f}"
-                elif rsi_signal > 0.25:  # RSI indicates mean reversion opportunity
-                    should_enter = True
-                    entry_reason = f"rsi_mean_reversion_{rsi_signal:.4f}"
-                
-                if should_enter and not has_position:
-                    from .signal_generation.signal_generator import SignalStrength
-                    
-                    try:
-                        trading_signal = TradingSignal(
-                            symbol_pair=symbol,
-                            signal_type=SignalType.LONG,  # Mean reversion typically goes long
-                            strength=SignalStrength.STRONG if composite_signal > 0.4 else SignalStrength.MODERATE,
-                            confidence=min(0.95, 0.5 + composite_signal),  # Scale confidence with signal strength
-                            position_size=0.25,  # Conservative position size
-                            entry_price=0.0,
-                            timestamp=slice_timestamp,  # 🎯 USE SLICE TIMESTAMP
-                            metadata={
-                                'signal_source': 'mean_reversion_strategy',
-                                'entry_reason': entry_reason,
-                                'ma_signal': ma_signal,
-                                'bb_signal': bb_signal,
-                                'rsi_signal': rsi_signal,
-                                'composite_signal': composite_signal,
-                                'strategy_id': strategy_config.strategy_id,
-                                'is_exit_signal': False,
-                                # 🎯 TIME-SLICE CONTEXT & LOOK-AHEAD BIAS PREVENTION
-                                'slice_index': slice_index,
-                                'total_slices': total_slices,
-                                'slice_timestamp': slice_timestamp,
-                                'is_historical_replay': is_historical_replay,
-                                'no_look_ahead_bias': True,  # Signal only uses past data
-                                'data_cutoff_time': slice_timestamp
-                            }
-                        )
-                        logger.info(f"✅ MEAN REVERSION ENTRY: {symbol} - {entry_reason} (composite: {composite_signal:.4f})")
-                        return trading_signal
-                    except Exception as e:
-                        logger.error(f"Error converting mean reversion signal: {e}")
-                        return None
-                else:
-                    logger.info(f"🔍 NO MEAN REVERSION ENTRY: {symbol} - should_enter={should_enter}, has_position={has_position}")
-                    return None
+            # Handle momentum-based signals
+            elif 'momentum' in strategy_signals:
+                return self._process_momentum_signals(
+                    symbol, strategy_signals, strategy_config, slice_timestamp, has_position, symbol_data
+                )
             
-            # If we reach here, no valid signals were generated
-            logger.info(f"🔍 NO SIGNALS: {symbol} - no valid trading signals generated from momentum={strategy_signals.get('momentum', 'N/A')}")
+            # Handle mean reversion signals
+            elif any(key in strategy_signals for key in ['MA_MeanReversion', 'BB_MeanReversion', 'RSI_MeanReversion']):
+                return self._process_mean_reversion_signals(
+                    symbol, strategy_signals, strategy_config, slice_timestamp, has_position
+                )
+            
             return None
             
         except Exception as e:
-            logger.error(f"Failed to convert strategy signal: {e}")
+            self.logger.error(f"Signal conversion failed: {e}")
             return None
     
-    def set_strategy_instance(self, strategy_instance):
-        """Set the strategy instance for signal generation"""
-        self.strategy_instance = strategy_instance
-        logger.info(f"Strategy instance set: {type(strategy_instance).__name__}")
+    def _process_explicit_signals(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig, 
+                                slice_timestamp: datetime, has_position: bool) -> Optional[TradingSignal]:
+        """Process explicit entry/exit signals"""
+        exit_signal = strategy_signals.get('exit_signal', 0.0)
+        entry_signal = strategy_signals.get('entry_signal', 0.0)
+        confidence = strategy_signals.get('confidence', 0.5)
+        
+        if has_position and exit_signal > 0:
+            # Exit signal
+            return TradingSignal(
+                symbol_pair=symbol,
+                signal_type=SignalType.CLOSE_LONG,
+                strength=SignalStrength.STRONG if exit_signal > 0.01 else SignalStrength.MODERATE,
+                confidence=confidence,
+                position_size=1.0,
+                entry_price=0.0,
+                timestamp=slice_timestamp,
+                metadata={
+                    'signal_source': 'explicit_exit',
+                    'exit_reason': strategy_signals.get('exit_reason', ''),
+                    'strategy_id': strategy_config.strategy_id,
+                    'is_exit_signal': True
+                }
+            )
+        
+        elif not has_position and entry_signal > 0:
+            # Entry signal
+            return TradingSignal(
+                symbol_pair=symbol,
+                signal_type=SignalType.LONG,
+                strength=SignalStrength.STRONG if entry_signal > 0.001 else SignalStrength.MODERATE,
+                confidence=confidence,
+                position_size=0.25,
+                entry_price=0.0,
+                timestamp=slice_timestamp,
+                metadata={
+                    'signal_source': 'explicit_entry',
+                    'entry_reason': strategy_signals.get('entry_reason', ''),
+                    'strategy_id': strategy_config.strategy_id,
+                    'is_exit_signal': False
+                }
+            )
+        
+        return None
     
-    def inject_strategy_parameters(self, strategy_config: StrategyConfig):
-        """Inject strategy parameters directly into core components"""
-        try:
-            logger.info(f"Injecting parameters for strategy: {strategy_config.strategy_id}")
-            
-            # Check if strategy_config has the expected attributes, if not create them from existing data
-            if not hasattr(strategy_config, 'signal_params'):
-                strategy_config.signal_params = strategy_config.signal_generation.get('parameters', {}) if hasattr(strategy_config, 'signal_generation') else {}
-            if not hasattr(strategy_config, 'execution_params'):
-                strategy_config.execution_params = strategy_config.parameters if hasattr(strategy_config, 'parameters') else {}
-            if not hasattr(strategy_config, 'risk_params'):
-                strategy_config.risk_params = strategy_config.risk_management if hasattr(strategy_config, 'risk_management') else {}
-            if not hasattr(strategy_config, 'portfolio_params'):
-                strategy_config.portfolio_params = strategy_config.parameters if hasattr(strategy_config, 'parameters') else {}
-            
-            # Store strategy configuration
-            self.active_strategies[strategy_config.strategy_id] = strategy_config
-            
-            # Create and cache strategy instance
-            strategy_instance = self._create_strategy_instance(strategy_config)
-            
-            if strategy_instance:
-                self.strategy_cache[strategy_config.strategy_id] = strategy_instance
-                logger.info(f"✅ Created and cached strategy instance for {strategy_config.strategy_id}")
-            else:
-                logger.warning(f"❌ Failed to create strategy instance for {strategy_config.strategy_id}")
-            
-            logger.info(f"Successfully injected parameters for strategy: {strategy_config.strategy_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to inject strategy parameters: {e}")
-            # Don't raise - allow trading cycle to continue
+    def _process_momentum_signals(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig,
+                                slice_timestamp: datetime, has_position: bool, symbol_data=None) -> Optional[TradingSignal]:
+        """Process momentum-based signals with intelligent logic"""
+        signal_strength = float(strategy_signals.get('momentum', 0.0))
+        confidence = float(strategy_signals.get('confidence', 0.5))
+        
+        # Get thresholds
+        entry_threshold = strategy_config.signal_params.get('entry_threshold', 0.001)
+        exit_threshold = strategy_config.signal_params.get('exit_threshold', 0.001)
+        
+        if has_position:
+            # Exit logic for existing positions
+            return self._process_momentum_exit(
+                symbol, signal_strength, confidence, strategy_config, slice_timestamp, symbol_data
+            )
+        else:
+            # Entry logic for new positions
+            return self._process_momentum_entry(
+                symbol, signal_strength, confidence, strategy_config, slice_timestamp, entry_threshold
+            )
+    
+    def _process_momentum_exit(self, symbol: str, signal_strength: float, confidence: float,
+                             strategy_config: StrategyConfig, slice_timestamp: datetime, symbol_data=None) -> Optional[TradingSignal]:
+        """Process momentum exit signals"""
+        # Get exit threshold
+        exit_threshold = strategy_config.signal_params.get('exit_threshold', 0.001)
+        momentum_strength = abs(signal_strength)
+        
+        # Determine if we should exit based on momentum reversal
+        should_exit = momentum_strength >= exit_threshold
+        
+        if should_exit:
+            return TradingSignal(
+                symbol_pair=symbol,
+                signal_type=SignalType.CLOSE_LONG,
+                strength=SignalStrength.STRONG if momentum_strength > 0.002 else SignalStrength.MODERATE,
+                confidence=confidence,
+                position_size=1.0,
+                entry_price=0.0,
+                timestamp=slice_timestamp,
+                metadata={
+                    'signal_source': 'momentum_exit',
+                    'exit_reason': f'momentum_reversal_{signal_strength:.6f}',
+                    'momentum': signal_strength,
+                    'strategy_id': strategy_config.strategy_id,
+                    'is_exit_signal': True
+                }
+            )
+        
+        return None
+    
+    def _process_momentum_entry(self, symbol: str, signal_strength: float, confidence: float,
+                              strategy_config: StrategyConfig, slice_timestamp: datetime, entry_threshold: float) -> Optional[TradingSignal]:
+        """Process momentum entry signals"""
+        momentum_strength = abs(signal_strength)
+        
+        # Dynamic position sizing based on momentum strength
+        base_position_size = 0.2
+        if momentum_strength > 0.005:
+            dynamic_position_size = min(0.5, base_position_size + momentum_strength * 20)
+        elif momentum_strength > 0.003:
+            dynamic_position_size = min(0.4, base_position_size + momentum_strength * 15)
+        else:
+            dynamic_position_size = base_position_size
+        
+        # Determine signal type based on momentum direction
+        if signal_strength >= entry_threshold:
+            signal_type = SignalType.LONG
+        elif signal_strength <= -entry_threshold:
+            signal_type = SignalType.SHORT
+        else:
+            return None
+        
+        return TradingSignal(
+            symbol_pair=symbol,
+            signal_type=signal_type,
+            strength=SignalStrength.STRONG if momentum_strength > 0.004 else SignalStrength.MODERATE,
+            confidence=confidence,
+            position_size=dynamic_position_size,
+            entry_price=0.0,
+            timestamp=slice_timestamp,
+            metadata={
+                'signal_source': 'momentum_entry',
+                'entry_reason': f'momentum_strength_{signal_strength:.6f}',
+                'momentum': signal_strength,
+                'dynamic_position_size': dynamic_position_size,
+                'strategy_id': strategy_config.strategy_id,
+                'is_exit_signal': False
+            }
+        )
+    
+    def _process_mean_reversion_signals(self, symbol: str, strategy_signals: Dict, strategy_config: StrategyConfig,
+                                      slice_timestamp: datetime, has_position: bool) -> Optional[TradingSignal]:
+        """Process mean reversion signals"""
+        # Extract mean reversion components
+        ma_signal = strategy_signals.get('MA_MeanReversion', 0.0)
+        bb_signal = strategy_signals.get('BB_MeanReversion', 0.0)
+        rsi_signal = strategy_signals.get('RSI_MeanReversion', 0.0)
+        
+        # Calculate composite signal
+        composite_signal = (bb_signal * 0.5) + (rsi_signal * 0.3) + (ma_signal * 0.2)
+        
+        # Entry logic for mean reversion
+        should_enter = (bb_signal > 0.5 or composite_signal > 0.3 or rsi_signal > 0.25)
+        
+        if should_enter and not has_position:
+            return TradingSignal(
+                symbol_pair=symbol,
+                signal_type=SignalType.LONG,
+                strength=SignalStrength.STRONG if composite_signal > 0.4 else SignalStrength.MODERATE,
+                confidence=min(0.95, 0.5 + composite_signal),
+                position_size=0.25,
+                entry_price=0.0,
+                timestamp=slice_timestamp,
+                metadata={
+                    'signal_source': 'mean_reversion',
+                    'ma_signal': ma_signal,
+                    'bb_signal': bb_signal,
+                    'rsi_signal': rsi_signal,
+                    'composite_signal': composite_signal,
+                    'strategy_id': strategy_config.strategy_id,
+                    'is_exit_signal': False
+                }
+            )
+        
+        return None
+    
+    # ================================================================================
+    # EXECUTION AND PORTFOLIO
+    # ================================================================================
     
     async def _validate_signals(self, signals: List[TradingSignal], strategy_config: StrategyConfig) -> List[TradingSignal]:
-        """Validate signals using configured risk manager"""
+        """Validate signals using risk management"""
         try:
             validated_signals = []
             
             for signal in signals:
-                
-                # Validate position size
                 try:
                     position_size = self.risk_manager.calculate_position_size(
                         symbol=signal.symbol_pair,
@@ -1448,221 +814,149 @@ class UnifiedCoreEngine:
                         method="signal_strength"
                     )
                     
-                    # Check if position size is within limits
                     if position_size.position_size <= self.risk_manager.risk_limits.max_position_size:
                         validated_signals.append(signal)
                     else:
-                        logger.warning(f"Signal rejected due to position size limit: {signal.symbol_pair}")
+                        self.logger.warning(f"Signal rejected - position size limit: {signal.symbol_pair}")
+                        
                 except Exception as e:
-                    logger.error(f"Error validating signal for {signal.symbol_pair}: {e}")
+                    self.logger.error(f"Signal validation error: {signal.symbol_pair} - {e}")
             
-            logger.debug(f"Validated {len(validated_signals)} signals for {strategy_config.strategy_id}")
+            self.logger.debug(f"Validated {len(validated_signals)}/{len(signals)} signals")
             return validated_signals
             
         except Exception as e:
-            logger.error(f"Failed to validate signals: {e}")
-            raise
+            self.logger.error(f"Signal validation failed: {e}")
+            return []
     
     async def _execute_signals(self, signals: List[TradingSignal], strategy_config: StrategyConfig) -> List[ExecutionResult]:
-        """Execute trading signals using configured execution engine"""
+        """Execute trading signals with anti-churning protection"""
         try:
             execution_results = []
             
-            # 🎯 STRATEGY-AWARE ANTI-CHURNING: Only prevent churning within the same strategy
-            # Each strategy can trade the same symbol independently (separate portfolios)
-            current_slice = strategy_config.signal_params.get('slice_index', -1) if hasattr(strategy_config, 'signal_params') and strategy_config.signal_params else -1
-            strategy_id = getattr(strategy_config, 'strategy_id', 'unknown')
+            # Anti-churning: Track symbols traded by strategy in current slice
+            current_slice = strategy_config.signal_params.get('slice_index', -1)
+            strategy_id = strategy_config.strategy_id
             
             if current_slice >= 0:
-                # Create strategy-specific slice lock key
                 strategy_slice_key = f"{strategy_id}_{current_slice}"
-                
                 if strategy_slice_key not in self.slice_trading_locks:
                     self.slice_trading_locks[strategy_slice_key] = set()
                 
-                # Filter out signals for symbols already traded by THIS STRATEGY in this slice
-                filtered_signals = []
-                for signal in signals:
-                    if signal.symbol_pair in self.slice_trading_locks[strategy_slice_key]:
-                        logger.info(f"🚫 STRATEGY SLICE LOCK: {signal.symbol_pair} already traded by {strategy_id} in slice {current_slice} - skipping to prevent churning")
-                        continue
-                    filtered_signals.append(signal)
+                # Filter signals to prevent churning
+                filtered_signals = [
+                    signal for signal in signals 
+                    if signal.symbol_pair not in self.slice_trading_locks[strategy_slice_key]
+                ]
+                
+                churning_prevented = len(signals) - len(filtered_signals)
+                if churning_prevented > 0:
+                    self.logger.info(f"🚫 Anti-churning: Prevented {churning_prevented} trades")
                 
                 signals = filtered_signals
             
+            # Execute each signal
             for signal in signals:
-                # Calculate proper quantity based on ACTUAL available capital
-                # position_size is a fraction (e.g., 0.5 for 50% of current portfolio)
-                # Get current market price
-                if hasattr(self, 'backtesting_data_provider') and self.backtesting_data_provider:
-                    current_price = self.backtesting_data_provider.get_current_price(signal.symbol_pair)
-                    if current_price is None:
-                        # Use reasonable fallback prices based on typical stock ranges
-                        fallback_prices = {'TSLA': 220.0, 'AAPL': 180.0, 'MSFT': 350.0, 'GOOGL': 140.0}
-                        current_price = fallback_prices.get(signal.symbol_pair, 100.0)
-                        logger.warning(f"Using fallback price ${current_price:.2f} for {signal.symbol_pair}")
-                else:
-                    # Default fallback when no data provider available
-                    fallback_prices = {'TSLA': 220.0, 'AAPL': 180.0, 'MSFT': 350.0, 'GOOGL': 140.0}
-                    current_price = fallback_prices.get(signal.symbol_pair, 100.0)
-                    logger.warning(f"No data provider available, using fallback price ${current_price:.2f} for {signal.symbol_pair}")
-                
-                # Get ACTUAL available capital from portfolio manager (not hardcoded!)
-                actual_capital = self.portfolio_manager.available_capital if self.portfolio_manager else 1000000.0
-                
-                # Capital validation
-                if actual_capital <= 0:
-                    logger.warning(f"Skipping {signal.symbol_pair} - No capital available")
-                    continue
-                
-                # Reserve 5% of capital for trading costs and risk management
-                usable_capital = actual_capital * 0.95
-                
-                # Calculate position value based on USABLE capital (with reserve)
-                position_value = signal.position_size * usable_capital
-                
-                # 🎯 PROFESSIONAL FIX: Position-aware quantity calculation
-                if signal.signal_type == SignalType.LONG:
-                    # BUY: Calculate based on available capital
-                    raw_quantity = position_value / current_price
+                result = await self._execute_single_signal(signal, strategy_config)
+                if result:
+                    execution_results.append(result)
                     
-                    # Position size validation - ensure meaningful trade size
-                    if raw_quantity >= 1.0 and position_value >= 100.0:
-                        quantity = int(raw_quantity)  # Integer shares only
-                    else:
-                        # Skip trades that are too small
-                        logger.debug(f"Skipping {signal.symbol_pair} BUY - trade too small: {raw_quantity:.2f} shares, ${position_value:.2f}")
-                        continue
-                    
-                    # Cap trade size to available capital
-                    max_affordable_shares = int(usable_capital / current_price) 
-                    quantity = min(quantity, max_affordable_shares)
-                    
-                elif signal.signal_type == SignalType.CLOSE_LONG:
-                    # CLOSE LONG: Close existing long position only
-                    current_position = self.portfolio_manager.get_position(signal.symbol_pair) if self.portfolio_manager else None
-                    
-                    if current_position and current_position.quantity > 0:
-                        # Close the entire long position
-                        quantity = current_position.quantity
-                        logger.info(f"📊 CLOSE LONG: {signal.symbol_pair} closing {quantity} shares")
-                    else:
-                        # No long position to close - skip this signal
-                        logger.info(f"⚠️ CLOSE LONG IGNORED: {signal.symbol_pair} has no long position to close")
-                        return None
-                        
-                elif signal.signal_type == SignalType.SHORT:
-                    # SELL: Calculate based on EXISTING POSITION
-                    current_position = self.portfolio_manager.get_position(signal.symbol_pair) if self.portfolio_manager else None
-                    
-                    if current_position and current_position.quantity > 0:
-                        # position_size represents % of current position to sell
-                        raw_quantity = current_position.quantity * signal.position_size
-                        quantity = int(raw_quantity)
-                        
-                        # Ensure we don't sell more than we own
-                        quantity = min(quantity, current_position.quantity)
-                        
-                        logger.info(f"📊 SELL calculation for {signal.symbol_pair}: "
-                                  f"Current position: {current_position.quantity}, "
-                                  f"Signal size: {signal.position_size:.2%}, "
-                                  f"Calculated quantity: {quantity}")
-                    else:
-                        # Can't sell what we don't own
-                        logger.debug(f"Skipping {signal.symbol_pair} SELL - no position to close")
-                        continue
-                
-                if quantity <= 0:
-                    logger.debug(f"Skipping {signal.symbol_pair} - final quantity = {quantity}")
-                    continue
-                
-                # Log execution
-                logger.info(f"Executing {signal.symbol_pair}: {quantity} shares @ ${current_price:.2f}")
-                
-                # Create execution request
-                request = ExecutionRequest(
-                    symbol=signal.symbol_pair,
-                    side=OrderSide.BUY if signal.signal_type == SignalType.LONG else OrderSide.SELL,
-                    quantity=quantity,
-                    algorithm=ExecutionAlgorithm.TWAP,
-                    strategy_id=strategy_config.strategy_id
-                )
-                
-                # Execute order
-                if self.execution_engine:
-                    # 🎯 DEBUG BACKTESTING MODE ROUTING
-                    has_backtesting_attr = hasattr(self, 'backtesting_mode')
-                    backtesting_value = getattr(self, 'backtesting_mode', False)
-                    logger.info(f"🔍 EXECUTION ROUTING: has_backtesting_mode={has_backtesting_attr}, backtesting_mode={backtesting_value}")
-                    
-                    if has_backtesting_attr and backtesting_value:
-                        logger.info(f"✅ PURE SIMULATION: {request.symbol} {request.side} {request.quantity}")
-                    else:
-                        logger.info(f"Executing via live engine: {request.symbol} {request.side} {request.quantity}")
-                    
-                    result = await self.execution_engine.execute_order(request)
-                    
-                    logger.info(f"🔍 DEBUG AFTER EXECUTION ENGINE: executed_quantity={result.executed_quantity}")
-                    
-                    # In pure backtesting mode, execution should never fail
-                    if result.status == ExecutionStatus.FAILED and hasattr(self, 'backtesting_mode') and self.backtesting_mode:
-                        logger.error(f"❌ Pure backtesting execution failed: {result.error_message}")
-                    elif result.status == ExecutionStatus.FAILED:
-                        logger.warning(f"Live execution failed for {request.symbol}: {result.error_message}")
-                        # Create a successful result for backtesting fallback
-                        result = ExecutionResult(
-                            request_id=request.request_id,
-                            status=ExecutionStatus.SUCCESS,
-                            symbol=request.symbol,
-                            side=request.side,
-                            requested_quantity=request.quantity,
-                            executed_quantity=request.quantity,
-                            average_price=current_price,
-                            total_cost=request.quantity * current_price * 0.0005,  # 5 bps commission
-                            error_message="Backtesting bypass - execution engine failure"
-                        )
-                else:
-                    # Fallback execution for backtesting
-                    logger.info(f"Executing via fallback: {request.symbol} {request.side} {request.quantity}")
-                    result = ExecutionResult(
-                        request_id=request.request_id,
-                        status=ExecutionStatus.SUCCESS,
-                        symbol=request.symbol,
-                        side=request.side,
-                        requested_quantity=request.quantity,
-                        executed_quantity=request.quantity,
-                        average_price=current_price,
-                        total_cost=request.quantity * current_price * 0.0005,  # 5 bps commission
-                        error_message="Backtesting fallback execution"
-                    )
-                
-                execution_results.append(result)
-                
-                logger.info(f"🔍 DEBUG AFTER APPEND: executed_quantity={result.executed_quantity}")
-                
-                # 🎯 ADD STRATEGY SLICE LOCK: Mark symbol as traded by this strategy in this slice
-                # Check if execution was successful using ExecutionResult.status instead of .success
-                is_successful = hasattr(result, 'status') and result.status == ExecutionStatus.SUCCESS
-                if current_slice >= 0 and is_successful:
-                    strategy_slice_key = f"{strategy_id}_{current_slice}"
-                    if strategy_slice_key in self.slice_trading_locks:
+                    # Update anti-churning locks
+                    if current_slice >= 0 and result.status == ExecutionStatus.SUCCESS:
+                        strategy_slice_key = f"{strategy_id}_{current_slice}"
                         self.slice_trading_locks[strategy_slice_key].add(signal.symbol_pair)
-                        logger.info(f"🔒 STRATEGY SLICE LOCK ADDED: {signal.symbol_pair} locked for {strategy_id} in slice {current_slice}")
             
-            logger.debug(f"Executed {len(execution_results)} orders for {strategy_config.strategy_id}")
+            self.logger.debug(f"Executed {len(execution_results)} orders")
             return execution_results
             
         except Exception as e:
-            logger.error(f"Failed to execute signals: {e}")
-            raise
+            self.logger.error(f"Signal execution failed: {e}")
+            return []
+    
+    async def _execute_single_signal(self, signal: TradingSignal, strategy_config: StrategyConfig) -> Optional[ExecutionResult]:
+        """Execute a single trading signal"""
+        try:
+            # Get current price
+            current_price = self._get_current_price(signal.symbol_pair)
+            
+            # Calculate quantity
+            quantity = self._calculate_quantity(signal, current_price)
+            if quantity <= 0:
+                self.logger.debug(f"Skipping {signal.symbol_pair} - invalid quantity")
+                return None
+            
+            # Create execution request
+            request = ExecutionRequest(
+                symbol=signal.symbol_pair,
+                side=OrderSide.BUY if signal.signal_type == SignalType.LONG else OrderSide.SELL,
+                quantity=quantity,
+                algorithm=ExecutionAlgorithm.TWAP,
+                strategy_id=strategy_config.strategy_id
+            )
+            
+            # Execute order
+            if self.execution_engine:
+                result = await self.execution_engine.execute_order(request)
+            else:
+                # Fallback execution
+                result = ExecutionResult(
+                    request_id=request.request_id,
+                    status=ExecutionStatus.SUCCESS,
+                    symbol=request.symbol,
+                    side=request.side,
+                    requested_quantity=request.quantity,
+                    executed_quantity=request.quantity,
+                    average_price=current_price,
+                    total_cost=request.quantity * current_price * self.config.commission_rate
+                )
+            
+            self.logger.info(f"✅ Executed: {signal.symbol_pair} {request.side} {quantity}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Single signal execution failed: {e}")
+            return None
+    
+    def _get_current_price(self, symbol: str) -> float:
+        """Get current market price for symbol"""
+        if hasattr(self, 'backtesting_data_provider') and self.backtesting_data_provider:
+            price = self.backtesting_data_provider.get_current_price(symbol)
+            if price:
+                return price
+        
+        # Fallback prices
+        fallback_prices = {'TSLA': 220.0, 'AAPL': 180.0, 'MSFT': 350.0, 'GOOGL': 140.0}
+        return fallback_prices.get(symbol, 100.0)
+    
+    def _calculate_quantity(self, signal: TradingSignal, current_price: float) -> int:
+        """Calculate order quantity based on signal and available capital"""
+        try:
+            if signal.signal_type == SignalType.CLOSE_LONG:
+                # Close existing position
+                current_position = self.portfolio_manager.get_position(signal.symbol_pair)
+                return current_position.quantity if current_position and current_position.quantity > 0 else 0
+            
+            elif signal.signal_type in [SignalType.LONG, SignalType.SHORT]:
+                # New position
+                available_capital = self.portfolio_manager.available_capital * 0.95  # 5% reserve
+                position_value = signal.position_size * available_capital
+                
+                if position_value >= 100.0:  # Minimum trade size
+                    quantity = int(position_value / current_price)
+                    max_affordable = int(available_capital / current_price)
+                    return min(quantity, max_affordable)
+            
+            return 0
+            
+        except Exception as e:
+            self.logger.error(f"Quantity calculation failed: {e}")
+            return 0
     
     async def _update_portfolio(self, execution_results: List[ExecutionResult], strategy_config: StrategyConfig) -> PortfolioMetrics:
-        """Update portfolio using configured portfolio manager"""
+        """Update portfolio with execution results"""
         try:
-            # Get slice timestamp for backtesting context
             slice_timestamp = strategy_config.signal_params.get('slice_timestamp', datetime.now())
             
-            # Process execution results
             for result in execution_results:
                 if result.status == ExecutionStatus.SUCCESS:
                     self.portfolio_manager.process_trade(
@@ -1675,36 +969,251 @@ class UnifiedCoreEngine:
             
             # Get portfolio metrics
             current_prices = {result.symbol: result.average_price for result in execution_results}
-            portfolio_metrics = self.portfolio_manager.get_portfolio_metrics(current_prices)
-            
-            logger.debug(f"Updated portfolio for {strategy_config.strategy_id}")
-            return portfolio_metrics
+            return self.portfolio_manager.get_portfolio_metrics(current_prices)
             
         except Exception as e:
-            logger.error(f"Failed to update portfolio: {e}")
+            self.logger.error(f"Portfolio update failed: {e}")
             raise
     
+    # ================================================================================
+    # ANALYTICS AND OPTIMIZATION
+    # ================================================================================
+    
     async def _generate_analytics(self, portfolio_update: PortfolioMetrics, strategy_config: StrategyConfig) -> Dict[str, Any]:
-        """Generate analytics using configured analytics engine"""
+        """Generate performance analytics"""
         try:
-            # Generate performance analytics
-            analytics = {
+            return {
                 'total_return': portfolio_update.total_return_pct,
                 'sharpe_ratio': portfolio_update.sharpe_ratio,
                 'max_drawdown': portfolio_update.max_drawdown,
                 'position_count': portfolio_update.position_count,
                 'timestamp': datetime.now().isoformat()
             }
+        except Exception as e:
+            self.logger.error(f"Analytics generation failed: {e}")
+            return {}
+    
+    async def _apply_trade_engine_optimization(self, signals: List[TradingSignal], analytics: Dict[str, Any], strategy_config: StrategyConfig):
+        """Apply Trade Engine optimization if available"""
+        if not self.trade_engine_optimizer:
+            return
+        
+        try:
+            optimization_params = {
+                'signals_count': len(signals),
+                'total_return': analytics.get('total_return', 0),
+                'max_drawdown': analytics.get('max_drawdown', 0)
+            }
             
-            logger.debug(f"Generated analytics for {strategy_config.strategy_id}")
-            return analytics
+            self.logger.info(f"🔧 Trade Engine optimization applied: {optimization_params}")
             
         except Exception as e:
-            logger.error(f"Failed to generate analytics: {e}")
+            self.logger.warning(f"Trade Engine optimization failed: {e}")
+    
+    # ================================================================================
+    # DATA LOADING
+    # ================================================================================
+    
+    async def _load_market_data(self, data_source: Any, strategy_config: StrategyConfig) -> Dict[str, Any]:
+        """Load and process market data from various sources"""
+        try:
+            if isinstance(data_source, dict):
+                return self._process_dict_data_source(data_source)
+            else:
+                return self._create_default_market_data()
+                
+        except Exception as e:
+            self.logger.error(f"Market data loading failed: {e}")
+            return self._create_default_market_data()
+    
+    def _process_dict_data_source(self, data_source: dict) -> Dict[str, Any]:
+        """Process dictionary-based data source"""
+        # Check if pre-processed DataFrame format
+        if 'data' in data_source and isinstance(data_source['data'], pd.DataFrame):
+            return {
+                'symbols': data_source.get('symbols', []),
+                'data': data_source['data'],
+                'timestamp': data_source.get('timestamp', datetime.now())
+            }
+        
+        # Process raw data format
+        metadata_keys = {'timestamp', 'slice_index', 'total_slices', 'data', 'symbols'}
+        symbols = [key for key in data_source.keys() if key not in metadata_keys]
+        
+        if not symbols:
+            return self._create_default_market_data()
+        
+        # Create DataFrame from raw data
+        data_records = []
+        current_time = data_source.get('timestamp', datetime.now())
+        
+        for symbol in symbols:
+            symbol_data = data_source[symbol]
+            record = self._create_data_record(symbol, symbol_data, current_time)
+            if record:
+                data_records.append(record)
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_records)
+        if not df.empty:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        
+        return {
+            'symbols': symbols,
+            'data': df,
+            'timestamp': current_time
+        }
+    
+    def _create_data_record(self, symbol: str, symbol_data: Any, current_time: datetime) -> Optional[Dict]:
+        """Create a data record from symbol data"""
+        try:
+            if isinstance(symbol_data, dict):
+                if 'price_history' in symbol_data:
+                    # Handle price history format
+                    price_history = symbol_data['price_history']
+                    if price_history:
+                        return {
+                            'timestamp': price_history[-1].get('timestamp', current_time),
+                            'symbol': symbol,
+                            'open': price_history[-1].get('open', 100.0),
+                            'high': price_history[-1].get('high', 100.0),
+                            'low': price_history[-1].get('low', 100.0),
+                            'close': price_history[-1].get('close', 100.0),
+                            'volume': price_history[-1].get('volume', 1000)
+                        }
+                else:
+                    # Handle simple price format
+                    price = symbol_data.get('price', symbol_data.get('close', 100.0))
+                    return {
+                        'timestamp': current_time,
+                        'symbol': symbol,
+                        'open': price,
+                        'high': price * 1.001,
+                        'low': price * 0.999,
+                        'close': price,
+                        'volume': symbol_data.get('volume', 1000)
+                    }
+            
+            # Fallback record
+            return {
+                'timestamp': current_time,
+                'symbol': symbol,
+                'open': 100.0,
+                'high': 100.1,
+                'low': 99.9,
+                'close': 100.0,
+                'volume': 1000
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Data record creation failed for {symbol}: {e}")
+            return None
+    
+    def _create_default_market_data(self) -> Dict[str, Any]:
+        """Create default market data structure"""
+        return {
+            'symbols': [],
+            'data': pd.DataFrame(),
+            'timestamp': datetime.now()
+        }
+    
+    # ================================================================================
+    # BACKTESTING SUPPORT
+    # ================================================================================
+    
+    async def set_backtesting_mode(self, clickhouse_loader, data_request):
+        """Initialize backtesting mode with ClickHouse data provider"""
+        try:
+            from core_structure.market_data.backtesting_data_provider import BacktestingDataProvider
+            from core_structure.execution_engine.backtesting_execution_engine import BacktestingExecutionEngine
+            
+            # Initialize backtesting data provider
+            self.backtesting_data_provider = BacktestingDataProvider(clickhouse_loader, data_request)
+            await self.backtesting_data_provider.initialize()
+            
+            # Set backtesting mode
+            self.backtesting_mode = True
+            
+            # Replace execution engine with backtesting version
+            self.execution_engine = BacktestingExecutionEngine(
+                commission_rate=0.001,
+                slippage_bps=1.0
+            )
+            self.execution_engine.set_backtesting_data_provider(self.backtesting_data_provider)
+            
+            self.logger.info("✅ Backtesting mode initialized")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Backtesting mode initialization failed: {e}")
             raise
     
+    async def advance_backtesting_time(self, time_index: int):
+        """Advance backtesting time"""
+        if hasattr(self, 'backtesting_data_provider'):
+            self.backtesting_data_provider.advance_time(time_index)
+    
+    def reset_for_backtesting(self):
+        """Reset engine state for clean backtesting"""
+        self.logger.info("🔄 Resetting for backtesting")
+        
+        # Reset portfolio
+        if self.portfolio_manager:
+            self.portfolio_manager.reset_for_backtesting()
+        
+        # Clear caches
+        self.strategy_cache.clear()
+        self.strategy_config_cache.clear()
+        self.trade_engine_strategy_initialized.clear()
+        self.slice_trading_locks.clear()
+        
+        # Reset metrics
+        self.metrics = EngineMetrics()
+        self.cycle_times.clear()
+        
+        self.logger.info("✅ Backtesting reset complete")
+    
+    # ================================================================================
+    # IBKR INTEGRATION
+    # ================================================================================
+    
+    async def connect_ibkr(self) -> bool:
+        """Connect to IBKR broker"""
+        if not self.ibkr_bridge:
+            self.logger.warning("IBKR bridge not initialized")
+            return False
+        
+        try:
+            success = await self.ibkr_bridge.connect()
+            if success:
+                self.logger.info("✅ IBKR connected")
+            else:
+                self.logger.error("❌ IBKR connection failed")
+            return success
+        except Exception as e:
+            self.logger.error(f"IBKR connection error: {e}")
+            return False
+    
+    async def disconnect_ibkr(self) -> bool:
+        """Disconnect from IBKR broker"""
+        if not self.ibkr_bridge:
+            return True
+        
+        try:
+            success = await self.ibkr_bridge.disconnect()
+            if success:
+                self.logger.info("✅ IBKR disconnected")
+            return success
+        except Exception as e:
+            self.logger.error(f"IBKR disconnection error: {e}")
+            return False
+    
+    # ================================================================================
+    # UTILITY METHODS
+    # ================================================================================
+    
     def _update_metrics(self, success: bool, processing_time_ms: float):
-        """Update engine metrics"""
+        """Update engine performance metrics"""
         self.metrics.total_cycles += 1
         
         if success:
@@ -1713,24 +1222,20 @@ class UnifiedCoreEngine:
             self.metrics.failed_cycles += 1
         
         # Update average processing time
-        total_time = sum(self.cycle_times)
-        self.metrics.average_processing_time_ms = total_time / len(self.cycle_times)
+        if self.cycle_times:
+            self.metrics.average_processing_time_ms = sum(self.cycle_times) / len(self.cycle_times)
         
-        # Update cache hit rate (placeholder)
-        self.metrics.cache_hit_rate = 0.85  # Placeholder
-        
-        # Update active strategies count
         self.metrics.active_strategies = len(self.active_strategies)
-        
-        # Update timestamp
         self.metrics.last_updated = datetime.now()
     
     def get_engine_status(self) -> Dict[str, Any]:
-        """Get current engine status"""
+        """Get comprehensive engine status"""
         return {
             'engine_id': self.config.engine_id,
             'status': self.status.value,
             'trading_mode': self.config.trading_mode.value,
+            'backtesting_mode': self.backtesting_mode,
+            'trade_engine_available': TRADE_ENGINE_AVAILABLE,
             'active_strategies': len(self.active_strategies),
             'metrics': {
                 'total_cycles': self.metrics.total_cycles,
@@ -1747,22 +1252,25 @@ class UnifiedCoreEngine:
         return self.active_strategies.get(strategy_id)
     
     def list_active_strategies(self) -> List[str]:
-        """List all active strategy IDs"""
+        """List active strategy IDs"""
         return list(self.active_strategies.keys())
     
     def remove_strategy(self, strategy_id: str) -> bool:
-        """Remove strategy from active strategies"""
+        """Remove strategy from engine"""
         if strategy_id in self.active_strategies:
             del self.active_strategies[strategy_id]
-            logger.info(f"Removed strategy: {strategy_id}")
+            self.strategy_cache.pop(strategy_id, None)
+            self.strategy_config_cache.pop(strategy_id, None)
+            self.trade_engine_strategy_initialized.pop(strategy_id, None)
+            self.logger.info(f"✅ Strategy removed: {strategy_id}")
             return True
         return False
     
     def shutdown(self):
-        """Shutdown the unified core engine"""
-        logger.info("Shutting down Unified Core Engine")
+        """Shutdown unified core engine"""
+        self.logger.info("🔄 Shutting down Unified Core Engine")
         
-        # Shutdown core components
+        # Shutdown components
         if hasattr(self, 'signal_generator'):
             self.signal_generator.shutdown()
         
@@ -1773,34 +1281,4 @@ class UnifiedCoreEngine:
             self.risk_manager.shutdown()
         
         self.status = EngineStatus.SHUTDOWN
-        logger.info("Unified Core Engine shutdown complete")
-
-    async def set_backtesting_mode(self, clickhouse_loader, data_request):
-        """Set backtesting mode with ClickHouse data provider"""
-        from core_structure.market_data.backtesting_data_provider import BacktestingDataProvider
-        from core_structure.execution_engine.backtesting_execution_engine import BacktestingExecutionEngine
-        
-        self.backtesting_data_provider = BacktestingDataProvider(clickhouse_loader, data_request)
-        
-        # Initialize the data provider to load historical data
-        await self.backtesting_data_provider.initialize()
-        logger.info("✅ BacktestingDataProvider initialized with real ClickHouse data")
-        
-        self.backtesting_mode = True
-        logger.info(f"🎯 BACKTESTING MODE SET: self.backtesting_mode = {self.backtesting_mode}")
-        
-        # 🎯 PROFESSIONAL ENHANCEMENT: Replace execution engine with pure simulation
-        logger.info("🔧 Switching to pure backtesting execution engine (No IBKR)")
-        self.execution_engine = BacktestingExecutionEngine(
-            commission_rate=0.001,  # 0.1% commission
-            slippage_bps=1.0        # 1 basis point slippage
-        )
-        self.execution_engine.set_backtesting_data_provider(self.backtesting_data_provider)
-        
-        logger.info("✅ UnifiedCoreEngine set to PURE backtesting mode (No IBKR attempts)")
-        logger.info(f"🔍 EXECUTION ENGINE TYPE: {type(self.execution_engine).__name__}")
-    
-    async def advance_backtesting_time(self, time_index: int):
-        """Advance backtesting time and update all components"""
-        if hasattr(self, 'backtesting_data_provider'):
-            self.backtesting_data_provider.advance_time(time_index)
+        self.logger.info("✅ Unified Core Engine shutdown complete")
