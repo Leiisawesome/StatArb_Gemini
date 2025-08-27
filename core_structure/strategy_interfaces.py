@@ -245,17 +245,24 @@ class StrategyExecutionError(StrategyError):
 # Auto-register available strategies
 def _auto_register_strategies():
     """Auto-register available strategy implementations"""
-    try:
-        from .strategies.momentum_strategy import MomentumStrategy
-        StrategyFactory.register_strategy(StrategyType.MOMENTUM, MomentumStrategy)
-    except ImportError:
-        pass
+    import importlib
     
-    try:
-        from .strategies.mean_reversion_strategy import MeanReversionStrategy
-        StrategyFactory.register_strategy(StrategyType.MEAN_REVERSION, MeanReversionStrategy)
-    except ImportError:
-        pass
+    strategy_modules = [
+        ('trade_engine.strategies.momentum_strategy', 'MomentumStrategy', StrategyType.MOMENTUM),
+        ('trade_engine.strategies.mean_reversion_strategy', 'MeanReversionStrategy', StrategyType.MEAN_REVERSION),
+        ('trade_engine.strategies.pairs_trading_strategy', 'PairsTradingStrategy', StrategyType.PAIRS_TRADING),
+        ('trade_engine.strategies.arbitrage_strategy', 'ArbitrageStrategy', StrategyType.ARBITRAGE),
+        ('trade_engine.strategies.custom_strategy', 'CustomStrategy', StrategyType.CUSTOM),
+    ]
+    
+    for module_name, class_name, strategy_type in strategy_modules:
+        try:
+            module = importlib.import_module(module_name)
+            strategy_class = getattr(module, class_name)
+            StrategyFactory.register_strategy(strategy_type, strategy_class)
+        except (ImportError, AttributeError) as e:
+            # Strategy not available - skip silently
+            pass
 
 
 # Register strategies on module import
