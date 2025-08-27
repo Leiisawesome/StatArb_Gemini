@@ -24,13 +24,13 @@ import uuid
 from abc import ABC, abstractmethod
 
 # Import execution engine components
-from ..execution_engine.execution_engine import (
+from core_structure.execution_engine.execution_engine import (
     ExecutionEngine, ExecutionResult, ExecutionStatus, 
     ExecutionAlgorithm, ExecutionMetrics
 )
 
 # Import performance analytics components
-from .performance_analytics import PerformanceAnalyzer, AttributionAnalyzer
+from .legacy_performance_analytics import PerformanceAnalyzer, AttributionAnalyzer
 
 logger = logging.getLogger(__name__)
 

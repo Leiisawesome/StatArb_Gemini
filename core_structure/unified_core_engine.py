@@ -39,15 +39,15 @@ from .execution_engine.ibkr_execution_bridge import IBKRExecutionBridge, IBKRExe
 from .risk.risk_manager import RiskManager, RiskLimits
 from .portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics
 from .market_data.data_manager import DataManager
-from .analytics.performance_analytics import PerformanceAnalyzer
 from .broker_integration import IBKRConfig
 
 # Strategy Interface (Clean Delegation)
 from .strategy_interfaces import StrategyInterface, StrategyFactory, StrategyType, StrategyContext, StrategyError, StrategyConfig
 
-# Trade Engine Integration (No Fallbacks)
+# Trade Engine Integration - Unified Analytics
 from trade_engine.dynamic_adaptation.parameter_optimizer import RealTimeParameterOptimizer
-from trade_engine.analytics.performance_analyzer import PerformanceAnalyzer as TradeEnginePerformanceAnalyzer
+from trade_engine.analytics.performance_analyzer import PerformanceAnalyzer
+from trade_engine.analytics.legacy_performance_analytics import PerformanceAnalyzer as LegacyPerformanceAnalyzer
 from trade_engine.templates.template_registry import get_trade_engine_template_registry
 
 # Monitoring Dashboard Integration (No Fallbacks)
