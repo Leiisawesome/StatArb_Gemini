@@ -57,16 +57,8 @@ class ProcessedData:
         }
 
 
-@dataclass
-class MarketRegime:
-    """Market regime information"""
-    regime_id: int
-    regime_name: str
-    probability: float
-    volatility_level: str  # low, medium, high
-    trend_direction: str  # bullish, bearish, sideways
-    confidence: float
-    detected_at: datetime
+# Use canonical RegimeInfo to eliminate duplicate MarketRegime class
+from ..infrastructure import RegimeInfo as MarketRegime  # Alias for backward compatibility
 
 
 class DataQualityChecker:
@@ -149,8 +141,12 @@ class DataQualityChecker:
             return False, 0.0, ["processing_error"]
 
 
-class FeatureEngine:
-    """Advanced feature engineering for market data"""
+class TickFeatureEngine:
+    """Advanced tick-level feature engineering for market data
+    
+    Note: For comprehensive AI/ML feature generation, see 
+    signal_generation/feature_engine.py (FeatureEngine)
+    """
     
     def __init__(self, window_sizes: Optional[List[int]] = None):
         self.logger = logging.getLogger("data_processor.features")
@@ -399,7 +395,7 @@ class DataProcessor:
         
         # Components
         self.quality_checker = DataQualityChecker()
-        self.feature_engine = FeatureEngine()
+        self.feature_engine = TickFeatureEngine()
         
         # Processing queues
         self.processing_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)

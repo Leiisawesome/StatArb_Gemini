@@ -23,13 +23,8 @@ from enum import Enum
 import logging
 from abc import ABC, abstractmethod
 
-
-class MarketRegime(Enum):
-    """Market regime classifications affecting transaction costs"""
-    NORMAL = "normal"
-    VOLATILE = "volatile"
-    STRESSED = "stressed"
-    ILLIQUID = "illiquid"
+# Use canonical MarketRegime to eliminate duplicates
+from ..infrastructure import MarketRegime
 
 
 class ImpactType(Enum):

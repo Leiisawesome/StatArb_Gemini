@@ -21,172 +21,18 @@ import uuid
 import logging
 from collections import defaultdict
 
-
-class OrderStatus(Enum):
-    """Order status enumeration"""
-    PENDING = "pending"
-    SUBMITTED = "submitted"
-    ACKNOWLEDGED = "acknowledged"
-    PARTIALLY_FILLED = "partially_filled"
-    FILLED = "filled"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
-
-
-class OrderType(Enum):
-    """Order type enumeration"""
-    MARKET = "market"
-    LIMIT = "limit"
-    STOP = "stop"
-    STOP_LIMIT = "stop_limit"
-    ICEBERG = "iceberg"
-    HIDDEN = "hidden"
-
-
-class OrderSide(Enum):
-    """Order side enumeration"""
-    BUY = "buy"
-    SELL = "sell"
-
-
-class TimeInForce(Enum):
-    """Time in force enumeration"""
-    DAY = "day"
-    GTC = "gtc"  # Good Till Cancelled
-    IOC = "ioc"  # Immediate Or Cancel
-    FOK = "fok"  # Fill Or Kill
-
-
-@dataclass
-class Fill:
-    """Order fill information"""
-    fill_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    order_id: str = ""
-    symbol: str = ""
-    side: OrderSide = OrderSide.BUY
-    quantity: float = 0.0
-    price: float = 0.0
-    commission: float = 0.0
-    timestamp: datetime = field(default_factory=datetime.now)
-    venue: str = "default"
-    execution_id: str = ""
-    
-    @property
-    def notional_value(self) -> float:
-        """Notional value of fill"""
-        return self.quantity * self.price
-    
-    @property
-    def net_value(self) -> float:
-        """Net value after commission"""
-        return self.notional_value - self.commission
-
-
-@dataclass
-class Order:
-    """Comprehensive order representation"""
-    # Basic order details
-    symbol: str
-    side: OrderSide
-    quantity: float
-    order_type: OrderType
-    
-    # Pricing
-    price: Optional[float] = None
-    stop_price: Optional[float] = None
-    
-    # Order identification
-    order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    client_order_id: str = ""
-    parent_order_id: Optional[str] = None
-    
-    # Timing
-    created_time: datetime = field(default_factory=datetime.now)
-    submitted_time: Optional[datetime] = None
-    acknowledged_time: Optional[datetime] = None
-    last_update_time: Optional[datetime] = None
-    expiry_time: Optional[datetime] = None
-    
-    # Status and execution
-    status: OrderStatus = OrderStatus.PENDING
-    filled_quantity: float = 0.0
-    remaining_quantity: float = 0.0
-    average_fill_price: float = 0.0
-    
-    # Order attributes
-    time_in_force: TimeInForce = TimeInForce.DAY
-    min_quantity: float = 0.0  # Minimum fill quantity
-    display_quantity: float = 0.0  # For iceberg orders
-    
-    # Risk and metadata
-    account_id: str = "default"
-    strategy_id: str = "default"
-    trader_id: str = "system"
-    notes: str = ""
-    
-    # Fills
-    fills: List[Fill] = field(default_factory=list)
-    
-    def __post_init__(self):
-        """Initialize calculated fields"""
-        self.remaining_quantity = self.quantity
-        if not self.client_order_id:
-            self.client_order_id = self.order_id
-    
-    @property
-    def is_complete(self) -> bool:
-        """Check if order is complete"""
-        return self.status in [OrderStatus.FILLED, OrderStatus.CANCELLED, 
-                              OrderStatus.REJECTED, OrderStatus.EXPIRED]
-    
-    @property
-    def is_active(self) -> bool:
-        """Check if order is active"""
-        return self.status in [OrderStatus.SUBMITTED, OrderStatus.ACKNOWLEDGED, 
-                              OrderStatus.PARTIALLY_FILLED]
-    
-    @property
-    def fill_percentage(self) -> float:
-        """Percentage of order filled"""
-        if self.quantity == 0:
-            return 0.0
-        return (self.filled_quantity / self.quantity) * 100
-    
-    @property
-    def total_commission(self) -> float:
-        """Total commission across all fills"""
-        return sum(fill.commission for fill in self.fills)
-    
-    @property
-    def notional_value(self) -> float:
-        """Notional value of filled quantity"""
-        return self.filled_quantity * self.average_fill_price
-    
-    def add_fill(self, fill: Fill):
-        """Add fill to order"""
-        self.fills.append(fill)
-        
-        # Update fill statistics
-        total_quantity = sum(f.quantity for f in self.fills)
-        total_value = sum(f.quantity * f.price for f in self.fills)
-        
-        self.filled_quantity = total_quantity
-        self.remaining_quantity = self.quantity - total_quantity
-        self.average_fill_price = total_value / total_quantity if total_quantity > 0 else 0.0
-        
-        # Update status
-        if self.remaining_quantity <= 0:
-            self.status = OrderStatus.FILLED
-        elif self.filled_quantity > 0:
-            self.status = OrderStatus.PARTIALLY_FILLED
-        
-        self.last_update_time = datetime.now()
+# Use canonical types to eliminate duplicates
+from ..infrastructure import OrderStatus, OrderType, OrderSide, TimeInForce, Fill, Order
 
 
 @dataclass
 class Position:
-    """Position tracking"""
+    """Execution engine position tracking
+    
+    Note: This is a specialized position class for order execution tracking
+    with detailed long/short breakdown. For canonical position representation,
+    see infrastructure/types/strategy_types.py
+    """
     symbol: str
     quantity: float = 0.0
     average_price: float = 0.0

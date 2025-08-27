@@ -59,14 +59,17 @@ class UniverseConfig:
     categories: Dict[str, List[str]]
 
 @dataclass
-class RiskConfig:
-    """Risk management configuration"""
+class TestRiskConfig:
+    """Risk management configuration for backtesting scenarios"""
     max_portfolio_risk: float = 0.02
     max_position_size: float = 0.20
     max_drawdown_limit: float = 0.10
     atr_multiplier: float = 2.0
     trailing_stop_enabled: bool = True
     trailing_stop_pct: float = 0.02
+
+# Backward compatibility alias
+RiskConfig = TestRiskConfig
 
 class TestConfigManager:
     """
@@ -226,17 +229,17 @@ class TestConfigManager:
     # RISK MANAGEMENT METHODS
     # =============================================================================
     
-    def get_risk_config(self) -> RiskConfig:
-        """Get risk management configuration"""
-        risk_data = self.config.get('risk_management', {}).get('global', {})
+    def get_risk_config(self) -> TestRiskConfig:
+        """Get risk configuration"""
+        risk_params = self.config.get('risk', {})
         
-        return RiskConfig(
-            max_portfolio_risk=risk_data.get('max_portfolio_risk', 0.02),
-            max_position_size=risk_data.get('max_position_size', 0.20),
-            max_drawdown_limit=risk_data.get('max_drawdown_limit', 0.10),
-            atr_multiplier=risk_data.get('stop_loss', {}).get('atr_multiplier', 2.0),
-            trailing_stop_enabled=risk_data.get('stop_loss', {}).get('trailing_stop_enabled', True),
-            trailing_stop_pct=risk_data.get('stop_loss', {}).get('trailing_stop_pct', 0.02)
+        return TestRiskConfig(
+            max_portfolio_risk=risk_params.get('max_portfolio_risk', 0.02),
+            max_position_size=risk_params.get('max_position_size', 0.20),
+            max_drawdown_limit=risk_params.get('max_drawdown_limit', 0.10),
+            atr_multiplier=risk_params.get('stop_loss', {}).get('atr_multiplier', 2.0),
+            trailing_stop_enabled=risk_params.get('stop_loss', {}).get('trailing_stop_enabled', True),
+            trailing_stop_pct=risk_params.get('stop_loss', {}).get('trailing_stop_pct', 0.02)
         )
     
     # =============================================================================

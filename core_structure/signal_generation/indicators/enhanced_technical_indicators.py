@@ -15,13 +15,9 @@ class MomentumHorizon(Enum):
     INTERMEDIATE = "6m"    # 6 months (126 days)
     LONG_TERM_EXTENDED = "12m"  # 12 months (252 days)
 
-class RegimeType(Enum):
-    """Market regimes based on Cooper et al. (2004)"""
-    BULL_MARKET = "bull_market"
-    BEAR_MARKET = "bear_market"
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
-    MOMENTUM_CRASH = "momentum_crash"
+# Use canonical RegimeType (MarketRegime) from infrastructure
+# Note: This module uses BULL_MARKET/BEAR_MARKET from canonical MarketRegime enum
+from ...infrastructure import MarketRegime as RegimeType
 
 @dataclass
 class AcademicMomentumConfig:

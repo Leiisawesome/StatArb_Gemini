@@ -53,8 +53,12 @@ class MarketDataConfig:
     quality_monitoring: bool = True
     data_streaming: bool = True
 
-class DataQualityMonitor:
-    """Enhanced data quality monitoring system"""
+class BasicDataQualityMonitor:
+    """Basic data quality monitoring system for enhanced data manager
+    
+    Note: For comprehensive data quality monitoring with alerts and history,
+    see data_quality_monitor.py (DataQualityMonitor)
+    """
     
     def __init__(self, thresholds: Optional[DataQualityThresholds] = None):
         self.thresholds = thresholds or DataQualityThresholds()
@@ -361,7 +365,7 @@ class EnhancedDataManager:
             max_size=1000
         )
         
-        self.quality_monitor = DataQualityMonitor() if self.config.quality_monitoring else None
+        self.quality_monitor = BasicDataQualityMonitor() if self.config.quality_monitoring else None
         self.stream_manager: Optional[DataStreamManager] = None
         
         # Initialize core components

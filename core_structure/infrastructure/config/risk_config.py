@@ -241,7 +241,11 @@ class OperationalRiskConfig(BaseConfig):
 
 @dataclass
 class RiskConfig(BaseConfig):
-    """Combined risk management configuration"""
+    """Enterprise-level comprehensive risk management configuration
+    
+    Note: For signal-level risk config, see signal_generation/risk_management.py (SignalRiskConfig)
+    For portfolio-level risk config, see unified_config_manager.py (PortfolioRiskConfig)
+    """
     
     # Sub-configurations
     position: PositionRiskConfig = field(default_factory=PositionRiskConfig)

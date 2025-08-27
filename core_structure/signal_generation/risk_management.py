@@ -13,8 +13,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 @dataclass
-class RiskConfig:
-    """Configuration for dynamic risk management"""
+class SignalRiskConfig:
+    """Configuration for signal-level dynamic risk management
+    
+    Note: For portfolio-level risk config, see infrastructure/config/unified_config_manager.py
+    For enterprise risk config, see infrastructure/config/risk_config.py
+    """
     # ATR settings
     atr_period: int = 14
     atr_multiplier_base: float = 2.0
@@ -51,8 +55,8 @@ class RiskConfig:
 class DynamicRiskManager:
     """Dynamic risk management with ATR-based stops and regime awareness"""
     
-    def __init__(self, config: Optional[RiskConfig] = None):
-        self.config = config or RiskConfig()
+    def __init__(self, config: Optional[SignalRiskConfig] = None):
+        self.config = config or SignalRiskConfig()
         self.position_history = []
         self.risk_metrics = {
             'total_stops_hit': 0,

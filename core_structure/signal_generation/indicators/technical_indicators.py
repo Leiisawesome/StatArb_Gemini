@@ -38,14 +38,8 @@ try:
 except ImportError:
     CLICKHOUSE_AVAILABLE = False
 
-class MarketRegime(Enum):
-    """Market regime classifications"""
-    TRENDING_UP = "trending_up"
-    TRENDING_DOWN = "trending_down"  
-    SIDEWAYS = "sideways"
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
-    UNKNOWN = "unknown"
+# Use canonical MarketRegime to eliminate duplicates
+from ...infrastructure import MarketRegime
 
 @dataclass
 class IndicatorConfig:

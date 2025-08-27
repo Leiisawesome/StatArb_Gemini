@@ -12,13 +12,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class RegimeType(Enum):
-    """Market regime classifications"""
-    TRENDING = "trending"
-    MEAN_REVERTING = "mean_reverting"
-    VOLATILE = "volatile"
-    STABLE = "stable"
-    UNKNOWN = "unknown"
+# Use canonical RegimeType from infrastructure
+from ..infrastructure import MarketRegime as RegimeType
 
 @dataclass
 class RegimeConfig:

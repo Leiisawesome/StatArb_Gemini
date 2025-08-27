@@ -41,7 +41,7 @@ from core_structure.market_data.enhanced_clickhouse_loader import EnhancedClickH
 from core_structure.market_data.backtesting_data_provider import BacktestingDataProvider
 
 # Advanced risk management
-from core_structure.signal_generation.risk_management import DynamicRiskManager, RiskConfig
+from core_structure.signal_generation.risk_management import DynamicRiskManager, SignalRiskConfig
 from core_structure.signal_generation.regime_filter import RegimeAwareFilter
 from core_structure.signal_generation.indicators.market_regimes import MarketRegimeDetector
 
@@ -379,7 +379,7 @@ class AdvancedEnhancedMomentumBacktest:
             self.regime_detector = MarketRegimeDetector()
             
             # Initialize modern risk management with RiskConfig
-            risk_config = RiskConfig(
+            risk_config = SignalRiskConfig(
                 atr_period=14,
                 atr_multiplier_base=self.config.stop_loss_atr_multiplier,
                 max_stop_loss_pct=0.15,

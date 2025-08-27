@@ -21,12 +21,8 @@ import statistics
 
 logger = logging.getLogger(__name__)
 
-class AlertLevel(Enum):
-    """Alert severity levels"""
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    EMERGENCY = "emergency"
+# Use canonical AlertLevel from types
+from ..types import AlertLevel
 
 class MetricType(Enum):
     """Types of metrics to monitor"""
@@ -56,9 +52,16 @@ class MonitorConfig:
     enable_auto_recovery: bool = True
     alert_cooldown_seconds: int = 60
 
+# Use canonical PerformanceMetric from types  
+from ..types import PerformanceMetric
+
 @dataclass
-class PerformanceMetric:
-    """Individual performance metric"""
+class RealTimePerformanceMetric:
+    """Real-time performance metric (specialized for monitoring)
+    
+    Note: For general performance metrics, use the canonical PerformanceMetric
+    from infrastructure/types/monitoring_types.py
+    """
     timestamp: datetime
     component: str
     metric_type: MetricType

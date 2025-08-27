@@ -31,8 +31,8 @@ class StrategyConfig:
 
 
 @dataclass
-class RiskConfig:
-    """Risk management configuration data class."""
+class ExecutionRiskConfig:
+    """Risk management configuration for trade execution."""
     max_position_size: float = 0.1
     max_portfolio_allocation: float = 0.2
     stop_loss_percentage: float = 0.05
@@ -40,6 +40,9 @@ class RiskConfig:
     max_daily_loss: float = 0.02
     position_sizing_method: str = "fixed"
     risk_budget_per_trade: float = 0.01
+
+# Backward compatibility alias
+RiskConfig = ExecutionRiskConfig
 
 
 @dataclass
@@ -113,7 +116,7 @@ class UnifiedConfigurationManager(ConfigurationInterface):
     def _initialize_default_configs(self) -> Dict[str, Any]:
         """Initialize default configuration values."""
         return {
-            'risk': asdict(RiskConfig()),
+            'risk': asdict(ExecutionRiskConfig()),
             'execution': asdict(ExecutionConfig()),
             'system': asdict(SystemConfig()),
             'strategies': {
@@ -224,7 +227,7 @@ class UnifiedConfigurationManager(ConfigurationInterface):
         """Validate all configuration sections."""
         try:
             # Validate risk configuration
-            risk_config = RiskConfig(**self._config_cache.get('risk', {}))
+            risk_config = ExecutionRiskConfig(**self._config_cache.get('risk', {}))
             self._validate_risk_config(risk_config)
             
             # Validate execution configuration
@@ -244,7 +247,7 @@ class UnifiedConfigurationManager(ConfigurationInterface):
         except Exception as e:
             raise ConfigurationError(f"Configuration validation failed: {e}")
     
-    def _validate_risk_config(self, risk_config: RiskConfig) -> None:
+    def _validate_risk_config(self, risk_config: ExecutionRiskConfig) -> None:
         """Validate risk management configuration."""
         if not 0.0 < risk_config.max_position_size <= 1.0:
             raise ConfigurationError("max_position_size must be between 0.0 and 1.0")

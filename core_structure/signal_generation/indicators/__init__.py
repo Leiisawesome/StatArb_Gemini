@@ -45,7 +45,7 @@ from .indicator_config import (
 # Integration with new_structure
 try:
     from ..signal_generator import SignalGenerator
-    from ...market_data.data_manager import DataManager
+    from ...market_data import DataManager
     from ...ai_infrastructure.agents.trading_agents import TradingAgent
     NEW_STRUCTURE_AVAILABLE = True
 except ImportError:

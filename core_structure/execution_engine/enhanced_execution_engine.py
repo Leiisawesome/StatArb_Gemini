@@ -15,37 +15,10 @@ from enum import Enum
 import logging
 import uuid
 
+# Use canonical types to eliminate duplicates
+from ..infrastructure import OrderType, OrderSide, OrderStatus, ExecutionStrategy, Order
+
 logger = logging.getLogger(__name__)
-
-class OrderType(Enum):
-    """Order types"""
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
-    STOP = "STOP"
-    STOP_LIMIT = "STOP_LIMIT"
-
-class OrderSide(Enum):
-    """Order sides"""
-    BUY = "BUY"
-    SELL = "SELL"
-
-class OrderStatus(Enum):
-    """Order status"""
-    PENDING = "PENDING"
-    SUBMITTED = "SUBMITTED"
-    PARTIAL = "PARTIAL"
-    FILLED = "FILLED"
-    CANCELLED = "CANCELLED"
-    REJECTED = "REJECTED"
-
-class ExecutionStrategy(Enum):
-    """Execution strategies"""
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
-    TWAP = "TWAP"  # Time-Weighted Average Price
-    VWAP = "VWAP"  # Volume-Weighted Average Price
-    ICEBERG = "ICEBERG"  # Iceberg orders
-    POV = "POV"  # Percentage of Volume
 
 class ExecutionStatus(Enum):
     """Execution status enumeration"""
@@ -56,29 +29,6 @@ class ExecutionStatus(Enum):
     FAILED = "failed"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
-
-@dataclass
-class Order:
-    """Enhanced order object"""
-    symbol: str
-    side: OrderSide
-    quantity: int
-    order_type: OrderType = OrderType.MARKET
-    limit_price: Optional[float] = None
-    stop_price: Optional[float] = None
-    
-    # Auto-generated fields
-    order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    status: OrderStatus = OrderStatus.PENDING
-    filled_quantity: int = 0
-    avg_fill_price: float = 0.0
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-    fills: List[Dict[str, Any]] = field(default_factory=list)
-    
-    def __post_init__(self):
-        """Initialize order"""
-        logger.info(f"Created order {self.order_id}: {self.side.value} {self.quantity} {self.symbol} @ {self.order_type.value}")
 
 @dataclass
 class ExecutionRequest:

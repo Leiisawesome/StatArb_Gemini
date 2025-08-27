@@ -16,35 +16,10 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Union, Tuple
 import uuid
 
+# Use canonical types to eliminate duplicates
+from ..infrastructure import OrderType, OrderSide, OrderStatus, Order
+
 logger = logging.getLogger(__name__)
-
-
-class OrderType(Enum):
-    """Order types supported by brokers"""
-    MARKET = "market"
-    LIMIT = "limit"
-    STOP = "stop"
-    STOP_LIMIT = "stop_limit"
-    TWAP = "twap"
-    VWAP = "vwap"
-    IMPLEMENTATION_SHORTFALL = "implementation_shortfall"
-
-
-class OrderSide(Enum):
-    """Order sides"""
-    BUY = "buy"
-    SELL = "sell"
-
-
-class OrderStatus(Enum):
-    """Order status enumeration"""
-    PENDING = "pending"
-    SUBMITTED = "submitted"
-    PARTIALLY_FILLED = "partially_filled"
-    FILLED = "filled"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
 
 
 @dataclass
@@ -79,38 +54,6 @@ class BrokerConfig:
 
 
 @dataclass
-class Order:
-    """Standard order representation"""
-    order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    symbol: str = ""
-    side: OrderSide = OrderSide.BUY
-    order_type: OrderType = OrderType.MARKET
-    quantity: float = 0.0
-    price: Optional[float] = None
-    stop_price: Optional[float] = None
-    
-    # Advanced order parameters
-    time_in_force: str = "DAY"
-    algo_params: Dict[str, Any] = field(default_factory=dict)
-    
-    # Metadata
-    strategy_id: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-    
-    def __post_init__(self):
-        """Validate order parameters"""
-        if self.quantity <= 0:
-            raise ValueError("Order quantity must be positive")
-        
-        if self.order_type in [OrderType.LIMIT, OrderType.STOP_LIMIT] and self.price is None:
-            raise ValueError(f"Price required for {self.order_type.value} orders")
-        
-        if self.order_type in [OrderType.STOP, OrderType.STOP_LIMIT] and self.stop_price is None:
-            raise ValueError(f"Stop price required for {self.order_type.value} orders")
-
-
-@dataclass
 class OrderResult:
     """Result of order placement"""
     order_id: str
@@ -125,7 +68,11 @@ class OrderResult:
 
 @dataclass
 class Position:
-    """Position information"""
+    """Broker-specific position information
+    
+    Note: This is a specialized position class for broker integration.
+    For canonical position representation, see infrastructure/types/strategy_types.py
+    """
     symbol: str
     quantity: float
     average_price: float

@@ -182,6 +182,9 @@ class FeatureValidator:
 class FeatureEngine:
     """
     Advanced feature engineering engine for AI-ready signal generation
+    
+    Note: For tick-level feature extraction, see 
+    market_data/data_processor.py (TickFeatureEngine)
     """
     
     def __init__(self, config: Optional[FeatureConfig] = None):

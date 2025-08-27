@@ -18,15 +18,8 @@ import pandas as pd
 
 # Core signal types
 from core_structure.signal_generation.signal_generator import TradingSignal, SignalType, SignalStrength
-
-
-class StrategyType(Enum):
-    """Supported strategy types"""
-    MOMENTUM = "momentum"
-    MEAN_REVERSION = "mean_reversion"
-    PAIRS_TRADING = "pairs_trading"
-    ARBITRAGE = "arbitrage"
-    CUSTOM = "custom"
+# Use canonical strategy types
+from .infrastructure import StrategyType, StrategyConfig
 
 
 @dataclass
@@ -47,25 +40,6 @@ class StrategyContext:
     risk_parameters: Dict[str, Any]
     timestamp: datetime
     strategy_config: Dict[str, Any]
-
-
-@dataclass
-class StrategyConfig:
-    """Strategy configuration for clean delegation"""
-    strategy_id: str
-    strategy_name: str
-    strategy_type: StrategyType
-    
-    # Strategy Parameters
-    signal_params: Dict[str, Any] = field(default_factory=dict)
-    risk_params: Dict[str, Any] = field(default_factory=dict)
-    execution_params: Dict[str, Any] = field(default_factory=dict)
-    portfolio_params: Dict[str, Any] = field(default_factory=dict)
-    
-    # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
 
 
 class StrategyInterface(Protocol):

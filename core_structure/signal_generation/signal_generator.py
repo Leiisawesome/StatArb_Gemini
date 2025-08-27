@@ -35,7 +35,7 @@ from .position_sizing import DynamicPositionSizer, PositionSizingConfig
 # Import the new transaction cost optimizer module
 from .cost_optimizer import TransactionCostOptimizer, CostConfig
 # Import the new Phase 2 modules
-from .risk_management import DynamicRiskManager, RiskConfig
+from .risk_management import DynamicRiskManager, SignalRiskConfig
 from .regime_filter import RegimeAwareFilter, RegimeConfig, RegimeType
 # Import the new Phase 3 modules
 from .multi_timeframe_ensemble import MultiTimeframeEnsemble, EnsembleConfig
@@ -68,7 +68,7 @@ except ImportError:
 
 # Market data imports
 try:
-    from ..market_data.data_manager import DataManager
+    from ..market_data import DataManager
     from ..market_data.feeds import MarketTick, DataType
 except ImportError:
     DataManager = None
@@ -109,13 +109,8 @@ class SignalStrength(Enum):
     STRONG = 3
     VERY_STRONG = 4
 
-class RegimeType(Enum):
-    """Market regime classifications"""
-    MEAN_REVERTING = "mean_reverting"
-    TRENDING = "trending"
-    VOLATILE = "volatile"
-    STABLE = "stable"
-    UNKNOWN = "unknown"
+# Use canonical RegimeType from infrastructure
+from ..infrastructure import MarketRegime as RegimeType
 
 @dataclass
 class SignalConfig:
@@ -560,7 +555,7 @@ class SignalGenerator:
             self.cost_optimizer = TransactionCostOptimizer(cost_config)
             
             # PHASE 2 ENHANCEMENT: Initialize dynamic risk manager
-            risk_config = RiskConfig(
+            risk_config = SignalRiskConfig(
                 atr_period=14,
                 atr_multiplier_base=2.0,
                 max_stop_loss_pct=0.15,

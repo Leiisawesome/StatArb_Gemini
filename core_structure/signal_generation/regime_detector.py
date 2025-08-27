@@ -63,7 +63,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class RegimeType(Enum):
-    """Market regime classifications"""
+    """Market regime classifications
+    
+    Note: This is a specialized ML-focused regime enum for the advanced regime detector.
+    For basic regime classification, use the canonical MarketRegime from 
+    infrastructure/types/market_types.py (available as RegimeType alias).
+    """
     MEAN_REVERTING = "mean_reverting"
     TRENDING = "trending"  
     VOLATILE = "volatile"
@@ -127,7 +132,13 @@ class RegimeState:
 
 @dataclass
 class MarketRegime:
-    """Comprehensive market regime information"""
+    """Comprehensive market regime information
+    
+    Note: This is a specialized regime detection class that wraps RegimeState
+    with additional metadata for ML-based regime detection. This is intentionally
+    different from the canonical MarketRegime enum in infrastructure/types/market_types.py
+    which is for simple regime classification.
+    """
     timestamp: datetime
     symbol: str
     current_state: RegimeState

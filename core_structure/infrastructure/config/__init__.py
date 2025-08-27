@@ -7,12 +7,15 @@ from .unified_config_manager import (
     TrainingConfig,
     TradingConfig,
     DatabaseConfig,
-    RiskConfig,
+    PortfolioRiskConfig,
     LoggingConfig,
     Environment
 )
 
 # Legacy exports for backward compatibility
+from .risk_config import RiskConfig as EnterpriseRiskConfig
+# Note: RiskConfig renamed to PortfolioRiskConfig in unified_config_manager
+RiskConfig = PortfolioRiskConfig  # Backward compatibility alias
 # ConfigManager and EnhancedConfigManager have been consolidated into UnifiedConfigManager
 
 __all__ = [

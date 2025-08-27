@@ -22,8 +22,8 @@ class RiskLevel(Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
-class OrderType(Enum):
-    """Order types for risk management"""
+class RiskOrderType(Enum):
+    """Risk management order types (distinct from trading OrderType)"""
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
     TRAILING_STOP = "trailing_stop"
@@ -73,7 +73,7 @@ class RiskOrder:
     """Risk management order"""
     symbol: str
     quantity: int
-    order_type: OrderType
+    order_type: RiskOrderType
     price: float
     trailing: bool = False
     triggered: bool = False
@@ -203,7 +203,7 @@ class RiskManager:
         stop_order = RiskOrder(
             symbol=symbol,
             quantity=quantity,
-            order_type=OrderType.STOP_LOSS,
+            order_type=RiskOrderType.STOP_LOSS,
             price=stop_price
         )
         
@@ -220,7 +220,7 @@ class RiskManager:
         profit_order = RiskOrder(
             symbol=symbol,
             quantity=quantity,
-            order_type=OrderType.TAKE_PROFIT,
+            order_type=RiskOrderType.TAKE_PROFIT,
             price=target_price
         )
         
@@ -243,7 +243,7 @@ class RiskManager:
         trailing_order = RiskOrder(
             symbol=symbol,
             quantity=quantity,
-            order_type=OrderType.TRAILING_STOP,
+            order_type=RiskOrderType.TRAILING_STOP,
             price=stop_price,
             trailing=True
         )

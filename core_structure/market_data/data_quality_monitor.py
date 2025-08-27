@@ -24,12 +24,8 @@ from .market_data_analytics import (
 logger = logging.getLogger(__name__)
 
 
-class AlertLevel(Enum):
-    """Alert level enumeration"""
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    CRITICAL = "critical"
+# Use canonical AlertLevel from infrastructure
+from ..infrastructure import AlertLevel
 
 
 class MonitoringStatus(Enum):
@@ -141,10 +137,13 @@ class DataQualityMonitorConfig:
 
 class DataQualityMonitor:
     """
-    Data Quality Monitor System
+    Comprehensive Data Quality Monitor System
     
     Provides real-time monitoring, alerting, and quality management
     for market data across the trading system.
+    
+    Note: For basic quality monitoring, see enhanced_data_manager.py 
+    (BasicDataQualityMonitor)
     """
     
     def __init__(self, config: Optional[DataQualityMonitorConfig] = None):

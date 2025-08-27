@@ -79,8 +79,12 @@ class DatabaseConfig:
     slow_query_threshold_ms: int = 1000
 
 @dataclass
-class RiskConfig:
-    """Risk management configuration"""
+class PortfolioRiskConfig:
+    """Portfolio-level risk management configuration
+    
+    Note: For signal-level risk config, see signal_generation/risk_management.py
+    For enterprise risk config, see infrastructure/config/risk_config.py
+    """
     max_position_size: float = 0.1
     stop_loss_threshold: float = 0.05
     daily_var_limit: float = 0.02
@@ -105,7 +109,7 @@ class UnifiedConfig:
     trading: TradingConfig
     training: Optional[TrainingConfig] = None
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
-    risk: RiskConfig = field(default_factory=RiskConfig)
+    risk: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     data_feeds: Dict[str, Any] = field(default_factory=dict)
     execution: Dict[str, Any] = field(default_factory=dict)
@@ -154,7 +158,7 @@ class UnifiedConfig:
             training=TrainingConfig(**config_dict['training']) if config_dict.get('training') else None,
             trading=TradingConfig(**config_dict['trading']),
             database=DatabaseConfig(**config_dict.get('database', {})),
-            risk=RiskConfig(**config_dict.get('risk', {})),
+            risk=PortfolioRiskConfig(**config_dict.get('risk', {})),
             logging=LoggingConfig(**config_dict.get('logging', {})),
             data_feeds=config_dict.get('data_feeds', {}),
             execution=config_dict.get('execution', {}),
@@ -390,10 +394,10 @@ class UnifiedConfigManager:
         db_config = self.get_database_config()
         return DatabaseConfig(**db_config)
     
-    def _get_risk_config(self) -> RiskConfig:
+    def _get_risk_config(self) -> PortfolioRiskConfig:
         """Get risk configuration"""
         risk_config = self._config.get('risk_management', {})
-        return RiskConfig(**risk_config)
+        return PortfolioRiskConfig(**risk_config)
     
     def _get_logging_config(self) -> LoggingConfig:
         """Get logging configuration"""

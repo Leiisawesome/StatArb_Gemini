@@ -12,17 +12,17 @@ Professional market data management system consolidating all data functionality:
 """
 
 from .enhanced_data_manager import (
-    EnhancedDataManager,
-    DataQualityMonitor,
+    DataQualityThresholds,
+    DataStreamConfig,
+    MarketDataConfig,
+    BasicDataQualityMonitor as DataQualityMonitor,  # Compatibility alias
     DataStreamManager,
     DataCache,
-    MarketDataConfig,
-    DataQualityThresholds,
-    DataStreamConfig
+    EnhancedDataManager
 )
 
-# Legacy exports for backward compatibility
-from .data_manager import DataManager
+# Alias for backward compatibility
+DataManager = EnhancedDataManager
 from .feeds import (
     FeedManager, PolygonFeed, AlphaVantageFeed, 
     MarketTick, DataType, FeedStatus

@@ -47,7 +47,12 @@ class PortfolioMetrics:
     timestamp: datetime = field(default_factory=datetime.now)
 
 class Position:
-    """Position object for tracking individual symbol positions"""
+    """Portfolio management position with full trade history and methods
+    
+    Note: This is a specialized position class for portfolio management
+    with trade tracking and position methods. For canonical position representation,
+    see infrastructure/types/strategy_types.py
+    """
     
     def __init__(self, symbol: str, quantity: int = 0, avg_price: float = 0.0, entry_slice: int = -1, created_at: datetime = None):
         self.symbol = symbol

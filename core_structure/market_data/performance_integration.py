@@ -38,8 +38,11 @@ class IntegrationStatus(Enum):
     INITIALIZING = "initializing"
 
 
-class PerformanceMetric(Enum):
-    """Performance metric enumeration"""
+# Use canonical PerformanceMetric for data structure
+from ..infrastructure import PerformanceMetric
+
+class PerformanceCategory(Enum):
+    """Performance metric categories (renamed from PerformanceMetric to avoid conflict)"""
     DATA_QUALITY = "data_quality"
     PROCESSING_PERFORMANCE = "processing_performance"
     SYSTEM_PERFORMANCE = "system_performance"

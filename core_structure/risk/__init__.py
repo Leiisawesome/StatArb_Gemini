@@ -21,7 +21,7 @@ from .risk_manager import (
     RiskOrder,
     PositionSize,
     RiskLevel,
-    OrderType
+    RiskOrderType  # Renamed to avoid confusion with trading OrderType
 )
 
 __all__ = [
@@ -32,5 +32,5 @@ __all__ = [
     'RiskOrder',
     'PositionSize',
     'RiskLevel',
-    'OrderType'
+    'RiskOrderType'
 ] 
