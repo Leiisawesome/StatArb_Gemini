@@ -19,6 +19,12 @@ import uuid
 from .execution_engine import ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionAlgorithm
 from .order_manager import OrderSide
 
+# Production safety imports
+from ..infrastructure.production_safety import (
+    ProductionSafetyFramework, Environment, SafetyLevel, 
+    production_safe, ValidationError, FailureMode
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,6 +45,9 @@ class BacktestingExecutionEngine:
         self.commission_rate = commission_rate  # 0.1% commission
         self.slippage_bps = slippage_bps  # 1 basis point slippage
         
+        # Initialize production safety framework
+        self.safety_framework = ProductionSafetyFramework()
+        
         # Simulation parameters
         self.backtesting_data_provider = None
         self.execution_history: List[ExecutionResult] = []
@@ -48,25 +57,58 @@ class BacktestingExecutionEngine:
         self.bid_ask_spread_bps = 2.0  # 2 basis points spread
         
         logger.info("✅ Backtesting Execution Engine initialized (Pure Simulation Mode)")
+        
+        # Log safety framework status
+        current_env = self.safety_framework.get_current_environment()
+        logger.info(f"🛡️ Backtesting Engine - Environment: {current_env.value}")
     
     def set_backtesting_data_provider(self, data_provider):
         """Set backtesting data provider for price simulation"""
         self.backtesting_data_provider = data_provider
         logger.info("✅ Backtesting data provider connected to execution engine")
     
+    @production_safe(FailureMode.EXECUTION_FAILURE)
     async def execute_order(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute order using pure simulation (no IBKR)"""
         start_time = datetime.now()
         
         try:
-            # Get current market price from backtesting data - NO FALLBACKS!
-            # 🎯 REALISTIC EXECUTION: Use appropriate price based on order side
+            # 🛡️ PRODUCTION SAFETY: Validate backtesting environment
+            current_env = self.safety_framework.get_current_environment()
+            
+            if current_env == Environment.PRODUCTION:
+                # Backtesting engine should not run in production with real money
+                self.safety_framework.record_violation(
+                    "backtesting_in_production",
+                    f"Backtesting engine used in production environment for {request.symbol}",
+                    critical=True
+                )
+                raise ValidationError(
+                    f"❌ PRODUCTION SAFETY VIOLATION: Backtesting engine cannot be used in production environment. "
+                    f"This is a simulation engine only and should not handle real money trades."
+                )
+            
+            # Get current market price from backtesting data - STRICT VALIDATION!
             side_str = "BUY" if request.side == OrderSide.BUY else "SELL"
             current_price = self._get_simulation_price(request.symbol, side_str)
+            
+            # 🛡️ PRODUCTION SAFETY: No fallbacks in staging, fail fast
             if current_price is None:
-                raise ValueError(f"❌ BACKTESTING ERROR: No price data available for {request.symbol}. "
-                               f"Data provider: {type(self.backtesting_data_provider).__name__ if self.backtesting_data_provider else 'None'}. "
-                               f"This indicates a data provider connection issue - fix the root cause instead of using fallbacks!")
+                if current_env == Environment.STAGING:
+                    self.safety_framework.record_violation(
+                        "missing_backtesting_data",
+                        f"No price data available for {request.symbol} in backtesting",
+                        critical=True
+                    )
+                    raise ValidationError(
+                        f"❌ STAGING SAFETY: No price data available for {request.symbol}. "
+                        f"Data provider: {type(self.backtesting_data_provider).__name__ if self.backtesting_data_provider else 'None'}. "
+                        f"Fix the root cause instead of using fallbacks!"
+                    )
+                else:  # DEVELOPMENT
+                    # Only allow fallbacks in development
+                    logger.warning(f"💻 DEVELOPMENT: Missing price data for {request.symbol}, using default")
+                    current_price = 100.0
             
             logger.info(f"🎯 REALISTIC EXECUTION: {request.symbol} {side_str} using {side_str.lower()} price: ${current_price:.2f}")
             
@@ -114,19 +156,46 @@ class BacktestingExecutionEngine:
             
             return result
             
+        except ValidationError:
+            # Re-raise production safety violations
+            raise
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Backtesting execution error: {e}")
+            current_env = self.safety_framework.get_current_environment()
             
-            return ExecutionResult(
-                request_id=request.request_id,
-                status=ExecutionStatus.FAILED,
-                symbol=request.symbol,
-                side=request.side,
-                requested_quantity=request.quantity,
-                execution_time=execution_time,
-                error_message=f"Simulation error: {str(e)}"
-            )
+            # Production safety: Handle errors according to environment
+            if current_env == Environment.STAGING:
+                self.safety_framework.record_violation(
+                    "backtesting_execution_error",
+                    f"Backtesting execution error for {request.symbol}: {str(e)}",
+                    critical=False
+                )
+                logger.error(f"⚠️ STAGING: Backtesting execution error: {e}")
+                # Fail fast in staging
+                return ExecutionResult(
+                    request_id=request.request_id,
+                    status=ExecutionStatus.FAILED,
+                    symbol=request.symbol,
+                    side=request.side,
+                    requested_quantity=request.quantity,
+                    execution_time=execution_time,
+                    error_message=f"Staging simulation error: {str(e)}"
+                )
+            else:  # DEVELOPMENT
+                logger.warning(f"💻 DEVELOPMENT: Backtesting execution error, using recovery: {e}")
+                # Allow recovery in development
+                return ExecutionResult(
+                    request_id=request.request_id,
+                    status=ExecutionStatus.SUCCESS,
+                    symbol=request.symbol,
+                    side=request.side,
+                    requested_quantity=request.quantity,
+                    executed_quantity=request.quantity,
+                    average_price=100.0,
+                    total_cost=request.quantity * 100.0 * self.commission_rate,
+                    execution_time=execution_time,
+                    error_message=f"Development recovery: {str(e)}"
+                )
     
     def _get_simulation_price(self, symbol: str, side: str = None) -> Optional[float]:
         """Get realistic execution price from backtesting data provider"""

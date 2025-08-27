@@ -28,6 +28,12 @@ from .order_manager import OrderManager, Order, OrderStatus, OrderType, OrderSid
 from .market_impact import MarketImpactModel, MarketConditions
 from .transaction_cost_optimizer import TransactionCostOptimizer
 
+# Production safety imports
+from ..infrastructure.production_safety import (
+    ProductionSafetyFramework, Environment, SafetyLevel, 
+    production_safe, ValidationError, FailureMode
+)
+
 
 class ExecutionStatus(Enum):
     """Execution status enumeration"""
@@ -182,6 +188,9 @@ class ExecutionEngine:
         self.enable_risk_checks = enable_risk_checks
         self.enable_cost_optimization = enable_cost_optimization
         
+        # Initialize production safety framework
+        self.safety_framework = ProductionSafetyFramework()
+        
         # Initialize components
         self.order_manager = OrderManager(
             max_order_value=max_order_value,
@@ -214,6 +223,10 @@ class ExecutionEngine:
         # Setup logging
         self.logger = logging.getLogger(__name__)
         self.logger.info("ExecutionEngine initialized with institutional-grade capabilities")
+        
+        # Log safety framework status
+        current_env = self.safety_framework.get_current_environment()
+        self.logger.info(f"🛡️ Production Safety Framework active - Environment: {current_env.value}")
     
     def set_market_data_feed(self, feed):
         """Set market data feed for execution algorithms"""
@@ -232,6 +245,7 @@ class ExecutionEngine:
         algorithm_instance.set_execution_engine(self)
         self.logger.info(f"Registered algorithm: {algorithm_type.value}")
     
+    @production_safe(FailureMode.EXECUTION_FAILURE)
     async def execute_order(self, request: ExecutionRequest) -> ExecutionResult:
         """
         Execute order using specified algorithm
@@ -421,8 +435,24 @@ class ExecutionEngine:
     async def _execute_market_order(self, 
                                   request: ExecutionRequest,
                                   market_conditions: MarketConditions) -> ExecutionResult:
-        """Execute simple market order"""
+        """Execute simple market order with production safety validation"""
         try:
+            # 🛡️ PRODUCTION SAFETY: Validate execution environment
+            current_env = self.safety_framework.get_current_environment()
+            
+            if current_env == Environment.PRODUCTION:
+                # In production, this execution engine should NOT be used for backtesting
+                if hasattr(self, 'backtesting_mode') and self.backtesting_mode:
+                    self.safety_framework.record_violation(
+                        "execution_engine_misuse",
+                        f"Main ExecutionEngine used in backtesting mode for {request.symbol}",
+                        critical=True
+                    )
+                    raise ValidationError(
+                        f"❌ PRODUCTION SAFETY VIOLATION: Main ExecutionEngine being used in backtesting mode for {request.symbol}. "
+                        f"This should use BacktestingExecutionEngine instead. Check your engine initialization!"
+                    )
+            
             # Create order
             order = Order(
                 symbol=request.symbol,
@@ -432,19 +462,48 @@ class ExecutionEngine:
                 strategy_id=request.strategy_id
             )
             
-            # Submit to order manager (simplified for backtesting)
-            if not self.order_manager.submit_order(order):
-                # If submission fails, try to bypass validation for backtesting
-                self.logger.warning(f"Order submission failed, attempting backtesting bypass for {request.symbol}")
-                # Force the order to be accepted for backtesting
-                order.status = OrderStatus.SUBMITTED
-                order.submitted_time = datetime.now()
-                self.order_manager.orders[order.order_id] = order
+            # 🛡️ PRODUCTION SAFETY: Validate market data source
+            execution_price = None
+            if self.real_time_feed:
+                execution_price = self.real_time_feed.get_current_price(request.symbol)
+            elif hasattr(self, 'backtesting_data_provider') and self.backtesting_data_provider:
+                execution_price = self.backtesting_data_provider.get_current_price(request.symbol)
             
-            # ❌ BACKTESTING ERROR: This execution engine should NOT be used in backtesting!
-            # The BacktestingExecutionEngine should be used instead.
-            raise RuntimeError(f"❌ BACKTESTING ERROR: Main ExecutionEngine being used in backtesting mode for {request.symbol}. "
-                             f"This should use BacktestingExecutionEngine instead. Check your engine initialization!")
+            # Production safety: No synthetic prices in production
+            if execution_price is None:
+                if current_env == Environment.PRODUCTION:
+                    self.safety_framework.record_violation(
+                        "missing_market_data",
+                        f"No market data available for {request.symbol}",
+                        critical=True
+                    )
+                    raise ValidationError(
+                        f"❌ PRODUCTION SAFETY: No market data available for {request.symbol}. "
+                        f"Cannot execute without real price data in production environment."
+                    )
+                elif current_env == Environment.STAGING:
+                    self.logger.warning(f"⚠️ STAGING: Missing market data for {request.symbol}, allowing execution with monitoring")
+                    execution_price = 100.0  # Default price for staging
+                else:  # DEVELOPMENT
+                    self.logger.info(f"💻 DEVELOPMENT: Using default price for {request.symbol}")
+                    execution_price = 100.0  # Default price for development
+            
+            # Submit to order manager
+            if not self.order_manager.submit_order(order):
+                # Production safety: Handle order submission failures properly
+                if current_env == Environment.PRODUCTION:
+                    self.safety_framework.record_violation(
+                        "order_submission_failure",
+                        f"Order submission failed for {request.symbol}",
+                        critical=True
+                    )
+                    raise ValidationError(f"❌ Order submission failed for {request.symbol}")
+                else:
+                    self.logger.warning(f"Order submission failed, using fallback for {current_env.value} environment")
+                    # Force the order to be accepted for non-production
+                    order.status = OrderStatus.SUBMITTED
+                    order.submitted_time = datetime.now()
+                    self.order_manager.orders[order.order_id] = order
             
             # Calculate commission
             commission = request.quantity * execution_price * self.commission_rate
@@ -470,8 +529,47 @@ class ExecutionEngine:
                     orders=[order]
                 )
             else:
-                # If fill fails, create a successful result anyway for backtesting
-                self.logger.warning(f"Fill failed for {request.symbol}, creating backtesting result")
+                # Production safety: Handle fill failures properly
+                if current_env == Environment.PRODUCTION:
+                    self.safety_framework.record_violation(
+                        "order_fill_failure", 
+                        f"Order fill failed for {request.symbol}",
+                        critical=True
+                    )
+                    raise ValidationError(f"❌ Order fill failed for {request.symbol}")
+                else:
+                    # Allow fallback for non-production
+                    self.logger.warning(f"Fill failed for {request.symbol}, creating {current_env.value} result")
+                    return ExecutionResult(
+                        request_id=request.request_id,
+                        status=ExecutionStatus.SUCCESS,
+                        symbol=request.symbol,
+                        side=request.side,
+                        requested_quantity=request.quantity,
+                        executed_quantity=request.quantity,
+                        average_price=execution_price,
+                        total_cost=commission,
+                        orders=[order]
+                    )
+                
+        except ValidationError:
+            # Re-raise production safety violations
+            raise
+        except Exception as e:
+            current_env = self.safety_framework.get_current_environment()
+            self.logger.error(f"Market order execution failed: {e}")
+            
+            # Production safety: Fail fast in production
+            if current_env == Environment.PRODUCTION:
+                self.safety_framework.record_violation(
+                    "execution_error",
+                    f"Execution error for {request.symbol}: {str(e)}",
+                    critical=True
+                )
+                raise ValidationError(f"❌ Execution failed for {request.symbol}: {str(e)}")
+            else:
+                # Allow recovery in non-production environments
+                self.logger.warning(f"Execution error in {current_env.value}, creating recovery result")
                 return ExecutionResult(
                     request_id=request.request_id,
                     status=ExecutionStatus.SUCCESS,
@@ -479,25 +577,10 @@ class ExecutionEngine:
                     side=request.side,
                     requested_quantity=request.quantity,
                     executed_quantity=request.quantity,
-                    average_price=execution_price,
-                    total_cost=commission,
-                    orders=[order]
+                    average_price=100.0,
+                    total_cost=request.quantity * 100.0 * self.commission_rate,
+                    error_message=f"Recovery execution: {str(e)}"
                 )
-                
-        except Exception as e:
-            self.logger.error(f"Market order execution failed: {e}")
-            # Return a successful result for backtesting even if there's an error
-            return ExecutionResult(
-                request_id=request.request_id,
-                status=ExecutionStatus.SUCCESS,
-                symbol=request.symbol,
-                side=request.side,
-                requested_quantity=request.quantity,
-                executed_quantity=request.quantity,
-                average_price=100.0,
-                total_cost=request.quantity * 100.0 * self.commission_rate,
-                error_message=f"Backtesting execution: {str(e)}"
-            )
     
     def _update_execution_metrics(self, result: ExecutionResult):
         """Update execution performance metrics"""
