@@ -1,18 +1,62 @@
 """
-Canonical Type Definitions
-=========================
+Canonical Type Definitions - Redirected to Messaging System
+===========================================================
 
-Centralized location for all shared types to eliminate duplicates.
+Phase 5D Infrastructure Consolidation - Types Module
+All type definitions have been consolidated into the messaging system.
+
+This module now serves as a redirect to maintain backward compatibility.
 """
 
-from .order_types import OrderType, OrderSide, OrderStatus, Order, Fill, TimeInForce, ExecutionStrategy
-from .strategy_types import StrategyType, StrategyConfig, Position
-from .market_types import MarketRegime, RegimeInfo, RegimeConfidence, RegimeType
-from .monitoring_types import AlertLevel, PerformanceMetric
+# Import all types from the consolidated messaging system
+from ..messaging.messaging_system import (
+    # Order Types
+    OrderType,
+    OrderSide,
+    OrderStatus,
+    TimeInForce,
+    ExecutionStrategy,
+    Order,
+    Fill,
+    Position,
+    
+    # Market Types
+    MarketRegime,
+    RegimeType,
+    RegimeConfidence,
+    RegimeInfo,
+    
+    # Strategy Types
+    StrategyType,
+    StrategyConfig,
+    
+    # Monitoring Types
+    AlertLevel,
+    PerformanceMetric
+)
 
 __all__ = [
-    'OrderType', 'OrderSide', 'OrderStatus', 'Order', 'Fill', 'TimeInForce', 'ExecutionStrategy',
-    'StrategyType', 'StrategyConfig', 'Position',
-    'MarketRegime', 'RegimeInfo', 'RegimeConfidence', 'RegimeType',
-    'AlertLevel', 'PerformanceMetric'
+    # Order Types
+    'OrderType',
+    'OrderSide', 
+    'OrderStatus',
+    'TimeInForce',
+    'ExecutionStrategy',
+    'Order',
+    'Fill',
+    'Position',
+    
+    # Market Types
+    'MarketRegime',
+    'RegimeType',
+    'RegimeConfidence', 
+    'RegimeInfo',
+    
+    # Strategy Types
+    'StrategyType',
+    'StrategyConfig',
+    
+    # Monitoring Types
+    'AlertLevel',
+    'PerformanceMetric'
 ]

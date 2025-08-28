@@ -33,12 +33,12 @@ import uuid
 import pandas as pd
 
 # Core Structure Imports (Clean)
-from .signal_generation.signal_generator import SignalGenerator, SignalConfig, TradingSignal, SignalType, SignalStrength
+from .signal_generation import UnifiedSignalEngine as SignalGenerator, SignalConfig, TradingSignal, SignalType, SignalStrength
 from .execution_engine.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionAlgorithm
 from .execution_engine.ibkr_execution_bridge import IBKRExecutionBridge, IBKRExecutionBridgeFactory
 from .risk.risk_manager import RiskManager, RiskLimits
 from .portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics
-from .market_data import DataManager  # Using enhanced version via alias
+from .market_data import EnhancedDataManager as DataManager  # Using consolidated Phase 4B version
 from .broker_integration import IBKRConfig
 
 # Canonical types - eliminates duplicates

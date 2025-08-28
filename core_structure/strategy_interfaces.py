@@ -17,7 +17,7 @@ from enum import Enum
 import pandas as pd
 
 # Core signal types
-from core_structure.signal_generation.signal_generator import TradingSignal, SignalType, SignalStrength
+from core_structure.signal_generation import TradingSignal, SignalType, SignalStrength
 # Use canonical strategy types
 from .infrastructure import StrategyType, StrategyConfig
 

@@ -461,4 +461,29 @@ class UnifiedConfigManager:
     
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value by key with default"""
-        return self._config.get(key, default) 
+        return self._config.get(key, default)
+
+
+class ConfigSystemFactory:
+    """Factory for creating unified configuration management systems"""
+    
+    @staticmethod
+    def create_production_config() -> UnifiedConfigManager:
+        """Create production configuration system"""
+        config_manager = UnifiedConfigManager()
+        config_manager.env = "production"
+        return config_manager
+    
+    @staticmethod
+    def create_development_config() -> UnifiedConfigManager:
+        """Create development configuration system"""
+        config_manager = UnifiedConfigManager()
+        config_manager.env = "development"
+        return config_manager
+    
+    @staticmethod
+    def create_testing_config() -> UnifiedConfigManager:
+        """Create testing configuration system"""
+        config_manager = UnifiedConfigManager()
+        config_manager.env = "testing"
+        return config_manager 

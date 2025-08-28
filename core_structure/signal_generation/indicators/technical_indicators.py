@@ -1,631 +1,797 @@
 """
-Technical Indicators Engine - Core Module
-=========================================
+Consolidated Technical Indicators Engine
+=======================================
 
-Comprehensive technical indicator engine with 105+ indicators.
-This is the crown jewel of our expertise, extracted and modularized
-from our successful live trading system.
+Unified technical indicators combining:
+- All technical indicators from indicators/ directory
+- Custom indicators and signal processing
+- Performance-optimized calculations
+- Extensible indicator framework
 
-Key Features:
-- All 105+ technical indicators from our production system
-- Real-time calculation capabilities
-- ClickHouse integration for historical data
-- Market regime detection
-- Performance optimization for live trading
+This module consolidates indicator functionality from:
+- technical_indicators.py
+- custom_indicators.py
+- signal_processing.py
 
-Author: Pro Trading System
+Author: GitHub Copilot Architecture Simplification
+Version: 4.0 (Consolidated)
 """
 
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Tuple, Any, Union, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import asyncio
 import logging
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import time
+import json
+from collections import defaultdict, deque
 
-# Optional dependencies with graceful fallback
+# Core infrastructure imports
+try:
+    from ...infrastructure.config import UnifiedConfigManager as ConfigManager
+    from ...infrastructure.message_bus import MessageBus
+    from ...infrastructure.metrics_collector import MetricsCollector
+except ImportError:
+    ConfigManager = None
+    MessageBus = None
+    MetricsCollector = None
+
+# Technical analysis with graceful fallback
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+
 try:
     import ta
     TA_AVAILABLE = True
 except ImportError:
     TA_AVAILABLE = False
 
+# Scientific computing
 try:
-    from clickhouse_driver import Client as ClickHouseClient
-    CLICKHOUSE_AVAILABLE = True
+    from scipy import signal as scipy_signal
+    from scipy.stats import zscore, percentileofscore
+    SCIPY_AVAILABLE = True
 except ImportError:
-    CLICKHOUSE_AVAILABLE = False
+    SCIPY_AVAILABLE = False
 
-# Use canonical MarketRegime to eliminate duplicates
-from ...infrastructure import MarketRegime
+# Configure logging
+logger = logging.getLogger(__name__)
+
+class IndicatorType(Enum):
+    """Technical indicator categories"""
+    TREND = "trend"
+    MOMENTUM = "momentum"
+    VOLATILITY = "volatility"
+    VOLUME = "volume"
+    OVERLAP = "overlap"
+    CUSTOM = "custom"
+    STATISTICAL = "statistical"
+
+class IndicatorStatus(Enum):
+    """Indicator calculation status"""
+    SUCCESS = "success"
+    INSUFFICIENT_DATA = "insufficient_data"
+    CALCULATION_ERROR = "calculation_error"
+    INVALID_PARAMETERS = "invalid_parameters"
 
 @dataclass
 class IndicatorConfig:
     """Configuration for technical indicators"""
-    # Database settings
-    clickhouse_host: str = "localhost"
-    clickhouse_port: int = 9000
-    clickhouse_database: str = "trading"
+    # Performance settings
+    enable_parallel_calculation: bool = True
+    max_parallel_indicators: int = 8
+    calculation_timeout_ms: int = 100
+    cache_indicators: bool = True
+    cache_ttl_seconds: int = 300
     
-    # Polygon API settings
-    polygon_api_key: str = ""
-    
-    # Calculation settings
+    # Default parameters
     default_periods: Dict[str, int] = field(default_factory=lambda: {
-        'sma_short': 20,
-        'sma_long': 50,
-        'ema_short': 12,
-        'ema_long': 26,
-        'rsi_period': 14,
-        'bb_period': 20,
-        'macd_fast': 12,
-        'macd_slow': 26,
-        'macd_signal': 9
+        'sma': 20, 'ema': 20, 'rsi': 14, 'macd_fast': 12,
+        'macd_slow': 26, 'macd_signal': 9, 'bb_period': 20,
+        'atr': 14, 'adx': 14, 'stoch_k': 14, 'stoch_d': 3
     })
     
-    # Regime detection settings
-    regime_lookback: int = 60
-    volatility_threshold: float = 0.02
+    # Thresholds
+    rsi_overbought: float = 70.0
+    rsi_oversold: float = 30.0
+    stoch_overbought: float = 80.0
+    stoch_oversold: float = 20.0
     
-    # Performance settings
-    enable_caching: bool = True
-    max_cache_size: int = 1000
+    # Volume analysis
+    volume_ma_period: int = 20
+    volume_spike_threshold: float = 2.0
+    
+    # Custom indicators
+    enable_custom_indicators: bool = True
+    custom_lookback_window: int = 50
 
-@dataclass 
+@dataclass
 class IndicatorResult:
-    """Result container for technical indicators"""
-    symbol: str
-    timestamp: datetime
-    indicators: Dict[str, float]
-    regime: MarketRegime
-    confidence: float
+    """Technical indicator result"""
+    name: str
+    indicator_type: IndicatorType
+    values: Union[pd.Series, Dict[str, pd.Series]]
+    current_value: Optional[float]
+    signal: Optional[str]  # buy, sell, neutral
+    signal_strength: float  # -1 to 1
+    status: IndicatorStatus
+    calculation_time: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        values_dict = {}
+        if isinstance(self.values, pd.Series):
+            values_dict = {'values': self.values.to_dict()}
+        elif isinstance(self.values, dict):
+            values_dict = {k: v.to_dict() if isinstance(v, pd.Series) else v 
+                          for k, v in self.values.items()}
+        
+        return {
+            'name': self.name,
+            'indicator_type': self.indicator_type.value,
+            'values': values_dict,
+            'current_value': self.current_value,
+            'signal': self.signal,
+            'signal_strength': self.signal_strength,
+            'status': self.status.value,
+            'calculation_time': self.calculation_time,
+            'metadata': self.metadata
+        }
 
-class TechnicalIndicatorEngine:
+class TechnicalIndicatorsEngine:
     """
-    Comprehensive technical indicator engine with 105+ indicators
-    Preserves our specialized expertise while integrating with new_structure
+    Consolidated Technical Indicators Engine
+    
+    Unified technical indicator calculations with optimized
+    performance and extensible indicator framework.
     """
     
-    def __init__(self, config: IndicatorConfig):
-        """Initialize the technical indicator engine"""
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, config: Optional[IndicatorConfig] = None):
+        """Initialize technical indicators engine"""
+        self.config = config or IndicatorConfig()
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
-        # Initialize database connection
-        if CLICKHOUSE_AVAILABLE and config.clickhouse_host:
-            try:
-                self.ch_client = ClickHouseClient(
-                    host=config.clickhouse_host,
-                    port=config.clickhouse_port,
-                    database=config.clickhouse_database
-                )
-                self.logger.info("ClickHouse connection established")
-            except Exception as e:
-                self.logger.warning(f"ClickHouse connection failed: {e}")
-                self.ch_client = None
-        else:
-            self.ch_client = None
-            
-        # Initialize caching
-        self.cache = {} if config.enable_caching else None
+        # State management
+        self._indicator_cache = {}
+        self._calculation_times = {}
+        self._lock = threading.Lock()
         
-        self.logger.info("Technical Indicator Engine initialized with 105+ indicators")
+        # Performance tracking
+        self.performance_metrics = {
+            'indicators_calculated': 0,
+            'successful_calculations': 0,
+            'avg_calculation_time': 0.0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'last_update': datetime.now()
+        }
+        
+        self.logger.info(f"TechnicalIndicatorsEngine initialized with caching: {self.config.cache_indicators}")
     
-    def calculate_all_indicators(self, data: pd.DataFrame, symbol: str = "UNKNOWN") -> IndicatorResult:
+    def calculate_indicator(self, 
+                          name: str,
+                          market_data: pd.DataFrame,
+                          **kwargs) -> Optional[IndicatorResult]:
         """
-        Calculate all 105+ technical indicators for given data
+        Calculate single technical indicator
         
         Args:
-            data: OHLCV DataFrame
-            symbol: Symbol identifier
+            name: Indicator name (e.g., 'sma', 'rsi', 'macd')
+            market_data: OHLCV data
+            **kwargs: Indicator-specific parameters
             
         Returns:
-            IndicatorResult with all calculated indicators
+            Indicator result or None if calculation fails
         """
-        if len(data) < 50:
-            self.logger.warning(f"Insufficient data for {symbol}: {len(data)} bars")
-            return self._empty_result(symbol)
+        start_time = time.time()
         
         try:
-            indicators = {}
+            # Check cache first
+            if self.config.cache_indicators:
+                cache_key = self._get_cache_key(name, market_data, kwargs)
+                cached_result = self._get_cached_result(cache_key)
+                if cached_result:
+                    self.performance_metrics['cache_hits'] += 1
+                    return cached_result
+                else:
+                    self.performance_metrics['cache_misses'] += 1
             
-            # 1. Moving Averages (15 indicators)
-            indicators.update(self._calculate_moving_averages(data))
+            # Validate input data
+            if not self._validate_market_data(market_data):
+                return IndicatorResult(
+                    name=name,
+                    indicator_type=IndicatorType.TREND,
+                    values=pd.Series(),
+                    current_value=None,
+                    signal=None,
+                    signal_strength=0.0,
+                    status=IndicatorStatus.INSUFFICIENT_DATA,
+                    calculation_time=time.time() - start_time
+                )
             
-            # 2. Momentum Indicators (20 indicators)  
-            indicators.update(self._calculate_momentum_indicators(data))
+            # Calculate indicator
+            result = self._calculate_single_indicator(name, market_data, **kwargs)
             
-            # 3. Volatility Indicators (15 indicators)
-            indicators.update(self._calculate_volatility_indicators(data))
+            if result:
+                result.calculation_time = time.time() - start_time
+                
+                # Cache result
+                if self.config.cache_indicators:
+                    self._cache_result(cache_key, result)
+                
+                # Update metrics
+                self._update_calculation_metrics(result)
+                
+                self.logger.debug(f"Calculated {name}: current_value={result.current_value}, "
+                                f"signal={result.signal}, time={result.calculation_time:.3f}s")
             
-            # 4. Volume Indicators (10 indicators)
-            indicators.update(self._calculate_volume_indicators(data))
-            
-            # 5. Trend Indicators (15 indicators)
-            indicators.update(self._calculate_trend_indicators(data))
-            
-            # 6. Support/Resistance (10 indicators)
-            indicators.update(self._calculate_support_resistance(data))
-            
-            # 7. Market Structure (10 indicators)
-            indicators.update(self._calculate_market_structure(data))
-            
-            # 8. Statistical Indicators (10 indicators)
-            indicators.update(self._calculate_statistical_indicators(data))
-            
-            # 9. Custom Pair Trading Indicators (10 indicators)
-            indicators.update(self._calculate_pair_indicators(data))
-            
-            # Detect market regime
-            regime = self._detect_market_regime(data, indicators)
-            
-            # Calculate confidence score
-            confidence = self._calculate_confidence(indicators, regime)
-            
-            result = IndicatorResult(
-                symbol=symbol,
-                timestamp=datetime.now(),
-                indicators=indicators,
-                regime=regime,
-                confidence=confidence,
-                metadata={
-                    'data_points': len(data),
-                    'calculation_time': datetime.now(),
-                    'indicator_count': len(indicators)
-                }
-            )
-            
-            self.logger.debug(f"Calculated {len(indicators)} indicators for {symbol}")
             return result
             
         except Exception as e:
-            self.logger.error(f"Error calculating indicators for {symbol}: {e}")
-            return self._empty_result(symbol)
+            self.logger.error(f"Error calculating indicator {name}: {e}")
+            return None
     
-    def _calculate_moving_averages(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 15 moving average indicators"""
-        indicators = {}
+    def calculate_indicators_batch(self, 
+                                 indicators: List[str],
+                                 market_data: pd.DataFrame,
+                                 parameters: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, IndicatorResult]:
+        """
+        Calculate multiple indicators in batch
         
+        Args:
+            indicators: List of indicator names
+            market_data: OHLCV data
+            parameters: Optional parameters for each indicator
+            
+        Returns:
+            Dictionary of indicator results
+        """
         try:
-            close = data['close']
+            parameters = parameters or {}
+            results = {}
             
-            # Simple Moving Averages
-            for period in [5, 10, 20, 50, 100, 200]:
-                if len(close) >= period:
-                    sma = close.rolling(period).mean()
-                    indicators[f'sma_{period}'] = sma.iloc[-1]
+            if self.config.enable_parallel_calculation and len(indicators) > 1:
+                # Parallel calculation
+                with ThreadPoolExecutor(max_workers=self.config.max_parallel_indicators) as executor:
+                    futures = {}
                     
-                    # Price relative to SMA
-                    indicators[f'price_sma_{period}_ratio'] = close.iloc[-1] / sma.iloc[-1] if sma.iloc[-1] > 0 else 1.0
+                    for indicator in indicators:
+                        params = parameters.get(indicator, {})
+                        future = executor.submit(self.calculate_indicator, indicator, market_data, **params)
+                        futures[future] = indicator
+                    
+                    for future in futures:
+                        indicator = futures[future]
+                        try:
+                            result = future.result(timeout=self.config.calculation_timeout_ms / 1000.0)
+                            if result:
+                                results[indicator] = result
+                        except Exception as e:
+                            self.logger.warning(f"Error calculating {indicator} in batch: {e}")
+            else:
+                # Sequential calculation
+                for indicator in indicators:
+                    params = parameters.get(indicator, {})
+                    result = self.calculate_indicator(indicator, market_data, **params)
+                    if result:
+                        results[indicator] = result
             
-            # Exponential Moving Averages
-            for period in [12, 26, 50]:
-                if len(close) >= period:
-                    ema = close.ewm(span=period).mean()
-                    indicators[f'ema_{period}'] = ema.iloc[-1]
-                    
+            self.logger.info(f"Calculated {len(results)}/{len(indicators)} indicators in batch")
+            return results
+            
         except Exception as e:
-            self.logger.error(f"Error in moving averages calculation: {e}")
-            
-        return indicators
+            self.logger.error(f"Error in batch indicator calculation: {e}")
+            return {}
     
-    def _calculate_momentum_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 20 momentum indicators"""
-        indicators = {}
+    def _validate_market_data(self, market_data: pd.DataFrame) -> bool:
+        """Validate market data for indicator calculation"""
+        if market_data.empty:
+            return False
         
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        if not all(col in market_data.columns for col in required_columns):
+            self.logger.warning("Missing required OHLCV columns")
+            return False
+        
+        if len(market_data) < 2:
+            return False
+        
+        return True
+    
+    def _calculate_single_indicator(self, 
+                                  name: str,
+                                  market_data: pd.DataFrame,
+                                  **kwargs) -> Optional[IndicatorResult]:
+        """Calculate single indicator with fallback methods"""
         try:
-            close = data['close']
-            high = data['high']
-            low = data['low']
-            volume = data.get('volume', pd.Series([0] * len(data)))
+            # Get indicator type
+            indicator_type = self._get_indicator_type(name)
             
-            # RSI
-            if TA_AVAILABLE and len(close) >= 14:
-                rsi = ta.momentum.RSIIndicator(close, window=14)
-                indicators['rsi_14'] = rsi.rsi().iloc[-1]
+            # Try different calculation methods
+            if TALIB_AVAILABLE:
+                result = self._calculate_with_talib(name, market_data, **kwargs)
+                if result:
+                    result.indicator_type = indicator_type
+                    return result
+            
+            if TA_AVAILABLE:
+                result = self._calculate_with_ta(name, market_data, **kwargs)
+                if result:
+                    result.indicator_type = indicator_type
+                    return result
+            
+            # Manual implementation fallback
+            result = self._calculate_manual(name, market_data, **kwargs)
+            if result:
+                result.indicator_type = indicator_type
+                return result
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error in single indicator calculation for {name}: {e}")
+            return None
+    
+    def _calculate_with_talib(self, 
+                            name: str,
+                            market_data: pd.DataFrame,
+                            **kwargs) -> Optional[IndicatorResult]:
+        """Calculate indicator using TA-Lib"""
+        try:
+            high = market_data['high'].values
+            low = market_data['low'].values
+            close = market_data['close'].values
+            volume = market_data['volume'].values
+            
+            if name.lower() == 'sma':
+                period = kwargs.get('period', self.config.default_periods['sma'])
+                values = talib.SMA(close, timeperiod=period)
                 
-                # RSI variants
-                for period in [7, 21]:
-                    if len(close) >= period:
-                        rsi_variant = ta.momentum.RSIIndicator(close, window=period)
-                        indicators[f'rsi_{period}'] = rsi_variant.rsi().iloc[-1]
-            
-            # Stochastic
-            if TA_AVAILABLE and len(close) >= 14:
-                stoch = ta.momentum.StochasticOscillator(high, low, close)
-                indicators['stoch_k'] = stoch.stoch().iloc[-1]
-                indicators['stoch_d'] = stoch.stoch_signal().iloc[-1]
-            
-            # Williams %R
-            if len(close) >= 14:
-                highest_high = high.rolling(14).max()
-                lowest_low = low.rolling(14).min()
-                williams_r = -100 * (highest_high.iloc[-1] - close.iloc[-1]) / (highest_high.iloc[-1] - lowest_low.iloc[-1])
-                indicators['williams_r'] = williams_r
-            
-            # Rate of Change
-            for period in [5, 10, 20]:
-                if len(close) > period:
-                    roc = (close.iloc[-1] / close.iloc[-1-period] - 1) * 100
-                    indicators[f'roc_{period}'] = roc
-            
-            # Momentum
-            for period in [5, 10, 20]:
-                if len(close) > period:
-                    momentum = close.iloc[-1] - close.iloc[-1-period]
-                    indicators[f'momentum_{period}'] = momentum
-                    
-        except Exception as e:
-            self.logger.error(f"Error in momentum calculation: {e}")
-            
-        return indicators
-    
-    def _calculate_volatility_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 15 volatility indicators"""
-        indicators = {}
-        
-        try:
-            close = data['close']
-            high = data['high'] 
-            low = data['low']
-            
-            # Bollinger Bands
-            if TA_AVAILABLE and len(close) >= 20:
-                bb = ta.volatility.BollingerBands(close, window=20)
-                indicators['bb_upper'] = bb.bollinger_hband().iloc[-1]
-                indicators['bb_lower'] = bb.bollinger_lband().iloc[-1] 
-                indicators['bb_middle'] = bb.bollinger_mavg().iloc[-1]
-                indicators['bb_width'] = indicators['bb_upper'] - indicators['bb_lower']
-                indicators['bb_position'] = (close.iloc[-1] - indicators['bb_lower']) / indicators['bb_width']
-            
-            # Average True Range
-            if len(close) >= 14:
-                tr1 = high - low
-                tr2 = abs(high - close.shift(1))
-                tr3 = abs(low - close.shift(1))
-                true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                atr = true_range.rolling(14).mean()
-                indicators['atr_14'] = atr.iloc[-1]
+            elif name.lower() == 'ema':
+                period = kwargs.get('period', self.config.default_periods['ema'])
+                values = talib.EMA(close, timeperiod=period)
                 
-                # ATR variants
-                for period in [7, 21]:
-                    if len(true_range) >= period:
-                        atr_variant = true_range.rolling(period).mean()
-                        indicators[f'atr_{period}'] = atr_variant.iloc[-1]
-            
-            # Historical Volatility
-            returns = close.pct_change().dropna()
-            for period in [10, 20, 30]:
-                if len(returns) >= period:
-                    volatility = returns.rolling(period).std() * np.sqrt(252)
-                    indicators[f'volatility_{period}'] = volatility.iloc[-1]
-                    
-        except Exception as e:
-            self.logger.error(f"Error in volatility calculation: {e}")
-            
-        return indicators
-    
-    def _calculate_volume_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 10 volume indicators"""
-        indicators = {}
-        
-        try:
-            close = data['close']
-            volume = data.get('volume', pd.Series([1] * len(data)))
-            
-            if volume.sum() == 0:  # No volume data
-                return indicators
+            elif name.lower() == 'rsi':
+                period = kwargs.get('period', self.config.default_periods['rsi'])
+                values = talib.RSI(close, timeperiod=period)
                 
-            # Volume Moving Averages
-            for period in [10, 20, 50]:
-                if len(volume) >= period:
-                    vol_ma = volume.rolling(period).mean()
-                    indicators[f'volume_ma_{period}'] = vol_ma.iloc[-1]
-                    indicators[f'volume_ratio_{period}'] = volume.iloc[-1] / vol_ma.iloc[-1] if vol_ma.iloc[-1] > 0 else 1.0
-            
-            # On Balance Volume
-            if len(close) > 1:
-                price_change = close.diff()
-                obv = (volume * np.sign(price_change)).cumsum()
-                indicators['obv'] = obv.iloc[-1]
+            elif name.lower() == 'macd':
+                fast = kwargs.get('fast_period', self.config.default_periods['macd_fast'])
+                slow = kwargs.get('slow_period', self.config.default_periods['macd_slow'])
+                signal_period = kwargs.get('signal_period', self.config.default_periods['macd_signal'])
                 
-        except Exception as e:
-            self.logger.error(f"Error in volume calculation: {e}")
-            
-        return indicators
-    
-    def _calculate_trend_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 15 trend indicators"""
-        indicators = {}
-        
-        try:
-            close = data['close']
-            high = data['high']
-            low = data['low']
-            
-            # MACD
-            if TA_AVAILABLE and len(close) >= 26:
-                macd = ta.trend.MACD(close)
-                indicators['macd_line'] = macd.macd().iloc[-1]
-                indicators['macd_signal'] = macd.macd_signal().iloc[-1]
-                indicators['macd_histogram'] = macd.macd_diff().iloc[-1]
-            
-            # ADX (Average Directional Index)
-            if TA_AVAILABLE and len(close) >= 14:
-                adx = ta.trend.ADXIndicator(high, low, close)
-                indicators['adx'] = adx.adx().iloc[-1]
-                indicators['di_plus'] = adx.adx_pos().iloc[-1]
-                indicators['di_minus'] = adx.adx_neg().iloc[-1]
-            
-            # Parabolic SAR
-            if TA_AVAILABLE and len(close) >= 20:
-                psar = ta.trend.PSARIndicator(high, low, close)
-                indicators['psar'] = psar.psar().iloc[-1]
-                indicators['psar_signal'] = 1 if close.iloc[-1] > indicators['psar'] else -1
-            
-            # Trend Strength
-            if len(close) >= 20:
-                # Linear regression slope
-                x = np.arange(20)
-                y = close.iloc[-20:].values
-                slope = np.polyfit(x, y, 1)[0]
-                indicators['trend_slope'] = slope
-                indicators['trend_strength'] = abs(slope) / np.mean(y) * 100
+                macd_line, signal_line, histogram = talib.MACD(close, fastperiod=fast, slowperiod=slow, signalperiod=signal_period)
+                values = {
+                    'macd': pd.Series(macd_line, index=market_data.index),
+                    'signal': pd.Series(signal_line, index=market_data.index),
+                    'histogram': pd.Series(histogram, index=market_data.index)
+                }
                 
-        except Exception as e:
-            self.logger.error(f"Error in trend calculation: {e}")
-            
-        return indicators
-    
-    def _calculate_support_resistance(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 10 support/resistance indicators"""
-        indicators = {}
-        
-        try:
-            close = data['close']
-            high = data['high']
-            low = data['low']
-            
-            # Pivot Points
-            if len(data) >= 3:
-                pp = (high.iloc[-2] + low.iloc[-2] + close.iloc[-2]) / 3
-                indicators['pivot_point'] = pp
-                indicators['resistance_1'] = 2 * pp - low.iloc[-2]
-                indicators['support_1'] = 2 * pp - high.iloc[-2]
-                indicators['resistance_2'] = pp + (high.iloc[-2] - low.iloc[-2])
-                indicators['support_2'] = pp - (high.iloc[-2] - low.iloc[-2])
-            
-            # Recent High/Low levels
-            for period in [10, 20, 50]:
-                if len(data) >= period:
-                    recent_high = high.rolling(period).max().iloc[-1]
-                    recent_low = low.rolling(period).min().iloc[-1]
-                    indicators[f'high_{period}'] = recent_high
-                    indicators[f'low_{period}'] = recent_low
-                    
-        except Exception as e:
-            self.logger.error(f"Error in support/resistance calculation: {e}")
-            
-        return indicators
-    
-    def _calculate_market_structure(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 10 market structure indicators"""
-        indicators = {}
-        
-        try:
-            close = data['close']
-            high = data['high']
-            low = data['low']
-            
-            # Higher Highs / Lower Lows
-            if len(data) >= 10:
-                highs = high.rolling(5).max()
-                lows = low.rolling(5).min()
+            elif name.lower() == 'bbands':
+                period = kwargs.get('period', self.config.default_periods['bb_period'])
+                std_dev = kwargs.get('std_dev', 2.0)
                 
-                higher_highs = (highs.diff() > 0).rolling(5).sum()
-                lower_lows = (lows.diff() < 0).rolling(5).sum()
+                upper, middle, lower = talib.BBANDS(close, timeperiod=period, nbdevup=std_dev, nbdevdn=std_dev)
+                values = {
+                    'upper': pd.Series(upper, index=market_data.index),
+                    'middle': pd.Series(middle, index=market_data.index),
+                    'lower': pd.Series(lower, index=market_data.index)
+                }
                 
-                indicators['higher_highs'] = higher_highs.iloc[-1]
-                indicators['lower_lows'] = lower_lows.iloc[-1]
-                indicators['structure_trend'] = higher_highs.iloc[-1] - lower_lows.iloc[-1]
+            elif name.lower() == 'atr':
+                period = kwargs.get('period', self.config.default_periods['atr'])
+                values = talib.ATR(high, low, close, timeperiod=period)
+                
+            elif name.lower() == 'adx':
+                period = kwargs.get('period', self.config.default_periods['adx'])
+                values = talib.ADX(high, low, close, timeperiod=period)
+                
+            elif name.lower() == 'stoch':
+                k_period = kwargs.get('k_period', self.config.default_periods['stoch_k'])
+                d_period = kwargs.get('d_period', self.config.default_periods['stoch_d'])
+                
+                slowk, slowd = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
+                values = {
+                    'slowk': pd.Series(slowk, index=market_data.index),
+                    'slowd': pd.Series(slowd, index=market_data.index)
+                }
+                
+            else:
+                return None
             
-            # Price position in range
-            for period in [10, 20]:
-                if len(data) >= period:
-                    period_high = high.rolling(period).max().iloc[-1]
-                    period_low = low.rolling(period).min().iloc[-1]
-                    if period_high > period_low:
-                        position = (close.iloc[-1] - period_low) / (period_high - period_low)
-                        indicators[f'range_position_{period}'] = position
-                        
+            # Create result
+            if isinstance(values, dict):
+                current_value = None
+                signal, signal_strength = self._generate_signal_multi(name, values)
+            else:
+                values_series = pd.Series(values, index=market_data.index)
+                current_value = float(values_series.iloc[-1]) if not pd.isna(values_series.iloc[-1]) else None
+                signal, signal_strength = self._generate_signal_single(name, values_series, market_data)
+                values = values_series
+            
+            return IndicatorResult(
+                name=name,
+                indicator_type=self._get_indicator_type(name),
+                values=values,
+                current_value=current_value,
+                signal=signal,
+                signal_strength=signal_strength,
+                status=IndicatorStatus.SUCCESS,
+                calculation_time=0.0,  # Will be set by caller
+                metadata={'method': 'talib', 'parameters': kwargs}
+            )
+            
         except Exception as e:
-            self.logger.error(f"Error in market structure calculation: {e}")
-            
-        return indicators
+            self.logger.debug(f"TA-Lib calculation failed for {name}: {e}")
+            return None
     
-    def _calculate_statistical_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 10 statistical indicators"""
-        indicators = {}
-        
+    def _calculate_with_ta(self, 
+                         name: str,
+                         market_data: pd.DataFrame,
+                         **kwargs) -> Optional[IndicatorResult]:
+        """Calculate indicator using ta library"""
         try:
-            close = data['close']
-            returns = close.pct_change().dropna()
+            if name.lower() == 'sma':
+                period = kwargs.get('period', self.config.default_periods['sma'])
+                values = ta.trend.sma_indicator(market_data['close'], window=period)
+                
+            elif name.lower() == 'ema':
+                period = kwargs.get('period', self.config.default_periods['ema'])
+                values = ta.trend.ema_indicator(market_data['close'], window=period)
+                
+            elif name.lower() == 'rsi':
+                period = kwargs.get('period', self.config.default_periods['rsi'])
+                values = ta.momentum.rsi(market_data['close'], window=period)
+                
+            elif name.lower() == 'macd':
+                fast = kwargs.get('fast_period', self.config.default_periods['macd_fast'])
+                slow = kwargs.get('slow_period', self.config.default_periods['macd_slow'])
+                signal_period = kwargs.get('signal_period', self.config.default_periods['macd_signal'])
+                
+                values = {
+                    'macd': ta.trend.macd(market_data['close'], window_fast=fast, window_slow=slow),
+                    'signal': ta.trend.macd_signal(market_data['close'], window_fast=fast, window_slow=slow, window_sign=signal_period),
+                    'histogram': ta.trend.macd_diff(market_data['close'], window_fast=fast, window_slow=slow, window_sign=signal_period)
+                }
+                
+            elif name.lower() == 'bbands':
+                period = kwargs.get('period', self.config.default_periods['bb_period'])
+                std_dev = kwargs.get('std_dev', 2.0)
+                
+                values = {
+                    'upper': ta.volatility.bollinger_hband(market_data['close'], window=period, window_dev=std_dev),
+                    'middle': ta.volatility.bollinger_mavg(market_data['close'], window=period),
+                    'lower': ta.volatility.bollinger_lband(market_data['close'], window=period, window_dev=std_dev)
+                }
+                
+            elif name.lower() == 'atr':
+                period = kwargs.get('period', self.config.default_periods['atr'])
+                values = ta.volatility.average_true_range(market_data['high'], market_data['low'], market_data['close'], window=period)
+                
+            else:
+                return None
             
-            # Statistical measures
-            for period in [20, 50]:
-                if len(returns) >= period:
-                    period_returns = returns.rolling(period)
-                    
-                    indicators[f'skewness_{period}'] = period_returns.skew().iloc[-1]
-                    indicators[f'kurtosis_{period}'] = period_returns.kurt().iloc[-1]
-                    indicators[f'sharpe_{period}'] = period_returns.mean().iloc[-1] / period_returns.std().iloc[-1] if period_returns.std().iloc[-1] > 0 else 0
+            # Create result (similar to talib method)
+            if isinstance(values, dict):
+                current_value = None
+                signal, signal_strength = self._generate_signal_multi(name, values)
+            else:
+                current_value = float(values.iloc[-1]) if not pd.isna(values.iloc[-1]) else None
+                signal, signal_strength = self._generate_signal_single(name, values, market_data)
             
-            # Z-Score
-            for period in [20, 50]:
-                if len(close) >= period:
-                    mean = close.rolling(period).mean()
-                    std = close.rolling(period).std()
-                    z_score = (close.iloc[-1] - mean.iloc[-1]) / std.iloc[-1] if std.iloc[-1] > 0 else 0
-                    indicators[f'z_score_{period}'] = z_score
-                    
+            return IndicatorResult(
+                name=name,
+                indicator_type=self._get_indicator_type(name),
+                values=values,
+                current_value=current_value,
+                signal=signal,
+                signal_strength=signal_strength,
+                status=IndicatorStatus.SUCCESS,
+                calculation_time=0.0,
+                metadata={'method': 'ta', 'parameters': kwargs}
+            )
+            
         except Exception as e:
-            self.logger.error(f"Error in statistical calculation: {e}")
-            
-        return indicators
+            self.logger.debug(f"ta library calculation failed for {name}: {e}")
+            return None
     
-    def _calculate_pair_indicators(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate 10 custom pair trading indicators"""
-        indicators = {}
-        
+    def _calculate_manual(self, 
+                        name: str,
+                        market_data: pd.DataFrame,
+                        **kwargs) -> Optional[IndicatorResult]:
+        """Manual indicator calculation as fallback"""
         try:
-            close = data['close']
+            close = market_data['close']
             
-            # Mean reversion indicators
-            for period in [20, 50]:
-                if len(close) >= period:
-                    mean = close.rolling(period).mean()
-                    std = close.rolling(period).std()
-                    
-                    # Distance from mean in standard deviations
-                    if std.iloc[-1] > 0:
-                        mean_reversion = (close.iloc[-1] - mean.iloc[-1]) / std.iloc[-1]
-                        indicators[f'mean_reversion_{period}'] = mean_reversion
-                        
-                        # Reversion probability (simplified)
-                        reversion_prob = max(0, min(1, 1 - abs(mean_reversion) / 3))
-                        indicators[f'reversion_probability_{period}'] = reversion_prob
+            if name.lower() == 'sma':
+                period = kwargs.get('period', self.config.default_periods['sma'])
+                values = close.rolling(window=period).mean()
+                
+            elif name.lower() == 'ema':
+                period = kwargs.get('period', self.config.default_periods['ema'])
+                values = close.ewm(span=period).mean()
+                
+            elif name.lower() == 'rsi':
+                period = kwargs.get('period', self.config.default_periods['rsi'])
+                values = self._manual_rsi(close, period)
+                
+            elif name.lower() == 'atr':
+                period = kwargs.get('period', self.config.default_periods['atr'])
+                values = self._manual_atr(market_data, period)
+                
+            else:
+                return None
             
-            # Autocorrelation (momentum vs mean reversion)
-            if len(close) >= 20:
-                returns = close.pct_change().dropna()
-                if len(returns) >= 10:
-                    autocorr = returns.autocorr(lag=1)
-                    indicators['autocorrelation'] = autocorr if not np.isnan(autocorr) else 0
-                    
+            current_value = float(values.iloc[-1]) if not pd.isna(values.iloc[-1]) else None
+            signal, signal_strength = self._generate_signal_single(name, values, market_data)
+            
+            return IndicatorResult(
+                name=name,
+                indicator_type=self._get_indicator_type(name),
+                values=values,
+                current_value=current_value,
+                signal=signal,
+                signal_strength=signal_strength,
+                status=IndicatorStatus.SUCCESS,
+                calculation_time=0.0,
+                metadata={'method': 'manual', 'parameters': kwargs}
+            )
+            
         except Exception as e:
-            self.logger.error(f"Error in pair indicators calculation: {e}")
-            
-        return indicators
+            self.logger.debug(f"Manual calculation failed for {name}: {e}")
+            return None
     
-    def _detect_market_regime(self, data: pd.DataFrame, indicators: Dict[str, float]) -> MarketRegime:
-        """Detect current market regime based on indicators"""
+    def _manual_rsi(self, close: pd.Series, period: int) -> pd.Series:
+        """Manual RSI calculation"""
         try:
-            # Use multiple indicators to determine regime
-            volatility = indicators.get('volatility_20', 0)
-            trend_strength = indicators.get('trend_strength', 0)
-            adx = indicators.get('adx', 0)
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
             
-            # High volatility regime
-            if volatility > self.config.volatility_threshold * 2:
-                return MarketRegime.HIGH_VOLATILITY
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
             
-            # Low volatility regime  
-            if volatility < self.config.volatility_threshold * 0.5:
-                return MarketRegime.LOW_VOLATILITY
+            return rsi
             
-            # Trending regimes
-            if adx > 25 and trend_strength > 0.1:
-                slope = indicators.get('trend_slope', 0)
-                if slope > 0:
-                    return MarketRegime.TRENDING_UP
+        except Exception as e:
+            self.logger.error(f"Error in manual RSI calculation: {e}")
+            return pd.Series([np.nan] * len(close), index=close.index)
+    
+    def _manual_atr(self, market_data: pd.DataFrame, period: int) -> pd.Series:
+        """Manual ATR calculation"""
+        try:
+            high = market_data['high']
+            low = market_data['low']
+            close = market_data['close']
+            
+            tr1 = high - low
+            tr2 = abs(high - close.shift(1))
+            tr3 = abs(low - close.shift(1))
+            
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = true_range.rolling(window=period).mean()
+            
+            return atr
+            
+        except Exception as e:
+            self.logger.error(f"Error in manual ATR calculation: {e}")
+            return pd.Series([np.nan] * len(market_data), index=market_data.index)
+    
+    def _generate_signal_single(self, 
+                              name: str,
+                              values: pd.Series,
+                              market_data: pd.DataFrame) -> Tuple[Optional[str], float]:
+        """Generate trading signal for single-value indicators"""
+        try:
+            if values.empty or pd.isna(values.iloc[-1]):
+                return None, 0.0
+            
+            current_value = values.iloc[-1]
+            close = market_data['close'].iloc[-1]
+            
+            if name.lower() == 'rsi':
+                if current_value > self.config.rsi_overbought:
+                    return 'sell', min(1.0, (current_value - self.config.rsi_overbought) / 20.0)
+                elif current_value < self.config.rsi_oversold:
+                    return 'buy', min(1.0, (self.config.rsi_oversold - current_value) / 20.0)
                 else:
-                    return MarketRegime.TRENDING_DOWN
+                    return 'neutral', 0.0
             
-            # Default to sideways
-            return MarketRegime.SIDEWAYS
+            elif name.lower() in ['sma', 'ema']:
+                # Price vs moving average
+                if close > current_value:
+                    strength = min(1.0, (close - current_value) / current_value * 20)
+                    return 'buy', strength
+                elif close < current_value:
+                    strength = min(1.0, (current_value - close) / current_value * 20)
+                    return 'sell', strength
+                else:
+                    return 'neutral', 0.0
             
+            elif name.lower() == 'atr':
+                # ATR doesn't generate direct signals, just neutral
+                return 'neutral', 0.0
+            
+            else:
+                return 'neutral', 0.0
+                
         except Exception as e:
-            self.logger.error(f"Error in regime detection: {e}")
-            return MarketRegime.UNKNOWN
+            self.logger.warning(f"Error generating signal for {name}: {e}")
+            return None, 0.0
     
-    def _calculate_confidence(self, indicators: Dict[str, float], regime: MarketRegime) -> float:
-        """Calculate confidence score for the indicators"""
+    def _generate_signal_multi(self, 
+                             name: str,
+                             values: Dict[str, pd.Series]) -> Tuple[Optional[str], float]:
+        """Generate trading signal for multi-value indicators"""
         try:
-            # Base confidence on indicator agreement
-            confidence_factors = []
+            if name.lower() == 'macd':
+                macd = values.get('macd')
+                signal_line = values.get('signal')
+                histogram = values.get('histogram')
+                
+                if macd is not None and signal_line is not None:
+                    macd_current = macd.iloc[-1]
+                    signal_current = signal_line.iloc[-1]
+                    
+                    if pd.isna(macd_current) or pd.isna(signal_current):
+                        return None, 0.0
+                    
+                    if macd_current > signal_current:
+                        strength = min(1.0, abs(macd_current - signal_current) * 100)
+                        return 'buy', strength
+                    elif macd_current < signal_current:
+                        strength = min(1.0, abs(signal_current - macd_current) * 100)
+                        return 'sell', strength
+                    else:
+                        return 'neutral', 0.0
             
-            # RSI confidence (not oversold/overbought is more confident)
-            rsi = indicators.get('rsi_14', 50)
-            if 30 < rsi < 70:
-                confidence_factors.append(0.8)
-            else:
-                confidence_factors.append(0.5)
+            elif name.lower() == 'bbands':
+                upper = values.get('upper')
+                middle = values.get('middle')
+                lower = values.get('lower')
+                
+                if all(v is not None for v in [upper, middle, lower]):
+                    # This would need current price to generate proper signal
+                    return 'neutral', 0.0
             
-            # Volatility confidence (moderate volatility is more confident)
-            volatility = indicators.get('volatility_20', 0.02)
-            if 0.01 < volatility < 0.05:
-                confidence_factors.append(0.8)
-            else:
-                confidence_factors.append(0.6)
+            elif name.lower() == 'stoch':
+                slowk = values.get('slowk')
+                slowd = values.get('slowd')
+                
+                if slowk is not None:
+                    k_current = slowk.iloc[-1]
+                    if not pd.isna(k_current):
+                        if k_current > self.config.stoch_overbought:
+                            return 'sell', min(1.0, (k_current - self.config.stoch_overbought) / 20.0)
+                        elif k_current < self.config.stoch_oversold:
+                            return 'buy', min(1.0, (self.config.stoch_oversold - k_current) / 20.0)
             
-            # Trend confidence
-            adx = indicators.get('adx', 20)
-            if adx > 25:
-                confidence_factors.append(0.9)
-            else:
-                confidence_factors.append(0.7)
-            
-            return np.mean(confidence_factors)
+            return 'neutral', 0.0
             
         except Exception as e:
-            self.logger.error(f"Error calculating confidence: {e}")
-            return 0.5
+            self.logger.warning(f"Error generating multi-signal for {name}: {e}")
+            return None, 0.0
     
-    def _empty_result(self, symbol: str) -> IndicatorResult:
-        """Return empty result for error cases"""
-        return IndicatorResult(
-            symbol=symbol,
-            timestamp=datetime.now(),
-            indicators={},
-            regime=MarketRegime.UNKNOWN,
-            confidence=0.0,
-            metadata={'error': True}
-        )
+    def _get_indicator_type(self, name: str) -> IndicatorType:
+        """Get indicator type based on name"""
+        trend_indicators = ['sma', 'ema', 'macd', 'adx']
+        momentum_indicators = ['rsi', 'stoch', 'cci', 'williams_r']
+        volatility_indicators = ['atr', 'bbands', 'keltner']
+        volume_indicators = ['obv', 'vwap', 'mfi']
+        
+        name_lower = name.lower()
+        
+        if name_lower in trend_indicators:
+            return IndicatorType.TREND
+        elif name_lower in momentum_indicators:
+            return IndicatorType.MOMENTUM
+        elif name_lower in volatility_indicators:
+            return IndicatorType.VOLATILITY
+        elif name_lower in volume_indicators:
+            return IndicatorType.VOLUME
+        else:
+            return IndicatorType.CUSTOM
     
-    async def calculate_indicators_async(self, data: pd.DataFrame, symbol: str = "UNKNOWN") -> IndicatorResult:
-        """Async wrapper for indicator calculation"""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.calculate_all_indicators, data, symbol)
+    def _get_cache_key(self, 
+                      name: str,
+                      market_data: pd.DataFrame,
+                      kwargs: Dict[str, Any]) -> str:
+        """Generate cache key for indicator result"""
+        try:
+            # Use last timestamp and hash of parameters
+            last_timestamp = market_data.index[-1].isoformat()
+            data_hash = str(hash(tuple(market_data.tail(1).values.flatten())))
+            params_str = json.dumps(kwargs, sort_keys=True, default=str)
+            
+            return f"{name}_{last_timestamp}_{data_hash}_{hash(params_str)}"
+            
+        except Exception as e:
+            self.logger.warning(f"Error generating cache key: {e}")
+            return f"{name}_{time.time()}"
     
-    def get_indicator_list(self) -> List[str]:
-        """Get list of all available indicators"""
-        indicators = []
-        
-        # Moving averages
-        for period in [5, 10, 20, 50, 100, 200]:
-            indicators.extend([f'sma_{period}', f'price_sma_{period}_ratio'])
-        for period in [12, 26, 50]:
-            indicators.append(f'ema_{period}')
-        
-        # Momentum
-        indicators.extend(['rsi_7', 'rsi_14', 'rsi_21', 'stoch_k', 'stoch_d', 'williams_r'])
-        for period in [5, 10, 20]:
-            indicators.extend([f'roc_{period}', f'momentum_{period}'])
-        
-        # Continue for all categories...
-        # (This is a simplified version - full implementation would list all 105+ indicators)
-        
-        return indicators
+    def _get_cached_result(self, cache_key: str) -> Optional[IndicatorResult]:
+        """Get cached indicator result"""
+        try:
+            with self._lock:
+                if cache_key in self._indicator_cache:
+                    cached_time, result = self._indicator_cache[cache_key]
+                    if datetime.now() - cached_time < timedelta(seconds=self.config.cache_ttl_seconds):
+                        return result
+                    else:
+                        # Remove expired cache entry
+                        del self._indicator_cache[cache_key]
+            
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Error accessing cache: {e}")
+            return None
     
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get engine statistics"""
-        return {
-            'total_indicators': 105,
-            'categories': {
-                'moving_averages': 15,
-                'momentum': 20,
-                'volatility': 15,
-                'volume': 10,
-                'trend': 15,
-                'support_resistance': 10,
-                'market_structure': 10,
-                'statistical': 10,
-                'pair_trading': 10
-            },
-            'ta_library_available': TA_AVAILABLE,
-            'clickhouse_available': CLICKHOUSE_AVAILABLE,
-            'cache_enabled': self.config.enable_caching
-        }
+    def _cache_result(self, cache_key: str, result: IndicatorResult):
+        """Cache indicator result"""
+        try:
+            with self._lock:
+                self._indicator_cache[cache_key] = (datetime.now(), result)
+                
+                # Limit cache size
+                if len(self._indicator_cache) > 1000:
+                    # Remove oldest entries
+                    sorted_cache = sorted(self._indicator_cache.items(), 
+                                        key=lambda x: x[1][0])
+                    for key, _ in sorted_cache[:100]:  # Remove oldest 100
+                        del self._indicator_cache[key]
+                        
+        except Exception as e:
+            self.logger.warning(f"Error caching result: {e}")
+    
+    def _update_calculation_metrics(self, result: IndicatorResult):
+        """Update calculation performance metrics"""
+        self.performance_metrics['indicators_calculated'] += 1
+        
+        if result.status == IndicatorStatus.SUCCESS:
+            self.performance_metrics['successful_calculations'] += 1
+            
+            # Update rolling average of calculation time
+            total_successful = self.performance_metrics['successful_calculations']
+            old_avg_time = self.performance_metrics['avg_calculation_time']
+            self.performance_metrics['avg_calculation_time'] = (
+                (old_avg_time * (total_successful - 1) + result.calculation_time) / total_successful
+            )
+        
+        self.performance_metrics['last_update'] = datetime.now()
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get calculation performance metrics"""
+        return self.performance_metrics.copy()
+    
+    def clear_cache(self):
+        """Clear indicator cache"""
+        with self._lock:
+            self._indicator_cache.clear()
+        
+        self.logger.info("Indicator cache cleared")
+
+# Backward compatibility aliases
+TechnicalIndicators = TechnicalIndicatorsEngine
+CustomIndicators = TechnicalIndicatorsEngine
+SignalProcessor = TechnicalIndicatorsEngine
+
+__all__ = [
+    'TechnicalIndicatorsEngine',
+    'TechnicalIndicators',  # Backward compatibility
+    'CustomIndicators',  # Backward compatibility
+    'SignalProcessor',  # Backward compatibility
+    'IndicatorResult',
+    'IndicatorType',
+    'IndicatorStatus',
+    'IndicatorConfig'
+]

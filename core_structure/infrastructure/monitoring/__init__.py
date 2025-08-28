@@ -2,40 +2,86 @@
 Real-Time Performance Monitoring Infrastructure
 ==============================================
 
+Phase 5B Infrastructure Consolidation - Monitoring Module
+Consolidated monitoring functionality into unified systems.
+
 This module provides real-time monitoring, continuous optimization,
 and auto-tuning capabilities for the unified core engine.
 
-Components:
-- MetricsCollector: Core metrics collection system (legacy)
-- RealTimeMonitor: Live performance tracking and alerting
-- ContinuousOptimizer: Dynamic parameter tuning
-- AutoTuner: Automated performance optimization
-- PerformanceDashboard: Real-time metrics visualization
+Consolidated Components:
+- optimization_system: Unified optimization and auto-tuning (from continuous_optimizer + auto_tuner)
+- monitoring_system: Unified monitoring and visualization (from performance_dashboard + real_time_monitor + metrics_collector)
+
+Legacy Support:
+- Individual component imports maintained for backward compatibility
 """
 
-# Legacy metrics collector
-from .metrics_collector import MetricsCollector
+# Phase 5B Consolidated Systems
+from .optimization_system import (
+    ContinuousOptimizer,
+    AutoTuner,
+    OptimizationSystemFactory,
+    OptimizerConfig,
+    AutoTunerConfig,
+    Parameter,
+    ParameterType,
+    OptimizationStrategy,
+    TuningMode,
+    TuningPhase
+)
 
-# New monitoring infrastructure
-from .real_time_monitor import RealTimeMonitor, MonitorConfig, MetricType, AlertLevel, PerformanceAlert
-from .continuous_optimizer import ContinuousOptimizer, OptimizerConfig, Parameter, ParameterType  
-from .auto_tuner import AutoTuner, AutoTunerConfig, TuningMode
-from .performance_dashboard import PerformanceDashboard, DashboardConfig
+from .monitoring_system import (
+    MetricsCollector,
+    RealTimeMonitor,
+    PerformanceDashboard,
+    MonitoringSystemFactory,
+    MonitorConfig,
+    DashboardConfig,
+    MetricsConfig,
+    MetricType,
+    AlertLevel,
+    DashboardMode,
+    MonitoringStatus,
+    PerformanceAlert,
+    DashboardMetric,
+    SystemHealth,
+    MetricValue
+)
+
+# Legacy backward compatibility imports
+# Note: These now reference the consolidated modules
+from .optimization_system import ContinuousOptimizer, AutoTuner
+from .monitoring_system import MetricsCollector, RealTimeMonitor, PerformanceDashboard
 
 __all__ = [
-    'MetricsCollector',
-    'RealTimeMonitor',
-    'MonitorConfig',
-    'MetricType',
-    'AlertLevel', 
-    'PerformanceAlert',
+    # Consolidated System Factories
+    'OptimizationSystemFactory',
+    'MonitoringSystemFactory',
+    
+    # Optimization System Components
     'ContinuousOptimizer',
+    'AutoTuner',
     'OptimizerConfig',
+    'AutoTunerConfig',
     'Parameter',
     'ParameterType',
-    'AutoTuner', 
-    'AutoTunerConfig',
+    'OptimizationStrategy',
     'TuningMode',
+    'TuningPhase',
+    
+    # Monitoring System Components
+    'MetricsCollector',
+    'RealTimeMonitor',
     'PerformanceDashboard',
-    'DashboardConfig'
+    'MonitorConfig',
+    'DashboardConfig',
+    'MetricsConfig',
+    'MetricType',
+    'AlertLevel',
+    'DashboardMode',
+    'MonitoringStatus',
+    'PerformanceAlert',
+    'DashboardMetric',
+    'SystemHealth',
+    'MetricValue'
 ]

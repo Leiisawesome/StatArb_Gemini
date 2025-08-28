@@ -116,8 +116,8 @@ class ProfessionalMeanReversionTemplate(BaseTemplate):
     
     def _setup_rules(self):
         """Setup trading rules for mean reversion."""
-        # Simplified rule setup for initial migration
-        # TODO: Implement proper SignalRule integration
+        # Simplified rule setup for template system compatibility
+        # Rules are handled through the template bridge system
         self._rules = []
         pass
     

@@ -3,10 +3,10 @@ Infrastructure layer for StatArb system
 Provides core services and utilities for the application
 """
 
-from .database.clickhouse_client import ClickHouseClient
-from .monitoring.metrics_collector import MetricsCollector
+from .database.database_system import DatabaseManager
+from .monitoring.monitoring_system import MetricsCollector
 from .config import UnifiedConfigManager as ConfigManager
-from .messaging.message_bus import MessageBus, Message
+from .messaging.messaging_system import MessageBus, Message
 
 # Canonical types to eliminate duplicates
 from .types import (
@@ -18,14 +18,14 @@ from .types import (
 )
 
 __all__ = [
-    'ClickHouseClient',
+    'DatabaseManager',
     'MetricsCollector', 
     'ConfigManager',
     'MessageBus',
     'Message',
     # Canonical types
     'OrderType', 'OrderSide', 'OrderStatus', 'Order', 'Fill', 'TimeInForce', 'ExecutionStrategy',
-    'StrategyConfig', 'MarketRegime', 'RegimeInfo', 'RegimeConfidence', 'RegimeType',
+    'StrategyType', 'StrategyConfig', 'Position', 'MarketRegime', 'RegimeInfo', 'RegimeConfidence', 'RegimeType',
     'AlertLevel', 'PerformanceMetric'
 ]
 

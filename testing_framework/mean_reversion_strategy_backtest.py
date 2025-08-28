@@ -148,7 +148,8 @@ class MeanReversionStrategyBacktester:
             
             # Set up backtesting data provider
             try:
-                from core_structure.market_data.enhanced_clickhouse_loader import EnhancedClickHouseLoader, DataRequest
+                # Use old classes for compatibility until Phase 4B provides these interfaces
+                from core_structure.market_data import EnhancedClickHouseLoader, DataRequest
                 
                 clickhouse_loader = EnhancedClickHouseLoader()
                 data_request = DataRequest(

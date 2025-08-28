@@ -52,18 +52,18 @@ class MarketConditions:
     is_closing: bool = False
     
     # Regime classification
-    regime: MarketRegime = MarketRegime.NORMAL
+    regime: MarketRegime = MarketRegime.UNKNOWN
     
     def __post_init__(self):
         """Classify market regime based on conditions"""
         if self.volatility > 0.08:  # 8% daily volatility
-            self.regime = MarketRegime.STRESSED
+            self.regime = MarketRegime.HIGH_VOLATILITY
         elif self.volatility > 0.04:  # 4% daily volatility
-            self.regime = MarketRegime.VOLATILE
+            self.regime = MarketRegime.HIGH_VOLATILITY
         elif self.volume < 100_000:  # Low volume threshold
-            self.regime = MarketRegime.ILLIQUID
+            self.regime = MarketRegime.LOW_VOLATILITY
         else:
-            self.regime = MarketRegime.NORMAL
+            self.regime = MarketRegime.SIDEWAYS
 
 
 @dataclass
@@ -162,10 +162,12 @@ class SquareRootImpactModel(BaseImpactModel):
         
         # Default regime adjustments
         self.regime_adjustments = regime_adjustments or {
-            MarketRegime.NORMAL: 1.0,
-            MarketRegime.VOLATILE: 1.5,
-            MarketRegime.STRESSED: 2.5,
-            MarketRegime.ILLIQUID: 3.0
+            MarketRegime.SIDEWAYS: 1.0,
+            MarketRegime.HIGH_VOLATILITY: 1.5,
+            MarketRegime.LOW_VOLATILITY: 0.8,
+            MarketRegime.TRENDING_UP: 1.2,
+            MarketRegime.TRENDING_DOWN: 1.2,
+            MarketRegime.UNKNOWN: 1.0
         }
         
         self.logger = logging.getLogger(__name__)
