@@ -30,7 +30,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # Core imports
-from core_structure.unified_core_engine import (
+from core_structure.compatibility_layer import (
     UnifiedCoreEngine, CoreEngineConfig, TradingMode, StrategyConfig
 )
 

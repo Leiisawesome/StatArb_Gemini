@@ -14,7 +14,7 @@ from datetime import datetime
 import pandas as pd
 
 from core_structure.strategy_interfaces import BaseStrategy, StrategyType, StrategyContext, StrategyMetrics
-from core_structure.signal_generation.signal_generator import TradingSignal, SignalType, SignalStrength
+from core_structure.components.signal_generation.signal_generator import TradingSignal, SignalType, SignalStrength
 
 
 class MomentumStrategy(BaseStrategy):

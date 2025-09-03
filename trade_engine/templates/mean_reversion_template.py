@@ -22,7 +22,19 @@ from trade_engine.templates.base_template import (
     BaseTemplate, TemplateValidationError,
     ParameterBounds, SignalRule
 )
-from trade_engine.interfaces import RawSignal
+# Create local RawSignal dataclass (migrated from obsolete trade_engine.interfaces)
+from dataclasses import dataclass
+from typing import Dict, Any
+import pandas as pd
+
+@dataclass
+class RawSignal:
+    """Raw signal data from strategy calculations (local definition)"""
+    symbol: str
+    value: float
+    confidence: float
+    signal_metadata: Dict[str, Any]
+    timestamp: pd.Timestamp
 
 
 class ProfessionalMeanReversionTemplate(BaseTemplate):

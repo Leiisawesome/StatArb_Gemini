@@ -16,9 +16,20 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..interfaces import StrategyInterface, RawSignal
+# Updated imports after removing obsolete trade_engine.interfaces
+from core_structure.interfaces import StrategyInterface
 from ..templates.base_template import BaseTemplate, template_registry, SignalRule, SignalCondition
 from ..templates.base_template import TemplateValidationError
+
+
+@dataclass
+class RawSignal:
+    """Raw signal data from strategy calculations (local definition)"""
+    symbol: str
+    value: float
+    confidence: float
+    signal_metadata: Dict[str, Any]
+    timestamp: pd.Timestamp
 
 
 @dataclass

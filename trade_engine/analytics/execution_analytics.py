@@ -24,7 +24,7 @@ import uuid
 from abc import ABC, abstractmethod
 
 # Import execution engine components
-from core_structure.execution_engine.execution_engine import (
+from core_structure.components.execution.execution_engine import (
     ExecutionEngine, ExecutionResult, ExecutionStatus, 
     ExecutionAlgorithm, ExecutionMetrics
 )
