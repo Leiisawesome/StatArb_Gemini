@@ -51,9 +51,25 @@ from core_structure.components.signal_generation import (
     RegimeAnalysisEngine as MarketRegimeDetector
 )
 
+# Missing imports for momentum backtest
+from testing_framework.config.config_manager import TestConfigManager
+from trade_engine.analytics.risk_analyzer import RiskAnalyzer
+from trade_engine.templates.template_bridge import TemplateStrategyBridge
+
 # Compatibility classes for old structure
 from dataclasses import dataclass
 from typing import Dict, Optional
+
+# Create placeholder classes for missing components
+class DynamicRiskManager:
+    """Placeholder for dynamic risk manager"""
+    def __init__(self):
+        pass
+
+class ProfessionalMomentumTemplate:
+    """Placeholder for momentum template"""
+    def __init__(self):
+        pass
 
 @dataclass
 class SignalRiskConfig:
@@ -1496,6 +1512,13 @@ class AdvancedEnhancedMomentumBacktest:
             start_time = datetime.now()
             self.logger.info("🎯 Starting Advanced Enhanced Momentum Strategy Backtest")
             
+            # Initialize results first
+            test_id = f"advanced_momentum_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.results = AdvancedTestResults(
+                test_id=test_id,
+                start_time=datetime.now()
+            )
+            
             # Load test data
             test_data = await self._load_test_data()
             if not test_data:
@@ -1641,19 +1664,7 @@ class AdvancedEnhancedMomentumBacktest:
             print(f"  • UnifiedTradingEngine: ✅ Working (Ultimate Replacement)")
             print()
             
-            # 3. MONITOR PERFORMANCE: Display unified engine performance
-            if self.core_engine:
-                engine_performance = self.core_engine.get_performance_summary()
-                print("🚀 UNIFIED TRADING ENGINE PERFORMANCE:")
-                print(f"  • Engine ID: {engine_performance.get('engine_id', 'N/A')}")
-                print(f"  • Total Cycles: {engine_performance.get('total_cycles', 0)}")
-                print(f"  • Successful Cycles: {engine_performance.get('successful_cycles', 0)}")
-                print(f"  • Success Rate: {engine_performance.get('success_rate', 0):.1%}")
-                print(f"  • Average Execution Time: {engine_performance.get('avg_execution_time_ms', 0):.2f}ms")
-                print(f"  • Hot Path Optimization: {'✅ Enabled' if engine_performance.get('hot_path_optimization_enabled') else '❌ Disabled'}")
-                print(f"  • Memory Optimization: {'✅ Enabled' if engine_performance.get('memory_optimization_enabled') else '❌ Disabled'}")
-                print(f"  • Async Optimization: {'✅ Enabled' if engine_performance.get('async_optimization_enabled') else '❌ Disabled'}")
-                print()
+
             
             # Show all trades
             if self.results.trade_history:
@@ -1687,29 +1698,10 @@ class AdvancedEnhancedMomentumBacktest:
             # Success message
             if self.results.test_status == "PASSED":
                 print("🎉 ADVANCED BACKTEST VALIDATION: SUCCESSFUL")
-                print("✅ Advanced risk management systems operational")
-                print("✅ Market regime detection and trend filters working")
-                print("✅ ATR-based stops and dynamic position sizing functional")
-                print("✅ Comprehensive performance tracking operational")
             else:
                 print("⚠️ ADVANCED BACKTEST VALIDATION: PARTIAL SUCCESS")
-                print("✅ Systems operational but performance optimization needed")
             
             print("="*80)
-            print()
-            
-            # 4. REMOVE LEGACY CODE: Replaced with UnifiedTradingEngine summary
-            print("🚀 UNIFIED TRADING ENGINE SUMMARY:")
-            print(f"✅ Successfully integrated UnifiedTradingEngine as ultimate replacement")
-            print(f"⚡ All optimizations handled by UnifiedTradingEngine (hot path, memory, async)")
-            print(f"📈 Maintained full compatibility with advanced momentum system")
-            print(f"🎯 All risk management, regime detection, and trend filters preserved")
-            print()
-            
-            print("✅ Advanced momentum backtest completed successfully")
-            print("📊 Configuration tested: Advanced TSLA Momentum with UnifiedTradingEngine")
-            print("⏰ Time period: Full trading day with 1-minute frequency")
-            print("📈 Features: ATR stops, regime detection, trend filters, position limits + UnifiedTradingEngine optimizations")
             
         except Exception as e:
             self.logger.error(f"Results display failed: {e}")

@@ -1430,31 +1430,10 @@ class AdvancedMeanReversionBacktest:
     def _display_results(self, execution_time: float):
         """Display comprehensive backtest results"""
         try:
-            logger.info("📊 Final UnifiedTradingEngine Performance Report:")
-            
-            # Get engine performance summary
-            if self.core_engine:
-                engine_summary = self.core_engine.get_performance_summary()
-                logger.info("================================================================================")
-                logger.info("UNIFIED TRADING ENGINE PERFORMANCE REPORT")
-                logger.info("================================================================================")
-                logger.info("ENGINE OVERVIEW")
-                logger.info("----------------------------------------")
-                logger.info(f"Engine ID: {self.core_engine.config.engine_id}")
-                logger.info(f"Trading Mode: {self.core_engine.config.trading_mode}")
-                logger.info(f"Status: {self.core_engine.status}")
-                logger.info(f"Total Cycles: {engine_summary.get('total_cycles', 0)}")
-                logger.info(f"Success Rate: {engine_summary.get('success_rate', 0.0):.1f}%")
-                logger.info(f"Active Strategies: {engine_summary.get('active_strategies', 0)}")
-                logger.info("")
-                logger.info("PHASE 2 PERFORMANCE FEATURES")
-                logger.info("----------------------------------------")
-                logger.info(f"Hot Path Optimization: ✅ Enable...")
-            
             # Display main results
-            logger.info("================================================================================")
+            logger.info("")
             logger.info("🎯 ADVANCED MEAN REVERSION STRATEGY BACKTEST RESULTS")
-            logger.info("================================================================================")
+            logger.info("=" * 80)
             logger.info(f"Test ID: {self.test_id}")
             logger.info(f"Test Status: PASSED (✅)")
             
@@ -1543,22 +1522,7 @@ class AdvancedMeanReversionBacktest:
             
             logger.info("")
             logger.info("🎉 ADVANCED MEAN REVERSION BACKTEST VALIDATION: SUCCESSFUL")
-            logger.info("✅ Simple mean reversion modeling operational")
-            logger.info("✅ Statistical arbitrage techniques working")
-            logger.info("✅ Advanced risk management and regime detection functional")
-            logger.info("✅ Comprehensive performance tracking operational")
-            logger.info("================================================================================")
-            logger.info("")
-            logger.info("🚀 UNIFIED TRADING ENGINE SUMMARY:")
-            logger.info("✅ Successfully integrated UnifiedTradingEngine as ultimate replacement")
-            logger.info("⚡ All optimizations handled by UnifiedTradingEngine (hot path, memory, async)")
-            logger.info("📈 Maintained full compatibility with advanced mean reversion system")
-            logger.info("🎯 All academic research techniques and risk management preserved")
-            logger.info("")
-            logger.info("✅ Advanced mean reversion backtest completed successfully")
-            logger.info(f"📊 Configuration tested: Advanced {'/'.join(self.config.symbols)} Mean Reversion with UnifiedTradingEngine")
-            logger.info(f"⏰ Time period: {self.config.start_date} to {self.config.end_date} with {self.config.data_frequency} frequency")
-            logger.info("📈 Features: OU process, statistical arbitrage, regime detection, advanced risk management + UnifiedTradingEngine optimizations")
+            logger.info("=" * 80)
             
         except Exception as e:
             logger.error(f"❌ Results display failed: {str(e)}")
