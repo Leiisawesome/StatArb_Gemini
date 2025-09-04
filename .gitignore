@@ -295,3 +295,21 @@ multi_strategy_backtest_report_*.txt
 # Testing framework temporary files
 testing_framework/test_report_*.txt
 testing_framework/test_run_*.log
+
+# Additional cleanup patterns
+verify_*.py
+fix_*.py
+debug_*.py
+*_debug.py
+*_temp.py
+*_tmp.py
+*.cache
+*.bak
+
+# Pairs trading temporary files
+pairs_trading_models.py
+*_pairs_*.py
+
+# Performance test files
+*_performance_test.py
+benchmark_*.py

@@ -25,6 +25,7 @@ try:
     from .base_template import BaseTemplate, TemplateValidationError
     from .momentum_template import ProfessionalMomentumTemplate
     from .mean_reversion_template import ProfessionalMeanReversionTemplate
+    from .pairs_trading_template import ProfessionalPairsTradingTemplate, PairsConfiguration
     LEGACY_TEMPLATES_AVAILABLE = True
 except ImportError:
     LEGACY_TEMPLATES_AVAILABLE = False
@@ -46,5 +47,7 @@ __all__ = [
     'TemplateValidationError',
     'ProfessionalMomentumTemplate',
     'ProfessionalMeanReversionTemplate',
+    'ProfessionalPairsTradingTemplate',
+    'PairsConfiguration',
     'LEGACY_TEMPLATES_AVAILABLE'
 ]

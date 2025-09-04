@@ -337,7 +337,8 @@ class TemplateRegistry:
             raise TemplateValidationError("Template must inherit from BaseTemplate")
         
         if template.template_id in self._templates:
-            raise TemplateValidationError(f"Template {template.template_id} already registered")
+            # Template already registered, skip silently
+            return
         
         self._templates[template.template_id] = template
         
@@ -382,3 +383,34 @@ class TemplateRegistry:
 
 # Global template registry instance
 template_registry = TemplateRegistry()
+
+
+def register_default_templates():
+    """Register default templates with the registry"""
+    try:
+        # Register momentum template
+        from .momentum_template import ProfessionalMomentumTemplate
+        momentum_template = ProfessionalMomentumTemplate()
+        template_registry.register_template(momentum_template, "momentum")
+    except ImportError:
+        pass
+    
+    try:
+        # Register mean reversion template
+        from .mean_reversion_template import ProfessionalMeanReversionTemplate
+        mean_reversion_template = ProfessionalMeanReversionTemplate()
+        template_registry.register_template(mean_reversion_template, "mean_reversion")
+    except ImportError:
+        pass
+    
+    try:
+        # Register pairs trading template
+        from .pairs_trading_template import ProfessionalPairsTradingTemplate
+        pairs_template = ProfessionalPairsTradingTemplate()
+        template_registry.register_template(pairs_template, "pairs_trading")
+    except ImportError:
+        pass
+
+
+# Auto-register templates on import
+register_default_templates()
