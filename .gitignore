@@ -308,7 +308,9 @@ debug_*.py
 
 # Pairs trading temporary files
 pairs_trading_models.py
-*_pairs_*.py
+*_pairs_*_temp.py
+*_pairs_*_debug.py
+*_pairs_*_test.py
 
 # Performance test files
 *_performance_test.py
