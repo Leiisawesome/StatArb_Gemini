@@ -53,7 +53,7 @@ from core_structure.components.signal_generation import (
 
 # Missing imports for momentum backtest
 from testing_framework.config.config_manager import TestConfigManager
-from trade_engine.analytics.risk_analyzer import RiskAnalyzer
+from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 from trade_engine.templates.template_bridge import TemplateStrategyBridge
 
 # Compatibility classes for old structure
@@ -109,7 +109,7 @@ from trade_engine.templates import (
     TemplateConfiguration,
     ProfessionalMomentumTemplate
 )
-from trade_engine.analytics.risk_analyzer import RiskAnalyzer
+from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 
 # 4. REMOVE LEGACY CODE: Legacy optimization framework (replaced by UnifiedTradingEngine optimizations)
 # from trade_engine.optimization import create_backtest_optimizer, OptimizationMode, CacheConfig, OptimizationConfig
@@ -270,10 +270,10 @@ class AdvancedEnhancedMomentumBacktest:
         self.test_config = self._load_test_config(config_name, custom_config)
         
         # Advanced components
-        self.risk_manager: Optional[DynamicRiskManager] = None
+        self.dynamic_risk_manager: Optional[DynamicRiskManager] = None
         self.regime_filter: Optional[RegimeAwareFilter] = None
         self.regime_detector: Optional[MarketRegimeDetector] = None
-        self.risk_analyzer: Optional[RiskAnalyzer] = None
+        self.risk_manager: Optional[RiskManager] = None
         
         # Template-based strategy (modern replacement for strategy_layer)
         self.strategy_template: Optional[ProfessionalMomentumTemplate] = None
@@ -465,8 +465,26 @@ class AdvancedEnhancedMomentumBacktest:
                 max_hold_time_hours=480  # 20 trading days
             )
             
-            # Initialize Risk Analyzer (modern replacement for ATRRiskManager)
-            self.risk_analyzer = RiskAnalyzer()
+            # Initialize unified risk manager (modern replacement for ATRRiskManager)
+            risk_limits = RiskLimits(
+                max_position_size_pct=0.1,
+                max_portfolio_drawdown=0.10,
+                default_stop_loss_pct=0.02,
+                default_take_profit_pct=0.04,
+                target_portfolio_volatility=0.15,
+                max_var_pct=0.03
+            )
+            
+            self.risk_manager = RiskManager(
+                risk_limits=risk_limits,
+                trading_mode=TradingMode.BACKTESTING,
+                initial_capital=100000.0  # Default capital
+            )
+            
+            # Set strategy allocations
+            self.risk_manager.set_strategy_allocations({
+                "momentum": 1.0
+            })
             
             # Initialize trade_engine template system
             self.strategy_template = ProfessionalMomentumTemplate()

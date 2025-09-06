@@ -1,0 +1,298 @@
+# ================================================================================
+# PAPER TRADING CONFIGURATION
+# ================================================================================
+# Configuration for paper trading with IBKR integration
+# Extends the unified configuration system for live trading
+# ================================================================================
+
+# =============================================================================
+# PAPER TRADING GLOBAL SETTINGS
+# =============================================================================
+paper_trading:
+  # Environment settings
+  environment: "paper"  # paper, live
+  enable_trading: true
+  enable_monitoring: true
+  enable_alerts: true
+  
+  # Trading session settings
+  market_hours:
+    start_time: "09:30:00"
+    end_time: "16:00:00"
+    timezone: "US/Eastern"
+    trading_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  
+  # Pre-market and after-hours
+  extended_hours:
+    enable_premarket: false
+    enable_afterhours: false
+    premarket_start: "04:00:00"
+    afterhours_end: "20:00:00"
+
+# =============================================================================
+# IBKR CONNECTION CONFIGURATION
+# =============================================================================
+ibkr:
+  # Connection settings for paper trading
+  connection:
+    host: "127.0.0.1"
+    port: 7497  # TWS Paper Trading port
+    client_id: 1
+    account_id: ""  # Will be set from environment or runtime
+    
+  # Connection management
+  connection_timeout: 30
+  retry_attempts: 3
+  retry_delay: 2.0
+  heartbeat_interval: 30
+  
+  # API rate limits
+  max_requests_per_second: 50
+  max_orders_per_second: 5
+  
+  # Market data settings
+  market_data:
+    enable_realtime: true
+    market_data_type: "REALTIME"  # REALTIME, FROZEN, DELAYED
+    enable_level2: false
+    
+  # Order settings
+  orders:
+    default_time_in_force: "DAY"
+    enable_smart_routing: true
+    enable_outside_rth: false
+
+# =============================================================================
+# RISK MANAGEMENT CONFIGURATION
+# =============================================================================
+risk_management:
+  # Portfolio-level limits
+  portfolio:
+    max_total_exposure: 0.95  # 95% of capital
+    max_single_position: 0.20  # 20% per position
+    max_sector_exposure: 0.40  # 40% per sector
+    max_correlation_threshold: 0.7
+    
+  # Daily limits
+  daily_limits:
+    max_daily_loss: 0.02  # 2% daily loss limit
+    max_daily_trades: 100
+    max_daily_turnover: 2.0  # 200% of portfolio
+    
+  # Position limits
+  position_limits:
+    max_position_value: 50000  # $50K per position
+    min_position_value: 1000   # $1K minimum position
+    max_leverage: 1.0          # No leverage for paper trading
+    
+  # Volatility controls
+  volatility_controls:
+    max_portfolio_volatility: 0.15  # 15% annualized
+    volatility_lookback: 20         # 20 days
+    volatility_multiplier: 2.0      # 2x volatility limit
+    
+  # Stop-loss settings
+  stop_loss:
+    enable_portfolio_stop: true
+    portfolio_stop_loss: 0.05  # 5% portfolio stop
+    enable_position_stops: true
+    default_stop_loss: 0.03    # 3% position stop
+
+# =============================================================================
+# STRATEGY CONFIGURATIONS
+# =============================================================================
+strategies:
+  # Strategy allocation and settings
+  allocation:
+    momentum_strategy: 0.40      # 40% allocation
+    mean_reversion_strategy: 0.40 # 40% allocation  
+    pairs_trading_strategy: 0.20  # 20% allocation
+    
+  # Strategy-specific settings
+  momentum:
+    strategy_id: "live_momentum_v1"
+    enable_strategy: true
+    max_positions: 5
+    position_size_method: "volatility_adjusted"
+    rebalance_frequency: "daily"
+    
+    # Live trading parameters
+    signal_frequency: "1min"  # Signal generation frequency
+    execution_delay: 5        # Max seconds between signal and execution
+    
+    # Risk controls
+    max_drawdown: 0.10       # 10% strategy drawdown limit
+    correlation_limit: 0.6    # Max correlation with other strategies
+    
+  mean_reversion:
+    strategy_id: "live_mean_reversion_v1"
+    enable_strategy: true
+    max_positions: 8
+    position_size_method: "equal_weight"
+    rebalance_frequency: "intraday"
+    
+    # Live trading parameters
+    signal_frequency: "5min"
+    execution_delay: 10
+    
+    # Risk controls
+    max_drawdown: 0.08
+    correlation_limit: 0.5
+    
+  pairs_trading:
+    strategy_id: "live_pairs_trading_v1"
+    enable_strategy: true
+    max_pairs: 3
+    position_size_method: "risk_parity"
+    rebalance_frequency: "continuous"
+    
+    # Live trading parameters
+    signal_frequency: "5min"
+    execution_delay: 15  # Pairs need coordination time
+    
+    # Risk controls
+    max_drawdown: 0.06
+    correlation_limit: 0.3  # Pairs should be uncorrelated
+
+# =============================================================================
+# MONITORING CONFIGURATION
+# =============================================================================
+monitoring:
+  # Performance monitoring
+  performance:
+    update_frequency: 60  # seconds
+    calculate_metrics: ["pnl", "sharpe", "drawdown", "win_rate"]
+    benchmark_symbols: ["SPY", "QQQ"]
+    
+  # Risk monitoring
+  risk:
+    check_frequency: 30   # seconds
+    alert_thresholds:
+      portfolio_loss: 0.015  # 1.5% loss alert
+      position_loss: 0.05    # 5% position loss alert
+      correlation_breach: 0.8 # Correlation alert
+      
+  # System monitoring
+  system:
+    check_frequency: 10   # seconds
+    monitor_connection: true
+    monitor_latency: true
+    monitor_errors: true
+    
+  # Data quality monitoring
+  data_quality:
+    check_frequency: 60
+    max_data_delay: 30    # seconds
+    min_data_quality: 0.95 # 95% data quality threshold
+
+# =============================================================================
+# ALERTING CONFIGURATION
+# =============================================================================
+alerts:
+  # Alert channels
+  channels:
+    console: true
+    email: false     # Configure email settings separately
+    slack: false     # Configure Slack webhook separately
+    
+  # Alert types
+  trade_alerts:
+    enable: true
+    new_positions: true
+    position_exits: true
+    large_trades: true      # Trades > 10% of allocation
+    
+  risk_alerts:
+    enable: true
+    limit_breaches: true
+    correlation_warnings: true
+    drawdown_alerts: true
+    volatility_alerts: true
+    
+  system_alerts:
+    enable: true
+    connection_issues: true
+    data_feed_problems: true
+    execution_errors: true
+    performance_degradation: true
+    
+  # Alert thresholds
+  thresholds:
+    large_trade_threshold: 0.10    # 10% of allocation
+    significant_pnl_change: 0.02   # 2% P&L change
+    high_correlation: 0.75         # 75% correlation
+    system_latency: 1000           # 1 second latency
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  # Log levels
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  
+  # Log destinations
+  console: true
+  file: true
+  
+  # File logging settings
+  file_settings:
+    log_directory: "logs/paper_trading"
+    max_file_size: "10MB"
+    backup_count: 10
+    rotation: "daily"
+    
+  # Log categories
+  categories:
+    trades: true          # Trade execution logs
+    signals: true         # Strategy signal logs
+    risk: true           # Risk management logs
+    performance: true    # Performance calculation logs
+    system: true         # System operation logs
+    
+  # Audit trail
+  audit_trail:
+    enable: true
+    include_orders: true
+    include_executions: true
+    include_risk_events: true
+    retention_days: 90
+
+# =============================================================================
+# PERFORMANCE OPTIMIZATION
+# =============================================================================
+optimization:
+  # Memory management
+  memory:
+    enable_caching: true
+    cache_size_mb: 512
+    cache_ttl_seconds: 300
+    
+  # Processing optimization
+  processing:
+    enable_parallel: true
+    max_workers: 4
+    batch_size: 100
+    
+  # Network optimization
+  network:
+    connection_pooling: true
+    request_timeout: 30
+    max_retries: 3
+
+# =============================================================================
+# DEVELOPMENT & TESTING
+# =============================================================================
+development:
+  # Testing modes
+  simulation_mode: false    # Pure simulation without IBKR
+  dry_run_mode: false      # Connect to IBKR but don't place orders
+  
+  # Development features
+  enable_debug_logging: false
+  save_debug_data: false
+  enable_profiling: false
+  
+  # Testing parameters
+  test_capital: 100000     # $100K for testing
+  test_symbols: ["AAPL", "MSFT", "TSLA"]
+  test_duration_hours: 1   # 1 hour test runs

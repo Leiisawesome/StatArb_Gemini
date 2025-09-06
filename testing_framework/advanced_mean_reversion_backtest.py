@@ -71,7 +71,7 @@ from trade_engine.templates import (
     TemplateConfiguration,
     ProfessionalMeanReversionTemplate
 )
-from trade_engine.analytics.risk_analyzer import RiskAnalyzer
+from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 
 # Testing framework configuration
 from testing_framework.config.config_manager import TestConfigManager, TradingPeriod, StrategyConfig
@@ -435,7 +435,7 @@ class AdvancedMeanReversionBacktest:
         self.config = config
         self.core_engine: Optional[UnifiedTradingEngine] = None
         self.ou_model = SimpleMeanReversionModel(config.ou_config)
-        self.risk_analyzer = None
+        self.risk_manager = None
         
         # Data management
         self.market_data_history: Dict[str, pd.DataFrame] = {}
@@ -480,9 +480,28 @@ class AdvancedMeanReversionBacktest:
             self.regime_detector = MarketRegimeDetector()
             logger.info("✅ Market regime detector initialized")
             
-            # Initialize risk analyzer
-            self.risk_analyzer = RiskAnalyzer()
-            logger.info("✅ Risk analyzer initialized")
+            # Initialize unified risk manager
+            risk_limits = RiskLimits(
+                max_position_size_pct=0.1,
+                max_portfolio_drawdown=0.10,
+                default_stop_loss_pct=0.02,
+                default_take_profit_pct=0.04,
+                target_portfolio_volatility=0.15,
+                max_var_pct=0.03
+            )
+            
+            self.risk_manager = RiskManager(
+                risk_limits=risk_limits,
+                trading_mode=TradingMode.BACKTESTING,
+                initial_capital=self.config.initial_capital
+            )
+            
+            # Set strategy allocations
+            self.risk_manager.set_strategy_allocations({
+                "mean_reversion": 1.0
+            })
+            
+            logger.info("✅ Unified risk manager initialized")
             
             # Setup strategy bridge with mean reversion template
             template_config = TemplateConfiguration(

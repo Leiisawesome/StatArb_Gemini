@@ -42,7 +42,7 @@ from core_structure.components.market_data.core.enhanced_clickhouse_loader impor
 from core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
 
 # Trade engine imports
-from trade_engine.analytics.risk_analyzer import RiskAnalyzer
+from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 from trade_engine.templates.template_bridge import TemplateStrategyBridge, TemplateConfiguration
 
 # Minimal pairs trading classes (inline for testing)
@@ -342,6 +342,9 @@ class AdvancedPairsTradingBacktest:
         self.config = config
         self.logger = main_logger
         
+        # Set initial capital from config
+        self.initial_capital = getattr(config, 'initial_capital', 100000.0)
+        
         # Generate unique test ID
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.test_id = f"advanced_pairs_backtest_{timestamp}"
@@ -350,7 +353,7 @@ class AdvancedPairsTradingBacktest:
         self.core_engine = None
         self.data_loader = None
         self.regime_detector = None
-        self.risk_analyzer = None
+        self.risk_manager = None
         self.strategy_bridge = None
         
         # Pairs trading models (one per pair)
@@ -409,9 +412,28 @@ class AdvancedPairsTradingBacktest:
             self.regime_detector = RegimeAnalysisEngine()
             self.logger.info("✅ Market regime detector initialized")
             
-            # Initialize risk analyzer
-            self.risk_analyzer = RiskAnalyzer()
-            self.logger.info("✅ Risk analyzer initialized")
+            # Initialize unified risk manager
+            risk_limits = RiskLimits(
+                max_position_size_pct=0.1,
+                max_portfolio_drawdown=0.10,
+                default_stop_loss_pct=0.02,
+                default_take_profit_pct=0.04,
+                target_portfolio_volatility=0.15,
+                max_var_pct=0.03
+            )
+            
+            self.risk_manager = RiskManager(
+                risk_limits=risk_limits,
+                trading_mode=TradingMode.BACKTESTING,
+                initial_capital=self.initial_capital
+            )
+            
+            # Set strategy allocations
+            self.risk_manager.set_strategy_allocations({
+                "pairs_trading": 1.0
+            })
+            
+            self.logger.info("✅ Unified risk manager initialized")
             
             # Create strategy bridge for pairs trading template
             template_config = TemplateConfiguration(

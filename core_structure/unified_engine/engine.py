@@ -27,7 +27,7 @@ import pandas as pd
 # Core Structure Imports (Updated for new structure)
 from ..components.signal_generation import UnifiedSignalEngine as SignalGenerator, SignalConfig, TradingSignal, SignalType, SignalStrength
 from ..components.execution.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult, ExecutionStatus
-from ..components.risk.risk_manager import RiskManager, RiskLimits
+from ..components.risk import RiskManager, RiskLimits, TradingMode
 from ..components.portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics
 from ..components.market_data import EnhancedDataManager as DataManager
 from ..infrastructure import OrderSide
@@ -267,7 +267,12 @@ class UnifiedTradingEngine:
                 max_portfolio_risk=self.config.max_portfolio_risk,
                 max_drawdown=self.config.max_drawdown
             )
-            self.risk_manager = RiskManager(risk_limits)
+            # Initialize unified risk manager
+            self.risk_manager = RiskManager(
+                risk_limits=risk_limits,
+                trading_mode=TradingMode.LIVE_TRADING,  # Default for unified engine
+                initial_capital=self.config.initial_capital
+            )
             
             # Portfolio Management
             self.portfolio_manager = PortfolioManager(

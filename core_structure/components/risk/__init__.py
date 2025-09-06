@@ -13,24 +13,27 @@ This module consolidates all risk management functionality from:
 - [REMOVED] Old backtesting framework components (superseded by strategy_layer)
 """
 
-from .risk_manager import (
-    RiskManager,
+# Import unified risk manager as the primary risk manager
+from .unified_risk_manager import (
+    UnifiedRiskManager as RiskManager,
     RiskLimits,
-    PositionRisk,
-    PortfolioRisk,
-    RiskOrder,
-    PositionSize,
+    PositionRiskProfile as PositionRisk,
+    UnifiedRiskMetrics as PortfolioRisk,
     RiskLevel,
-    RiskOrderType  # Renamed to avoid confusion with trading OrderType
+    RiskAction,
+    RiskAlert,
+    TradingMode
 )
 
+# Note: Old risk_manager.py has been removed - all functionality moved to unified_risk_manager.py
+
 __all__ = [
-    'RiskManager',
-    'RiskLimits', 
-    'PositionRisk',
-    'PortfolioRisk',
-    'RiskOrder',
-    'PositionSize',
-    'RiskLevel',
-    'RiskOrderType'
+    'RiskManager',           # UnifiedRiskManager (primary)
+    'RiskLimits',           # Unified risk limits
+    'PositionRisk',         # PositionRiskProfile
+    'PortfolioRisk',        # UnifiedRiskMetrics
+    'RiskLevel',            # Risk level enum
+    'RiskAction',           # Risk action enum
+    'RiskAlert',            # Risk alert dataclass
+    'TradingMode',          # Trading mode enum
 ] 
