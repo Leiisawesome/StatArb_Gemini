@@ -315,3 +315,10 @@ pairs_trading_models.py
 # Performance test files
 *_performance_test.py
 benchmark_*.py
+
+# Configuration system demonstration files
+config_driven_backtest_example.py
+refactored_*_backtest.py
+*_demo.py
+*_example.py
+*_sample.py

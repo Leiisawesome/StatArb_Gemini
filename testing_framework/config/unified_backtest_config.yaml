@@ -1,0 +1,308 @@
+# ================================================================================
+# UNIFIED BACKTEST CONFIGURATION SYSTEM
+# ================================================================================
+# Centralized configuration for all backtesting strategies, parameters, 
+# trading periods, and test scenarios. Eliminates hardcoded parameters.
+# ================================================================================
+
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+global:
+  # Default settings applied to all backtests unless overridden
+  default_capital: 100000.0
+  default_interval: "5min"
+  default_timezone: "US/Eastern"
+  
+  # Risk management defaults
+  default_risk_limit: 0.02
+  default_max_position_size: 0.20
+  default_slippage: 0.0005
+
+# =============================================================================
+# TRADING UNIVERSES
+# =============================================================================
+universes:
+  # Single asset universes
+  single_assets:
+    high_momentum: ["TSLA", "NVDA", "AMD", "ARKK"]
+    large_cap: ["AAPL", "MSFT", "GOOGL", "AMZN"]
+    tech_stocks: ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]
+    etfs: ["SPY", "QQQ", "IWM", "VTI", "GLD"]
+    volatile: ["TSLA", "NVDA", "GME", "AMC", "COIN"]
+    stable: ["AAPL", "MSFT", "JNJ", "PG", "KO"]
+    crypto_related: ["COIN", "MSTR", "RIOT", "MARA"]
+  
+  # Pairs trading universes
+  pairs:
+    # Sector pairs
+    tech_pairs: [["AAPL", "MSFT"], ["GOOGL", "AMZN"], ["NVDA", "AMD"]]
+    energy_pairs: [["XOM", "CVX"], ["COP", "EOG"]]
+    finance_pairs: [["JPM", "BAC"], ["GS", "MS"]]
+    
+    # ETF pairs
+    etf_pairs: [["SPY", "QQQ"], ["GLD", "GDX"], ["XLF", "XLK"]]
+    
+    # Cross-sector pairs
+    diversified_pairs: [["AAPL", "JPM"], ["TSLA", "F"], ["AMZN", "WMT"]]
+    
+    # Commodity pairs
+    commodity_pairs: [["GLD", "SLV"], ["USO", "XLE"], ["GLD", "GDX"]]
+
+# =============================================================================
+# TRADING PERIODS
+# =============================================================================
+periods:
+  # Development and testing periods
+  quick_test:
+    start_date: "2024-12-20"
+    end_date: "2024-12-20"
+    description: "Single day for rapid testing"
+  
+  one_week:
+    start_date: "2024-12-16"
+    end_date: "2024-12-20"
+    description: "One week validation"
+  
+  one_month:
+    start_date: "2024-11-20"
+    end_date: "2024-12-20"
+    description: "One month comprehensive test"
+  
+  # Recent performance periods
+  jan_2025:
+    start_date: "2025-01-01"
+    end_date: "2025-01-31"
+    description: "January 2025 - Recent market conditions"
+  
+  q4_2024:
+    start_date: "2024-10-01"
+    end_date: "2024-12-31"
+    description: "Q4 2024 - Election and year-end effects"
+  
+  # Extended backtesting periods
+  three_months:
+    start_date: "2024-09-20"
+    end_date: "2024-12-20"
+    description: "Three month extended analysis"
+  
+  six_months:
+    start_date: "2024-06-20"
+    end_date: "2024-12-20"
+    description: "Six month comprehensive backtest"
+  
+  full_year_2024:
+    start_date: "2024-01-01"
+    end_date: "2024-12-31"
+    description: "Full year 2024 analysis"
+  
+  # Market regime periods
+  bull_market_2023:
+    start_date: "2023-01-01"
+    end_date: "2023-12-31"
+    description: "2023 Bull market conditions"
+  
+  volatile_2022:
+    start_date: "2022-01-01"
+    end_date: "2022-12-31"
+    description: "2022 High volatility period"
+
+# =============================================================================
+# STRATEGY CONFIGURATIONS
+# =============================================================================
+strategies:
+  # =============================================================================
+  # MOMENTUM STRATEGIES
+  # =============================================================================
+  momentum:
+    # Single asset momentum
+    momentum_single_tsla:
+      type: "momentum"
+      universe: "single_assets.high_momentum"
+      symbols: ["TSLA"]
+      period: "jan_2025"
+      interval: "1min"
+      capital: 100000.0
+      parameters:
+        lookback_period: 20
+        momentum_threshold: 0.015
+        trend_lookback: 50
+        regime_detection: true
+        atr_multiplier: 2.0
+        max_position_size: 0.15
+        risk_limit: 0.02
+    
+    # Multi-asset momentum
+    momentum_multi_tech:
+      type: "momentum"
+      universe: "single_assets.tech_stocks"
+      symbols: ["TSLA", "NVDA", "AMD"]
+      period: "three_months"
+      interval: "5min"
+      capital: 300000.0
+      parameters:
+        lookback_period: 15
+        momentum_threshold: 0.02
+        trend_lookback: 30
+        regime_detection: true
+        max_position_size: 0.10
+        risk_limit: 0.015
+  
+  # =============================================================================
+  # MEAN REVERSION STRATEGIES
+  # =============================================================================
+  mean_reversion:
+    # Conservative mean reversion
+    mean_reversion_conservative:
+      type: "mean_reversion"
+      universe: "single_assets.stable"
+      symbols: ["AAPL", "MSFT"]
+      period: "one_month"
+      interval: "5min"
+      capital: 100000.0
+      parameters:
+        lookback_period: 252
+        zscore_entry: 2.0
+        zscore_exit: 0.5
+        profit_target_zscore: 0.2
+        stop_loss_zscore: 3.0
+        max_position_hold_periods: 48
+        partial_exit_zscore: 1.0
+        max_position_size: 0.20
+        risk_limit: 0.015
+    
+    # Aggressive mean reversion
+    mean_reversion_aggressive:
+      type: "mean_reversion"
+      universe: "single_assets.volatile"
+      symbols: ["TSLA"]
+      period: "jan_2025"
+      interval: "1min"
+      capital: 100000.0
+      parameters:
+        lookback_period: 120
+        zscore_entry: 1.5
+        zscore_exit: 0.3
+        profit_target_zscore: 0.1
+        stop_loss_zscore: 2.5
+        max_position_hold_periods: 24
+        partial_exit_zscore: 0.8
+        max_position_size: 0.25
+        risk_limit: 0.025
+  
+  # =============================================================================
+  # PAIRS TRADING STRATEGIES
+  # =============================================================================
+  pairs_trading:
+    # Conservative ETF pairs
+    pairs_etf_conservative:
+      type: "pairs_trading"
+      universe: "pairs.etf_pairs"
+      symbol_pairs: [["GLD", "GDX"]]
+      period: "jan_2025"
+      interval: "5min"
+      capital: 100000.0
+      parameters:
+        lookback_window: 252
+        entry_zscore_long: -1.0
+        entry_zscore_short: 1.0
+        exit_zscore: 0.5
+        stop_loss_zscore: 3.0
+        cointegration_pvalue_threshold: 0.05
+        min_correlation: 0.7
+        max_position_size: 0.40
+        risk_limit: 0.02
+    
+    # Aggressive tech pairs
+    pairs_tech_aggressive:
+      type: "pairs_trading"
+      universe: "pairs.tech_pairs"
+      symbol_pairs: [["AAPL", "MSFT"], ["GOOGL", "AMZN"]]
+      period: "three_months"
+      interval: "1min"
+      capital: 200000.0
+      parameters:
+        lookback_window: 120
+        entry_zscore_long: -0.8
+        entry_zscore_short: 0.8
+        exit_zscore: 0.3
+        stop_loss_zscore: 2.5
+        cointegration_pvalue_threshold: 0.01
+        min_correlation: 0.8
+        max_position_size: 0.30
+        risk_limit: 0.025
+
+# =============================================================================
+# TEST SCENARIOS
+# =============================================================================
+test_scenarios:
+  # Quick validation scenarios
+  quick_validation:
+    - strategy: "momentum.momentum_single_tsla"
+      override:
+        period: "quick_test"
+        interval: "5min"
+    
+    - strategy: "mean_reversion.mean_reversion_conservative"
+      override:
+        period: "quick_test"
+        symbols: ["AAPL"]
+    
+    - strategy: "pairs_trading.pairs_etf_conservative"
+      override:
+        period: "quick_test"
+  
+  # Comprehensive comparison
+  strategy_comparison:
+    - strategy: "momentum.momentum_single_tsla"
+      override:
+        period: "jan_2025"
+        symbols: ["TSLA"]
+    
+    - strategy: "mean_reversion.mean_reversion_aggressive"
+      override:
+        period: "jan_2025"
+        symbols: ["TSLA"]
+    
+    - strategy: "pairs_trading.pairs_etf_conservative"
+      override:
+        period: "jan_2025"
+  
+  # Multi-timeframe analysis
+  multi_timeframe:
+    - strategy: "mean_reversion.mean_reversion_conservative"
+      override:
+        interval: "1min"
+        test_name: "mean_reversion_1min"
+    
+    - strategy: "mean_reversion.mean_reversion_conservative"
+      override:
+        interval: "5min"
+        test_name: "mean_reversion_5min"
+    
+    - strategy: "mean_reversion.mean_reversion_conservative"
+      override:
+        interval: "15min"
+        test_name: "mean_reversion_15min"
+
+# =============================================================================
+# ENVIRONMENT OVERRIDES
+# =============================================================================
+environments:
+  development:
+    global:
+      default_capital: 10000.0  # Smaller capital for dev
+    periods:
+      default_period: "quick_test"
+  
+  testing:
+    global:
+      default_capital: 50000.0
+    periods:
+      default_period: "one_week"
+  
+  production:
+    global:
+      default_capital: 1000000.0
+    periods:
+      default_period: "three_months"
