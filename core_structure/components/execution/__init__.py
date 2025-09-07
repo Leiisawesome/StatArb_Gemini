@@ -15,48 +15,46 @@ This module transforms raw trading signals into optimal market executions
 with institutional-grade performance and risk controls.
 """
 
-from .enhanced_execution_engine import (
-    EnhancedExecutionEngine,
-    OrderManager,
-    SmartOrderRouter,
-    TransactionCostOptimizer,
-    Order,
-    OrderStatus,
-    OrderType,
-    OrderSide,
+# Unified execution engine (PRIMARY - use this for all execution needs)
+from .unified_execution_engine import (
+    UnifiedExecutionEngine, 
+    ExecutionMode, 
+    SlippageModel, 
+    LatencySimulator,
+    MarketConditions as UnifiedMarketConditions,
+    create_execution_engine,
     ExecutionRequest,
     ExecutionResult,
-    ExecutionStatus,
-    ExecutionStrategy,
-    ExecutionMetrics
+    ExecutionStatus
 )
 
-# Legacy exports for backward compatibility
-from .execution_engine import ExecutionEngine
+# Supporting components
 from .market_impact import MarketImpactModel, MarketConditions, SquareRootImpactModel
 from .advanced_algorithms import (
     TWAPAlgorithm, VWAPAlgorithm, ImplementationShortfallAlgorithm,
     PairExecutionCoordinator, ExecutionAlgorithmFactory
 )
 
+# Order management components (if needed separately)
+try:
+    from .order_manager import OrderManager, Order, OrderStatus, OrderType, OrderSide
+    ORDER_MANAGER_AVAILABLE = True
+except ImportError:
+    ORDER_MANAGER_AVAILABLE = False
+
 __all__ = [
-    # Enhanced unified execution engine
-    'EnhancedExecutionEngine',
-    'OrderManager',
-    'SmartOrderRouter',
-    'TransactionCostOptimizer',
-    'Order',
-    'OrderStatus',
-    'OrderType',
-    'OrderSide',
+    # Unified execution engine (PRIMARY - use this for all execution needs)
+    'UnifiedExecutionEngine',
+    'ExecutionMode',
+    'SlippageModel',
+    'LatencySimulator',
+    'UnifiedMarketConditions',
+    'create_execution_engine',
     'ExecutionRequest',
     'ExecutionResult',
     'ExecutionStatus',
-    'ExecutionStrategy',
-    'ExecutionMetrics',
     
-    # Legacy components
-    'ExecutionEngine',
+    # Supporting components
     'MarketImpactModel',
     'SquareRootImpactModel',
     'MarketConditions',
@@ -66,5 +64,15 @@ __all__ = [
     'PairExecutionCoordinator',
     'ExecutionAlgorithmFactory'
 ]
+
+# Add order management components if available
+if ORDER_MANAGER_AVAILABLE:
+    __all__.extend([
+        'OrderManager',
+        'Order',
+        'OrderStatus',
+        'OrderType',
+        'OrderSide'
+    ])
 
 __version__ = "2.0.0" 

@@ -23,7 +23,7 @@ import logging
 from abc import ABC, abstractmethod
 
 # Import execution engine components
-from .execution_engine import ExecutionRequest, ExecutionResult, ExecutionStatus
+from .unified_execution_engine import ExecutionRequest, ExecutionResult, ExecutionStatus
 from .order_manager import Order, OrderType, OrderSide, OrderStatus
 from .market_impact import MarketConditions
 from .transaction_cost_optimizer import VenueCharacteristics, VenueType

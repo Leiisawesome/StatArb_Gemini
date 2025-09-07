@@ -26,7 +26,7 @@ import pandas as pd
 
 # Core Structure Imports (Updated for new structure)
 from ..components.signal_generation import UnifiedSignalEngine as SignalGenerator, SignalConfig, TradingSignal, SignalType, SignalStrength
-from ..components.execution.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult, ExecutionStatus
+from ..components.execution.unified_execution_engine import UnifiedExecutionEngine, ExecutionMode, ExecutionRequest, ExecutionResult, ExecutionStatus
 from ..components.risk import RiskManager, RiskLimits, TradingMode
 from ..components.portfolio.portfolio_manager import PortfolioManager, PortfolioMetrics
 from ..components.market_data import EnhancedDataManager as DataManager
@@ -279,11 +279,14 @@ class UnifiedTradingEngine:
                 initial_capital=self.config.initial_capital
             )
             
-            # Execution Engine
-            self.execution_engine = ExecutionEngine(
-                initial_capital=self.config.initial_capital,
-                max_order_value=self.config.max_order_value,
-                commission_rate=self.config.commission_rate
+            # Unified Execution Engine (supports all trading modes)
+            execution_mode = ExecutionMode.LIVE_TRADING  # Default for unified engine
+            if self.config.trading_mode == TradingMode.SIMULATION:
+                execution_mode = ExecutionMode.BACKTESTING
+            
+            self.execution_engine = UnifiedExecutionEngine(
+                mode=execution_mode,
+                initial_capital=self.config.initial_capital
             )
             
             # Data Management

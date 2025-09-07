@@ -17,10 +17,10 @@ Author: Professional Trading System Architecture
 Version: PRODUCTION (Reorganized)
 """
 
-# Execution Engine
+# Unified Execution Engine
 from .execution import (
-    ExecutionEngine,
-    OrderManager,
+    UnifiedExecutionEngine,
+    ExecutionMode,
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus
@@ -62,9 +62,9 @@ from .broker_integration import (
 )
 
 __all__ = [
-    # Execution
-    'ExecutionEngine',
-    'OrderManager', 
+    # Unified Execution
+    'UnifiedExecutionEngine',
+    'ExecutionMode',
     'ExecutionRequest',
     'ExecutionResult',
     'ExecutionStatus',

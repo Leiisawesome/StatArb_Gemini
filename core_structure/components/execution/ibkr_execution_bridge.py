@@ -25,7 +25,7 @@ from enum import Enum
 import uuid
 
 # Core execution imports
-from .execution_engine import ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionAlgorithm
+from .unified_execution_engine import ExecutionRequest, ExecutionResult, ExecutionStatus
 from .order_manager import Order, OrderStatus, OrderType, OrderSide
 
 # IBKR integration imports
