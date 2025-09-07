@@ -174,7 +174,7 @@ class EnhancedClickHouseLoader:
         self.clickhouse = self.db_system.clickhouse
         
         # Initialize monitoring system
-        metrics_collector, _, _ = MonitoringSystemFactory.create_development_monitoring_system()
+        metrics_collector, _, _, _ = MonitoringSystemFactory.create_development_monitoring_system()
         self.metrics = metrics_collector
         
         # Caching

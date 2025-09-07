@@ -37,13 +37,26 @@ sys.path.append(str(project_root))
 # Core engine imports
 from core_structure.unified_engine.factory import UnifiedEngineFactory
 from core_structure.unified_engine.engine import UnifiedEngineConfig
-from core_structure.infrastructure.config.unified_config_manager import UnifiedConfigManager
+from core_structure.configuration import UnifiedConfigManager
 from core_structure.components.market_data.core.enhanced_clickhouse_loader import EnhancedClickHouseLoader, DataRequest
 from core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
 
 # Trade engine imports
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from trade_engine.templates.template_bridge import TemplateStrategyBridge, TemplateConfiguration
+from core_structure.strategies import TemplateBasedStrategy as TemplateStrategyBridge, UnifiedStrategyConfig as TemplateConfiguration
+
+# Import unified strategy system components
+from core_structure.strategies import (
+    UnifiedStrategyConfig,
+    StrategyParameters,
+    StrategyExecutionMode,
+    StrategyType,
+    UnifiedStrategyEngine,
+    PairsTradingStrategy
+)
+
+# Alias for backward compatibility
+UnifiedStrategyConfig = TemplateConfiguration
 
 # Minimal pairs trading classes (inline for testing)
 @dataclass
@@ -435,32 +448,46 @@ class AdvancedPairsTradingBacktest:
             
             self.logger.info("✅ Unified risk manager initialized")
             
-            # Create strategy bridge for pairs trading template
-            template_config = TemplateConfiguration(
-                template_id="professional_pairs_trading_v1",
-                strategy_instance_id="pairs_trading_strategy_instance",
-                parameters={
-                    # Cointegration parameters
-                    "lookback_window": self.config.pairs_config.lookback_window,
-                    "significance_level": self.config.pairs_config.significance_level,
-                    "min_correlation": self.config.pairs_config.min_correlation,
-                    
-                    # Spread parameters
-                    "spread_lookback": self.config.pairs_config.spread_lookback,
-                    "entry_zscore_long": self.config.pairs_config.entry_zscore_long,
-                    "entry_zscore_short": self.config.pairs_config.entry_zscore_short,
-                    "exit_zscore": self.config.pairs_config.exit_zscore,
-                    "stop_loss_zscore": self.config.pairs_config.stop_loss_zscore,
-                    
-                    # Position and risk management
-                    "max_position_hold_periods": self.config.pairs_config.max_position_hold_periods,
-                    "capital_per_pair": self.config.pairs_config.capital_per_pair,
-                    "max_pairs_active": self.config.pairs_config.max_pairs_active,
-                    "hedge_ratio_update_frequency": self.config.pairs_config.hedge_ratio_update_frequency
-                }
+            # Setup unified strategy configuration with parameters
+            strategy_params_obj = StrategyParameters(
+                lookback_period=self.config.pairs_config.lookback_window,
+                signal_threshold=0.02,
+                position_size=0.1,
+                execution_mode=StrategyExecutionMode.BACKTEST
             )
             
-            self.strategy_bridge = TemplateStrategyBridge(template_config)
+            # Add pairs trading specific parameters to template_config
+            strategy_params_obj.template_config = {
+                'pairs': [{'symbol1': 'TSLA', 'symbol2': 'TSLA'}],  # Simplified for testing
+                'entry_threshold': 2.0,
+                'exit_threshold': 0.5,
+                'lookback_window': self.config.pairs_config.lookback_window,
+                'significance_level': self.config.pairs_config.significance_level,
+                'min_correlation': self.config.pairs_config.min_correlation,
+                'spread_lookback': self.config.pairs_config.spread_lookback,
+                'entry_zscore_long': self.config.pairs_config.entry_zscore_long,
+                'entry_zscore_short': self.config.pairs_config.entry_zscore_short,
+                'exit_zscore': self.config.pairs_config.exit_zscore,
+                'stop_loss_zscore': self.config.pairs_config.stop_loss_zscore,
+                'max_position_hold_periods': self.config.pairs_config.max_position_hold_periods,
+                'capital_per_pair': self.config.pairs_config.capital_per_pair,
+                'max_pairs_active': self.config.pairs_config.max_pairs_active,
+                'hedge_ratio_update_frequency': self.config.pairs_config.hedge_ratio_update_frequency
+            }
+            
+            # Create unified strategy configuration
+            template_config = UnifiedStrategyConfig(
+                strategy_id="advanced_pairs_trading_tsla",
+                strategy_type=StrategyType.PAIRS_TRADING,
+                parameters=strategy_params_obj,
+                template_based=False,  # Use regular strategy, not template-based
+                template_name="professional_pairs_trading_v1",
+                description="Advanced Pairs Trading Strategy for Backtesting"
+            )
+            
+            # Create strategy bridge using unified strategy engine
+            strategy_engine = UnifiedStrategyEngine()
+            self.strategy_bridge = strategy_engine.create_strategy(template_config, PairsTradingStrategy)
             
             self.logger.info("✅ Strategy bridge created for: advanced_pairs_trading_strategy")
             self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")

@@ -5,8 +5,19 @@ Strategy Interface Layer - Clean Architecture
 Professional interface definitions for strategy implementations.
 Ensures clean separation between core orchestration and strategy logic.
 
+This module provides the foundational contracts and base classes that all
+strategy implementations must follow. It serves as the architectural foundation
+for the unified strategy system.
+
+Key Components:
+- StrategyInterface: Protocol defining strategy contracts
+- BaseStrategy: Abstract base class with common functionality  
+- StrategyFactory: Factory pattern for strategy creation
+- StrategyContext: Execution context data structure
+- StrategyMetrics: Performance tracking framework
+
 Author: Professional Trading System Architecture
-Version: 2.0.0
+Version: 3.0.0 (Updated for Consolidated Architecture)
 """
 
 from abc import ABC, abstractmethod
@@ -218,15 +229,17 @@ class StrategyExecutionError(StrategyError):
 
 # Auto-register available strategies
 def _auto_register_strategies():
-    """Auto-register available strategy implementations"""
+    """Auto-register available strategy implementations from consolidated system"""
     import importlib
     
+    # Updated paths to use the consolidated strategy system
     strategy_modules = [
-        ('trade_engine.strategies.momentum_strategy', 'MomentumStrategy', StrategyType.MOMENTUM),
-        ('trade_engine.strategies.mean_reversion_strategy', 'MeanReversionStrategy', StrategyType.MEAN_REVERSION),
-        ('trade_engine.strategies.pairs_trading_strategy', 'PairsTradingStrategy', StrategyType.PAIRS_TRADING),
-        ('trade_engine.strategies.arbitrage_strategy', 'ArbitrageStrategy', StrategyType.ARBITRAGE),
-        ('trade_engine.strategies.custom_strategy', 'CustomStrategy', StrategyType.CUSTOM),
+        ('core_structure.strategies.momentum_strategy', 'MomentumStrategy', StrategyType.MOMENTUM),
+        ('core_structure.strategies.mean_reversion_strategy', 'MeanReversionStrategy', StrategyType.MEAN_REVERSION),
+        ('core_structure.strategies.pairs_trading_strategy', 'PairsTradingStrategy', StrategyType.PAIRS_TRADING),
+        # Note: Arbitrage and Custom strategies not yet implemented in consolidated system
+        # ('core_structure.strategies.arbitrage_strategy', 'ArbitrageStrategy', StrategyType.ARBITRAGE),
+        # ('core_structure.strategies.custom_strategy', 'CustomStrategy', StrategyType.CUSTOM),
     ]
     
     for module_name, class_name, strategy_type in strategy_modules:

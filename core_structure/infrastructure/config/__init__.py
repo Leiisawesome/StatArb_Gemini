@@ -1,157 +1,183 @@
+#!/usr/bin/env python3
 """
-Consolidated Configuration System for StatArb Trading System
-===========================================================
+Infrastructure Configuration - Backward Compatibility Layer
+==========================================================
 
-Phase 5A Infrastructure Consolidation - Config Module
-Consolidates 9 config files → 3 unified domain modules
+This module provides backward compatibility for the legacy infrastructure configuration system.
+All configuration functionality has been consolidated into the unified configuration system.
 
-Architecture:
-- core_config.py: Base framework + environment + validation (900 lines)
-- business_config.py: Trading + risk + AI business logic (1000 lines)  
-- infrastructure_config.py: Database + logging + monitoring (850 lines)
+MIGRATION NOTICE:
+The configuration system has been unified and moved to:
+core_structure/configuration/
 
-Total reduction: 9 files → 3 files (67% reduction)
+Legacy imports are maintained for backward compatibility.
+
+Author: Professional Trading System Architecture
+Version: 3.0.0 (Compatibility Layer)
 """
 
-# Core configuration framework
-from .core_config import (
-    BaseConfig, 
-    Environment, 
-    LogLevel,
-    SystemConfig,
-    CoreConfigFactory,
-    SecureConfigManager,
-    ConfigValidator,
+# Backward compatibility imports from unified configuration system
+from core_structure.configuration import (
+    # Core Configuration Classes
+    UnifiedConfig,
+    ConfigurationError,
     ValidationError,
-    get_api_key,
-    get_database_config,
-    get_feeds_config,
-    load_env_file
-)
-
-# Business domain configurations
-from .business_config import (
-    # Trading configurations
-    MarketConfig,
-    ExecutionConfig, 
-    StrategyConfig,
-    PortfolioConfig,
+    Environment,
+    TradingMode,
+    LogLevel,
+    BaseConfig,
+    ConfigValidator,
     
-    # Risk configurations
-    PositionRiskConfig,
-    PortfolioRiskConfig,
-    MarketRiskConfig,
-    
-    # AI/ML configurations
-    ModelConfig,
-    LLMConfig,
-    MLPipelineConfig,
-    AIAgentConfig,
-    
-    # Consolidated business config
-    BusinessConfig,
-    BusinessConfigFactory
-)
-
-# Infrastructure configurations
-from .infrastructure_config import (
-    # Database configurations
-    ClickHouseConfig,
-    RedisConfig,
-    PostgreSQLConfig,
-    
-    # System configurations
+    # Domain Configurations
+    TradingConfig,
+    RiskConfig,
+    SystemConfig,
+    DatabaseConfig,
     LoggingConfig,
     MonitoringConfig,
-    MessageQueueConfig,
+    AIConfig,
+    MarketDataConfig,
+    StrategyConfig,
     
-    # Consolidated infrastructure config
-    InfrastructureConfig,
-    InfrastructureConfigManager,
-    InfrastructureConfigFactory
-)
-
-# Legacy compatibility and unified management
-from .unified_config_manager import (
+    # Configuration Management
     UnifiedConfigManager,
-    UnifiedConfig,
-    ConfigSystemFactory
+    ConfigFactory,
+    ConfigBuilder,
+    
+    # Convenience Functions
+    get_config,
+    load_config,
+    save_config,
+    validate_config,
+    get_environment,
+    set_environment,
+    is_production,
+    is_development,
+    get_api_key,
+    get_database_url,
+    get_secret,
 )
 
-# Backward compatibility aliases
-RiskConfig = PortfolioRiskConfig
+# Legacy aliases for smooth migration
+Config = UnifiedConfig
+ConfigManager = UnifiedConfigManager
+InfrastructureConfig = SystemConfig
+BusinessConfig = TradingConfig
+
+# Legacy function aliases
+get_database_config = get_database_url
+get_feeds_config = lambda: get_config().market_data if get_config().market_data else {}
+load_env_file = lambda: None  # Environment loading is now automatic
+
+# Backward compatibility for specific legacy imports
+CoreConfigFactory = ConfigFactory
+SecureConfigManager = UnifiedConfigManager
+InfrastructureConfigManager = UnifiedConfigManager
+InfrastructureConfigFactory = ConfigFactory
+
+# Legacy configuration classes for compatibility
+class ClickHouseConfig:
+    """Legacy ClickHouse config - redirects to unified system"""
+    def __init__(self):
+        config = get_config()
+        if config.database and config.database.clickhouse:
+            self.__dict__.update(config.database.clickhouse.to_dict())
+
+class RedisConfig:
+    """Legacy Redis config - redirects to unified system"""
+    def __init__(self):
+        config = get_config()
+        if config.database and config.database.redis:
+            self.__dict__.update(config.database.redis.to_dict())
+
+class PostgreSQLConfig:
+    """Legacy PostgreSQL config - placeholder"""
+    def __init__(self):
+        pass
+
+class MessageQueueConfig:
+    """Legacy message queue config - placeholder"""
+    def __init__(self):
+        pass
+
+# Legacy risk configuration aliases
+PositionRiskConfig = lambda: get_config().risk.position if get_config().risk else None
+PortfolioRiskConfig = lambda: get_config().risk.portfolio if get_config().risk else None
+MarketRiskConfig = lambda: get_config().risk.market if get_config().risk else None
+
+# Legacy business configuration aliases
+MarketConfig = lambda: get_config().market_data if get_config().market_data else None
+ExecutionConfig = lambda: get_config().trading.execution if get_config().trading else None
+PortfolioConfig = lambda: get_config().trading.portfolio if get_config().trading else None
+
+# Legacy AI configuration aliases
+ModelConfig = lambda: get_config().ai.models if get_config().ai else {}
+LLMConfig = lambda: get_config().ai.llm if get_config().ai else None
+AIAgentConfig = lambda: get_config().ai if get_config().ai else None
 
 __all__ = [
-    # ================================
-    # CORE CONFIGURATION FRAMEWORK
-    # ================================
-    "BaseConfig",
-    "Environment", 
+    # Core Configuration Framework
+    "UnifiedConfig",
+    "ConfigurationError",
+    "ValidationError", 
+    "Environment",
+    "TradingMode",
     "LogLevel",
-    "SystemConfig",
+    "BaseConfig",
+    "ConfigValidator",
+    
+    # Domain Configurations
+    "TradingConfig",
+    "RiskConfig",
+    "SystemConfig", 
+    "DatabaseConfig",
+    "LoggingConfig",
+    "MonitoringConfig",
+    "AIConfig",
+    "MarketDataConfig",
+    "StrategyConfig",
+    
+    # Configuration Management
+    "UnifiedConfigManager",
+    "ConfigFactory",
+    "ConfigBuilder",
+    
+    # Convenience Functions
+    "get_config",
+    "load_config",
+    "save_config", 
+    "validate_config",
+    "get_environment",
+    "set_environment",
+    "is_production",
+    "is_development",
+    "get_api_key",
+    "get_database_url",
+    "get_secret",
+    
+    # Legacy Compatibility
+    "Config",
+    "ConfigManager",
+    "InfrastructureConfig",
+    "BusinessConfig",
     "CoreConfigFactory",
     "SecureConfigManager",
-    "ConfigValidator",
-    "ValidationError",
-    "get_api_key",
-    "get_database_config", 
-    "get_feeds_config",
-    "load_env_file",
-    
-    # ================================
-    # BUSINESS DOMAIN CONFIGURATIONS
-    # ================================
-    
-    # Trading configurations
-    "MarketConfig",
-    "ExecutionConfig", 
-    "StrategyConfig",
-    "PortfolioConfig",
-    
-    # Risk configurations
-    "PositionRiskConfig",
-    "PortfolioRiskConfig",
-    "MarketRiskConfig",
-    
-    # AI/ML configurations
-    "ModelConfig",
-    "LLMConfig",
-    "MLPipelineConfig",
-    "AIAgentConfig",
-    
-    # Consolidated business config
-    "BusinessConfig",
-    "BusinessConfigFactory",
-    
-    # ================================
-    # INFRASTRUCTURE CONFIGURATIONS
-    # ================================
-    
-    # Database configurations
+    "InfrastructureConfigManager",
+    "InfrastructureConfigFactory",
     "ClickHouseConfig",
     "RedisConfig",
     "PostgreSQLConfig",
-    
-    # System configurations
-    "LoggingConfig",
-    "MonitoringConfig", 
     "MessageQueueConfig",
-    
-    # Consolidated infrastructure config
-    "InfrastructureConfig",
-    "InfrastructureConfigManager",
-    "InfrastructureConfigFactory",
-    
-    # ================================
-    # LEGACY COMPATIBILITY
-    # ================================
-    "UnifiedConfigManager",
-    "UnifiedConfig",
-    "ConfigSystemFactory",
-    "LegacyStrategyConfig",
-    "TrainingConfig",
-    "TradingConfig",
-    "DatabaseConfig",
-    "LegacyLoggingConfig",
-    "RiskConfig"  # Alias for PortfolioRiskConfig
-] 
+    "PositionRiskConfig",
+    "PortfolioRiskConfig",
+    "MarketRiskConfig",
+    "MarketConfig",
+    "ExecutionConfig",
+    "PortfolioConfig",
+    "ModelConfig",
+    "LLMConfig",
+    "AIAgentConfig",
+    "get_database_config",
+    "get_feeds_config",
+    "load_env_file",
+]

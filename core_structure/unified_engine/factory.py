@@ -338,7 +338,7 @@ class UnifiedEngineFactory:
         """Create engine configuration with full optimizations"""
         return UnifiedEngineConfig(
             engine_id=f"unified_prod_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            trading_mode=unified_config.trading.get('mode', TradingMode.LIVE_TRADING),
+            trading_mode=getattr(unified_config, 'trading_mode', TradingMode.LIVE_TRADING),
             
             # Enable all Phase 2 optimizations
             enable_hot_path_optimization=True,
@@ -364,7 +364,7 @@ class UnifiedEngineFactory:
         return UnifiedEngineConfig(
             engine_id=f"unified_dev_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
 
-            trading_mode=unified_config.trading.get('mode', TradingMode.PAPER_TRADING),
+            trading_mode=getattr(unified_config, 'trading_mode', TradingMode.PAPER_TRADING),
             
             # Selective optimizations for development
             enable_hot_path_optimization=False,  # Easier debugging
@@ -413,7 +413,7 @@ class UnifiedEngineFactory:
         return UnifiedEngineConfig(
             engine_id=f"unified_migrated_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
 
-            trading_mode=unified_config.trading.get('mode', TradingMode.PAPER_TRADING),
+            trading_mode=getattr(unified_config, 'trading_mode', TradingMode.PAPER_TRADING),
             
             # Balanced optimizations for migrated engines
             enable_hot_path_optimization=self.factory_config.enable_hot_path_optimization,

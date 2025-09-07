@@ -34,6 +34,7 @@ from .monitoring_system import (
     MetricsCollector,
     RealTimeMonitor,
     PerformanceDashboard,
+    EnhancedHealthMonitor,
     MonitoringSystemFactory,
     MonitorConfig,
     DashboardConfig,
@@ -42,10 +43,16 @@ from .monitoring_system import (
     AlertLevel,
     DashboardMode,
     MonitoringStatus,
+    HealthStatus,
+    ComponentType,
     PerformanceAlert,
     DashboardMetric,
     SystemHealth,
-    MetricValue
+    MetricValue,
+    HealthCheck,
+    SystemMetrics,
+    EnhancedMetric,
+    MetricSummary
 )
 
 # Legacy backward compatibility imports

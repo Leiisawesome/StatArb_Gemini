@@ -65,12 +65,26 @@ from core_structure.components.signal_generation import (
     RegimeAnalysisEngine as MarketRegimeDetector
 )
 
-# Trade engine analytics and templates
-from trade_engine.templates import (
-    TemplateStrategyBridge, 
-    TemplateConfiguration,
-    ProfessionalMeanReversionTemplate
+# Unified strategy system components (consolidated)
+from core_structure.strategies import (
+    TemplateBasedStrategy as TemplateStrategyBridge, 
+    UnifiedStrategyConfig as TemplateConfiguration
 )
+
+# Note: ProfessionalMeanReversionTemplate is now handled by the unified strategy system
+
+# Import unified strategy system components
+from core_structure.strategies import (
+    UnifiedStrategyConfig,
+    StrategyParameters,
+    StrategyExecutionMode,
+    StrategyType,
+    UnifiedStrategyEngine,
+    MeanReversionStrategy
+)
+
+# Alias for backward compatibility
+UnifiedStrategyConfig = TemplateConfiguration
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 
 # Testing framework configuration
@@ -503,36 +517,46 @@ class AdvancedMeanReversionBacktest:
             
             logger.info("✅ Unified risk manager initialized")
             
-            # Setup strategy bridge with mean reversion template
-            template_config = TemplateConfiguration(
-                template_id="professional_mean_reversion_v1",
-                parameters={
-                    # Core parameters
-                    'lookback_period': 20,
-                    'rsi_period': 14,
-                    'bb_period': 20,
-                    'bb_std_dev': 2.0,
-                    
-                    # Signal thresholds
-                    'rsi_overbought': 70,
-                    'rsi_oversold': 30,
-                    'ma_deviation_threshold': 0.05,
-                    'confidence_threshold': 0.6,
-                    
-                    # Position and risk management
-                    'position_size': self.config.risk_config.max_position_size,
-                    'stop_loss_pct': 0.02,
-                    'take_profit_pct': 0.04,
-                    
-                    # Volume and volatility filters
-                    'volume_threshold': 1.2,
-                    'volatility_percentile': 80
-                },
-                strategy_instance_id="advanced_mean_reversion_strategy"
+            # Setup unified strategy configuration with parameters
+            strategy_params_obj = StrategyParameters(
+                lookback_period=20,
+                signal_threshold=0.02,
+                position_size=0.1,
+                execution_mode=StrategyExecutionMode.BACKTEST
             )
             
-            self.strategy_bridge = TemplateStrategyBridge(template_config)
-            logger.info(f"✅ Strategy bridge created for: {template_config.strategy_instance_id}")
+            # Add mean reversion specific parameters to template_config
+            strategy_params_obj.template_config = {
+                'z_score_threshold': 2.0,
+                'exit_z_score': 0.5,
+                'rsi_period': 14,
+                'bb_period': 20,
+                    'bb_std_dev': 2.0,
+                'rsi_overbought': 70,
+                'rsi_oversold': 30,
+                'ma_deviation_threshold': 0.05,
+                'confidence_threshold': 0.6,
+                'position_size': self.config.risk_config.max_position_size,
+                'stop_loss_pct': 0.02,
+                'take_profit_pct': 0.04,
+                'volume_threshold': 1.2,
+                'volatility_percentile': 80
+            }
+            
+            # Create unified strategy configuration
+            template_config = UnifiedStrategyConfig(
+                strategy_id="advanced_mean_reversion_tsla",
+                strategy_type=StrategyType.MEAN_REVERSION,
+                parameters=strategy_params_obj,
+                template_based=False,  # Use regular strategy, not template-based
+                template_name="professional_mean_reversion_v1",
+                description="Advanced Mean Reversion Strategy for Backtesting"
+            )
+            
+            # Create strategy bridge using unified strategy engine
+            strategy_engine = UnifiedStrategyEngine()
+            self.strategy_bridge = strategy_engine.create_strategy(template_config, MeanReversionStrategy)
+            logger.info(f"✅ Strategy bridge created for: {template_config.strategy_id}")
             
             # Register strategy with UnifiedTradingEngine (auto-discovery)
             logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")

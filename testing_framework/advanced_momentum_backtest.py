@@ -54,7 +54,7 @@ from core_structure.components.signal_generation import (
 # Missing imports for momentum backtest
 from testing_framework.config.config_manager import TestConfigManager
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from trade_engine.templates.template_bridge import TemplateStrategyBridge
+from core_structure.strategies.unified_strategy_system import TemplateBasedStrategy as TemplateStrategyBridge
 
 # Compatibility classes for old structure
 from dataclasses import dataclass
@@ -103,12 +103,24 @@ class SignalRiskConfig:
             'stable': {'stop': 2.0, 'target': 3.5}
         }
 
-# Trade engine components (modern replacement for strategy_layer)
-from trade_engine.templates import (
-    TemplateStrategyBridge, 
-    TemplateConfiguration,
-    ProfessionalMomentumTemplate
+# Unified strategy system components (consolidated)
+from core_structure.strategies import (
+    TemplateBasedStrategy as TemplateStrategyBridge, 
+    UnifiedStrategyConfig as TemplateConfiguration
 )
+
+# Note: ProfessionalMomentumTemplate is now handled by the unified strategy system
+
+# Import unified strategy system components
+from core_structure.strategies import (
+    UnifiedStrategyConfig,
+    StrategyParameters,
+    StrategyExecutionMode,
+    StrategyType
+)
+
+# Alias for backward compatibility
+UnifiedStrategyConfig = TemplateConfiguration
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 
 # 4. REMOVE LEGACY CODE: Legacy optimization framework (replaced by UnifiedTradingEngine optimizations)
@@ -493,32 +505,42 @@ class AdvancedEnhancedMomentumBacktest:
             strategy_params = self.test_config['strategy']['parameters']
             primary_symbol = symbols[0] if symbols else 'UNKNOWN'
             
-            # Setup template configuration with parameters from config
-            template_config = TemplateConfiguration(
-                template_id=self.test_config['strategy']['template'],
-                strategy_instance_id=f"advanced_momentum_{primary_symbol.lower()}",
-                parameters={
-                    'lookback_period': strategy_params.get('lookback_period', self.momentum_config.lookback_period),
-                    'momentum_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
-                    'confidence_threshold': 0.75,  # 75% confidence threshold (within 0.5-0.95 range)
-                    'volume_lookback': 10,
-                    'volume_threshold': 1.5,
-                    'position_size': strategy_params.get('max_position_size', self.config.max_position_size),
-                    'stop_loss_pct': self.config.stop_loss_percentage,
-                    'take_profit_pct': self.config.take_profit_percentage,
-                    'volatility_percentile': 80
-                },
-                metadata={
-                    'strategy_name': 'Advanced TSLA Momentum Strategy',
-                    'description': 'Advanced momentum with comprehensive risk management',
-                    'risk_config': risk_config.__dict__,
-                    'trend_filter_enabled': self.momentum_config.trend_filter_enabled,
-                    'regime_filter_enabled': self.momentum_config.regime_filter_enabled
-                }
+            # Setup unified strategy configuration with parameters from config
+            strategy_params_obj = StrategyParameters(
+                lookback_period=strategy_params.get('lookback_period', self.momentum_config.lookback_period),
+                signal_threshold=strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
+                position_size=0.1,
+                execution_mode=StrategyExecutionMode.BACKTEST
+            )
+            
+            # Add momentum-specific parameters to template_config
+            strategy_params_obj.template_config = {
+                'momentum_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
+                'confidence_threshold': 0.75,  # 75% confidence threshold (within 0.5-0.95 range)
+                'volume_lookback': 10,
+                'volume_threshold': 1.5,
+                'position_size': strategy_params.get('max_position_size', self.config.max_position_size),
+                'stop_loss_pct': self.config.stop_loss_percentage,
+                'take_profit_pct': self.config.take_profit_percentage,
+                'volatility_percentile': 80
+            }
+            
+            # Create unified strategy configuration
+            template_config = UnifiedStrategyConfig(
+                strategy_id=f"advanced_momentum_{primary_symbol.lower()}",
+                strategy_type=StrategyType.MOMENTUM,
+                parameters=strategy_params_obj,
+                template_based=False,  # Use regular strategy, not template-based
+                template_name=self.test_config['strategy']['template'],
+                description="Advanced Momentum Strategy for Backtesting"
             )
             
             # Create strategy bridge (modern replacement for MomentumStrategyDefinition)
-            self.strategy_bridge = TemplateStrategyBridge(template_config)
+            # Use the unified strategy engine to create the strategy
+            from core_structure.strategies import UnifiedStrategyEngine, MomentumStrategy
+            
+            strategy_engine = UnifiedStrategyEngine()
+            self.strategy_bridge = strategy_engine.create_strategy(template_config, MomentumStrategy)
             
             # 2. REGISTER STRATEGIES: Register momentum strategy with unified engine
             # Note: UnifiedTradingEngine uses auto-discovery, so strategies are registered automatically

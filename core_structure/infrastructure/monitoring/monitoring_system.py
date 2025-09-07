@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 class MetricType(Enum):
     """Types of metrics to monitor"""
+    # System metrics
     LATENCY = "latency"
     THROUGHPUT = "throughput"
     ERROR_RATE = "error_rate"
@@ -46,9 +47,18 @@ class MetricType(Enum):
     CPU_USAGE = "cpu_usage"
     DISK_USAGE = "disk_usage"
     NETWORK_IO = "network_io"
+    
+    # Trading metrics
     SHARPE_RATIO = "sharpe_ratio"
     DRAWDOWN = "drawdown"
     PNL = "pnl"
+    
+    # Enhanced metric types (from trade engine)
+    COUNTER = "counter"          # Monotonically increasing
+    GAUGE = "gauge"              # Current value
+    HISTOGRAM = "histogram"      # Distribution of values
+    TIMER = "timer"              # Timing measurements
+    BUSINESS = "business"        # Business metrics
 
 
 class AlertLevel(Enum):
@@ -75,6 +85,80 @@ class MonitoringStatus(Enum):
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"
+
+
+class HealthStatus(Enum):
+    """Component health status levels"""
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    UNHEALTHY = "unhealthy"
+    CRITICAL = "critical"
+    UNKNOWN = "unknown"
+
+
+class ComponentType(Enum):
+    """Component types for health monitoring"""
+    SYSTEM = "system"
+    DATABASE = "database"
+    MARKET_DATA = "market_data"
+    STRATEGY = "strategy"
+    EXECUTION = "execution"
+    PORTFOLIO = "portfolio"
+    MONITORING = "monitoring"
+
+
+# =============================================================================
+# Enhanced Data Classes (from trade engine monitoring)
+# =============================================================================
+
+@dataclass
+class HealthCheck:
+    """Health check configuration"""
+    name: str
+    component_type: ComponentType
+    check_function: Callable[[], bool]
+    interval_seconds: float = 60.0
+    timeout_seconds: float = 10.0
+    retry_count: int = 3
+    tags: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SystemMetrics:
+    """System performance metrics"""
+    timestamp: datetime
+    cpu_percent: float
+    memory_percent: float
+    disk_percent: float
+    network_bytes_sent: int
+    network_bytes_recv: int
+    load_average: List[float]
+
+
+@dataclass
+class EnhancedMetric:
+    """Enhanced metric with tags and metadata"""
+    name: str
+    value: Union[int, float]
+    metric_type: MetricType
+    timestamp: datetime
+    tags: Dict[str, str] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MetricSummary:
+    """Statistical summary of metrics"""
+    name: str
+    count: int
+    min_value: float
+    max_value: float
+    mean_value: float
+    median_value: float
+    std_dev: float
+    percentile_95: float
+    percentile_99: float
+    tags: Dict[str, str] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -249,18 +333,36 @@ class SystemHealth:
 
 class MetricsCollector:
     """
-    Centralized metrics collection system with real-time monitoring
-    and alerting capabilities
+    Enhanced centralized metrics collection system with real-time monitoring,
+    alerting capabilities, and advanced features from trade engine monitoring.
+    
+    Features:
+    - Multi-type metric support (counters, gauges, histograms, timers, business)
+    - Tag-based metric organization
+    - Real-time aggregation and statistics
+    - Automatic metric retention and cleanup
+    - Performance-optimized storage
+    - Enhanced alerting with rule-based system
     """
     
     def __init__(self, config: MetricsConfig):
         self.config = config
         
-        # Storage
+        # Enhanced storage with tags and metadata
         self._metrics: Dict[str, List[MetricValue]] = defaultdict(list)
+        self._enhanced_metrics: Dict[str, deque] = defaultdict(lambda: deque(maxlen=10000))
         self._counters: Dict[str, int] = defaultdict(int)
         self._gauges: Dict[str, float] = {}
         self._histograms: Dict[str, List[float]] = defaultdict(list)
+        
+        # Enhanced features from trade engine
+        self.metric_metadata: Dict[str, MetricType] = {}
+        self.metric_tags: Dict[str, Dict[str, str]] = {}
+        self.aggregated_metrics: Dict[str, MetricSummary] = {}
+        self.aggregation_window = timedelta(minutes=1)
+        
+        # Registered metric sources
+        self.metric_sources: Dict[str, Callable] = {}
         
         # Alert system
         self._alert_thresholds: Dict[str, Dict[str, float]] = {}
@@ -369,6 +471,74 @@ class MetricsCollector:
             self._histograms[name] = self._histograms[name][-1000:]
         
         self.record_metric(name, value, {'type': 'histogram'})
+    
+    # Enhanced methods from trade engine monitoring
+    def record_enhanced_metric(self, metric: EnhancedMetric) -> None:
+        """Record an enhanced metric with tags and metadata"""
+        self._enhanced_metrics[metric.name].append(metric)
+        self.metric_metadata[metric.name] = metric.metric_type
+        self.metric_tags[metric.name] = metric.tags
+        
+        # Also record in legacy format for compatibility
+        self.record_metric(metric.name, metric.value, metric.tags)
+    
+    def record_business_metric(self, name: str, value: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Record a business-specific metric"""
+        enhanced_metric = EnhancedMetric(
+            name=name,
+            value=value,
+            metric_type=MetricType.BUSINESS,
+            timestamp=datetime.now(),
+            tags=tags or {},
+            metadata={'category': 'business'}
+        )
+        self.record_enhanced_metric(enhanced_metric)
+    
+    def record_timer_metric(self, name: str, duration_ms: float, tags: Optional[Dict[str, str]] = None) -> None:
+        """Record a timing metric"""
+        enhanced_metric = EnhancedMetric(
+            name=name,
+            value=duration_ms,
+            metric_type=MetricType.TIMER,
+            timestamp=datetime.now(),
+            tags=tags or {},
+            metadata={'unit': 'milliseconds'}
+        )
+        self.record_enhanced_metric(enhanced_metric)
+    
+    def register_metric_source(self, name: str, source_func: Callable) -> None:
+        """Register a metric source function"""
+        self.metric_sources[name] = source_func
+        logger.info(f"Registered metric source: {name}")
+    
+    def get_metric_summary(self, name: str, window_minutes: int = 5) -> Optional[MetricSummary]:
+        """Get statistical summary for a metric"""
+        if name not in self._enhanced_metrics:
+            return None
+        
+        cutoff_time = datetime.now() - timedelta(minutes=window_minutes)
+        recent_metrics = [
+            m for m in self._enhanced_metrics[name] 
+            if m.timestamp >= cutoff_time
+        ]
+        
+        if not recent_metrics:
+            return None
+        
+        values = [m.value for m in recent_metrics]
+        
+        return MetricSummary(
+            name=name,
+            count=len(values),
+            min_value=min(values),
+            max_value=max(values),
+            mean_value=statistics.mean(values),
+            median_value=statistics.median(values) if values else 0.0,
+            std_dev=statistics.stdev(values) if len(values) > 1 else 0.0,
+            percentile_95=np.percentile(values, 95) if len(values) > 0 else 0.0,
+            percentile_99=np.percentile(values, 99) if len(values) > 0 else 0.0,
+            tags=self.metric_tags.get(name, {})
+        )
     
     def get_metric_history(self, name: str, duration_minutes: int = 60) -> List[MetricValue]:
         """Get metric history for specified duration"""
@@ -907,6 +1077,234 @@ class PerformanceDashboard:
 
 
 # =============================================================================
+# Enhanced Health Monitoring System (from trade engine)
+# =============================================================================
+
+class EnhancedHealthMonitor:
+    """
+    Advanced health monitoring system with component tracking,
+    dependency monitoring, and automated health checks.
+    
+    Features:
+    - Component health tracking
+    - Automated health checks
+    - Dependency monitoring
+    - System metrics collection
+    - Health status aggregation
+    - Alert integration
+    """
+    
+    def __init__(self, check_interval: float = 60):
+        self.check_interval = check_interval
+        
+        # Health check management
+        self.health_checks: Dict[str, HealthCheck] = {}
+        self.health_statuses: Dict[str, HealthStatus] = {}
+        self.component_dependencies: Dict[str, set] = {}
+        
+        # Monitoring state
+        self.is_monitoring = False
+        self.monitoring_task: Optional[asyncio.Task] = None
+        self.monitoring_lock = threading.RLock()
+        
+        # System metrics
+        self.system_metrics_history: List[SystemMetrics] = []
+        self.max_history_size = 1440  # 24 hours of minute-by-minute data
+        
+        # Health statistics
+        self.health_stats = {
+            'total_components': 0,
+            'healthy_components': 0,
+            'warning_components': 0,
+            'unhealthy_components': 0,
+            'critical_components': 0,
+            'unknown_components': 0
+        }
+        
+        # Alert callbacks
+        self.alert_callbacks: List[Callable[[str, HealthStatus, str], None]] = []
+        
+        logger.info("EnhancedHealthMonitor initialized")
+    
+    def register_health_check(self, health_check: HealthCheck) -> None:
+        """Register a health check"""
+        self.health_checks[health_check.name] = health_check
+        self.health_statuses[health_check.name] = HealthStatus.UNKNOWN
+        logger.info(f"Registered health check: {health_check.name}")
+    
+    def add_component_dependency(self, component: str, depends_on: str) -> None:
+        """Add a component dependency"""
+        if component not in self.component_dependencies:
+            self.component_dependencies[component] = set()
+        self.component_dependencies[component].add(depends_on)
+        logger.info(f"Added dependency: {component} depends on {depends_on}")
+    
+    async def start_monitoring(self):
+        """Start health monitoring"""
+        if self.is_monitoring:
+            logger.warning("Health monitoring already active")
+            return
+        
+        self.is_monitoring = True
+        self.monitoring_task = asyncio.create_task(self._monitoring_loop())
+        
+        # Setup default system health checks
+        self._setup_system_health_checks()
+        
+        logger.info("Enhanced health monitoring started")
+    
+    async def stop_monitoring(self):
+        """Stop health monitoring"""
+        if not self.is_monitoring:
+            return
+        
+        self.is_monitoring = False
+        if self.monitoring_task:
+            self.monitoring_task.cancel()
+            try:
+                await self.monitoring_task
+            except asyncio.CancelledError:
+                pass
+        
+        logger.info("Enhanced health monitoring stopped")
+    
+    def _setup_system_health_checks(self):
+        """Setup default system health checks"""
+        # CPU health check
+        cpu_check = HealthCheck(
+            name="system_cpu",
+            component_type=ComponentType.SYSTEM,
+            check_function=self._check_cpu_health,
+            interval_seconds=30.0,
+            tags={'category': 'system', 'resource': 'cpu'}
+        )
+        self.register_health_check(cpu_check)
+        
+        # Memory health check
+        memory_check = HealthCheck(
+            name="system_memory",
+            component_type=ComponentType.SYSTEM,
+            check_function=self._check_memory_health,
+            interval_seconds=30.0,
+            tags={'category': 'system', 'resource': 'memory'}
+        )
+        self.register_health_check(memory_check)
+    
+    def _check_cpu_health(self) -> bool:
+        """Check CPU health"""
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=1)
+            return cpu_percent < 90.0  # Healthy if CPU < 90%
+        except Exception:
+            return False
+    
+    def _check_memory_health(self) -> bool:
+        """Check memory health"""
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+            return memory.percent < 85.0  # Healthy if memory < 85%
+        except Exception:
+            return False
+    
+    async def _monitoring_loop(self):
+        """Main monitoring loop"""
+        while self.is_monitoring:
+            try:
+                await self._run_health_checks()
+                await self._collect_system_metrics()
+                await self._update_health_statistics()
+                await asyncio.sleep(self.check_interval)
+            except Exception as e:
+                logger.error(f"Error in health monitoring loop: {e}")
+                await asyncio.sleep(self.check_interval)
+    
+    async def _run_health_checks(self):
+        """Run all registered health checks"""
+        for name, health_check in self.health_checks.items():
+            try:
+                is_healthy = health_check.check_function()
+                new_status = HealthStatus.HEALTHY if is_healthy else HealthStatus.UNHEALTHY
+                
+                # Check if status changed
+                if self.health_statuses.get(name) != new_status:
+                    self.health_statuses[name] = new_status
+                    await self._notify_status_change(name, new_status)
+                    
+            except Exception as e:
+                logger.error(f"Health check failed for {name}: {e}")
+                self.health_statuses[name] = HealthStatus.CRITICAL
+    
+    async def _collect_system_metrics(self):
+        """Collect system performance metrics"""
+        try:
+            import psutil
+            
+            metrics = SystemMetrics(
+                timestamp=datetime.now(),
+                cpu_percent=psutil.cpu_percent(),
+                memory_percent=psutil.virtual_memory().percent,
+                disk_percent=psutil.disk_usage('/').percent,
+                network_bytes_sent=psutil.net_io_counters().bytes_sent,
+                network_bytes_recv=psutil.net_io_counters().bytes_recv,
+                load_average=list(psutil.getloadavg()) if hasattr(psutil, 'getloadavg') else [0.0, 0.0, 0.0]
+            )
+            
+            self.system_metrics_history.append(metrics)
+            
+            # Maintain history size
+            if len(self.system_metrics_history) > self.max_history_size:
+                self.system_metrics_history = self.system_metrics_history[-self.max_history_size:]
+                
+        except Exception as e:
+            logger.error(f"Failed to collect system metrics: {e}")
+    
+    async def _update_health_statistics(self):
+        """Update health statistics"""
+        self.health_stats = {
+            'total_components': len(self.health_statuses),
+            'healthy_components': sum(1 for s in self.health_statuses.values() if s == HealthStatus.HEALTHY),
+            'warning_components': sum(1 for s in self.health_statuses.values() if s == HealthStatus.WARNING),
+            'unhealthy_components': sum(1 for s in self.health_statuses.values() if s == HealthStatus.UNHEALTHY),
+            'critical_components': sum(1 for s in self.health_statuses.values() if s == HealthStatus.CRITICAL),
+            'unknown_components': sum(1 for s in self.health_statuses.values() if s == HealthStatus.UNKNOWN)
+        }
+    
+    async def _notify_status_change(self, component: str, status: HealthStatus):
+        """Notify about status changes"""
+        message = f"Component {component} status changed to {status.value}"
+        
+        for callback in self.alert_callbacks:
+            try:
+                callback(component, status, message)
+            except Exception as e:
+                logger.error(f"Error in alert callback: {e}")
+    
+    def get_health_summary(self) -> Dict[str, Any]:
+        """Get overall health summary"""
+        return {
+            'overall_status': self._calculate_overall_status(),
+            'component_statuses': dict(self.health_statuses),
+            'statistics': dict(self.health_stats),
+            'last_updated': datetime.now().isoformat()
+        }
+    
+    def _calculate_overall_status(self) -> HealthStatus:
+        """Calculate overall system health status"""
+        if self.health_stats['critical_components'] > 0:
+            return HealthStatus.CRITICAL
+        elif self.health_stats['unhealthy_components'] > 0:
+            return HealthStatus.UNHEALTHY
+        elif self.health_stats['warning_components'] > 0:
+            return HealthStatus.WARNING
+        elif self.health_stats['healthy_components'] > 0:
+            return HealthStatus.HEALTHY
+        else:
+            return HealthStatus.UNKNOWN
+
+
+# =============================================================================
 # Monitoring System Factory
 # =============================================================================
 
@@ -914,8 +1312,8 @@ class MonitoringSystemFactory:
     """Factory for creating monitoring system components"""
     
     @staticmethod
-    def create_production_monitoring_system() -> Tuple[MetricsCollector, RealTimeMonitor, PerformanceDashboard]:
-        """Create monitoring system for production environment"""
+    def create_production_monitoring_system() -> Tuple[MetricsCollector, RealTimeMonitor, PerformanceDashboard, EnhancedHealthMonitor]:
+        """Create enhanced monitoring system for production environment"""
         # Production metrics config
         metrics_config = MetricsConfig(
             collection_interval_ms=1000,
@@ -956,11 +1354,12 @@ class MonitoringSystemFactory:
         metrics_collector = MetricsCollector(metrics_config)
         monitor = RealTimeMonitor(monitor_config, metrics_collector)
         dashboard = PerformanceDashboard(dashboard_config, metrics_collector, monitor)
+        health_monitor = EnhancedHealthMonitor(check_interval=30.0)  # Production: 30s checks
         
-        return metrics_collector, monitor, dashboard
+        return metrics_collector, monitor, dashboard, health_monitor
     
     @staticmethod
-    def create_development_monitoring_system() -> Tuple[MetricsCollector, RealTimeMonitor, PerformanceDashboard]:
+    def create_development_monitoring_system() -> Tuple[MetricsCollector, RealTimeMonitor, PerformanceDashboard, EnhancedHealthMonitor]:
         """Create monitoring system for development environment"""
         # Development metrics config
         metrics_config = MetricsConfig(
@@ -995,8 +1394,9 @@ class MonitoringSystemFactory:
         metrics_collector = MetricsCollector(metrics_config)
         monitor = RealTimeMonitor(monitor_config, metrics_collector)
         dashboard = PerformanceDashboard(dashboard_config, metrics_collector, monitor)
+        health_monitor = EnhancedHealthMonitor(check_interval=60.0)  # Development: 60s checks
         
-        return metrics_collector, monitor, dashboard
+        return metrics_collector, monitor, dashboard, health_monitor
 
 
 # =============================================================================
@@ -1009,6 +1409,8 @@ __all__ = [
     'AlertLevel',
     'DashboardMode',
     'MonitoringStatus',
+    'HealthStatus',
+    'ComponentType',
     
     # Configuration classes
     'MonitorConfig',
@@ -1020,11 +1422,16 @@ __all__ = [
     'PerformanceAlert',
     'DashboardMetric',
     'SystemHealth',
+    'HealthCheck',
+    'SystemMetrics',
+    'EnhancedMetric',
+    'MetricSummary',
     
     # Core systems
     'MetricsCollector',
     'RealTimeMonitor',
     'PerformanceDashboard',
+    'EnhancedHealthMonitor',
     
     # Factory
     'MonitoringSystemFactory'
