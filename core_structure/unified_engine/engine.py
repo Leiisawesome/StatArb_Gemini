@@ -263,9 +263,9 @@ class UnifiedTradingEngine:
             
             # Risk Management
             risk_limits = RiskLimits(
-                max_position_size=self.config.max_position_size,
-                max_portfolio_risk=self.config.max_portfolio_risk,
-                max_drawdown=self.config.max_drawdown
+                max_position_size_pct=self.config.max_position_size,
+                max_portfolio_drawdown=self.config.max_portfolio_risk,
+                max_strategy_drawdown=self.config.max_drawdown
             )
             # Initialize unified risk manager
             self.risk_manager = RiskManager(

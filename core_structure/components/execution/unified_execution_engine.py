@@ -270,6 +270,80 @@ class UnifiedExecutionEngine:
         if len(self.price_history[symbol]) > 1000:
             self.price_history[symbol] = self.price_history[symbol][-1000:]
     
+    async def execute_pair_trade(self, symbol1: str, symbol2: str, 
+                               quantity1: float, quantity2: float,
+                               strategy_id: str = "pairs_trading") -> tuple:
+        """
+        Execute coordinated pair trade with unified execution logic
+        
+        This method executes two orders simultaneously for pairs trading,
+        ensuring consistent execution across both legs of the trade.
+        """
+        
+        try:
+            logger.info(f"🎯 Executing pair trade: {quantity1} {symbol1} / {quantity2} {symbol2} - Mode: {self.mode.value}")
+            
+            # Create execution requests for both legs
+            import uuid
+            request1 = ExecutionRequest(
+                request_id=f"pair_trade_{symbol1}_{uuid.uuid4().hex[:8]}",
+                strategy_id=strategy_id,
+                symbol=symbol1,
+                side="BUY" if quantity1 > 0 else "SELL",
+                quantity=abs(quantity1),
+                order_type="MARKET"
+            )
+            
+            request2 = ExecutionRequest(
+                request_id=f"pair_trade_{symbol2}_{uuid.uuid4().hex[:8]}",
+                strategy_id=strategy_id,
+                symbol=symbol2,
+                side="BUY" if quantity2 > 0 else "SELL", 
+                quantity=abs(quantity2),
+                order_type="MARKET"
+            )
+            
+            # Execute both orders simultaneously
+            import asyncio
+            result1, result2 = await asyncio.gather(
+                self.execute_order(request1),
+                self.execute_order(request2)
+            )
+            
+            logger.info(f"✅ Pair trade complete: {symbol1} @ ${result1.executed_price:.4f}, "
+                       f"{symbol2} @ ${result2.executed_price:.4f}")
+            
+            return result1, result2
+            
+        except Exception as e:
+            logger.error(f"❌ Pair trade execution failed: {e}")
+            # Return failed results for both legs
+            failed_result1 = ExecutionResult(
+                request_id=f"pair_trade_{symbol1}",
+                execution_id=f"failed_{symbol1}_{uuid.uuid4().hex[:8]}",
+                status=ExecutionStatus.REJECTED,
+                executed_quantity=0,
+                executed_price=0,
+                execution_time=datetime.now(),
+                slippage_bps=0,
+                commission=0,
+                market_impact_bps=0
+            )
+            
+            failed_result2 = ExecutionResult(
+                request_id=f"pair_trade_{symbol2}",
+                execution_id=f"failed_{symbol2}_{uuid.uuid4().hex[:8]}",
+                status=ExecutionStatus.REJECTED,
+                executed_quantity=0,
+                executed_price=0,
+                execution_time=datetime.now(),
+                slippage_bps=0,
+                commission=0,
+                market_impact_bps=0
+            )
+            
+            return failed_result1, failed_result2
+
     async def execute_order(self, request: ExecutionRequest) -> ExecutionResult:
         """
         Execute order with unified logic across all modes
