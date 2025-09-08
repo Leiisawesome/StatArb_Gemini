@@ -33,6 +33,9 @@ from ..interfaces.strategy_interfaces import StrategyType, StrategyContext, Stra
 # Import signal types
 from ..components.signal_generation import TradingSignal, SignalType, SignalStrength
 
+# Import regime detection
+from ..components.market_regime import detect_market_regime, MarketRegime
+
 logger = logging.getLogger(__name__)
 
 # ================================================================================
@@ -75,6 +78,16 @@ class MomentumStrategy(EnhancedBaseStrategy):
         self.ml_enhancement = getattr(self.parameters, 'ml_enhancement', False)
         self.kalman_filter = getattr(self.parameters, 'kalman_filter', False)
         
+        # Enhanced signal quality features
+        self.signal_quality_filter = getattr(self.parameters, 'signal_quality_filter', True)
+        self.min_signal_quality = getattr(self.parameters, 'min_signal_quality', 0.6)
+        self.cross_timeframe_confirmation = getattr(self.parameters, 'cross_timeframe_confirmation', True)
+        
+        # Dynamic stop-loss features
+        self.dynamic_stops = getattr(self.parameters, 'dynamic_stops', True)
+        self.atr_stop_multiplier = getattr(self.parameters, 'atr_stop_multiplier', 2.0)
+        self.regime_based_stops = getattr(self.parameters, 'regime_based_stops', True)
+        
         # Dynamic parameter optimization
         self.parameter_history = []
         self.performance_history = []
@@ -86,6 +99,169 @@ class MomentumStrategy(EnhancedBaseStrategy):
         self.regime_confidence = 0.5
         
         logger.info(f"Momentum strategy initialized: {strategy_id}")
+    
+    def _calculate_volatility_adjusted_position_size(self, market_data: pd.DataFrame, 
+                                                   base_size: float, confidence: float) -> float:
+        """Calculate position size adjusted for volatility with enhanced logic"""
+        try:
+            if len(market_data) < 20:
+                return base_size * confidence
+            
+            returns = market_data['close'].pct_change().dropna()
+            if len(returns) < 10:
+                return base_size * confidence
+            
+            # Current volatility (20-day)
+            current_vol = returns.iloc[-20:].std() if len(returns) >= 20 else returns.std()
+            
+            # Historical volatility (longer period for comparison)
+            historical_vol = returns.std() if len(returns) >= 50 else current_vol
+            
+            # Target volatility (2% daily)
+            target_vol = 0.02
+            
+            # Volatility ratio adjustment
+            if historical_vol > 0:
+                vol_ratio = current_vol / historical_vol
+                
+                # More conservative in high volatility, more aggressive in low volatility
+                if vol_ratio > 1.5:  # High volatility regime
+                    vol_adjustment = max(0.4, target_vol / current_vol)
+                elif vol_ratio < 0.7:  # Low volatility regime  
+                    vol_adjustment = min(1.5, target_vol / current_vol)
+                else:  # Normal volatility
+                    vol_adjustment = target_vol / current_vol
+                
+                # Cap the adjustment to reasonable bounds
+                vol_adjustment = max(0.3, min(2.0, vol_adjustment))
+            else:
+                vol_adjustment = 1.0
+            
+            # Apply confidence and volatility adjustments
+            adjusted_size = base_size * vol_adjustment * confidence
+            
+            # Additional momentum-specific adjustment based on trend strength
+            momentum_adjustment = min(1.2, max(0.8, confidence * 1.5))
+            adjusted_size *= momentum_adjustment
+            
+            return adjusted_size
+            
+        except Exception as e:
+            logger.error(f"Volatility adjustment calculation failed: {e}")
+            return base_size * confidence
+    
+    def _calculate_momentum_quality(self, prices: pd.Series, period: int) -> Dict[str, float]:
+        """Calculate momentum quality metrics (consistency and strength)"""
+        try:
+            if len(prices) < period:
+                return {'consistency': 0.0, 'strength': 0.0, 'acceleration': 0.0}
+            
+            # Calculate returns for the period
+            returns = prices.pct_change().dropna()
+            recent_returns = returns.tail(period)
+            
+            if len(recent_returns) < 5:
+                return {'consistency': 0.0, 'strength': 0.0, 'acceleration': 0.0}
+            
+            # Momentum direction
+            total_momentum = (prices.iloc[-1] - prices.iloc[-period]) / prices.iloc[-period]
+            momentum_direction = 1 if total_momentum > 0 else -1
+            
+            # Consistency: % of returns in the same direction as overall momentum
+            consistent_returns = (recent_returns * momentum_direction > 0).sum()
+            consistency = consistent_returns / len(recent_returns)
+            
+            # Strength: magnitude of average return
+            avg_return = abs(recent_returns.mean())
+            strength = min(1.0, avg_return * 100)  # Scale to 0-1
+            
+            # Acceleration: is momentum increasing?
+            half_period = max(1, period // 2)
+            if len(prices) >= period:
+                early_momentum = (prices.iloc[-half_period] - prices.iloc[-period]) / prices.iloc[-period]
+                recent_momentum = (prices.iloc[-1] - prices.iloc[-half_period]) / prices.iloc[-half_period]
+                acceleration = 1.0 if recent_momentum > early_momentum else 0.5
+            else:
+                acceleration = 0.5
+            
+            return {
+                'consistency': consistency,
+                'strength': strength,
+                'acceleration': acceleration
+            }
+            
+        except Exception as e:
+            logger.error(f"Momentum quality calculation failed: {e}")
+            return {'consistency': 0.0, 'strength': 0.0, 'acceleration': 0.0}
+    
+    def _check_volume_confirmation(self, market_data: pd.DataFrame, momentum_signal: float) -> bool:
+        """Check if volume confirms the momentum signal"""
+        try:
+            if 'volume' not in market_data.columns or len(market_data) < 20:
+                return True  # No volume data available, don't filter
+            
+            volume = market_data['volume']
+            prices = market_data['close']
+            
+            # Calculate volume trend (recent vs historical average)
+            recent_volume = volume.iloc[-5:].mean()  # Last 5 periods
+            historical_volume = volume.iloc[-20:].mean()  # Last 20 periods
+            
+            if historical_volume <= 0:
+                return True  # Avoid division by zero
+            
+            volume_ratio = recent_volume / historical_volume
+            
+            # Calculate price-volume relationship
+            recent_returns = prices.pct_change().iloc[-5:]
+            recent_volume_changes = volume.pct_change().iloc[-5:]
+            
+            # Remove NaN values
+            valid_data = ~(recent_returns.isna() | recent_volume_changes.isna())
+            if valid_data.sum() < 3:
+                return True  # Not enough data
+            
+            clean_returns = recent_returns[valid_data]
+            clean_volume_changes = recent_volume_changes[valid_data]
+            
+            # Volume confirmation criteria
+            volume_threshold = self.volume_threshold  # From parameters (default 1.2)
+            
+            # 1. Volume should be above average for strong momentum
+            if abs(momentum_signal) > self.momentum_threshold * 1.5:
+                if volume_ratio < volume_threshold:
+                    logger.debug(f"Strong momentum signal rejected: insufficient volume {volume_ratio:.2f} < {volume_threshold}")
+                    return False
+            
+            # 2. Price and volume should move in the same direction (for momentum)
+            if len(clean_returns) >= 3:
+                avg_return = clean_returns.mean()
+                avg_volume_change = clean_volume_changes.mean()
+                
+                # For momentum strategies, we want volume to increase with price moves
+                if abs(avg_return) > 0.01:  # Significant price movement
+                    if momentum_signal > 0 and avg_return > 0:  # Upward momentum
+                        if avg_volume_change < -0.1:  # But volume is decreasing significantly
+                            logger.debug("Upward momentum rejected: decreasing volume")
+                            return False
+                    elif momentum_signal < 0 and avg_return < 0:  # Downward momentum
+                        if avg_volume_change < -0.1:  # But volume is decreasing significantly
+                            logger.debug("Downward momentum rejected: decreasing volume")
+                            return False
+            
+            # 3. Check for volume spikes that might indicate false breakouts
+            max_recent_volume = volume.iloc[-5:].max()
+            if max_recent_volume > historical_volume * 3:  # Volume spike > 3x average
+                # This could be a false breakout, be more cautious
+                if abs(momentum_signal) < self.momentum_threshold * 2:
+                    logger.debug("Momentum signal rejected: potential false breakout (volume spike)")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Volume confirmation check failed: {e}")
+            return True  # Don't filter on error
     
     @property
     def strategy_type(self) -> StrategyType:
@@ -122,6 +298,13 @@ class MomentumStrategy(EnhancedBaseStrategy):
             if not self._passes_filters(market_data, momentum_scores, confidence):
                 return signals
             
+            # Enhanced signal quality filter
+            if self.signal_quality_filter:
+                signal_quality = self._calculate_signal_quality(market_data, momentum_scores)
+                if signal_quality < self.min_signal_quality:
+                    logger.debug(f"Signal filtered out due to low quality: {signal_quality:.2f} < {self.min_signal_quality}")
+                    return signals
+            
             # Generate signal
             signal = self._create_momentum_signal(
                 context, momentum_scores, confidence, market_data
@@ -154,23 +337,33 @@ class MomentumStrategy(EnhancedBaseStrategy):
                 adaptive_threshold = self._calculate_adaptive_threshold(market_data)
                 momentum_scores['adaptive_threshold'] = adaptive_threshold
             
-            # Enhanced momentum calculation with regime adjustment
+            # Enhanced momentum calculation with quality assessment
             for i, period in enumerate(self.lookback_periods):
                 if len(prices) >= period:
                     # Basic momentum
                     momentum = (prices.iloc[-1] - prices.iloc[-period]) / prices.iloc[-period]
                     
+                    # Calculate momentum quality (consistency and acceleration)
+                    quality_metrics = self._calculate_momentum_quality(prices, period)
+                    
+                    # Adjust momentum based on quality
+                    quality_factor = (quality_metrics['consistency'] * 0.6 + 
+                                    quality_metrics['strength'] * 0.4)
+                    adjusted_momentum = momentum * quality_factor
+                    
                     # Apply Kalman filter if enabled
                     if self.kalman_filter:
-                        momentum = self._apply_kalman_filter(momentum, f'momentum_{period}')
+                        adjusted_momentum = self._apply_kalman_filter(adjusted_momentum, f'momentum_{period}')
                     
                     # Regime adjustment
                     if self.regime_awareness:
-                        momentum = self._adjust_for_regime(momentum, self.current_regime)
+                        adjusted_momentum = self._adjust_for_regime(adjusted_momentum, self.current_regime)
                     
-                    momentum_scores[f'momentum_{period}'] = momentum
+                    momentum_scores[f'momentum_{period}'] = adjusted_momentum
+                    momentum_scores[f'quality_{period}'] = quality_factor
                 else:
                     momentum_scores[f'momentum_{period}'] = 0.0
+                    momentum_scores[f'quality_{period}'] = 0.0
             
             # Calculate weighted average momentum with dynamic weights
             if self.adaptive_thresholds:
@@ -266,6 +459,11 @@ class MomentumStrategy(EnhancedBaseStrategy):
             if confidence < self.confidence_threshold:
                 return False
             
+            # Volume confirmation filter
+            volume_confirmation = self._check_volume_confirmation(market_data, weighted_momentum)
+            if not volume_confirmation:
+                return False
+            
             # Trend filter (optional)
             if self.trend_filter and len(market_data) >= 50:
                 # Check if price is above/below long-term moving average
@@ -312,23 +510,17 @@ class MomentumStrategy(EnhancedBaseStrategy):
             else:
                 strength = SignalStrength.WEAK
             
-            # Calculate position size with volatility adjustment
+            # Calculate enhanced volatility-adjusted position size
             base_position_size = self.parameters.position_size
-            
-            if self.volatility_adjustment and len(market_data) >= 20:
-                returns = market_data['close'].pct_change().dropna()
-                if len(returns) >= 10:
-                    volatility = returns.iloc[-10:].std()
-                    # Reduce position size for higher volatility
-                    vol_adjustment = max(0.5, 1.0 - (volatility * 10))  # Scale volatility
-                    adjusted_position_size = base_position_size * vol_adjustment * confidence
-                else:
-                    adjusted_position_size = base_position_size * confidence
-            else:
-                adjusted_position_size = base_position_size * confidence
+            adjusted_position_size = self._calculate_volatility_adjusted_position_size(
+                market_data, base_position_size, confidence
+            )
             
             # Ensure position size is within limits
             adjusted_position_size = min(adjusted_position_size, self.parameters.max_position_size)
+            
+            # Calculate dynamic stop-loss levels
+            stop_loss_data = self._calculate_dynamic_stop_loss(market_data, signal_type) if self.dynamic_stops else {}
             
             # Create signal
             signal = TradingSignal(
@@ -346,9 +538,11 @@ class MomentumStrategy(EnhancedBaseStrategy):
                     'momentum_threshold': self.momentum_threshold,
                     'confidence_threshold': self.confidence_threshold,
                     'lookback_periods': self.lookback_periods,
+                    'stop_loss_data': stop_loss_data,
                     'filters_applied': {
                         'trend_filter': self.trend_filter,
-                        'volatility_adjustment': self.volatility_adjustment
+                        'volatility_adjustment': self.volatility_adjustment,
+                        'signal_quality_filter': self.signal_quality_filter
                     }
                 }
             )
@@ -417,27 +611,53 @@ class MomentumStrategy(EnhancedBaseStrategy):
             return {'regime': 'unknown', 'confidence': 0.5}
     
     def _calculate_adaptive_threshold(self, market_data: pd.DataFrame) -> float:
-        """Calculate adaptive momentum threshold based on market conditions"""
+        """Calculate enhanced adaptive momentum threshold based on market conditions"""
         try:
             returns = market_data['close'].pct_change().dropna()
             
             if len(returns) < 20:
                 return self.momentum_threshold
             
-            # Base threshold on recent volatility
+            # 1. Volatility-based adjustment
             recent_vol = returns.iloc[-20:].std()
-            avg_vol = returns.std()
+            long_term_vol = returns.std() if len(returns) >= 50 else recent_vol
             
-            vol_adjustment = recent_vol / avg_vol if avg_vol > 0 else 1.0
+            vol_ratio = recent_vol / long_term_vol if long_term_vol > 0 else 1.0
             
-            # Adjust threshold: higher volatility = higher threshold
-            adaptive_threshold = self.momentum_threshold * vol_adjustment
+            # 2. Market regime adjustment
+            regime_adjustment = 1.0
+            if hasattr(self, 'current_regime'):
+                if self.current_regime == 'high_volatility':
+                    regime_adjustment = 1.4  # Higher threshold in volatile markets
+                elif self.current_regime == 'trending':
+                    regime_adjustment = 0.8  # Lower threshold in trending markets
+                elif self.current_regime == 'sideways':
+                    regime_adjustment = 1.2  # Higher threshold in sideways markets
             
-            # Keep within reasonable bounds
-            return max(min(adaptive_threshold, self.momentum_threshold * 2), self.momentum_threshold * 0.5)
+            # 3. Recent performance adjustment
+            if hasattr(self, 'signal_history') and len(self.signal_history) >= 10:
+                recent_success_rate = sum(1 for s in self.signal_history[-10:] if s.get('success', False)) / 10
+                if recent_success_rate < 0.4:  # Poor recent performance
+                    performance_adjustment = 1.3  # Raise threshold
+                elif recent_success_rate > 0.7:  # Good recent performance
+                    performance_adjustment = 0.9  # Lower threshold slightly
+                else:
+                    performance_adjustment = 1.0
+            else:
+                performance_adjustment = 1.0
+            
+            # Combine all adjustments
+            total_adjustment = vol_ratio * regime_adjustment * performance_adjustment
+            adaptive_threshold = self.momentum_threshold * total_adjustment
+            
+            # Keep within reasonable bounds (0.3x to 2.5x original)
+            min_threshold = self.momentum_threshold * 0.3
+            max_threshold = self.momentum_threshold * 2.5
+            
+            return max(min_threshold, min(adaptive_threshold, max_threshold))
             
         except Exception as e:
-            logger.error(f"Adaptive threshold calculation failed: {e}")
+            logger.error(f"Enhanced adaptive threshold calculation failed: {e}")
             return self.momentum_threshold
     
     def _adjust_for_regime(self, momentum: float, regime: str) -> float:
@@ -599,6 +819,288 @@ class MomentumStrategy(EnhancedBaseStrategy):
             
         except Exception as e:
             logger.error(f"Parameter optimization failed: {e}")
+    
+    def _calculate_signal_quality(self, market_data: pd.DataFrame, momentum_scores: Dict[str, float]) -> float:
+        """Calculate comprehensive signal quality score"""
+        try:
+            quality_factors = []
+            
+            # 1. Trend Consistency Factor
+            trend_consistency = self._check_trend_consistency(market_data)
+            quality_factors.append(('trend_consistency', trend_consistency, 0.25))
+            
+            # 2. Volume-Momentum Alignment
+            volume_alignment = self._check_volume_momentum_alignment(market_data, momentum_scores)
+            quality_factors.append(('volume_alignment', volume_alignment, 0.20))
+            
+            # 3. Volatility Regime Suitability
+            volatility_suitability = self._check_volatility_suitability(market_data)
+            quality_factors.append(('volatility_suitability', volatility_suitability, 0.20))
+            
+            # 4. Cross-Timeframe Confirmation
+            if self.cross_timeframe_confirmation:
+                timeframe_confirmation = self._check_cross_timeframe_confirmation(market_data)
+                quality_factors.append(('timeframe_confirmation', timeframe_confirmation, 0.20))
+            
+            # 5. Market Regime Suitability
+            regime_suitability = self._check_regime_suitability(market_data)
+            quality_factors.append(('regime_suitability', regime_suitability, 0.15))
+            
+            # Calculate weighted quality score
+            total_score = 0.0
+            total_weight = 0.0
+            
+            for name, score, weight in quality_factors:
+                if score is not None:
+                    total_score += score * weight
+                    total_weight += weight
+            
+            if total_weight > 0:
+                final_quality = total_score / total_weight
+            else:
+                final_quality = 0.5  # Default quality
+            
+            return max(0.0, min(1.0, final_quality))
+            
+        except Exception as e:
+            logger.error(f"Signal quality calculation failed: {e}")
+            return 0.5
+    
+    def _check_trend_consistency(self, market_data: pd.DataFrame) -> float:
+        """Check trend consistency across multiple timeframes"""
+        try:
+            prices = market_data['close']
+            
+            if len(prices) < 50:
+                return 0.5
+            
+            # Calculate trends for different periods
+            trends = []
+            for period in [10, 20, 50]:
+                if len(prices) >= period:
+                    start_price = prices.iloc[-period]
+                    end_price = prices.iloc[-1]
+                    trend = 1 if end_price > start_price else -1
+                    trends.append(trend)
+            
+            if not trends:
+                return 0.5
+            
+            # Calculate consistency (all trends in same direction = 1.0)
+            consistency = abs(sum(trends)) / len(trends)
+            return consistency
+            
+        except Exception as e:
+            logger.error(f"Trend consistency check failed: {e}")
+            return 0.5
+    
+    def _check_volume_momentum_alignment(self, market_data: pd.DataFrame, momentum_scores: Dict[str, float]) -> float:
+        """Check if volume supports momentum direction"""
+        try:
+            if 'volume' not in market_data.columns or len(market_data) < 20:
+                return 0.7  # Neutral score if no volume data
+            
+            volume = market_data['volume']
+            prices = market_data['close']
+            weighted_momentum = momentum_scores.get('weighted_momentum', 0.0)
+            
+            # Recent volume trend
+            recent_volume = volume.iloc[-10:].mean()
+            historical_volume = volume.iloc[-20:].mean()
+            volume_trend = recent_volume / historical_volume if historical_volume > 0 else 1.0
+            
+            # Price momentum direction
+            momentum_direction = 1 if weighted_momentum > 0 else -1 if weighted_momentum < 0 else 0
+            
+            # Volume should increase with momentum
+            if momentum_direction != 0:
+                if volume_trend > 1.1:  # Volume increasing
+                    alignment = 0.8  # Good alignment
+                elif volume_trend > 0.9:  # Volume stable
+                    alignment = 0.6  # Moderate alignment
+                else:  # Volume decreasing
+                    alignment = 0.3  # Poor alignment
+            else:
+                alignment = 0.5  # Neutral
+            
+            return alignment
+            
+        except Exception as e:
+            logger.error(f"Volume-momentum alignment check failed: {e}")
+            return 0.5
+    
+    def _check_volatility_suitability(self, market_data: pd.DataFrame) -> float:
+        """Check if current volatility regime is suitable for momentum trading"""
+        try:
+            returns = market_data['close'].pct_change().dropna()
+            
+            if len(returns) < 20:
+                return 0.5
+            
+            # Current vs historical volatility
+            current_vol = returns.iloc[-10:].std()
+            historical_vol = returns.std()
+            vol_ratio = current_vol / historical_vol if historical_vol > 0 else 1.0
+            
+            # Momentum works best in moderate volatility
+            if 0.8 <= vol_ratio <= 1.3:  # Moderate volatility
+                suitability = 0.9
+            elif 0.6 <= vol_ratio <= 1.6:  # Acceptable volatility
+                suitability = 0.7
+            elif vol_ratio > 2.0:  # Very high volatility (whipsaws)
+                suitability = 0.2
+            elif vol_ratio < 0.5:  # Very low volatility (no momentum)
+                suitability = 0.3
+            else:
+                suitability = 0.5
+            
+            return suitability
+            
+        except Exception as e:
+            logger.error(f"Volatility suitability check failed: {e}")
+            return 0.5
+    
+    def _check_cross_timeframe_confirmation(self, market_data: pd.DataFrame) -> float:
+        """Check momentum confirmation across multiple timeframes"""
+        try:
+            prices = market_data['close']
+            
+            if len(prices) < 100:
+                return 0.5
+            
+            # Calculate momentum for different timeframes
+            timeframes = [5, 10, 20, 50]
+            momentum_signals = []
+            
+            for tf in timeframes:
+                if len(prices) >= tf:
+                    momentum = (prices.iloc[-1] - prices.iloc[-tf]) / prices.iloc[-tf]
+                    signal = 1 if momentum > 0.01 else -1 if momentum < -0.01 else 0
+                    momentum_signals.append(signal)
+            
+            if not momentum_signals:
+                return 0.5
+            
+            # Calculate confirmation (agreement across timeframes)
+            if len(set(momentum_signals)) == 1 and momentum_signals[0] != 0:
+                confirmation = 1.0  # Perfect agreement
+            else:
+                # Partial agreement
+                positive_signals = sum(1 for s in momentum_signals if s > 0)
+                negative_signals = sum(1 for s in momentum_signals if s < 0)
+                total_signals = len(momentum_signals)
+                
+                max_agreement = max(positive_signals, negative_signals)
+                confirmation = max_agreement / total_signals
+            
+            return confirmation
+            
+        except Exception as e:
+            logger.error(f"Cross-timeframe confirmation check failed: {e}")
+            return 0.5
+    
+    def _check_regime_suitability(self, market_data: pd.DataFrame) -> float:
+        """Check if current market regime is suitable for momentum trading"""
+        try:
+            # Use unified regime detection
+            regime_result = detect_market_regime(market_data)
+            
+            # Get momentum strategy suitability from regime detector
+            momentum_suitability = regime_result.strategy_suitability.get('momentum', 0.5)
+            
+            return momentum_suitability
+            
+        except Exception as e:
+            logger.error(f"Regime suitability check failed: {e}")
+            return 0.5
+    
+    def _calculate_dynamic_stop_loss(self, market_data: pd.DataFrame, signal_type: SignalType) -> Dict[str, Any]:
+        """Calculate dynamic stop-loss levels based on market conditions"""
+        try:
+            if len(market_data) < 20:
+                return {}
+            
+            prices = market_data['close']
+            current_price = prices.iloc[-1]
+            
+            # Calculate ATR for volatility-based stops
+            atr = self._calculate_atr(market_data)
+            
+            # Get market regime for regime-based adjustments
+            regime_multiplier = 1.0
+            if self.regime_based_stops:
+                regime_result = detect_market_regime(market_data)
+                regime_multiplier = self._get_regime_stop_multiplier(regime_result.primary_regime)
+            
+            # Calculate stop-loss distance
+            base_stop_distance = atr * self.atr_stop_multiplier * regime_multiplier
+            
+            # Adjust for signal direction
+            if signal_type == SignalType.BUY:
+                stop_loss_price = current_price - base_stop_distance
+                take_profit_price = current_price + (base_stop_distance * 2)  # 2:1 reward:risk
+            else:  # SELL
+                stop_loss_price = current_price + base_stop_distance
+                take_profit_price = current_price - (base_stop_distance * 2)
+            
+            return {
+                'stop_loss_price': stop_loss_price,
+                'take_profit_price': take_profit_price,
+                'atr': atr,
+                'stop_distance': base_stop_distance,
+                'regime_multiplier': regime_multiplier,
+                'risk_reward_ratio': 2.0
+            }
+            
+        except Exception as e:
+            logger.error(f"Dynamic stop-loss calculation failed: {e}")
+            return {}
+    
+    def _calculate_atr(self, market_data: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range"""
+        try:
+            if len(market_data) < period or 'high' not in market_data.columns:
+                # Fallback to price-based volatility
+                returns = market_data['close'].pct_change().dropna()
+                return returns.std() * market_data['close'].iloc[-1] if len(returns) > 0 else 0.02
+            
+            high = market_data['high']
+            low = market_data['low']
+            close = market_data['close']
+            prev_close = close.shift(1)
+            
+            # True Range calculation
+            tr1 = high - low
+            tr2 = abs(high - prev_close)
+            tr3 = abs(low - prev_close)
+            
+            true_range = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3}).max(axis=1)
+            atr = true_range.rolling(window=period).mean().iloc[-1]
+            
+            return atr if not pd.isna(atr) else 0.02
+            
+        except Exception as e:
+            logger.error(f"ATR calculation failed: {e}")
+            return 0.02
+    
+    def _get_regime_stop_multiplier(self, regime: MarketRegime) -> float:
+        """Get stop-loss multiplier based on market regime"""
+        try:
+            multipliers = {
+                MarketRegime.TRENDING_UP: 0.8,      # Tighter stops in trends
+                MarketRegime.TRENDING_DOWN: 0.8,    # Tighter stops in trends
+                MarketRegime.HIGH_VOLATILITY: 1.5,  # Wider stops in high vol
+                MarketRegime.LOW_VOLATILITY: 1.2,   # Slightly wider in low vol
+                MarketRegime.MEAN_REVERTING: 1.3,   # Wider stops (momentum less reliable)
+                MarketRegime.SIDEWAYS: 1.1,         # Slightly wider stops
+                MarketRegime.BREAKOUT: 0.9,         # Tighter stops on breakouts
+            }
+            
+            return multipliers.get(regime, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Regime stop multiplier calculation failed: {e}")
+            return 1.0
 
 # ================================================================================
 # TEMPLATE-BASED MOMENTUM STRATEGY

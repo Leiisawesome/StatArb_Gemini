@@ -33,6 +33,9 @@ from ..interfaces.strategy_interfaces import StrategyType, StrategyContext, Stra
 # Import signal types
 from ..components.signal_generation import TradingSignal, SignalType, SignalStrength
 
+# Import regime detection
+from ..components.market_regime import detect_market_regime, MarketRegime
+
 logger = logging.getLogger(__name__)
 
 # ================================================================================
@@ -91,7 +94,204 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
         self.signal_history = []
         self.performance_metrics = {'accuracy': 0.0, 'sharpe': 0.0, 'max_dd': 0.0}
         
+        # Adaptive threshold parameters
+        self.adaptive_thresholds = getattr(self.parameters, 'adaptive_thresholds', True)
+        self.base_z_threshold = self.z_score_threshold  # Store original threshold
+        
+        # Market condition filtering
+        self.market_condition_filter = getattr(self.parameters, 'market_condition_filter', True)
+        self.max_trend_strength = getattr(self.parameters, 'max_trend_strength', 0.7)
+        self.min_mean_reversion_strength = getattr(self.parameters, 'min_mean_reversion_strength', 0.3)
+        
+        # Relative strength analysis
+        self.relative_strength_analysis = getattr(self.parameters, 'relative_strength_analysis', True)
+        self.sector_relative_trading = getattr(self.parameters, 'sector_relative_trading', False)
+        
         logger.info(f"Mean reversion strategy initialized: {strategy_id}")
+    
+    def _calculate_volatility_adjusted_position_size(self, market_data: pd.DataFrame, 
+                                                   base_size: float, z_score: float) -> float:
+        """Calculate position size adjusted for volatility and mean reversion strength"""
+        try:
+            if len(market_data) < 20:
+                return base_size
+            
+            returns = market_data['close'].pct_change().dropna()
+            if len(returns) < 10:
+                return base_size
+            
+            # Current volatility
+            current_vol = returns.iloc[-20:].std() if len(returns) >= 20 else returns.std()
+            
+            # Historical volatility for comparison
+            historical_vol = returns.std() if len(returns) >= 50 else current_vol
+            
+            # Target volatility for mean reversion (typically lower than momentum)
+            target_vol = 0.015  # 1.5% daily target
+            
+            # Volatility adjustment
+            if historical_vol > 0:
+                vol_ratio = current_vol / historical_vol
+                
+                # Mean reversion works better in stable markets
+                if vol_ratio > 1.3:  # High volatility - reduce size
+                    vol_adjustment = max(0.5, target_vol / current_vol)
+                elif vol_ratio < 0.8:  # Low volatility - can increase size
+                    vol_adjustment = min(1.3, target_vol / current_vol)
+                else:  # Normal volatility
+                    vol_adjustment = target_vol / current_vol
+                
+                vol_adjustment = max(0.4, min(1.8, vol_adjustment))
+            else:
+                vol_adjustment = 1.0
+            
+            # Z-score strength adjustment (stronger mean reversion = larger position)
+            z_score_strength = min(abs(z_score) / 3.0, 1.0)  # Normalize to max 1.0
+            z_score_adjustment = 0.7 + (z_score_strength * 0.6)  # Range: 0.7 to 1.3
+            
+            # Combine adjustments
+            adjusted_size = base_size * vol_adjustment * z_score_adjustment
+            
+            return adjusted_size
+            
+        except Exception as e:
+            logger.error(f"Mean reversion volatility adjustment failed: {e}")
+            return base_size
+    
+    def _calculate_multi_timeframe_zscore(self, prices: pd.Series) -> Dict[str, Any]:
+        """Calculate z-scores across multiple timeframes for robust mean reversion signals"""
+        try:
+            # Multiple lookback windows for different timeframes
+            windows = [20, 50, 100]  # Short, medium, long-term
+            weights = [0.5, 0.3, 0.2]  # Higher weight for shorter-term (more responsive)
+            
+            z_scores = {}
+            valid_z_scores = []
+            valid_weights = []
+            
+            current_price = prices.iloc[-1]
+            
+            # Calculate z-score for each timeframe
+            for i, window in enumerate(windows):
+                if len(prices) >= window:
+                    mean = prices.rolling(window).mean().iloc[-1]
+                    std = prices.rolling(window).std().iloc[-1]
+                    
+                    if std > 0:
+                        z_score = (current_price - mean) / std
+                        z_scores[f'z_{window}'] = z_score
+                        valid_z_scores.append(z_score)
+                        valid_weights.append(weights[i])
+                    else:
+                        z_scores[f'z_{window}'] = 0.0
+                else:
+                    z_scores[f'z_{window}'] = 0.0
+            
+            # Calculate composite z-score (weighted average)
+            if valid_z_scores:
+                total_weight = sum(valid_weights)
+                composite_z_score = sum(z * w for z, w in zip(valid_z_scores, valid_weights)) / total_weight
+                
+                # Calculate z-score strength (agreement across timeframes)
+                z_score_signs = [1 if z > 0 else -1 if z < 0 else 0 for z in valid_z_scores]
+                agreement = abs(sum(z_score_signs)) / len(z_score_signs) if z_score_signs else 0
+                
+                # Strength is combination of magnitude and agreement
+                avg_magnitude = sum(abs(z) for z in valid_z_scores) / len(valid_z_scores)
+                z_score_strength = agreement * min(1.0, avg_magnitude / 2.0)
+            else:
+                composite_z_score = 0.0
+                z_score_strength = 0.0
+            
+            return {
+                'composite_z_score': composite_z_score,
+                'z_score_strength': z_score_strength,
+                'individual_z_scores': z_scores,
+                'timeframe_agreement': agreement if valid_z_scores else 0.0
+            }
+            
+        except Exception as e:
+            logger.error(f"Multi-timeframe z-score calculation failed: {e}")
+            return {
+                'composite_z_score': 0.0,
+                'z_score_strength': 0.0,
+                'individual_z_scores': {},
+                'timeframe_agreement': 0.0
+            }
+    
+    def _calculate_adaptive_z_threshold(self, market_data: pd.DataFrame) -> float:
+        """Calculate adaptive z-score threshold based on market conditions"""
+        try:
+            if not self.adaptive_thresholds:
+                return self.base_z_threshold
+            
+            returns = market_data['close'].pct_change().dropna()
+            
+            if len(returns) < 20:
+                return self.base_z_threshold
+            
+            # 1. Volatility regime adjustment
+            recent_vol = returns.iloc[-20:].std()
+            long_term_vol = returns.std() if len(returns) >= 50 else recent_vol
+            
+            vol_ratio = recent_vol / long_term_vol if long_term_vol > 0 else 1.0
+            
+            # Mean reversion works better in stable markets
+            if vol_ratio > 1.5:  # High volatility
+                vol_adjustment = 1.3  # Higher threshold (more conservative)
+            elif vol_ratio < 0.7:  # Low volatility
+                vol_adjustment = 0.8  # Lower threshold (more aggressive)
+            else:
+                vol_adjustment = 1.0
+            
+            # 2. Mean reversion strength adjustment
+            if hasattr(self, 'mean_reversion_strength'):
+                if self.mean_reversion_strength > 0.7:  # Strong mean reversion
+                    strength_adjustment = 0.9  # Lower threshold
+                elif self.mean_reversion_strength < 0.3:  # Weak mean reversion
+                    strength_adjustment = 1.4  # Higher threshold
+                else:
+                    strength_adjustment = 1.0
+            else:
+                strength_adjustment = 1.0
+            
+            # 3. Recent performance adjustment
+            if hasattr(self, 'signal_history') and len(self.signal_history) >= 10:
+                recent_signals = self.signal_history[-10:]
+                success_rate = sum(1 for s in recent_signals if s.get('success', False)) / len(recent_signals)
+                
+                if success_rate < 0.4:  # Poor performance
+                    performance_adjustment = 1.2  # Raise threshold
+                elif success_rate > 0.7:  # Good performance
+                    performance_adjustment = 0.9  # Lower threshold
+                else:
+                    performance_adjustment = 1.0
+            else:
+                performance_adjustment = 1.0
+            
+            # 4. Market regime adjustment
+            regime_adjustment = 1.0
+            if hasattr(self, 'volatility_regime'):
+                if self.volatility_regime == 'high_volatility':
+                    regime_adjustment = 1.3
+                elif self.volatility_regime == 'low_volatility':
+                    regime_adjustment = 0.8
+                elif self.volatility_regime == 'trending':
+                    regime_adjustment = 1.4  # Mean reversion less effective in trends
+            
+            # Combine all adjustments
+            total_adjustment = vol_adjustment * strength_adjustment * performance_adjustment * regime_adjustment
+            adaptive_threshold = self.base_z_threshold * total_adjustment
+            
+            # Keep within reasonable bounds (0.5x to 3.0x original)
+            min_threshold = self.base_z_threshold * 0.5
+            max_threshold = self.base_z_threshold * 3.0
+            
+            return max(min_threshold, min(adaptive_threshold, max_threshold))
+            
+        except Exception as e:
+            logger.error(f"Adaptive z-score threshold calculation failed: {e}")
+            return self.base_z_threshold
     
     @property
     def strategy_type(self) -> StrategyType:
@@ -121,6 +321,12 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
             # Calculate mean reversion indicators
             indicators = self._calculate_indicators(market_data)
             
+            # Market condition filter
+            if self.market_condition_filter:
+                if not self._should_trade_mean_reversion(market_data, indicators):
+                    logger.debug("Mean reversion trading filtered out due to unfavorable market conditions")
+                    return signals
+            
             # Check for mean reversion signal
             signal = self._evaluate_mean_reversion(context, market_data, indicators)
             
@@ -148,7 +354,10 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
             rolling_mean = prices.rolling(window=window).mean()
             rolling_std = prices.rolling(window=window).std()
             
-            # Enhanced Z-score calculation
+            # Multi-timeframe Z-score calculation
+            z_scores = self._calculate_multi_timeframe_zscore(prices)
+            
+            # Primary z-score (main timeframe)
             current_price = prices.iloc[-1]
             current_mean = rolling_mean.iloc[-1]
             current_std = rolling_std.iloc[-1]
@@ -158,7 +367,14 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
             else:
                 z_score = 0.0
             
+            # Composite z-score from multiple timeframes
+            composite_z_score = z_scores['composite_z_score']
+            z_score_strength = z_scores['z_score_strength']
+            
             indicators['z_score'] = z_score
+            indicators['composite_z_score'] = composite_z_score
+            indicators['z_score_strength'] = z_score_strength
+            indicators['multi_timeframe_z_scores'] = z_scores['individual_z_scores']
             indicators['rolling_mean'] = current_mean
             indicators['rolling_std'] = current_std
             indicators['adaptive_window'] = window
@@ -251,31 +467,43 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
                                 indicators: Dict[str, Any]) -> Optional[TradingSignal]:
         """Evaluate mean reversion conditions and generate signal"""
         try:
+            # Use composite z-score for more robust signals
             z_score = indicators.get('z_score', 0.0)
+            composite_z_score = indicators.get('composite_z_score', z_score)
+            z_score_strength = indicators.get('z_score_strength', 0.5)
+            
             rsi = indicators.get('rsi', 50.0)
             bollinger_position = indicators.get('bollinger_position', 0.5)
             volume_ratio = indicators.get('volume_ratio', 1.0)
             
-            # Check for extreme deviations
+            # Use composite z-score for signal generation (more robust)
+            primary_z_score = composite_z_score if abs(composite_z_score) > abs(z_score) * 0.8 else z_score
+            
+            # Calculate adaptive threshold
+            adaptive_threshold = self._calculate_adaptive_z_threshold(market_data)
+            
+            # Check for extreme deviations using adaptive threshold
             signal_type = None
             confidence = 0.0
             
             # Oversold conditions (potential buy signal)
-            if (z_score <= -self.z_score_threshold and 
+            if (primary_z_score <= -adaptive_threshold and 
                 rsi <= self.rsi_oversold and
                 bollinger_position <= 0.1):
                 
                 signal_type = SignalType.BUY
-                # Confidence increases with more extreme values
-                confidence = min(0.95, 0.6 + (abs(z_score) - self.z_score_threshold) * 0.1)
+                # Enhanced confidence with z-score strength and adaptive threshold
+                base_confidence = 0.6 + (abs(primary_z_score) - adaptive_threshold) * 0.1
+                confidence = min(0.95, base_confidence * (0.7 + z_score_strength * 0.3))
                 
             # Overbought conditions (potential sell signal)
-            elif (z_score >= self.z_score_threshold and
+            elif (primary_z_score >= adaptive_threshold and
                   rsi >= self.rsi_overbought and
                   bollinger_position >= 0.9):
                 
                 signal_type = SignalType.SELL
-                confidence = min(0.95, 0.6 + (abs(z_score) - self.z_score_threshold) * 0.1)
+                base_confidence = 0.6 + (abs(primary_z_score) - adaptive_threshold) * 0.1
+                confidence = min(0.95, base_confidence * (0.7 + z_score_strength * 0.3))
             
             # No signal if conditions not met
             if signal_type is None:
@@ -286,6 +514,25 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
                 logger.debug(f"Signal filtered out due to low volume: {volume_ratio:.2f}")
                 return None
             
+            # Market condition filtering (enhanced)
+            if self.market_condition_filter:
+                if not self._check_market_condition_filter(market_data, confidence):
+                    logger.debug("Signal filtered out by enhanced market condition filter")
+                    return None
+            
+            # Relative strength analysis
+            relative_strength = self._calculate_relative_strength(market_data)
+            
+            # Adjust confidence based on relative strength
+            if signal_type == SignalType.BUY:
+                # For buy signals, lower relative strength (oversold) increases confidence
+                rs_adjustment = (1.0 - relative_strength) * 0.2  # Up to 20% boost
+            else:  # SELL
+                # For sell signals, higher relative strength (overbought) increases confidence
+                rs_adjustment = relative_strength * 0.2  # Up to 20% boost
+            
+            confidence = min(0.95, confidence + rs_adjustment)
+            
             # Determine signal strength based on deviation magnitude
             deviation_magnitude = abs(z_score)
             if deviation_magnitude > self.z_score_threshold * 2:
@@ -295,10 +542,13 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
             else:
                 strength = SignalStrength.WEAK
             
-            # Calculate position size based on confidence and deviation
+            # Calculate enhanced volatility-adjusted position size
             base_position_size = self.parameters.position_size
-            deviation_factor = min(2.0, deviation_magnitude / self.z_score_threshold)
-            adjusted_position_size = base_position_size * confidence * (deviation_factor / 2.0)
+            adjusted_position_size = self._calculate_volatility_adjusted_position_size(
+                market_data, base_position_size, z_score
+            )
+            # Apply confidence factor
+            adjusted_position_size *= confidence
             adjusted_position_size = min(adjusted_position_size, self.parameters.max_position_size)
             
             # Create signal
@@ -313,6 +563,9 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
                     'strategy_type': 'mean_reversion',
                     'strategy_id': self.strategy_id,
                     'z_score': z_score,
+                    'composite_z_score': composite_z_score,
+                    'z_score_strength': z_score_strength,
+                    'adaptive_threshold': adaptive_threshold,
                     'rsi': rsi,
                     'bollinger_position': bollinger_position,
                     'volume_ratio': volume_ratio,
@@ -322,9 +575,17 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
                         'exit_z_score': self.exit_z_score,
                         'rsi_oversold': self.rsi_oversold,
                         'rsi_overbought': self.rsi_overbought
+                    },
+                    'filters_applied': {
+                        'market_condition_filter': self.market_condition_filter,
+                        'relative_strength_analysis': self.relative_strength_analysis
                     }
                 }
             )
+            
+            # Enhance signal with relative strength analysis
+            if self.relative_strength_analysis:
+                signal = self._enhance_signal_with_relative_strength(signal, market_data, context)
             
             return signal
             
@@ -634,6 +895,317 @@ class MeanReversionStrategy(EnhancedBaseStrategy):
                 
         except Exception as e:
             logger.error(f"Mean reversion strength calculation failed: {e}")
+            return 0.5
+    
+    def _should_trade_mean_reversion(self, market_data: pd.DataFrame, indicators: Dict[str, Any]) -> bool:
+        """Determine if market conditions are suitable for mean reversion trading"""
+        try:
+            # 1. Check trend strength - avoid mean reversion in strong trends
+            trend_strength = self._calculate_trend_strength(market_data)
+            if trend_strength > self.max_trend_strength:
+                logger.debug(f"Mean reversion filtered: trend too strong ({trend_strength:.2f} > {self.max_trend_strength})")
+                return False
+            
+            # 2. Check mean reversion strength - need sufficient mean reversion tendency
+            mr_strength = indicators.get('mean_reversion_strength', 0.5)
+            if mr_strength < self.min_mean_reversion_strength:
+                logger.debug(f"Mean reversion filtered: insufficient MR strength ({mr_strength:.2f} < {self.min_mean_reversion_strength})")
+                return False
+            
+            # 3. Market regime suitability check
+            regime_result = detect_market_regime(market_data)
+            mr_suitability = regime_result.strategy_suitability.get('mean_reversion', 0.5)
+            
+            if mr_suitability < 0.4:  # Low suitability threshold
+                logger.debug(f"Mean reversion filtered: poor regime suitability ({mr_suitability:.2f})")
+                return False
+            
+            # 4. Volatility regime check - avoid extreme volatility
+            if regime_result.primary_regime == MarketRegime.HIGH_VOLATILITY:
+                # Allow trading in high vol only if confidence is high
+                if regime_result.confidence > 0.8 and mr_strength > 0.6:
+                    return True
+                else:
+                    logger.debug("Mean reversion filtered: high volatility regime with low confidence")
+                    return False
+            
+            # 5. Check for breakout conditions - avoid mean reversion during breakouts
+            if regime_result.primary_regime == MarketRegime.BREAKOUT:
+                logger.debug("Mean reversion filtered: breakout regime detected")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Market condition filter failed: {e}")
+            return True  # Default to allowing trading on error
+    
+    def _calculate_trend_strength(self, market_data: pd.DataFrame) -> float:
+        """Calculate overall trend strength to avoid mean reversion in strong trends"""
+        try:
+            prices = market_data['close']
+            
+            if len(prices) < 50:
+                return 0.0
+            
+            trend_factors = []
+            
+            # 1. Multiple moving average alignment
+            ma_short = prices.rolling(20).mean().iloc[-1]
+            ma_medium = prices.rolling(50).mean().iloc[-1]
+            current_price = prices.iloc[-1]
+            
+            # Check if MAs are aligned (trending)
+            if ma_short > ma_medium > current_price * 0.98:  # Uptrend with tolerance
+                ma_alignment = 1.0
+            elif ma_short < ma_medium < current_price * 1.02:  # Downtrend with tolerance
+                ma_alignment = 1.0
+            else:
+                ma_alignment = 0.0
+            
+            trend_factors.append(ma_alignment)
+            
+            # 2. Linear trend strength
+            recent_prices = prices.iloc[-30:]
+            x = np.arange(len(recent_prices))
+            slope, _ = np.polyfit(x, recent_prices.values, 1)
+            normalized_slope = abs(slope) / recent_prices.mean() * 30  # Normalize by price and period
+            linear_trend = min(1.0, normalized_slope / 0.05)  # 5% over 30 periods = strong trend
+            
+            trend_factors.append(linear_trend)
+            
+            # 3. Directional consistency
+            returns = prices.pct_change().dropna()
+            if len(returns) >= 20:
+                recent_returns = returns.iloc[-20:]
+                positive_returns = (recent_returns > 0).sum()
+                directional_consistency = abs(positive_returns - 10) / 10  # Deviation from 50/50
+                trend_factors.append(directional_consistency)
+            
+            # 4. Momentum persistence
+            if len(prices) >= 60:
+                short_momentum = (prices.iloc[-1] - prices.iloc[-20]) / prices.iloc[-20]
+                medium_momentum = (prices.iloc[-1] - prices.iloc[-40]) / prices.iloc[-40]
+                
+                # Check if momentum is persistent (same direction)
+                if short_momentum * medium_momentum > 0:  # Same sign
+                    momentum_persistence = min(1.0, abs(short_momentum) / 0.1)  # 10% = strong momentum
+                else:
+                    momentum_persistence = 0.0
+                
+                trend_factors.append(momentum_persistence)
+            
+            # Calculate overall trend strength
+            if trend_factors:
+                trend_strength = sum(trend_factors) / len(trend_factors)
+            else:
+                trend_strength = 0.0
+            
+            return max(0.0, min(1.0, trend_strength))
+            
+        except Exception as e:
+            logger.error(f"Trend strength calculation failed: {e}")
+            return 0.0
+    
+    def _calculate_relative_strength_signal(self, market_data: pd.DataFrame, context) -> Optional[Dict[str, Any]]:
+        """Calculate relative strength vs sector/market for enhanced mean reversion"""
+        try:
+            if not self.relative_strength_analysis:
+                return None
+            
+            # This is a simplified implementation
+            # In practice, you'd need sector/market index data
+            prices = market_data['close']
+            
+            if len(prices) < 50:
+                return None
+            
+            # Calculate relative performance metrics
+            # For now, use price relative to its own moving averages as proxy
+            
+            # Short-term relative strength
+            ma_20 = prices.rolling(20).mean().iloc[-1]
+            ma_50 = prices.rolling(50).mean().iloc[-1]
+            current_price = prices.iloc[-1]
+            
+            # Relative strength vs short-term average
+            rs_short = (current_price - ma_20) / ma_20
+            
+            # Relative strength vs medium-term average
+            rs_medium = (current_price - ma_50) / ma_50
+            
+            # Calculate relative strength score
+            # Negative RS = underperforming (good for mean reversion longs)
+            # Positive RS = outperforming (good for mean reversion shorts)
+            
+            relative_strength_score = (rs_short + rs_medium) / 2
+            
+            # Determine if relative strength supports mean reversion signal
+            rs_signal_strength = abs(relative_strength_score)
+            
+            return {
+                'relative_strength_score': relative_strength_score,
+                'rs_signal_strength': rs_signal_strength,
+                'rs_short_term': rs_short,
+                'rs_medium_term': rs_medium,
+                'supports_long': relative_strength_score < -0.02,  # Underperforming
+                'supports_short': relative_strength_score > 0.02   # Outperforming
+            }
+            
+        except Exception as e:
+            logger.error(f"Relative strength calculation failed: {e}")
+            return None
+    
+    def _enhance_signal_with_relative_strength(self, 
+                                             signal: TradingSignal, 
+                                             market_data: pd.DataFrame,
+                                             context) -> TradingSignal:
+        """Enhance mean reversion signal with relative strength analysis"""
+        try:
+            if not self.relative_strength_analysis:
+                return signal
+            
+            rs_data = self._calculate_relative_strength_signal(market_data, context)
+            
+            if rs_data is None:
+                return signal
+            
+            # Check if relative strength supports the signal
+            signal_supported = False
+            
+            if signal.signal_type == SignalType.BUY and rs_data['supports_long']:
+                signal_supported = True
+            elif signal.signal_type == SignalType.SELL and rs_data['supports_short']:
+                signal_supported = True
+            
+            # Adjust confidence based on relative strength support
+            if signal_supported:
+                # Boost confidence
+                rs_boost = min(0.2, rs_data['rs_signal_strength'] * 0.5)
+                signal.confidence = min(0.95, signal.confidence + rs_boost)
+            else:
+                # Reduce confidence if relative strength doesn't support
+                rs_penalty = min(0.15, rs_data['rs_signal_strength'] * 0.3)
+                signal.confidence = max(0.1, signal.confidence - rs_penalty)
+            
+            # Add relative strength data to metadata
+            if 'relative_strength' not in signal.metadata:
+                signal.metadata['relative_strength'] = rs_data
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Relative strength enhancement failed: {e}")
+            return signal
+    
+    def _check_market_condition_filter(self, market_data: pd.DataFrame, signal_strength: float) -> bool:
+        """
+        Enhanced market condition filtering for mean reversion signals
+        
+        Args:
+            market_data: Historical price data
+            signal_strength: Strength of the mean reversion signal
+            
+        Returns:
+            bool: True if market conditions are favorable for mean reversion
+        """
+        try:
+            if len(market_data) < 50:
+                return True  # Not enough data for filtering
+            
+            prices = market_data['close']
+            current_price = prices.iloc[-1]
+            
+            # 1. Trend Strength Analysis
+            ma_20 = prices.rolling(20).mean().iloc[-1]
+            ma_50 = prices.rolling(50).mean().iloc[-1]
+            
+            # Calculate trend strength
+            trend_strength = abs(ma_20 - ma_50) / ma_50
+            
+            # Strong trends are unfavorable for mean reversion
+            if trend_strength > 0.025:  # 2.5% threshold
+                logger.debug(f"Strong trend detected (strength: {trend_strength:.3f}), filtering mean reversion signal")
+                return False
+            
+            # 2. Market Regime Check
+            try:
+                regime_result = detect_market_regime(market_data)
+                mean_reversion_suitability = regime_result.strategy_suitability.get('mean_reversion', 0.5)
+                
+                # Require minimum regime suitability
+                if mean_reversion_suitability < 0.4:
+                    logger.debug(f"Unfavorable market regime for mean reversion (suitability: {mean_reversion_suitability:.3f})")
+                    return False
+                    
+            except Exception as e:
+                logger.warning(f"Regime detection failed in market condition filter: {e}")
+            
+            # 3. Volatility Regime Analysis
+            returns = prices.pct_change().dropna()
+            if len(returns) >= 20:
+                volatility = returns.rolling(20).std().iloc[-1] * np.sqrt(252)
+                
+                # Extremely high volatility can lead to false mean reversion signals
+                if volatility > 0.5:  # 50% annualized volatility threshold
+                    logger.debug(f"High volatility regime detected ({volatility:.3f}), filtering signal")
+                    return False
+            
+            # 4. Signal Strength Requirement
+            # Require stronger signals in uncertain conditions
+            min_signal_strength = 0.6
+            if signal_strength < min_signal_strength:
+                logger.debug(f"Signal strength too low ({signal_strength:.3f} < {min_signal_strength})")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Market condition filter failed: {e}")
+            return True  # Default to allowing signal
+    
+    def _calculate_relative_strength(self, market_data: pd.DataFrame) -> float:
+        """
+        Calculate relative strength of the asset compared to its moving averages
+        
+        Args:
+            market_data: Historical price data
+            
+        Returns:
+            float: Relative strength score (0.0 to 1.0)
+        """
+        try:
+            if len(market_data) < 50:
+                return 0.5  # Neutral if insufficient data
+            
+            prices = market_data['close']
+            current_price = prices.iloc[-1]
+            
+            # Calculate multiple moving averages
+            ma_10 = prices.rolling(10).mean().iloc[-1]
+            ma_20 = prices.rolling(20).mean().iloc[-1] 
+            ma_50 = prices.rolling(50).mean().iloc[-1]
+            
+            # Calculate relative positions
+            rel_10 = (current_price - ma_10) / ma_10
+            rel_20 = (current_price - ma_20) / ma_20
+            rel_50 = (current_price - ma_50) / ma_50
+            
+            # Weight shorter-term MAs more heavily
+            weighted_relative_strength = (
+                rel_10 * 0.5 +  # 50% weight on 10-day MA
+                rel_20 * 0.3 +  # 30% weight on 20-day MA
+                rel_50 * 0.2    # 20% weight on 50-day MA
+            )
+            
+            # Normalize to 0-1 scale (assuming ±10% is extreme)
+            normalized_strength = (weighted_relative_strength + 0.1) / 0.2
+            normalized_strength = max(0.0, min(1.0, normalized_strength))
+            
+            return normalized_strength
+            
+        except Exception as e:
+            logger.error(f"Relative strength calculation failed: {e}")
             return 0.5
 
 # ================================================================================

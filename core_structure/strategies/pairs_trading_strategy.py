@@ -453,34 +453,156 @@ class PairsTradingStrategy(EnhancedBaseStrategy):
             return {'cointegrated': True, 'p_value': 0.05, 'test_statistic': -3.0}
     
     def _calculate_dynamic_hedge_ratio(self, price1: pd.Series, price2: pd.Series, pair_id: str) -> float:
-        """Calculate dynamic hedge ratio using rolling regression"""
+        """Calculate enhanced dynamic hedge ratio using multiple methods"""
         try:
-            # Use shorter window for dynamic calculation
-            window = min(30, len(price1) // 2)
+            # Multiple window sizes for robustness
+            short_window = min(20, len(price1) // 3)
+            medium_window = min(50, len(price1) // 2)
+            long_window = min(100, len(price1))
             
-            if len(price1) >= window:
-                recent_price1 = price1.iloc[-window:]
-                recent_price2 = price2.iloc[-window:]
+            hedge_ratios = []
+            weights = []
+            
+            # 1. Short-term rolling regression (most responsive)
+            if len(price1) >= short_window:
+                short_ratio = self._calculate_rolling_hedge_ratio(price1, price2, short_window)
+                hedge_ratios.append(short_ratio)
+                weights.append(0.5)  # Higher weight for recent data
+            
+            # 2. Medium-term rolling regression (balanced)
+            if len(price1) >= medium_window:
+                medium_ratio = self._calculate_rolling_hedge_ratio(price1, price2, medium_window)
+                hedge_ratios.append(medium_ratio)
+                weights.append(0.3)
+            
+            # 3. Long-term rolling regression (stable baseline)
+            if len(price1) >= long_window:
+                long_ratio = self._calculate_rolling_hedge_ratio(price1, price2, long_window)
+                hedge_ratios.append(long_ratio)
+                weights.append(0.2)
+            
+            # 4. Error Correction Model based hedge ratio
+            if len(price1) >= 50:
+                ecm_ratio = self._calculate_ecm_hedge_ratio(price1, price2)
+                if ecm_ratio is not None:
+                    hedge_ratios.append(ecm_ratio)
+                    weights.append(0.1)
+            
+            # Calculate weighted average
+            if hedge_ratios:
+                total_weight = sum(weights[:len(hedge_ratios)])
+                weighted_ratio = sum(r * w for r, w in zip(hedge_ratios, weights[:len(hedge_ratios)])) / total_weight
                 
-                # Rolling regression for hedge ratio
-                covariance = np.cov(recent_price1, recent_price2)[0, 1]
-                variance = np.var(recent_price1)
-                
-                if variance > 0:
-                    hedge_ratio = covariance / variance
-                else:
-                    hedge_ratio = 1.0
+                # Volatility-based adjustment
+                volatility_adjustment = self._calculate_volatility_adjusted_hedge_ratio(price1, price2, weighted_ratio)
                 
                 # Apply bounds to prevent extreme ratios
-                hedge_ratio = max(min(hedge_ratio, 3.0), 0.3)
+                final_ratio = max(min(volatility_adjustment, 3.0), 0.3)
                 
-                return hedge_ratio
+                return final_ratio
             else:
                 return self._calculate_static_hedge_ratio(price1, price2)
                 
         except Exception as e:
-            logger.error(f"Dynamic hedge ratio calculation failed: {e}")
+            logger.error(f"Enhanced dynamic hedge ratio calculation failed: {e}")
             return 1.0
+    
+    def _calculate_rolling_hedge_ratio(self, price1: pd.Series, price2: pd.Series, window: int) -> float:
+        """Calculate hedge ratio using rolling regression"""
+        try:
+            recent_price1 = price1.iloc[-window:]
+            recent_price2 = price2.iloc[-window:]
+            
+            # Use linear regression (more robust than simple covariance/variance)
+            X = recent_price2.values.reshape(-1, 1)
+            y = recent_price1.values
+            
+            # Add constant term for intercept
+            X_with_intercept = np.column_stack([np.ones(len(X)), X])
+            
+            # Solve using least squares
+            coefficients = np.linalg.lstsq(X_with_intercept, y, rcond=None)[0]
+            hedge_ratio = coefficients[1]  # Slope coefficient
+            
+            return hedge_ratio
+            
+        except Exception as e:
+            logger.error(f"Rolling hedge ratio calculation failed: {e}")
+            # Fallback to simple covariance method
+            covariance = np.cov(price1.iloc[-window:], price2.iloc[-window:])[0, 1]
+            variance = np.var(price2.iloc[-window:])
+            return covariance / variance if variance > 0 else 1.0
+    
+    def _calculate_ecm_hedge_ratio(self, price1: pd.Series, price2: pd.Series) -> Optional[float]:
+        """Calculate hedge ratio using Error Correction Model"""
+        try:
+            # Vector Error Correction Model approach
+            # First, test for cointegration and get cointegrating vector
+            
+            # Simple Engle-Granger approach
+            # Step 1: Run cointegrating regression
+            X = price2.values.reshape(-1, 1)
+            y = price1.values
+            X_with_intercept = np.column_stack([np.ones(len(X)), X])
+            
+            coefficients = np.linalg.lstsq(X_with_intercept, y, rcond=None)[0]
+            beta = coefficients[1]  # Cointegrating coefficient
+            
+            # Step 2: Calculate residuals (error correction term)
+            residuals = y - (coefficients[0] + beta * price2.values)
+            
+            # Step 3: Test residuals for stationarity (simplified)
+            # If residuals are mean-reverting, the hedge ratio is valid
+            residual_series = pd.Series(residuals)
+            
+            # Check if residuals are stationary using simple heuristics
+            residual_mean = residual_series.mean()
+            residual_std = residual_series.std()
+            
+            # Count mean crossings (more crossings = more stationary)
+            mean_crossings = sum(1 for i in range(1, len(residuals)) 
+                               if (residuals[i-1] - residual_mean) * (residuals[i] - residual_mean) < 0)
+            
+            crossing_rate = mean_crossings / len(residuals)
+            
+            # If crossing rate is reasonable, accept the hedge ratio
+            if 0.1 < crossing_rate < 0.5:  # Reasonable mean reversion
+                return beta
+            else:
+                return None
+                
+        except Exception as e:
+            logger.error(f"ECM hedge ratio calculation failed: {e}")
+            return None
+    
+    def _calculate_volatility_adjusted_hedge_ratio(self, price1: pd.Series, price2: pd.Series, base_ratio: float) -> float:
+        """Adjust hedge ratio based on relative volatilities"""
+        try:
+            # Calculate recent volatilities
+            returns1 = price1.pct_change().dropna()
+            returns2 = price2.pct_change().dropna()
+            
+            if len(returns1) < 10 or len(returns2) < 10:
+                return base_ratio
+            
+            vol1 = returns1.iloc[-20:].std() if len(returns1) >= 20 else returns1.std()
+            vol2 = returns2.iloc[-20:].std() if len(returns2) >= 20 else returns2.std()
+            
+            if vol2 > 0:
+                vol_ratio = vol1 / vol2
+                
+                # Adjust hedge ratio based on volatility ratio
+                # If asset 1 is more volatile, increase hedge ratio slightly
+                volatility_adjustment = 1.0 + (vol_ratio - 1.0) * 0.1  # 10% of volatility difference
+                
+                adjusted_ratio = base_ratio * volatility_adjustment
+                return adjusted_ratio
+            else:
+                return base_ratio
+                
+        except Exception as e:
+            logger.error(f"Volatility adjustment failed: {e}")
+            return base_ratio
     
     def _calculate_static_hedge_ratio(self, price1: pd.Series, price2: pd.Series) -> float:
         """Calculate static hedge ratio using full history"""
