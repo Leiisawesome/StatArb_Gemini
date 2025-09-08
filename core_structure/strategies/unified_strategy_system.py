@@ -204,6 +204,13 @@ class EnhancedBaseStrategy(BaseStrategy):
         self.status = StrategyStatus.INACTIVE
         self.execution_mode = config.parameters.execution_mode
         
+        # ✅ MERGE TEMPLATE_CONFIG PARAMETERS INTO PARAMETERS OBJECT
+        # This ensures that advanced features configured in template_config are accessible via getattr(self.parameters, ...)
+        if hasattr(self.parameters, 'template_config') and self.parameters.template_config:
+            for key, value in self.parameters.template_config.items():
+                # Set as attribute on parameters object so getattr(self.parameters, key) works
+                setattr(self.parameters, key, value)
+        
         # Enhanced metrics
         self._enhanced_metrics = {
             'total_signals_generated': 0,

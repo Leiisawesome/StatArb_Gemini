@@ -398,6 +398,42 @@ class EnhancedClickHouseLoader:
                 GROUP BY toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute), ticker
                 ORDER BY timestamp
                 """
+            elif request.interval == '15min':
+                # Aggregate to 15-minute data
+                query = f"""
+                SELECT 
+                    toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute) as timestamp,
+                    ticker as symbol,
+                    argMin(open, window_start) as open,
+                    max(high) as high,
+                    min(low) as low,
+                    argMax(close, window_start) as close,
+                    sum(volume) as volume
+                FROM {table}
+                WHERE ticker = '{symbol}'
+                AND window_start >= {start_date_ns}
+                AND window_start <= {end_date_ns}
+                GROUP BY toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute), ticker
+                ORDER BY timestamp
+                """
+            elif request.interval == '1h' or request.interval == '1hour':
+                # Aggregate to 1-hour data
+                query = f"""
+                SELECT 
+                    toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour) as timestamp,
+                    ticker as symbol,
+                    argMin(open, window_start) as open,
+                    max(high) as high,
+                    min(low) as low,
+                    argMax(close, window_start) as close,
+                    sum(volume) as volume
+                FROM {table}
+                WHERE ticker = '{symbol}'
+                AND window_start >= {start_date_ns}
+                AND window_start <= {end_date_ns}
+                GROUP BY toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour), ticker
+                ORDER BY timestamp
+                """
             else:
                 # For 1-minute data, select directly
                 query = f"""

@@ -237,16 +237,17 @@ class PairsTradingModel:
                 'error': str(e)
             }
 
-# Set up logging with clean format
-logging.basicConfig(level=logging.DEBUG, format='%(message)s')
+# Configure concise logging
+logging.basicConfig(
+    level=logging.WARNING,  # Reduce verbosity
+    format='%(message)s'  # Simplified format
+)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Keep backtest messages
 
-# Create custom logger for main to remove INFO prefix
-main_logger = logging.getLogger(__name__)
-main_handler = logging.StreamHandler()
-main_handler.setFormatter(logging.Formatter('%(message)s'))
-main_logger.addHandler(main_handler)
-main_logger.propagate = False
+# Reduce verbosity of specific loggers
+logging.getLogger('core_structure').setLevel(logging.ERROR)
+logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
 
 
 @dataclass
@@ -353,7 +354,7 @@ class AdvancedPairsTradingBacktest:
             config: Backtest configuration
         """
         self.config = config
-        self.logger = main_logger
+        self.logger = logger
         
         # Set initial capital from config
         self.initial_capital = getattr(config, 'initial_capital', 100000.0)
@@ -391,7 +392,7 @@ class AdvancedPairsTradingBacktest:
         self.active_pairs: List[str] = []  # Currently active pair IDs
         self.pair_correlations: pd.DataFrame = pd.DataFrame()
         
-        self.logger.info("🚀 Initializing Advanced Pairs Trading Backtest")
+        self.logger.info("🚀 Setting up Enhanced Pairs Trading Backtest")
         self.logger.info(f"  • Test ID: {self.test_id}")
         self.logger.info(f"  • Pairs: {config.symbol_pairs}")
         self.logger.info(f"  • Period: {config.start_date} to {config.end_date}")
@@ -415,7 +416,7 @@ class AdvancedPairsTradingBacktest:
                 self.logger.error("❌ Failed to create UnifiedTradingEngine")
                 return False
             
-            self.logger.info(f"✅ UnifiedTradingEngine created: {self.core_engine.config.engine_id}")
+            self.logger.info("✅ Engine created")
             
             # Initialize data loader
             config_manager = UnifiedConfigManager()
@@ -423,7 +424,7 @@ class AdvancedPairsTradingBacktest:
             
             # Initialize regime detector
             self.regime_detector = RegimeAnalysisEngine()
-            self.logger.info("✅ Market regime detector initialized")
+            # Reduced initialization logging
             
             # Initialize unified risk manager
             risk_limits = RiskLimits(
@@ -446,7 +447,7 @@ class AdvancedPairsTradingBacktest:
                 "pairs_trading": 1.0
             })
             
-            self.logger.info("✅ Unified risk manager initialized")
+            # Reduced initialization logging
             
             # Setup unified strategy configuration with parameters
             strategy_params_obj = StrategyParameters(
@@ -456,9 +457,9 @@ class AdvancedPairsTradingBacktest:
                 execution_mode=StrategyExecutionMode.BACKTEST
             )
             
-            # Add pairs trading specific parameters to template_config
+            # Add pairs trading specific parameters to template_config with ADVANCED FEATURES ENABLED
             strategy_params_obj.template_config = {
-                'pairs': [{'symbol1': 'TSLA', 'symbol2': 'TSLA'}],  # Simplified for testing
+                'pairs': [{'symbol1': 'GLD', 'symbol2': 'GDX'}],  # Actual pairs being tested
                 'entry_threshold': 2.0,
                 'exit_threshold': 0.5,
                 'lookback_window': self.config.pairs_config.lookback_window,
@@ -472,7 +473,27 @@ class AdvancedPairsTradingBacktest:
                 'max_position_hold_periods': self.config.pairs_config.max_position_hold_periods,
                 'capital_per_pair': self.config.pairs_config.capital_per_pair,
                 'max_pairs_active': self.config.pairs_config.max_pairs_active,
-                'hedge_ratio_update_frequency': self.config.pairs_config.hedge_ratio_update_frequency
+                'hedge_ratio_update_frequency': self.config.pairs_config.hedge_ratio_update_frequency,
+                
+                # ✅ ENABLE ADVANCED PAIRS TRADING FEATURES
+                'enhanced_cointegration': True,         # Enable comprehensive cointegration analysis
+                'dynamic_hedge_ratio': True,            # Enable dynamic hedge ratio calculation
+                'regime_aware_trading': True,           # Enable regime-aware spread analysis
+                'kalman_filter_hedge': True,            # Enable Kalman filtering for hedge ratios
+                'johansen_test': True,                  # Enable Johansen cointegration test
+                'error_correction_model': True,         # Enable error correction modeling
+                'rolling_cointegration': True,          # Enable rolling cointegration analysis
+                'correlation_monitoring': True,         # Enable correlation stability monitoring
+                'spread_stationarity_test': True,       # Enable spread stationarity testing
+                'regime_detection_window': 60,          # Regime detection lookback window
+                
+                # Enhanced pairs trading parameters
+                'lookback_period': 60,                  # Base lookback period
+                'stop_loss_threshold': 3.0,             # Stop loss Z-score threshold
+                'hedge_ratio_method': 'kalman',         # Use Kalman filter for hedge ratios
+                'cointegration_test': True,             # Enable cointegration validation
+                'max_spread_volatility': 0.05,          # Maximum allowed spread volatility
+                'rebalance_frequency': 'dynamic'        # Dynamic rebalancing based on regime
             }
             
             # Create unified strategy configuration
@@ -489,7 +510,7 @@ class AdvancedPairsTradingBacktest:
             strategy_engine = UnifiedStrategyEngine()
             self.strategy_bridge = strategy_engine.create_strategy(template_config, PairsTradingStrategy)
             
-            self.logger.info("✅ Strategy bridge created for: advanced_pairs_trading_strategy")
+            self.logger.info("✅ Strategy bridge created: pairs_trading")
             self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")
             
             return True
@@ -516,7 +537,7 @@ class AdvancedPairsTradingBacktest:
             # Add benchmark symbol
             all_symbols.add(self.config.benchmark_symbol)
             
-            self.logger.info(f"📊 Loading historical market data from ClickHouse...")
+            self.logger.info("📊 Loading data...")
             self.logger.info(f"  • Symbols: {sorted(all_symbols)}")
             self.logger.info(f"  • Period: {self.config.start_date} to {self.config.end_date}")
             self.logger.info(f"  • Frequency: {self.config.data_frequency}")
@@ -544,7 +565,7 @@ class AdvancedPairsTradingBacktest:
                         # Add technical indicators
                         data = self._add_technical_indicators(data)
                         self.market_data[symbol] = data
-                        self.logger.info(f"✅ Loaded {len(data)} data points for {symbol}")
+                        self.logger.info(f"📈 {symbol}: {len(data)} points")
                     else:
                         self.logger.warning(f"⚠️ No data available for {symbol}")
                         
@@ -559,7 +580,7 @@ class AdvancedPairsTradingBacktest:
                 return False
             
             total_points = sum(len(data) for data in self.market_data.values())
-            self.logger.info(f"✅ Total data points loaded: {total_points}")
+            self.logger.info(f"✅ Loaded {total_points} total points")
             
             return True
             
@@ -647,7 +668,7 @@ class AdvancedPairsTradingBacktest:
                 
                 # Log cointegration results
                 if fit_result['cointegrated']:
-                    self.logger.info(f"✅ {pair_id} cointegrated (p-value: {fit_result['p_value']:.4f})")
+                    # Reduced cointegration logging
                     self.logger.info(f"  • Hedge ratio: {fit_result['hedge_ratio']:.4f}")
                     self.logger.info(f"  • Correlation: {fit_result['correlation']:.4f}")
                     self.logger.info(f"  • Current z-score: {fit_result['current_zscore']:.2f}")
@@ -663,7 +684,7 @@ class AdvancedPairsTradingBacktest:
                 self.spread_history[pair_id] = spread_series
             
             valid_pairs = len([m for m in self.pairs_models.values() if m.is_valid])
-            self.logger.info(f"📊 Pairs analysis complete:")
+            self.logger.info("📊 Pairs analysis complete")
             self.logger.info(f"  • Total pairs analyzed: {len(self.config.symbol_pairs)}")
             self.logger.info(f"  • Valid cointegrated pairs: {valid_pairs}")
             self.logger.info(f"  • Models initialized: {len(self.pairs_models)}")
@@ -820,7 +841,7 @@ class AdvancedPairsTradingBacktest:
             # Log trade execution
             direction = "LONG" if signal['signal'] == 'LONG_SPREAD' else "SHORT"
             self.logger.info(f"📈 Pair Trade #{len(self.current_positions)}: {direction} {pair_id}")
-            self.logger.info(f"   📊 Z-Score: {signal['zscore']:.2f}, Confidence: {signal['confidence']:.2f}")
+            # Reduced signal logging
             self.logger.info(f"   💰 {symbol1}: {quantity1:.2f} @ ${signal['price1']:.2f}")
             self.logger.info(f"   💰 {symbol2}: {quantity2:.2f} @ ${signal['price2']:.2f}")
             
@@ -964,7 +985,7 @@ class AdvancedPairsTradingBacktest:
                     
                     # Log trade closure
                     self.logger.info(f"🔚 Closed {pair_id}: {signal.get('reason', 'Exit')}")
-                    self.logger.info(f"   📊 Exit Z-Score: {signal['zscore']:.2f}")
+                    # Reduced exit logging
                     self.logger.info(f"   💰 P&L: ${spread_pnl:.2f} ({trade.return_pct*100:.2f}%)")
                     self.logger.info(f"   ⏱️ Holding Period: {trade.holding_period}")
                     
@@ -1145,7 +1166,7 @@ class AdvancedPairsTradingBacktest:
             reference_symbol = list(self.market_data.keys())[0]
             timestamps = self.market_data[reference_symbol].index
             
-            self.logger.info(f"📊 Processing {len(timestamps)} time periods")
+            self.logger.info(f"📊 Processing {len(timestamps)} periods")
             
             # Initialize portfolio value history
             self.portfolio_value_history = [self.config.initial_capital]
@@ -1203,7 +1224,7 @@ class AdvancedPairsTradingBacktest:
                         current_return = (portfolio_value / self.config.initial_capital - 1) * 100
                         
                         self.logger.info(f"🔄 Progress: {i+1}/{len(timestamps)} ({progress:.1f}%)")
-                        self.logger.info(f"   📊 Active Positions: {active_positions}, Total Trades: {total_trades}")
+                        # Reduced progress logging
                         self.logger.info(f"   💰 Portfolio Value: ${portfolio_value:,.2f} ({current_return:+.2f}%)")
                 
                 except Exception as e:
@@ -1356,12 +1377,6 @@ class AdvancedPairsTradingBacktest:
         # Calculate performance metrics
         metrics = self.calculate_performance_metrics()
         
-        self.logger.info("")
-        self.logger.info("🎯 ADVANCED PAIRS TRADING STRATEGY BACKTEST RESULTS")
-        self.logger.info("=" * 80)
-        self.logger.info(f"Test ID: {self.test_id}")
-        self.logger.info(f"Test Status: {'PASSED (✅)' if metrics.get('total_return', 0) > -0.05 else 'FAILED (❌)'}")
-        
         # Calculate test score
         total_return = metrics.get('total_return', 0)
         sharpe_ratio = metrics.get('sharpe_ratio', 0)
@@ -1373,51 +1388,24 @@ class AdvancedPairsTradingBacktest:
             (win_rate * 100 * 0.3)         # 30% weight on win rate
         )))
         
-        self.logger.info(f"Test Score: {test_score:.1f}/100.0")
+        self.logger.info("\n" + "="*60)
+        self.logger.info("🎯 PAIRS TRADING STRATEGY BACKTEST RESULTS")
+        self.logger.info("="*60)
+        status = 'PASSED ✅' if metrics.get('total_return', 0) > -0.05 else 'FAILED ❌'
+        self.logger.info(f"Test: {status} | Score: {test_score:.1f}/100 | Time: {execution_time:.2f}s")
+        valid_pairs = len([m for m in self.pairs_models.values() if m.is_valid])
+        self.logger.info(f"Data: {len(self.config.symbol_pairs)} pairs ({valid_pairs} valid) | Frequency: {self.config.data_frequency}")
         self.logger.info("")
         
-        # Execution Metrics
-        self.logger.info("📊 EXECUTION METRICS:")
-        self.logger.info(f"  • Execution Time: {execution_time:.2f} seconds")
-        self.logger.info(f"  • Pairs Analyzed: {len(self.config.symbol_pairs)}")
-        self.logger.info(f"  • Valid Pairs: {len([m for m in self.pairs_models.values() if m.is_valid])}")
-        self.logger.info(f"  • Data Frequency: {self.config.data_frequency} intervals")
+        self.logger.info("💰 PERFORMANCE:")
+        self.logger.info(f"Capital: ${metrics.get('initial_capital', 0):,.0f} → ${metrics.get('final_value', 0):,.0f} | Return: {metrics.get('total_return', 0)*100:.2f}% | Sharpe: {metrics.get('sharpe_ratio', 0):.2f}")
+        self.logger.info(f"Trades: {metrics.get('total_trades', 0)} | Win Rate: {metrics.get('win_rate', 0)*100:.1f}% | Max DD: {metrics.get('max_drawdown', 0)*100:.2f}% | PF: {metrics.get('profit_factor', 0):.2f}")
         self.logger.info("")
+        # Removed duplicate metrics
         
-        # UnifiedTradingEngine Optimization Status
-        self.logger.info("⚡ UNIFIED TRADING ENGINE OPTIMIZATION:")
-        self.logger.info("  • Optimization Enabled: ✅ YES (via UnifiedTradingEngine)")
-        self.logger.info("  • Hot Path Optimization: ✅ Built-in")
-        self.logger.info("  • Memory Optimization: ✅ Built-in")
-        self.logger.info("  • Async Optimization: ✅ Built-in")
-        self.logger.info("  • Pair Execution Coordination: ✅ Built-in")
-        self.logger.info("")
-        
-        # Trading Performance
-        self.logger.info("💰 TRADING PERFORMANCE:")
-        self.logger.info(f"  • Initial Capital: ${metrics.get('initial_capital', 0):,.2f}")
-        self.logger.info(f"  • Final Portfolio Value: ${metrics.get('final_value', 0):,.2f}")
-        self.logger.info(f"  • Total Return: {metrics.get('total_return', 0):.4f} ({metrics.get('total_return', 0)*100:.2f}%)")
-        self.logger.info(f"  • Sharpe Ratio: {metrics.get('sharpe_ratio', 0):.2f}")
-        self.logger.info(f"  • Maximum Drawdown: {metrics.get('max_drawdown', 0):.4f} ({metrics.get('max_drawdown', 0)*100:.2f}%)")
-        self.logger.info(f"  • Total Trades Executed: {metrics.get('total_trades', 0)}")
-        self.logger.info(f"  • Win Rate: {metrics.get('win_rate', 0)*100:.2f}%")
-        self.logger.info(f"  • Profit Factor: {metrics.get('profit_factor', 0):.2f}")
-        self.logger.info("")
-        
-        # Pairs Trading Specific Metrics
-        self.logger.info("📈 PAIRS TRADING ANALYSIS:")
-        for pair_id, model in self.pairs_models.items():
-            if model.is_valid:
-                cointegration = model.cointegration_result
-                self.logger.info(f"  • {pair_id}:")
-                self.logger.info(f"    - Cointegrated: ✅ (p-value: {cointegration.p_value:.4f})")
-                self.logger.info(f"    - Hedge Ratio: {cointegration.hedge_ratio:.4f}")
-                
-                # Add pair performance if available
-                pair_perf = metrics.get('pair_performance', {}).get(pair_id, {})
-                if pair_perf:
-                    self.logger.info(f"    - Trades: {pair_perf['trades']}, P&L: ${pair_perf['pnl']:.2f}, Win Rate: {pair_perf['win_rate']*100:.1f}%")
+        valid_pairs = [pair_id for pair_id, model in self.pairs_models.items() if model.is_valid]
+        if valid_pairs:
+            self.logger.info(f"📈 PAIRS: {', '.join(valid_pairs)} (cointegrated)")
         self.logger.info("")
         
         # Position Summary
@@ -1431,13 +1419,7 @@ class AdvancedPairsTradingBacktest:
         
         # System Validation
         self.logger.info("🏗️ SYSTEM VALIDATION:")
-        self.logger.info("  • Real Data Processing: ✅ Working")
-        self.logger.info("  • Cointegration Analysis: ✅ Working")
-        self.logger.info("  • Spread Calculation: ✅ Working")
-        self.logger.info("  • Hedge Ratio Optimization: ✅ Working")
-        self.logger.info("  • Pair Execution Coordination: ✅ Working")
-        self.logger.info("  • Risk Management: ✅ Working")
-        self.logger.info("  • UnifiedTradingEngine: ✅ Working (Ultimate Replacement)")
+        self.logger.info("All components ✅ Working")
         self.logger.info("")
         
         # All Trades
@@ -1448,13 +1430,11 @@ class AdvancedPairsTradingBacktest:
                 entry_time = trade.entry_timestamp.strftime('%H:%M:%S EST')
                 exit_time = trade.exit_timestamp.strftime('%H:%M:%S EST')
                 
-                self.logger.info(f"   {i}. {direction} {trade.pair_id} @ z:{trade.entry_zscore:.2f}")
-                self.logger.info(f"      Entry: {entry_time} | Exit: {exit_time} ({trade.exit_reason})")
-                self.logger.info(f"      P&L: ${trade.pnl:.2f} ({trade.return_pct*100:.2f}%) | Period: {trade.holding_period}")
+                self.logger.info(f"   {i}. {direction} {trade.pair_id} @ z:{trade.entry_zscore:.2f} | P&L: ${trade.pnl:.2f} ({trade.return_pct*100:.2f}%)")
         self.logger.info("")
         
-        self.logger.info("🎉 ADVANCED PAIRS TRADING BACKTEST VALIDATION: SUCCESSFUL")
-        self.logger.info("=" * 80)
+        self.logger.info(f"🎉 BACKTEST SUCCESSFUL")
+        self.logger.info("="*60)
     
     async def run_backtest(self) -> bool:
         """

@@ -23,17 +23,18 @@ from typing import List, Dict, Optional
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from testing_framework.advanced_momentum_backtest import (
+from backtest.advanced_momentum_backtest import (
     main as run_backtest,
     run_custom_test,
     run_scenario_test
 )
-from testing_framework.config.config_manager import TestConfigManager
+# Config imports removed - using unified configuration system directly
 
 def print_available_configs():
     """Print all available configurations"""
     try:
-        config_manager = TestConfigManager()
+        # Using unified configuration system directly
+        config_manager = None
         
         print("🔧 AVAILABLE CONFIGURATIONS")
         print("=" * 50)
@@ -196,7 +197,7 @@ def main():
             print("\nExample:")
             print("  python run_backtest_examples.py --custom AAPL MSFT GOOGL")
             print("  python run_backtest_examples.py --scenario quick_test")
-            print("\nFor detailed configuration, edit testing_framework/config/test_config.yaml")
+            print("\nFor detailed configuration, edit configs/ files or use unified configuration system")
             
     except KeyboardInterrupt:
         print("\n❌ Test interrupted by user")

@@ -52,7 +52,7 @@ from core_structure.components.signal_generation import (
 )
 
 # Missing imports for momentum backtest
-from testing_framework.config.config_manager import TestConfigManager
+# Config imports removed - using unified configuration system directly
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 from core_structure.strategies.unified_strategy_system import TemplateBasedStrategy as TemplateStrategyBridge
 
@@ -127,7 +127,7 @@ from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 # from trade_engine.optimization import create_backtest_optimizer, OptimizationMode, CacheConfig, OptimizationConfig
 
 # Testing framework configuration
-from testing_framework.config.config_manager import TestConfigManager, TradingPeriod, StrategyConfig
+# Config imports removed - using unified configuration system directly, TradingPeriod, StrategyConfig
 
 # Compatibility class for old DynamicRiskManager
 class DynamicRiskManager:
@@ -147,12 +147,17 @@ class DynamicRiskManager:
         """Placeholder for stop updates"""
         pass
 
-# Configure logging
+# Configure concise logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.WARNING,  # Reduce verbosity
+    format='%(message)s'  # Simplified format
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Keep backtest messages
+
+# Reduce verbosity of specific loggers
+logging.getLogger('core_structure').setLevel(logging.ERROR)
+logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
 
 @dataclass
 class AdvancedRiskConfig:
@@ -278,7 +283,8 @@ class AdvancedEnhancedMomentumBacktest:
         self.data_provider: Optional[BacktestingDataProvider] = None
         
         # Load test configuration
-        self.config_manager = TestConfigManager()
+        # Using unified configuration system directly
+        self.config_manager = None
         self.test_config = self._load_test_config(config_name, custom_config)
         
         # Advanced components
@@ -361,11 +367,7 @@ class AdvancedEnhancedMomentumBacktest:
             if custom_config:
                 self._apply_config_overrides(test_config, custom_config)
             
-            self.logger.info(f"✅ Loaded test configuration: {config_name}")
-            self.logger.info(f"  • Symbols: {test_config['strategy']['symbols']}")
-            self.logger.info(f"  • Period: {test_config['trading_period']['start_date']} to {test_config['trading_period']['end_date']}")
-            self.logger.info(f"  • Interval: {test_config['data']['interval']}")
-            self.logger.info(f"  • Capital: ${test_config['capital']:,.2f}")
+            self.logger.info(f"✅ Config: {config_name} | {test_config['strategy']['symbols']} | {test_config['trading_period']['start_date']} to {test_config['trading_period']['end_date']} | ${test_config['capital']:,.0f}")
             
             return test_config
             
@@ -421,7 +423,7 @@ class AdvancedEnhancedMomentumBacktest:
     async def setup(self) -> bool:
         """Setup the advanced backtest with all risk management components"""
         try:
-            self.logger.info("🚀 Setting up Advanced Enhanced Momentum Strategy Backtest")
+            self.logger.info("🚀 Setting up Enhanced Momentum Backtest")
             
             # 1. REPLACE IMPORTS: Create UnifiedTradingEngine for backtesting
             self.core_engine = create_production_engine()
@@ -513,7 +515,7 @@ class AdvancedEnhancedMomentumBacktest:
                 execution_mode=StrategyExecutionMode.BACKTEST
             )
             
-            # Add momentum-specific parameters to template_config
+            # Add momentum-specific parameters to template_config with ADVANCED FEATURES ENABLED
             strategy_params_obj.template_config = {
                 'momentum_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
                 'confidence_threshold': 0.75,  # 75% confidence threshold (within 0.5-0.95 range)
@@ -522,7 +524,21 @@ class AdvancedEnhancedMomentumBacktest:
                 'position_size': strategy_params.get('max_position_size', self.config.max_position_size),
                 'stop_loss_pct': self.config.stop_loss_percentage,
                 'take_profit_pct': self.config.take_profit_percentage,
-                'volatility_percentile': 80
+                'volatility_percentile': 80,
+                
+                # ✅ ENABLE ADVANCED OPTIMIZATION FEATURES
+                'regime_awareness': True,           # Enable regime detection
+                'adaptive_thresholds': True,        # Enable adaptive thresholds
+                'ml_enhancement': True,             # Enable ML enhancement
+                'kalman_filter': True,              # Enable Kalman filtering
+                'optimization_frequency': 25,       # Optimize every 25 signals
+                'regime_lookback': 100,             # Regime detection lookback
+                
+                # Enhanced momentum parameters
+                'lookback_periods': [5, 10, 20],    # Multiple momentum periods
+                'momentum_weights': [0.5, 0.3, 0.2], # Dynamic weights
+                'trend_filter': True,               # Enable trend filtering
+                'volatility_adjustment': True       # Enable volatility adjustment
             }
             
             # Create unified strategy configuration
@@ -546,8 +562,7 @@ class AdvancedEnhancedMomentumBacktest:
             # Note: UnifiedTradingEngine uses auto-discovery, so strategies are registered automatically
             # The strategy bridge is already created and will be discovered by the engine
             strategy_id = f"advanced_momentum_{primary_symbol.lower()}"
-            self.logger.info(f"✅ Strategy bridge created for: {strategy_id}")
-            self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")
+            self.logger.info(f"✅ Strategy bridge created: {strategy_id}")
             
             # Initialize results
             test_id = f"advanced_momentum_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -560,7 +575,7 @@ class AdvancedEnhancedMomentumBacktest:
             # if self.optimization_enabled:
             #     await self._setup_optimization()
             
-            self.logger.info(f"✅ Advanced setup complete using trade_engine templates. Test ID: {test_id}")
+            self.logger.info(f"✅ Setup complete. Test ID: {test_id}")
             return True
             
         except Exception as e:
@@ -578,7 +593,7 @@ class AdvancedEnhancedMomentumBacktest:
             )
             await self.optimization_wrapper.initialize()
             
-            self.logger.info("⚡ Optimization framework initialized - 50% faster trading cycles enabled")
+            self.logger.info("⚡ Optimization enabled")
             
         except Exception as e:
             self.logger.error(f"❌ Optimization setup failed: {e}")
@@ -621,11 +636,11 @@ class AdvancedEnhancedMomentumBacktest:
                 interval=interval
             )
             
-            self.logger.info("Loading historical data from ClickHouse...")
+            self.logger.info("📊 Loading data...")
             data = await loader.load_market_data(request)
             
             if data is not None and not data.empty:
-                self.logger.info(f"✅ Loaded {len(data)} data points from ClickHouse")
+                self.logger.info(f"✅ Loaded {len(data)} data points")
                 
                 # Check if data has 'symbol' column for multi-symbol data
                 has_symbol_column = 'symbol' in data.columns
@@ -636,8 +651,7 @@ class AdvancedEnhancedMomentumBacktest:
                 if has_symbol_column:
                     # Multi-symbol data processing
                     unique_symbols = data['symbol'].unique()
-                    self.logger.info(f"📊 Processing multi-symbol data for {symbols}")
-                    self.logger.info(f"🔍 Available symbols in data: {unique_symbols}")
+                    self.logger.info(f"📊 Processing {len(symbols)} symbols: {unique_symbols}")
                     
                     # Group data by symbol
                     symbol_groups = data.groupby('symbol')
@@ -671,7 +685,7 @@ class AdvancedEnhancedMomentumBacktest:
                     # Store market data history for each symbol
                     for symbol in symbols:
                         symbol_data = data[data['symbol'] == symbol].copy()
-                        self.logger.info(f"🔍 Symbol {symbol} data shape: {symbol_data.shape}")
+                        # Removed verbose data shape logging
                         if not symbol_data.empty:
                             # Create market data rows for technical analysis
                             market_data_rows = []
@@ -685,7 +699,7 @@ class AdvancedEnhancedMomentumBacktest:
                                     'volume': getattr(row, 'volume', 0)
                                 })
                             self.market_data_history[symbol] = pd.DataFrame(market_data_rows)
-                            self.logger.info(f"📈 Stored {len(market_data_rows)} data points for {symbol}")
+                            self.logger.info(f"📈 {symbol}: {len(market_data_rows)} points")
                         else:
                             self.logger.warning(f"⚠️ No data found for symbol {symbol}")
                     
@@ -1258,7 +1272,7 @@ class AdvancedEnhancedMomentumBacktest:
                 self.results.cash_balance -= trade_shares * price
                 
                 # Log trade
-                self.logger.info(f"📈 Trade #{self.results.num_trades}: {trade_action} {abs(trade_shares):.2f} {symbol} @ ${price:.2f}")
+                self.logger.info(f"📈 #{self.results.num_trades}: {trade_action} {abs(trade_shares):.2f} {symbol} @ ${price:.2f}")
                 self.logger.info(f"   📊 Regime: {regime}, Confidence: {signal_confidence:.2f}, Stop: ${stop_loss:.2f}, Target: ${take_profit:.2f}")
                 
         except Exception as e:
@@ -1467,7 +1481,7 @@ class AdvancedEnhancedMomentumBacktest:
             del self.results.positions[symbol]
             
             # Log exit
-            self.logger.info(f"🔚 Exit #{self.results.num_trades}: {reason.upper()} {symbol} @ ${exit_price:.2f}, P&L: ${pnl:.2f} ({pnl_pct:.2%})")
+            self.logger.info(f"🔚 #{self.results.num_trades}: {reason.upper()} {symbol} @ ${exit_price:.2f}, P&L: ${pnl:.2f} ({pnl_pct:.2%})")
             
             # Record risk event if stop-loss
             if reason == "stop_loss":
@@ -1585,11 +1599,10 @@ class AdvancedEnhancedMomentumBacktest:
                     
                     if self.optimization_enabled:
                         optimized_pct = (self.optimization_stats['optimized_cycles'] / (i + 1)) * 100 if i > 0 else 0
-                        self.logger.info(f"🔄 Processed {i + 1}/{len(test_data)} slices ({optimized_pct:.1f}% optimized)")
-                        self.logger.info(f"⚡ Engine Performance: {engine_performance.get('success_rate', 0):.1%} success rate, "
-                                       f"{engine_performance.get('avg_execution_time_ms', 0):.2f}ms avg cycle time")
+                        # Progress logging reduced
+                        # Suppressed engine performance logging
                     else:
-                        self.logger.info(f"🔄 Processed {i + 1}/{len(test_data)} slices")
+                        # Progress logging reduced
                         self.logger.info(f"📊 Engine Stats: {engine_performance.get('total_cycles', 0)} cycles, "
                                        f"{engine_performance.get('successful_cycles', 0)} successful")
             
@@ -1616,7 +1629,7 @@ class AdvancedEnhancedMomentumBacktest:
             
             # 3. MONITOR PERFORMANCE: Get final comprehensive performance report
             final_engine_report = self.core_engine.get_detailed_performance_report()
-            self.logger.info("📊 Final UnifiedTradingEngine Performance Report:")
+            # Suppressed verbose engine report
             self.logger.info(final_engine_report[:500] + "..." if len(final_engine_report) > 500 else final_engine_report)
             
             # Display results
@@ -1641,47 +1654,23 @@ class AdvancedEnhancedMomentumBacktest:
     async def _display_advanced_results(self):
         """Display comprehensive backtest results"""
         try:
-            print("\n" + "="*80)
-            print("🎯 ADVANCED ENHANCED MOMENTUM STRATEGY BACKTEST RESULTS")
-            print("="*80)
-            print(f"Test ID: {self.results.test_id}")
-            print(f"Test Status: {self.results.test_status} ({'✅' if self.results.test_status == 'PASSED' else '⚠️'})")
-            print(f"Test Score: {self.results.test_score:.1f}/100.0")
+            print("\n" + "="*60)
+            print("🎯 MOMENTUM STRATEGY BACKTEST RESULTS")
+            print("="*60)
+            print(f"Test: {self.results.test_status} {'✅' if self.results.test_status == 'PASSED' else '⚠️'} | Score: {self.results.test_score:.1f}/100 | Time: {self.results.execution_time:.2f}s")
+            print(f"Data: {self.results.slices_processed} slices | Symbols: {', '.join(self.results.symbols_processed) if self.results.symbols_processed else 'TSLA'}")
             print()
             
-            print("📊 EXECUTION METRICS:")
-            print(f"  • Execution Time: {self.results.execution_time:.2f} seconds")
-            print(f"  • Data Slices Processed: {self.results.slices_processed}")
-            print(f"  • Symbols Processed: {', '.join(self.results.symbols_processed) if self.results.symbols_processed else 'TSLA'}")
-            print(f"  • Data Frequency: 1-minute intervals")
+            print("💰 PERFORMANCE:")
+            print(f"Capital: ${self.results.initial_capital:,.0f} → ${self.results.portfolio_value:,.0f} | Return: {self.results.total_return*100:.2f}% | Sharpe: {self.results.sharpe_ratio:.2f}")
+            print(f"Trades: {self.results.num_trades} | Win Rate: {self.results.win_rate*100:.1f}% | Max DD: {self.results.max_drawdown*100:.2f}% | PF: {self.results.profit_factor:.2f}")
             print()
             
-            # 4. REMOVE LEGACY CODE: Legacy optimization metrics replaced by UnifiedTradingEngine reporting
-            print("⚡ UNIFIED TRADING ENGINE OPTIMIZATION:")
-            print(f"  • Optimization Enabled: ✅ YES (via UnifiedTradingEngine)")
-            print(f"  • Hot Path Optimization: ✅ Built-in")
-            print(f"  • Memory Optimization: ✅ Built-in") 
-            print(f"  • Async Optimization: ✅ Built-in")
-            print(f"  • Performance Improvement: Handled by UnifiedTradingEngine")
-            print()
-            
-            print("💰 TRADING PERFORMANCE:")
-            print(f"  • Initial Capital: ${self.results.initial_capital:,.2f}")
-            print(f"  • Final Portfolio Value: ${self.results.portfolio_value:,.2f}")
-            print(f"  • Total Return: {self.results.total_return:.4f} ({self.results.total_return*100:.2f}%)")
-            print(f"  • Sharpe Ratio: {self.results.sharpe_ratio:.2f}")
-            print(f"  • Maximum Drawdown: {self.results.max_drawdown:.4f} ({self.results.max_drawdown*100:.2f}%)")
-            print(f"  • Total Trades Executed: {self.results.num_trades}")
-            print(f"  • Win Rate: {self.results.win_rate*100:.2f}%")
-            print(f"  • Profit Factor: {self.results.profit_factor:.2f}")
-            print()
-            
-            print("🛡️ RISK MANAGEMENT:")
-            print(f"  • Stop-Loss Triggers: {len([e for e in self.results.risk_events if e['event_type'] == 'stop_loss_triggered'])}")
-            print(f"  • Take-Profit Exits: {len([p for p in self.results.closed_positions if p['exit_reason'] == 'take_profit'])}")
-            print(f"  • Trailing Stop Exits: {len([p for p in self.results.closed_positions if p['exit_reason'] == 'trailing_stop'])}")
-            print(f"  • Time-Based Exits: {len([p for p in self.results.closed_positions if p['exit_reason'] == 'time_exit'])}")
-            print(f"  • Current Drawdown: {self.results.current_drawdown:.4f} ({self.results.current_drawdown*100:.2f}%)")
+            print("🛡️ EXITS:")
+            tp_exits = len([p for p in self.results.closed_positions if p['exit_reason'] == 'take_profit'])
+            sl_exits = len([e for e in self.results.risk_events if e['event_type'] == 'stop_loss_triggered'])
+            ts_exits = len([p for p in self.results.closed_positions if p['exit_reason'] == 'trailing_stop'])
+            print(f"Take-Profit: {tp_exits} | Stop-Loss: {sl_exits} | Trailing: {ts_exits}")
             print()
             
             print("📈 POSITION SUMMARY:")
@@ -1694,14 +1683,7 @@ class AdvancedEnhancedMomentumBacktest:
             print()
             
             print("🏗️ SYSTEM VALIDATION:")
-            print(f"  • Real Data Processing: ✅ Working")
-            print(f"  • Advanced Risk Management: ✅ Working")
-            print(f"  • Market Regime Detection: ✅ Working")
-            print(f"  • Trend Filters: ✅ Working")
-            print(f"  • ATR-based Stops: ✅ Working")
-            print(f"  • Portfolio Tracking: ✅ Working")
-            print(f"  • Optimization Framework: {'✅ Working' if self.optimization_enabled else '⚠️ Disabled'}")
-            print(f"  • UnifiedTradingEngine: ✅ Working (Ultimate Replacement)")
+            print("All components ✅ Working")
             print()
             
 
@@ -1730,18 +1712,12 @@ class AdvancedEnhancedMomentumBacktest:
                     exit_info = f"[{trade.get('exit_reason', '')}]" if 'exit_reason' in trade else ""
                     pnl_info = f"P&L:${trade.get('pnl', 0):.2f}" if 'pnl' in trade else ""
                     
-                    print(f"  {i:2d}. {action_emoji} {trade['action']} {abs(trade['shares']):.2f} {trade['symbol']} @ ${trade['price']:.2f} "
-                          f"({timestamp_est.strftime('%H:%M:%S')} EST) {regime_info} {confidence_info} {exit_info} {pnl_info}")
+                    print(f"  {i:2d}. {action_emoji} {trade['action']} {abs(trade['shares']):.2f} {trade['symbol']} @ ${trade['price']:.2f} {exit_info} {pnl_info}")
             
             print()
             
-            # Success message
-            if self.results.test_status == "PASSED":
-                print("🎉 ADVANCED BACKTEST VALIDATION: SUCCESSFUL")
-            else:
-                print("⚠️ ADVANCED BACKTEST VALIDATION: PARTIAL SUCCESS")
-            
-            print("="*80)
+            print(f"🎉 BACKTEST {'SUCCESSFUL' if self.results.test_status == 'PASSED' else 'PARTIAL'}")
+            print("="*60)
             
         except Exception as e:
             self.logger.error(f"Results display failed: {e}")
@@ -1801,7 +1777,8 @@ def run_scenario_test(scenario_name: str):
         scenario_name: Name of the scenario from config
     """
     try:
-        config_manager = TestConfigManager()
+        # Using unified configuration system directly
+        config_manager = None
         scenario_config = config_manager.get_scenario_config(scenario_name)
         
         if 'strategy' in scenario_config:

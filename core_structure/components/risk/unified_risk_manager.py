@@ -85,6 +85,20 @@ class RiskLimits:
     # VaR limits
     var_confidence_level: float = 0.95        # 95% VaR confidence
     max_var_pct: float = 0.03                # 3% max VaR
+    
+    # Advanced risk management
+    enable_kelly_criterion: bool = True       # Kelly criterion position sizing
+    enable_adaptive_stops: bool = True        # Adaptive stop losses
+    enable_correlation_monitoring: bool = True # Real-time correlation monitoring
+    enable_regime_risk_adjustment: bool = True # Regime-aware risk adjustment
+    
+    # Stress testing
+    enable_stress_testing: bool = True        # Monte Carlo stress testing
+    stress_test_scenarios: int = 1000         # Number of stress scenarios
+    
+    # Machine learning risk features
+    enable_ml_risk_scoring: bool = True       # ML-based risk scoring
+    risk_model_update_frequency: int = 100    # Update ML models every N observations
 
 @dataclass
 class UnifiedRiskMetrics:
@@ -211,6 +225,25 @@ class UnifiedRiskManager:
         self.ml_models: Dict[str, Any] = {}
         if ML_AVAILABLE and trading_mode != TradingMode.BACKTESTING:
             self._initialize_ml_models()
+        
+        # Advanced risk management components
+        self.kelly_calculator = None
+        self.adaptive_stop_manager = None
+        self.correlation_monitor = None
+        self.stress_tester = None
+        
+        # Initialize advanced components
+        if self.risk_limits.enable_kelly_criterion:
+            self._initialize_kelly_calculator()
+        
+        if self.risk_limits.enable_adaptive_stops:
+            self._initialize_adaptive_stop_manager()
+        
+        if self.risk_limits.enable_correlation_monitoring:
+            self._initialize_correlation_monitor()
+        
+        if self.risk_limits.enable_stress_testing:
+            self._initialize_stress_tester()
         
         logger.info(f"🛡️  Unified Risk Manager initialized - Mode: {trading_mode.value}")
     
@@ -376,13 +409,22 @@ class UnifiedRiskManager:
         return True, "Trade approved"
     
     def get_recommended_position_size(self, strategy_id: str, symbol: str, 
-                                    base_size: float, current_price: float) -> float:
-        """Get risk-adjusted position size recommendation"""
+                                    base_size: float, current_price: float,
+                                    expected_return: Optional[float] = None,
+                                    expected_volatility: Optional[float] = None) -> float:
+        """Get advanced risk-adjusted position size recommendation"""
         
         try:
             # Base position value
             base_value = base_size * current_price
             base_pct = base_value / self.current_capital
+            
+            # Kelly Criterion position sizing if enabled
+            if self.risk_limits.enable_kelly_criterion and expected_return and expected_volatility:
+                kelly_size = self._calculate_kelly_position_size(
+                    expected_return, expected_volatility, current_price
+                )
+                base_size = min(base_size, kelly_size)  # Use more conservative of the two
             
             # Volatility adjustment
             symbol_volatility = self._get_symbol_volatility(symbol)
@@ -404,8 +446,29 @@ class UnifiedRiskManager:
             else:
                 dd_adjustment = 1.0
             
+            # Correlation adjustment
+            if self.risk_limits.enable_correlation_monitoring and self.correlation_monitor:
+                corr_adjustment = self._get_correlation_adjustment(symbol)
+            else:
+                corr_adjustment = 1.0
+            
+            # Regime-based adjustment
+            if self.risk_limits.enable_regime_risk_adjustment:
+                regime_adjustment = self._get_regime_risk_adjustment()
+            else:
+                regime_adjustment = 1.0
+            
+            # ML-based risk scoring adjustment
+            if self.risk_limits.enable_ml_risk_scoring and self.ml_models:
+                ml_adjustment = self._get_ml_risk_adjustment(symbol, strategy_id)
+            else:
+                ml_adjustment = 1.0
+            
             # Combined adjustment
-            total_adjustment = vol_adjustment * perf_adjustment * dd_adjustment
+            total_adjustment = (
+                vol_adjustment * perf_adjustment * dd_adjustment * 
+                corr_adjustment * regime_adjustment * ml_adjustment
+            )
             adjusted_size = base_size * max(min(total_adjustment, 3.0), 0.1)  # 0.1x to 3x range
             
             # Final position size check
@@ -418,7 +481,7 @@ class UnifiedRiskManager:
             return max(adjusted_size, 1.0)  # Minimum 1 unit
             
         except Exception as e:
-            logger.error(f"❌ Error calculating position size: {e}")
+            logger.error(f"❌ Error calculating advanced position size: {e}")
             return base_size
     
     def get_stop_loss_price(self, entry_price: float, side: str, 
@@ -837,6 +900,45 @@ class UnifiedRiskManager:
         except Exception as e:
             logger.error(f"❌ Error initializing ML models: {e}")
     
+    def update_kelly_performance(self, trade_result: Dict[str, Any]):
+        """Update Kelly Criterion performance tracking"""
+        try:
+            if not self.kelly_calculator:
+                return
+            
+            # Extract trade result
+            pnl = trade_result.get('pnl', 0.0)
+            is_win = pnl > 0
+            
+            # Update win rate history
+            self.kelly_calculator['win_rate_history'].append(1.0 if is_win else 0.0)
+            
+            # Keep history manageable
+            if len(self.kelly_calculator['win_rate_history']) > 200:
+                self.kelly_calculator['win_rate_history'] = self.kelly_calculator['win_rate_history'][-200:]
+            
+            # Update win/loss ratio
+            if 'entry_price' in trade_result and 'exit_price' in trade_result:
+                entry_price = trade_result['entry_price']
+                exit_price = trade_result['exit_price']
+                
+                if entry_price > 0:
+                    return_pct = abs((exit_price - entry_price) / entry_price)
+                    
+                    # Simple moving average of win/loss magnitudes
+                    if hasattr(self.kelly_calculator, 'return_history'):
+                        self.kelly_calculator['return_history'].append(return_pct)
+                        if len(self.kelly_calculator['return_history']) > 50:
+                            self.kelly_calculator['return_history'] = self.kelly_calculator['return_history'][-50:]
+                        
+                        avg_return = sum(self.kelly_calculator['return_history']) / len(self.kelly_calculator['return_history'])
+                        self.kelly_calculator['avg_win_loss_ratio'] = max(avg_return * 10, 0.5)  # Scale and bound
+                    else:
+                        self.kelly_calculator['return_history'] = [return_pct]
+            
+        except Exception as e:
+            logger.error(f"Kelly performance update failed: {e}")
+    
     def get_risk_summary(self) -> Dict[str, Any]:
         """Get comprehensive risk summary"""
         
@@ -921,3 +1023,308 @@ class UnifiedRiskManager:
             risk_manager.set_strategy_allocations(config["strategy_allocations"])
         
         return risk_manager
+    
+    def _initialize_kelly_calculator(self):
+        """Initialize Kelly Criterion calculator"""
+        try:
+            self.kelly_calculator = {
+                'win_rate_history': [],
+                'avg_win_loss_ratio': 1.0,
+                'confidence_threshold': 0.6
+            }
+            logger.info("🎯 Kelly Criterion calculator initialized")
+        except Exception as e:
+            logger.error(f"Kelly calculator initialization failed: {e}")
+    
+    def _initialize_adaptive_stop_manager(self):
+        """Initialize adaptive stop loss manager"""
+        try:
+            self.adaptive_stop_manager = {
+                'atr_multipliers': {},  # ATR-based stop multipliers per symbol
+                'volatility_adjustments': {},
+                'trailing_stops': {},
+                'stop_history': []
+            }
+            logger.info("🛑 Adaptive stop loss manager initialized")
+        except Exception as e:
+            logger.error(f"Adaptive stop manager initialization failed: {e}")
+    
+    def _initialize_correlation_monitor(self):
+        """Initialize real-time correlation monitoring"""
+        try:
+            self.correlation_monitor = {
+                'correlation_matrix': None,
+                'correlation_alerts': [],
+                'max_correlation_threshold': 0.8,
+                'correlation_history': []
+            }
+            logger.info("📊 Correlation monitor initialized")
+        except Exception as e:
+            logger.error(f"Correlation monitor initialization failed: {e}")
+    
+    def _initialize_stress_tester(self):
+        """Initialize Monte Carlo stress tester"""
+        try:
+            self.stress_tester = {
+                'scenarios': [],
+                'stress_results': {},
+                'last_stress_test': None,
+                'var_estimates': {}
+            }
+            logger.info("🧪 Monte Carlo stress tester initialized")
+        except Exception as e:
+            logger.error(f"Stress tester initialization failed: {e}")
+    
+    def _calculate_kelly_position_size(self, expected_return: float, 
+                                     expected_volatility: float, 
+                                     current_price: float) -> float:
+        """Calculate Kelly Criterion optimal position size"""
+        try:
+            if not self.kelly_calculator:
+                return 1.0
+            
+            # Simplified Kelly formula: f = (bp - q) / b
+            # where b = odds, p = win probability, q = loss probability
+            
+            # Estimate win probability from historical data
+            if len(self.kelly_calculator['win_rate_history']) > 10:
+                win_rate = sum(self.kelly_calculator['win_rate_history'][-20:]) / min(20, len(self.kelly_calculator['win_rate_history']))
+            else:
+                win_rate = 0.55  # Default assumption
+            
+            # Estimate average win/loss ratio
+            avg_win_loss = self.kelly_calculator['avg_win_loss_ratio']
+            
+            # Kelly fraction
+            if avg_win_loss > 0 and win_rate > 0:
+                kelly_fraction = (win_rate * avg_win_loss - (1 - win_rate)) / avg_win_loss
+                kelly_fraction = max(min(kelly_fraction, 0.25), 0.0)  # Cap at 25% of capital
+            else:
+                kelly_fraction = 0.05  # Conservative default
+            
+            # Convert to position size
+            kelly_capital = self.current_capital * kelly_fraction
+            kelly_size = kelly_capital / current_price if current_price > 0 else 1.0
+            
+            return max(kelly_size, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Kelly position size calculation failed: {e}")
+            return 1.0
+    
+    def _get_correlation_adjustment(self, symbol: str) -> float:
+        """Get position size adjustment based on correlation with existing positions"""
+        try:
+            if not self.correlation_monitor or not self.correlation_monitor['correlation_matrix']:
+                return 1.0
+            
+            # Check correlation with existing positions
+            # This is a simplified implementation
+            max_correlation = 0.0
+            
+            # In a full implementation, you would check correlation with all existing positions
+            # For now, return a conservative adjustment if high correlation is detected
+            
+            if max_correlation > self.correlation_monitor['max_correlation_threshold']:
+                return 0.7  # Reduce position size due to high correlation
+            elif max_correlation > 0.6:
+                return 0.85  # Moderate reduction
+            else:
+                return 1.0  # No adjustment
+                
+        except Exception as e:
+            logger.error(f"Correlation adjustment calculation failed: {e}")
+            return 1.0
+    
+    def _get_regime_risk_adjustment(self) -> float:
+        """Get risk adjustment based on current market regime"""
+        try:
+            # Simplified regime detection based on portfolio volatility
+            if not self.current_metrics:
+                return 1.0
+            
+            portfolio_vol = self.current_metrics.portfolio_volatility
+            
+            if portfolio_vol > 0.25:  # High volatility regime
+                return 0.7  # Reduce position sizes
+            elif portfolio_vol > 0.20:
+                return 0.85  # Moderate reduction
+            elif portfolio_vol < 0.10:  # Low volatility regime
+                return 1.1   # Slightly increase position sizes
+            else:
+                return 1.0   # Normal regime
+                
+        except Exception as e:
+            logger.error(f"Regime risk adjustment calculation failed: {e}")
+            return 1.0
+    
+    def _get_ml_risk_adjustment(self, symbol: str, strategy_id: str) -> float:
+        """Get ML-based risk adjustment (placeholder for ML integration)"""
+        try:
+            # Placeholder for ML-based risk scoring
+            # In practice, this would use trained models to assess risk
+            
+            # Simple heuristic based on recent performance
+            if (self.current_metrics and 
+                strategy_id in self.current_metrics.strategy_performance):
+                
+                perf_score = self.current_metrics.strategy_performance[strategy_id]
+                
+                if perf_score > 0.7:  # Good performance
+                    return 1.1  # Slightly increase allocation
+                elif perf_score < 0.3:  # Poor performance
+                    return 0.8  # Reduce allocation
+                else:
+                    return 1.0  # No adjustment
+            
+            return 1.0
+            
+        except Exception as e:
+            logger.error(f"ML risk adjustment calculation failed: {e}")
+            return 1.0
+    
+    def get_adaptive_stop_loss_price(self, symbol: str, entry_price: float, 
+                                    side: str, atr_value: Optional[float] = None) -> float:
+        """Calculate adaptive stop-loss price using ATR and volatility clustering"""
+        try:
+            if not self.risk_limits.enable_adaptive_stops or not self.adaptive_stop_manager:
+                return self.get_stop_loss_price(entry_price, side)
+            
+            # Get symbol volatility
+            symbol_volatility = self._get_symbol_volatility(symbol)
+            
+            # ATR-based stop calculation
+            if atr_value and atr_value > 0:
+                # Use ATR multiplier based on volatility regime
+                if symbol_volatility > 0.03:  # High volatility
+                    atr_multiplier = 2.5
+                elif symbol_volatility > 0.02:  # Medium volatility
+                    atr_multiplier = 2.0
+                else:  # Low volatility
+                    atr_multiplier = 1.5
+                
+                stop_distance = atr_value * atr_multiplier
+            else:
+                # Fallback to volatility-based stop
+                stop_distance = entry_price * symbol_volatility * 2
+            
+            # Calculate stop price
+            if side.upper() == "LONG":
+                stop_price = entry_price - stop_distance
+            else:  # SHORT
+                stop_price = entry_price + stop_distance
+            
+            # Store for tracking
+            if symbol not in self.adaptive_stop_manager['atr_multipliers']:
+                self.adaptive_stop_manager['atr_multipliers'][symbol] = atr_multiplier
+            
+            return stop_price
+            
+        except Exception as e:
+            logger.error(f"Adaptive stop loss calculation failed: {e}")
+            return self.get_stop_loss_price(entry_price, side)
+    
+    def perform_stress_test(self) -> Dict[str, Any]:
+        """Perform Monte Carlo stress testing on current portfolio"""
+        try:
+            if not self.risk_limits.enable_stress_testing or not self.stress_tester:
+                return {'status': 'disabled'}
+            
+            if not self.current_metrics:
+                return {'status': 'insufficient_data'}
+            
+            # Simple Monte Carlo simulation
+            scenarios = self.risk_limits.stress_test_scenarios
+            portfolio_value = self.current_metrics.portfolio_value
+            portfolio_vol = self.current_metrics.portfolio_volatility
+            
+            # Generate random scenarios
+            stress_results = []
+            
+            for _ in range(scenarios):
+                # Random shock (normal distribution)
+                shock = np.random.normal(0, portfolio_vol * 2)  # 2x normal volatility
+                stressed_value = portfolio_value * (1 + shock)
+                stress_results.append(stressed_value)
+            
+            # Calculate stress metrics
+            stress_results = np.array(stress_results)
+            
+            worst_case_5pct = np.percentile(stress_results, 5)
+            worst_case_1pct = np.percentile(stress_results, 1)
+            expected_shortfall = np.mean(stress_results[stress_results <= worst_case_5pct])
+            
+            stress_metrics = {
+                'status': 'completed',
+                'scenarios_tested': scenarios,
+                'worst_case_5pct_loss': (portfolio_value - worst_case_5pct) / portfolio_value,
+                'worst_case_1pct_loss': (portfolio_value - worst_case_1pct) / portfolio_value,
+                'expected_shortfall': (portfolio_value - expected_shortfall) / portfolio_value,
+                'stress_var_95': (portfolio_value - np.percentile(stress_results, 5)) / portfolio_value,
+                'timestamp': datetime.now()
+            }
+            
+            # Store results
+            self.stress_tester['last_stress_test'] = stress_metrics
+            self.stress_tester['stress_results'] = stress_results
+            
+            logger.info(f"🧪 Stress test completed: Worst case 5% loss: {stress_metrics['worst_case_5pct_loss']:.2%}")
+            
+            return stress_metrics
+            
+        except Exception as e:
+            logger.error(f"Stress testing failed: {e}")
+            return {'status': 'failed', 'error': str(e)}
+    
+    def get_real_time_var(self, confidence_level: float = 0.95) -> Dict[str, float]:
+        """Calculate real-time Value at Risk using multiple methods"""
+        try:
+            if not self.current_metrics or len(self.portfolio_history) < 30:
+                return {'parametric_var': 0.0, 'historical_var': 0.0, 'monte_carlo_var': 0.0}
+            
+            portfolio_value = self.current_metrics.portfolio_value
+            
+            # Method 1: Parametric VaR
+            portfolio_vol = self.current_metrics.portfolio_volatility
+            z_score = stats.norm.ppf(1 - confidence_level) if SCIPY_AVAILABLE else -1.65  # 95% confidence
+            parametric_var = abs(z_score * portfolio_vol * portfolio_value)
+            
+            # Method 2: Historical VaR
+            returns = []
+            for i in range(1, len(self.portfolio_history)):
+                prev_val = self.portfolio_history[i-1]['value']
+                curr_val = self.portfolio_history[i]['value']
+                if prev_val > 0:
+                    ret = (curr_val - prev_val) / prev_val
+                    returns.append(ret)
+            
+            if len(returns) >= 20:
+                var_percentile = (1 - confidence_level) * 100
+                historical_var_return = np.percentile(returns, var_percentile)
+                historical_var = abs(historical_var_return * portfolio_value)
+            else:
+                historical_var = parametric_var
+            
+            # Method 3: Monte Carlo VaR (simplified)
+            if self.stress_tester and 'stress_results' in self.stress_tester:
+                stress_results = self.stress_tester['stress_results']
+                if len(stress_results) > 0:
+                    var_percentile = (1 - confidence_level) * 100
+                    mc_var_value = np.percentile(stress_results, var_percentile)
+                    monte_carlo_var = abs(portfolio_value - mc_var_value)
+                else:
+                    monte_carlo_var = parametric_var
+            else:
+                monte_carlo_var = parametric_var
+            
+            return {
+                'parametric_var': parametric_var,
+                'historical_var': historical_var,
+                'monte_carlo_var': monte_carlo_var,
+                'confidence_level': confidence_level,
+                'timestamp': datetime.now()
+            }
+            
+        except Exception as e:
+            logger.error(f"Real-time VaR calculation failed: {e}")
+            return {'parametric_var': 0.0, 'historical_var': 0.0, 'monte_carlo_var': 0.0}

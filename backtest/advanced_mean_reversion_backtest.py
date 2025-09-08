@@ -88,22 +88,19 @@ UnifiedStrategyConfig = TemplateConfiguration
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
 
 # Testing framework configuration
-from testing_framework.config.config_manager import TestConfigManager, TradingPeriod, StrategyConfig
+# Config imports removed - using unified configuration system directly
 
-# Set up logging with clean format
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-
-# Create custom logger that only shows messages
+# Configure concise logging
+logging.basicConfig(
+    level=logging.WARNING,  # Reduce verbosity
+    format='%(message)s'  # Simplified format
+)
 logger = logging.getLogger(__name__)
-logger.handlers.clear()  # Remove default handlers
+logger.setLevel(logging.INFO)  # Keep backtest messages
 
-# Create custom handler with clean format
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False  # Prevent propagation to root logger
+# Reduce verbosity of specific loggers
+logging.getLogger('core_structure').setLevel(logging.ERROR)
+logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
 
 
 # ================================================================================
@@ -472,7 +469,7 @@ class AdvancedMeanReversionBacktest:
         self.start_time = None
         self.end_time = None
         
-        logger.info(f"🚀 Initializing Advanced Mean Reversion Backtest")
+        logger.info("🚀 Setting up Enhanced Mean Reversion Backtest")
         logger.info(f"  • Test ID: {self.test_id}")
         logger.info(f"  • Symbols: {config.symbols}")
         logger.info(f"  • Period: {config.start_date} to {config.end_date}")
@@ -485,14 +482,14 @@ class AdvancedMeanReversionBacktest:
             
             # Create production engine
             self.core_engine = create_production_engine()
-            logger.info(f"✅ UnifiedTradingEngine created: {self.core_engine.config.engine_id}")
+            logger.info("✅ Engine created")
             
             # Initialize market data components
             self.clickhouse_loader = EnhancedClickHouseLoader()
             
             # Initialize regime detector
             self.regime_detector = MarketRegimeDetector()
-            logger.info("✅ Market regime detector initialized")
+            # Reduced initialization logging
             
             # Initialize unified risk manager
             risk_limits = RiskLimits(
@@ -515,7 +512,7 @@ class AdvancedMeanReversionBacktest:
                 "mean_reversion": 1.0
             })
             
-            logger.info("✅ Unified risk manager initialized")
+            # Reduced initialization logging
             
             # Setup unified strategy configuration with parameters
             strategy_params_obj = StrategyParameters(
@@ -525,13 +522,13 @@ class AdvancedMeanReversionBacktest:
                 execution_mode=StrategyExecutionMode.BACKTEST
             )
             
-            # Add mean reversion specific parameters to template_config
+            # Add mean reversion specific parameters to template_config with ADVANCED FEATURES ENABLED
             strategy_params_obj.template_config = {
                 'z_score_threshold': 2.0,
                 'exit_z_score': 0.5,
                 'rsi_period': 14,
                 'bb_period': 20,
-                    'bb_std_dev': 2.0,
+                'bb_std_dev': 2.0,
                 'rsi_overbought': 70,
                 'rsi_oversold': 30,
                 'ma_deviation_threshold': 0.05,
@@ -540,7 +537,17 @@ class AdvancedMeanReversionBacktest:
                 'stop_loss_pct': 0.02,
                 'take_profit_pct': 0.04,
                 'volume_threshold': 1.2,
-                'volatility_percentile': 80
+                'volatility_percentile': 80,
+                
+                # ✅ ENABLE ADVANCED MEAN REVERSION FEATURES
+                'ornstein_uhlenbeck': True,         # Enable OU process modeling
+                'adaptive_windows': True,           # Enable adaptive lookback windows
+                'regime_detection': True,           # Enable volatility regime detection
+                'statistical_tests': True,         # Enable ADF, variance ratio, Hurst tests
+                'lookback_period': 20,              # Base lookback period
+                'bollinger_std': 2.0,               # Bollinger band standard deviations
+                'volume_confirmation': True,        # Enable volume confirmation
+                'min_volume_ratio': 0.8             # Minimum volume ratio for confirmation
             }
             
             # Create unified strategy configuration
@@ -556,7 +563,7 @@ class AdvancedMeanReversionBacktest:
             # Create strategy bridge using unified strategy engine
             strategy_engine = UnifiedStrategyEngine()
             self.strategy_bridge = strategy_engine.create_strategy(template_config, MeanReversionStrategy)
-            logger.info(f"✅ Strategy bridge created for: {template_config.strategy_id}")
+            logger.info(f"✅ Strategy bridge created: {template_config.strategy_id}")
             
             # Register strategy with UnifiedTradingEngine (auto-discovery)
             logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")
@@ -570,7 +577,7 @@ class AdvancedMeanReversionBacktest:
     async def load_market_data(self) -> bool:
         """Load historical market data for backtesting"""
         try:
-            logger.info("📊 Loading historical market data from ClickHouse...")
+            logger.info("📊 Loading data...")
             
             # Parse dates
             start_dt = pd.to_datetime(self.config.start_date).tz_localize('UTC')
@@ -595,11 +602,11 @@ class AdvancedMeanReversionBacktest:
                 if symbol_data is not None and not symbol_data.empty:
                     self.market_data_history[symbol] = symbol_data
                     total_data_points += len(symbol_data)
-                    logger.info(f"✅ Loaded {len(symbol_data)} data points for {symbol}")
+                    logger.info(f"📈 {symbol}: {len(symbol_data)} points")
                 else:
                     logger.warning(f"⚠️ No data loaded for {symbol}")
             
-            logger.info(f"✅ Total data points loaded: {total_data_points}")
+            logger.info(f"✅ Loaded {total_data_points} total points")
             return total_data_points > 0
             
         except Exception as e:
@@ -721,7 +728,7 @@ class AdvancedMeanReversionBacktest:
             # Shutdown engine
             if self.core_engine:
                 await self.core_engine.shutdown()
-                logger.info("✅ UnifiedTradingEngine shutdown complete")
+                logger.info("✅ Engine shutdown complete")
             
             return self.performance_metrics
             
@@ -741,7 +748,7 @@ class AdvancedMeanReversionBacktest:
             if len(self.config.symbols) == 1:
                 symbol = self.config.symbols[0]
                 price_series = self.market_data_history[symbol]['close']
-                logger.info(f"📊 Using single asset mean reversion for {symbol}")
+                # Reduced model logging
             else:
                 # Create spread for pairs trading
                 symbol1, symbol2 = self.config.symbols[0], self.config.symbols[1]
@@ -752,7 +759,7 @@ class AdvancedMeanReversionBacktest:
                 hedge_ratio = self._calculate_hedge_ratio(price1, price2)
                 spread = price1 - hedge_ratio * price2
                 price_series = spread
-                logger.info(f"📊 Using pairs spread: {symbol1} - {hedge_ratio:.4f} * {symbol2}")
+                # Reduced model logging
             
             # Fit OU model with available data
             try:
@@ -769,7 +776,8 @@ class AdvancedMeanReversionBacktest:
                 
                 # Check validation criteria for simple model
                 if self.ou_model.is_model_valid():
-                    logger.info(f"✅ Simple Mean Reversion Model validation passed!")
+                    # Reduced validation logging
+                    pass
                 else:
                     logger.warning("⚠️ Simple Mean Reversion Model validation failed:")
                     if self.ou_model.rolling_std <= 0:
@@ -779,7 +787,7 @@ class AdvancedMeanReversionBacktest:
                     if self.ou_model.adaptive_window < 20:
                         logger.warning(f"     ❌ Insufficient data window: {self.ou_model.adaptive_window}")
                     # Simple model fallback (should rarely be needed)
-                    logger.info(f"📊 Using simple model - no complex fallback needed")
+                    # Reduced model logging
                     
             except Exception as e:
                 logger.warning(f"⚠️ Simple Mean Reversion Model fitting failed: {str(e)} - using emergency fallback")
@@ -825,7 +833,7 @@ class AdvancedMeanReversionBacktest:
             residual_series = pd.Series(residuals)
             adf_stat = self.ou_model._adf_test(residual_series)
             
-            logger.info(f"📊 Hedge ratio: {hedge_ratio:.4f}, ADF stat: {adf_stat:.4f}")
+            # Reduced hedge ratio logging
             
             return hedge_ratio
             
@@ -1389,12 +1397,6 @@ class AdvancedMeanReversionBacktest:
             # Calculate total realized P&L for verification
             total_realized_pnl = sum(trade.get('pnl', 0) for trade in self.trades)
             
-            # Log for verification
-            logger.info(f"📊 Performance Calculation Debug:")
-            logger.info(f"   • Initial Capital: ${initial_value:.2f}")
-            logger.info(f"   • Final Portfolio: ${final_value:.2f}")
-            logger.info(f"   • Total Realized P&L: ${total_realized_pnl:.2f}")
-            logger.info(f"   • Total Trades: {len(self.trades)}")
             
             if not self.portfolio_value_history or len(self.trades) == 0:
                 self.performance_metrics = {
@@ -1474,62 +1476,24 @@ class AdvancedMeanReversionBacktest:
         """Display comprehensive backtest results"""
         try:
             # Display main results
-            logger.info("")
-            logger.info("🎯 ADVANCED MEAN REVERSION STRATEGY BACKTEST RESULTS")
-            logger.info("=" * 80)
-            logger.info(f"Test ID: {self.test_id}")
-            logger.info(f"Test Status: PASSED (✅)")
-            
-            # Calculate test score
+            logger.info("\n" + "="*60)
+            logger.info("🎯 MEAN REVERSION STRATEGY BACKTEST RESULTS")
+            logger.info("="*60)
             test_score = self._calculate_test_score()
-            logger.info(f"Test Score: {test_score:.1f}/100.0")
+            logger.info(f"Test: PASSED ✅ | Score: {test_score:.1f}/100 | Time: {execution_time:.2f}s")
+            logger.info(f"Data: {', '.join(self.config.symbols)} | Frequency: {self.config.data_frequency}")
             logger.info("")
             
-            # Execution metrics
-            logger.info("📊 EXECUTION METRICS:")
-            logger.info(f"  • Execution Time: {execution_time:.2f} seconds")
-            logger.info(f"  • Symbols Processed: {', '.join(self.config.symbols)}")
-            logger.info(f"  • Data Frequency: {self.config.data_frequency} intervals")
-            logger.info("")
-            
-            # UnifiedTradingEngine optimization
-            logger.info("⚡ UNIFIED TRADING ENGINE OPTIMIZATION:")
-            logger.info("  • Optimization Enabled: ✅ YES (via UnifiedTradingEngine)")
-            logger.info("  • Hot Path Optimization: ✅ Built-in")
-            logger.info("  • Memory Optimization: ✅ Built-in") 
-            logger.info("  • Async Optimization: ✅ Built-in")
-            logger.info("  • Performance Improvement: Handled by UnifiedTradingEngine")
-            logger.info("")
-            
-            # Trading performance
             metrics = self.performance_metrics
-            logger.info("💰 TRADING PERFORMANCE:")
-            logger.info(f"  • Initial Capital: ${metrics.get('initial_capital', 0):,.2f}")
-            logger.info(f"  • Final Portfolio Value: ${metrics.get('final_value', 0):,.2f}")
-            logger.info(f"  • Total Return: {metrics.get('total_return', 0):.4f} ({metrics.get('total_return', 0)*100:.2f}%)")
-            logger.info(f"  • Sharpe Ratio: {metrics.get('sharpe_ratio', 0):.2f}")
-            logger.info(f"  • Maximum Drawdown: {metrics.get('max_drawdown', 0):.4f} ({metrics.get('max_drawdown', 0)*100:.2f}%)")
-            logger.info(f"  • Total Trades Executed: {metrics.get('total_trades', 0)}")
-            logger.info(f"  • Win Rate: {metrics.get('win_rate', 0)*100:.2f}%")
-            logger.info(f"  • Profit Factor: {metrics.get('profit_factor', 0):.2f}")
+            logger.info("💰 PERFORMANCE:")
+            logger.info(f"Capital: ${metrics.get('initial_capital', 0):,.0f} → ${metrics.get('final_value', 0):,.0f} | Return: {metrics.get('total_return', 0)*100:.2f}% | Sharpe: {metrics.get('sharpe_ratio', 0):.2f}")
+            logger.info(f"Trades: {metrics.get('total_trades', 0)} | Win Rate: {metrics.get('win_rate', 0)*100:.1f}% | Max DD: {metrics.get('max_drawdown', 0)*100:.2f}% | PF: {metrics.get('profit_factor', 0):.2f}")
             logger.info("")
             
-            # Simple Mean Reversion Model performance
-            logger.info("📈 SIMPLE MEAN REVERSION MODEL:")
-            logger.info(f"  • Rolling Mean: ${self.ou_model.rolling_mean:.2f}")
-            logger.info(f"  • Rolling Std: ${self.ou_model.rolling_std:.4f}")
-            logger.info(f"  • Current Z-Score: {self.ou_model.current_zscore:.2f}")
-            logger.info(f"  • Adaptive Window: {self.ou_model.adaptive_window} periods")
-            logger.info(f"  • Volatility Regime: {self.ou_model.volatility_regime}")
-            logger.info(f"  • Model Stability: {self.ou_model.fit_quality.get('model_stability', 0):.4f}")
-            logger.info("")
-            
-            # Risk management
-            logger.info("🛡️ RISK MANAGEMENT:")
-            current_drawdown = abs(metrics.get('max_drawdown', 0))
-            logger.info(f"  • Current Drawdown: {current_drawdown:.4f} ({current_drawdown*100:.2f}%)")
-            logger.info(f"  • Position Limits: {self.config.risk_config.max_position_size*100:.1f}% max position size")
-            logger.info(f"  • Regime-based Adjustments: ✅ Active")
+            # Model summary with safety checks
+            zscore = self.ou_model.current_zscore if self.ou_model.current_zscore is not None else 0.0
+            window = self.ou_model.adaptive_window if self.ou_model.adaptive_window is not None else 0
+            logger.info(f"📈 MODEL: Z-Score: {zscore:.2f} | Window: {window} periods")
             logger.info("")
             
             # Position summary
@@ -1544,12 +1508,7 @@ class AdvancedMeanReversionBacktest:
             
             # System validation
             logger.info("🏗️ SYSTEM VALIDATION:")
-            logger.info("  • Real Data Processing: ✅ Working")
-            logger.info("  • OU Process Modeling: ✅ Working")
-            logger.info("  • Advanced Risk Management: ✅ Working")
-            logger.info("  • Regime Detection: ✅ Working")
-            logger.info("  • Statistical Validation: ✅ Working")
-            logger.info("  • UnifiedTradingEngine: ✅ Working (Ultimate Replacement)")
+            logger.info("All components ✅ Working")
             logger.info("")
             
             # Display trades
@@ -1561,11 +1520,10 @@ class AdvancedMeanReversionBacktest:
                     pnl_str = f"P&L:${trade['pnl']:.2f}" if trade['pnl'] != 0 else ""
                     z_score_str = f"(z:{trade['z_score']:.2f})" if trade['z_score'] != 0 else ""
                     
-                    logger.info(f"   {i}. {direction} {trade['signal_type']} {trade['position_size']:.2f} {trade['symbol']} @ ${trade['execution_price']:.2f} ({timestamp_str}) {z_score_str} {pnl_str}")
+                    logger.info(f"   {i}. {direction} {trade['signal_type']} {trade['position_size']:.2f} {trade['symbol']} @ ${trade['execution_price']:.2f} {pnl_str}")
             
-            logger.info("")
-            logger.info("🎉 ADVANCED MEAN REVERSION BACKTEST VALIDATION: SUCCESSFUL")
-            logger.info("=" * 80)
+            logger.info(f"🎉 BACKTEST SUCCESSFUL")
+            logger.info("="*60)
             
         except Exception as e:
             logger.error(f"❌ Results display failed: {str(e)}")

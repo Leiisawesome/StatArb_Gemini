@@ -69,6 +69,22 @@ class MomentumStrategy(EnhancedBaseStrategy):
         self.trend_filter = getattr(self.parameters, 'trend_filter', True)
         self.volatility_adjustment = getattr(self.parameters, 'volatility_adjustment', True)
         
+        # Advanced optimization features
+        self.regime_awareness = getattr(self.parameters, 'regime_awareness', True)
+        self.adaptive_thresholds = getattr(self.parameters, 'adaptive_thresholds', True)
+        self.ml_enhancement = getattr(self.parameters, 'ml_enhancement', False)
+        self.kalman_filter = getattr(self.parameters, 'kalman_filter', False)
+        
+        # Dynamic parameter optimization
+        self.parameter_history = []
+        self.performance_history = []
+        self.optimization_frequency = getattr(self.parameters, 'optimization_frequency', 50)  # Every 50 signals
+        
+        # Regime detection parameters
+        self.regime_lookback = getattr(self.parameters, 'regime_lookback', 252)
+        self.current_regime = 'unknown'
+        self.regime_confidence = 0.5
+        
         logger.info(f"Momentum strategy initialized: {strategy_id}")
     
     @property
@@ -121,26 +137,53 @@ class MomentumStrategy(EnhancedBaseStrategy):
             return []
     
     def _calculate_momentum_scores(self, market_data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate multi-period momentum scores"""
+        """Calculate enhanced multi-period momentum scores with advanced features"""
         try:
             prices = market_data['close']
             momentum_scores = {}
             
+            # Detect current market regime
+            if self.regime_awareness:
+                regime_info = self._detect_market_regime(market_data)
+                self.current_regime = regime_info['regime']
+                self.regime_confidence = regime_info['confidence']
+                momentum_scores.update(regime_info)
+            
+            # Calculate adaptive thresholds based on volatility
+            if self.adaptive_thresholds:
+                adaptive_threshold = self._calculate_adaptive_threshold(market_data)
+                momentum_scores['adaptive_threshold'] = adaptive_threshold
+            
+            # Enhanced momentum calculation with regime adjustment
             for i, period in enumerate(self.lookback_periods):
                 if len(prices) >= period:
-                    # Calculate momentum as percentage change
+                    # Basic momentum
                     momentum = (prices.iloc[-1] - prices.iloc[-period]) / prices.iloc[-period]
+                    
+                    # Apply Kalman filter if enabled
+                    if self.kalman_filter:
+                        momentum = self._apply_kalman_filter(momentum, f'momentum_{period}')
+                    
+                    # Regime adjustment
+                    if self.regime_awareness:
+                        momentum = self._adjust_for_regime(momentum, self.current_regime)
+                    
                     momentum_scores[f'momentum_{period}'] = momentum
                 else:
                     momentum_scores[f'momentum_{period}'] = 0.0
             
-            # Calculate weighted average momentum
+            # Calculate weighted average momentum with dynamic weights
+            if self.adaptive_thresholds:
+                weights = self._calculate_dynamic_weights(market_data)
+            else:
+                weights = self.momentum_weights
+            
             total_momentum = 0.0
             total_weight = 0.0
             
             for i, period in enumerate(self.lookback_periods):
-                if i < len(self.momentum_weights):
-                    weight = self.momentum_weights[i]
+                if i < len(weights):
+                    weight = weights[i]
                     momentum = momentum_scores.get(f'momentum_{period}', 0.0)
                     total_momentum += momentum * weight
                     total_weight += weight
@@ -150,10 +193,18 @@ class MomentumStrategy(EnhancedBaseStrategy):
             else:
                 momentum_scores['weighted_momentum'] = 0.0
             
+            # Add ML enhancement if enabled
+            if self.ml_enhancement:
+                ml_score = self._calculate_ml_momentum_score(market_data, momentum_scores)
+                momentum_scores['ml_enhanced_momentum'] = ml_score
+                # Use ML score as primary if available
+                if ml_score != 0.0:
+                    momentum_scores['weighted_momentum'] = ml_score
+            
             return momentum_scores
             
         except Exception as e:
-            logger.error(f"Momentum calculation failed: {e}")
+            logger.error(f"Enhanced momentum calculation failed: {e}")
             return {'weighted_momentum': 0.0}
     
     def _calculate_confidence(self, market_data: pd.DataFrame, momentum_scores: Dict[str, float]) -> float:
@@ -302,11 +353,252 @@ class MomentumStrategy(EnhancedBaseStrategy):
                 }
             )
             
+            # Store performance data for optimization
+            self._store_signal_for_optimization(signal, market_data)
+            
+            # Check if parameter optimization is needed
+            if len(self.performance_history) % self.optimization_frequency == 0 and len(self.performance_history) > 0:
+                self._optimize_parameters()
+            
             return signal
             
         except Exception as e:
             logger.error(f"Signal creation failed: {e}")
             return None
+    
+    def _detect_market_regime(self, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """Detect current market regime using multiple indicators"""
+        try:
+            prices = market_data['close']
+            
+            if len(prices) < 50:
+                return {'regime': 'unknown', 'confidence': 0.5}
+            
+            # Calculate regime indicators
+            returns = prices.pct_change().dropna()
+            
+            # Volatility regime
+            short_vol = returns.iloc[-20:].std() if len(returns) >= 20 else 0
+            long_vol = returns.iloc[-60:].std() if len(returns) >= 60 else short_vol
+            vol_ratio = short_vol / long_vol if long_vol > 0 else 1.0
+            
+            # Trend regime
+            short_ma = prices.iloc[-20:].mean() if len(prices) >= 20 else prices.iloc[-1]
+            long_ma = prices.iloc[-50:].mean() if len(prices) >= 50 else short_ma
+            trend_strength = (short_ma - long_ma) / long_ma if long_ma > 0 else 0
+            
+            # Mean reversion tendency
+            autocorr = returns.iloc[-30:].autocorr() if len(returns) >= 30 else 0
+            
+            # Determine regime
+            if abs(trend_strength) > 0.02 and vol_ratio < 1.2:
+                regime = 'trending'
+                confidence = min(0.9, 0.6 + abs(trend_strength) * 10)
+            elif autocorr < -0.1:
+                regime = 'mean_reverting'
+                confidence = min(0.9, 0.6 + abs(autocorr) * 2)
+            elif vol_ratio > 1.5:
+                regime = 'volatile'
+                confidence = min(0.9, 0.5 + (vol_ratio - 1.0) * 0.3)
+            else:
+                regime = 'sideways'
+                confidence = 0.6
+            
+            return {
+                'regime': regime,
+                'confidence': confidence,
+                'vol_ratio': vol_ratio,
+                'trend_strength': trend_strength,
+                'autocorr': autocorr
+            }
+            
+        except Exception as e:
+            logger.error(f"Regime detection failed: {e}")
+            return {'regime': 'unknown', 'confidence': 0.5}
+    
+    def _calculate_adaptive_threshold(self, market_data: pd.DataFrame) -> float:
+        """Calculate adaptive momentum threshold based on market conditions"""
+        try:
+            returns = market_data['close'].pct_change().dropna()
+            
+            if len(returns) < 20:
+                return self.momentum_threshold
+            
+            # Base threshold on recent volatility
+            recent_vol = returns.iloc[-20:].std()
+            avg_vol = returns.std()
+            
+            vol_adjustment = recent_vol / avg_vol if avg_vol > 0 else 1.0
+            
+            # Adjust threshold: higher volatility = higher threshold
+            adaptive_threshold = self.momentum_threshold * vol_adjustment
+            
+            # Keep within reasonable bounds
+            return max(min(adaptive_threshold, self.momentum_threshold * 2), self.momentum_threshold * 0.5)
+            
+        except Exception as e:
+            logger.error(f"Adaptive threshold calculation failed: {e}")
+            return self.momentum_threshold
+    
+    def _adjust_for_regime(self, momentum: float, regime: str) -> float:
+        """Adjust momentum signal based on detected regime"""
+        try:
+            if regime == 'trending':
+                # Boost momentum signals in trending markets
+                return momentum * 1.2
+            elif regime == 'mean_reverting':
+                # Dampen momentum signals in mean-reverting markets
+                return momentum * 0.7
+            elif regime == 'volatile':
+                # Reduce momentum signals in volatile markets
+                return momentum * 0.8
+            else:
+                return momentum
+                
+        except Exception:
+            return momentum
+    
+    def _calculate_dynamic_weights(self, market_data: pd.DataFrame) -> List[float]:
+        """Calculate dynamic weights based on recent performance of different periods"""
+        try:
+            # Simplified dynamic weighting based on recent volatility
+            returns = market_data['close'].pct_change().dropna()
+            
+            if len(returns) < 50:
+                return self.momentum_weights
+            
+            # Calculate effectiveness of different periods
+            weights = []
+            for period in self.lookback_periods:
+                if len(returns) >= period:
+                    # Simple effectiveness measure: inverse of volatility
+                    period_returns = returns.iloc[-period:]
+                    effectiveness = 1.0 / (period_returns.std() + 0.001)  # Add small constant to avoid division by zero
+                    weights.append(effectiveness)
+                else:
+                    weights.append(1.0)
+            
+            # Normalize weights
+            total_weight = sum(weights)
+            if total_weight > 0:
+                weights = [w / total_weight for w in weights]
+            else:
+                weights = self.momentum_weights
+            
+            return weights
+            
+        except Exception as e:
+            logger.error(f"Dynamic weight calculation failed: {e}")
+            return self.momentum_weights
+    
+    def _apply_kalman_filter(self, value: float, series_name: str) -> float:
+        """Apply simple Kalman filter to smooth momentum values"""
+        try:
+            # Simple Kalman filter implementation
+            if not hasattr(self, '_kalman_states'):
+                self._kalman_states = {}
+            
+            if series_name not in self._kalman_states:
+                self._kalman_states[series_name] = {
+                    'estimate': value,
+                    'error_covariance': 1.0,
+                    'process_noise': 0.01,
+                    'measurement_noise': 0.1
+                }
+                return value
+            
+            state = self._kalman_states[series_name]
+            
+            # Prediction step
+            predicted_estimate = state['estimate']
+            predicted_error_covariance = state['error_covariance'] + state['process_noise']
+            
+            # Update step
+            kalman_gain = predicted_error_covariance / (predicted_error_covariance + state['measurement_noise'])
+            updated_estimate = predicted_estimate + kalman_gain * (value - predicted_estimate)
+            updated_error_covariance = (1 - kalman_gain) * predicted_error_covariance
+            
+            # Store updated state
+            state['estimate'] = updated_estimate
+            state['error_covariance'] = updated_error_covariance
+            
+            return updated_estimate
+            
+        except Exception as e:
+            logger.error(f"Kalman filter failed: {e}")
+            return value
+    
+    def _calculate_ml_momentum_score(self, market_data: pd.DataFrame, momentum_scores: Dict[str, float]) -> float:
+        """Calculate ML-enhanced momentum score (placeholder for future ML integration)"""
+        try:
+            # Placeholder for ML model integration
+            # In a full implementation, this would use trained models
+            
+            # For now, return a composite score based on multiple factors
+            weighted_momentum = momentum_scores.get('weighted_momentum', 0.0)
+            regime_confidence = momentum_scores.get('confidence', 0.5)
+            
+            # Simple enhancement: boost signal if regime confidence is high
+            ml_score = weighted_momentum * (1.0 + regime_confidence * 0.2)
+            
+            return ml_score
+            
+        except Exception as e:
+            logger.error(f"ML momentum calculation failed: {e}")
+            return 0.0
+    
+    def _store_signal_for_optimization(self, signal: TradingSignal, market_data: pd.DataFrame):
+        """Store signal data for parameter optimization"""
+        try:
+            signal_data = {
+                'timestamp': signal.timestamp,
+                'confidence': signal.confidence,
+                'strength': signal.strength.name,
+                'regime': self.current_regime,
+                'regime_confidence': self.regime_confidence,
+                'parameters': {
+                    'momentum_threshold': self.momentum_threshold,
+                    'confidence_threshold': self.confidence_threshold,
+                    'lookback_periods': self.lookback_periods.copy(),
+                    'momentum_weights': self.momentum_weights.copy()
+                }
+            }
+            
+            self.parameter_history.append(signal_data)
+            
+            # Keep history manageable
+            if len(self.parameter_history) > 1000:
+                self.parameter_history = self.parameter_history[-1000:]
+                
+        except Exception as e:
+            logger.error(f"Signal storage failed: {e}")
+    
+    def _optimize_parameters(self):
+        """Optimize strategy parameters based on recent performance"""
+        try:
+            if len(self.parameter_history) < 20:
+                return
+            
+            # Simple parameter optimization based on confidence scores
+            recent_signals = self.parameter_history[-50:]
+            avg_confidence = sum(s['confidence'] for s in recent_signals) / len(recent_signals)
+            
+            # If confidence is low, adjust parameters
+            if avg_confidence < 0.6:
+                # Reduce momentum threshold to generate more signals
+                self.momentum_threshold *= 0.95
+                self.momentum_threshold = max(self.momentum_threshold, 0.005)  # Minimum threshold
+                
+                logger.info(f"Momentum strategy parameter optimization: threshold adjusted to {self.momentum_threshold:.4f}")
+            elif avg_confidence > 0.8:
+                # Increase momentum threshold for higher quality signals
+                self.momentum_threshold *= 1.05
+                self.momentum_threshold = min(self.momentum_threshold, 0.05)  # Maximum threshold
+                
+                logger.info(f"Momentum strategy parameter optimization: threshold adjusted to {self.momentum_threshold:.4f}")
+            
+        except Exception as e:
+            logger.error(f"Parameter optimization failed: {e}")
 
 # ================================================================================
 # TEMPLATE-BASED MOMENTUM STRATEGY

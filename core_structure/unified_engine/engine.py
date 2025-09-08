@@ -257,15 +257,32 @@ class UnifiedTradingEngine:
     def _initialize_core_components(self):
         """Initialize core trading components"""
         try:
-            # Signal Generation
-            signal_config = SignalConfig()
+            # Signal Generation with ADVANCED FEATURES ENABLED
+            signal_config = SignalConfig(
+                enable_ml_enhancement=True,        # Enable ML enhancement
+                enable_regime_detection=True,      # Enable regime detection
+                enable_adaptive_thresholds=True,   # Enable adaptive thresholds
+                enable_kalman_filtering=True,      # Enable Kalman filtering
+                enable_parameter_optimization=True, # Enable parameter optimization
+                optimization_frequency=50,         # Optimize every 50 signals
+                lookback_optimization=200          # Use 200 periods for optimization
+            )
             self.signal_generator = SignalGenerator(signal_config)
             
-            # Risk Management
+            # Risk Management with ADVANCED FEATURES ENABLED
             risk_limits = RiskLimits(
                 max_position_size_pct=self.config.max_position_size,
                 max_portfolio_drawdown=self.config.max_portfolio_risk,
-                max_strategy_drawdown=self.config.max_drawdown
+                max_strategy_drawdown=self.config.max_drawdown,
+                # ✅ ENABLE ADVANCED RISK FEATURES
+                enable_kelly_criterion=True,           # Enable Kelly Criterion position sizing
+                enable_adaptive_stops=True,            # Enable adaptive stop losses
+                enable_correlation_monitoring=True,    # Enable correlation monitoring
+                enable_regime_risk_adjustment=True,    # Enable regime-aware risk adjustment
+                enable_stress_testing=True,            # Enable Monte Carlo stress testing
+                enable_ml_risk_scoring=True,           # Enable ML-based risk scoring
+                stress_test_scenarios=500,             # Number of stress test scenarios
+                risk_model_update_frequency=50         # Update risk models every 50 observations
             )
             # Initialize unified risk manager
             self.risk_manager = RiskManager(

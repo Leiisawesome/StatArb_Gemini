@@ -19,7 +19,7 @@ StatArb_Gemini is a complete trading platform that evolved from basic backtestin
 ```
 StatArb_Gemini/
 ├── core_structure/           # Core trading infrastructure
-├── testing_framework/        # Advanced backtesting system
+├── backtest/                 # Advanced backtesting system
 ├── paper_trading/           # Paper trading with advanced features
 ├── trade_engine/            # Strategy implementations and analytics
 └── archived/               # Historical development artifacts
@@ -42,13 +42,13 @@ pip install -r requirements.txt
 ### 1. Run Backtests
 ```bash
 # Advanced momentum strategy
-python testing_framework/advanced_momentum_backtest.py
+python backtest/advanced_momentum_backtest.py
 
 # Mean reversion strategy  
-python testing_framework/advanced_mean_reversion_backtest.py
+python backtest/advanced_mean_reversion_backtest.py
 
 # Pairs trading strategy
-python testing_framework/advanced_pairs_trading_backtest.py
+python backtest/advanced_pairs_trading_backtest.py
 ```
 
 ### 2. Start Paper Trading
@@ -177,14 +177,14 @@ slack_config = NotificationConfig(
 
 ### Core Components
 - **`core_structure/`** - Trading infrastructure and risk management
-- **`testing_framework/`** - Advanced backtesting with 3 strategies
+- **`backtest/`** - Advanced backtesting with 3 strategies
 - **`paper_trading/`** - Paper trading system with advanced features
 - **`trade_engine/`** - Strategy implementations and analytics
 
 ### Key Files
 - **`paper_trading/multi_strategy_paper_trading.py`** - Main paper trading system
 - **`paper_trading/priority_3_simple_demo.py`** - Complete system demonstration
-- **`testing_framework/advanced_*_backtest.py`** - Strategy backtests
+- **`backtest/advanced_*_backtest.py`** - Strategy backtests
 - **`paper_trading/dashboard/`** - Advanced dashboard suite
 
 ## 🎯 Development Evolution
@@ -228,7 +228,7 @@ The system evolved through structured development phases:
 
 ### Key Documentation
 - **System Architecture**: `core_structure/` documentation
-- **Strategy Details**: `testing_framework/` documentation  
+- **Strategy Details**: `backtest/` documentation  
 - **Dashboard Features**: `paper_trading/dashboard/` documentation
 - **API Reference**: Inline code documentation
 

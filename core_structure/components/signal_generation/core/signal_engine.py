@@ -116,6 +116,17 @@ class SignalConfig:
     feature_selection: bool = True
     max_features: int = 50
     
+    # Advanced signal processing
+    enable_ml_enhancement: bool = True
+    enable_regime_detection: bool = True
+    enable_adaptive_thresholds: bool = True
+    enable_kalman_filtering: bool = True
+    
+    # Optimization parameters
+    enable_parameter_optimization: bool = True
+    optimization_frequency: int = 100
+    lookback_optimization: int = 500
+    
     # Signal validation
     enable_validation: bool = True
     min_data_points: int = 20
@@ -377,9 +388,10 @@ class UnifiedSignalEngine:
         return True
     
     def _extract_basic_features(self, market_data: pd.DataFrame) -> Dict[str, float]:
-        """Extract basic technical features when feature processor not available"""
+        """Extract enhanced technical features with advanced indicators"""
         try:
             latest = market_data.iloc[-1]
+            prices = market_data['close']
             
             features = {
                 'price': float(latest['close']),
@@ -388,84 +400,154 @@ class UnifiedSignalEngine:
                 'volatility_20d': float(market_data['close'].pct_change().rolling(20).std().iloc[-1]) if len(market_data) >= 20 else 0.0,
             }
             
-            # RSI if TA available
-            if TA_AVAILABLE and len(market_data) >= 14:
+            # Enhanced technical indicators
+            if len(market_data) >= 20:
+                # Multiple timeframe analysis
+                for period in [5, 10, 20, 50]:
+                    if len(prices) >= period:
+                        sma = prices.rolling(period).mean().iloc[-1]
+                        features[f'sma_{period}'] = float(sma)
+                        features[f'price_to_sma_{period}'] = float(latest['close'] / sma - 1) if sma > 0 else 0.0
+                
+                # Bollinger Bands
+                if len(prices) >= 20:
+                    sma_20 = prices.rolling(20).mean()
+                    std_20 = prices.rolling(20).std()
+                    bb_upper = (sma_20 + 2 * std_20).iloc[-1]
+                    bb_lower = (sma_20 - 2 * std_20).iloc[-1]
+                    bb_position = (latest['close'] - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
+                    features['bollinger_position'] = float(bb_position)
+                
+                # Enhanced volatility measures
+                returns = prices.pct_change().dropna()
+                if len(returns) >= 10:
+                    features['volatility_10d'] = float(returns.iloc[-10:].std())
+                    features['volatility_ratio'] = float(returns.iloc[-10:].std() / returns.std()) if returns.std() > 0 else 1.0
+                
+                # Momentum indicators
+                if len(prices) >= 10:
+                    momentum_10 = (prices.iloc[-1] / prices.iloc[-10] - 1) if prices.iloc[-10] > 0 else 0.0
+                    features['momentum_10d'] = float(momentum_10)
+                
+                # Volume analysis
+                if 'volume' in market_data.columns and len(market_data) >= 20:
+                    volume_sma = market_data['volume'].rolling(20).mean().iloc[-1]
+                    features['volume_ratio'] = float(latest['volume'] / volume_sma) if volume_sma > 0 else 1.0
+            
+            # RSI with multiple periods
+            if TA_AVAILABLE:
+                for period in [14, 21]:
+                    if len(market_data) >= period:
+                        try:
+                            rsi = ta.momentum.RSIIndicator(market_data['close'], window=period)
+                            features[f'rsi_{period}'] = float(rsi.rsi().iloc[-1])
+                        except:
+                            features[f'rsi_{period}'] = 50.0
+            
+            # MACD if available
+            if TA_AVAILABLE and len(market_data) >= 26:
                 try:
-                    rsi = ta.momentum.RSIIndicator(market_data['close'], window=14)
-                    features['rsi_14'] = float(rsi.rsi().iloc[-1])
+                    macd = ta.trend.MACD(market_data['close'])
+                    features['macd'] = float(macd.macd().iloc[-1])
+                    features['macd_signal'] = float(macd.macd_signal().iloc[-1])
+                    features['macd_histogram'] = float(macd.macd_diff().iloc[-1])
                 except:
-                    features['rsi_14'] = 50.0
+                    pass
+            
+            # Regime detection features
+            if self.config.enable_regime_detection and len(market_data) >= 50:
+                regime_features = self._extract_regime_features(market_data)
+                features.update(regime_features)
             
             return features
             
         except Exception as e:
-            self.logger.warning(f"Error extracting basic features: {e}")
+            self.logger.warning(f"Error extracting enhanced features: {e}")
             return {}
     
     def _generate_core_signal(self, symbol: str, market_data: pd.DataFrame, 
                              features: Dict[str, float], 
                              regime_info: Optional[Dict[str, Any]]) -> Optional[TradingSignal]:
-        """Generate core trading signal based on features and regime"""
+        """Generate enhanced core trading signal with advanced algorithms"""
         try:
-            # Simple momentum-based signal generation (can be enhanced with ML models)
+            # Multi-factor signal generation
             confidence = 0.0
             signal_type = SignalType.NEUTRAL
             strength = SignalStrength.WEAK
             
-            # Extract key features
+            # Extract enhanced features
             returns_1d = features.get('returns_1d', 0.0)
             volatility = features.get('volatility_20d', 0.0)
-            rsi = features.get('rsi_14', 50.0)
+            rsi_14 = features.get('rsi_14', 50.0)
+            rsi_21 = features.get('rsi_21', 50.0)
+            bollinger_position = features.get('bollinger_position', 0.5)
+            momentum_10d = features.get('momentum_10d', 0.0)
+            volume_ratio = features.get('volume_ratio', 1.0)
             
-            # Basic momentum signal
-            if abs(returns_1d) > 0.001:  # 0.1% threshold
-                # Momentum direction
-                if returns_1d > 0:
-                    signal_type = SignalType.LONG
-                else:
-                    signal_type = SignalType.SHORT
-                
-                # Confidence based on momentum strength and RSI
-                momentum_strength = min(abs(returns_1d) * 100, 5.0)  # Cap at 5%
-                
-                if rsi < 30 and returns_1d > 0:  # Oversold bouncing up
-                    confidence = min(0.8, 0.4 + momentum_strength * 0.1)
-                elif rsi > 70 and returns_1d < 0:  # Overbought falling down  
-                    confidence = min(0.8, 0.4 + momentum_strength * 0.1)
-                else:
-                    confidence = min(0.6, 0.2 + momentum_strength * 0.05)
-                
-                # Adjust for volatility
-                if volatility > 0.03:  # High volatility
-                    confidence *= 0.8
-                
-                # Regime adjustment
-                if regime_info:
-                    regime_confidence = regime_info.get('confidence', 0.5)
-                    regime_type = regime_info.get('regime', 'unknown')
-                    
-                    if regime_type == 'trending' and signal_type != SignalType.NEUTRAL:
-                        confidence *= (1.0 + regime_confidence * 0.2)  # Boost trending signals
-                    elif regime_type == 'mean_reverting':
-                        confidence *= 0.8  # Reduce momentum signals in mean-reverting regime
-                
-                # Determine strength
-                if confidence > 0.7:
-                    strength = SignalStrength.VERY_STRONG
-                elif confidence > 0.55:
-                    strength = SignalStrength.STRONG
-                elif confidence > 0.4:
-                    strength = SignalStrength.MODERATE
-                elif confidence > 0.25:
-                    strength = SignalStrength.WEAK
-                else:
-                    strength = SignalStrength.VERY_WEAK
+            # Enhanced signal generation with multiple factors
+            signal_factors = []
             
-            # Check minimum confidence threshold
-            if confidence < self.config.min_confidence_threshold:
-                return None
+            # Factor 1: Enhanced momentum analysis
+            momentum_signal = self._calculate_momentum_factor(returns_1d, momentum_10d, volatility)
+            signal_factors.append(momentum_signal)
             
-            # Create signal
+            # Factor 2: Mean reversion analysis
+            mean_reversion_signal = self._calculate_mean_reversion_factor(rsi_14, rsi_21, bollinger_position)
+            signal_factors.append(mean_reversion_signal)
+            
+            # Factor 3: Volume confirmation
+            volume_signal = self._calculate_volume_factor(volume_ratio, returns_1d)
+            signal_factors.append(volume_signal)
+            
+            # Factor 4: Volatility regime adjustment
+            volatility_signal = self._calculate_volatility_factor(volatility, features)
+            signal_factors.append(volatility_signal)
+            
+            # Combine factors with adaptive weights
+            if self.config.enable_adaptive_thresholds:
+                weights = self._calculate_adaptive_weights(market_data, regime_info)
+            else:
+                weights = [0.4, 0.3, 0.2, 0.1]  # Default weights
+            
+            # Weighted combination of signals
+            combined_signal = sum(factor * weight for factor, weight in zip(signal_factors, weights))
+            confidence = abs(combined_signal)
+            
+            # Determine signal direction
+            if combined_signal > 0.1:
+                signal_type = SignalType.LONG
+            elif combined_signal < -0.1:
+                signal_type = SignalType.SHORT
+            else:
+                signal_type = SignalType.NEUTRAL
+            
+            # ML enhancement if enabled
+            if self.config.enable_ml_enhancement and hasattr(self, '_ml_model'):
+                ml_adjustment = self._apply_ml_enhancement(features, regime_info)
+                confidence *= ml_adjustment
+            
+            # Regime-aware adjustments
+            if regime_info and self.config.enable_regime_detection:
+                regime_adjustment = self._apply_regime_adjustment(signal_type, regime_info)
+                confidence *= regime_adjustment
+            
+            # Adaptive threshold adjustment
+            if self.config.enable_adaptive_thresholds:
+                adaptive_threshold = self._calculate_adaptive_threshold(market_data)
+                if confidence < adaptive_threshold:
+                    return None
+            else:
+                if confidence < self.config.min_confidence_threshold:
+                    return None
+            
+            # Determine signal strength
+            strength = self._determine_signal_strength(confidence, combined_signal)
+            
+            # Apply Kalman filtering if enabled
+            if self.config.enable_kalman_filtering:
+                confidence = self._apply_kalman_filter(confidence, symbol)
+            
+            # Create enhanced signal
             signal = TradingSignal(
                 symbol=symbol,
                 signal_type=signal_type,
@@ -475,13 +557,21 @@ class UnifiedSignalEngine:
                 entry_price=features.get('price'),
                 features=features,
                 regime=regime_info.get('regime') if regime_info else None,
-                regime_confidence=regime_info.get('confidence') if regime_info else None
+                regime_confidence=regime_info.get('confidence') if regime_info else None,
+                model_id='enhanced_signal_engine',
+                model_version='2.0',
+                feature_importance={
+                    'momentum': signal_factors[0] * weights[0],
+                    'mean_reversion': signal_factors[1] * weights[1],
+                    'volume': signal_factors[2] * weights[2],
+                    'volatility': signal_factors[3] * weights[3]
+                }
             )
             
             return signal
             
         except Exception as e:
-            self.logger.error(f"Error in core signal generation for {symbol}: {e}")
+            self.logger.error(f"Error in enhanced signal generation for {symbol}: {e}")
             return None
     
     def _pass_risk_filter(self, signal: TradingSignal) -> bool:
@@ -589,6 +679,256 @@ class UnifiedSignalEngine:
             self._signal_cache.clear()
             self._feature_cache.clear()
         self.logger.info("Signal caches reset")
+    
+    def _extract_regime_features(self, market_data: pd.DataFrame) -> Dict[str, float]:
+        """Extract market regime detection features"""
+        try:
+            prices = market_data['close']
+            returns = prices.pct_change().dropna()
+            
+            regime_features = {}
+            
+            # Volatility regime indicators
+            if len(returns) >= 20:
+                short_vol = returns.iloc[-10:].std()
+                long_vol = returns.iloc[-20:].std()
+                regime_features['vol_regime_ratio'] = float(short_vol / long_vol) if long_vol > 0 else 1.0
+            
+            # Trend strength
+            if len(prices) >= 50:
+                short_ma = prices.iloc[-20:].mean()
+                long_ma = prices.iloc[-50:].mean()
+                regime_features['trend_strength'] = float((short_ma - long_ma) / long_ma) if long_ma > 0 else 0.0
+            
+            # Mean reversion tendency
+            if len(returns) >= 30:
+                autocorr = returns.iloc[-30:].autocorr() if len(returns) >= 30 else 0
+                regime_features['mean_reversion_tendency'] = float(autocorr) if not pd.isna(autocorr) else 0.0
+            
+            return regime_features
+            
+        except Exception as e:
+            self.logger.warning(f"Regime feature extraction failed: {e}")
+            return {}
+    
+    def _calculate_momentum_factor(self, returns_1d: float, momentum_10d: float, volatility: float) -> float:
+        """Calculate momentum factor for signal generation"""
+        try:
+            # Combine short and medium term momentum
+            momentum_score = 0.0
+            
+            # Short-term momentum (1-day)
+            if abs(returns_1d) > 0.001:
+                momentum_score += returns_1d * 5  # Scale up
+            
+            # Medium-term momentum (10-day)
+            if abs(momentum_10d) > 0.01:
+                momentum_score += momentum_10d * 2
+            
+            # Volatility adjustment
+            if volatility > 0.02:  # High volatility
+                momentum_score *= 0.8
+            
+            return max(min(momentum_score, 1.0), -1.0)  # Bound between -1 and 1
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_mean_reversion_factor(self, rsi_14: float, rsi_21: float, bollinger_position: float) -> float:
+        """Calculate mean reversion factor for signal generation"""
+        try:
+            reversion_score = 0.0
+            
+            # RSI-based mean reversion
+            avg_rsi = (rsi_14 + rsi_21) / 2
+            if avg_rsi < 30:
+                reversion_score += (30 - avg_rsi) / 30  # Oversold -> positive (buy signal)
+            elif avg_rsi > 70:
+                reversion_score -= (avg_rsi - 70) / 30  # Overbought -> negative (sell signal)
+            
+            # Bollinger Band position
+            if bollinger_position < 0.2:
+                reversion_score += (0.2 - bollinger_position) * 2  # Near lower band -> buy
+            elif bollinger_position > 0.8:
+                reversion_score -= (bollinger_position - 0.8) * 2  # Near upper band -> sell
+            
+            return max(min(reversion_score, 1.0), -1.0)
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_volume_factor(self, volume_ratio: float, returns_1d: float) -> float:
+        """Calculate volume confirmation factor"""
+        try:
+            volume_score = 0.0
+            
+            # Volume confirmation of price moves
+            if volume_ratio > 1.2 and abs(returns_1d) > 0.005:
+                # High volume confirms price movement
+                volume_score = returns_1d * (volume_ratio - 1.0)
+            elif volume_ratio < 0.8:
+                # Low volume weakens signals
+                volume_score = returns_1d * -0.2
+            
+            return max(min(volume_score, 0.5), -0.5)  # Smaller impact
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_volatility_factor(self, volatility: float, features: Dict[str, float]) -> float:
+        """Calculate volatility regime factor"""
+        try:
+            vol_ratio = features.get('volatility_ratio', 1.0)
+            
+            # Volatility regime adjustment
+            if vol_ratio > 1.5:  # High volatility regime
+                return -0.2  # Reduce signal strength
+            elif vol_ratio < 0.7:  # Low volatility regime
+                return 0.1   # Slightly boost signals
+            else:
+                return 0.0   # Neutral
+                
+        except Exception:
+            return 0.0
+    
+    def _calculate_adaptive_weights(self, market_data: pd.DataFrame, regime_info: Optional[Dict[str, Any]]) -> List[float]:
+        """Calculate adaptive weights based on market conditions"""
+        try:
+            # Default weights
+            weights = [0.4, 0.3, 0.2, 0.1]  # [momentum, mean_reversion, volume, volatility]
+            
+            # Adjust based on regime
+            if regime_info:
+                regime = regime_info.get('regime', 'unknown')
+                
+                if regime == 'trending':
+                    weights = [0.6, 0.2, 0.15, 0.05]  # Boost momentum
+                elif regime == 'mean_reverting':
+                    weights = [0.2, 0.6, 0.15, 0.05]  # Boost mean reversion
+                elif regime == 'volatile':
+                    weights = [0.3, 0.3, 0.3, 0.1]    # Balanced with more volume
+            
+            return weights
+            
+        except Exception:
+            return [0.4, 0.3, 0.2, 0.1]
+    
+    def _apply_ml_enhancement(self, features: Dict[str, float], regime_info: Optional[Dict[str, Any]]) -> float:
+        """Apply ML model enhancement (placeholder for future ML integration)"""
+        try:
+            # Placeholder for ML model
+            # In practice, this would use a trained model to adjust confidence
+            
+            # Simple heuristic enhancement
+            enhancement = 1.0
+            
+            # Boost confidence if multiple indicators align
+            rsi = features.get('rsi_14', 50.0)
+            momentum = features.get('momentum_10d', 0.0)
+            
+            if (rsi < 30 and momentum > 0.02) or (rsi > 70 and momentum < -0.02):
+                enhancement = 1.2  # Boost when RSI and momentum align
+            
+            return min(enhancement, 1.5)  # Cap enhancement
+            
+        except Exception:
+            return 1.0
+    
+    def _apply_regime_adjustment(self, signal_type: SignalType, regime_info: Dict[str, Any]) -> float:
+        """Apply regime-based signal adjustment"""
+        try:
+            regime = regime_info.get('regime', 'unknown')
+            regime_confidence = regime_info.get('confidence', 0.5)
+            
+            if regime == 'trending' and signal_type in [SignalType.LONG, SignalType.SHORT]:
+                return 1.0 + regime_confidence * 0.3  # Boost trending signals
+            elif regime == 'mean_reverting':
+                return 0.8  # Reduce momentum signals in mean-reverting markets
+            elif regime == 'volatile':
+                return 0.9  # Slightly reduce signals in volatile markets
+            else:
+                return 1.0
+                
+        except Exception:
+            return 1.0
+    
+    def _calculate_adaptive_threshold(self, market_data: pd.DataFrame) -> float:
+        """Calculate adaptive confidence threshold based on market conditions"""
+        try:
+            returns = market_data['close'].pct_change().dropna()
+            
+            if len(returns) < 20:
+                return self.config.min_confidence_threshold
+            
+            # Adjust threshold based on recent volatility
+            recent_vol = returns.iloc[-20:].std()
+            avg_vol = returns.std()
+            
+            vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1.0
+            
+            # Higher volatility -> higher threshold
+            adaptive_threshold = self.config.min_confidence_threshold * vol_ratio
+            
+            # Keep within reasonable bounds
+            return max(min(adaptive_threshold, 0.8), 0.2)
+            
+        except Exception:
+            return self.config.min_confidence_threshold
+    
+    def _determine_signal_strength(self, confidence: float, combined_signal: float) -> SignalStrength:
+        """Determine signal strength based on confidence and signal magnitude"""
+        try:
+            signal_magnitude = abs(combined_signal)
+            
+            if confidence > 0.8 and signal_magnitude > 0.5:
+                return SignalStrength.VERY_STRONG
+            elif confidence > 0.65 and signal_magnitude > 0.3:
+                return SignalStrength.STRONG
+            elif confidence > 0.5 and signal_magnitude > 0.2:
+                return SignalStrength.MODERATE
+            elif confidence > 0.35:
+                return SignalStrength.WEAK
+            else:
+                return SignalStrength.VERY_WEAK
+                
+        except Exception:
+            return SignalStrength.WEAK
+    
+    def _apply_kalman_filter(self, confidence: float, symbol: str) -> float:
+        """Apply Kalman filter to smooth confidence values"""
+        try:
+            if not hasattr(self, '_kalman_states'):
+                self._kalman_states = {}
+            
+            if symbol not in self._kalman_states:
+                self._kalman_states[symbol] = {
+                    'estimate': confidence,
+                    'error_covariance': 0.1,
+                    'process_noise': 0.01,
+                    'measurement_noise': 0.05
+                }
+                return confidence
+            
+            state = self._kalman_states[symbol]
+            
+            # Prediction step
+            predicted_estimate = state['estimate']
+            predicted_error_covariance = state['error_covariance'] + state['process_noise']
+            
+            # Update step
+            kalman_gain = predicted_error_covariance / (predicted_error_covariance + state['measurement_noise'])
+            updated_estimate = predicted_estimate + kalman_gain * (confidence - predicted_estimate)
+            updated_error_covariance = (1 - kalman_gain) * predicted_error_covariance
+            
+            # Store updated state
+            state['estimate'] = updated_estimate
+            state['error_covariance'] = updated_error_covariance
+            
+            return updated_estimate
+            
+        except Exception as e:
+            self.logger.warning(f"Kalman filter failed: {e}")
+            return confidence
 
 # Export consolidated signal engine
 SignalGenerator = UnifiedSignalEngine  # Backward compatibility alias
