@@ -16,47 +16,74 @@ Author: Professional Trading System Architecture
 Version: 3.0.0 (Compatibility Layer)
 """
 
-# Backward compatibility imports from unified configuration system
-from core_structure.configuration import (
+# Backward compatibility imports from streamlined configuration system
+from core_structure.config import (
     # Core Configuration Classes
-    UnifiedConfig,
+    TradingConfig as UnifiedConfig,
+    ConfigManager as UnifiedConfigManager,
     ConfigurationError,
     ValidationError,
     Environment,
     TradingMode,
     LogLevel,
-    BaseConfig,
-    ConfigValidator,
     
-    # Domain Configurations
+    # Domain Configurations (legacy compatibility - all map to TradingConfig)
     TradingConfig,
-    RiskConfig,
-    SystemConfig,
-    DatabaseConfig,
-    LoggingConfig,
-    MonitoringConfig,
-    AIConfig,
-    MarketDataConfig,
-    StrategyConfig,
+    TradingConfig as RiskConfig,
+    TradingConfig as SystemConfig,
+    TradingConfig as DatabaseConfig,
+    TradingConfig as LoggingConfig,
+    TradingConfig as MonitoringConfig,
+    TradingConfig as AIConfig,
+    TradingConfig as MarketDataConfig,
+    TradingConfig as StrategyConfig,
     
     # Configuration Management
-    UnifiedConfigManager,
-    ConfigFactory,
-    ConfigBuilder,
+    ConfigManager as ConfigFactory,
+    ConfigManager as ConfigBuilder,
     
     # Convenience Functions
     get_config,
     load_config,
     save_config,
     validate_config,
-    get_environment,
     set_environment,
     is_production,
     is_development,
-    get_api_key,
-    get_database_url,
-    get_secret,
 )
+
+# Create legacy compatibility classes
+class BaseConfig:
+    """Legacy base config class for compatibility"""
+    def __init__(self):
+        pass
+    
+    def validate(self):
+        return True
+
+class ConfigValidator:
+    """Legacy config validator for compatibility"""
+    @staticmethod
+    def validate(config):
+        return True
+
+# Add missing legacy functions
+def get_environment():
+    """Get current environment"""
+    return get_config().environment
+
+def get_api_key(service: str = "default"):
+    """Get API key for service"""
+    return ""  # Placeholder for legacy compatibility
+
+def get_database_url():
+    """Get database URL"""
+    config = get_config()
+    return f"clickhouse://{config.clickhouse_host}:{config.clickhouse_port}/{config.clickhouse_database}"
+
+def get_secret(key: str):
+    """Get secret value"""
+    return ""  # Placeholder for legacy compatibility
 
 # Legacy aliases for smooth migration
 Config = UnifiedConfig

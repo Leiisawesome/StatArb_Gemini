@@ -1,23 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Temporary log files
-*.log
-*_backtest_*.log
-momentum_backtest_*.log
-
-# Debug and temporary files
-debug_*.py
-*_debug.py
-simple_debug_*.py
-temp_*.py
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -31,141 +16,25 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
+# Virtual Environment
+ai_integration_env/
 venv/
+env/
 ENV/
-env.bak/
-venv.bak/
 
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Trading system specific
-*.db
-*.sqlite
-*.sqlite3
-
-# Results and logs
-results/current_results/*
-*.log
-*.csv
-*.json
-!*config.json
-!requirements*.txt
-
-# Temporary files
-temp/
-tmp/
-*.tmp
-*.temp
-
-# IDE files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS files
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -174,151 +43,52 @@ tmp/
 ehthumbs.db
 Thumbs.db
 
-# Archived files (keep structure but ignore content)
-archived_files/
-live_results/
+# Logs
+*.log
+logs/
 
-# Data files
-data/raw/
-data/processed/
-data/cache/
+# Results and temporary files
+results/
+temp/
+tmp/
+test_results/
+*.tmp
 
-# Model files
-models/saved/
-models/checkpoints/
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration (sensitive)
+*_local.yml
+*_local.yaml
+*.env
+.env
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 # Backup files
 *.bak
 *.backup
 *~
 
-# Configuration files with sensitive data
-config/api_keys.py
-config/secrets.py
-config/production_secrets.py
-
-# Docker
-.dockerignore
-docker-compose.override.yml 
-
-# Removed files - prevent reappearance
-core_structure/signal_generation/stat_arb_ensemble_integration.py
-core_structure/signal_generation/stat_arb_models.py
-
-# Removed documentation files - prevent reappearance
-backtesting_framework/docs/ANNUALIZED_RETURN_BUG_FIX.md
-backtesting_framework/docs/CLEANUP_SUMMARY_JUL22.md
-backtesting_framework/docs/GITIGNORE_CONSOLIDATION.md
-backtesting_framework/docs/TESTS_REMOVAL_SUMMARY.md
-backtesting_framework/docs/PRODUCTION_SETUP_GUIDE.md
-backtesting_framework/docs/CLEANUP_COMPLETE.md
-backtesting_framework/docs/README.md
-
-# Documentation files (keep all .md files)
-# *.md files are kept for documentation
-
-# Empty or temporary files (prevent recreation)
-simple_debug.py
-debug_data_loading.py
-**/run_momentum_real_data.py
-**/quick_test_fix.py
-**/patch_datamanager.py
-**/fix_clickhouse_timestamps.py
-**/compare_rebalancing_frequencies.py
-**/test_capital_impact.py
-**/explore_clickhouse_data.py
-**/explain_annualized_return.py
-**/fixed_clickhouse_loader.py
-**/test_rebalancing_frequency.py
-**/test_fix.py
-
-# Deprecated directories (prevent recreation)
-Tests/
-deprecated/
-archived/
-demos/
-scenario_layer/
-old_*/
-
-# Additional cache and temporary files
-.cache/
-.pytest_cache/
-*.tmp
-*.temp
-
-# Virtual environments
-venv/
-env/
-ENV/
-ai_integration_env/
-
-# Log files and directories
-*.log
-logs/
-logs/*.log
-logs/*.txt
-Tests/mvs/logs/
-Tests/mvs/results/
-
-# Test results (keep only latest)
-results/*.json
-!results/README.md
-
-# Temporary test files
-test_*.py
-*_test.py
-!backtesting_framework/tests/
-
-# Stop ignoring the tests folder
-!tests/
-!tests/**
-
-# Test logs and temporary directories
-test_logs/
-test_logs_*/
-*.test.log
-integration_test_logs/
-
-# Temporary validation files
-validation/*_validation.py
-!validation/README.md
-
-# Analysis files (temporary)
-analysis/
-*.analysis.json
-*.report.json
-
-# Multi-strategy backtest temporary files
-multi_strategy_backtest_*.log
-multi_strategy_backtest_report_*.txt
-
-# Testing framework temporary files
-testing_framework/test_report_*.txt
-testing_framework/test_run_*.log
-
-# Additional cleanup patterns
-verify_*.py
-fix_*.py
-debug_*.py
-*_debug.py
-*_temp.py
-*_tmp.py
-*.cache
-*.bak
-
-# Pairs trading temporary files
-pairs_trading_models.py
-*_pairs_*_temp.py
-*_pairs_*_debug.py
-*_pairs_*_test.py
-
-# Performance test files
-*_performance_test.py
-benchmark_*.py
-
-# Configuration system demonstration files
-config_driven_backtest_example.py
-refactored_*_backtest.py
-*_demo.py
-*_example.py
-*_sample.py
+# Trading specific
+backtest_results_*.yml
+selection_history_*.yml
+validation_report_*.yml

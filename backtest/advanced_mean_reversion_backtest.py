@@ -52,8 +52,8 @@ warnings.filterwarnings('ignore')
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# UNIFIED TRADING ENGINE INTEGRATION
-from core_structure import create_production_engine, UnifiedTradingEngine
+# ULTIMATE SYSTEM INTEGRATION
+from core_structure import create_production_trading_system, UnifiedTradingSystem as UnifiedTradingEngine
 from core_structure.components.market_data import EnhancedClickHouseLoader, DataRequest
 from core_structure.components.market_data import BacktestingDataProvider
 from core_structure.components.market_data import UnifiedDataManager, UnifiedDataFeeds
@@ -67,19 +67,19 @@ from core_structure.components.signal_generation import (
 
 # Unified strategy system components (consolidated)
 from core_structure.strategies import (
-    TemplateBasedStrategy as TemplateStrategyBridge, 
-    UnifiedStrategyConfig as TemplateConfiguration
+    BaseStrategy as TemplateStrategyBridge, 
+    StrategyManager as TemplateConfiguration
 )
 
 # Note: ProfessionalMeanReversionTemplate is now handled by the unified strategy system
 
 # Import unified strategy system components
 from core_structure.strategies import (
-    UnifiedStrategyConfig,
-    StrategyParameters,
-    StrategyExecutionMode,
+    StrategyManager as UnifiedStrategyConfig,
+    StrategyRegistry as StrategyParameters,
+    ExecutionMode as StrategyExecutionMode,
     StrategyType,
-    UnifiedStrategyEngine,
+    StrategyManager as UnifiedStrategyEngine,
     MeanReversionStrategy
 )
 
@@ -481,7 +481,7 @@ class AdvancedMeanReversionBacktest:
             logger.info("🏗️ Setting up UnifiedTradingEngine for mean reversion strategy")
             
             # Create production engine
-            self.core_engine = create_production_engine()
+            self.core_engine = create_production_trading_system()
             logger.info("✅ Engine created")
             
             # Initialize market data components
@@ -515,15 +515,15 @@ class AdvancedMeanReversionBacktest:
             # Reduced initialization logging
             
             # Setup unified strategy configuration with parameters
-            strategy_params_obj = StrategyParameters(
-                lookback_period=20,
-                signal_threshold=0.02,
-                position_size=0.1,
-                execution_mode=StrategyExecutionMode.BACKTEST
-            )
+            strategy_params_obj = {
+                'lookback_period': 20,
+                'signal_threshold': 0.02,
+                'position_size': 0.1,
+                'execution_mode': StrategyExecutionMode.BACKTEST
+            }
             
             # Add mean reversion specific parameters to template_config with ADVANCED FEATURES ENABLED
-            strategy_params_obj.template_config = {
+            template_config = {
                 'z_score_threshold': 2.0,
                 'exit_z_score': 0.5,
                 'rsi_period': 14,
@@ -551,19 +551,23 @@ class AdvancedMeanReversionBacktest:
             }
             
             # Create unified strategy configuration
-            template_config = UnifiedStrategyConfig(
-                strategy_id="advanced_mean_reversion_tsla",
-                strategy_type=StrategyType.MEAN_REVERSION,
-                parameters=strategy_params_obj,
-                template_based=False,  # Use regular strategy, not template-based
-                template_name="professional_mean_reversion_v1",
-                description="Advanced Mean Reversion Strategy for Backtesting"
-            )
+            template_config = {
+                'strategy_id': "advanced_mean_reversion_tsla",
+                'strategy_type': StrategyType.MEAN_REVERSION,
+                'parameters': strategy_params_obj,
+                'template_based': False,  # Use regular strategy, not template-based
+                'template_name': "professional_mean_reversion_v1",
+                'description': "Advanced Mean Reversion Strategy for Backtesting"
+            }
             
             # Create strategy bridge using unified strategy engine
             strategy_engine = UnifiedStrategyEngine()
-            self.strategy_bridge = strategy_engine.create_strategy(template_config, MeanReversionStrategy)
-            logger.info(f"✅ Strategy bridge created: {template_config.strategy_id}")
+            self.strategy_bridge = strategy_engine.create_strategy(
+                StrategyType.MEAN_REVERSION,
+                "mean_reversion_strategy_1", 
+                template_config
+            )
+            logger.info(f"✅ Strategy bridge created: {template_config['strategy_id']}")
             
             # Register strategy with UnifiedTradingEngine (auto-discovery)
             logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")

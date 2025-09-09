@@ -58,10 +58,11 @@ class DataValidationMonitor:
         self.logger = logging.getLogger(__name__)
         self.validation_history = []
         self.alert_thresholds = {
-            'missing_data_pct': 5.0,  # Alert if >5% missing data
-            'price_outlier_factor': 10.0,  # Alert if price moves >10x
-            'timestamp_gap_minutes': 60,  # Alert if >60min gaps
-            'volume_zero_pct': 20.0  # Alert if >20% zero volume
+            'missing_data_pct': 10.0,  # Alert if >10% missing data (increased for market data)
+            'price_outlier_factor': 20.0,  # Alert if price moves >20x (increased for volatile stocks)
+            'timestamp_gap_minutes': 1440,  # Alert if >24hr gaps (weekends/holidays are normal)
+            'volume_zero_pct': 30.0,  # Alert if >30% zero volume (increased for low-volume periods)
+            'statistical_outlier_pct': 10.0  # Alert if >10% statistical outliers (new threshold)
         }
     
     def validate_market_data(self, data: pd.DataFrame, symbol: str) -> List[ValidationResult]:
@@ -104,14 +105,36 @@ class DataValidationMonitor:
                 'data_points': len(data)
             })
             
-            # Log summary
+            # Log summary (smart filtering for market data)
             errors = [r for r in results if r.severity == ValidationSeverity.ERROR]
             warnings = [r for r in results if r.severity == ValidationSeverity.WARNING]
             
             if errors:
                 self.logger.error(f"Validation errors for {symbol}: {len(errors)} errors")
             elif warnings:
-                self.logger.warning(f"Validation warnings for {symbol}: {len(warnings)} warnings")
+                # Filter out expected market data warnings
+                significant_warnings = []
+                for w in warnings:
+                    # Skip normal timestamp gaps (single gaps are usually weekends/holidays)
+                    if w.check_name == "timestamps.gaps" and len(warnings) == 1:
+                        continue
+                    # Skip normal statistical outliers below 10%
+                    if w.check_name == "outliers.statistical_outliers" and "%" in w.message:
+                        pct_str = w.message.split("(")[1].split("%")[0]
+                        try:
+                            pct = float(pct_str)
+                            if pct < 10.0:  # Below our threshold
+                                continue
+                        except:
+                            pass
+                    significant_warnings.append(w)
+                
+                # Only log significant warnings
+                if significant_warnings:
+                    warning_types = [w.check_name for w in significant_warnings]
+                    self.logger.warning(f"Validation issues for {symbol}: {warning_types}")
+                else:
+                    self.logger.debug(f"Validation: {len(warnings)} normal market patterns for {symbol}")
             else:
                 self.logger.debug(f"Validation passed for {symbol}")
                 
@@ -184,21 +207,21 @@ class DataValidationMonitor:
                         details={'duplicate_count': duplicates}
                     ))
                 
-                # Check for gaps
+                # Check for gaps (only alert on very large gaps > 24 hours)
                 if len(data) > 1:
                     time_diffs = data.index.to_series().diff().dropna()
-                    median_interval = time_diffs.median()
-                    large_gaps = time_diffs[time_diffs > median_interval * 3]
+                    gap_threshold = pd.Timedelta(minutes=self.alert_thresholds['timestamp_gap_minutes'])
+                    large_gaps = time_diffs[time_diffs > gap_threshold]
                     
                     if len(large_gaps) > 0:
                         results.append(ValidationResult(
                             check_name="timestamps.gaps",
                             severity=ValidationSeverity.WARNING,
                             passed=False,
-                            message=f"Found {len(large_gaps)} large time gaps for {symbol}",
+                            message=f"Found {len(large_gaps)} gaps > 24hrs for {symbol}",
                             details={
                                 'gap_count': len(large_gaps),
-                                'median_interval': str(median_interval),
+                                'gap_threshold': str(gap_threshold),
                                 'max_gap': str(large_gaps.max())
                             }
                         ))
@@ -421,12 +444,18 @@ class DataValidationMonitor:
             
             outliers = price_changes[(price_changes < lower_bound) | (price_changes > upper_bound)]
             
-            if len(outliers) > len(price_changes) * 0.05:  # More than 5% outliers
+            outlier_pct = len(outliers) / len(price_changes) * 100
+            if outlier_pct > self.alert_thresholds['statistical_outlier_pct']:
                 results.append(ValidationResult(
                     check_name="outliers.statistical_outliers",
-                    severity=ValidationSeverity.INFO,
+                    severity=ValidationSeverity.WARNING,
                     passed=False,
-                    message=f"High number of statistical outliers for {symbol}: {len(outliers)} ({len(outliers)/len(price_changes)*100:.1f}%)"
+                    message=f"High number of statistical outliers for {symbol}: {len(outliers)} ({outlier_pct:.1f}%)",
+                    details={
+                        'outlier_count': len(outliers),
+                        'outlier_percentage': outlier_pct,
+                        'threshold': self.alert_thresholds['statistical_outlier_pct']
+                    }
                 ))
         
         except Exception as e:

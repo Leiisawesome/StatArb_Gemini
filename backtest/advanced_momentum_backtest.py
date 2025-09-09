@@ -35,8 +35,8 @@ import time
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 1. REPLACE IMPORTS: Use new UnifiedTradingEngine
-from core_structure import create_production_engine, UnifiedTradingEngine
+# 1. ULTIMATE SYSTEM: Use streamlined UnifiedTradingSystem
+from core_structure import create_production_trading_system, UnifiedTradingSystem as UnifiedTradingEngine
 # Use new reorganized structure
 from core_structure.components.market_data import EnhancedClickHouseLoader, DataRequest
 from core_structure.components.market_data import BacktestingDataProvider
@@ -54,7 +54,7 @@ from core_structure.components.signal_generation import (
 # Missing imports for momentum backtest
 # Config imports removed - using unified configuration system directly
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from core_structure.strategies.unified_strategy_system import TemplateBasedStrategy as TemplateStrategyBridge
+from core_structure.strategies import BaseStrategy as TemplateStrategyBridge
 
 # Compatibility classes for old structure
 from dataclasses import dataclass
@@ -105,17 +105,17 @@ class SignalRiskConfig:
 
 # Unified strategy system components (consolidated)
 from core_structure.strategies import (
-    TemplateBasedStrategy as TemplateStrategyBridge, 
-    UnifiedStrategyConfig as TemplateConfiguration
+    BaseStrategy as TemplateStrategyBridge, 
+    StrategyManager as TemplateConfiguration
 )
 
 # Note: ProfessionalMomentumTemplate is now handled by the unified strategy system
 
 # Import unified strategy system components
 from core_structure.strategies import (
-    UnifiedStrategyConfig,
-    StrategyParameters,
-    StrategyExecutionMode,
+    StrategyManager as UnifiedStrategyConfig,
+    StrategyRegistry as StrategyParameters,
+    ExecutionMode as StrategyExecutionMode,
     StrategyType
 )
 
@@ -425,8 +425,8 @@ class AdvancedEnhancedMomentumBacktest:
         try:
             self.logger.info("🚀 Setting up Enhanced Momentum Backtest")
             
-            # 1. REPLACE IMPORTS: Create UnifiedTradingEngine for backtesting
-            self.core_engine = create_production_engine()
+            # 1. ULTIMATE SYSTEM: Create UnifiedTradingSystem for backtesting
+            self.core_engine = create_production_trading_system()
             
             # Create ClickHouse loader and data request for BacktestingDataProvider
             clickhouse_loader = EnhancedClickHouseLoader()
@@ -508,15 +508,15 @@ class AdvancedEnhancedMomentumBacktest:
             primary_symbol = symbols[0] if symbols else 'UNKNOWN'
             
             # Setup unified strategy configuration with parameters from config
-            strategy_params_obj = StrategyParameters(
-                lookback_period=strategy_params.get('lookback_period', self.momentum_config.lookback_period),
-                signal_threshold=strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
-                position_size=0.1,
-                execution_mode=StrategyExecutionMode.BACKTEST
-            )
+            strategy_params_obj = {
+                'lookback_period': strategy_params.get('lookback_period', self.momentum_config.lookback_period),
+                'signal_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
+                'position_size': 0.1,
+                'execution_mode': StrategyExecutionMode.BACKTEST
+            }
             
             # Add momentum-specific parameters to template_config with ADVANCED FEATURES ENABLED
-            strategy_params_obj.template_config = {
+            template_config = {
                 'momentum_threshold': strategy_params.get('momentum_threshold', self.momentum_config.momentum_threshold),
                 'confidence_threshold': 0.75,  # 75% confidence threshold (within 0.5-0.95 range)
                 'volume_lookback': 10,
@@ -542,21 +542,25 @@ class AdvancedEnhancedMomentumBacktest:
             }
             
             # Create unified strategy configuration
-            template_config = UnifiedStrategyConfig(
-                strategy_id=f"advanced_momentum_{primary_symbol.lower()}",
-                strategy_type=StrategyType.MOMENTUM,
-                parameters=strategy_params_obj,
-                template_based=False,  # Use regular strategy, not template-based
-                template_name=self.test_config['strategy']['template'],
-                description="Advanced Momentum Strategy for Backtesting"
-            )
+            template_config = {
+                'strategy_id': f"advanced_momentum_{primary_symbol.lower()}",
+                'strategy_type': StrategyType.MOMENTUM,
+                'parameters': strategy_params_obj,
+                'template_based': False,  # Use regular strategy, not template-based
+                'template_name': self.test_config['strategy']['template'],
+                'description': "Advanced Momentum Strategy for Backtesting"
+            }
             
             # Create strategy bridge (modern replacement for MomentumStrategyDefinition)
             # Use the unified strategy engine to create the strategy
-            from core_structure.strategies import UnifiedStrategyEngine, MomentumStrategy
+            from core_structure.strategies import StrategyManager as UnifiedStrategyEngine, MomentumStrategy
             
             strategy_engine = UnifiedStrategyEngine()
-            self.strategy_bridge = strategy_engine.create_strategy(template_config, MomentumStrategy)
+            self.strategy_bridge = strategy_engine.create_strategy(
+                StrategyType.MOMENTUM, 
+                "momentum_strategy_1", 
+                template_config
+            )
             
             # 2. REGISTER STRATEGIES: Register momentum strategy with unified engine
             # Note: UnifiedTradingEngine uses auto-discovery, so strategies are registered automatically

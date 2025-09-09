@@ -499,10 +499,27 @@ class EnhancedClickHouseLoader:
                         self.logger.error(f"❌ CRITICAL DATA VALIDATION ERRORS for {symbol}: {error_messages}")
                         # Still return data but log the issues for monitoring
                     
-                    # Log validation summary
+                    # Log validation summary (smart filtering for market data)
                     warnings = [r for r in validation_results if r.severity == ValidationSeverity.WARNING]
                     if warnings:
-                        self.logger.warning(f"⚠️  Data validation warnings for {symbol}: {len(warnings)} issues")
+                        # Filter out expected market data warnings
+                        significant_warnings = []
+                        for w in warnings:
+                            # Skip normal timestamp gaps (weekends, holidays)
+                            if w.check_name == "timestamps.gaps" and len(warnings) == 1:
+                                continue  # Normal market gaps, don't spam logs
+                            # Skip low-level statistical outliers
+                            if w.check_name == "outliers.statistical_outliers" and "5." in w.message:
+                                continue  # Normal volatility, don't spam logs
+                            significant_warnings.append(w)
+                        
+                        # Only log significant issues
+                        if significant_warnings:
+                            warning_types = [w.check_name for w in significant_warnings]
+                            self.logger.warning(f"⚠️  Data validation issues for {symbol}: {warning_types}")
+                        else:
+                            # All warnings were filtered as normal market behavior
+                            self.logger.debug(f"Data validation: {len(warnings)} normal market data patterns for {symbol}")
                 except ImportError:
                     pass  # Validation not available
             

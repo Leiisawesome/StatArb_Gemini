@@ -29,6 +29,10 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
 pytest-mock>=3.8.0
+pytest-xdist>=3.0.0  # Parallel test execution
+pytest-timeout>=2.1.0  # Test timeouts
+pytest-benchmark>=4.0.0  # Performance benchmarking
+psutil>=5.9.0  # System monitoring for performance tests
 
 # Logging and monitoring
 structlog>=22.0.0

@@ -35,23 +35,23 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 # Core engine imports
-from core_structure.unified_engine.factory import UnifiedEngineFactory
-from core_structure.unified_engine.engine import UnifiedEngineConfig
-from core_structure.configuration import UnifiedConfigManager
+from core_structure import create_production_trading_system
+from core_structure.config import TradingConfig as UnifiedEngineConfig
+from core_structure.config import ConfigManager as UnifiedConfigManager
 from core_structure.components.market_data.core.enhanced_clickhouse_loader import EnhancedClickHouseLoader, DataRequest
 from core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
 
 # Trade engine imports
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from core_structure.strategies import TemplateBasedStrategy as TemplateStrategyBridge, UnifiedStrategyConfig as TemplateConfiguration
+from core_structure.strategies import BaseStrategy as TemplateStrategyBridge, StrategyManager as TemplateConfiguration
 
 # Import unified strategy system components
 from core_structure.strategies import (
-    UnifiedStrategyConfig,
-    StrategyParameters,
-    StrategyExecutionMode,
+    StrategyManager as UnifiedStrategyConfig,
+    StrategyRegistry as StrategyParameters,
+    ExecutionMode as StrategyExecutionMode,
     StrategyType,
-    UnifiedStrategyEngine,
+    StrategyManager as UnifiedStrategyEngine,
     PairsTradingStrategy
 )
 
@@ -408,9 +408,9 @@ class AdvancedPairsTradingBacktest:
         try:
             self.logger.info("🏗️ Setting up UnifiedTradingEngine for pairs trading strategy")
             
-            # Create UnifiedTradingEngine
-            factory = UnifiedEngineFactory()
-            self.core_engine = factory.create_production_engine()
+            # Create UnifiedTradingSystem
+            from core_structure import create_production_trading_system
+            self.core_engine = create_production_trading_system()
             
             if not self.core_engine:
                 self.logger.error("❌ Failed to create UnifiedTradingEngine")
@@ -450,15 +450,15 @@ class AdvancedPairsTradingBacktest:
             # Reduced initialization logging
             
             # Setup unified strategy configuration with parameters
-            strategy_params_obj = StrategyParameters(
-                lookback_period=self.config.pairs_config.lookback_window,
-                signal_threshold=0.02,
-                position_size=0.1,
-                execution_mode=StrategyExecutionMode.BACKTEST
-            )
+            strategy_params_obj = {
+                'lookback_period': self.config.pairs_config.lookback_window,
+                'signal_threshold': 0.02,
+                'position_size': 0.1,
+                'execution_mode': StrategyExecutionMode.BACKTEST
+            }
             
             # Add pairs trading specific parameters to template_config with ADVANCED FEATURES ENABLED
-            strategy_params_obj.template_config = {
+            template_config = {
                 'pairs': [{'symbol1': 'GLD', 'symbol2': 'GDX'}],  # Actual pairs being tested
                 'entry_threshold': 2.0,
                 'exit_threshold': 0.5,
@@ -497,18 +497,22 @@ class AdvancedPairsTradingBacktest:
             }
             
             # Create unified strategy configuration
-            template_config = UnifiedStrategyConfig(
-                strategy_id="advanced_pairs_trading_tsla",
-                strategy_type=StrategyType.PAIRS_TRADING,
-                parameters=strategy_params_obj,
-                template_based=False,  # Use regular strategy, not template-based
-                template_name="professional_pairs_trading_v1",
-                description="Advanced Pairs Trading Strategy for Backtesting"
-            )
+            template_config = {
+                'strategy_id': "advanced_pairs_trading_tsla",
+                'strategy_type': StrategyType.PAIRS_TRADING,
+                'parameters': strategy_params_obj,
+                'template_based': False,  # Use regular strategy, not template-based
+                'template_name': "professional_pairs_trading_v1",
+                'description': "Advanced Pairs Trading Strategy for Backtesting"
+            }
             
             # Create strategy bridge using unified strategy engine
             strategy_engine = UnifiedStrategyEngine()
-            self.strategy_bridge = strategy_engine.create_strategy(template_config, PairsTradingStrategy)
+            self.strategy_bridge = strategy_engine.create_strategy(
+                StrategyType.PAIRS_TRADING,
+                "pairs_trading_strategy_1", 
+                template_config
+            )
             
             self.logger.info("✅ Strategy bridge created: pairs_trading")
             self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")

@@ -15,7 +15,7 @@ Version: 3.0.0 (Compatibility Placeholder)
 """
 
 # Backward compatibility placeholder
-from core_structure.configuration import get_config
+from core_structure.config import get_config
 
 class IBKRConfig:
     """Legacy IBKR configuration - redirects to unified system"""
