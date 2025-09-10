@@ -29,6 +29,21 @@ from enum import Enum
 import json
 from abc import ABC, abstractmethod
 
+# Import regime engine
+try:
+    from ...regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
+    REGIME_ENGINE_AVAILABLE = True
+except ImportError:
+    REGIME_ENGINE_AVAILABLE = False
+    IRegimeSubscriber = None
+    # Define dummy classes for type hints
+    class RegimeState:
+        pass
+    class RegimeTransition:
+        pass
+    class UnifiedRegimeEngine:
+        pass
+
 # ML libraries (optional imports for backtesting compatibility)
 try:
     from sklearn.decomposition import PCA
@@ -178,24 +193,40 @@ class IRiskDataProvider(ABC):
         """Get historical price data"""
         pass
 
-class UnifiedRiskManager:
+class UnifiedRiskManager(IRegimeSubscriber if REGIME_ENGINE_AVAILABLE else object):
     """
     Unified Risk Management System
     
     Works for both backtesting and live trading with consistent risk logic.
     Combines advanced analytics with real-time monitoring capabilities.
+    Now includes regime-aware risk adjustments.
     """
     
     def __init__(self, 
                  risk_limits: Optional[RiskLimits] = None,
                  trading_mode: TradingMode = TradingMode.PAPER_TRADING,
                  initial_capital: float = 100000.0,
-                 data_provider: Optional[IRiskDataProvider] = None):
+                 data_provider: Optional[IRiskDataProvider] = None,
+                 regime_engine: Optional['UnifiedRegimeEngine'] = None):
         
         self.risk_limits = risk_limits or RiskLimits()
         self.trading_mode = trading_mode
         self.initial_capital = initial_capital
         self.data_provider = data_provider
+        
+        # Regime integration
+        self.regime_engine = regime_engine
+        self.current_regime: Optional[RegimeState] = None
+        self.regime_multipliers: Dict[str, float] = {
+            'position_size': 1.0,
+            'stop_loss': 1.0,
+            'take_profit': 1.0,
+            'leverage': 1.0
+        }
+        
+        # Subscribe to regime changes if engine provided
+        if self.regime_engine and REGIME_ENGINE_AVAILABLE:
+            self.regime_engine.subscribe_to_regime_changes(self)
         
         # Portfolio state
         self.current_capital = initial_capital
@@ -267,6 +298,70 @@ class UnifiedRiskManager:
     def add_alert_callback(self, callback: Callable):
         """Add callback for risk alerts"""
         self.alert_callbacks.append(callback)
+    
+    # ================================================================================
+    # REGIME SUBSCRIBER INTERFACE IMPLEMENTATION
+    # ================================================================================
+    
+    async def on_regime_change(self, 
+                             old_regime: RegimeState, 
+                             new_regime: RegimeState,
+                             transition: RegimeTransition) -> None:
+        """Handle regime change notification"""
+        if not REGIME_ENGINE_AVAILABLE:
+            return
+            
+        logger.info(f"🔄 Risk Manager adapting to regime change: "
+                   f"{old_regime.primary_regime.value} → {new_regime.primary_regime.value}")
+        
+        # Update current regime
+        self.current_regime = new_regime
+        
+        # Get risk multipliers from regime engine
+        if self.regime_engine:
+            self.regime_multipliers = self.regime_engine.get_risk_multipliers()
+            
+            # Apply regime-specific risk limits adjustments
+            self._apply_regime_risk_adjustments(new_regime)
+        
+        # Generate risk alert if needed
+        if new_regime.primary_regime in ['crisis', 'high_volatility']:
+            alert = RiskAlert(
+                alert_id=f"regime_change_{datetime.now().timestamp()}",
+                risk_level=RiskLevel.HIGH,
+                message=f"High-risk regime detected: {new_regime.primary_regime.value}",
+                recommended_action=RiskAction.REDUCE_POSITIONS,
+                affected_strategies=list(self.strategy_allocations.keys()),
+                affected_symbols=[],
+                timestamp=datetime.now()
+            )
+            self._generate_alert(alert)
+        
+        logger.info(f"✅ Risk parameters adapted: position_size={self.regime_multipliers['position_size']:.2f}x, "
+                   f"stop_loss={self.regime_multipliers['stop_loss']:.2f}x")
+    
+    def get_subscriber_id(self) -> str:
+        """Get unique subscriber identifier"""
+        return "risk_manager"
+    
+    def _apply_regime_risk_adjustments(self, regime: RegimeState) -> None:
+        """Apply regime-specific adjustments to risk limits"""
+        # Temporarily adjust risk limits based on regime
+        # These adjustments are multiplicative on top of base limits
+        
+        if regime.primary_regime.value == 'crisis':
+            # Crisis mode: Very conservative
+            self.risk_limits.max_position_size_pct *= 0.3
+            self.risk_limits.max_portfolio_drawdown *= 0.5
+            self.risk_limits.daily_loss_limit *= 0.3
+        elif regime.primary_regime.value == 'high_volatility':
+            # High volatility: Reduce exposures
+            self.risk_limits.max_position_size_pct *= 0.5
+            self.risk_limits.default_stop_loss_pct *= 1.5
+        elif regime.primary_regime.value == 'bull_trend':
+            # Bull trend: Slightly more aggressive
+            self.risk_limits.max_position_size_pct *= 1.2
+            self.risk_limits.max_portfolio_drawdown *= 1.1
     
     async def update_portfolio_state(self, portfolio_data: Dict[str, Any]):
         """Update portfolio state and calculate risk metrics"""

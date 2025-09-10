@@ -36,6 +36,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core_structure.config import TradingConfig, Environment, TradingMode
 from core_structure.engines import TradingSignal, SignalType, SignalStrength
+from core_structure.regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
 
 logger = logging.getLogger(__name__)
 
@@ -151,13 +152,14 @@ class StrategyInterface(Protocol):
         """Update strategy parameters dynamically"""
         ...
 
-class BaseStrategy(ABC):
+class BaseStrategy(IRegimeSubscriber):
     """
     Base strategy implementation with common functionality
     Consolidates functionality from all previous base classes
+    Now includes regime adaptation capabilities
     """
     
-    def __init__(self, strategy_id: str, config: Dict[str, Any]):
+    def __init__(self, strategy_id: str, config: Dict[str, Any], regime_engine: Optional[UnifiedRegimeEngine] = None):
         self._strategy_id = strategy_id
         self._config = config
         self._metrics = StrategyMetrics()
@@ -168,6 +170,15 @@ class BaseStrategy(ABC):
         # Performance tracking
         self._signal_history: List[TradingSignal] = []
         self._execution_times: List[float] = []
+        
+        # Regime integration
+        self._regime_engine = regime_engine
+        self._current_regime: Optional[RegimeState] = None
+        self._regime_adaptations: Dict[str, float] = {}
+        
+        # Subscribe to regime changes if engine provided
+        if self._regime_engine:
+            self._regime_engine.subscribe_to_regime_changes(self)
         
         logger.info(f"📈 Strategy initialized: {strategy_id}")
     
@@ -277,6 +288,57 @@ class BaseStrategy(ABC):
         """Set strategy status"""
         self._status = status
         logger.info(f"🔄 {self.strategy_id} status: {status.value}")
+    
+    # ================================================================================
+    # REGIME SUBSCRIBER INTERFACE IMPLEMENTATION
+    # ================================================================================
+    
+    async def on_regime_change(self, 
+                             old_regime: RegimeState, 
+                             new_regime: RegimeState,
+                             transition: RegimeTransition) -> None:
+        """Handle regime change notification"""
+        logger.info(f"🔄 {self.strategy_id} adapting to regime change: "
+                   f"{old_regime.primary_regime.value} → {new_regime.primary_regime.value}")
+        
+        # Update current regime
+        self._current_regime = new_regime
+        
+        # Get strategy-specific adjustments from regime engine
+        if self._regime_engine:
+            adjustments = self._regime_engine.get_strategy_adjustments(
+                self.strategy_type.value.lower()
+            )
+            self._regime_adaptations = adjustments
+            
+            # Apply adjustments to strategy parameters
+            self._apply_regime_adaptations(adjustments)
+        
+        # Log adaptation
+        logger.info(f"✅ {self.strategy_id} adapted to {new_regime.primary_regime.value} regime "
+                   f"(confidence: {new_regime.confidence:.2%})")
+    
+    def get_subscriber_id(self) -> str:
+        """Get unique subscriber identifier"""
+        return f"strategy_{self.strategy_id}"
+    
+    def _apply_regime_adaptations(self, adjustments: Dict[str, Any]) -> None:
+        """Apply regime-based adjustments to strategy parameters"""
+        # This method can be overridden by specific strategies
+        # Default implementation updates config with adjustments
+        for key, value in adjustments.items():
+            if key in self._config:
+                old_value = self._config[key]
+                # Apply multiplier if it's a numeric adjustment
+                if isinstance(value, (int, float)) and isinstance(old_value, (int, float)):
+                    if 'multiplier' in key:
+                        self._config[key] = old_value * value
+                    else:
+                        self._config[key] = old_value + value
+                else:
+                    self._config[key] = value
+                    
+                logger.debug(f"  Adjusted {key}: {old_value} → {self._config[key]}")
 
 # ================================================================================
 # STRATEGY IMPLEMENTATIONS
@@ -306,28 +368,41 @@ class MomentumStrategy(BaseStrategy):
         if len(data) < 50:  # Need sufficient data
             return []
         
+        # Apply regime adaptations to parameters
+        lookback_multiplier = self._regime_adaptations.get('lookback_multiplier', 1.0)
+        threshold_adjustment = self._regime_adaptations.get('threshold_adjustment', 0.0)
+        confidence_multiplier = self._regime_adaptations.get('confidence_multiplier', 1.0)
+        
+        # Adjusted lookback period
+        adjusted_lookback = int(20 * lookback_multiplier)
+        
         # Calculate momentum indicators
         rsi = self._calculate_rsi(data['close'], self._config.get('rsi_period', 14))
         macd_line, signal_line = self._calculate_macd(data['close'])
         
-        # Price momentum
-        price_change = (data['close'].iloc[-1] / data['close'].iloc[-20] - 1) * 100
+        # Price momentum with regime-adjusted lookback
+        price_change = (data['close'].iloc[-1] / data['close'].iloc[-adjusted_lookback] - 1) * 100
         
         # Volume confirmation
-        avg_volume = data['volume'].rolling(20).mean().iloc[-1]
+        avg_volume = data['volume'].rolling(adjusted_lookback).mean().iloc[-1]
         current_volume = data['volume'].iloc[-1]
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+        
+        # Adjusted thresholds based on regime
+        momentum_threshold = 2 + threshold_adjustment
         
         # Generate signals based on momentum conditions
         signals = []
         
-        # Long signal conditions
+        # Long signal conditions with regime-adjusted thresholds
         if (rsi < 70 and rsi > 50 and  # RSI in momentum zone
             macd_line > signal_line and  # MACD bullish
-            price_change > 2 and  # Positive price momentum
+            price_change > momentum_threshold and  # Positive price momentum (regime-adjusted)
             volume_ratio > 1.2):  # Volume confirmation
             
-            confidence = min(0.9, (price_change / 10) * volume_ratio * 0.1 + 0.5)
+            # Apply confidence multiplier from regime
+            base_confidence = min(0.9, (price_change / 10) * volume_ratio * 0.1 + 0.5)
+            confidence = base_confidence * confidence_multiplier
             
             signal = TradingSignal(
                 symbol=context.symbol,
@@ -598,9 +673,10 @@ class StrategyRegistry:
     Streamlined strategy registry - consolidates all registration functionality
     """
     
-    def __init__(self):
+    def __init__(self, regime_engine: Optional['UnifiedRegimeEngine'] = None):
         self._strategies: Dict[StrategyType, Type[BaseStrategy]] = {}
         self._instances: Dict[str, BaseStrategy] = {}
+        self.regime_engine = regime_engine
         self.logger = logging.getLogger(f"{__name__}.StrategyRegistry")
         
         # Register built-in strategies
@@ -629,12 +705,14 @@ class StrategyRegistry:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
         
         strategy_class = self._strategies[strategy_type]
-        strategy = strategy_class(strategy_id, config)
+        # Pass regime engine to strategy
+        strategy = strategy_class(strategy_id, config, self.regime_engine)
         
         # Store instance
         self._instances[strategy_id] = strategy
         
-        self.logger.info(f"🏭 Created strategy instance: {strategy_id}")
+        self.logger.info(f"🏭 Created strategy instance: {strategy_id} "
+                        f"{'with' if self.regime_engine else 'without'} regime engine")
         return strategy
     
     def get_strategy(self, strategy_id: str) -> Optional[BaseStrategy]:
@@ -659,12 +737,15 @@ class StrategyManager:
     Replaces UnifiedStrategyEngine, StrategyExecutionEngine, and registry systems
     """
     
-    def __init__(self, config: Optional[TradingConfig] = None):
+    def __init__(self, config: Optional[TradingConfig] = None, regime_engine: Optional['UnifiedRegimeEngine'] = None):
         self.config = config or TradingConfig()
         self.logger = logging.getLogger(f"{__name__}.StrategyManager")
         
-        # Initialize registry
-        self.registry = StrategyRegistry()
+        # Regime engine reference
+        self.regime_engine = regime_engine
+        
+        # Initialize registry with regime engine
+        self.registry = StrategyRegistry(regime_engine)
         
         # Active strategies
         self._active_strategies: Dict[str, BaseStrategy] = {}
@@ -745,6 +826,20 @@ class StrategyManager:
             results.append(result)
         
         return results
+    
+    def execute_strategy_with_data(self, strategy_id: str, symbol: str, market_data: Union[pd.DataFrame, Dict]) -> StrategyResult:
+        """Convenience method to execute strategy with raw market data (for testing/compatibility)"""
+        # Create StrategyContext from raw data
+        context = StrategyContext(
+            symbol=symbol,
+            market_data=market_data if isinstance(market_data, pd.DataFrame) else pd.DataFrame(market_data),
+            current_time=datetime.now(),
+            portfolio_state={},
+            risk_limits={},
+            strategy_config={}
+        )
+        
+        return self.execute_strategy(strategy_id, context)
     
     def get_strategy_metrics(self, strategy_id: str) -> Optional[StrategyMetrics]:
         """Get metrics for a specific strategy"""

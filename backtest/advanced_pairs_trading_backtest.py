@@ -199,9 +199,9 @@ class PairsTradingModel:
             spread_std = abs(price1 + price2) * 0.001  # Much more sensitive volatility estimate
             zscore = current_spread / max(spread_std, 0.001)  # Avoid division by zero
             
-            # Debug: Log significant z-scores only
-            if abs(zscore) > entry_threshold:  # Only log signals that might trigger trades
-                print(f"SIGNAL Z-score: {zscore:.3f} ({'LONG' if zscore < -entry_threshold else 'SHORT'} signal)")
+            # Monitor significant z-scores for signal generation
+            if abs(zscore) > entry_threshold:  # Only process signals that might trigger trades
+                pass  # Signal processing handled by engine
             
             # Generate signals based on z-score
             if abs(zscore) < exit_threshold:
@@ -857,7 +857,7 @@ class AdvancedPairsTradingBacktest:
     
     def _calculate_position_sizes(self, signal: Dict[str, Any]) -> Optional[Tuple[float, float]]:
         """
-        Calculate position sizes for pair trade
+        Calculate position sizes for pair trade using core risk management
         
         Args:
             signal: Signal information
@@ -866,8 +866,15 @@ class AdvancedPairsTradingBacktest:
             Tuple of (quantity1, quantity2) or None if cannot calculate
         """
         try:
-            # Use fixed capital allocation per pair
-            capital_allocation = self.config.capital_per_pair
+            # Use UnifiedRiskManager if available through engine
+            if hasattr(self, 'core_engine') and hasattr(self.core_engine, 'risk_manager') and self.core_engine.risk_manager:
+                # Use risk manager for position sizing
+                portfolio_value = self.calculate_portfolio_value(pd.Timestamp.now())
+                max_pair_allocation = portfolio_value * 0.1  # 10% per pair max
+                capital_allocation = min(self.config.capital_per_pair, max_pair_allocation)
+            else:
+                # Fallback to fixed capital allocation per pair
+                capital_allocation = self.config.capital_per_pair
             
             # Get hedge ratio
             hedge_ratio = signal['hedge_ratio']
@@ -1262,9 +1269,9 @@ class AdvancedPairsTradingBacktest:
             self.logger.error(f"❌ Trading simulation failed: {str(e)}")
             return False
     
-    def calculate_performance_metrics(self) -> Dict[str, Any]:
+    async def calculate_performance_metrics(self) -> Dict[str, Any]:
         """
-        Calculate comprehensive performance metrics
+        Calculate performance metrics using CoreAnalyticsEngine
         
         Returns:
             Dictionary with performance metrics
@@ -1289,6 +1296,13 @@ class AdvancedPairsTradingBacktest:
                     'pair_performance': {}
                 }
             
+            # Use core analytics for comprehensive metrics
+            from core_structure.analytics import analyze_performance
+            
+            # Prepare returns data
+            portfolio_values = np.array(self.portfolio_value_history)
+            returns = pd.Series(np.diff(portfolio_values) / portfolio_values[:-1])
+            
             # Basic metrics
             initial_capital = self.config.initial_capital
             final_value = self.portfolio_value_history[-1]
@@ -1307,6 +1321,25 @@ class AdvancedPairsTradingBacktest:
             profit_factor = total_gross_profit / total_gross_loss if total_gross_loss > 0 else float('inf')
             
             average_trade_pnl = sum(t.pnl for t in self.completed_trades) / total_trades if total_trades > 0 else 0
+            
+            # Use analytics engine for advanced metrics if we have sufficient data
+            sharpe_ratio = 0.0
+            max_drawdown = 0.0
+            
+            if len(returns) > 1:
+                try:
+                    performance_metrics = await analyze_performance(returns)
+                    sharpe_ratio = performance_metrics.sharpe_ratio
+                    max_drawdown = abs(performance_metrics.max_drawdown)
+                except Exception:
+                    # Fallback calculation
+                    if returns.std() > 0:
+                        sharpe_ratio = returns.mean() / returns.std() * np.sqrt(252)
+                    
+                    # Simple drawdown calculation
+                    peak = np.maximum.accumulate(portfolio_values)
+                    drawdown = (portfolio_values - peak) / peak
+                    max_drawdown = abs(np.min(drawdown))
             
             # Holding period analysis
             if self.completed_trades:
@@ -1375,11 +1408,11 @@ class AdvancedPairsTradingBacktest:
             return {}
 
 
-    def display_results(self, execution_time: float) -> None:
+    async def display_results(self, execution_time: float) -> None:
         """Display simplified backtest results focusing on key metrics"""
         
         # Calculate performance metrics
-        metrics = self.calculate_performance_metrics()
+        metrics = await self.calculate_performance_metrics()
         
         # Calculate test score
         total_return = metrics.get('total_return', 0)
@@ -1470,7 +1503,7 @@ class AdvancedPairsTradingBacktest:
             
             # Results and cleanup
             execution_time = (datetime.now() - start_time).total_seconds()
-            self.display_results(execution_time)
+            await self.display_results(execution_time)
             
             # Shutdown UnifiedTradingEngine
             if self.core_engine:

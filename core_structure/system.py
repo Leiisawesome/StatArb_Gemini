@@ -246,13 +246,54 @@ class UnifiedTradingSystem:
     def _initialize_core_components(self) -> None:
         """Initialize all integrated components"""
         
+        # Initialize regime engine first (Phase 5 - Centralized Regime Management)
+        try:
+            from core_structure.regime_engine import create_regime_engine, RegimeConfig
+            regime_config = RegimeConfig(
+                lookback_window=60,
+                update_frequency_seconds=60,
+                n_regimes=5,
+                use_hmm=True,
+                use_gmm=True
+            )
+            self.regime_engine = create_regime_engine(regime_config)
+            self.logger.info("🎯 Regime engine initialized")
+        except ImportError:
+            self.regime_engine = None
+            self.logger.warning("⚠️ Regime engine not available")
+        
         # Initialize streamlined engines (Phase 2)
         self.trading_engine = TradingEngine(self.config)
         self.signal_processor = SignalProcessor(self.config)
         self.execution_processor = ExecutionProcessor(self.config)
         
-        # Initialize streamlined strategies (Phase 3)
-        self.strategy_manager = StrategyManager(self.config)
+        # Initialize streamlined strategies (Phase 3) with regime engine
+        self.strategy_manager = StrategyManager(self.config, self.regime_engine)
+        
+        # Initialize portfolio management with regime engine
+        try:
+            # Use importlib for consistent loading
+            import importlib.util
+            import os
+            
+            portfolio_file = os.path.join(
+                os.path.dirname(__file__), 
+                'components', 'portfolio', 'portfolio_manager.py'
+            )
+            spec = importlib.util.spec_from_file_location('portfolio_module', portfolio_file)
+            portfolio_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(portfolio_module)
+            
+            PortfolioManager = portfolio_module.PortfolioManager
+            
+            self.portfolio_manager = PortfolioManager(
+                initial_capital=self.config.initial_capital,
+                regime_engine=self.regime_engine
+            )
+            self.logger.info("💼 Portfolio manager initialized with regime engine")
+        except Exception as e:
+            self.portfolio_manager = None
+            self.logger.warning(f"⚠️ Portfolio manager not available: {e}")
         
         # Initialize configuration manager (Phase 1)
         self.config_manager = ConfigManager()

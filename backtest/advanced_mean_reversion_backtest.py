@@ -125,42 +125,26 @@ class OrnsteinUhlenbeckConfig:
 
 
 @dataclass
-class MeanReversionRiskConfig:
-    """Advanced risk management configuration for mean reversion"""
-    max_position_size: float = 0.1      # Maximum position size (10% of portfolio)
-    volatility_lookback: int = 30       # Days for volatility calculation
-    volatility_multiplier: float = 2.0  # Stop-loss volatility multiplier
-    correlation_threshold: float = 0.7   # Minimum correlation for pairs
-    cointegration_pvalue: float = 0.05  # P-value threshold for cointegration
-    max_holding_period: int = 30        # Maximum days to hold position
-    profit_target_multiplier: float = 2.5  # Profit target as multiple of expected move
-    
-    # Regime-specific adjustments
-    regime_multipliers: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
-        'mean_reverting': {'stop': 1.5, 'target': 3.0, 'size': 1.0},
-        'trending': {'stop': 2.5, 'target': 1.5, 'size': 0.5},
-        'volatile': {'stop': 2.0, 'target': 2.0, 'size': 0.7},
-        'stable': {'stop': 1.2, 'target': 3.5, 'size': 1.2}
-    })
+# Risk management now handled by UnifiedRiskManager
 
 
 @dataclass
 class AdvancedSignalConfig:
     """Configuration for advanced mean reversion signals"""
-    # Z-score thresholds (enhanced exit logic)
+    # Fields with default_factory must come first
+    timeframes: List[str] = field(default_factory=lambda: ['5min', '15min', '1h', '4h'])
+    timeframe_weights: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.4, 0.3])
+    
+    # Z-score thresholds (all have simple defaults)
     entry_zscore: float = 1.5           # Z-score threshold for entry
     exit_zscore: float = 0.2            # Exit when approaching mean (more aggressive)
     extreme_zscore: float = 2.5         # Extreme deviation threshold
     profit_target_zscore: float = 0.1   # Take profit when very close to mean
     stop_loss_zscore: float = 3.0       # Stop loss for extreme moves against us
+    partial_exit_zscore: float = 0.5     # Partial exit threshold
     
     # Position management
     max_position_hold_periods: int = 120  # Max periods to hold a position (2 hours for 1min data)
-    partial_exit_zscore: float = 0.5     # Partial exit threshold
-    
-    # Multi-timeframe analysis
-    timeframes: List[str] = field(default_factory=lambda: ['5min', '15min', '1h', '4h'])
-    timeframe_weights: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.4, 0.3])
     
     # Signal confirmation requirements
     min_confirmations: int = 2          # Minimum timeframes confirming signal
@@ -184,8 +168,8 @@ class BacktestConfig:
     
     # Strategy configurations
     ou_config: OrnsteinUhlenbeckConfig = field(default_factory=OrnsteinUhlenbeckConfig)
-    risk_config: MeanReversionRiskConfig = field(default_factory=MeanReversionRiskConfig)
     signal_config: AdvancedSignalConfig = field(default_factory=AdvancedSignalConfig)
+    # Risk config now handled by UnifiedRiskManager
     
     # Performance tracking
     benchmark_symbol: str = "SPY"
@@ -463,6 +447,7 @@ class AdvancedMeanReversionBacktest:
         self.current_positions: Dict[str, float] = {}
         self.position_entry_info: Dict[str, Dict[str, Any]] = {}  # Track entry details
         self.performance_metrics: Dict[str, float] = {}
+        self.cash_balance: float = self.config.initial_capital  # Track running cash balance
         
         # Test metadata
         self.test_id = f"advanced_mean_reversion_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -533,7 +518,7 @@ class AdvancedMeanReversionBacktest:
                 'rsi_oversold': 30,
                 'ma_deviation_threshold': 0.05,
                 'confidence_threshold': 0.6,
-                'position_size': self.config.risk_config.max_position_size,
+                'position_size': 0.1,  # 10% default max position size
                 'stop_loss_pct': 0.02,
                 'take_profit_pct': 0.04,
                 'volume_threshold': 1.2,
@@ -721,7 +706,7 @@ class AdvancedMeanReversionBacktest:
             await self._execute_trading_simulation()
             
             # Calculate final performance metrics
-            self._calculate_performance_metrics()
+            await self._calculate_performance_metrics()
             
             self.end_time = time.time()
             execution_time = self.end_time - self.start_time
@@ -1173,8 +1158,15 @@ class AdvancedMeanReversionBacktest:
                     continue
                 
                 # Apply regime-based adjustments
-                regime = self._detect_market_regime(market_data)
-                regime_multiplier = self.config.risk_config.regime_multipliers.get(regime, {})
+                regime = await self._detect_market_regime(symbol, market_data)
+                # Use default regime multipliers since risk config removed
+                regime_multipliers = {
+                    'mean_reverting': {'size': 1.0},
+                    'trending': {'size': 0.5},
+                    'volatile': {'size': 0.7},
+                    'stable': {'size': 1.2}
+                }
+                regime_multiplier = regime_multipliers.get(regime, {})
                 position_size *= regime_multiplier.get('size', 1.0)
                 
                 # Execute trade
@@ -1185,12 +1177,14 @@ class AdvancedMeanReversionBacktest:
                 if trade_result:
                     self.trades.append(trade_result)
                     
-                    # Log trade
+                    # Log successful trade
                     direction = "📈" if signal_type in ['BUY'] else "📉" if signal_type in ['SELL'] else "🔚"
                     logger.info(f"{direction} Trade #{len(self.trades)}: {signal_type} {position_size:.2f} {symbol} @ ${current_price:.2f}")
                     
                     if 'z_score' in signal:
                         logger.info(f"   📊 Z-Score: {signal['z_score']:.2f}, Confidence: {confidence:.2f}, Regime: {regime}")
+                else:
+                    logger.warning(f"⚠️ Trade execution returned None for {symbol} {signal_type}")
             
         except Exception as e:
             logger.error(f"❌ Trade execution failed: {str(e)}")
@@ -1198,9 +1192,24 @@ class AdvancedMeanReversionBacktest:
     def _calculate_position_size(self, symbol: str, signal_type: str, confidence: float, current_price: float) -> float:
         """Calculate position size based on risk management rules"""
         try:
-            # Base position size
-            portfolio_value = sum(self.portfolio_value_history[-1:]) or self.config.initial_capital
-            max_position_value = portfolio_value * self.config.risk_config.max_position_size
+            # Use UnifiedRiskManager if available
+            if hasattr(self.core_engine, 'risk_manager') and self.core_engine.risk_manager:
+                risk_manager = self.core_engine.risk_manager
+                portfolio_value = sum(self.portfolio_value_history[-1:]) or self.config.initial_capital
+                
+                # Get max position size from risk manager
+                max_position_pct = risk_manager.risk_limits.max_position_size_pct
+                
+                # Apply regime multipliers if available
+                if hasattr(risk_manager, 'regime_multipliers'):
+                    position_multiplier = risk_manager.regime_multipliers.get('position_size', 1.0)
+                    max_position_pct *= position_multiplier
+                
+                max_position_value = portfolio_value * max_position_pct
+            else:
+                # Fallback calculation
+                portfolio_value = sum(self.portfolio_value_history[-1:]) or self.config.initial_capital
+                max_position_value = portfolio_value * 0.1  # 10% default
             
             # Adjust for confidence
             confidence_adjusted_value = max_position_value * confidence
@@ -1219,11 +1228,22 @@ class AdvancedMeanReversionBacktest:
             logger.error(f"❌ Position size calculation failed: {str(e)}")
             return 0.0
     
-    def _detect_market_regime(self, market_data: pd.Series) -> str:
-        """Detect current market regime for risk adjustment"""
+    async def _detect_market_regime(self, symbol: str, market_data: pd.Series) -> str:
+        """Detect current market regime using UnifiedRegimeEngine"""
         try:
-            # Simple regime detection based on volatility and trend
-            # In practice, this would use the regime detector from core_structure
+            # Use centralized regime engine if available
+            if hasattr(self.core_engine, 'regime_engine') and self.core_engine.regime_engine:
+                # Convert Series to DataFrame format expected by regime engine
+                df_data = pd.DataFrame({
+                    'close': market_data,
+                    'volume': [1000000] * len(market_data),  # Mock volume for backtest
+                    'timestamp': pd.date_range(start=datetime.now() - timedelta(minutes=len(market_data)), 
+                                             periods=len(market_data), freq='1min')
+                })
+                regime_state = await self.core_engine.regime_engine.update_regime(symbol, df_data)
+                return regime_state.primary_regime.value
+            
+            # Fallback to simple regime detection
             
             # Get volatility proxy
             symbol = self.config.symbols[0]
@@ -1302,6 +1322,10 @@ class AdvancedMeanReversionBacktest:
                 elif old_position < 0:  # Closing short position
                     pnl = position_change * (self._get_average_entry_price(symbol) - execution_price)
             
+            # Update cash balance with realized P&L
+            realized_pnl = pnl - total_cost  # Include costs in P&L
+            self.cash_balance += realized_pnl
+            
             # Create trade record
             trade_record = {
                 'trade_id': len(self.trades) + 1,
@@ -1313,10 +1337,10 @@ class AdvancedMeanReversionBacktest:
                 'transaction_cost': total_cost,
                 'old_position': old_position,
                 'new_position': new_position,
-                'pnl': pnl - total_cost,  # Include costs in P&L
+                'pnl': realized_pnl,
                 'confidence': signal.get('confidence', 0),
                 'z_score': signal.get('z_score', 0),
-                'regime': self._detect_market_regime(pd.Series()),
+                'regime': 'unknown',  # Simplified for Phase 1
                 'exit_reason': signal.get('exit_reason'),
                 'position_age': signal.get('position_age', 0),
                 'entry_zscore': self.position_entry_info.get(symbol, {}).get('entry_zscore') if symbol in self.position_entry_info else None,
@@ -1342,12 +1366,8 @@ class AdvancedMeanReversionBacktest:
     def _calculate_portfolio_value(self, market_data: pd.Series) -> float:
         """Calculate current portfolio value using correct accounting principles"""
         try:
-            # Start with initial capital
-            cash_value = self.config.initial_capital
-            
-            # Add all realized P&L from trades (this already includes transaction costs)
-            for trade in self.trades:
-                cash_value += trade.get('pnl', 0)
+            # Use running cash balance (updated with each trade)
+            cash_value = self.cash_balance
             
             # Add current position values at current market prices
             position_value = 0.0
@@ -1391,18 +1411,19 @@ class AdvancedMeanReversionBacktest:
             logger.error(f"❌ Unrealized P&L calculation failed: {str(e)}")
             return 0.0
     
-    def _calculate_performance_metrics(self):
-        """Calculate comprehensive performance metrics"""
+    async def _calculate_performance_metrics(self):
+        """Calculate performance metrics using CoreAnalyticsEngine"""
         try:
-            # Always set initial capital and final value
+            # Use core analytics for performance calculation
+            from core_structure.analytics import analyze_performance
+            
             initial_value = self.config.initial_capital
-            final_value = self.portfolio_value_history[-1] if self.portfolio_value_history else initial_value
+            final_value = self.portfolio_value_history[-1] if self.portfolio_value_history else self.cash_balance
             
-            # Calculate total realized P&L for verification
-            total_realized_pnl = sum(trade.get('pnl', 0) for trade in self.trades)
+            # Performance calculation
             
-            
-            if not self.portfolio_value_history or len(self.trades) == 0:
+            if len(self.trades) == 0:
+                logger.info("⚠️ No trades found for performance calculation")
                 self.performance_metrics = {
                     'initial_capital': initial_value,
                     'final_value': final_value,
@@ -1415,50 +1436,62 @@ class AdvancedMeanReversionBacktest:
                 }
                 return
             
-            # Portfolio performance
-            initial_value = self.config.initial_capital
-            final_value = self.portfolio_value_history[-1]
-            total_return = (final_value - initial_value) / initial_value
-            
-            # Calculate returns series
-            portfolio_values = np.array(self.portfolio_value_history)
-            returns = np.diff(portfolio_values) / portfolio_values[:-1]
-            
-            # Sharpe ratio (assuming daily data, annualized)
-            if len(returns) > 1 and np.std(returns) > 0:
-                sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252)
+            # Calculate total return using corrected final value
+            # Include unrealized P&L for final portfolio value
+            if self.portfolio_value_history:
+                # Use the last calculated portfolio value
+                final_portfolio_value = self.portfolio_value_history[-1]
             else:
-                sharpe_ratio = 0.0
+                # Fallback: calculate from cash balance and current positions
+                unrealized_value = sum(
+                    pos * 0  # No current market data available, use 0 for unrealized
+                    for sym, pos in self.current_positions.items()
+                )
+                final_portfolio_value = self.cash_balance + unrealized_value
             
-            # Maximum drawdown
-            peak = np.maximum.accumulate(portfolio_values)
-            drawdown = (portfolio_values - peak) / peak
-            max_drawdown = np.min(drawdown)
+            total_return = (final_portfolio_value - initial_value) / initial_value
+            win_rate = len([t for t in self.trades if t['pnl'] > 0]) / len(self.trades) if self.trades else 0
             
-            # Trade statistics
+            # Calculate profit factor
             profitable_trades = [t for t in self.trades if t['pnl'] > 0]
             losing_trades = [t for t in self.trades if t['pnl'] < 0]
-            
-            win_rate = len(profitable_trades) / len(self.trades) if self.trades else 0
-            
             total_profit = sum(t['pnl'] for t in profitable_trades)
             total_loss = abs(sum(t['pnl'] for t in losing_trades))
             profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
             
+            # Prepare data for analytics engine if we have sufficient data
+            sharpe_ratio = 0.0
+            max_drawdown = 0.0
+            
+            if len(self.portfolio_value_history) > 1:
+                portfolio_values = np.array(self.portfolio_value_history)
+                returns = pd.Series(np.diff(portfolio_values) / portfolio_values[:-1])
+                
+                if len(returns) > 1:
+                    # Use core analytics engine
+                    try:
+                        performance_metrics = await analyze_performance(returns)
+                        sharpe_ratio = performance_metrics.sharpe_ratio if hasattr(performance_metrics, 'sharpe_ratio') else 0.0
+                        max_drawdown = performance_metrics.max_drawdown if hasattr(performance_metrics, 'max_drawdown') else 0.0
+                    except Exception as e:
+                        logger.warning(f"⚠️ Analytics engine failed: {e}")
+            
             # OU model performance
             ou_metrics = {}
-            if self.ou_model.is_model_valid():
+            if self.ou_model and hasattr(self.ou_model, 'is_model_valid') and self.ou_model.is_model_valid():
                 ou_metrics = {
-                    'ou_theta': self.ou_model.theta,
-                    'ou_mu': self.ou_model.mu,
-                    'ou_sigma': self.ou_model.sigma,
-                    'ou_half_life': self.ou_model.half_life,
-                    'ou_r_squared': self.ou_model.fit_quality['r_squared']
+                    'ou_theta': getattr(self.ou_model, 'theta', 0),
+                    'ou_mu': getattr(self.ou_model, 'mu', 0),
+                    'ou_sigma': getattr(self.ou_model, 'sigma', 0),
+                    'ou_half_life': getattr(self.ou_model, 'half_life', 0),
+                    'ou_r_squared': getattr(self.ou_model, 'fit_quality', {}).get('r_squared', 0)
                 }
+            
+            # Performance calculation complete
             
             self.performance_metrics = {
                 'initial_capital': initial_value,
-                'final_value': final_value,
+                'final_value': final_portfolio_value,
                 'total_return': total_return,
                 'sharpe_ratio': sharpe_ratio,
                 'max_drawdown': max_drawdown,
@@ -1610,7 +1643,7 @@ async def main():
         logger.info(f"  • Data Frequency: {config.data_frequency}")
         logger.info(f"  • OU Lookback Window: {config.ou_config.lookback_window} periods")
         logger.info(f"  • Entry Z-Score Threshold: ±{config.signal_config.entry_zscore}")
-        logger.info(f"  • Max Position Size: {config.risk_config.max_position_size*100:.1f}%")
+        logger.info(f"  • Max Position Size: 10.0%")  # Default since risk config removed
         logger.info("")
         
         # Initialize and run backtest

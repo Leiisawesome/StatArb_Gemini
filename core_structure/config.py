@@ -438,9 +438,10 @@ class ConfigManager:
         
         class RiskConfigCompat:
             def __init__(self, config: TradingConfig):
-                self.max_position_size = config.risk_settings.max_position_size
-                self.stop_loss_pct = config.risk_settings.stop_loss_pct
-                self.max_drawdown_pct = config.risk_settings.max_drawdown_pct
+                # Access risk settings directly from TradingConfig
+                self.max_position_size = config.max_position_size
+                self.stop_loss_pct = 0.02  # Default stop loss
+                self.max_drawdown_pct = config.max_daily_loss
                 
             def __dict__(self):
                 return {

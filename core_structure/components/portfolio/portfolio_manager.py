@@ -14,6 +14,32 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Import regime engine for integration
+try:
+    # Try different import paths
+    try:
+        from ...regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
+    except ImportError:
+        # Fallback to absolute import
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        from core_structure.regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
+    
+    REGIME_ENGINE_AVAILABLE = True
+    logger.info("✅ Regime engine imports successful")
+except ImportError as e:
+    REGIME_ENGINE_AVAILABLE = False
+    IRegimeSubscriber = None
+    logger.warning(f"⚠️ Regime engine import failed: {e}")
+    # Define dummy classes for type hints
+    class RegimeState:
+        pass
+    class RegimeTransition:
+        pass
+    class UnifiedRegimeEngine:
+        pass
+
 @dataclass
 class PositionMetrics:
     """Position-level metrics"""
@@ -295,15 +321,31 @@ class PnLTracker:
         sortino_ratio = excess_returns.mean() / downside_returns.std() * np.sqrt(252)
         return sortino_ratio
 
-class PortfolioManager:
-    """Comprehensive portfolio management system"""
+class PortfolioManager(IRegimeSubscriber if REGIME_ENGINE_AVAILABLE else object):
+    """Comprehensive portfolio management system with regime awareness"""
     
-    def __init__(self, initial_capital: float = 100000):
+    def __init__(self, initial_capital: float = 100000, regime_engine: Optional[UnifiedRegimeEngine] = None):
         self.initial_capital = initial_capital
         self.available_capital = initial_capital
         self.positions = {}
         self.portfolio_callbacks = []
         self.rebalancing_callbacks = []
+        
+        # Regime integration
+        self.regime_engine = regime_engine
+        self.current_regime: Optional[RegimeState] = None
+        self.regime_allocations: Dict[str, float] = {
+            'momentum': 0.33,
+            'mean_reversion': 0.33, 
+            'pairs_trading': 0.34
+        }
+        
+        # Subscribe to regime changes if engine provided
+        if self.regime_engine and REGIME_ENGINE_AVAILABLE:
+            self.regime_engine.subscribe_to_regime_changes(self)
+            logger.info(f"📋 Portfolio manager subscribed to regime engine")
+        else:
+            logger.warning(f"📋 Portfolio manager NOT subscribed: regime_engine={self.regime_engine is not None}, available={REGIME_ENGINE_AVAILABLE}")
         
         # Portfolio tracking
         self.total_market_value = 0.0
@@ -320,7 +362,133 @@ class PortfolioManager:
         self.max_drawdown = 0.0
         self.current_drawdown = 0.0
         
-        logger.info(f"Initialized PortfolioManager with ${initial_capital:,.2f} capital")
+        logger.info(f"Initialized PortfolioManager with ${initial_capital:,.2f} capital "
+                   f"{'with' if self.regime_engine else 'without'} regime engine")
+    
+    # ================================================================================
+    # REGIME SUBSCRIBER INTERFACE IMPLEMENTATION
+    # ================================================================================
+    
+    async def on_regime_change(self, 
+                             old_regime: RegimeState, 
+                             new_regime: RegimeState,
+                             transition: RegimeTransition) -> None:
+        """Handle regime change notification for portfolio rebalancing"""
+        if not REGIME_ENGINE_AVAILABLE:
+            return
+            
+        logger.info(f"📊 Portfolio adapting to regime change: "
+                   f"{old_regime.primary_regime.value} → {new_regime.primary_regime.value}")
+        
+        # Update current regime
+        self.current_regime = new_regime
+        
+        # Get regime-based portfolio constraints
+        if self.regime_engine:
+            portfolio_constraints = self.regime_engine.get_portfolio_constraints()
+            self._apply_regime_portfolio_adjustments(new_regime, portfolio_constraints)
+        
+        # Trigger rebalancing if significant regime change
+        if self._should_rebalance_for_regime(old_regime, new_regime):
+            await self._regime_based_rebalancing(new_regime)
+        
+        logger.info(f"✅ Portfolio adapted to {new_regime.primary_regime.value} regime "
+                   f"(confidence: {new_regime.confidence:.2%})")
+    
+    def get_subscriber_id(self) -> str:
+        """Get unique subscriber identifier"""
+        return "portfolio_manager"
+    
+    def _apply_regime_portfolio_adjustments(self, regime: RegimeState, constraints: Dict[str, Any]) -> None:
+        """Apply regime-specific portfolio adjustments"""
+        # Update strategy allocations based on regime
+        regime_type = regime.primary_regime.value
+        
+        if regime_type == 'bull_trend':
+            # Favor momentum in bull markets
+            self.regime_allocations = {
+                'momentum': 0.5,
+                'mean_reversion': 0.2,
+                'pairs_trading': 0.3
+            }
+        elif regime_type == 'bear_trend':
+            # Favor mean reversion and pairs in bear markets
+            self.regime_allocations = {
+                'momentum': 0.2,
+                'mean_reversion': 0.4,
+                'pairs_trading': 0.4
+            }
+        elif regime_type == 'high_volatility':
+            # Conservative allocation in high vol
+            self.regime_allocations = {
+                'momentum': 0.3,
+                'mean_reversion': 0.3,
+                'pairs_trading': 0.4
+            }
+        elif regime_type == 'crisis':
+            # Very conservative in crisis
+            self.regime_allocations = {
+                'momentum': 0.1,
+                'mean_reversion': 0.3,
+                'pairs_trading': 0.6
+            }
+        else:  # sideways, unknown, etc.
+            # Balanced allocation
+            self.regime_allocations = {
+                'momentum': 0.33,
+                'mean_reversion': 0.33,
+                'pairs_trading': 0.34
+            }
+        
+        logger.info(f"📈 Updated strategy allocations for {regime_type}:")
+        for strategy, allocation in self.regime_allocations.items():
+            logger.info(f"   {strategy}: {allocation:.1%}")
+    
+    def _should_rebalance_for_regime(self, old_regime: RegimeState, new_regime: RegimeState) -> bool:
+        """Determine if regime change warrants portfolio rebalancing"""
+        # Rebalance if regime type changed
+        if old_regime.primary_regime != new_regime.primary_regime:
+            return True
+        
+        # Rebalance if confidence changed significantly
+        confidence_change = abs(new_regime.confidence - old_regime.confidence)
+        if confidence_change > 0.2:  # 20% confidence change
+            return True
+        
+        return False
+    
+    async def _regime_based_rebalancing(self, regime: RegimeState) -> None:
+        """Perform regime-based portfolio rebalancing"""
+        try:
+            # Calculate target allocations based on regime
+            total_value = self.total_market_value + self.available_capital
+            
+            # Apply regime-based position sizing
+            regime_multiplier = 1.0
+            if regime.primary_regime.value == 'crisis':
+                regime_multiplier = 0.3  # Reduce positions in crisis
+            elif regime.primary_regime.value == 'high_volatility':
+                regime_multiplier = 0.6  # Reduce positions in high vol
+            elif regime.primary_regime.value == 'bull_trend':
+                regime_multiplier = 1.2  # Increase positions in bull market
+            
+            # Log rebalancing decision
+            logger.info(f"🔄 Regime-based rebalancing: {regime.primary_regime.value} "
+                       f"(multiplier: {regime_multiplier:.1f}x)")
+            
+            # Trigger rebalancing callbacks
+            for callback in self.rebalancing_callbacks:
+                try:
+                    await callback(regime, self.regime_allocations, regime_multiplier)
+                except Exception as e:
+                    logger.error(f"Error in rebalancing callback: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in regime-based rebalancing: {e}")
+    
+    def get_regime_allocations(self) -> Dict[str, float]:
+        """Get current regime-based strategy allocations"""
+        return self.regime_allocations.copy()
     
     def add_portfolio_callback(self, callback: Callable):
         """Add callback for portfolio events"""

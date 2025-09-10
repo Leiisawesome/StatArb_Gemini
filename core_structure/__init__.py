@@ -49,6 +49,41 @@ try:
     OptimizationManager = optimization_module.OptimizationManager
     OptimizationLevel = optimization_module.OptimizationLevel
     
+    # Import regime engine
+    regime_file = os.path.join(os.path.dirname(__file__), 'regime_engine.py')
+    spec = importlib.util.spec_from_file_location('regime_module', regime_file)
+    regime_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(regime_module)
+    
+    # Regime engine exports
+    UnifiedRegimeEngine = regime_module.UnifiedRegimeEngine
+    RegimeType = regime_module.RegimeType
+    RegimeState = regime_module.RegimeState
+    RegimeConfidence = regime_module.RegimeConfidence
+    RegimeAdaptations = regime_module.RegimeAdaptations
+    RegimeConfig = regime_module.RegimeConfig
+    create_regime_engine = regime_module.create_regime_engine
+    
+    # Import regime monitoring (Phase 4)
+    try:
+        monitoring_file = os.path.join(os.path.dirname(__file__), 'regime_monitoring.py')
+        spec = importlib.util.spec_from_file_location('monitoring_module', monitoring_file)
+        monitoring_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(monitoring_module)
+        
+        # Monitoring exports
+        RegimeMonitor = monitoring_module.RegimeMonitor
+        ABTestConfig = monitoring_module.ABTestConfig
+        create_regime_monitor = monitoring_module.create_regime_monitor
+        create_dashboard_provider = monitoring_module.create_dashboard_provider
+        MONITORING_AVAILABLE = True
+    except Exception as e:
+        MONITORING_AVAILABLE = False
+        RegimeMonitor = None
+        ABTestConfig = None
+        create_regime_monitor = None
+        create_dashboard_provider = None
+    
     ULTIMATE_SYSTEM_AVAILABLE = True
     
 except Exception as e:
@@ -60,9 +95,13 @@ except Exception as e:
         pass
     def create_unified_trading_system():
         return UnifiedTradingSystem()
-    def create_production_trading_system():
+    def create_production_trading_system(config=None):
+        if config:
+            return UnifiedTradingSystem(config)
         return UnifiedTradingSystem()
-    def create_research_trading_system():
+    def create_research_trading_system(config=None):
+        if config:
+            return UnifiedTradingSystem(config)
         return UnifiedTradingSystem()
     class OptimizationManager:
         pass
@@ -109,6 +148,21 @@ __all__ = [
     'create_research_trading_system',
     'OptimizationManager',
     'OptimizationLevel',
+    
+    # REGIME ENGINE (Centralized Regime Management)
+    'UnifiedRegimeEngine',
+    'RegimeType',
+    'RegimeState',
+    'RegimeConfidence',
+    'RegimeAdaptations',
+    'RegimeConfig',
+    'create_regime_engine',
+    
+    # REGIME MONITORING (Production Features)
+    'RegimeMonitor',
+    'ABTestConfig',
+    'create_regime_monitor',
+    'create_dashboard_provider',
     
     # BACKWARD COMPATIBILITY (Legacy Support)
     'create_production_engine',

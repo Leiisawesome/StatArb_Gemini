@@ -39,8 +39,8 @@ try:
     from ..orchestration.multi_strategy_orchestrator import (
         MultiStrategyOrchestrator, OrchestrationSession
     )
-    from ..components.portfolio.regime_aware_portfolio_manager import (
-        RegimeAwarePortfolioManager, RegimePortfolioState
+    from ..components.portfolio.portfolio_manager import (
+        PortfolioManager, PortfolioMetrics
     )
     PHASE_INTEGRATION_AVAILABLE = True
 except ImportError:
@@ -180,7 +180,7 @@ class RegimeAnalyticsEngine:
     
     def integrate_phase_systems(self, 
                                regime_system: Optional[ProfessionalRegimeSystem] = None,
-                               portfolio_manager: Optional[RegimeAwarePortfolioManager] = None,
+                               portfolio_manager: Optional[PortfolioManager] = None,
                                orchestrator: Optional[MultiStrategyOrchestrator] = None):
         """Integrate with Phase 1 & 2 systems"""
         
@@ -708,7 +708,7 @@ def create_regime_analytics_engine(
     lookback_days: int = 30,
     min_regime_duration: int = 5,
     regime_system: Optional[ProfessionalRegimeSystem] = None,
-    portfolio_manager: Optional[RegimeAwarePortfolioManager] = None,
+    portfolio_manager: Optional[PortfolioManager] = None,
     orchestrator: Optional[MultiStrategyOrchestrator] = None
 ) -> RegimeAnalyticsEngine:
     """
