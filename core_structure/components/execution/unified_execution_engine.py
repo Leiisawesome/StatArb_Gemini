@@ -356,13 +356,13 @@ class UnifiedExecutionEngine:
             logger.info(f"🎯 Executing order: {request.side} {request.quantity} {request.symbol} "
                        f"({request.order_type}) - Mode: {self.mode.value}")
             
-            # Add to pending executions
-            self.pending_executions[request.request_id] = request
-            
             # Step 1: Pre-execution validation
             validation_result = await self._validate_execution_request(request)
             if not validation_result[0]:
                 return self._create_rejected_result(request, validation_result[1])
+            
+            # Add to pending executions after validation
+            self.pending_executions[request.request_id] = request
             
             # Step 2: Add realistic execution delay
             execution_delay = await self.latency_simulator.add_execution_delay(request)
@@ -464,7 +464,10 @@ class UnifiedExecutionEngine:
         
         # Calculate costs
         current_price = self.current_prices[request.symbol]
-        slippage_bps = abs(execution_price - current_price) / current_price * 10000
+        if current_price == 0:
+            slippage_bps = 0.0  # No slippage calculation possible with zero price
+        else:
+            slippage_bps = abs(execution_price - current_price) / current_price * 10000
         
         # Commission (simplified model)
         commission = max(1.0, request.quantity * 0.005)  # $0.005 per share, min $1
@@ -474,7 +477,10 @@ class UnifiedExecutionEngine:
         market_impact_bps = min(order_value / 100000 * 2.0, 10.0)  # Max 10bps
         
         # Total cost
-        total_cost_bps = slippage_bps + market_impact_bps + (commission / order_value * 10000)
+        if order_value == 0:
+            total_cost_bps = slippage_bps + market_impact_bps  # Skip commission calculation
+        else:
+            total_cost_bps = slippage_bps + market_impact_bps + (commission / order_value * 10000)
         
         # Price improvement (sometimes we get better prices)
         price_improvement_bps = 0.0
@@ -508,7 +514,10 @@ class UnifiedExecutionEngine:
         
         # Similar to backtesting but with different cost assumptions
         current_price = self.current_prices[request.symbol]
-        slippage_bps = abs(execution_price - current_price) / current_price * 10000
+        if current_price == 0:
+            slippage_bps = 0.0  # No slippage calculation possible with zero price
+        else:
+            slippage_bps = abs(execution_price - current_price) / current_price * 10000
         
         # Paper trading commission (broker-specific)
         commission = 0.0  # Many brokers offer commission-free paper trading

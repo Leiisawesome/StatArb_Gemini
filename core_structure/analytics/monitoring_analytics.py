@@ -32,10 +32,14 @@ import json
 import warnings
 
 # ML libraries for anomaly detection and prediction
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+try:
+    from sklearn.ensemble import IsolationForest
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LinearRegression
+    from sklearn.metrics import mean_squared_error
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -154,13 +158,18 @@ class MonitoringAnalyticsEngine:
         self.predictions: deque = deque(maxlen=100)
         self.monitoring_data: deque = deque(maxlen=1000)
         
-        # ML Models
-        self.anomaly_detector = IsolationForest(
-            contamination=anomaly_threshold,
-            random_state=42
-        )
-        self.prediction_model = LinearRegression()
-        self.scaler = StandardScaler()
+        # ML Models (if available)
+        if HAS_SKLEARN:
+            self.anomaly_detector = IsolationForest(
+                contamination=anomaly_threshold,
+                random_state=42
+            )
+            self.prediction_model = LinearRegression()
+            self.scaler = StandardScaler()
+        else:
+            self.anomaly_detector = None
+            self.prediction_model = None
+            self.scaler = None
         
         # Monitoring state
         self.status = MonitoringStatus.ACTIVE
@@ -256,6 +265,7 @@ class MonitoringAnalyticsEngine:
         for alert in self.alerts:
             if alert.id == alert_id:
                 alert.acknowledged = True
+                self._update_dashboard_alerts()  # Update dashboard after acknowledging
                 logger.info(f"Alert acknowledged: {alert_id}")
                 return True
         return False
@@ -265,6 +275,7 @@ class MonitoringAnalyticsEngine:
         for alert in self.alerts:
             if alert.id == alert_id:
                 alert.resolved = True
+                self._update_dashboard_alerts()  # Update dashboard after resolving
                 logger.info(f"Alert resolved: {alert_id}")
                 return True
         return False

@@ -31,14 +31,23 @@ from abc import ABC, abstractmethod
 import warnings
 
 # ML and statistical libraries
-from sklearn.ensemble import RandomForestRegressor, IsolationForest
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score
-from sklearn.decomposition import PCA, FactorAnalysis
-from scipy import stats
-from scipy.optimize import minimize
-import joblib
+try:
+    from sklearn.ensemble import RandomForestRegressor, IsolationForest
+    from sklearn.linear_model import LinearRegression, Ridge
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import r2_score
+    from sklearn.decomposition import PCA, FactorAnalysis
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+try:
+    from scipy import stats
+    from scipy.optimize import minimize
+    import joblib
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 
 # Optional statistical libraries
 try:
@@ -193,18 +202,29 @@ class CoreAnalyticsEngine:
         self.execution_history: deque = deque(maxlen=1000)
         self.attribution_history: deque = deque(maxlen=100)
         
-        # ML Models (if enabled)
-        if self.enable_ml:
+        # ML Models (if enabled and available)
+        if self.enable_ml and HAS_SKLEARN:
             self.performance_model = RandomForestRegressor(n_estimators=100, random_state=42)
             self.risk_model = RandomForestRegressor(n_estimators=50, random_state=42)
             self.anomaly_model = IsolationForest(contamination=0.1, random_state=42)
             self.scaler = StandardScaler()
             self.model_trained = False
+        else:
+            self.performance_model = None
+            self.risk_model = None
+            self.anomaly_model = None
+            self.scaler = None
+            self.model_trained = False
         
-        # Attribution models
-        self.linear_model = LinearRegression()
-        self.ridge_model = Ridge(alpha=1.0)
-        self.factor_model = FactorAnalysis(n_components=5, random_state=42)
+        # Attribution models (if available)
+        if HAS_SKLEARN:
+            self.linear_model = LinearRegression()
+            self.ridge_model = Ridge(alpha=1.0)
+            self.factor_model = FactorAnalysis(n_components=5, random_state=42)
+        else:
+            self.linear_model = None
+            self.ridge_model = None
+            self.factor_model = None
         
         # State management
         self.is_analyzing = False
