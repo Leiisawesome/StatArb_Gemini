@@ -5,13 +5,7 @@ Research Analytics - Consolidated Research, Backtesting, and Insights
 
 Consolidates research functionality from multiple modules:
 - ResearchEngine (from research_platform.py)
-- BacktestEng            # Execute backtest based on mode
-            if mode == BacktestMode.VECTORIZED:
-                result = asyncio.run(self._run_vectorized_backtest(signals, data, capital, strategy_name, params, mode))
-            elif mode == BacktestMode.EVENT_DRIVEN:
-                result = asyncio.run(self._run_vectorized_backtest(signals, data, capital, strategy_name, params, mode))
-            else:  # MONTE_CARLO
-                result = asyncio.run(self._run_vectorized_backtest(signals, data, capital, strategy_name, params, mode))om research_platform.py)
+- BacktestEngine (from research_platform.py)
 - StrategyDeveloper (from research_platform.py)
 - RegimeDetector (from regime_detector.py)
 - InsightsEngine (from ai_insights.py)
@@ -19,12 +13,7 @@ Consolidates research functionality from multiple modules:
 - ReportGenerator (from reporting_engine.py)
 
 This module provides comprehensive research tools, backtesting capabilities,
-AI-powe                # Update best result
-                is_maximizing = optimization_metric in ['sharpe_ratio', 'total_return', 'win_rate']
-                if (is_maximizing and metric_value > best_metric) or (not is_maximizing and metric_value < best_metric):
-                    best_metric = metric_value
-                    best_result = result
-                    best_params = param_dictsights, and advanced visualization for strategy development.
+AI-powered insights, and advanced visualization for strategy development.
 
 Author: Professional Trading System Architecture
 Version: 1.0.0 (Consolidated)
@@ -45,21 +34,12 @@ import warnings
 import json
 
 # ML and statistical libraries
-try:
-    from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-    from sklearn.linear_model import LinearRegression
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import accuracy_score, precision_score, recall_score
-    from sklearn.cluster import KMeans
-    HAS_SKLEARN = True
-except ImportError:
-    HAS_SKLEARN = False
-
-try:
-    from scipy import stats
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.cluster import KMeans
+from scipy import stats
 
 # Optional visualization libraries
 try:
@@ -209,17 +189,12 @@ class ResearchAnalyticsEngine:
         self.insights_history: deque = deque(maxlen=500)
         self.research_cache: Dict[str, Any] = {}
         
-        # ML Models (if enabled and available)
-        if self.enable_ai_insights and HAS_SKLEARN:
+        # ML Models
+        if self.enable_ai_insights:
             self.pattern_classifier = RandomForestClassifier(n_estimators=100, random_state=42)
             self.performance_predictor = RandomForestRegressor(n_estimators=100, random_state=42)
             self.regime_classifier = RandomForestClassifier(n_estimators=50, random_state=42)
             self.scaler = StandardScaler()
-        else:
-            self.pattern_classifier = None
-            self.performance_predictor = None
-            self.regime_classifier = None
-            self.scaler = None
         
         # Regime detection (HMM if available)
         if HAS_HMM:
@@ -237,17 +212,13 @@ class ResearchAnalyticsEngine:
     # BACKTESTING ENGINE
     # ================================================================================
     
-    def run_backtest(self,
-                          strategy_func: Optional[Callable] = None,
-                          data: Optional[pd.DataFrame] = None,
+    async def run_backtest(self,
+                          strategy_func: Callable,
+                          data: pd.DataFrame,
                           strategy_name: str = "Strategy",
                           initial_capital: Optional[float] = None,
                           mode: BacktestMode = BacktestMode.VECTORIZED,
-                          parameters: Optional[Dict[str, Any]] = None,
-                          # Alternative parameter names for backward compatibility
-                          strategy_function: Optional[Callable] = None,
-                          market_data: Optional[pd.DataFrame] = None,
-                          strategy_instance: Optional[Any] = None) -> BacktestResult:
+                          parameters: Optional[Dict[str, Any]] = None) -> BacktestResult:
         """
         Run comprehensive backtest for a trading strategy
         
@@ -258,50 +229,33 @@ class ResearchAnalyticsEngine:
             initial_capital: Initial capital (uses default if None)
             mode: Backtesting mode
             parameters: Strategy parameters
-            strategy_function: Alternative name for strategy_func
-            market_data: Alternative name for data
-            strategy_instance: Alternative name for strategy_name
+            
+        Returns:
+            BacktestResult with comprehensive performance metrics
         """
         try:
-            # Handle alternative parameter names
-            if strategy_function is not None:
-                strategy_func = strategy_function
-            if market_data is not None:
-                data = market_data
-            if strategy_instance is not None:
-                if strategy_name == "Strategy":  # Only use instance name if no explicit name provided
-                    strategy_name = str(strategy_instance)
-                if strategy_func is None and hasattr(strategy_instance, 'on_market_data'):
-                    strategy_func = strategy_instance.on_market_data
-            
             capital = initial_capital or self.default_capital
             params = parameters or {}
-            
-            # Validate required parameters
-            if strategy_func is None:
-                raise ValueError("strategy_func or strategy_function must be provided")
-            if data is None:
-                raise ValueError("data or market_data must be provided")
             
             logger.info(f"Starting backtest: {strategy_name} with {len(data)} data points")
             
             # Generate signals
-            signals = asyncio.run(self._generate_signals(strategy_func, data, params))
+            signals = await self._generate_signals(strategy_func, data, params)
             
             # Execute backtest based on mode
             if mode == BacktestMode.VECTORIZED:
-                result = asyncio.run(self._run_vectorized_backtest(signals, data, capital, strategy_name, params))
+                result = await self._run_vectorized_backtest(signals, data, capital, strategy_name, params)
             elif mode == BacktestMode.EVENT_DRIVEN:
-                result = asyncio.run(self._run_event_driven_backtest(signals, data, capital, strategy_name, params))
+                result = await self._run_event_driven_backtest(signals, data, capital, strategy_name, params)
             else:  # MONTE_CARLO
-                result = asyncio.run(self._run_monte_carlo_backtest(signals, data, capital, strategy_name, params))
+                result = await self._run_monte_carlo_backtest(signals, data, capital, strategy_name, params)
             
             # Store result
             self.backtest_results.append(result)
             
             # Generate insights if enabled
             if self.enable_ai_insights:
-                asyncio.run(self._generate_backtest_insights(result))
+                await self._generate_backtest_insights(result)
             
             logger.info(f"Backtest completed: {result.total_return:.2%} return, {result.sharpe_ratio:.2f} Sharpe")
             return result
@@ -321,8 +275,7 @@ class ResearchAnalyticsEngine:
                 sharpe_ratio=0.0,
                 max_drawdown=0.0,
                 win_rate=0.0,
-                total_trades=0,
-                backtest_mode=mode
+                total_trades=0
             )
     
     async def _generate_signals(self, strategy_func: Callable, data: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
@@ -330,50 +283,22 @@ class ResearchAnalyticsEngine:
         try:
             # Call strategy function with data and parameters
             if asyncio.iscoroutinefunction(strategy_func):
-                try:
-                    # Try with params as keyword argument first
-                    signals = await strategy_func(data, params=params)
-                except TypeError:
-                    # Fall back to unpacking params
-                    signals = await strategy_func(data, **params)
+                signals = await strategy_func(data, **params)
             else:
-                try:
-                    # Try with params as keyword argument first
-                    signals = strategy_func(data, params=params)
-                except TypeError:
-                    # Fall back to unpacking params
-                    signals = strategy_func(data, **params)
+                signals = strategy_func(data, **params)
             
-            # Handle different return types
-            if isinstance(signals, pd.DataFrame):
-                # Extract signal column if it exists
-                if 'signal' in signals.columns:
-                    signal_series = pd.Series(0, index=data.index)
-                    # Map signals to the correct index
-                    for _, row in signals.iterrows():
-                        if hasattr(row, 'timestamp') and row.timestamp in data.index:
-                            idx = data.index.get_loc(row.timestamp)
-                            signal_series.iloc[idx] = row.signal
-                        elif hasattr(row, 'name') and row.name in data.index:
-                            idx = data.index.get_loc(row.name)
-                            signal_series.iloc[idx] = row.signal
-                    return signal_series
-                else:
-                    # Use first column as signals
-                    return signals.iloc[:, 0] if len(signals.columns) > 0 else pd.Series(0, index=data.index)
-            elif isinstance(signals, pd.Series):
-                return signals
-            else:
-                # Convert to Series
-                return pd.Series(signals, index=data.index[:len(signals)] if hasattr(signals, '__len__') else data.index)
+            # Ensure signals are a pandas Series
+            if not isinstance(signals, pd.Series):
+                signals = pd.Series(signals, index=data.index)
+            
+            return signals
             
         except Exception as e:
             logger.error(f"Error generating signals: {e}")
             return pd.Series(0, index=data.index)  # No signals
     
     async def _run_vectorized_backtest(self, signals: pd.Series, data: pd.DataFrame, 
-                                     capital: float, strategy_name: str, params: Dict[str, Any], 
-                                     mode: BacktestMode = BacktestMode.VECTORIZED) -> BacktestResult:
+                                     capital: float, strategy_name: str, params: Dict[str, Any]) -> BacktestResult:
         """Run vectorized backtest (fastest method)"""
         try:
             # Calculate returns
@@ -438,7 +363,7 @@ class ResearchAnalyticsEngine:
                 total_trades=total_trades,
                 daily_returns=net_returns,
                 equity_curve=cumulative_returns * capital,
-                backtest_mode=mode,
+                backtest_mode=BacktestMode.VECTORIZED,
                 parameters=params
             )
             
@@ -545,12 +470,11 @@ class ResearchAnalyticsEngine:
                 current_regime=regime,
                 regime_probability=0.7,
                 regime_duration=lookback,
-                confidence=0.6,
-                regime_history=[(data.index[-1], regime)] if len(data) > 0 else []
+                confidence=0.6
             )
             
             return analysis
-
+            
         except Exception as e:
             logger.error(f"Error in regime detection: {e}")
             return RegimeAnalysis(
@@ -560,286 +484,7 @@ class ResearchAnalyticsEngine:
                 confidence=0.3
             )
 
-    # ================================================================================
-    # ADDITIONAL METHODS FOR TEST COMPATIBILITY
-    # ================================================================================
-    
-    def analyze_market_regime(self, data: pd.DataFrame, **kwargs) -> RegimeAnalysis:
-        """Alias for detect_market_regime for backward compatibility"""
-        return self.detect_market_regime(data, **kwargs)
-    
-    def generate_ai_insights(self, data: pd.DataFrame) -> List[AIInsight]:
-        """Generate AI insights from market data"""
-        try:
-            insights = []
-            
-            if not self.enable_ai_insights:
-                return insights
-            
-            # Generate basic insights based on data analysis
-            if len(data) > 0:
-                # Trend insight
-                if 'close' in data.columns:
-                    recent_prices = data['close'].tail(20)
-                    if len(recent_prices) >= 2:
-                        trend = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
-                        if abs(trend) > 0.05:  # 5% threshold
-                            insight_type = InsightType.PERFORMANCE_INSIGHT if trend > 0 else InsightType.RISK_INSIGHT
-                            insights.append(AIInsight(
-                                insight_type=insight_type,
-                                title="Market Trend Detected",
-                                description=f"Market showing {'upward' if trend > 0 else 'downward'} trend of {trend:.1%}",
-                                confidence=0.7,
-                                importance=0.6,
-                                actionable=True,
-                                supporting_data={'trend': trend}
-                            ))
-                
-                # Volatility insight
-                if len(data) > 10:
-                    returns = data['close'].pct_change().dropna() if 'close' in data.columns else pd.Series()
-                    if len(returns) > 0:
-                        volatility = returns.std()
-                        if volatility > 0.02:  # High volatility threshold
-                            insights.append(AIInsight(
-                                insight_type=InsightType.RISK_INSIGHT,
-                                title="High Market Volatility",
-                                description=f"Market volatility at {volatility:.1%} - consider risk management",
-                                confidence=0.8,
-                                importance=0.7,
-                                actionable=True,
-                                supporting_data={'volatility': volatility}
-                            ))
-            
-            return insights
-            
-        except Exception as e:
-            logger.error(f"Error generating AI insights: {e}")
-            return []
-    
-    def compare_strategies(self, results: List[BacktestResult]) -> Dict[str, Any]:
-        """Compare multiple backtest results"""
-        try:
-            if not results:
-                return {}
-            
-            # Calculate comparison metrics
-            comparison = {
-                'total_strategies': len(results),
-                'best_performer': max(results, key=lambda x: x.total_return).strategy_name,
-                'worst_performer': min(results, key=lambda x: x.total_return).strategy_name,
-                'average_return': np.mean([r.total_return for r in results]),
-                'average_sharpe': np.mean([r.sharpe_ratio for r in results]),
-                'average_win_rate': np.mean([r.win_rate for r in results]),
-                'strategies': []
-            }
-            
-            for result in results:
-                strategy_info = {
-                    'name': result.strategy_name,
-                    'total_return': result.total_return,
-                    'sharpe_ratio': result.sharpe_ratio,
-                    'win_rate': result.win_rate,
-                    'max_drawdown': result.max_drawdown,
-                    'total_trades': result.total_trades
-                }
-                comparison['strategies'].append(strategy_info)
-            
-            # Add performance rankings
-            comparison['performance_rankings'] = sorted(
-                [{'name': r.strategy_name, 'return': r.total_return} for r in results],
-                key=lambda x: x['return'], reverse=True
-            )
-            
-            # Add risk-adjusted rankings (Sharpe ratio)
-            comparison['risk_adjusted_rankings'] = sorted(
-                [{'name': r.strategy_name, 'sharpe': r.sharpe_ratio} for r in results],
-                key=lambda x: x['sharpe'], reverse=True
-            )
-            
-            return comparison
-            
-        except Exception as e:
-            logger.error(f"Error comparing strategies: {e}")
-            return {}
-    
-    def optimize_strategy_parameters(self, strategy_func: Optional[Callable] = None, data: Optional[pd.DataFrame] = None, 
-                                   param_ranges: Optional[Dict[str, List[Any]]] = None, 
-                                   optimization_metric: str = 'sharpe_ratio',
-                                   # Alternative parameter names
-                                   strategy_function: Optional[Callable] = None,
-                                   market_data: Optional[pd.DataFrame] = None,
-                                   param_grid: Optional[Dict[str, List[Any]]] = None) -> Dict[str, Any]:
-        """Optimize strategy parameters using grid search"""
-        try:
-            # Handle alternative parameter names
-            if strategy_function is not None:
-                strategy_func = strategy_function
-            if market_data is not None:
-                data = market_data
-            if param_grid is not None:
-                param_ranges = param_grid
-            
-            # Validate required parameters
-            if strategy_func is None:
-                raise ValueError("strategy_func or strategy_function must be provided")
-            if data is None:
-                raise ValueError("data or market_data must be provided")
-            if param_ranges is None:
-                raise ValueError("param_ranges or param_grid must be provided")
-            
-            best_result = None
-            best_metric = -np.inf if optimization_metric in ['sharpe_ratio', 'total_return'] else np.inf
-            
-            # Simple grid search (could be enhanced with more sophisticated optimization)
-            from itertools import product
-            
-            param_combinations = list(product(*param_ranges.values()))
-            param_names = list(param_ranges.keys())
-            
-            # Store all results
-            all_results = []
-            for params in param_combinations:
-                param_dict = dict(zip(param_names, params))
-                
-                # Run backtest with these parameters
-                result = self.run_backtest(
-                    strategy_func=strategy_func,
-                    data=data,
-                    parameters=param_dict
-                )
-                
-                # Get metric value
-                if optimization_metric == 'sharpe_ratio':
-                    metric_value = result.sharpe_ratio
-                elif optimization_metric == 'total_return':
-                    metric_value = result.total_return
-                elif optimization_metric == 'win_rate':
-                    metric_value = result.win_rate
-                else:
-                    metric_value = result.sharpe_ratio  # default
-                
-                # Store result
-                all_results.append({
-                    'parameters': param_dict,
-                    'result': result,
-                    'metric_value': metric_value
-                })
-                
-                # Update best result
-                is_maximizing = optimization_metric in ['sharpe_ratio', 'total_return', 'win_rate']
-                if (is_maximizing and metric_value > best_metric) or (not is_maximizing and metric_value < best_metric):
-                    best_metric = metric_value
-                    best_result = result
-                    best_params = param_dict
-            
-            return {
-                'best_parameters': best_params if 'best_params' in locals() else {},
-                'best_result': best_result,
-                'optimization_metric': optimization_metric,
-                'metric_value': best_metric,
-                'best_score': best_metric,  # Alias for backward compatibility
-                'all_results': all_results,  # All optimization results
-                'total_combinations_tested': len(param_combinations)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error optimizing strategy parameters: {e}")
-            return {}
-    
-    def generate_research_report(self) -> Dict[str, Any]:
-        """Generate comprehensive research report"""
-        try:
-            report = {
-                'timestamp': datetime.now(),
-                'generated_at': datetime.now(),
-                'total_backtests': len(self.backtest_results),
-                'total_insights': len(self.insights_history),
-                'regime_history_length': len(self.regime_history),
-                'summary': {},
-                'performance_analysis': {},
-                'risk_analysis': {},
-                'recommendations': []
-            }
-            
-            if self.backtest_results:
-                returns = [r.total_return for r in self.backtest_results]
-                sharpe_ratios = [r.sharpe_ratio for r in self.backtest_results]
-                max_drawdowns = [r.max_drawdown for r in self.backtest_results]
-                
-                report['summary'] = {
-                    'average_return': np.mean(returns),
-                    'best_return': max(returns),
-                    'worst_return': min(returns),
-                    'total_strategies_tested': len(self.backtest_results)
-                }
-                
-                report['performance_analysis'] = {
-                    'average_sharpe': np.mean(sharpe_ratios),
-                    'best_sharpe': max(sharpe_ratios),
-                    'return_volatility': np.std(returns)
-                }
-                
-                report['risk_analysis'] = {
-                    'average_max_drawdown': np.mean(max_drawdowns),
-                    'worst_drawdown': max(max_drawdowns),
-                    'risk_adjusted_returns': np.mean([r.total_return / abs(r.max_drawdown) if r.max_drawdown != 0 else 0 for r in self.backtest_results])
-                }
-                
-                # Generate recommendations
-                if np.mean(returns) > 0.1:
-                    report['recommendations'].append("Strong performance detected - consider live deployment")
-                if np.mean(sharpe_ratios) > 1.0:
-                    report['recommendations'].append("Good risk-adjusted returns - strategy shows promise")
-            
-            return report
-            
-        except Exception as e:
-            logger.error(f"Error generating research report: {e}")
-            return {}
-    
-    def get_research_summary(self) -> Dict[str, Any]:
-        """Get research summary"""
-        return {
-            'total_backtests': len(self.backtest_results),
-            'total_insights': len(self.insights_history),
-            'regime_analysis_count': len(self.regime_history),
-            'cache_size': len(self.research_cache),
-            'ai_enabled': self.enable_ai_insights,
-            'last_research_activity': datetime.now()
-        }
-
-
 # ================================================================================
-# CONVENIENCE FUNCTIONS AND ALIASES
-# ================================================================================
-
-async def run_backtest(strategy_func: Callable, data: pd.DataFrame, **kwargs) -> BacktestResult:
-    """Convenience function for running backtests"""
-    return await research_analytics.run_backtest(strategy_func, data, **kwargs)
-
-def detect_market_regime(data: pd.DataFrame, **kwargs) -> RegimeAnalysis:
-    """Convenience function for regime detection"""
-    return research_analytics.detect_market_regime(data, **kwargs)
-
-# ================================================================================
-# CONVENIENCE FUNCTIONS AND ALIASES
-# ================================================================================
-
-# Create global instance for backward compatibility
-research_analytics = ResearchAnalyticsEngine()
-
-# Aliases for backward compatibility
-research_engine = research_analytics
-ResearchEngine = ResearchAnalyticsEngine
-BacktestEngine = ResearchAnalyticsEngine
-StrategyDeveloper = ResearchAnalyticsEngine
-RegimeDetector = ResearchAnalyticsEngine
-InsightsEngine = ResearchAnalyticsEngine
-DataVisualization = ResearchAnalyticsEngine
-ReportGenerator = ResearchAnalyticsEngine
-
-logger.info("Research Analytics module loaded successfully - 7 modules consolidated into 1")# ================================================================================
 # CONVENIENCE FUNCTIONS AND ALIASES
 # ================================================================================
 
@@ -863,22 +508,5 @@ async def run_backtest(strategy_func: Callable, data: pd.DataFrame, **kwargs) ->
 def detect_market_regime(data: pd.DataFrame, **kwargs) -> RegimeAnalysis:
     """Convenience function for regime detection"""
     return research_analytics.detect_market_regime(data, **kwargs)
-
-# ================================================================================
-# CONVENIENCE FUNCTIONS AND ALIASES
-# ================================================================================
-
-# Create global instance for backward compatibility
-research_analytics = ResearchAnalyticsEngine()
-
-# Aliases for backward compatibility
-research_engine = research_analytics
-ResearchEngine = ResearchAnalyticsEngine
-BacktestEngine = ResearchAnalyticsEngine
-StrategyDeveloper = ResearchAnalyticsEngine
-RegimeDetector = ResearchAnalyticsEngine
-InsightsEngine = ResearchAnalyticsEngine
-DataVisualization = ResearchAnalyticsEngine
-ReportGenerator = ResearchAnalyticsEngine
 
 logger.info("Research Analytics module loaded successfully - 7 modules consolidated into 1")

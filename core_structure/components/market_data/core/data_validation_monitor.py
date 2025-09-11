@@ -415,10 +415,8 @@ class DataValidationMonitor:
             if len(close_prices) < 2:
                 return results
             
-            # Calculate price changes - pre-fill non-leading NAs and avoid deprecated
-            # default fill_method by specifying fill_method=None
-            close_series = close_prices.ffill()
-            price_changes = close_series.pct_change(fill_method=None).dropna()
+            # Calculate price changes
+            price_changes = close_prices.pct_change().dropna()
             
             # Detect extreme price movements
             extreme_threshold = self.alert_thresholds['price_outlier_factor']

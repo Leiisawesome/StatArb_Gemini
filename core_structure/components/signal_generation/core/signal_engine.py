@@ -83,32 +83,12 @@ class SignalType(Enum):
     EXIT = 99
 
 class SignalStrength(Enum):
-    """Signal strength classification with comparison support"""
-    VERY_WEAK = 1
-    WEAK = 2
-    MODERATE = 3
-    STRONG = 4
+    """Signal strength classification"""
     VERY_STRONG = 5
-    
-    def __lt__(self, other):
-        if isinstance(other, SignalStrength):
-            return self.value < other.value
-        return NotImplemented
-    
-    def __le__(self, other):
-        if isinstance(other, SignalStrength):
-            return self.value <= other.value
-        return NotImplemented
-    
-    def __gt__(self, other):
-        if isinstance(other, SignalStrength):
-            return self.value > other.value
-        return NotImplemented
-    
-    def __ge__(self, other):
-        if isinstance(other, SignalStrength):
-            return self.value >= other.value
-        return NotImplemented
+    STRONG = 4
+    MODERATE = 3
+    WEAK = 2
+    VERY_WEAK = 1
 
 @dataclass
 class SignalConfig:
@@ -138,7 +118,6 @@ class SignalConfig:
     
     # Advanced signal processing
     enable_ml_enhancement: bool = True
-    enable_ml_features: bool = True
     enable_regime_detection: bool = True
     enable_adaptive_thresholds: bool = True
     enable_kalman_filtering: bool = True
@@ -148,11 +127,10 @@ class SignalConfig:
     optimization_frequency: int = 100
     lookback_optimization: int = 500
     
-    # Signal validation and processing
+    # Signal validation
     enable_validation: bool = True
     min_data_points: int = 20
     outlier_detection: bool = True
-    signal_decay_factor: float = 0.95
 
 @dataclass
 class TradingSignal:
@@ -264,10 +242,6 @@ class UnifiedSignalEngine:
         # Core components
         self._initialize_components()
         
-        # Signal history tracking
-        self.signal_history: Dict[str, List[TradingSignal]] = {}
-        self.signal_count: int = 0
-        
         # Performance tracking
         self.performance_metrics = {
             'signals_generated': 0,
@@ -290,8 +264,6 @@ class UnifiedSignalEngine:
             except ImportError:
                 self.logger.warning("FeatureProcessor not available - using basic features")
                 self.feature_processor = None
-        else:
-            self.feature_processor = None
         
         self.logger.info(f"UnifiedSignalEngine initialized with config: min_confidence={self.config.min_confidence_threshold}, max_position_size={self.config.max_position_size}")
     
@@ -310,9 +282,6 @@ class UnifiedSignalEngine:
                 self.portfolio_optimizer = None
         else:
             self.portfolio_optimizer = None
-        
-        # Position sizing
-        self.position_sizer = None
         
         # Timing optimization
         if OPTIMIZATION_AVAILABLE:
@@ -342,7 +311,7 @@ class UnifiedSignalEngine:
     
     def generate_signal(self, symbol: str, market_data: pd.DataFrame, 
                        features: Optional[Dict[str, float]] = None,
-                       regime_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                       regime_info: Optional[Dict[str, Any]] = None) -> Optional[TradingSignal]:
         """
         Generate trading signal for a symbol
         
@@ -353,23 +322,23 @@ class UnifiedSignalEngine:
             regime_info: Market regime information (optional)
             
         Returns:
-            Trading signal dictionary or None if no signal generated
+            Trading signal or None if no signal generated
         """
         start_time = time.time()
         
         try:
             # Validate inputs
             if not self._validate_inputs(symbol, market_data):
-                return self._default_signal_dict(symbol)
+                return None
             
             # Check cache first
             if self.config.enable_caching:
                 cached_signal = self._get_cached_signal(symbol, market_data)
                 if cached_signal:
-                    return cached_signal.to_dict() if hasattr(cached_signal, 'to_dict') else self._default_signal_dict(symbol)
+                    return cached_signal
             
             # Extract or compute features
-            if features is None and hasattr(self, 'feature_processor') and self.feature_processor:
+            if features is None and self.feature_processor:
                 features = self.feature_processor.extract_features(market_data)
             elif features is None:
                 features = self._extract_basic_features(market_data)
@@ -381,7 +350,7 @@ class UnifiedSignalEngine:
                 # Apply risk filtering
                 if self.config.enable_risk_filtering and not self._pass_risk_filter(signal):
                     self.performance_metrics['signals_filtered'] += 1
-                    return self._default_signal_dict(symbol)
+                    return None
                 
                 # Optimize timing and position size
                 signal = self._optimize_signal(signal, market_data)
@@ -395,44 +364,12 @@ class UnifiedSignalEngine:
                 
                 self.logger.debug(f"Generated signal for {symbol}: {signal.signal_type.name} "
                                 f"(confidence: {signal.confidence:.3f}, strength: {signal.strength.name})")
-                
-                # Update signal history
-                self.update_signal_history(signal)
-                
-                # Return as dictionary
-                return signal.to_dict()
             
-            self.logger.debug("No core signal generated")
-            return self._default_signal_dict(symbol)
+            return signal
             
         except Exception as e:
             self.logger.error(f"Error generating signal for {symbol}: {e}")
-            return self._default_signal_dict(symbol)
-
-    def _default_signal_dict(self, symbol: str) -> Dict[str, Any]:
-        """Return a default neutral signal dict for edge cases/tests"""
-        return {
-            'signal_id': f'def_{int(time.time()*1000)}',
-            'symbol': symbol,
-            'signal_type': SignalType.NEUTRAL,
-            'strength': SignalStrength.WEAK,
-            'confidence': 0.0,
-            'timestamp': datetime.now(),
-            'entry_price': None,
-            'position_size': None,
-            'stop_loss': None,
-            'take_profit': None,
-            'features': {},
-            'regime': None,
-            'regime_confidence': None,
-            'expected_return': None,
-            'expected_risk': None,
-            'sharpe_ratio': None,
-            'model_id': None,
-            'model_version': None,
-            'feature_importance': None,
-            'created_at': datetime.now().isoformat()
-        }
+            return None
     
     def _validate_inputs(self, symbol: str, market_data: pd.DataFrame) -> bool:
         """Validate signal generation inputs"""
@@ -443,7 +380,7 @@ class UnifiedSignalEngine:
             self.logger.debug(f"Insufficient data for {symbol}: {len(market_data)} < {self.config.min_data_points}")
             return False
         
-        required_columns = ['high', 'low', 'close', 'volume']
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
         if not all(col in market_data.columns for col in required_columns):
             self.logger.warning(f"Missing required columns for {symbol}")
             return False
@@ -639,7 +576,7 @@ class UnifiedSignalEngine:
     
     def _pass_risk_filter(self, signal: TradingSignal) -> bool:
         """Apply risk filtering to signal"""
-        if not hasattr(self, 'portfolio_optimizer') or not self.portfolio_optimizer:
+        if not self.risk_optimizer:
             return True
         
         try:
@@ -660,7 +597,7 @@ class UnifiedSignalEngine:
         """Optimize signal timing and position sizing"""
         try:
             # Position sizing
-            if hasattr(self, 'position_sizer') and self.position_sizer and signal.entry_price:
+            if self.position_sizer and signal.entry_price:
                 position_size = self.position_sizer.calculate_position_size(
                     signal.symbol,
                     signal.entry_price,
@@ -743,402 +680,7 @@ class UnifiedSignalEngine:
             self._feature_cache.clear()
         self.logger.info("Signal caches reset")
     
-    def update_signal_history(self, signal):
-        """Update signal history for a symbol"""
-        # Handle both TradingSignal objects and dictionaries
-        if isinstance(signal, dict):
-            symbol = signal.get('symbol')
-        else:
-            symbol = signal.symbol
-            
-        if symbol not in self.signal_history:
-            self.signal_history[symbol] = []
-        
-        self.signal_history[symbol].append(signal)
-        self.signal_count += 1
-        
-        # Keep only last 100 signals per symbol to prevent memory issues
-        if len(self.signal_history[symbol]) > 100:
-            self.signal_history[symbol] = self.signal_history[symbol][-100:]
-    
-    def get_signal_history(self, symbol: str, limit: Optional[int] = None) -> List[TradingSignal]:
-        """Get signal history for a symbol"""
-        if symbol not in self.signal_history:
-            return []
-        
-        history = self.signal_history[symbol]
-        if limit is not None:
-            return history[-limit:]
-        return history.copy()
-    
-    def clear_signal_history(self, symbol: Optional[str] = None):
-        """Clear signal history for a symbol or all symbols"""
-        if symbol is None:
-            self.signal_history.clear()
-        elif symbol in self.signal_history:
-            self.signal_history[symbol].clear()
-    
-    def generate_base_signals(self, symbol: str, market_data: pd.DataFrame) -> Dict[str, Any]:
-        """Generate base signals for a symbol"""
-        try:
-            if not self._validate_inputs(symbol, market_data):
-                return {}
-            
-            features = self._extract_basic_features(market_data)
-            signals = {}
-            
-            # Generate basic momentum signal
-            momentum_signal = self._calculate_momentum_factor(
-                features.get('returns_1d', 0.0),
-                features.get('momentum_10d', 0.0),
-                features.get('volatility_20d', 0.0)
-            )
-            
-            signals['momentum'] = {
-                'signal_type': SignalType.LONG if momentum_signal > 0 else SignalType.SHORT,
-                'strength': SignalStrength.STRONG if abs(momentum_signal) > 0.3 else SignalStrength.MODERATE,
-                'confidence': min(abs(momentum_signal), 0.95),
-                'value': momentum_signal
-            }
-            
-            # Generate mean reversion signal
-            mean_reversion_signal = self._calculate_mean_reversion_factor(
-                features.get('rsi_14', 50.0),
-                features.get('rsi_21', 50.0),
-                features.get('bollinger_position', 0.5)
-            )
-            
-            signals['mean_reversion'] = {
-                'signal_type': SignalType.LONG if mean_reversion_signal > 0 else SignalType.SHORT,
-                'strength': SignalStrength.STRONG if abs(mean_reversion_signal) > 0.3 else SignalStrength.MODERATE,
-                'confidence': min(abs(mean_reversion_signal), 0.95),
-                'value': mean_reversion_signal
-            }
-            
-            # Generate trend signal
-            trend_signal = self.calculate_trend_signal(market_data['close'])
-            
-            signals['trend'] = {
-                'signal_type': SignalType.LONG if trend_signal > 0 else SignalType.SHORT,
-                'strength': SignalStrength.STRONG if abs(trend_signal) > 0.3 else SignalStrength.MODERATE,
-                'confidence': min(abs(trend_signal), 0.95),
-                'value': trend_signal
-            }
-            
-            return signals
-        except Exception as e:
-            self.logger.error(f"Error generating base signals for {symbol}: {e}")
-            return {}
-    
-    def calculate_momentum_signal(self, prices: pd.Series) -> float:
-        """Calculate momentum signal from price series"""
-        try:
-            if len(prices) < 10:
-                return 0.0
-            
-            # Simple momentum calculation
-            short_term = prices.iloc[-1] / prices.iloc[-5] - 1
-            long_term = prices.iloc[-1] / prices.iloc[-10] - 1
-            
-            return (short_term * 0.7 + long_term * 0.3)
-        except Exception as e:
-            self.logger.error(f"Error calculating momentum signal: {e}")
-            return 0.0
-    
-    def calculate_mean_reversion_signal(self, prices: pd.Series) -> float:
-        """Calculate mean reversion signal from price series"""
-        try:
-            if len(prices) < 20:
-                return 0.0
-            
-            # Simple mean reversion based on Bollinger Bands
-            sma = prices.rolling(20).mean().iloc[-1]
-            std = prices.rolling(20).std().iloc[-1]
-            current_price = prices.iloc[-1]
-            
-            upper_band = sma + 2 * std
-            lower_band = sma - 2 * std
-            
-            if current_price > upper_band:
-                return -0.8  # Sell signal
-            elif current_price < lower_band:
-                return 0.8   # Buy signal
-            else:
-                return 0.0   # Neutral
-        except Exception as e:
-            self.logger.error(f"Error calculating mean reversion signal: {e}")
-            return 0.0
-    
-    def calculate_trend_signal(self, prices: pd.Series) -> float:
-        """Calculate trend signal from price series"""
-        try:
-            if len(prices) < 20:
-                return 0.0
-            
-            # Simple trend based on moving averages
-            short_ma = prices.rolling(10).mean().iloc[-1]
-            long_ma = prices.rolling(20).mean().iloc[-1]
-            
-            if short_ma > long_ma * 1.001:
-                return 0.7  # Uptrend
-            elif short_ma < long_ma * 0.999:
-                return -0.7  # Downtrend
-            else:
-                return 0.0   # Sideways
-        except Exception as e:
-            self.logger.error(f"Error calculating trend signal: {e}")
-            return 0.0
-    
-    def combine_signals(self, signals: Dict[str, float]) -> float:
-        """Combine multiple signals into a single signal"""
-        try:
-            if not signals:
-                return 0.0
-            
-            # Simple weighted average
-            weights = {
-                'momentum': 0.4,
-                'mean_reversion': 0.3,
-                'trend': 0.3
-            }
-            
-            combined = 0.0
-            total_weight = 0.0
-            
-            for signal_type, value in signals.items():
-                weight = weights.get(signal_type, 0.2)
-                combined += value * weight
-                total_weight += weight
-            
-            return combined / total_weight if total_weight > 0 else 0.0
-        except Exception as e:
-            self.logger.error(f"Error combining signals: {e}")
-            return 0.0
-    
-    def apply_risk_filters(self, signal: float, confidence: float, risk_metrics: Dict[str, float]) -> float:
-        """Apply risk filters to signal"""
-        try:
-            # Simple risk filtering based on volatility
-            volatility = risk_metrics.get('volatility', 0.02)
-            max_drawdown = risk_metrics.get('max_drawdown', 0.05)
-            
-            # Reduce signal strength if volatility is high
-            if volatility > 0.03:
-                signal *= 0.7
-            
-            # Reduce signal strength if max drawdown is high
-            if max_drawdown > 0.1:
-                signal *= 0.8
-            
-            return signal
-        except Exception as e:
-            self.logger.error(f"Error applying risk filters: {e}")
-            return signal
-    
-    def calculate_signal_confidence(self, signals: Dict[str, float]) -> float:
-        """Calculate overall confidence from multiple signals"""
-        try:
-            if not signals:
-                return 0.0
-            
-            # Average absolute signal strength as confidence
-            abs_signals = [abs(s) for s in signals.values()]
-            return min(sum(abs_signals) / len(abs_signals), 1.0)
-        except Exception as e:
-            self.logger.error(f"Error calculating signal confidence: {e}")
-            return 0.0
-    
-    def validate_signal(self, signal: Dict[str, Any]) -> bool:
-        """Validate signal structure and quality"""
-        try:
-            required_fields = ['symbol', 'signal_type', 'strength', 'confidence', 'timestamp']
-            if not all(field in signal for field in required_fields):
-                return False
-            
-            # Check confidence threshold
-            if signal.get('confidence', 0.0) < self.config.min_confidence_threshold:
-                return False
-            
-            return True
-        except Exception as e:
-            self.logger.error(f"Error validating signal: {e}")
-            return False
-    
-    def calculate_signal_metrics(self, symbol: str) -> Dict[str, Any]:
-        """Calculate performance metrics for signals"""
-        try:
-            history = self.get_signal_history(symbol)
-            if not history:
-                return {
-                    'total_signals': 0,
-                    'win_rate': 0.0,
-                    'avg_return': 0.0,
-                    'avg_confidence': 0.0
-                }
-            
-            total_signals = len(history)
-            winning_signals = 0
-            total_return = 0.0
-            total_confidence = 0.0
-            
-            for signal in history:
-                if 'outcome' in signal:
-                    total_return += signal['outcome']
-                    if signal['outcome'] > 0:
-                        winning_signals += 1
-                
-                if 'confidence' in signal:
-                    total_confidence += signal['confidence']
-            
-            win_rate = winning_signals / total_signals if total_signals > 0 else 0.0
-            avg_return = total_return / total_signals if total_signals > 0 else 0.0
-            avg_confidence = total_confidence / total_signals if total_signals > 0 else 0.0
-            
-            return {
-                'total_signals': total_signals,
-                'win_rate': win_rate,
-                'avg_return': avg_return,
-                'avg_confidence': avg_confidence
-            }
-        except Exception as e:
-            self.logger.error(f"Error calculating signal metrics for {symbol}: {e}")
-            return {
-                'total_signals': 0,
-                'win_rate': 0.0,
-                'avg_return': 0.0,
-                'avg_confidence': 0.0
-            }
-    def process_market_data(self, symbol: str, market_data: pd.DataFrame) -> pd.DataFrame:
-        """Process market data for signal generation"""
-        try:
-            # Basic data cleaning and validation
-            if market_data.empty:
-                return market_data
-            
-            # Ensure required columns exist
-            required_cols = ['close', 'high', 'low', 'volume']
-            for col in required_cols:
-                if col not in market_data.columns:
-                    market_data[col] = 0.0
-            
-            # Remove NaN values
-            market_data = market_data.dropna()
-            
-            return market_data
-        except Exception as e:
-            self.logger.error(f"Error processing market data for {symbol}: {e}")
-            return market_data
-    
-    def apply_signal_decay(self, signal: float, age_hours: float) -> float:
-        """Apply time-based signal decay"""
-        try:
-            decay_factor = self.config.signal_decay_factor ** age_hours
-            return signal * decay_factor
-        except Exception as e:
-            self.logger.error(f"Error applying signal decay: {e}")
-            return signal
-    
-    def generate_multi_timeframe_signals(self, symbol: str, multi_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
-        """Generate signals across multiple timeframes"""
-        try:
-            timeframe_signals = {}
-            combined_confidence = 0.0
-            combined_signal_type = SignalType.NEUTRAL
-            
-            for timeframe, data in multi_data.items():
-                if not data.empty and len(data) >= 20:
-                    signal = self.generate_signal(f"{symbol}_{timeframe}", data)
-                    if signal:
-                        timeframe_signals[timeframe] = signal
-                        combined_confidence += signal.get('confidence', 0.0)
-                        # Use the signal type from the longest timeframe as primary
-                        if timeframe == max(multi_data.keys(), key=len):
-                            combined_signal_type = signal.get('signal_type', SignalType.NEUTRAL)
-            
-            # Calculate combined signal
-            num_timeframes = len(timeframe_signals)
-            if num_timeframes > 0:
-                combined_confidence /= num_timeframes
-                
-                combined_signal = {
-                    'symbol': symbol,
-                    'signal_type': combined_signal_type,
-                    'strength': SignalStrength.STRONG if combined_confidence > 0.7 else SignalStrength.MODERATE,
-                    'confidence': combined_confidence,
-                    'timestamp': datetime.now()
-                }
-            else:
-                combined_signal = None
-            
-            return {
-                'combined_signal': combined_signal,
-                'timeframe_signals': timeframe_signals
-            }
-        except Exception as e:
-            self.logger.error(f"Error generating multi-timeframe signals for {symbol}: {e}")
-            return {
-                'combined_signal': None,
-                'timeframe_signals': {}
-            }
-    
-    def calculate_risk_adjusted_position_size(self, signal_strength: float, confidence: float, 
-                                            volatility: float, portfolio_value: float) -> float:
-        """Calculate risk-adjusted position size"""
-        try:
-            # Simple position sizing based on Kelly criterion approximation
-            base_size = portfolio_value * 0.02  # 2% of portfolio
-            
-            # Adjust for signal strength and confidence
-            adjustment = signal_strength * confidence
-            
-            # Adjust for volatility (higher volatility = smaller position)
-            vol_adjustment = 1.0 / (1.0 + volatility * 10)
-            
-            position_size = base_size * adjustment * vol_adjustment
-            
-            # Cap at reasonable limits
-            return min(max(position_size, 0), portfolio_value * 0.1)
-        except Exception as e:
-            self.logger.error(f"Error calculating position size: {e}")
-            return 0.0
-    
-    def apply_correlation_filter(self, signals: Dict[str, float], correlation_matrix: pd.DataFrame) -> Dict[str, float]:
-        """Apply correlation filter to signals"""
-        try:
-            filtered_signals = {}
-            
-            for symbol, signal in signals.items():
-                if symbol in correlation_matrix.index:
-                    # Check correlation with other signals
-                    correlations = correlation_matrix.loc[symbol]
-                    high_corr_count = sum(1 for corr in correlations if abs(corr) > 0.7)
-                    
-                    # Reduce signal if highly correlated with many others
-                    if high_corr_count > 2:
-                        signal *= 0.7
-                    
-                    filtered_signals[symbol] = signal
-                else:
-                    filtered_signals[symbol] = signal
-            
-            return filtered_signals
-        except Exception as e:
-            self.logger.error(f"Error applying correlation filter: {e}")
-            return signals
-    
-    def _get_cached_signal(self, symbol: str, market_data: pd.DataFrame) -> Optional[TradingSignal]:
-        """Get cached signal if available and valid"""
-        with self._lock:
-            cache_key = f"{symbol}_{hash(str(market_data.iloc[-1].to_dict()))}"
-            
-            if cache_key in self._signal_cache:
-                cached_signal, timestamp = self._signal_cache[cache_key]
-                if (datetime.now() - timestamp).total_seconds() < self.config.cache_ttl_seconds:
-                    return cached_signal
-                else:
-                    del self._signal_cache[cache_key]
-        
-        return None
+    def _extract_regime_features(self, market_data: pd.DataFrame) -> Dict[str, float]:
         """Extract market regime detection features"""
         try:
             prices = market_data['close']
@@ -1387,188 +929,6 @@ class UnifiedSignalEngine:
         except Exception as e:
             self.logger.warning(f"Kalman filter failed: {e}")
             return confidence
-    
-    def _calculate_momentum_factor(self, returns_1d: float, momentum_10d: float, volatility: float) -> float:
-        """Calculate momentum factor for signal generation"""
-        try:
-            # Combine short and medium term momentum
-            momentum_score = 0.0
-            
-            # Short-term momentum (1-day)
-            if abs(returns_1d) > 0.001:
-                momentum_score += returns_1d * 5  # Scale up
-            
-            # Medium-term momentum (10-day)
-            if abs(momentum_10d) > 0.01:
-                momentum_score += momentum_10d * 2
-            
-            # Adjust for volatility (higher volatility reduces momentum signal)
-            if volatility > 0.02:
-                momentum_score *= 0.8
-            
-            return momentum_score
-        except Exception as e:
-            self.logger.error(f"Error calculating momentum factor: {e}")
-            return 0.0
-    
-    def _calculate_mean_reversion_factor(self, rsi_14: float, rsi_21: float, bollinger_position: float) -> float:
-        """Calculate mean reversion factor"""
-        try:
-            mean_reversion_score = 0.0
-            
-            # RSI-based mean reversion
-            if rsi_14 < 30:
-                mean_reversion_score += 0.8  # Oversold
-            elif rsi_14 > 70:
-                mean_reversion_score -= 0.8  # Overbought
-            
-            if rsi_21 < 30:
-                mean_reversion_score += 0.6
-            elif rsi_21 > 70:
-                mean_reversion_score -= 0.6
-            
-            # Bollinger Band position
-            if bollinger_position < 0.2:
-                mean_reversion_score += 0.5  # Near lower band
-            elif bollinger_position > 0.8:
-                mean_reversion_score -= 0.5  # Near upper band
-            
-            return mean_reversion_score
-        except Exception as e:
-            self.logger.error(f"Error calculating mean reversion factor: {e}")
-            return 0.0
-    
-    def _calculate_volume_factor(self, volume_ratio: float, returns_1d: float) -> float:
-        """Calculate volume confirmation factor"""
-        try:
-            volume_score = 0.0
-            
-            # Volume confirmation
-            if volume_ratio > 1.2 and abs(returns_1d) > 0.005:
-                volume_score += returns_1d * 3  # High volume + price movement
-            elif volume_ratio < 0.8:
-                volume_score += returns_1d * 0.5  # Low volume reduces signal
-            
-            return volume_score
-        except Exception as e:
-            self.logger.error(f"Error calculating volume factor: {e}")
-            return 0.0
-    
-    def _calculate_volatility_factor(self, volatility: float, features: Dict[str, float]) -> float:
-        """Calculate volatility regime factor"""
-        try:
-            vol_score = 0.0
-            
-            # Volatility adjustment
-            if volatility > 0.03:
-                vol_score -= 0.3  # High volatility reduces confidence
-            elif volatility < 0.01:
-                vol_score += 0.2  # Low volatility increases confidence
-            
-            return vol_score
-        except Exception as e:
-            self.logger.error(f"Error calculating volatility factor: {e}")
-            return 0.0
-    
-    def _calculate_adaptive_weights(self, market_data: pd.DataFrame, regime_info: Optional[Dict[str, Any]]) -> List[float]:
-        """Calculate adaptive weights for signal factors"""
-        try:
-            # Default weights
-            weights = [0.4, 0.3, 0.2, 0.1]
-            
-            # Adjust based on market regime
-            if regime_info:
-                regime = regime_info.get('regime', 'neutral')
-                if regime == 'trending':
-                    weights = [0.5, 0.2, 0.2, 0.1]  # Favor momentum
-                elif regime == 'ranging':
-                    weights = [0.2, 0.5, 0.2, 0.1]  # Favor mean reversion
-            
-            return weights
-        except Exception as e:
-            self.logger.error(f"Error calculating adaptive weights: {e}")
-            return [0.4, 0.3, 0.2, 0.1]
-    
-    def _pass_risk_filter(self, signal: TradingSignal) -> bool:
-        """Apply risk filters to signal"""
-        try:
-            # Basic risk filters
-            if signal.confidence < self.config.min_confidence_threshold:
-                return False
-            
-            # Check position size limits
-            if signal.position_size and signal.position_size > self.config.max_position_size:
-                return False
-            
-            # Additional risk checks can be added here
-            return True
-        except Exception as e:
-            self.logger.error(f"Error in risk filter: {e}")
-            return False
-    
-    def _optimize_signal(self, signal: TradingSignal, market_data: pd.DataFrame) -> TradingSignal:
-        """Optimize signal timing and position size"""
-        try:
-            # Basic optimization - can be enhanced
-            return signal
-        except Exception as e:
-            self.logger.error(f"Error optimizing signal: {e}")
-            return signal
-    
-    def _apply_regime_adjustment(self, signal_type: SignalType, regime_info: Dict[str, Any]) -> float:
-        """Apply regime-based adjustments to signal confidence"""
-        try:
-            regime = regime_info.get('regime', 'neutral')
-            regime_confidence = regime_info.get('confidence', 0.5)
-            
-            # Adjust confidence based on regime
-            if regime == 'trending' and signal_type in [SignalType.LONG, SignalType.SHORT]:
-                return 1.2  # Boost trend-following signals
-            elif regime == 'ranging' and signal_type == SignalType.NEUTRAL:
-                return 1.1  # Boost neutral signals in ranging markets
-            else:
-                return 0.9  # Slight reduction for mismatched signals
-            
-        except Exception as e:
-            self.logger.error(f"Error applying regime adjustment: {e}")
-            return 1.0
-    
-    def _apply_ml_enhancement(self, features: Dict[str, float], regime_info: Optional[Dict[str, Any]]) -> float:
-        """Apply ML-based enhancements to signal confidence"""
-        try:
-            # Simple ML enhancement - can be expanded with actual ML models
-            if self.config.enable_ml_features and hasattr(self, '_ml_model'):
-                # Placeholder for ML model prediction
-                ml_confidence = 1.0
-            else:
-                ml_confidence = 1.0
-            
-            return ml_confidence
-        except Exception as e:
-            self.logger.error(f"Error applying ML enhancement: {e}")
-            return 1.0
-    
-    def _calculate_adaptive_threshold(self, market_data: pd.DataFrame) -> float:
-        """Calculate adaptive confidence threshold based on market conditions"""
-        try:
-            if len(market_data) < 20:
-                return self.config.min_confidence_threshold
-            
-            # Calculate market volatility
-            returns = market_data['close'].pct_change().dropna()
-            volatility = returns.std()
-            
-            # Higher volatility requires higher confidence threshold
-            if volatility > 0.03:
-                return self.config.min_confidence_threshold * 1.5
-            elif volatility < 0.01:
-                return self.config.min_confidence_threshold * 0.8
-            else:
-                return self.config.min_confidence_threshold
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating adaptive threshold: {e}")
-            return self.config.min_confidence_threshold
 
 # Export consolidated signal engine
 SignalGenerator = UnifiedSignalEngine  # Backward compatibility alias

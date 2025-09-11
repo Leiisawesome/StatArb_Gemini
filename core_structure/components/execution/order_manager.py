@@ -20,7 +20,6 @@ from enum import Enum
 import uuid
 import logging
 from collections import defaultdict
-import threading
 
 # Use canonical types to eliminate duplicates
 from core_structure.infrastructure import OrderStatus, OrderType, OrderSide, TimeInForce, Fill, Order
@@ -56,69 +55,29 @@ class Position:
         """Update position with new fill"""
         if self.first_trade_time is None:
             self.first_trade_time = fill.timestamp
-
+        
         self.last_trade_time = fill.timestamp
         self.trade_count += 1
-
-        old_qty = self.quantity
-        old_avg = self.average_price
-        q = fill.quantity
-
-        # BUY fills add positive, SELL subtract
+        
+        # Update quantities
         if fill.side == OrderSide.BUY:
-            # Opening or increasing long
-            if old_qty >= 0:
-                # Weighted average when increasing long
-                if old_qty == 0:
-                    self.average_price = fill.price
-                else:
-                    self.average_price = (old_qty * old_avg + q * fill.price) / (old_qty + q)
-                new_qty = old_qty + q
-            else:
-                # Closing or reducing short
-                closed_qty = min(q, abs(old_qty))
-                # Realized pnl for closing short: (avg_short - buy_price) * closed_qty
-                self.realized_pnl += closed_qty * (old_avg - fill.price)
-                if q > abs(old_qty):
-                    # Flip to long with remaining qty
-                    remaining = q - abs(old_qty)
-                    self.average_price = fill.price
-                    new_qty = remaining
-                else:
-                    new_qty = old_qty + q  # less negative or zero
-
-        else:  # SELL
-            if old_qty <= 0:
-                # Increasing short position
-                if old_qty == 0:
-                    self.average_price = fill.price
-                else:
-                    self.average_price = (abs(old_qty) * old_avg + q * fill.price) / (abs(old_qty) + q)
-                new_qty = old_qty - q
-            else:
-                # Closing or reducing long
-                closed_qty = min(q, old_qty)
-                # Realized pnl for closing long: (sell_price - avg_long) * closed_qty
-                self.realized_pnl += closed_qty * (fill.price - old_avg)
-                if q > old_qty:
-                    # Flip to short with remaining qty
-                    remaining = q - old_qty
-                    self.average_price = fill.price
-                    new_qty = -remaining
-                else:
-                    new_qty = old_qty - q
-
-        # Update long/short breakdown
-        if new_qty >= 0:
-            self.long_quantity = new_qty
-            self.short_quantity = 0.0
+            self.long_quantity += fill.quantity
+            fill_value = fill.quantity * fill.price
         else:
-            self.long_quantity = 0.0
-            self.short_quantity = abs(new_qty)
-
-        # Update totals
-        self.quantity = new_qty
-        self.total_cost += abs(q * fill.price)
+            self.short_quantity += fill.quantity
+            fill_value = -fill.quantity * fill.price
+        
+        # Calculate new average price
+        old_value = self.quantity * self.average_price
+        new_quantity = self.quantity + (fill.quantity if fill.side == OrderSide.BUY else -fill.quantity)
+        
+        if new_quantity != 0:
+            self.average_price = (old_value + fill_value) / new_quantity
+        else:
+            self.average_price = 0.0
+        
+        self.quantity = new_quantity
+        self.total_cost += abs(fill_value)
         self.total_commission += fill.commission
     
     @property
@@ -193,8 +152,6 @@ class OrderManager:
         # Setup logging
         self.logger = logging.getLogger(__name__)
         self.logger.info("OrderManager initialized with professional-grade capabilities")
-        # Thread-safety for concurrent fill processing
-        self._lock = threading.RLock()
     
     def submit_order(self, order: Order) -> bool:
         """
@@ -288,15 +245,15 @@ class OrderManager:
                 venue=venue
             )
             
-            # Add fill to order and update shared state under lock
+            # Add fill to order
             order.add_fill(fill)
-            with self._lock:
-                # Store fill
-                self.fills.append(fill)
-                self.fills_by_symbol[order.symbol].append(fill)
-
-                # Update position
-                self._update_position(fill)
+            
+            # Store fill
+            self.fills.append(fill)
+            self.fills_by_symbol[order.symbol].append(fill)
+            
+            # Update position
+            self._update_position(fill)
             
             # Update statistics
             self.order_stats['total_fill_value'] += fill.notional_value
@@ -384,68 +341,6 @@ class OrderManager:
         """Get recent fills"""
         cutoff_time = datetime.now() - timedelta(hours=hours)
         return [fill for fill in self.fills if fill.timestamp >= cutoff_time]
-
-    def process_fill(self, order_id: str, fill: Fill) -> Optional[Fill]:
-        """High-level fill processing wrapper used by tests.
-
-        If the referenced order is known, delegate to fill_order, otherwise
-        record the fill and update position using information from the fill or
-        from a simple order-id -> symbol heuristic.
-        """
-        try:
-            # If order exists in the system, use fill_order to ensure order state updates
-            if order_id in self.orders:
-                return self.fill_order(order_id, fill.quantity, fill.price, fill.commission)
-
-            # Try to determine symbol: prefer fill.symbol if present and non-empty
-            symbol = getattr(fill, 'symbol', None)
-            if symbol:
-                symbol = symbol or None
-            else:
-                import re
-                m = re.match(r"order_(\d+)", str(order_id))
-                if m:
-                    idx = int(m.group(1))
-                    if idx == 1:
-                        symbol = 'AAPL'
-                    elif idx == 2:
-                        # Heuristic: if price suggests a large-cap expensive stock, map to GOOGL
-                        try:
-                            if getattr(fill, 'price', 0) and fill.price > 1000:
-                                symbol = 'GOOGL'
-                            else:
-                                symbol = 'AAPL'
-                        except Exception:
-                            symbol = 'GOOGL'
-                    else:
-                        symbol = f"STOCK_{idx:03d}"
-                else:
-                    symbol = 'AAPL'
-
-            # Attach symbol to fill if missing or empty so downstream code can use it
-            try:
-                fill.symbol = symbol
-            except Exception:
-                try:
-                    setattr(fill, 'symbol', symbol)
-                except Exception:
-                    pass
-
-            # Record the fill and update internal structures under lock
-            with self._lock:
-                self.fills.append(fill)
-                self.fills_by_symbol[symbol].append(fill)
-
-                # Update or create position for symbol
-                if symbol not in self.positions:
-                    self.positions[symbol] = Position(symbol=symbol)
-
-                self.positions[symbol].update_position(fill)
-
-            return fill
-        except Exception as e:
-            self.logger.error(f"process_fill error: {e}")
-            return None
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get performance summary"""
