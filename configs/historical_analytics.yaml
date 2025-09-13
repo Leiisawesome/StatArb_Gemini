@@ -1,0 +1,8 @@
+analytics:
+  confidence_threshold: 0.6
+  data_source_path: data/market_data.csv
+  enable_caching: true
+  enable_parallel_processing: true
+  max_instruments_per_config: 20
+  min_sample_size: 30
+  output_base_dir: outputs/historical_analytics

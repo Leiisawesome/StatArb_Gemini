@@ -14,10 +14,7 @@ Features Demonstrated:
 """
 
 import asyncio
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, Any
+from datetime import datetime
 import logging
 
 # Import the adaptive threshold system
