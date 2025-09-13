@@ -126,15 +126,17 @@ class IBKRSimpleTest:
             # Get account summary
             account_summary = await self.ibkr_client.get_account_summary()
             self.logger.info(f"✅ Account Summary:")
-            self.logger.info(f"   Equity: ${account_summary.equity:,.2f}")
+            self.logger.info(f"   Account ID: {account_summary.account_id}")
+            self.logger.info(f"   Net Liquidation: ${account_summary.net_liquidation:,.2f}")
+            self.logger.info(f"   Total Value: ${account_summary.total_value:,.2f}")
             self.logger.info(f"   Buying Power: ${account_summary.buying_power:,.2f}")
-            self.logger.info(f"   Cash: ${account_summary.cash:,.2f}")
+            self.logger.info(f"   Available Cash: ${account_summary.available_cash:,.2f}")
             
             # Get positions
             positions = await self.ibkr_client.get_positions()
             self.logger.info(f"✅ Positions: {len(positions)} found")
             for symbol, position in positions.items():
-                self.logger.info(f"   {symbol}: {position['quantity']} @ ${position['market_price']:.2f}")
+                self.logger.info(f"   {symbol}: {position.quantity} @ ${position.average_price:.2f}")
             
         except Exception as e:
             self.logger.error(f"❌ Account info test failed: {e}")

@@ -121,37 +121,24 @@ class IBKRClient(BaseBroker):
             self.logger.warning("Portfolio event handlers not available")
     
     async def connect(self) -> bool:
-        """Establish connection to IBKR"""
+        """Establish connection to IBKR with improved event loop handling"""
         try:
             if not self.ib:
                 self.logger.error("IBKR library not available")
                 return False
             
-            # Try different connection approaches
-            try:
-                # First try async connection
-                await self.ib.connectAsync(
-                    host=self.config.host,
-                    port=self.config.port,
-                    clientId=self.config.client_id,
-                    timeout=self.config.connection_timeout
-                )
-            except RuntimeError as e:
-                if "event loop is already running" in str(e):
-                    # Fall back to sync connection in thread
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            self.ib.connect,
-                            self.config.host,
-                            self.config.port,
-                            self.config.client_id,
-                            self.config.connection_timeout
-                        )
-                        # Wait for connection to complete
-                        future.result(timeout=self.config.connection_timeout)
-                else:
-                    raise
+            # Detect if we're in an environment with an existing event loop
+            in_existing_loop = self._detect_existing_event_loop()
+            
+            if in_existing_loop:
+                self.logger.debug("Detected existing event loop - using threaded connection")
+                success = await self._connect_with_thread()
+            else:
+                self.logger.debug("No existing event loop - using async connection")
+                success = await self._connect_async()
+            
+            if not success:
+                return False
             
             # Give a moment for connection to fully establish
             await asyncio.sleep(1)
@@ -161,14 +148,8 @@ class IBKRClient(BaseBroker):
                 self.connection_time = datetime.now()
                 self.logger.info(f"Connected to IBKR on {self.config.host}:{self.config.port}")
                 
-                # Request account information
-                await self._request_account_info()
-                
-                # Start heartbeat monitoring
-                self._start_heartbeat()
-                
-                # Pre-populate cache after connection
-                await self._populate_initial_cache()
+                # Initialize connection state without problematic async operations
+                await self._initialize_connection_state()
                 
                 return True
             else:
@@ -179,14 +160,136 @@ class IBKRClient(BaseBroker):
             self.logger.error(f"Connection error: {e}")
             return False
     
+    def _detect_existing_event_loop(self) -> bool:
+        """Detect if we're running in an environment with an existing event loop"""
+        try:
+            # Check if there's a running event loop
+            loop = asyncio.get_running_loop()
+            return loop is not None
+        except RuntimeError:
+            # No running loop
+            return False
+    
+    async def _connect_async(self) -> bool:
+        """Connect using async method"""
+        try:
+            await self.ib.connectAsync(
+                host=self.config.host,
+                port=self.config.port,
+                clientId=self.config.client_id,
+                timeout=self.config.connection_timeout
+            )
+            return True
+        except Exception as e:
+            self.logger.error(f"Async connection failed: {e}")
+            return False
+    
+    async def _connect_with_thread(self) -> bool:
+        """Connect using threaded approach for environments with existing event loops"""
+        try:
+            import concurrent.futures
+            import threading
+            
+            # Event to signal connection completion
+            connection_event = threading.Event()
+            connection_result = {'success': False, 'error': None}
+            
+            def threaded_connect():
+                """Run connection in a new thread with its own event loop"""
+                try:
+                    # Create a new event loop for this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    
+                    try:
+                        # Use sync connection method which handles its own event loop
+                        self.ib.connect(
+                            host=self.config.host,
+                            port=self.config.port,
+                            clientId=self.config.client_id,
+                            timeout=self.config.connection_timeout
+                        )
+                        connection_result['success'] = True
+                    finally:
+                        new_loop.close()
+                        
+                except Exception as e:
+                    connection_result['error'] = str(e)
+                finally:
+                    connection_event.set()
+            
+            # Start connection in thread
+            thread = threading.Thread(target=threaded_connect, daemon=True)
+            thread.start()
+            
+            # Wait for connection to complete (run in executor to avoid blocking)
+            def wait_for_connection():
+                return connection_event.wait(timeout=self.config.connection_timeout)
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(wait_for_connection)
+                completed = future.result(timeout=self.config.connection_timeout + 5)
+            
+            if not completed:
+                self.logger.error("Connection timeout in thread")
+                return False
+            
+            if connection_result['error']:
+                self.logger.error(f"Threaded connection error: {connection_result['error']}")
+                return False
+            
+            return connection_result['success']
+            
+        except Exception as e:
+            self.logger.error(f"Threaded connection setup failed: {e}")
+            return False
+    
+    async def _initialize_connection_state(self) -> None:
+        """Initialize connection state without causing timeouts"""
+        try:
+            # Start heartbeat monitoring
+            self._start_heartbeat()
+            
+            # Try to get basic account info without causing timeouts
+            try:
+                # Use a shorter timeout for initial requests
+                original_timeout = getattr(self.config, 'connection_timeout', 30)
+                self.config.connection_timeout = 5  # Shorter timeout for init
+                
+                # Only request essential info
+                await self._request_essential_info()
+                
+            except Exception as e:
+                self.logger.warning(f"Could not retrieve initial account info: {e}")
+                # Continue anyway - connection is established
+                
+            finally:
+                # Restore original timeout
+                self.config.connection_timeout = original_timeout
+                
+        except Exception as e:
+            self.logger.warning(f"Connection state initialization warning: {e}")
+            # Don't fail the connection for this
+    
     async def disconnect(self) -> bool:
-        """Disconnect from IBKR"""
+        """Disconnect from IBKR with improved error handling"""
         try:
             if self.ib and self.ib.isConnected():
                 # Stop heartbeat monitoring
                 self._stop_heartbeat()
                 
-                self.ib.disconnect()
+                # Graceful disconnect with error handling
+                try:
+                    self.ib.disconnect()
+                except RuntimeError as e:
+                    if "Event loop is closed" in str(e):
+                        # Event loop was already closed - connection is effectively disconnected
+                        self.logger.debug("Event loop already closed during disconnect")
+                    else:
+                        raise
+                except Exception as e:
+                    self.logger.warning(f"Disconnect warning: {e}")
+                
                 self.connected = False
                 self.connection_time = None
                 self.logger.info("Disconnected from IBKR")
@@ -508,7 +611,7 @@ class IBKRClient(BaseBroker):
             return {}
     
     async def get_account_summary(self) -> AccountSummary:
-        """Get account summary with optimized caching"""
+        """Get account summary with direct data access"""
         try:
             if not self.ib.isConnected():
                 return AccountSummary(
@@ -520,51 +623,58 @@ class IBKRClient(BaseBroker):
                     net_liquidation=0.0
                 )
             
-            # Try to get cached data first - ib_insync automatically caches responses
-            account_summary_data = []
+            # Get account values directly - this is populated automatically after connection
+            account_values = {}
             try:
-                # Use the cached data if available
-                if hasattr(self.ib, 'accountSummary'):
-                    account_summary_data = self.ib.accountSummary()
+                # Use accountValues() which we confirmed contains the real data
+                values_data = self.ib.accountValues()
+                self.logger.debug(f"Retrieved {len(values_data)} account values")
                 
-                # If we have recent cached data, use it
-                if account_summary_data:
-                    self.logger.debug("Using cached account summary data")
-                else:
-                    # Check our internal cache
-                    cache_key = f"account_summary_{self.config.account_id}"
-                    cached_result = getattr(self, '_account_cache', {}).get(cache_key)
+                # Parse account values
+                for value in values_data:
+                    try:
+                        # Handle different value formats
+                        if hasattr(value, 'value') and hasattr(value, 'tag'):
+                            # Convert to float, handling currency symbols and formatting
+                            clean_value = value.value.replace(',', '').replace('$', '')
+                            account_values[value.tag] = float(clean_value)
+                            self.logger.debug(f"Parsed {value.tag}: {account_values[value.tag]}")
+                    except (ValueError, TypeError, AttributeError) as e:
+                        self.logger.debug(f"Could not parse {value.tag}: {value.value} - {e}")
+                        account_values[value.tag] = 0.0
+                
+                # If accountValues is empty, try accountSummary as fallback
+                if not account_values:
+                    self.logger.debug("No account values found, trying account summary")
+                    summary_data = self.ib.accountSummary()
+                    self.logger.debug(f"Retrieved {len(summary_data)} account summary items")
                     
-                    if cached_result and self._is_cache_valid(cached_result):
-                        self.logger.debug("Using internal cached account summary")
-                        account_summary_data = cached_result['data']
-                    else:
-                        # No valid cache, but don't try async request to avoid event loop conflicts
-                        # Instead, use default values and log the limitation
-                        self.logger.debug("No cached account data available, using defaults")
-                        account_summary_data = []
+                    for summary in summary_data:
+                        try:
+                            if hasattr(summary, 'value') and hasattr(summary, 'tag'):
+                                clean_value = summary.value.replace(',', '').replace('$', '')
+                                account_values[summary.tag] = float(clean_value)
+                                self.logger.debug(f"Parsed summary {summary.tag}: {account_values[summary.tag]}")
+                        except (ValueError, TypeError, AttributeError) as e:
+                            self.logger.debug(f"Could not parse summary {summary.tag}: {summary.value} - {e}")
+                            account_values[summary.tag] = 0.0
                         
             except Exception as e:
-                self.logger.debug(f"Account summary cache access: {e}")
-                account_summary_data = []
+                self.logger.warning(f"Account data access error: {e}")
+                account_values = {}
             
-            # Parse account values
-            account_values = {}
-            for value in account_summary_data:
-                try:
-                    account_values[value.tag] = float(value.value)
-                except (ValueError, TypeError):
-                    account_values[value.tag] = 0.0
-            
+            # Create summary with proper field mapping
             summary = AccountSummary(
                 account_id=self.config.account_id,
                 total_value=account_values.get('NetLiquidation', 0.0),
-                available_cash=account_values.get('AvailableFunds', 0.0),
+                available_cash=account_values.get('AvailableFunds', account_values.get('TotalCashValue', 0.0)),
                 buying_power=account_values.get('BuyingPower', 0.0),
                 margin_balance=account_values.get('GrossPositionValue', 0.0),
                 net_liquidation=account_values.get('NetLiquidation', 0.0),
                 timestamp=datetime.now()
             )
+            
+            self.logger.info(f"Account summary created: Net Liquidation=${summary.net_liquidation:.2f}, Available Cash=${summary.available_cash:.2f}, Buying Power=${summary.buying_power:.2f}")
             
             self.account_summary = summary
             return summary
@@ -808,7 +918,7 @@ class IBKRClient(BaseBroker):
             return "2 Y"
     
     async def _request_account_info(self):
-        """Request account information"""
+        """Request account information (legacy method - use _request_essential_info for new connections)"""
         try:
             # Request account summary
             await self.get_account_summary()
@@ -818,6 +928,32 @@ class IBKRClient(BaseBroker):
             
         except Exception as e:
             self.logger.error(f"Account info request error: {e}")
+    
+    async def _request_essential_info(self) -> None:
+        """Request only essential account info to avoid timeouts"""
+        try:
+            # Get account info synchronously from ib_insync's internal state
+            if hasattr(self.ib, 'managedAccounts') and self.ib.managedAccounts():
+                accounts = self.ib.managedAccounts()
+                self.logger.info(f"Managed accounts: {accounts}")
+                
+                # Update config with actual account if available
+                if accounts and len(accounts) > 0:
+                    actual_account = accounts[0]
+                    if actual_account != self.config.account_id:
+                        self.logger.info(f"Updating account ID from {self.config.account_id} to {actual_account}")
+                        self.config.account_id = actual_account
+            
+            # Log server version if available
+            if hasattr(self.ib, 'client') and hasattr(self.ib.client, 'serverVersion'):
+                server_version = self.ib.client.serverVersion
+                self.logger.info(f"Server version: {server_version}")
+            
+            self.logger.info("Essential connection info retrieved successfully")
+            
+        except Exception as e:
+            self.logger.warning(f"Could not retrieve essential info: {e}")
+            # Don't fail - connection is still valid
     
     # Event handlers
     def _on_connected(self):
@@ -848,47 +984,106 @@ class IBKRClient(BaseBroker):
         }
     
     async def _populate_initial_cache(self) -> None:
-        """Populate cache with initial data after connection"""
+        """Populate cache with initial data after connection (non-blocking version)"""
         try:
             if not self.ib.isConnected():
                 return
             
-            self.logger.debug("Populating initial data cache...")
+            self.logger.debug("Populating initial data cache (safe mode)...")
             
-            # Pre-request account summary and positions to populate ib_insync's cache
+            # Use only synchronous data access to avoid async conflicts
             try:
-                # This will populate ib_insync's internal cache
-                self.ib.reqAccountSummary()
-                self.ib.reqPositions()
-                
-                # Wait a moment for data to arrive
-                await asyncio.sleep(0.5)
-                
-                # Cache the data in our internal cache for backup
+                # Check if ib_insync already has cached data
                 account_cache_key = f"account_summary_{self.config.account_id}"
                 positions_cache_key = f"positions_{self.config.account_id}"
                 
-                # Get and cache account summary
+                # Try to get existing cached data from ib_insync
                 if hasattr(self.ib, 'accountSummary'):
-                    account_data = self.ib.accountSummary()
-                    if account_data:
-                        self._cache_data(self._account_cache, account_cache_key, account_data)
-                        self.logger.debug(f"Cached {len(account_data)} account summary items")
+                    try:
+                        account_data = self.ib.accountSummary()
+                        if account_data:
+                            self._cache_data(self._account_cache, account_cache_key, account_data)
+                            self.logger.debug(f"Cached {len(account_data)} existing account summary items")
+                    except Exception as e:
+                        self.logger.debug(f"No existing account summary cache: {e}")
                 
-                # Get and cache positions
+                # Try to get existing positions data
                 if hasattr(self.ib, 'positions'):
-                    positions_data = self.ib.positions()
-                    if positions_data:
-                        self._cache_data(self._positions_cache, positions_cache_key, positions_data)
-                        self.logger.debug(f"Cached {len(positions_data)} positions")
+                    try:
+                        positions_data = self.ib.positions()
+                        if positions_data:
+                            self._cache_data(self._positions_cache, positions_cache_key, positions_data)
+                            self.logger.debug(f"Cached {len(positions_data)} existing positions")
+                    except Exception as e:
+                        self.logger.debug(f"No existing positions cache: {e}")
                 
-                self.logger.debug("Initial cache population completed")
+                # Schedule background cache population without blocking connection
+                asyncio.create_task(self._background_cache_population())
+                
+                self.logger.debug("Initial cache population completed (safe mode)")
                 
             except Exception as e:
-                self.logger.warning(f"Could not populate initial cache: {e}")
+                self.logger.debug(f"Cache population skipped: {e}")
                 
         except Exception as e:
-            self.logger.warning(f"Cache population error: {e}")
+            self.logger.debug(f"Cache initialization skipped: {e}")
+    
+    async def _background_cache_population(self) -> None:
+        """Populate cache in background without blocking connection"""
+        try:
+            # Wait a bit for connection to stabilize
+            await asyncio.sleep(2)
+            
+            if not self.ib.isConnected():
+                return
+            
+            self.logger.debug("Starting background cache population...")
+            
+            # Try to request fresh data (with timeout protection)
+            try:
+                # Use non-blocking requests with short timeouts
+                account_task = asyncio.create_task(self._safe_request_account_data())
+                positions_task = asyncio.create_task(self._safe_request_positions_data())
+                
+                # Wait for both with timeout
+                await asyncio.wait_for(
+                    asyncio.gather(account_task, positions_task, return_exceptions=True),
+                    timeout=5.0
+                )
+                
+                self.logger.debug("Background cache population completed")
+                
+            except asyncio.TimeoutError:
+                self.logger.debug("Background cache population timed out (non-critical)")
+            except Exception as e:
+                self.logger.debug(f"Background cache population error (non-critical): {e}")
+                
+        except Exception as e:
+            self.logger.debug(f"Background cache setup error: {e}")
+    
+    async def _safe_request_account_data(self) -> None:
+        """Safely request account data without blocking"""
+        try:
+            if self.ib.isConnected():
+                # Use ib_insync's cached data access
+                account_data = getattr(self.ib, 'accountSummary', lambda: [])()
+                if account_data:
+                    cache_key = f"account_summary_{self.config.account_id}"
+                    self._cache_data(self._account_cache, cache_key, account_data)
+        except Exception as e:
+            self.logger.debug(f"Safe account data request failed: {e}")
+    
+    async def _safe_request_positions_data(self) -> None:
+        """Safely request positions data without blocking"""
+        try:
+            if self.ib.isConnected():
+                # Use ib_insync's cached data access
+                positions_data = getattr(self.ib, 'positions', lambda: [])()
+                if positions_data:
+                    cache_key = f"positions_{self.config.account_id}"
+                    self._cache_data(self._positions_cache, cache_key, positions_data)
+        except Exception as e:
+            self.logger.debug(f"Safe positions data request failed: {e}")
     
     def _on_order_status(self, trade):
         """Handle order status updates"""
