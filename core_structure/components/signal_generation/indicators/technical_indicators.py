@@ -84,7 +84,7 @@ class IndicatorStatus(Enum):
 
 @dataclass
 class IndicatorConfig:
-    """Configuration for technical indicators"""
+    """Configuration for technical indicators with adaptive thresholds support"""
     # Performance settings
     enable_parallel_calculation: bool = True
     max_parallel_indicators: int = 8
@@ -92,14 +92,14 @@ class IndicatorConfig:
     cache_indicators: bool = True
     cache_ttl_seconds: int = 300
     
-    # Default parameters
+    # Default parameters (now used as fallbacks when adaptive thresholds unavailable)
     default_periods: Dict[str, int] = field(default_factory=lambda: {
         'sma': 20, 'ema': 20, 'rsi': 14, 'macd_fast': 12,
         'macd_slow': 26, 'macd_signal': 9, 'bb_period': 20,
         'atr': 14, 'adx': 14, 'stoch_k': 14, 'stoch_d': 3
     })
     
-    # Thresholds
+    # Default thresholds (now used as fallbacks when adaptive thresholds unavailable)
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
     stoch_overbought: float = 80.0
@@ -112,6 +112,48 @@ class IndicatorConfig:
     # Custom indicators
     enable_custom_indicators: bool = True
     custom_lookback_window: int = 50
+    
+    # Adaptive threshold support
+    enable_adaptive_thresholds: bool = True
+    threshold_manager: Optional[Any] = None  # Reference to AdaptiveThresholdManager
+    
+    def get_rsi_thresholds(self, regime_name: Optional[str] = None) -> Dict[str, float]:
+        """Get RSI thresholds - adaptive if available, otherwise defaults"""
+        if self.enable_adaptive_thresholds and self.threshold_manager:
+            return self.threshold_manager.get_adaptive_rsi_thresholds(regime_name)
+        return {
+            'overbought': self.rsi_overbought,
+            'oversold': self.rsi_oversold,
+            'momentum_upper': 70.0,
+            'momentum_lower': 50.0,
+            'bearish_upper': 50.0,
+            'bearish_lower': 30.0
+        }
+    
+    def get_stoch_thresholds(self, regime_name: Optional[str] = None) -> Dict[str, float]:
+        """Get Stochastic thresholds - adaptive if available, otherwise defaults"""
+        if self.enable_adaptive_thresholds and self.threshold_manager:
+            return {
+                'overbought': self.threshold_manager.get_threshold_value('stoch_overbought', regime_name),
+                'oversold': self.threshold_manager.get_threshold_value('stoch_oversold', regime_name)
+            }
+        return {
+            'overbought': self.stoch_overbought,
+            'oversold': self.stoch_oversold
+        }
+    
+    def get_technical_params(self, regime_name: Optional[str] = None) -> Dict[str, Union[int, float]]:
+        """Get technical indicator parameters - adaptive if available, otherwise defaults"""
+        if self.enable_adaptive_thresholds and self.threshold_manager:
+            return self.threshold_manager.get_adaptive_technical_indicator_params(regime_name)
+        return {
+            'rsi_period': self.default_periods['rsi'],
+            'bb_period': self.default_periods['bb_period'],
+            'bb_std_multiplier': 2.0,
+            'macd_fast': self.default_periods['macd_fast'],
+            'macd_slow': self.default_periods['macd_slow'],
+            'macd_signal': self.default_periods['macd_signal']
+        }
 
 @dataclass
 class IndicatorResult:

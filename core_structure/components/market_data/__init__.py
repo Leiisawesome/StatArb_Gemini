@@ -27,6 +27,27 @@ from .core.data_validation_monitor import (
     DataValidationMonitor, ValidationSeverity, ValidationResult
 )
 
+# Import WebSocket components
+try:
+    from .websocket import (
+        WebSocketDiversificationManager,
+        WebSocketSource,
+        SourceConfig,
+        SourcePriority,
+        DataType,
+        MarketDataUpdate,
+        WebSocketPaperTradingIntegration
+    )
+except ImportError:
+    # Fallback if websocket components are not available
+    WebSocketDiversificationManager = None
+    WebSocketSource = None
+    SourceConfig = None
+    SourcePriority = None
+    DataType = None
+    MarketDataUpdate = None
+    WebSocketPaperTradingIntegration = None
+
 __all__ = [
     # Phase 4B unified classes
     'UnifiedDataManager',
@@ -46,7 +67,15 @@ __all__ = [
     'PairScreeningCriteria',
     'SmartCache',
     'ValidationSeverity',
-    'ValidationResult'
+    'ValidationResult',
+    # WebSocket components
+    'WebSocketDiversificationManager',
+    'WebSocketSource',
+    'SourceConfig',
+    'SourcePriority',
+    'DataType',
+    'MarketDataUpdate',
+    'WebSocketPaperTradingIntegration'
 ]
 
 def get_consolidation_status():

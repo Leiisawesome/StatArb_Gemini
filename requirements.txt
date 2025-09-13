@@ -111,4 +111,9 @@ types-PyYAML>=6.0.0
 # Additional utilities
 tqdm>=4.64.0
 rich>=12.0.0
-click>=8.1.0 
+click>=8.1.0
+
+# WebSocket Diversification Enhancement
+websockets>=12.0
+websocket-client>=1.6.0
+python-dotenv>=1.0.0 

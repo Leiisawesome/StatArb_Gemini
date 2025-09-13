@@ -1,0 +1,62 @@
+# WebSocket Diversification Configuration
+# ========================================
+
+# Data Sources Configuration
+enable_alpaca: true
+enable_polygon: true
+enable_finnhub: false
+enable_twelve_data: false
+
+# API Keys (set via environment variables for security)
+# ALPACA_API_KEY=your_alpaca_key
+# POLYGON_API_KEY=your_polygon_key
+# FINNHUB_API_KEY=your_finnhub_key
+# TWELVE_DATA_API_KEY=your_twelve_data_key
+
+# Default Symbols
+default_symbols:
+  - SPY
+  - QQQ
+  - IWM
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - TSLA
+  - NVDA
+  - META
+  - NFLX
+  - CRM
+
+# Data Types
+data_types:
+  - trade
+  - quote
+
+# Connection Settings
+max_reconnect_attempts: 5
+reconnect_delay: 1.0
+connection_timeout: 30
+ping_interval: 30
+
+# Performance Settings
+message_buffer_size: 5000
+processing_batch_size: 100
+max_latency_ms: 1000.0
+min_message_rate: 1.0
+
+# Quality Settings
+enable_quality_monitoring: true
+quality_check_interval: 30
+max_error_rate: 0.05
+min_uptime_percentage: 95.0
+
+# Failover Settings
+enable_automatic_failover: true
+min_active_sources: 1
+failover_delay: 2.0
+
+# Integration Settings
+enable_strategy_integration: true
+enable_paper_trading_integration: true
+enable_analytics_integration: true

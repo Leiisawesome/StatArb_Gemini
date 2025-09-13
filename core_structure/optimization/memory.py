@@ -11,6 +11,7 @@ Features:
 - Garbage collection optimization
 - Memory usage monitoring and alerts
 - Automatic pool sizing and management
+- Configuration caching for adaptive thresholds
 
 Author: Professional Trading System Architecture
 Version: 2.0 (Memory Optimized)
@@ -21,17 +22,109 @@ import time
 import logging
 from typing import Dict, Any, Optional, List, Type, TypeVar, Generic, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 from abc import ABC, abstractmethod
 import weakref
 import gc
 import psutil
 import os
+import json
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+# ================================================================================
+# CONFIGURATION CACHE MANAGER
+# ================================================================================
+
+class CacheManager:
+    """
+    Simple cache manager for adaptive threshold configurations.
+    Provides persistent storage and retrieval of threshold configurations.
+    """
+    
+    def __init__(self, cache_name: str, ttl_seconds: int = 3600):
+        """
+        Initialize cache manager.
+        
+        Args:
+            cache_name: Name of the cache
+            ttl_seconds: Time-to-live for cache entries in seconds
+        """
+        self.cache_name = cache_name
+        self.ttl_seconds = ttl_seconds
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.cache_timestamps: Dict[str, datetime] = {}
+        self.lock = threading.RLock()
+        
+        self.logger = logging.getLogger(f"{__name__}.CacheManager")
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if it exists and is not expired."""
+        with self.lock:
+            if key not in self.cache:
+                return None
+            
+            # Check expiration
+            timestamp = self.cache_timestamps.get(key)
+            if timestamp and datetime.now() - timestamp > timedelta(seconds=self.ttl_seconds):
+                self._remove_expired_entry(key)
+                return None
+            
+            return self.cache[key]
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set value in cache."""
+        with self.lock:
+            self.cache[key] = value
+            self.cache_timestamps[key] = datetime.now()
+    
+    def remove(self, key: str) -> bool:
+        """Remove key from cache. Returns True if key existed."""
+        with self.lock:
+            existed = key in self.cache
+            self.cache.pop(key, None)
+            self.cache_timestamps.pop(key, None)
+            return existed
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        with self.lock:
+            self.cache.clear()
+            self.cache_timestamps.clear()
+    
+    def _remove_expired_entry(self, key: str) -> None:
+        """Remove expired entry from cache."""
+        self.cache.pop(key, None)
+        self.cache_timestamps.pop(key, None)
+    
+    def cleanup_expired(self) -> int:
+        """Remove all expired entries. Returns number of entries removed."""
+        with self.lock:
+            now = datetime.now()
+            expired_keys = [
+                key for key, timestamp in self.cache_timestamps.items()
+                if now - timestamp > timedelta(seconds=self.ttl_seconds)
+            ]
+            
+            for key in expired_keys:
+                self._remove_expired_entry(key)
+            
+            return len(expired_keys)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self.lock:
+            return {
+                'cache_name': self.cache_name,
+                'total_entries': len(self.cache),
+                'ttl_seconds': self.ttl_seconds,
+                'memory_usage_bytes': sum(
+                    len(str(k)) + len(str(v)) for k, v in self.cache.items()
+                )
+            }
 
 # ================================================================================
 # OBJECT POOL STATISTICS AND MONITORING
