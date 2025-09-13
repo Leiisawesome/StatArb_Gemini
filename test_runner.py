@@ -21,9 +21,9 @@ def run_tests():
     print(f"📅 Test Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
-    # Change to project directory
-    project_dir = "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini"
-    os.chdir(project_dir)
+    # Change to project directory - use current working directory
+    project_dir = os.getcwd()
+    print(f"📂 Running tests from: {project_dir}")
     
     test_suites = [
         {
