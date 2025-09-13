@@ -3,11 +3,16 @@
 IBKR Test Runner
 ===============
 
-Comprehensive test runner for IBKR broker integration testing.
-Provides multiple test options and comprehensive reporting.
+Streamlined test runner for essential IBKR broker integration testing.
+Provides clean, focused test options:
+
+- verification: Quick connection verification utility
+- simple: Basic IBKRClient connection and functionality test
+- validation: Comprehensive IBKRClient validation with real account data
+- all: Run all essential tests
 
 Author: Professional Trading System Architecture
-Version: 1.0.0 (IBKR Test Runner)
+Version: 2.0.0 (Streamlined Test Runner)
 """
 
 import asyncio
@@ -18,11 +23,13 @@ import argparse
 from datetime import datetime
 
 # Add the project root to the path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+sys.path.insert(0, project_root)
 
-from tests.integration.ibkr.ibkr_connection_diagnostics import run_diagnostics
 from tests.integration.ibkr.ibkr_simple_test import run_simple_test
-from tests.integration.ibkr.ibkr_real_test import run_ibkr_real_test
+from tests.integration.ibkr.ibkr_client_validation_test import run_validation_test
+from tests.integration.ibkr.ibkr_connection_verification import verify_ibkr_connection
 
 # Configure logging
 logging.basicConfig(
@@ -39,20 +46,20 @@ class IBKRTestRunner:
         self.logger = logging.getLogger(f"{__name__}.IBKRTestRunner")
         self.test_results = {}
     
-    async def run_diagnostics(self):
-        """Run connection diagnostics"""
+    async def run_verification(self):
+        """Run connection verification utility"""
         
-        self.logger.info("🔍 Running IBKR Connection Diagnostics")
+        self.logger.info("🔍 Running IBKR Connection Verification")
         self.logger.info("=" * 50)
         
         try:
-            await run_diagnostics()
-            self.test_results["diagnostics"] = "PASSED"
-            self.logger.info("✅ Diagnostics completed successfully")
+            await verify_ibkr_connection()
+            self.test_results["verification"] = "PASSED"
+            self.logger.info("✅ Connection verification completed successfully")
             
         except Exception as e:
-            self.logger.error(f"❌ Diagnostics failed: {e}")
-            self.test_results["diagnostics"] = f"FAILED: {e}"
+            self.logger.error(f"❌ Connection verification failed: {e}")
+            self.test_results["verification"] = f"FAILED: {e}"
     
     async def run_simple_test(self):
         """Run simple connection test"""
@@ -69,20 +76,24 @@ class IBKRTestRunner:
             self.logger.error(f"❌ Simple test failed: {e}")
             self.test_results["simple_test"] = f"FAILED: {e}"
     
-    async def run_comprehensive_test(self):
-        """Run comprehensive test suite"""
+    async def run_validation_test(self):
+        """Run IBKRClient validation test"""
         
-        self.logger.info("🎯 Running IBKR Comprehensive Test Suite")
+        self.logger.info("🔍 Running IBKRClient Validation Test")
         self.logger.info("=" * 50)
         
         try:
-            await run_ibkr_real_test()
-            self.test_results["comprehensive_test"] = "PASSED"
-            self.logger.info("✅ Comprehensive test completed successfully")
+            result = await run_validation_test()
+            if result == 0:
+                self.test_results["validation_test"] = "PASSED"
+                self.logger.info("✅ Validation test completed successfully")
+            else:
+                self.test_results["validation_test"] = "FAILED: Non-zero exit code"
+                self.logger.error("❌ Validation test failed")
             
         except Exception as e:
-            self.logger.error(f"❌ Comprehensive test failed: {e}")
-            self.test_results["comprehensive_test"] = f"FAILED: {e}"
+            self.logger.error(f"❌ Validation test failed: {e}")
+            self.test_results["validation_test"] = f"FAILED: {e}"
     
     async def run_all_tests(self):
         """Run all available tests"""
@@ -90,11 +101,15 @@ class IBKRTestRunner:
         self.logger.info("🏆 Running All IBKR Tests")
         self.logger.info("=" * 50)
         
-        # Run diagnostics first
-        await self.run_diagnostics()
+        # Run verification first
+        await self.run_verification()
         
         # Run simple test
         await self.run_simple_test()
+        
+        # Run validation test
+        await self.run_validation_test()
+        await self.run_validation_test()
         
         # Run comprehensive test
         await self.run_comprehensive_test()
@@ -134,7 +149,7 @@ async def main():
     parser = argparse.ArgumentParser(description="IBKR Test Runner")
     parser.add_argument(
         "--test",
-        choices=["diagnostics", "simple", "comprehensive", "all"],
+        choices=["verification", "simple", "validation", "all"],
         default="all",
         help="Type of test to run (default: all)"
     )
@@ -158,12 +173,12 @@ async def main():
     print("=" * 50)
     
     try:
-        if args.test == "diagnostics":
-            await runner.run_diagnostics()
+        if args.test == "verification":
+            await runner.run_verification()
         elif args.test == "simple":
             await runner.run_simple_test()
-        elif args.test == "comprehensive":
-            await runner.run_comprehensive_test()
+        elif args.test == "validation":
+            await runner.run_validation_test()
         elif args.test == "all":
             await runner.run_all_tests()
         
