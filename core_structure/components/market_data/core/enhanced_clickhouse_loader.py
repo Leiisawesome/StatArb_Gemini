@@ -245,7 +245,13 @@ class EnhancedClickHouseLoader:
             # Cache result
             if use_cache and data is not None and not data.empty:
                 # Calculate TTL based on data recency
-                latest_time = data.index.max() if not data.empty else datetime.now()
+                if 'date' in data.columns:
+                    latest_time = data['date'].max()
+                elif 'timestamp' in data.columns:
+                    latest_time = data['timestamp'].max()
+                else:
+                    latest_time = datetime.now()
+                    
                 age_hours = (datetime.now() - latest_time).total_seconds() / 3600
                 ttl = min(3600, max(300, int(age_hours * 60)))  # 5min to 1hour
                 
@@ -289,8 +295,14 @@ class EnhancedClickHouseLoader:
         
         # For multi-symbol data, concatenate vertically to maintain symbol column
         if len(dataframes) > 1:
-            combined_data = pd.concat(dataframes, ignore_index=False)
-            combined_data = combined_data.sort_index()  # Sort by timestamp
+            combined_data = pd.concat(dataframes, ignore_index=True)  # Reset index for clean combination
+            
+            # Sort by appropriate time column
+            if 'date' in combined_data.columns:
+                combined_data = combined_data.sort_values('date')
+            elif 'timestamp' in combined_data.columns:
+                combined_data = combined_data.sort_values('timestamp')
+            
             self.logger.info(f"Combined {len(dataframes)} symbol datasets into {len(combined_data)} total rows")
         else:
             combined_data = dataframes[0]
@@ -367,6 +379,7 @@ class EnhancedClickHouseLoader:
                 # Aggregate to daily data
                 query = f"""
                 SELECT 
+                    ticker,
                     toDate(toDateTime(window_start / 1000000000)) as date,
                     argMin(open, window_start) as open,
                     max(high) as high,
@@ -377,7 +390,7 @@ class EnhancedClickHouseLoader:
                 WHERE ticker = '{symbol}'
                 AND window_start >= {start_date_ns}
                 AND window_start <= {end_date_ns}
-                GROUP BY toDate(toDateTime(window_start / 1000000000))
+                GROUP BY ticker, toDate(toDateTime(window_start / 1000000000))
                 ORDER BY date
                 """
             elif request.interval == '5min':
@@ -463,14 +476,15 @@ class EnhancedClickHouseLoader:
             df = pd.DataFrame(data)
             
             if request.interval == '1d':
-                df.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+                df.columns = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume']
                 df['date'] = pd.to_datetime(df['date'])
-                df.set_index('date', inplace=True)
+                # Don't set date as index for historical analytics - keep as column
+                # df.set_index('date', inplace=True)
             else:
                 df.columns = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
-                # Keep symbol as a column (don't set as index)
-                df.set_index('timestamp', inplace=True)
+                # Keep timestamp as a column (don't set as index)
+                # df.set_index('timestamp', inplace=True)
             
             # Clean data types
             for col in ['open', 'high', 'low', 'close', 'volume']:
@@ -484,7 +498,17 @@ class EnhancedClickHouseLoader:
                 self.logger.warning(f"No valid data after processing for {symbol}")
                 return pd.DataFrame()
             
-            self.logger.info(f"Loaded {len(df)} rows for {symbol} from {df.index.min()} to {df.index.max()}")
+            # Log data range based on column structure
+            if request.interval == '1d' and 'date' in df.columns:
+                date_min = df['date'].min()
+                date_max = df['date'].max()
+                self.logger.info(f"Loaded {len(df)} rows for {symbol} from {date_min} to {date_max}")
+            elif 'timestamp' in df.columns:
+                ts_min = df['timestamp'].min()
+                ts_max = df['timestamp'].max()
+                self.logger.info(f"Loaded {len(df)} rows for {symbol} from {ts_min} to {ts_max}")
+            else:
+                self.logger.info(f"Loaded {len(df)} rows for {symbol} from {df.index.min()} to {df.index.max()}")
             
             # Data validation and monitoring (if available)
             if self.enable_validation and self.validation_monitor and not df.empty:

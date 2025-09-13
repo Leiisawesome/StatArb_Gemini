@@ -17,17 +17,15 @@ Author: Professional Trading System Architecture
 Version: 1.0.0 (Consolidated)
 """
 
-import asyncio
 import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any, Union, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 import threading
-from abc import ABC, abstractmethod
 import warnings
 
 # ML and statistical libraries
@@ -35,10 +33,7 @@ from sklearn.ensemble import RandomForestRegressor, IsolationForest
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
-from sklearn.decomposition import PCA, FactorAnalysis
-from scipy import stats
-from scipy.optimize import minimize
-import joblib
+from sklearn.decomposition import FactorAnalysis
 
 # Optional statistical libraries
 try:

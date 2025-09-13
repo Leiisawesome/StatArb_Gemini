@@ -1,0 +1,19 @@
+strategies:
+  mean_reversion:
+    default_parameters:
+      entry_threshold: 2.0
+      exit_threshold: 0.5
+      lookback_period: 20
+      rebalance_frequency: daily
+  momentum:
+    default_parameters:
+      momentum_window: 20
+      rebalance_frequency: weekly
+      signal_window: 5
+      trend_threshold: 0.05
+  pairs_trading:
+    default_parameters:
+      cointegration_window: 252
+      entry_zscore: 2.0
+      exit_zscore: 0.5
+      hedge_ratio_lookback: 60

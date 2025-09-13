@@ -14,10 +14,8 @@ Author: Pro Quant Desk Trader
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-import json
-from pathlib import Path
 
 import sys
 import os

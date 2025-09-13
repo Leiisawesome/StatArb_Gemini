@@ -39,6 +39,14 @@ StatArb Gemini has been completely transformed through a comprehensive 4-phase a
 - **Regime-Aware Trading**: Advanced market regime detection with GMM/HMM models
 - **Smart Execution**: TWAP, VWAP, Implementation Shortfall with market impact optimization
 - **Real-Time Risk Management**: Dynamic position sizing with correlation limits
+- **MarketCondition Analytics**: ML-powered regime detection with 5 market conditions and dynamic strategy allocation
+
+### **🔮 MarketCondition Analytics Engine**
+- **5 Market Regimes**: crisis_mode, trending_bull, trending_bear, high_volatility, sideways_range
+- **Dynamic Strategy Allocation**: Regime-specific strategy weighting (crisis: 70% pairs, bull: 70% momentum, etc.)
+- **Multi-Factor Analysis**: Volatility, trend strength, volume profile, VIX analysis, flight-to-quality indicators
+- **Performance Feedback Loop**: Continuous learning from strategy performance across regimes
+- **Real-Time Alerts**: Regime change detection with confidence scoring and transition probabilities
 
 ### **📊 Comprehensive Monitoring**
 - **System Health**: Real-time CPU, memory, thread monitoring with intelligent alerts
@@ -116,6 +124,12 @@ python main.py --mode paper --capital 100000
 
 # Live trading mode (requires IBKR setup)
 python main.py --mode live --capital 50000 --symbols SPY QQQ IWM
+
+# MarketCondition Analytics Demo
+python demo_market_condition_analytics.py
+
+# Integration Example (Advanced)
+python examples/market_condition_analytics_integration.py
 
 # With dashboard on custom port
 python main.py --dashboard-port 8080

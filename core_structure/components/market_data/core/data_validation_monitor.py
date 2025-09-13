@@ -176,13 +176,18 @@ class DataValidationMonitor:
                 message=f"Missing required columns for {symbol}: {missing_columns}"
             ))
         
-        # Check index type
-        if not isinstance(data.index, pd.DatetimeIndex):
+        # Check index type - accept either DatetimeIndex or datetime columns
+        has_datetime_index = isinstance(data.index, pd.DatetimeIndex)
+        has_datetime_columns = any(col in data.columns for col in ['date', 'timestamp']) and \
+                              any(pd.api.types.is_datetime64_any_dtype(data[col]) 
+                                  for col in ['date', 'timestamp'] if col in data.columns)
+        
+        if not (has_datetime_index or has_datetime_columns):
             results.append(ValidationResult(
                 check_name="data_structure.index_type",
                 severity=ValidationSeverity.WARNING,
                 passed=False,
-                message=f"Index is not DatetimeIndex for {symbol}: {type(data.index)}"
+                message=f"No datetime index or datetime columns found for {symbol}: index={type(data.index)}, columns={list(data.columns)}"
             ))
         
         return results
@@ -195,54 +200,65 @@ class DataValidationMonitor:
             return results
         
         try:
-            # Check for duplicate timestamps
+            # Get datetime series - either from index or columns
+            datetime_series = None
             if isinstance(data.index, pd.DatetimeIndex):
-                duplicates = data.index.duplicated().sum()
-                if duplicates > 0:
+                datetime_series = data.index.to_series()
+            elif 'date' in data.columns and pd.api.types.is_datetime64_any_dtype(data['date']):
+                datetime_series = data['date']
+            elif 'timestamp' in data.columns and pd.api.types.is_datetime64_any_dtype(data['timestamp']):
+                datetime_series = data['timestamp']
+            
+            if datetime_series is None:
+                return results  # No datetime data to validate
+            
+            # Check for duplicate timestamps
+            duplicates = datetime_series.duplicated().sum()
+            if duplicates > 0:
+                results.append(ValidationResult(
+                    check_name="timestamps.duplicates",
+                    severity=ValidationSeverity.WARNING,
+                    passed=False,
+                    message=f"Found {duplicates} duplicate timestamps for {symbol}",
+                    details={'duplicate_count': duplicates}
+                ))
+            
+            # Check for gaps (only alert on very large gaps > 24 hours)
+            if len(datetime_series) > 1:
+                time_diffs = datetime_series.diff().dropna()
+                gap_threshold = pd.Timedelta(minutes=self.alert_thresholds['timestamp_gap_minutes'])
+                large_gaps = time_diffs[time_diffs > gap_threshold]
+                
+                if len(large_gaps) > 0:
                     results.append(ValidationResult(
-                        check_name="timestamps.duplicates",
+                        check_name="timestamps.gaps",
                         severity=ValidationSeverity.WARNING,
                         passed=False,
-                        message=f"Found {duplicates} duplicate timestamps for {symbol}",
-                        details={'duplicate_count': duplicates}
+                        message=f"Found {len(large_gaps)} gaps > 24hrs for {symbol}",
+                        details={
+                            'gap_count': len(large_gaps),
+                            'gap_threshold': str(gap_threshold),
+                            'max_gap': str(large_gaps.max())
+                        }
                     ))
-                
-                # Check for gaps (only alert on very large gaps > 24 hours)
-                if len(data) > 1:
-                    time_diffs = data.index.to_series().diff().dropna()
-                    gap_threshold = pd.Timedelta(minutes=self.alert_thresholds['timestamp_gap_minutes'])
-                    large_gaps = time_diffs[time_diffs > gap_threshold]
-                    
-                    if len(large_gaps) > 0:
-                        results.append(ValidationResult(
-                            check_name="timestamps.gaps",
-                            severity=ValidationSeverity.WARNING,
-                            passed=False,
-                            message=f"Found {len(large_gaps)} gaps > 24hrs for {symbol}",
-                            details={
-                                'gap_count': len(large_gaps),
-                                'gap_threshold': str(gap_threshold),
-                                'max_gap': str(large_gaps.max())
-                            }
-                        ))
-                
-                # Check date range reasonableness
-                start_date = data.index.min()
-                end_date = data.index.max()
-                
-                if start_date > datetime.now():
-                    results.append(ValidationResult(
-                        check_name="timestamps.future_data",
-                        severity=ValidationSeverity.ERROR,
-                        passed=False,
-                        message=f"Future data detected for {symbol}: starts {start_date}"
-                    ))
-                
-                if start_date < datetime(1990, 1, 1):
-                    results.append(ValidationResult(
-                        check_name="timestamps.old_data",
-                        severity=ValidationSeverity.WARNING,
-                        passed=False,
+            
+            # Check date range reasonableness
+            start_date = datetime_series.min()
+            end_date = datetime_series.max()
+            
+            if start_date > datetime.now():
+                results.append(ValidationResult(
+                    check_name="timestamps.future_data",
+                    severity=ValidationSeverity.ERROR,
+                    passed=False,
+                    message=f"Future data detected for {symbol}: starts {start_date}"
+                ))
+            
+            if start_date < datetime(1990, 1, 1):
+                results.append(ValidationResult(
+                    check_name="timestamps.old_data",
+                    severity=ValidationSeverity.WARNING,
+                    passed=False,
                         message=f"Very old data detected for {symbol}: starts {start_date}"
                     ))
         
