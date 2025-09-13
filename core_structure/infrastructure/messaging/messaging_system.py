@@ -588,6 +588,20 @@ class MessageBus:
             
             logger.info("MessageBus shutdown complete")
 
+    # Compatibility shims for examples/tests that await these methods
+    async def start(self) -> None:
+        """Async start compatibility method - MessageBus starts automatically in __init__"""
+        # MessageBus is ready to use immediately after initialization
+        # This is a compatibility shim for examples/tests that call await message_bus.start()
+        logger.debug("MessageBus.start() called (compatibility shim)")
+        pass
+    
+    async def stop(self) -> None:
+        """Async stop compatibility method - calls shutdown()"""
+        # Delegate to existing shutdown method
+        logger.debug("MessageBus.stop() called (compatibility shim)")
+        self.shutdown()
+
 
 # =============================================================================
 # Specialized Message Factories

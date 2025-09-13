@@ -345,8 +345,9 @@ class MetricsCollector:
     - Enhanced alerting with rule-based system
     """
     
-    def __init__(self, config: MetricsConfig):
-        self.config = config
+    def __init__(self, config: Optional[MetricsConfig] = None):
+        # Compatibility shim: Accept optional config with default
+        self.config = config or MetricsConfig()
         
         # Enhanced storage with tags and metadata
         self._metrics: Dict[str, List[MetricValue]] = defaultdict(list)
@@ -624,6 +625,24 @@ class MetricsCollector:
             self._active_alerts[alert_id].resolved = True
             return True
         return False
+
+    # Compatibility shims for examples/tests that await these methods
+    async def start(self) -> None:
+        """Async start compatibility method (no-op when not needed)"""
+        # MetricsCollector doesn't need async startup in current implementation
+        # This is a compatibility shim for examples/tests that call await metrics_collector.start()
+        logger.debug("MetricsCollector.start() called (compatibility shim)")
+        pass
+    
+    async def stop(self) -> None:
+        """Async stop compatibility method (no-op when not needed)"""
+        # Gracefully stop any background processing
+        if self.config.async_processing:
+            self._stop_processing.set()
+            for thread in self._processing_threads:
+                if thread.is_alive():
+                    thread.join(timeout=2.0)
+        logger.debug("MetricsCollector.stop() called (compatibility shim)")
 
 
 # =============================================================================
