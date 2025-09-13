@@ -159,7 +159,9 @@ class BaseStrategy(IRegimeSubscriber):
     Now includes regime adaptation capabilities
     """
     
-    def __init__(self, strategy_id: str, config: Dict[str, Any], regime_engine: Optional[UnifiedRegimeEngine] = None):
+    def __init__(self, strategy_id: str, config: Dict[str, Any], 
+                 regime_engine: Optional[UnifiedRegimeEngine] = None,
+                 threshold_manager: Optional[Any] = None):
         self._strategy_id = strategy_id
         self._config = config
         self._metrics = StrategyMetrics()
@@ -176,11 +178,14 @@ class BaseStrategy(IRegimeSubscriber):
         self._current_regime: Optional[RegimeState] = None
         self._regime_adaptations: Dict[str, float] = {}
         
+        # Adaptive threshold support
+        self.threshold_manager = threshold_manager
+        
         # Subscribe to regime changes if engine provided
         if self._regime_engine:
             self._regime_engine.subscribe_to_regime_changes(self)
         
-        logger.info(f"📈 Strategy initialized: {strategy_id}")
+        logger.info(f"📈 Strategy initialized: {strategy_id} (adaptive_thresholds: {threshold_manager is not None})")
     
     @property
     def strategy_id(self) -> str:
@@ -376,6 +381,30 @@ class MomentumStrategy(BaseStrategy):
         # Adjusted lookback period
         adjusted_lookback = int(20 * lookback_multiplier)
         
+        # Get current regime for adaptive thresholds
+        current_regime = getattr(context, 'current_regime', None)
+        
+        # Get adaptive thresholds
+        if hasattr(self, 'threshold_manager'):
+            adaptive_rsi = self.threshold_manager.get_adaptive_rsi_thresholds(current_regime)
+            adaptive_momentum = self.threshold_manager.get_adaptive_momentum_thresholds(current_regime)
+            adaptive_risk = self.threshold_manager.get_adaptive_risk_thresholds(current_regime)
+        else:
+            # Fallback to default values
+            adaptive_rsi = {
+                'momentum_upper': 70.0,
+                'momentum_lower': 50.0,
+                'bearish_upper': 50.0,
+                'bearish_lower': 30.0
+            }
+            adaptive_momentum = {
+                'momentum_threshold': 2.0 + threshold_adjustment,
+                'volume_ratio': 1.2
+            }
+            adaptive_risk = {
+                'confidence_threshold': 0.7
+            }
+        
         # Calculate momentum indicators
         rsi = self._calculate_rsi(data['close'], self._config.get('rsi_period', 14))
         macd_line, signal_line = self._calculate_macd(data['close'])
@@ -388,17 +417,23 @@ class MomentumStrategy(BaseStrategy):
         current_volume = data['volume'].iloc[-1]
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
         
-        # Adjusted thresholds based on regime
-        momentum_threshold = 2 + threshold_adjustment
+        # Use adaptive thresholds
+        momentum_threshold = adaptive_momentum['momentum_threshold']
+        volume_threshold = adaptive_momentum['volume_ratio']
+        rsi_momentum_upper = adaptive_rsi['momentum_upper']
+        rsi_momentum_lower = adaptive_rsi['momentum_lower']
+        rsi_bearish_upper = adaptive_rsi['bearish_upper']
+        rsi_bearish_lower = adaptive_rsi['bearish_lower']
+        confidence_threshold = adaptive_risk['confidence_threshold']
         
         # Generate signals based on momentum conditions
         signals = []
         
-        # Long signal conditions with regime-adjusted thresholds
-        if (rsi < 70 and rsi > 50 and  # RSI in momentum zone
+        # Long signal conditions with adaptive thresholds
+        if (rsi < rsi_momentum_upper and rsi > rsi_momentum_lower and  # RSI in adaptive momentum zone
             macd_line > signal_line and  # MACD bullish
-            price_change > momentum_threshold and  # Positive price momentum (regime-adjusted)
-            volume_ratio > 1.2):  # Volume confirmation
+            price_change > momentum_threshold and  # Positive price momentum (adaptive)
+            volume_ratio > volume_threshold):  # Volume confirmation (adaptive)
             
             # Apply confidence multiplier from regime
             base_confidence = min(0.9, (price_change / 10) * volume_ratio * 0.1 + 0.5)
@@ -407,7 +442,7 @@ class MomentumStrategy(BaseStrategy):
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.LONG,
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > confidence_threshold else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=data['close'].iloc[-1],
@@ -417,23 +452,29 @@ class MomentumStrategy(BaseStrategy):
                     'signal_line': signal_line,
                     'price_change': price_change,
                     'volume_ratio': volume_ratio,
-                    'strategy': 'momentum'
+                    'strategy': 'momentum',
+                    'adaptive_thresholds': {
+                        'momentum_threshold': momentum_threshold,
+                        'rsi_upper': rsi_momentum_upper,
+                        'rsi_lower': rsi_momentum_lower,
+                        'volume_threshold': volume_threshold
+                    }
                 }
             )
             signals.append(signal)
         
-        # Short signal conditions
-        elif (rsi > 30 and rsi < 50 and  # RSI in bearish momentum zone
+        # Short signal conditions with adaptive thresholds
+        elif (rsi > rsi_bearish_lower and rsi < rsi_bearish_upper and  # RSI in adaptive bearish momentum zone
               macd_line < signal_line and  # MACD bearish
-              price_change < -2 and  # Negative price momentum
-              volume_ratio > 1.2):  # Volume confirmation
+              price_change < adaptive_momentum['momentum_threshold'] * -0.5 and  # Negative price momentum (adaptive)
+              volume_ratio > volume_threshold):  # Volume confirmation (adaptive)
             
             confidence = min(0.9, (abs(price_change) / 10) * volume_ratio * 0.1 + 0.5)
             
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.SHORT,
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > confidence_threshold else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=data['close'].iloc[-1],
@@ -443,7 +484,13 @@ class MomentumStrategy(BaseStrategy):
                     'signal_line': signal_line,
                     'price_change': price_change,
                     'volume_ratio': volume_ratio,
-                    'strategy': 'momentum'
+                    'strategy': 'momentum',
+                    'adaptive_thresholds': {
+                        'momentum_threshold': momentum_threshold,
+                        'rsi_upper': rsi_bearish_upper,
+                        'rsi_lower': rsi_bearish_lower,
+                        'volume_threshold': volume_threshold
+                    }
                 }
             )
             signals.append(signal)
@@ -491,9 +538,30 @@ class MeanReversionStrategy(BaseStrategy):
         if len(data) < 50:  # Need sufficient data
             return []
         
+        # Get current regime for adaptive thresholds
+        current_regime = getattr(context, 'current_regime', None)
+        
+        # Get adaptive thresholds
+        if hasattr(self, 'threshold_manager'):
+            adaptive_mr = self.threshold_manager.get_adaptive_mean_reversion_thresholds(current_regime)
+            adaptive_risk = self.threshold_manager.get_adaptive_risk_thresholds(current_regime)
+        else:
+            # Fallback to default values
+            adaptive_mr = {
+                'z_score_entry': self._config.get('z_score_threshold', 2.0),
+                'z_score_exit': 0.5,
+                'confidence_base': 3.0,
+                'confidence_offset': 0.3,
+                'bb_period': self._config.get('bollinger_period', 20),
+                'bb_std_multiplier': 2.0
+            }
+            adaptive_risk = {
+                'confidence_threshold': 0.7
+            }
+        
         # Calculate mean reversion indicators
         lookback = self._config.get('lookback_period', 20)
-        z_threshold = self._config.get('z_score_threshold', 2.0)
+        z_threshold = adaptive_mr['z_score_entry']
         
         # Calculate rolling mean and standard deviation
         rolling_mean = data['close'].rolling(lookback).mean()
@@ -509,12 +577,13 @@ class MeanReversionStrategy(BaseStrategy):
         
         z_score = (current_price - current_mean) / current_std
         
-        # Bollinger Bands
-        bb_period = self._config.get('bollinger_period', 20)
+        # Adaptive Bollinger Bands
+        bb_period = adaptive_mr['bb_period']
+        bb_std_multiplier = adaptive_mr['bb_std_multiplier']
         bb_mean = data['close'].rolling(bb_period).mean().iloc[-1]
         bb_std = data['close'].rolling(bb_period).std().iloc[-1]
-        bb_upper = bb_mean + (2 * bb_std)
-        bb_lower = bb_mean - (2 * bb_std)
+        bb_upper = bb_mean + (bb_std_multiplier * bb_std)
+        bb_lower = bb_mean - (bb_std_multiplier * bb_std)
         
         # Volume confirmation
         avg_volume = data['volume'].rolling(20).mean().iloc[-1]
@@ -523,15 +592,15 @@ class MeanReversionStrategy(BaseStrategy):
         
         signals = []
         
-        # Mean reversion signals
+        # Mean reversion signals with adaptive thresholds
         if z_score > z_threshold and current_price > bb_upper:
             # Price is too high, expect reversion down (short signal)
-            confidence = min(0.9, abs(z_score) / 3.0 + 0.3)
+            confidence = min(0.9, abs(z_score) / adaptive_mr['confidence_base'] + adaptive_mr['confidence_offset'])
             
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.SHORT,
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > adaptive_risk['confidence_threshold'] else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=current_price,
@@ -541,19 +610,25 @@ class MeanReversionStrategy(BaseStrategy):
                     'bb_lower': bb_lower,
                     'bb_mean': bb_mean,
                     'volume_ratio': volume_ratio,
-                    'strategy': 'mean_reversion'
+                    'strategy': 'mean_reversion',
+                    'adaptive_thresholds': {
+                        'z_threshold': z_threshold,
+                        'bb_period': bb_period,
+                        'bb_std_multiplier': bb_std_multiplier,
+                        'confidence_base': adaptive_mr['confidence_base']
+                    }
                 }
             )
             signals.append(signal)
         
         elif z_score < -z_threshold and current_price < bb_lower:
             # Price is too low, expect reversion up (long signal)
-            confidence = min(0.9, abs(z_score) / 3.0 + 0.3)
+            confidence = min(0.9, abs(z_score) / adaptive_mr['confidence_base'] + adaptive_mr['confidence_offset'])
             
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.LONG,
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > adaptive_risk['confidence_threshold'] else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=current_price,
@@ -563,7 +638,13 @@ class MeanReversionStrategy(BaseStrategy):
                     'bb_lower': bb_lower,
                     'bb_mean': bb_mean,
                     'volume_ratio': volume_ratio,
-                    'strategy': 'mean_reversion'
+                    'strategy': 'mean_reversion',
+                    'adaptive_thresholds': {
+                        'z_threshold': z_threshold,
+                        'bb_period': bb_period,
+                        'bb_std_multiplier': bb_std_multiplier,
+                        'confidence_base': adaptive_mr['confidence_base']
+                    }
                 }
             )
             signals.append(signal)
@@ -594,11 +675,30 @@ class PairsTradingStrategy(BaseStrategy):
         if len(data) < 100:  # Need more data for pairs trading
             return []
         
+        # Get current regime for adaptive thresholds
+        current_regime = getattr(context, 'current_regime', None)
+        
+        # Get adaptive thresholds
+        if hasattr(self, 'threshold_manager'):
+            adaptive_pairs = self.threshold_manager.get_adaptive_pairs_trading_thresholds(current_regime)
+            adaptive_risk = self.threshold_manager.get_adaptive_risk_thresholds(current_regime)
+        else:
+            # Fallback to default values
+            adaptive_pairs = {
+                'entry_threshold': self._config.get('entry_threshold', 2.0),
+                'exit_threshold': 0.5,
+                'confidence_base': 3.0,
+                'confidence_offset': 0.4
+            }
+            adaptive_risk = {
+                'confidence_threshold': 0.7
+            }
+        
         # For pairs trading, we need data for both symbols
         # This is a simplified implementation - in practice, you'd need both symbols' data
         pair_symbol = self._config.get('pair_symbol', 'SPY')
         lookback = self._config.get('lookback_period', 60)
-        entry_threshold = self._config.get('entry_threshold', 2.0)
+        entry_threshold = adaptive_pairs['entry_threshold']
         
         # Calculate spread (simplified - assuming we have pair data)
         # In practice, you'd calculate the spread between two correlated assets
@@ -620,16 +720,16 @@ class PairsTradingStrategy(BaseStrategy):
         
         signals = []
         
-        # Pairs trading signals based on spread divergence
+        # Pairs trading signals based on spread divergence with adaptive thresholds
         if spread_z_score > entry_threshold:
             # Spread is too wide, expect convergence
             # Short the outperforming asset, long the underperforming
-            confidence = min(0.9, abs(spread_z_score) / 3.0 + 0.4)
+            confidence = min(0.9, abs(spread_z_score) / adaptive_pairs['confidence_base'] + adaptive_pairs['confidence_offset'])
             
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.SHORT,  # Short the outperforming asset
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > adaptive_risk['confidence_threshold'] else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=data['close'].iloc[-1],
@@ -637,19 +737,24 @@ class PairsTradingStrategy(BaseStrategy):
                     'spread_z_score': spread_z_score,
                     'spread': current_spread,
                     'pair_symbol': pair_symbol,
-                    'strategy': 'pairs_trading'
+                    'strategy': 'pairs_trading',
+                    'adaptive_thresholds': {
+                        'entry_threshold': entry_threshold,
+                        'confidence_base': adaptive_pairs['confidence_base'],
+                        'confidence_offset': adaptive_pairs['confidence_offset']
+                    }
                 }
             )
             signals.append(signal)
         
         elif spread_z_score < -entry_threshold:
             # Spread is too narrow, expect divergence
-            confidence = min(0.9, abs(spread_z_score) / 3.0 + 0.4)
+            confidence = min(0.9, abs(spread_z_score) / adaptive_pairs['confidence_base'] + adaptive_pairs['confidence_offset'])
             
             signal = TradingSignal(
                 symbol=context.symbol,
                 signal_type=SignalType.LONG,  # Long the underperforming asset
-                strength=SignalStrength.STRONG if confidence > 0.7 else SignalStrength.MODERATE,
+                strength=SignalStrength.STRONG if confidence > adaptive_risk['confidence_threshold'] else SignalStrength.MODERATE,
                 confidence=confidence,
                 timestamp=context.current_time,
                 price=data['close'].iloc[-1],
@@ -657,7 +762,12 @@ class PairsTradingStrategy(BaseStrategy):
                     'spread_z_score': spread_z_score,
                     'spread': current_spread,
                     'pair_symbol': pair_symbol,
-                    'strategy': 'pairs_trading'
+                    'strategy': 'pairs_trading',
+                    'adaptive_thresholds': {
+                        'entry_threshold': entry_threshold,
+                        'confidence_base': adaptive_pairs['confidence_base'],
+                        'confidence_offset': adaptive_pairs['confidence_offset']
+                    }
                 }
             )
             signals.append(signal)
@@ -700,13 +810,37 @@ class StrategyRegistry:
     
     def create_strategy(self, strategy_type: StrategyType, strategy_id: str, 
                        config: Dict[str, Any]) -> BaseStrategy:
-        """Create strategy instance"""
+        """Create strategy instance with adaptive threshold support"""
         if strategy_type not in self._strategies:
             raise ValueError(f"Unknown strategy type: {strategy_type}")
         
         strategy_class = self._strategies[strategy_type]
-        # Pass regime engine to strategy
-        strategy = strategy_class(strategy_id, config, self.regime_engine)
+        
+        # Create adaptive threshold manager for this strategy
+        threshold_manager = None
+        if config.get('enable_adaptive_thresholds', True):
+            try:
+                from core_structure.optimization.dynamic_adaptation.adaptive_threshold_manager import AdaptiveThresholdManager
+                from core_structure.optimization.dynamic_adaptation.adaptation_config import AdaptationConfig, AdaptationMode
+                
+                # Create adaptation config based on strategy config
+                adaptation_mode = AdaptationMode(config.get('adaptation_mode', 'moderate'))
+                adaptation_config = AdaptationConfig(mode=adaptation_mode)
+                
+                threshold_manager = AdaptiveThresholdManager(
+                    strategy_id=strategy_id,
+                    adaptation_config=adaptation_config,
+                    regime_engine=self.regime_engine
+                )
+                
+                self.logger.info(f"🔧 Created adaptive threshold manager for {strategy_id}")
+                
+            except ImportError as e:
+                self.logger.warning(f"⚠️ Could not create adaptive threshold manager: {e}")
+                threshold_manager = None
+        
+        # Pass regime engine and threshold manager to strategy
+        strategy = strategy_class(strategy_id, config, self.regime_engine, threshold_manager)
         
         # Store instance
         self._instances[strategy_id] = strategy
