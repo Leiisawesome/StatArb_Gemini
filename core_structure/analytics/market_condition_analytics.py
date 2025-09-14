@@ -34,6 +34,11 @@ import json
 # ML and statistical libraries
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Analytics database connection pool
+from .database_pool import analytics_db_connection, execute_analytics_query
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 # Leverage existing core_structure components
@@ -211,7 +216,7 @@ class MarketConditionAnalyticsEngine:
         self.last_model_update = None
         
         # Threading
-        self.analysis_lock = threading.RLock()
+        self.analysis_lock = asyncio.Lock()
         self.background_thread = None
         self.running = False
         
@@ -239,7 +244,7 @@ class MarketConditionAnalyticsEngine:
     async def start(self) -> None:
         """Start the market condition analytics engine"""
         try:
-            with self.analysis_lock:
+            async with self.analysis_lock:
                 if self.running:
                     logger.warning("Market condition analytics engine already running")
                     return
@@ -281,7 +286,7 @@ class MarketConditionAnalyticsEngine:
     async def stop(self) -> None:
         """Stop the market condition analytics engine"""
         try:
-            with self.analysis_lock:
+            async with self.analysis_lock:
                 if not self.running:
                     return
                 
@@ -307,7 +312,7 @@ class MarketConditionAnalyticsEngine:
         This is the main entry point for regime detection and analysis.
         """
         try:
-            with self.analysis_lock:
+            async with self.analysis_lock:
                 # Process and integrate all data sources
                 processed_data = await self.data_processor.process_all_data(
                     market_data=market_data,
@@ -348,7 +353,7 @@ class MarketConditionAnalyticsEngine:
         Get dynamic strategy recommendations based on current market condition.
         """
         try:
-            with self.analysis_lock:
+            async with self.analysis_lock:
                 # Use current market state if not provided
                 if market_state is None:
                     market_state = self.current_market_state
@@ -387,7 +392,7 @@ class MarketConditionAnalyticsEngine:
         Update performance feedback for continuous improvement.
         """
         try:
-            with self.analysis_lock:
+            async with self.analysis_lock:
                 # Store feedback
                 self.performance_history.append(feedback)
                 
@@ -465,14 +470,16 @@ class MarketConditionAnalyticsEngine:
             return
         
         try:
-            # Market condition states table
-            await self.database_manager.execute("""
-                CREATE TABLE IF NOT EXISTS market_condition_states (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP NOT NULL,
-                    primary_condition VARCHAR(50) NOT NULL,
-                    secondary_conditions TEXT,
-                    confidence DECIMAL(5,4) NOT NULL,
+            # Use connection pool for database initialization
+            async with analytics_db_connection(self.database_manager) as conn:
+                # Market condition states table
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS market_condition_states (
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMP NOT NULL,
+                        primary_condition VARCHAR(50) NOT NULL,
+                        secondary_conditions TEXT,
+                        confidence DECIMAL(5,4) NOT NULL,
                     volatility_regime VARCHAR(20),
                     trend_strength DECIMAL(8,6),
                     market_stress DECIMAL(8,6),
@@ -482,15 +489,15 @@ class MarketConditionAnalyticsEngine:
                     features TEXT,
                     metadata TEXT
                 )
-            """)
-            
-            # Strategy selections table
-            await self.database_manager.execute("""
-                CREATE TABLE IF NOT EXISTS strategy_selections (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP NOT NULL,
-                    regime VARCHAR(50) NOT NULL,
-                    selected_strategies TEXT NOT NULL,
+                """)
+                
+                # Strategy selections table
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS strategy_selections (
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMP NOT NULL,
+                        regime VARCHAR(50) NOT NULL,
+                        selected_strategies TEXT NOT NULL,
                     confidence DECIMAL(5,4) NOT NULL,
                     expected_performance TEXT,
                     risk_assessment TEXT,
@@ -498,25 +505,25 @@ class MarketConditionAnalyticsEngine:
                     reasoning TEXT,
                     metadata TEXT
                 )
-            """)
-            
-            # Performance feedback table
-            await self.database_manager.execute("""
-                CREATE TABLE IF NOT EXISTS performance_feedback (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP NOT NULL,
-                    strategy VARCHAR(50) NOT NULL,
-                    instrument VARCHAR(20) NOT NULL,
-                    regime VARCHAR(50) NOT NULL,
-                    actual_return DECIMAL(10,6) NOT NULL,
-                    predicted_return DECIMAL(10,6) NOT NULL,
-                    prediction_error DECIMAL(10,6) NOT NULL,
+                """)
+                
+                # Performance feedback table
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS performance_feedback (
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMP NOT NULL,
+                        strategy VARCHAR(50) NOT NULL,
+                        instrument VARCHAR(20) NOT NULL,
+                        regime VARCHAR(50) NOT NULL,
+                        actual_return DECIMAL(10,6) NOT NULL,
+                        predicted_return DECIMAL(10,6) NOT NULL,
+                        prediction_error DECIMAL(10,6) NOT NULL,
                     risk_adjusted_return DECIMAL(10,6),
                     execution_quality DECIMAL(5,4),
                     regime_accuracy DECIMAL(5,4),
                     metadata TEXT
                 )
-            """)
+                """)
             
             logger.info("✅ Database schema initialized for market condition analytics")
             
@@ -582,7 +589,7 @@ class MarketConditionAnalyticsEngine:
         logger.info("✅ Background analysis loop stopped")
     
     async def _persist_market_state(self, market_state: MarketConditionState) -> None:
-        """Persist market state to database"""
+        """Persist market state to database using connection pool"""
         if not self.database_manager:
             return
         
@@ -591,26 +598,30 @@ class MarketConditionAnalyticsEngine:
             json_safe_features = self._make_json_safe(market_state.features)
             json_safe_metadata = self._make_json_safe(market_state.metadata)
             
-            await self.database_manager.execute("""
+            # Use connection pool for database persistence
+            await execute_analytics_query(
+                self.database_manager,
+                """
                 INSERT INTO market_condition_states (
                     timestamp, primary_condition, secondary_conditions, confidence,
                     volatility_regime, trend_strength, market_stress, liquidity_condition,
                     regime_duration_seconds, transition_probabilities, features, metadata
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                market_state.timestamp,
-                market_state.primary_condition.value,
-                json.dumps([c.value for c in market_state.secondary_conditions]),
-                market_state.confidence,
-                market_state.volatility_regime,
-                market_state.trend_strength,
-                market_state.market_stress,
-                market_state.liquidity_condition,
-                int(market_state.regime_duration.total_seconds()),
-                json.dumps({k.value if hasattr(k, 'value') else str(k): v for k, v in market_state.transition_probability.items()}),
-                json.dumps(json_safe_features),
-                json.dumps(json_safe_metadata)
-            ))
+                """, {
+                    'timestamp': market_state.timestamp,
+                    'primary_condition': market_state.primary_condition.value,
+                    'secondary_conditions': json.dumps([c.value for c in market_state.secondary_conditions]),
+                    'confidence': market_state.confidence,
+                    'volatility_regime': market_state.volatility_regime,
+                    'trend_strength': market_state.trend_strength,
+                    'market_stress': market_state.market_stress,
+                    'liquidity_condition': market_state.liquidity_condition,
+                    'regime_duration_seconds': int(market_state.regime_duration.total_seconds()),
+                    'transition_probabilities': json.dumps({k.value if hasattr(k, 'value') else str(k): v for k, v in market_state.transition_probability.items()}),
+                    'features': json.dumps(json_safe_features),
+                    'metadata': json.dumps(json_safe_metadata)
+                }
+            )
             
         except Exception as e:
             logger.error(f"❌ Error persisting market state: {e}")
@@ -637,30 +648,35 @@ class MarketConditionAnalyticsEngine:
             return str(obj)
     
     async def _persist_performance_feedback(self, feedback: PerformanceFeedback) -> None:
-        """Persist performance feedback to database"""
+        """Persist performance feedback to database using connection pool"""
         if not self.database_manager:
             return
         
         try:
-            await self.database_manager.execute("""
+            await execute_analytics_query(
+                self.database_manager,
+                """
                 INSERT INTO performance_feedback (
                     timestamp, strategy, instrument, regime, actual_return,
                     predicted_return, prediction_error, risk_adjusted_return,
                     execution_quality, regime_accuracy, metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                feedback.timestamp,
-                feedback.strategy.value,
-                feedback.instrument,
-                feedback.regime.value,
-                feedback.actual_return,
-                feedback.predicted_return,
-                feedback.prediction_error,
-                feedback.risk_adjusted_return,
-                feedback.execution_quality,
-                feedback.regime_accuracy,
-                json.dumps(feedback.metadata)
-            ))
+                ) VALUES (%(timestamp)s, %(strategy)s, %(instrument)s, %(regime)s, %(actual_return)s, 
+                         %(predicted_return)s, %(prediction_error)s, %(risk_adjusted_return)s,
+                         %(execution_quality)s, %(regime_accuracy)s, %(metadata)s)
+                """, {
+                    'timestamp': feedback.timestamp,
+                    'strategy': feedback.strategy.value,
+                    'instrument': feedback.instrument,
+                    'regime': feedback.regime.value,
+                    'actual_return': feedback.actual_return,
+                    'predicted_return': feedback.predicted_return,
+                    'prediction_error': feedback.prediction_error,
+                    'risk_adjusted_return': feedback.risk_adjusted_return,
+                    'execution_quality': feedback.execution_quality,
+                    'regime_accuracy': feedback.regime_accuracy,
+                    'metadata': json.dumps(feedback.metadata)
+                }
+            )
             
         except Exception as e:
             logger.error(f"❌ Error persisting performance feedback: {e}")

@@ -230,7 +230,7 @@ class AdvancedEnhancedMomentumBacktest:
     
     def __init__(self, config_name: str = "advanced_momentum", custom_config: Optional[Dict] = None):
         self.logger = logging.getLogger(__name__)
-        self.core_engine: Optional[UnifiedTradingEngine] = None
+        self.core_engine = None  # UnifiedTradingEngine instance
         self.data_provider: Optional[BacktestingDataProvider] = None
         
         # Load test configuration
@@ -244,7 +244,7 @@ class AdvancedEnhancedMomentumBacktest:
         self.test_config = self._load_test_config(config_name, custom_config)
         
         # Advanced components
-        self.dynamic_risk_manager: Optional[DynamicRiskManager] = None
+        self.dynamic_risk_manager = None  # RiskManager instance
         self.regime_filter: Optional[RegimeAwareFilter] = None
         self.regime_detector: Optional[MarketRegimeDetector] = None
         self.risk_manager: Optional[RiskManager] = None
@@ -609,15 +609,12 @@ class AdvancedEnhancedMomentumBacktest:
     async def _setup_optimization(self):
         """Setup the optimization framework for 50% faster trading cycles"""
         try:
-            self.optimization_wrapper = create_backtest_optimizer(
-                mode=OptimizationMode.OPTIMIZED_ONLY,
-                regime_cache_duration=5,
-                trend_cache_duration=5,
-                momentum_cache_duration=2
-            )
-            await self.optimization_wrapper.initialize()
+            # Optimization framework is currently disabled
+            # TODO: Integrate with core_structure optimization components when available
+            self.optimization_wrapper = None
+            self.optimization_enabled = False
             
-            self.logger.info("⚡ Optimization enabled")
+            self.logger.info("⚠️ Optimization framework not available - continuing without optimization")
             
         except Exception as e:
             self.logger.error(f"❌ Optimization setup failed: {e}")
@@ -1288,13 +1285,27 @@ class AdvancedEnhancedMomentumBacktest:
                 # Calculate trailing stop
                 trailing_stop = self._calculate_trailing_stop(price, signal > 0)
                 
+                # Ensure timestamp is a proper datetime object for position creation
+                if not isinstance(timestamp, datetime):
+                    if hasattr(timestamp, 'to_pydatetime'):
+                        # Convert pandas Timestamp to datetime
+                        position_timestamp = timestamp.to_pydatetime()
+                    elif isinstance(timestamp, (int, float)):
+                        # Convert Unix timestamp to datetime
+                        position_timestamp = datetime.fromtimestamp(timestamp)
+                    else:
+                        # Try to parse as string
+                        position_timestamp = pd.to_datetime(timestamp).to_pydatetime()
+                else:
+                    position_timestamp = timestamp
+                
                 # Create or update position
                 new_shares = current_shares + trade_shares
                 position_info = PositionInfo(
                     symbol=symbol,
                     shares=new_shares,
                     entry_price=price,
-                    entry_time=timestamp,
+                    entry_time=position_timestamp,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     trailing_stop=trailing_stop
@@ -1399,6 +1410,18 @@ class AdvancedEnhancedMomentumBacktest:
         try:
             if symbol not in self.results.positions:
                 return
+            
+            # Ensure timestamp is a proper datetime object
+            if not isinstance(timestamp, datetime):
+                if hasattr(timestamp, 'to_pydatetime'):
+                    # Convert pandas Timestamp to datetime
+                    timestamp = timestamp.to_pydatetime()
+                elif isinstance(timestamp, (int, float)):
+                    # Convert Unix timestamp to datetime
+                    timestamp = datetime.fromtimestamp(timestamp)
+                else:
+                    # Try to parse as string
+                    timestamp = pd.to_datetime(timestamp).to_pydatetime()
             
             position = self.results.positions[symbol]
             is_long = position.shares > 0
@@ -1768,6 +1791,19 @@ class AdvancedEnhancedMomentumBacktest:
                     est_tz = pytz.timezone('US/Eastern')
                     
                     timestamp_local = trade['timestamp']
+                    
+                    # Ensure timestamp is a proper datetime object
+                    if not isinstance(timestamp_local, datetime):
+                        if hasattr(timestamp_local, 'to_pydatetime'):
+                            # Convert pandas Timestamp to datetime
+                            timestamp_local = timestamp_local.to_pydatetime()
+                        elif isinstance(timestamp_local, (int, float)):
+                            # Convert Unix timestamp to datetime
+                            timestamp_local = datetime.fromtimestamp(timestamp_local)
+                        else:
+                            # Try to parse as string
+                            timestamp_local = pd.to_datetime(timestamp_local).to_pydatetime()
+                    
                     if timestamp_local.tzinfo is None:
                         timestamp_cst = cst_tz.localize(timestamp_local)
                     else:

@@ -11,11 +11,13 @@ Author: StatArb Gemini Team
 Version: 1.0.0
 """
 
+import asyncio
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 import logging
+import gc
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -194,6 +196,180 @@ class HistoricalAnalyticsEngine:
             logger.error(traceback.format_exc())
             self.execution_state['errors'].append(error_msg)
             raise
+    
+    async def run_streaming_analysis(self, 
+                                   periods_config: Optional[Dict] = None,
+                                   target_strategies: Optional[List[StrategyType]] = None,
+                                   target_symbols: Optional[List[str]] = None,
+                                   analysis_name: Optional[str] = None,
+                                   chunk_size: int = 5000) -> AnalysisResults:
+        """
+        Run the complete historical analytics pipeline with streaming for large datasets
+        
+        Args:
+            periods_config: Optional custom period configuration
+            target_strategies: Optional list of strategies to analyze
+            target_symbols: Optional list of symbols to analyze
+            analysis_name: Optional name for this analysis run
+            chunk_size: Number of rows per chunk for streaming
+            
+        Returns:
+            Complete analysis results with all outputs
+        """
+        if analysis_name is None:
+            analysis_name = f"streaming_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        logger.info(f"Starting streaming historical analysis: {analysis_name}")
+        self._start_execution_tracking()
+        
+        try:
+            # Step 1: Define historical periods (no data loading yet)
+            self.execution_state['current_step'] = 'defining_periods'
+            periods = self.data_manager.define_historical_periods(periods_config)
+            
+            if not periods:
+                raise ValueError("No valid historical periods defined")
+            
+            logger.info(f"Defined {len(periods)} periods for streaming analysis")
+            
+            # Step 2: Stream regime analysis
+            logger.info("Step 2: Performing streaming regime analysis...")
+            regime_results = []
+            
+            async for period_name, data_chunk in self.data_manager.stream_multiple_periods(
+                periods, target_symbols, chunk_size
+            ):
+                try:
+                    # Process chunk through regime analyzer
+                    chunk_result = await self._process_regime_chunk(period_name, data_chunk)
+                    if chunk_result:
+                        regime_results.append(chunk_result)
+                    
+                    # Force garbage collection periodically
+                    if len(regime_results) % 10 == 0:
+                        gc.collect()
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to process chunk for {period_name}: {e}")
+                    continue
+            
+            # Step 3: Combine regime results
+            from .data_types import RegimeAnalysisOutput
+            regime_analysis = RegimeAnalysisOutput(
+                regime_results=regime_results,
+                regime_distribution={},
+                transition_matrix={},
+                regime_clusters={},
+                analysis_metadata={
+                    'total_periods': len(periods),
+                    'streaming_mode': True,
+                    'chunk_size': chunk_size,
+                    'analysis_timestamp': datetime.now().isoformat()
+                }
+            )
+            
+            # Step 4: Generate instrument rankings (using aggregated data)
+            logger.info("Step 4: Generating instrument rankings...")
+            rankings = await self._generate_streaming_rankings(regime_analysis, target_strategies)
+            
+            # Step 5: Generate backtest configs
+            logger.info("Step 5: Generating backtest configurations...")
+            backtest_suite = self.config_generator.generate_comprehensive_configs(
+                regime_analysis=regime_analysis,
+                rankings=rankings,
+                target_strategies=target_strategies or [StrategyType.MEAN_REVERSION, StrategyType.MOMENTUM]
+            )
+            
+            # Step 6: Export results
+            analysis_paths, rankings_paths = self._export_analysis_results(
+                regime_analysis, rankings, analysis_name
+            )
+            
+            # Create final results
+            results = AnalysisResults(
+                regime_analysis=regime_analysis,
+                instrument_rankings=rankings,
+                backtest_suite=backtest_suite,
+                analysis_metadata={
+                    'analysis_name': analysis_name,
+                    'streaming_mode': True,
+                    'chunk_size': chunk_size,
+                    'timestamp': datetime.now().isoformat(),
+                    'execution_time_seconds': self._get_execution_time()
+                },
+                output_paths=analysis_paths,
+                rankings_paths=rankings_paths,
+                execution_metadata=self.execution_state.copy()
+            )
+            
+            # Calculate success metrics
+            results.execution_metadata['success_metrics'] = results.success_metrics
+            
+            logger.info(
+                f"Streaming analysis finished successfully in {self._get_execution_time():.1f}s: "
+                f"{len(regime_analysis.regime_results)} periods analyzed"
+            )
+            
+            return results
+            
+        except Exception as e:
+            error_msg = f"Streaming historical analytics pipeline failed: {e}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            self.execution_state['errors'].append(error_msg)
+            raise
+    
+    async def _process_regime_chunk(self, period_name: str, data_chunk: pd.DataFrame) -> Optional[Any]:
+        """Process a data chunk for regime analysis"""
+        try:
+            # Create a temporary dataset for this chunk
+            from .data_types import HistoricalPeriod, MarketDataset
+            
+            # Extract period info from period_name and create basic period
+            temp_period = HistoricalPeriod(
+                name=period_name,
+                start_date=data_chunk['timestamp'].min().strftime('%Y-%m-%d'),
+                end_date=data_chunk['timestamp'].max().strftime('%Y-%m-%d'),
+                description=f"Streaming chunk for {period_name}"
+            )
+            
+            temp_dataset = MarketDataset(
+                period=temp_period,
+                market_data=data_chunk,
+                metadata={'streaming_chunk': True, 'chunk_size': len(data_chunk)}
+            )
+            
+            # Analyze this chunk
+            return self.regime_analyzer.analyze_single_period(
+                dataset=temp_dataset,
+                include_transition_analysis=False  # Skip transitions for chunks
+            )
+            
+        except Exception as e:
+            logger.warning(f"Error processing regime chunk for {period_name}: {e}")
+            return None
+    
+    async def _generate_streaming_rankings(self, regime_analysis: Any, 
+                                         target_strategies: Optional[List[StrategyType]]) -> Any:
+        """Generate rankings from streaming regime analysis"""
+        try:
+            # Use the ranking engine with the compiled regime results
+            return self.ranking_engine.rank_instruments_across_regimes(
+                regime_analysis=regime_analysis,
+                target_strategies=target_strategies or [StrategyType.MEAN_REVERSION, StrategyType.MOMENTUM]
+            )
+        except Exception as e:
+            logger.error(f"Error generating streaming rankings: {e}")
+            # Return empty rankings as fallback
+            from .data_types import InstrumentRankings
+            return InstrumentRankings(
+                rankings_by_strategy={},
+                cross_strategy_rankings=[],
+                rankings_metadata={
+                    'error': str(e),
+                    'timestamp': datetime.now().isoformat()
+                }
+            )
     
     def run_regime_analysis_only(self, 
                                periods_config: Optional[Dict] = None,

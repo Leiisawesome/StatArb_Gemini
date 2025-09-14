@@ -25,6 +25,8 @@ class IBKRConfig:
         self.port = 7497
         self.client_id = 1
         self.timeout = 30
+        self.connection_timeout = 30  # Add missing connection_timeout attribute
+        self.broker_name = "interactive_brokers"  # Add missing broker_name attribute
 
 class IBKRSetupHelper:
     """Legacy IBKR setup helper - placeholder"""

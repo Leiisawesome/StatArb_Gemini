@@ -623,10 +623,32 @@ class DatabaseManager:
         
         logger.info("DatabaseManager initialized with ClickHouse, Redis, and intelligent caching")
     
+    async def initialize(self) -> bool:
+        """Initialize database connections and perform health checks"""
+        try:
+            logger.info("🔧 Initializing DatabaseManager...")
+            
+            # Perform initial health check
+            health = await self.health_check()
+            
+            if health['clickhouse'] and health['redis']:
+                logger.info("✅ DatabaseManager initialized successfully - all services healthy")
+                return True
+            elif health['redis']:
+                logger.warning("⚠️ DatabaseManager initialized with Redis only - ClickHouse unavailable")
+                return True
+            else:
+                logger.error("❌ DatabaseManager initialization failed - no healthy services")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ DatabaseManager initialization error: {e}")
+            return False
+    
     def _load_default_config(self) -> DatabaseConfig:
         """Load default database configuration"""
         try:
-            from ..config import UnifiedConfigManager as ConfigManager
+            from core_structure.infrastructure.config import UnifiedConfigManager as ConfigManager
             config_manager = ConfigManager()
             
             return DatabaseConfig(

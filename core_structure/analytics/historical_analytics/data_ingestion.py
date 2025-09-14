@@ -10,13 +10,15 @@ Author: StatArb Gemini Team
 Version: 1.0.0
 """
 
+import asyncio
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, AsyncGenerator
 from datetime import datetime, timedelta
 import logging
 import json
+import gc
 from dataclasses import asdict
 
 from .data_types import (
@@ -178,6 +180,37 @@ class HistoricalDataManager:
         
         return datasets
     
+    async def stream_multiple_periods(self, periods: List[HistoricalPeriod],
+                                    symbols: Optional[List[str]] = None,
+                                    chunk_size: int = 5000) -> AsyncGenerator[Tuple[str, pd.DataFrame], None]:
+        """
+        Stream data from multiple periods for memory-efficient batch processing
+        
+        Args:
+            periods: List of historical periods to stream
+            symbols: Optional list of symbols to filter
+            chunk_size: Number of rows per chunk
+            
+        Yields:
+            Tuple[str, pd.DataFrame]: (period_name, data_chunk) pairs
+        """
+        logger.info(f"Starting streaming load for {len(periods)} periods")
+        
+        for period in periods:
+            try:
+                logger.debug(f"Streaming period: {period.name}")
+                async for chunk in self.stream_period_data(period, symbols, chunk_size):
+                    yield (period.name, chunk)
+                    
+                # Force garbage collection between periods
+                gc.collect()
+                
+            except Exception as e:
+                logger.error(f"Error streaming period {period.name}: {e}")
+                continue
+        
+        logger.info("Completed streaming all periods")
+    
     def get_period_statistics(self, datasets: Dict[str, MarketDataset]) -> Dict[str, Any]:
         """
         Calculate comprehensive statistics across all loaded periods
@@ -285,37 +318,168 @@ class HistoricalDataManager:
                       symbols: Optional[List[str]] = None) -> pd.DataFrame:
         """Load raw market data from source"""
         try:
-            # Handle different data source types
+            # Handle different data source types with chunked reading for memory efficiency
             if self.data_source_path.suffix == '.csv':
-                data = pd.read_csv(self.data_source_path)
+                # For large CSV files, use chunked reading
+                chunks = []
+                chunk_size = 10000  # Process 10K rows at a time
+                
+                for chunk in pd.read_csv(self.data_source_path, chunksize=chunk_size):
+                    # Apply timestamp and date conversions early
+                    if 'timestamp' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+                    elif 'date' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['date'])
+                        chunk = chunk.drop('date', axis=1)
+                    else:
+                        raise ValueError("No timestamp or date column found in data")
+                    
+                    # Filter by date range early to reduce memory usage
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    filtered_chunk = chunk[(chunk['timestamp'] >= start_dt) & (chunk['timestamp'] <= end_dt)]
+                    
+                    # Filter by symbols if specified
+                    if symbols is not None and 'symbol' in filtered_chunk.columns:
+                        filtered_chunk = filtered_chunk[filtered_chunk['symbol'].isin(symbols)]
+                    
+                    if not filtered_chunk.empty:
+                        chunks.append(filtered_chunk)
+                
+                # Combine chunks if any data found
+                if chunks:
+                    data = pd.concat(chunks, ignore_index=True)
+                    # Clean up chunks from memory
+                    del chunks
+                    gc.collect()
+                else:
+                    data = pd.DataFrame()
+                    
             elif self.data_source_path.suffix == '.parquet':
+                # Parquet files typically handle memory more efficiently
                 data = pd.read_parquet(self.data_source_path)
+                
+                # Apply date filtering and conversions
+                if 'timestamp' in data.columns:
+                    data['timestamp'] = pd.to_datetime(data['timestamp'])
+                elif 'date' in data.columns:
+                    data['timestamp'] = pd.to_datetime(data['date'])
+                    data = data.drop('date', axis=1)
+                else:
+                    raise ValueError("No timestamp or date column found in data")
+                
+                # Filter by date range
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                data = data[(data['timestamp'] >= start_dt) & (data['timestamp'] <= end_dt)]
+                
+                # Filter by symbols if specified
+                if symbols is not None and 'symbol' in data.columns:
+                    data = data[data['symbol'].isin(symbols)]
             else:
-                # Assume CSV if no extension
-                data = pd.read_csv(self.data_source_path)
-            
-            # Ensure timestamp column exists and is datetime
-            if 'timestamp' in data.columns:
-                data['timestamp'] = pd.to_datetime(data['timestamp'])
-            elif 'date' in data.columns:
-                data['timestamp'] = pd.to_datetime(data['date'])
-                data = data.drop('date', axis=1)
-            else:
-                raise ValueError("No timestamp or date column found in data")
-            
-            # Filter by date range
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            data = data[(data['timestamp'] >= start_dt) & (data['timestamp'] <= end_dt)]
-            
-            # Filter by symbols if specified
-            if symbols is not None and 'symbol' in data.columns:
-                data = data[data['symbol'].isin(symbols)]
-            
+                # Assume CSV if no extension, use chunked reading
+                chunks = []
+                chunk_size = 10000
+                
+                for chunk in pd.read_csv(self.data_source_path, chunksize=chunk_size):
+                    # Apply timestamp and date conversions early
+                    if 'timestamp' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+                    elif 'date' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['date'])
+                        chunk = chunk.drop('date', axis=1)
+                    else:
+                        raise ValueError("No timestamp or date column found in data")
+                    
+                    # Filter by date range early
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    filtered_chunk = chunk[(chunk['timestamp'] >= start_dt) & (chunk['timestamp'] <= end_dt)]
+                    
+                    # Filter by symbols if specified
+                    if symbols is not None and 'symbol' in filtered_chunk.columns:
+                        filtered_chunk = filtered_chunk[filtered_chunk['symbol'].isin(symbols)]
+                    
+                    if not filtered_chunk.empty:
+                        chunks.append(filtered_chunk)
+                
+                # Combine chunks if any data found
+                if chunks:
+                    data = pd.concat(chunks, ignore_index=True)
+                    del chunks
+                    gc.collect()
+                else:
+                    data = pd.DataFrame()
+
             return data
             
         except Exception as e:
             logger.error(f"Error loading raw data: {e}")
+            raise
+    
+    async def stream_period_data(self, period: HistoricalPeriod, 
+                                symbols: Optional[List[str]] = None,
+                                chunk_size: int = 5000) -> AsyncGenerator[pd.DataFrame, None]:
+        """
+        Stream period data in chunks for memory-efficient processing of large datasets
+        
+        Args:
+            period: Historical period to load
+            symbols: Optional list of symbols to filter
+            chunk_size: Number of rows per chunk
+            
+        Yields:
+            pd.DataFrame: Chunks of market data
+        """
+        logger.info(f"Starting streaming data load for period {period.name}")
+        
+        try:
+            start_dt = pd.to_datetime(period.start_date)
+            end_dt = pd.to_datetime(period.end_date)
+            
+            if self.data_source_path.suffix == '.csv':
+                # Stream CSV data
+                for chunk in pd.read_csv(self.data_source_path, chunksize=chunk_size):
+                    # Process chunk
+                    if 'timestamp' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+                    elif 'date' in chunk.columns:
+                        chunk['timestamp'] = pd.to_datetime(chunk['date'])
+                        chunk = chunk.drop('date', axis=1)
+                    else:
+                        continue  # Skip chunks without timestamp
+                    
+                    # Filter by date range
+                    filtered_chunk = chunk[(chunk['timestamp'] >= start_dt) & (chunk['timestamp'] <= end_dt)]
+                    
+                    # Filter by symbols if specified
+                    if symbols is not None and 'symbol' in filtered_chunk.columns:
+                        filtered_chunk = filtered_chunk[filtered_chunk['symbol'].isin(symbols)]
+                    
+                    if not filtered_chunk.empty:
+                        # Validate and clean chunk
+                        cleaned_chunk = self._validate_and_clean_data(filtered_chunk, period)
+                        if not cleaned_chunk.empty:
+                            # Enrich with derived features
+                            enriched_chunk = self._enrich_market_data(cleaned_chunk)
+                            yield enriched_chunk
+                    
+                    # Allow other async operations to run
+                    await asyncio.sleep(0)
+            else:
+                # For non-CSV files, fall back to loading all at once but yield in chunks
+                data = self._load_raw_data(period.start_date, period.end_date, symbols)
+                cleaned_data = self._validate_and_clean_data(data, period)
+                enriched_data = self._enrich_market_data(cleaned_data)
+                
+                # Yield in chunks
+                for i in range(0, len(enriched_data), chunk_size):
+                    chunk = enriched_data.iloc[i:i + chunk_size]
+                    yield chunk
+                    await asyncio.sleep(0)
+                    
+        except Exception as e:
+            logger.error(f"Error streaming data for period {period.name}: {e}")
             raise
     
     def _validate_and_clean_data(self, data: pd.DataFrame, period: HistoricalPeriod) -> pd.DataFrame:

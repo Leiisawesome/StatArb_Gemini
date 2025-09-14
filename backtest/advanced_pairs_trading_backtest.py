@@ -21,7 +21,6 @@ Version: 1.0.0
 
 import asyncio
 import sys
-import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
@@ -36,27 +35,15 @@ sys.path.append(str(project_root))
 
 # Core engine imports
 from core_structure import create_production_trading_system
-from core_structure.config import TradingConfig as UnifiedEngineConfig
 from core_structure.config import ConfigManager as UnifiedConfigManager
 from core_structure.components.market_data.core.enhanced_clickhouse_loader import EnhancedClickHouseLoader, DataRequest
 from core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
-
-# Trade engine imports
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from core_structure.strategies import BaseStrategy as TemplateStrategyBridge, StrategyManager as TemplateConfiguration
-
-# Import unified strategy system components
 from core_structure.strategies import (
-    StrategyManager as UnifiedStrategyConfig,
-    StrategyRegistry as StrategyParameters,
+    StrategyManager,
     ExecutionMode as StrategyExecutionMode,
     StrategyType,
-    StrategyManager as UnifiedStrategyEngine,
-    PairsTradingStrategy
 )
-
-# Alias for backward compatibility
-UnifiedStrategyConfig = TemplateConfiguration
 
 # Minimal pairs trading classes (inline for testing)
 @dataclass
@@ -162,18 +149,7 @@ class PairsTradingModel:
             }
     
     def generate_signal(self, price1: float, price2: float, entry_threshold: float = 2.0, exit_threshold: float = 0.5) -> Dict[str, Any]:
-        """
-        Generate trading signal based on current prices and z-score thresholds
-        
-        Args:
-            price1: Current price of first asset
-            price2: Current price of second asset  
-            entry_threshold: Z-score threshold for entry signals
-            exit_threshold: Z-score threshold for exit signals
-            
-        Returns:
-            Dictionary with signal information
-        """
+        """Generate trading signal based on current prices and z-score thresholds"""
         try:
             if not self.is_valid or not self.cointegration_result:
                 return {
@@ -237,15 +213,15 @@ class PairsTradingModel:
                 'error': str(e)
             }
 
-# Configure concise logging
+# Configure logging
 logging.basicConfig(
-    level=logging.WARNING,  # Reduce verbosity
-    format='%(message)s'  # Simplified format
+    level=logging.WARNING,
+    format='%(message)s'
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Keep backtest messages
+logger.setLevel(logging.INFO)
 
-# Reduce verbosity of specific loggers
+# Reduce verbosity of external loggers
 logging.getLogger('core_structure').setLevel(logging.ERROR)
 logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
 
@@ -254,29 +230,29 @@ logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
 class PairsBacktestConfig:
     """Configuration for pairs trading backtest"""
     # Asset pairs
-    symbol_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [("TSLA", "NVDA")])
+    symbol_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [("GLD", "GDX")])
     
     # Time period
-    start_date: str = "2024-12-20"
-    end_date: str = "2024-12-20"
-    data_frequency: str = "5min"  # Professional recommendation from mean reversion analysis
+    start_date: str = "2025-01-01"
+    end_date: str = "2025-01-31"
+    data_frequency: str = "5min"
     
     # Capital allocation
     initial_capital: float = 100000.0
-    max_pairs_active: int = 3  # Maximum number of active pairs
-    capital_per_pair: float = 30000.0  # Capital allocation per pair
+    max_pairs_active: int = 3
+    capital_per_pair: float = 30000.0
     
     # Pairs trading parameters
     pairs_config: PairsConfiguration = field(default_factory=PairsConfiguration)
     
     # Risk management
-    max_portfolio_risk: float = 0.15  # Maximum portfolio risk
-    max_pair_correlation: float = 0.8  # Maximum correlation between pairs
-    position_size_limit: float = 0.10  # Maximum position size per asset
+    max_portfolio_risk: float = 0.15
+    max_pair_correlation: float = 0.8
+    position_size_limit: float = 0.10
     
     # Performance tracking
-    benchmark_symbol: str = "SPY"  # Benchmark for comparison
-    performance_frequency: str = "daily"  # Performance calculation frequency
+    benchmark_symbol: str = "SPY"
+    performance_frequency: str = "daily"
 
 
 @dataclass 
@@ -336,23 +312,11 @@ class PairTrade:
 class AdvancedPairsTradingBacktest:
     """
     Advanced pairs trading backtest implementing statistical arbitrage
-    
-    This backtest provides:
-    1. Multi-pair cointegration analysis
-    2. Dynamic hedge ratio optimization
-    3. Spread-based signal generation
-    4. Advanced risk management for pair positions
-    5. Integration with UnifiedTradingEngine
-    6. Comprehensive performance analytics
+    with cointegration analysis, dynamic hedge ratios, and risk management.
     """
     
     def __init__(self, config: PairsBacktestConfig):
-        """
-        Initialize advanced pairs trading backtest
-        
-        Args:
-            config: Backtest configuration
-        """
+        """Initialize pairs trading backtest with given configuration"""
         self.config = config
         self.logger = logger
         
@@ -370,17 +334,17 @@ class AdvancedPairsTradingBacktest:
         self.risk_manager = None
         self.strategy_bridge = None
         
-        # Pairs trading models (one per pair)
+        # Pairs trading models
         self.pairs_models: Dict[str, PairsTradingModel] = {}
         
         # Portfolio state
-        self.current_positions: Dict[str, PairPosition] = {}  # pair_id -> position
+        self.current_positions: Dict[str, PairPosition] = {}
         self.completed_trades: List[PairTrade] = []
         self.portfolio_value_history: List[float] = []
         self.cash_balance: float = config.initial_capital
         
         # Market data storage
-        self.market_data: Dict[str, pd.DataFrame] = {}  # symbol -> data
+        self.market_data: Dict[str, pd.DataFrame] = {}
         self.spread_history: Dict[str, pd.Series] = {}  # pair_id -> spread series
         
         # Performance tracking
@@ -399,12 +363,7 @@ class AdvancedPairsTradingBacktest:
         self.logger.info(f"  • Initial Capital: ${config.initial_capital:,.2f}")
     
     async def setup(self) -> bool:
-        """
-        Setup backtest components and validate configuration
-        
-        Returns:
-            True if setup successful, False otherwise
-        """
+        """Setup backtest components and validate configuration"""
         try:
             self.logger.info("🏗️ Setting up UnifiedTradingEngine for pairs trading strategy")
             
@@ -507,7 +466,7 @@ class AdvancedPairsTradingBacktest:
             }
             
             # Create strategy bridge using unified strategy engine
-            strategy_engine = UnifiedStrategyEngine()
+            strategy_engine = StrategyManager()
             self.strategy_bridge = strategy_engine.create_strategy(
                 StrategyType.PAIRS_TRADING,
                 "pairs_trading_strategy_1", 
@@ -525,12 +484,7 @@ class AdvancedPairsTradingBacktest:
 
 
     async def load_market_data(self) -> bool:
-        """
-        Load historical market data for all symbols in pairs
-        
-        Returns:
-            True if data loading successful, False otherwise
-        """
+        """Load historical market data for all symbols in pairs"""
         try:
             # Get all unique symbols from pairs
             all_symbols = set()
@@ -593,15 +547,7 @@ class AdvancedPairsTradingBacktest:
             return False
     
     def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add technical indicators required for pairs trading
-        
-        Args:
-            data: Raw market data
-            
-        Returns:
-            Data with technical indicators added
-        """
+        """Add technical indicators required for pairs trading"""
         try:
             # Ensure we have required columns
             if 'close' not in data.columns:
@@ -627,12 +573,7 @@ class AdvancedPairsTradingBacktest:
             return data
     
     async def initialize_pairs_models(self) -> bool:
-        """
-        Initialize pairs trading models for each symbol pair
-        
-        Returns:
-            True if initialization successful, False otherwise
-        """
+        """Initialize pairs trading models for each symbol pair"""
         try:
             self.logger.info("📈 Initializing pairs trading models...")
             
@@ -819,7 +760,13 @@ class AdvancedPairsTradingBacktest:
             
             quantity1, quantity2 = position_sizes
             
-            # Create position record
+            # Create position record  
+            # Convert timestamp to datetime if it's not already
+            if isinstance(signal['timestamp'], (int, float)):
+                timestamp_dt = pd.to_datetime(signal['timestamp'], unit='s')
+            else:
+                timestamp_dt = pd.to_datetime(signal['timestamp'])
+                
             position = PairPosition(
                 symbol1=symbol1,
                 symbol2=symbol2,
@@ -829,9 +776,9 @@ class AdvancedPairsTradingBacktest:
                 entry_price2=signal['price2'],
                 entry_spread=signal['spread'],
                 entry_zscore=signal['zscore'],
-                entry_timestamp=signal['timestamp'],
+                entry_timestamp=timestamp_dt,
                 hedge_ratio=signal['hedge_ratio'],
-                position_id=f"{pair_id}_{signal['timestamp'].strftime('%H%M%S')}"
+                position_id=f"{pair_id}_{timestamp_dt.strftime('%H%M%S')}"
             )
             
             # For backtesting, simulate trade execution without core engine
@@ -945,6 +892,21 @@ class AdvancedPairsTradingBacktest:
             else:  # Short spread position
                 spread_pnl = (entry_spread - current_spread) * abs(position.quantity1)
             
+            # Ensure timestamp consistency for holding period calculation
+            exit_timestamp = signal['timestamp']
+            entry_timestamp = position.entry_timestamp
+            
+            # Convert timestamps to pd.Timestamp for consistent subtraction
+            if isinstance(exit_timestamp, (int, float)):
+                exit_timestamp = pd.to_datetime(exit_timestamp, unit='s')
+            elif not isinstance(exit_timestamp, pd.Timestamp):
+                exit_timestamp = pd.to_datetime(exit_timestamp)
+                
+            if isinstance(entry_timestamp, (int, float)):
+                entry_timestamp = pd.to_datetime(entry_timestamp, unit='s')
+            elif not isinstance(entry_timestamp, pd.Timestamp):
+                entry_timestamp = pd.to_datetime(entry_timestamp)
+            
             # Create completed trade record
             trade = PairTrade(
                 pair_id=pair_id,
@@ -966,7 +928,7 @@ class AdvancedPairsTradingBacktest:
                 exit_reason=signal.get('reason', 'exit_signal'),
                 pnl=spread_pnl,
                 return_pct=spread_pnl / self.config.capital_per_pair,
-                holding_period=signal['timestamp'] - position.entry_timestamp,
+                holding_period=exit_timestamp - entry_timestamp,
                 max_favorable=position.max_favorable,
                 max_adverse=position.max_adverse
             )
@@ -1112,6 +1074,12 @@ class AdvancedPairsTradingBacktest:
         actions = []
         
         try:
+            # Ensure timestamp is properly converted to pd.Timestamp
+            if isinstance(timestamp, (int, float)):
+                timestamp = pd.to_datetime(timestamp, unit='s')
+            elif not isinstance(timestamp, pd.Timestamp):
+                timestamp = pd.to_datetime(timestamp)
+            
             current_portfolio_value = self.calculate_portfolio_value(timestamp)
             
             # Check overall portfolio risk
@@ -1142,7 +1110,14 @@ class AdvancedPairsTradingBacktest:
             # Check individual position age limits
             max_age = timedelta(hours=4)  # Maximum 4 hours for intraday
             for pair_id, position in self.current_positions.items():
-                age = timestamp - position.entry_timestamp
+                # Ensure position.entry_timestamp is also properly converted
+                entry_ts = position.entry_timestamp
+                if isinstance(entry_ts, (int, float)):
+                    entry_ts = pd.to_datetime(entry_ts, unit='s')
+                elif not isinstance(entry_ts, pd.Timestamp):
+                    entry_ts = pd.to_datetime(entry_ts)
+                
+                age = timestamp - entry_ts
                 if age > max_age:
                     actions.append(f'close_{pair_id}')
             
@@ -1464,8 +1439,22 @@ class AdvancedPairsTradingBacktest:
             self.logger.info(f"📋 ALL TRADES ({len(self.completed_trades)} total):")
             for i, trade in enumerate(self.completed_trades, 1):
                 direction = "📈 LONG" if trade.quantity1 > 0 else "📉 SHORT"
-                entry_time = trade.entry_timestamp.strftime('%H:%M:%S EST')
-                exit_time = trade.exit_timestamp.strftime('%H:%M:%S EST')
+                
+                # Ensure timestamps are datetime objects for strftime
+                entry_ts = trade.entry_timestamp
+                if isinstance(entry_ts, (int, float)):
+                    entry_ts = pd.to_datetime(entry_ts, unit='s')
+                elif not isinstance(entry_ts, (pd.Timestamp, datetime)):
+                    entry_ts = pd.to_datetime(entry_ts)
+                    
+                exit_ts = trade.exit_timestamp
+                if isinstance(exit_ts, (int, float)):
+                    exit_ts = pd.to_datetime(exit_ts, unit='s')
+                elif not isinstance(exit_ts, (pd.Timestamp, datetime)):
+                    exit_ts = pd.to_datetime(exit_ts)
+                
+                entry_time = entry_ts.strftime('%H:%M:%S EST')
+                exit_time = exit_ts.strftime('%H:%M:%S EST')
                 
                 self.logger.info(f"   {i}. {direction} {trade.pair_id} @ z:{trade.entry_zscore:.2f} | P&L: ${trade.pnl:.2f} ({trade.return_pct*100:.2f}%)")
         self.logger.info("")
@@ -1517,29 +1506,10 @@ class AdvancedPairsTradingBacktest:
             return False
 
 
-# ================================================================================
-# MAIN EXECUTION FUNCTIONS
-# ================================================================================
-
 async def main():
     """Main execution function for pairs trading backtest"""
     try:
-        logger.info("🚀 Starting Advanced Pairs Trading Strategy Backtest with UnifiedTradingEngine")
-        logger.info("=" * 80)
-        logger.info("ADVANCED PAIRS TRADING BACKTEST - STATISTICAL ARBITRAGE")
-        logger.info("=" * 80)
-        logger.info("Features:")
-        logger.info("  • Cointegration Analysis (Engle-Granger)")
-        logger.info("  • Dynamic Hedge Ratio Optimization")
-        logger.info("  • Spread Mean Reversion Signals")
-        logger.info("  • Advanced Risk Management")
-        logger.info("  • UnifiedTradingEngine Integration")
-        logger.info("  • Professional Performance Analytics")
-        logger.info("")
-        
-        # Test GLD/GDX pair for January 2025 (Gold ETF vs Gold Miners ETF)
-        logger.info("🚀 Testing Enhanced Pairs Trading Strategy: GLD/GDX (Gold ETF Pair)")
-        logger.info("=" * 80)
+        logger.info("🚀 Starting Advanced Pairs Trading Strategy Backtest")
         
         config = PairsBacktestConfig(
             symbol_pairs=[("GLD", "GDX")],  # Gold ETF vs Gold Miners ETF

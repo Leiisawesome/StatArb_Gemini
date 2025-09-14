@@ -98,6 +98,7 @@ class SystemStatus(Enum):
     """Overall system status"""
     INITIALIZING = "initializing"
     READY = "ready"
+    STARTING = "starting"
     RUNNING = "running"
     PAUSED = "paused"
     STOPPING = "stopping"
@@ -246,6 +247,29 @@ class UnifiedTradingSystem:
     def _initialize_core_components(self) -> None:
         """Initialize all integrated components"""
         
+        # Phase 4: Initialize production infrastructure first
+        self.production_infrastructure = None
+        try:
+            from core_structure.infrastructure.production_infrastructure import (
+                ProductionInfrastructureFactory, DeploymentMode
+            )
+            
+            # Determine deployment mode from config
+            deployment_mode = getattr(self.config, 'deployment_mode', 'development')
+            if deployment_mode.lower() == 'production':
+                config = ProductionInfrastructureFactory.create_production_config()
+            elif deployment_mode.lower() == 'paper_trading':
+                config = ProductionInfrastructureFactory.create_paper_trading_config()
+            else:
+                config = ProductionInfrastructureFactory.create_development_config()
+            
+            from core_structure.infrastructure.production_infrastructure import ProductionInfrastructureManager
+            self.production_infrastructure = ProductionInfrastructureManager(config)
+            
+            self.logger.info(f"🏗️ Phase 4 Production Infrastructure initialized for {deployment_mode}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Phase 4 Production Infrastructure not available: {e}")
+        
         # Initialize regime engine first (Phase 5 - Centralized Regime Management)
         try:
             from core_structure.regime_engine import create_regime_engine, RegimeConfig
@@ -298,6 +322,40 @@ class UnifiedTradingSystem:
         # Initialize configuration manager (Phase 1)
         self.config_manager = ConfigManager()
         
+        # Phase 4: Initialize real-time trading engine
+        self.real_time_engine = None
+        try:
+            from core_structure.real_time_trading_engine import create_real_time_trading_engine
+            
+            # Determine trading mode from config
+            trading_mode = getattr(self.config, 'trading_mode', 'paper_trading')
+            # Ensure trading_mode is a string
+            if hasattr(trading_mode, 'value'):
+                trading_mode = trading_mode.value
+            elif not isinstance(trading_mode, str):
+                trading_mode = str(trading_mode)
+            
+            self.real_time_engine = create_real_time_trading_engine(trading_mode)
+            
+            self.logger.info(f"🚀 Phase 4 Real-Time Trading Engine initialized for {trading_mode}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Phase 4 Real-Time Trading Engine not available: {e}")
+        
+        # Phase 4: Initialize advanced risk management system
+        self.risk_manager = None
+        try:
+            from core_structure.advanced_risk_management import create_advanced_risk_manager
+            
+            # Determine risk profile from config
+            risk_profile = getattr(self.config, 'risk_profile', 'moderate')
+            self.risk_manager = create_advanced_risk_manager(risk_profile)
+            
+            self.logger.info(f"🛡️ Phase 4 Advanced Risk Management initialized with {risk_profile} profile")
+        except Exception as e:
+            self.logger.warning(f"⚠️ Phase 4 Advanced Risk Management not available: {e}")
+        
+        self.logger.info("🔗 Phase 4 Integration: All advanced components initialized")
+        
         self.logger.info("🔧 All core components initialized")
     
     # ================================================================================
@@ -321,6 +379,70 @@ class UnifiedTradingSystem:
         self.logger.info(f"📊 Created trading session: {session_id}")
         
         return session
+    
+    # ================================================================================
+    # PHASE 4: REAL-TIME TRADING OPERATIONS
+    # ================================================================================
+    
+    def start_real_time_trading(self, session_name: str = None) -> str:
+        """Start real-time trading session"""
+        if not self.real_time_engine:
+            raise RuntimeError("Real-time trading engine not available")
+        
+        session_id = self.real_time_engine.start_trading_session(session_name)
+        self.logger.info(f"🟢 Real-time trading session started: {session_id}")
+        return session_id
+    
+    def stop_real_time_trading(self) -> None:
+        """Stop real-time trading session"""
+        if self.real_time_engine:
+            self.real_time_engine.stop_trading_session()
+            self.logger.info("🔴 Real-time trading session stopped")
+    
+    def get_real_time_status(self) -> Dict[str, Any]:
+        """Get real-time trading engine status"""
+        if not self.real_time_engine:
+            return {'status': 'not_available', 'message': 'Real-time engine not initialized'}
+        
+        return self.real_time_engine.get_engine_status()
+    
+    def subscribe_to_symbol(self, symbol: str) -> None:
+        """Subscribe to real-time data for a symbol"""
+        if self.real_time_engine and self.real_time_engine.market_data_manager:
+            asyncio.run(self.real_time_engine.market_data_manager.subscribe_symbol(symbol))
+            self.logger.info(f"📈 Subscribed to real-time data for {symbol}")
+    
+    def get_current_regime(self) -> Optional[Dict[str, Any]]:
+        """Get current market regime"""
+        if not self.real_time_engine:
+            return None
+        
+        regime_signal = self.real_time_engine.regime_detector.get_current_regime()
+        if regime_signal:
+            return {
+                'regime': regime_signal.regime,
+                'confidence': regime_signal.confidence,
+                'timestamp': regime_signal.timestamp.isoformat(),
+                'features': regime_signal.features
+            }
+        return None
+    
+    def get_strategy_allocations(self) -> Dict[str, Any]:
+        """Get current dynamic strategy allocations"""
+        if not self.real_time_engine:
+            return {}
+        
+        allocations = self.real_time_engine.strategy_allocator.get_current_allocations()
+        return {
+            name: {
+                'percentage': alloc.allocation_percentage,
+                'instruments': alloc.instruments,
+                'risk_limit': alloc.risk_limit,
+                'max_position_size': alloc.max_position_size,
+                'updated_at': alloc.updated_at.isoformat()
+            }
+            for name, alloc in allocations.items()
+        }
     
     def execute_unified_trading_cycle(self, symbols: List[str], market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         """
@@ -489,11 +611,22 @@ class UnifiedTradingSystem:
         trading_metrics = self.trading_engine.get_metrics()
         strategy_metrics = self.strategy_manager.get_overall_metrics()
         
+        # Phase 4: Get production infrastructure status
+        infrastructure_status = {}
+        if self.production_infrastructure:
+            try:
+                infrastructure_status = self.production_infrastructure.get_infrastructure_status()
+            except Exception as e:
+                infrastructure_status = {'error': str(e), 'status': 'unknown'}
+        
         return {
             'system_id': self.system_id,
             'status': self.status.value,
             'uptime_hours': (datetime.now() - self.start_time).total_seconds() / 3600,
             'active_sessions': len(self._active_sessions),
+            
+            # Phase 4: Production Infrastructure Health
+            'infrastructure': infrastructure_status,
             
             # Component health
             'trading_engine': {
@@ -520,6 +653,28 @@ class UnifiedTradingSystem:
                 'win_rate': self._system_metrics.win_rate
             }
         }
+    
+    def get_system_status(self) -> Dict[str, Any]:
+        """Get overall system status - alias for get_system_health with additional status info"""
+        health_data = self.get_system_health()
+        
+        # Add additional status information
+        status_data = {
+            **health_data,
+            'timestamp': datetime.now().isoformat(),
+            'version': '4.0.0',  # Phase 4 version
+            'components': {
+                'trading_engine': 'active' if self.trading_engine else 'inactive',
+                'strategy_manager': 'active' if self.strategy_manager else 'inactive',
+                'portfolio_manager': 'active' if self.portfolio_manager else 'inactive',
+                'regime_engine': 'active' if self.regime_engine else 'inactive',
+                'real_time_engine': 'active' if hasattr(self, 'real_time_engine') and self.real_time_engine else 'inactive',
+                'risk_manager': 'active' if hasattr(self, 'risk_manager') and self.risk_manager else 'inactive',
+                'production_infrastructure': 'active' if hasattr(self, 'production_infrastructure') and self.production_infrastructure else 'inactive'
+            }
+        }
+        
+        return status_data
     
     def get_real_time_dashboard_data(self) -> Dict[str, Any]:
         """Get real-time data for monitoring dashboard"""
@@ -571,6 +726,39 @@ class UnifiedTradingSystem:
     def start_system(self) -> None:
         """Start the unified trading system"""
         self.logger.info(f"🚀 Starting Ultimate Unified Trading System: {self.system_id}")
+        self.status = SystemStatus.STARTING
+        
+        # Phase 4: Initialize production infrastructure
+        if self.production_infrastructure:
+            try:
+                asyncio.run(self.production_infrastructure.initialize_infrastructure())
+                self.logger.info("✅ Phase 4 Production Infrastructure started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start production infrastructure: {e}")
+                # Continue with degraded functionality
+        
+        # Phase 4: Initialize real-time trading engine
+        if self.real_time_engine:
+            try:
+                asyncio.run(self.real_time_engine.initialize())
+                self.logger.info("✅ Phase 4 Real-Time Trading Engine started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start real-time trading engine: {e}")
+                # Continue with degraded functionality
+        
+        # Phase 4: Initialize advanced risk management
+        if self.risk_manager:
+            try:
+                asyncio.run(self.risk_manager.initialize())
+                self.logger.info("✅ Phase 4 Advanced Risk Management started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start risk management: {e}")
+                # Continue with degraded functionality
+        
+        # Start integrated engines
+        self.trading_engine.start()
+        self.strategy_manager.start()
+        
         self.status = SystemStatus.RUNNING
         
         # Enable advanced features
@@ -605,6 +793,30 @@ class UnifiedTradingSystem:
         for session_id in list(self._active_sessions.keys()):
             self.close_trading_session(session_id)
         
+        # Phase 4: Shutdown production infrastructure
+        if self.production_infrastructure:
+            try:
+                asyncio.run(self.production_infrastructure.shutdown_infrastructure())
+                self.logger.info("✅ Phase 4 Production Infrastructure shutdown complete")
+            except Exception as e:
+                self.logger.error(f"❌ Error shutting down production infrastructure: {e}")
+        
+        # Phase 4: Shutdown real-time trading engine
+        if self.real_time_engine:
+            try:
+                asyncio.run(self.real_time_engine.shutdown())
+                self.logger.info("✅ Phase 4 Real-Time Trading Engine shutdown complete")
+            except Exception as e:
+                self.logger.error(f"❌ Error shutting down real-time trading engine: {e}")
+        
+        # Phase 4: Shutdown advanced risk management
+        if self.risk_manager:
+            try:
+                asyncio.run(self.risk_manager.shutdown())
+                self.logger.info("✅ Phase 4 Advanced Risk Management shutdown complete")
+            except Exception as e:
+                self.logger.error(f"❌ Error shutting down risk management: {e}")
+        
         # Shutdown thread pools
         self._strategy_executor.shutdown(wait=True)
         self._execution_executor.shutdown(wait=True)
@@ -614,6 +826,81 @@ class UnifiedTradingSystem:
         
         self.status = SystemStatus.STOPPED
         self.logger.info("✅ Ultimate Unified Trading System shutdown complete")
+    
+    # ================================================================================
+    # PHASE 4 RISK MANAGEMENT INTEGRATION
+    # ================================================================================
+    
+    def update_position_risk(self, symbol: str, quantity: float, current_price: float, 
+                           entry_price: float = None, strategy: str = "") -> None:
+        """Update position for risk management monitoring"""
+        if self.risk_manager:
+            try:
+                self.risk_manager.update_position(symbol, quantity, current_price, entry_price, strategy)
+            except Exception as e:
+                self.logger.error(f"Error updating position risk for {symbol}: {e}")
+    
+    def get_risk_status(self) -> Dict[str, Any]:
+        """Get comprehensive risk status"""
+        if self.risk_manager:
+            try:
+                return self.risk_manager.get_risk_status()
+            except Exception as e:
+                self.logger.error(f"Error getting risk status: {e}")
+                return {'error': str(e)}
+        else:
+            return {'error': 'Risk manager not available'}
+    
+    def check_trade_risk(self, symbol: str, quantity: float, price: float) -> Dict[str, Any]:
+        """Check if a proposed trade violates risk limits"""
+        if not self.risk_manager:
+            return {'error': 'Risk manager not available', 'approved': False}
+        
+        try:
+            # Get current risk status
+            risk_status = self.risk_manager.get_risk_status()
+            
+            # Check circuit breaker
+            if risk_status.get('circuit_breaker_active', False):
+                return {
+                    'approved': False,
+                    'reason': 'Circuit breaker active - trading halted',
+                    'risk_level': 'CRITICAL'
+                }
+            
+            # Check position limits (simplified check)
+            positions = risk_status.get('positions', {})
+            portfolio_value = positions.get('portfolio_value', 0)
+            
+            if portfolio_value > 0:
+                trade_value = abs(quantity * price)
+                position_weight = trade_value / portfolio_value
+                
+                max_position = self.risk_manager.config.max_single_position
+                if position_weight > max_position:
+                    return {
+                        'approved': False,
+                        'reason': f'Trade would exceed position limit: {position_weight:.2%} > {max_position:.2%}',
+                        'risk_level': 'HIGH'
+                    }
+            
+            return {'approved': True, 'reason': 'Risk checks passed'}
+            
+        except Exception as e:
+            self.logger.error(f"Error checking trade risk: {e}")
+            return {'approved': True, 'reason': f'Risk check error: {e}'}
+    
+    def reset_circuit_breaker(self) -> bool:
+        """Reset circuit breaker (requires manual intervention)"""
+        if self.risk_manager:
+            try:
+                self.risk_manager.reset_circuit_breaker()
+                self.logger.info("✅ Circuit breaker reset by user")
+                return True
+            except Exception as e:
+                self.logger.error(f"Error resetting circuit breaker: {e}")
+                return False
+        return False
     
     # ================================================================================
     # BACKWARD COMPATIBILITY METHODS (For Legacy Backtests)

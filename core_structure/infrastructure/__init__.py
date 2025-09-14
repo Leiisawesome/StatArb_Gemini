@@ -3,13 +3,13 @@ Infrastructure layer for StatArb system
 Provides core services and utilities for the application
 """
 
-from .database.database_system import DatabaseManager
-from .monitoring.monitoring_system import MetricsCollector
-from .config import UnifiedConfigManager as ConfigManager
-from .messaging.messaging_system import MessageBus, Message
+from core_structure.infrastructure.database.database_system import DatabaseManager
+from core_structure.infrastructure.monitoring.monitoring_system import MetricsCollector
+from core_structure.infrastructure.config import UnifiedConfigManager as ConfigManager
+from core_structure.infrastructure.messaging.messaging_system import MessageBus, Message
 
 # Canonical types to eliminate duplicates
-from .types import (
+from core_structure.infrastructure.types import (
     OrderType, OrderSide, OrderStatus, Order, Fill, TimeInForce, ExecutionStrategy,
     StrategyType,
     StrategyConfig,

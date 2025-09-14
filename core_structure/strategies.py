@@ -889,6 +889,32 @@ class StrategyManager:
         
         self.logger.info("🎯 StrategyManager initialized")
     
+    def start(self) -> None:
+        """Start the strategy manager and all active strategies"""
+        self.logger.info("🚀 Starting StrategyManager...")
+        
+        # Start all active strategies
+        for strategy_id, strategy in self._active_strategies.items():
+            if strategy.status == StrategyStatus.PAUSED:
+                strategy.set_status(StrategyStatus.ACTIVE)
+                self.logger.info(f"▶️ Resumed strategy: {strategy_id}")
+            elif strategy.status == StrategyStatus.STOPPED:
+                strategy.set_status(StrategyStatus.ACTIVE)
+                self.logger.info(f"🔄 Restarted strategy: {strategy_id}")
+        
+        self.logger.info("✅ StrategyManager started successfully")
+    
+    def stop(self) -> None:
+        """Stop the strategy manager and all active strategies"""
+        self.logger.info("🛑 Stopping StrategyManager...")
+        
+        # Stop all active strategies
+        for strategy_id, strategy in self._active_strategies.items():
+            strategy.set_status(StrategyStatus.STOPPED)
+            self.logger.info(f"⏹️ Stopped strategy: {strategy_id}")
+        
+        self.logger.info("✅ StrategyManager stopped successfully")
+    
     def create_strategy(self, strategy_type: StrategyType, strategy_id: str, 
                        config: Dict[str, Any]) -> BaseStrategy:
         """Create and register a new strategy"""

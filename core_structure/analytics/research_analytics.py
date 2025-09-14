@@ -66,6 +66,19 @@ except ImportError:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
+# Performance optimizations
+from .performance_optimization import (
+    VectorizedCalculations,
+    ParallelProcessor,
+    IntelligentCache,
+    MemoryOptimizer,
+    performance_optimized,
+    vectorized_calc,
+    parallel_processor,
+    intelligent_cache,
+    memory_optimizer
+)
+
 # ================================================================================
 # CORE ENUMS AND DATA CLASSES
 # ================================================================================
@@ -212,6 +225,14 @@ class ResearchAnalyticsEngine:
     # BACKTESTING ENGINE
     # ================================================================================
     
+    @performance_optimized(
+        cache_key_func=lambda self, strategy_func, data, strategy_name="Strategy", 
+                              initial_capital=None, mode=BacktestMode.VECTORIZED, 
+                              parameters=None: 
+            f"backtest_{strategy_name}_{hash(str(data.index))}_{len(data)}_{mode.value}_{hash(str(parameters))}",
+        vectorization_ratio=0.85,
+        enable_parallel=True
+    )
     async def run_backtest(self,
                           strategy_func: Callable,
                           data: pd.DataFrame,
@@ -296,6 +317,297 @@ class ResearchAnalyticsEngine:
         except Exception as e:
             logger.error(f"Error generating signals: {e}")
             return pd.Series(0, index=data.index)  # No signals
+    
+    @performance_optimized(
+        cache_key_func=lambda self, data, strategy_type="mean_reversion", params=None: 
+            f"vectorized_signals_{strategy_type}_{hash(str(data.index))}_{hash(str(params))}",
+        vectorization_ratio=0.90,
+        enable_parallel=False
+    )
+    def generate_signals_vectorized(self, data: pd.DataFrame, 
+                                  strategy_type: str = "mean_reversion",
+                                  params: Optional[Dict[str, Any]] = None) -> pd.Series:
+        """
+        Vectorized signal generation for common strategy patterns
+        
+        Args:
+            data: Market data with OHLCV columns
+            strategy_type: Type of strategy signals to generate
+            params: Strategy parameters
+            
+        Returns:
+            Series of trading signals (-1, 0, 1)
+        """
+        try:
+            if data.empty:
+                return pd.Series(0, index=data.index)
+            
+            # Default parameters
+            default_params = {
+                'lookback': 20,
+                'threshold': 2.0,
+                'ema_short': 12,
+                'ema_long': 26
+            }
+            if params:
+                default_params.update(params)
+            
+            # Use close price for signal generation
+            if 'close' in data.columns:
+                prices = data['close'].values
+            elif 'price' in data.columns:
+                prices = data['price'].values
+            else:
+                logger.warning("No price column found for signal generation")
+                return pd.Series(0, index=data.index)
+            
+            signals = np.zeros(len(prices))
+            
+            if strategy_type == "mean_reversion":
+                # Vectorized mean reversion signals
+                lookback = default_params['lookback']
+                threshold = default_params['threshold']
+                
+                # Rolling mean and std using vectorized operations
+                rolling_mean = vectorized_calc.calculate_rolling_features(
+                    prices.reshape(-1, 1), window=lookback
+                )[0][:, 0]  # Get rolling mean
+                
+                rolling_std = vectorized_calc.calculate_rolling_features(
+                    prices.reshape(-1, 1), window=lookback
+                )[0][:, 1]  # Get rolling std
+                
+                # Z-score calculation
+                z_scores = (prices - rolling_mean) / (rolling_std + 1e-8)
+                
+                # Generate signals
+                signals[z_scores > threshold] = -1  # Sell when above threshold
+                signals[z_scores < -threshold] = 1  # Buy when below threshold
+                
+            elif strategy_type == "momentum":
+                # Vectorized momentum signals using EMAs
+                short_window = default_params['ema_short']
+                long_window = default_params['ema_long']
+                
+                # Vectorized EMA calculation
+                ema_short = self._calculate_ema_vectorized(prices, short_window)
+                ema_long = self._calculate_ema_vectorized(prices, long_window)
+                
+                # Generate signals
+                signals[ema_short > ema_long] = 1  # Buy when short EMA > long EMA
+                signals[ema_short < ema_long] = -1  # Sell when short EMA < long EMA
+                
+            elif strategy_type == "pairs_trading":
+                # Pairs trading signals (requires two price series)
+                if 'close_2' in data.columns:
+                    prices_2 = data['close_2'].values
+                    
+                    # Calculate spread
+                    spread = prices - prices_2
+                    
+                    # Rolling statistics for spread
+                    lookback = default_params['lookback']
+                    spread_features = vectorized_calc.calculate_rolling_features(
+                        spread.reshape(-1, 1), window=lookback
+                    )[0]
+                    
+                    spread_mean = spread_features[:, 0]
+                    spread_std = spread_features[:, 1]
+                    
+                    # Z-score of spread
+                    spread_z = (spread - spread_mean) / (spread_std + 1e-8)
+                    
+                    # Generate signals
+                    threshold = default_params['threshold']
+                    signals[spread_z > threshold] = -1  # Short spread
+                    signals[spread_z < -threshold] = 1  # Long spread
+                else:
+                    logger.warning("Pairs trading requires 'close_2' column")
+            
+            return pd.Series(signals, index=data.index)
+            
+        except Exception as e:
+            logger.error(f"Error in vectorized signal generation: {e}")
+            return pd.Series(0, index=data.index)
+    
+    def _calculate_ema_vectorized(self, prices: np.ndarray, window: int) -> np.ndarray:
+        """Calculate exponential moving average using vectorized operations"""
+        alpha = 2.0 / (window + 1)
+        ema = np.zeros_like(prices)
+        ema[0] = prices[0]
+        
+        # Vectorized EMA calculation
+        for i in range(1, len(prices)):
+            ema[i] = alpha * prices[i] + (1 - alpha) * ema[i-1]
+        
+        return ema
+    
+    async def run_backtest_memory_efficient(self,
+                                          strategy_func: Callable,
+                                          data: pd.DataFrame,
+                                          strategy_name: str = "Strategy",
+                                          initial_capital: Optional[float] = None,
+                                          chunk_size: int = 10000) -> BacktestResult:
+        """
+        Memory-efficient backtesting for large datasets
+        
+        Args:
+            strategy_func: Strategy function
+            data: Large market dataset
+            strategy_name: Name of the strategy
+            initial_capital: Starting capital
+            chunk_size: Size of processing chunks
+            
+        Returns:
+            BacktestResult object
+        """
+        try:
+            if data.empty:
+                return BacktestResult(
+                    strategy_name=strategy_name,
+                    start_date=datetime.now(),
+                    end_date=datetime.now(),
+                    initial_capital=initial_capital or 100000,
+                    final_capital=initial_capital or 100000,
+                    total_return=0.0,
+                    annualized_return=0.0,
+                    volatility=0.0,
+                    sharpe_ratio=0.0,
+                    max_drawdown=0.0,
+                    total_trades=0,
+                    win_rate=0.0,
+                    trades=[],
+                    daily_returns=pd.Series(),
+                    equity_curve=pd.Series(),
+                    insights=[]
+                )
+            
+            capital = initial_capital or 100000
+            
+            # Process data in chunks to manage memory
+            def process_chunk(chunk_data):
+                """Process a single chunk of data"""
+                signals = self.generate_signals_vectorized(chunk_data, "mean_reversion")
+                
+                # Simple vectorized backtest for chunk
+                if 'close' in chunk_data.columns:
+                    returns = chunk_data['close'].pct_change().fillna(0)
+                else:
+                    returns = pd.Series(0, index=chunk_data.index)
+                
+                # Strategy returns
+                strategy_returns = signals.shift(1) * returns
+                strategy_returns = strategy_returns.fillna(0)
+                
+                return {
+                    'returns': strategy_returns,
+                    'signals': signals,
+                    'trades': len(signals[signals != 0])
+                }
+            
+            # Memory-efficient processing
+            chunk_results = memory_optimizer.memory_efficient_calculation(
+                data.values,
+                lambda chunk: process_chunk(pd.DataFrame(chunk, columns=data.columns)),
+                chunk_size=chunk_size,
+                reduce_func=self._combine_backtest_chunks
+            )
+            
+            if chunk_results:
+                # Construct final result
+                all_returns = chunk_results['combined_returns']
+                total_trades = chunk_results['total_trades']
+                
+                # Calculate performance metrics
+                total_return = (1 + all_returns).prod() - 1
+                annualized_return = (1 + all_returns.mean()) ** 252 - 1
+                volatility = all_returns.std() * np.sqrt(252)
+                sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
+                
+                # Calculate drawdown
+                cumulative = (1 + all_returns).cumprod()
+                running_max = cumulative.expanding().max()
+                drawdown = (cumulative - running_max) / running_max
+                max_drawdown = drawdown.min()
+                
+                # Win rate
+                win_rate = (all_returns > 0).mean()
+                
+                # Final capital
+                final_capital = capital * (1 + total_return)
+                
+                result = BacktestResult(
+                    strategy_name=strategy_name,
+                    start_date=data.index[0],
+                    end_date=data.index[-1],
+                    initial_capital=capital,
+                    final_capital=final_capital,
+                    total_return=total_return,
+                    annualized_return=annualized_return,
+                    volatility=volatility,
+                    sharpe_ratio=sharpe_ratio,
+                    max_drawdown=max_drawdown,
+                    total_trades=total_trades,
+                    win_rate=win_rate,
+                    trades=[],  # Not tracking individual trades in memory-efficient mode
+                    daily_returns=all_returns,
+                    equity_curve=cumulative * capital,
+                    insights=[]
+                )
+                
+                logger.info(f"Memory-efficient backtest completed: {total_return*100:.2f}% return, "
+                           f"{sharpe_ratio:.2f} Sharpe, {total_trades} trades")
+                
+                return result
+            else:
+                logger.error("Failed to process backtest chunks")
+                return BacktestResult(
+                    strategy_name=strategy_name,
+                    start_date=data.index[0] if not data.empty else datetime.now(),
+                    end_date=data.index[-1] if not data.empty else datetime.now(),
+                    initial_capital=capital,
+                    final_capital=capital,
+                    total_return=0.0,
+                    annualized_return=0.0,
+                    volatility=0.0,
+                    sharpe_ratio=0.0,
+                    max_drawdown=0.0,
+                    total_trades=0,
+                    win_rate=0.0,
+                    trades=[],
+                    daily_returns=pd.Series(),
+                    equity_curve=pd.Series(),
+                    insights=[]
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in memory-efficient backtest: {e}")
+            raise
+    
+    def _combine_backtest_chunks(self, chunk_results: List[Dict]) -> Dict[str, Any]:
+        """Combine results from multiple backtest chunks"""
+        if not chunk_results:
+            return {}
+        
+        # Combine returns
+        all_returns = []
+        total_trades = 0
+        
+        for chunk_result in chunk_results:
+            if 'returns' in chunk_result:
+                all_returns.append(chunk_result['returns'])
+            if 'trades' in chunk_result:
+                total_trades += chunk_result['trades']
+        
+        if all_returns:
+            combined_returns = pd.concat(all_returns)
+        else:
+            combined_returns = pd.Series()
+        
+        return {
+            'combined_returns': combined_returns,
+            'total_trades': total_trades
+        }
     
     async def _run_vectorized_backtest(self, signals: pd.Series, data: pd.DataFrame, 
                                      capital: float, strategy_name: str, params: Dict[str, Any]) -> BacktestResult:

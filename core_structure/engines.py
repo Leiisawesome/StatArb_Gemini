@@ -956,6 +956,12 @@ class TradingEngine:
         
         return self._metrics
     
+    def start(self) -> None:
+        """Start the trading engine"""
+        self.logger.info(f"🚀 Starting TradingEngine: {self.engine_id}")
+        self.status = EngineStatus.RUNNING
+        self.logger.info("✅ TradingEngine started and ready")
+    
     def shutdown(self) -> None:
         """Graceful engine shutdown"""
         self.logger.info(f"🛑 Shutting down TradingEngine: {self.engine_id}")

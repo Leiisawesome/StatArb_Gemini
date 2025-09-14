@@ -14,7 +14,7 @@ This module provides real-time monitoring, alerting, anomaly detection,
 and dashboard functionality for trading operations.
 
 Author: Professional Trading System Architecture
-Version: 1.0.0 (Consolidated)
+Version: 1.0.0 (Consolidated) - Phase 2: Enhanced Error Handling
 """
 
 import asyncio
@@ -30,6 +30,26 @@ import threading
 from abc import ABC, abstractmethod
 import json
 import warnings
+
+# Enhanced error handling
+from .error_handling import (
+    error_handling_manager, 
+    CircuitBreakerError, 
+    MaxRetriesExceededError,
+    circuit_breaker,
+    retry_on_failure
+)
+
+# Performance optimizations
+from .performance_optimization import (
+    VectorizedCalculations,
+    ParallelProcessor,
+    performance_optimized,
+    vectorized_calc,
+    parallel_processor,
+    intelligent_cache,
+    performance_profiler
+)
 
 # ML libraries for anomaly detection and prediction
 from sklearn.ensemble import IsolationForest
@@ -129,61 +149,24 @@ class MonitoringAnalyticsEngine:
     - Multi-strategy dashboard data aggregation
     """
     
-    def __init__(self,
-                 monitoring_interval: int = 60,  # seconds
-                 alert_retention: int = 1000,
-                 anomaly_threshold: float = 0.1,
-                 prediction_horizon: int = 30):  # minutes
-        """
-        Initialize monitoring analytics engine
+    def __init__(self):
+        """Initialize monitoring analytics with error handling"""
+        self.alerts: List[Alert] = []
+        self.anomaly_history: List[AnomalyDetection] = []
+        self.dashboard_data: Dict[str, Any] = {}
+        self.monitoring_status = MonitoringStatus.MAINTENANCE
+        self.last_update = datetime.now()
         
-        Args:
-            monitoring_interval: Monitoring frequency in seconds
-            alert_retention: Number of alerts to retain
-            anomaly_threshold: Anomaly detection threshold (0-1)
-            prediction_horizon: Prediction horizon in minutes
-        """
-        self.monitoring_interval = monitoring_interval
-        self.alert_retention = alert_retention
-        self.anomaly_threshold = anomaly_threshold
-        self.prediction_horizon = prediction_horizon
+        # Initialize error handling and performance optimization components
+        self.error_handling_manager = error_handling_manager
+        self.vectorized_calc = vectorized_calc
+        self.intelligent_cache = intelligent_cache
         
-        # Data storage
-        self.alerts: deque = deque(maxlen=alert_retention)
-        self.anomalies: deque = deque(maxlen=500)
-        self.predictions: deque = deque(maxlen=100)
-        self.monitoring_data: deque = deque(maxlen=1000)
+        # ML models for anomaly detection
+        self.isolation_forest = None
+        self.model_last_trained = None
         
-        # ML Models
-        self.anomaly_detector = IsolationForest(
-            contamination=anomaly_threshold,
-            random_state=42
-        )
-        self.prediction_model = LinearRegression()
-        self.scaler = StandardScaler()
-        
-        # Monitoring state
-        self.status = MonitoringStatus.ACTIVE
-        self.is_monitoring = False
-        self.monitoring_task: Optional[asyncio.Task] = None
-        self.monitoring_lock = threading.RLock()
-        
-        # Alert handlers
-        self.alert_handlers: Dict[AlertType, List[Callable]] = {
-            alert_type: [] for alert_type in AlertType
-        }
-        
-        # Dashboard data
-        self.dashboard_data: Dict[str, Any] = {
-            'last_updated': None,
-            'performance_summary': {},
-            'risk_summary': {},
-            'execution_summary': {},
-            'system_health': {},
-            'active_alerts': [],
-            'recent_anomalies': []
-        }
-        
+        self.monitoring_status = MonitoringStatus.ACTIVE
         logger.info("MonitoringAnalyticsEngine initialized successfully")
     
     # ================================================================================
@@ -198,7 +181,7 @@ class MonitoringAnalyticsEngine:
                           source: str = "system",
                           data: Optional[Dict[str, Any]] = None) -> Alert:
         """
-        Create and process a new alert
+        Create and process a new alert with enhanced error handling
         
         Args:
             severity: Alert severity level
@@ -211,28 +194,115 @@ class MonitoringAnalyticsEngine:
         Returns:
             Created Alert object
         """
-        alert = Alert(
-            id=f"alert_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(self.alerts)}",
-            timestamp=datetime.now(),
-            severity=severity,
-            alert_type=alert_type,
-            title=title,
-            message=message,
-            source=source,
-            data=data or {}
-        )
-        
-        # Store alert
-        self.alerts.append(alert)
-        
-        # Update dashboard
-        self._update_dashboard_alerts()
-        
-        # Trigger alert handlers
-        await self._trigger_alert_handlers(alert)
-        
-        logger.info(f"Alert created: {severity.value} - {title}")
-        return alert
+        async with error_handling_manager.protected_operation(
+            "alert_creation",
+            "database",
+            "database",
+            retryable_exceptions=(ValueError, RuntimeError),
+            non_retryable_exceptions=(TypeError, MemoryError)
+        ) as protected_op:
+            
+            async def _create_alert():
+                try:
+                    # Input validation
+                    if not title or not isinstance(title, str):
+                        title_safe = "Untitled Alert"
+                        logger.warning(f"Invalid alert title provided, using default: {title_safe}")
+                    else:
+                        title_safe = title[:200]  # Limit title length
+                    
+                    if not message or not isinstance(message, str):
+                        message_safe = "No message provided"
+                        logger.warning(f"Invalid alert message provided, using default: {message_safe}")
+                    else:
+                        message_safe = message[:1000]  # Limit message length
+                    
+                    if not isinstance(source, str):
+                        source_safe = "unknown"
+                        logger.warning(f"Invalid alert source provided, using default: {source_safe}")
+                    else:
+                        source_safe = source[:50]  # Limit source length
+                    
+                    # Sanitize data payload
+                    data_safe = {}
+                    if data:
+                        try:
+                            # Ensure data is serializable and bounded
+                            import json
+                            data_str = json.dumps(data)
+                            if len(data_str) > 10000:  # Limit data size
+                                data_safe = {"warning": "Data payload too large, truncated"}
+                                logger.warning("Alert data payload truncated due to size")
+                            else:
+                                data_safe = data
+                        except (TypeError, ValueError) as e:
+                            logger.warning(f"Alert data not serializable: {e}")
+                            data_safe = {"error": "Data not serializable"}
+                    
+                    # Create alert with safe timestamp
+                    try:
+                        timestamp = datetime.now()
+                        alert_id = f"alert_{timestamp.strftime('%Y%m%d_%H%M%S')}_{len(self.alerts)}"
+                    except Exception as e:
+                        logger.warning(f"Error generating alert ID: {e}")
+                        timestamp = datetime.now()
+                        alert_id = f"alert_{int(timestamp.timestamp())}_{len(self.alerts)}"
+                    
+                    alert = Alert(
+                        id=alert_id,
+                        timestamp=timestamp,
+                        severity=severity,
+                        alert_type=alert_type,
+                        title=title_safe,
+                        message=message_safe,
+                        source=source_safe,
+                        data=data_safe
+                    )
+                    
+                    # Store alert with bounds checking
+                    try:
+                        if len(self.alerts) >= 5000:  # Prevent unbounded growth
+                            # Remove oldest alerts, keep last 4000
+                            old_count = len(self.alerts)
+                            self.alerts = self.alerts[-4000:]
+                            logger.info(f"Alert history trimmed from {old_count} to {len(self.alerts)} entries")
+                        
+                        self.alerts.append(alert)
+                        
+                    except Exception as e:
+                        logger.error(f"Error storing alert: {e}")
+                        # Continue processing even if storage fails
+                    
+                    # Update dashboard with error handling
+                    try:
+                        self._update_dashboard_alerts()
+                    except Exception as e:
+                        logger.warning(f"Error updating dashboard for alert: {e}")
+                    
+                    # Trigger alert handlers with error handling
+                    try:
+                        await self._trigger_alert_handlers(alert)
+                    except Exception as e:
+                        logger.warning(f"Error triggering alert handlers: {e}")
+                    
+                    logger.info(f"Alert created successfully: {severity.value} - {title_safe[:50]}")
+                    return alert
+                    
+                except Exception as e:
+                    logger.error(f"Critical error creating alert: {e}")
+                    # Return a minimal alert to prevent complete failure
+                    return Alert(
+                        id=f"error_alert_{int(datetime.now().timestamp())}",
+                        timestamp=datetime.now(),
+                        severity=AlertSeverity.ERROR,
+                        alert_type=AlertType.SYSTEM,
+                        title="Alert Creation Error",
+                        message=f"Failed to create alert: {e}",
+                        source="error_handler",
+                        data={}
+                    )
+            
+            return await protected_op.execute(_create_alert)
     
     def register_alert_handler(self, alert_type: AlertType, handler: Callable) -> None:
         """Register a handler for specific alert types"""
@@ -273,11 +343,17 @@ class MonitoringAnalyticsEngine:
     # ANOMALY DETECTION
     # ================================================================================
     
+    @performance_optimized(
+        cache_key_func=lambda self, data, metric_name="performance": 
+            f"anomaly_detection_{metric_name}_{hash(str(data.index))}_{len(data)}",
+        vectorization_ratio=0.90,
+        enable_parallel=False
+    )
     async def detect_anomalies(self, 
                               data: pd.DataFrame,
                               metric_name: str = "performance") -> List[AnomalyDetection]:
         """
-        Detect anomalies in time series data using ML
+        Detect anomalies in time series data using ML with enhanced error handling
         
         Args:
             data: Time series data to analyze
@@ -286,98 +362,202 @@ class MonitoringAnalyticsEngine:
         Returns:
             List of detected anomalies
         """
-        try:
-            anomalies = []
+        async with error_handling_manager.protected_operation(
+            "anomaly_detection",
+            "external_data",
+            "external_data",
+            retryable_exceptions=(ValueError, RuntimeError, pd.errors.DataError),
+            non_retryable_exceptions=(KeyError, TypeError, MemoryError)
+        ) as protected_op:
             
-            if len(data) < 10:  # Need minimum data for anomaly detection
-                return anomalies
-            
-            # Prepare features for anomaly detection
-            features = self._prepare_anomaly_features(data)
-            
-            if features is not None and len(features) > 0:
-                # Fit anomaly detector
-                self.anomaly_detector.fit(features)
-                
-                # Detect anomalies
-                anomaly_labels = self.anomaly_detector.predict(features)
-                anomaly_scores = self.anomaly_detector.decision_function(features)
-                
-                # Process anomalies
-                for i, (is_anomaly, score) in enumerate(zip(anomaly_labels, anomaly_scores)):
-                    if is_anomaly == -1:  # Anomaly detected
-                        severity_score = min(1.0, abs(score) / 2.0)  # Normalize to 0-1
+            async def _perform_anomaly_detection():
+                try:
+                    anomalies = []
+                    
+                    # Input validation
+                    if data is None:
+                        logger.warning("No data provided for anomaly detection")
+                        return anomalies
+                    
+                    if len(data) < 10:  # Need minimum data for anomaly detection
+                        logger.debug(f"Insufficient data for anomaly detection: {len(data)} rows (minimum 10 required)")
+                        return anomalies
+                    
+                    # Validate data quality
+                    if isinstance(data, pd.DataFrame):
+                        numeric_cols = data.select_dtypes(include=[np.number]).columns
+                        if len(numeric_cols) == 0:
+                            logger.warning("No numeric columns found for anomaly detection")
+                            return anomalies
                         
-                        anomaly = AnomalyDetection(
-                            timestamp=data.index[i] if hasattr(data, 'index') else datetime.now(),
-                            anomaly_type=self._classify_anomaly_type(metric_name),
-                            severity_score=severity_score,
-                            description=f"Anomaly detected in {metric_name}",
-                            affected_metrics=[metric_name],
-                            confidence=min(0.95, 0.5 + severity_score * 0.4),
-                            raw_data={'score': score, 'index': i}
-                        )
+                        # Check for excessive NaN values
+                        nan_ratio = data[numeric_cols].isnull().sum().sum() / (len(data) * len(numeric_cols))
+                        if nan_ratio > 0.5:
+                            logger.warning(f"High NaN ratio ({nan_ratio:.2f}) in data for anomaly detection")
+                    
+                    # Prepare features for anomaly detection with error handling
+                    try:
+                        features = self._prepare_anomaly_features(data)
                         
-                        anomalies.append(anomaly)
-                        self.anomalies.append(anomaly)
+                        if features is None:
+                            logger.warning("Failed to prepare features for anomaly detection")
+                            return anomalies
                         
-                        # Create alert for significant anomalies
-                        if severity_score > 0.7:
-                            await self.create_alert(
-                                severity=AlertSeverity.WARNING if severity_score < 0.9 else AlertSeverity.ERROR,
-                                alert_type=AlertType.ANOMALY,
-                                title=f"Anomaly Detected: {metric_name}",
-                                message=f"Significant anomaly detected with severity {severity_score:.2f}",
-                                source="anomaly_detector",
-                                data={'anomaly': anomaly.__dict__}
+                        if len(features) == 0:
+                            logger.warning("Empty features array for anomaly detection")
+                            return anomalies
+                        
+                        # Check for invalid values in features
+                        if np.any(np.isnan(features)) or np.any(np.isinf(features)):
+                            logger.warning("Invalid values (NaN/Inf) found in features, cleaning...")
+                            features = np.nan_to_num(features, nan=0.0, posinf=1e6, neginf=-1e6)
+                        
+                    except Exception as e:
+                        logger.error(f"Error preparing anomaly detection features: {e}")
+                        return anomalies
+                    
+                    # Fit anomaly detector with error handling
+                    try:
+                        if self.anomaly_detector is None:
+                            logger.warning("Anomaly detector not initialized, creating new instance")
+                            self.anomaly_detector = IsolationForest(
+                                contamination=0.1, 
+                                random_state=42,
+                                n_estimators=50  # Reduced for better performance
                             )
+                        
+                        # Fit detector with timeout protection
+                        self.anomaly_detector.fit(features)
+                        
+                    except (ValueError, MemoryError) as e:
+                        logger.error(f"Error fitting anomaly detector: {e}")
+                        return anomalies
+                    
+                    # Detect anomalies with error handling
+                    try:
+                        anomaly_labels = self.anomaly_detector.predict(features)
+                        anomaly_scores = self.anomaly_detector.decision_function(features)
+                        
+                        # Validate prediction results
+                        if len(anomaly_labels) != len(features) or len(anomaly_scores) != len(features):
+                            logger.error("Mismatch in anomaly detection results length")
+                            return anomalies
+                        
+                    except Exception as e:
+                        logger.error(f"Error in anomaly prediction: {e}")
+                        return anomalies
+                    
+                    # Process anomalies with validation
+                    try:
+                        for i, (is_anomaly, score) in enumerate(zip(anomaly_labels, anomaly_scores)):
+                            if is_anomaly == -1:  # Anomaly detected
+                                try:
+                                    # Bound severity score
+                                    severity_score = min(1.0, max(0.0, abs(score) / 2.0))  # Normalize to 0-1
+                                    
+                                    # Get timestamp safely
+                                    if hasattr(data, 'index') and i < len(data.index):
+                                        timestamp = data.index[i]
+                                    else:
+                                        timestamp = datetime.now()
+                                    
+                                    anomaly = AnomalyDetection(
+                                        timestamp=timestamp,
+                                        anomaly_type=self._classify_anomaly_type(metric_name),
+                                        severity_score=severity_score,
+                                        description=f"Anomaly detected in {metric_name} (score: {score:.3f})",
+                                        affected_metrics=[metric_name],
+                                        confidence=min(0.95, max(0.1, 0.5 + severity_score * 0.4)),
+                                        raw_data={'score': float(score), 'index': i, 'feature_vector': features[i].tolist() if i < len(features) else []}
+                                    )
+                                    
+                                    anomalies.append(anomaly)
+                                    
+                                    # Add to history with bounds checking
+                                    if len(self.anomalies) >= 1000:  # Prevent unbounded growth
+                                        self.anomalies.popleft()  # Remove oldest
+                                    self.anomalies.append(anomaly)
+                                    
+                                    # Create alert for significant anomalies with error handling
+                                    if severity_score > 0.7:
+                                        try:
+                                            alert_severity = AlertSeverity.WARNING if severity_score < 0.9 else AlertSeverity.ERROR
+                                            await self.create_alert(
+                                                severity=alert_severity,
+                                                alert_type=AlertType.ANOMALY,
+                                                title=f"Anomaly Detected: {metric_name}",
+                                                message=f"Significant anomaly detected with severity {severity_score:.2f} at index {i}",
+                                                source="anomaly_detector",
+                                                data={'anomaly': anomaly.__dict__}
+                                            )
+                                        except Exception as alert_error:
+                                            logger.warning(f"Failed to create alert for anomaly: {alert_error}")
+                                
+                                except Exception as anomaly_error:
+                                    logger.warning(f"Error processing anomaly at index {i}: {anomaly_error}")
+                                    continue
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing anomaly results: {e}")
+                    
+                    logger.debug(f"Anomaly detection completed: {len(anomalies)} anomalies found in {metric_name}")
+                    return anomalies
+                    
+                except Exception as e:
+                    logger.error(f"Critical error in anomaly detection: {e}")
+                    return []
             
-            return anomalies
-            
-        except Exception as e:
-            logger.error(f"Error in anomaly detection: {e}")
-            return []
+            return await protected_op.execute(_perform_anomaly_detection)
     
     def _prepare_anomaly_features(self, data: pd.DataFrame) -> Optional[np.ndarray]:
-        """Prepare features for anomaly detection"""
+        """Prepare features for anomaly detection using vectorized operations"""
         try:
             if isinstance(data, pd.Series):
                 # Convert series to DataFrame
                 data = data.to_frame('value')
             
-            # Create rolling statistics as features
-            features = []
+            # Get numeric columns and convert to numpy array for vectorized operations
+            numeric_cols = data.select_dtypes(include=[np.number])
+            if numeric_cols.empty:
+                return None
             
-            for col in data.select_dtypes(include=[np.number]).columns:
-                series = data[col].dropna()
-                if len(series) > 5:
-                    # Rolling statistics
-                    rolling_mean = series.rolling(window=5, min_periods=1).mean()
-                    rolling_std = series.rolling(window=5, min_periods=1).std()
-                    rolling_min = series.rolling(window=5, min_periods=1).min()
-                    rolling_max = series.rolling(window=5, min_periods=1).max()
-                    
-                    # Z-score
-                    z_score = (series - rolling_mean) / (rolling_std + 1e-8)
-                    
-                    # Combine features
-                    feature_matrix = np.column_stack([
-                        series.values,
-                        rolling_mean.values,
-                        rolling_std.values,
-                        z_score.values,
-                        rolling_min.values,
-                        rolling_max.values
-                    ])
-                    
-                    features.append(feature_matrix)
+            # Use vectorized calculations for performance optimization
+            data_array = numeric_cols.values
+            if data_array.shape[0] < 5:
+                return None
             
-            if features:
-                # Combine all features
-                combined_features = np.concatenate(features, axis=1)
+            # Vectorized rolling statistics computation
+            rolling_features = self.vectorized_calc.calculate_rolling_features(
+                data_array, window=5
+            )
+            
+            # Compute additional statistical features vectorized
+            z_scores = self.vectorized_calc.calculate_rolling_z_scores(
+                data_array, window=5
+            )
+            
+            # Combine all features using vectorized operations
+            feature_matrices = []
+            for i in range(data_array.shape[1]):
+                col_data = data_array[:, i:i+1]  # Keep 2D shape
+                col_rolling = rolling_features[i]  # Shape: (n_samples, 4) for mean,std,min,max
+                col_z_scores = z_scores[:, i:i+1]  # Keep 2D shape
                 
-                # Handle NaN values
-                combined_features = np.nan_to_num(combined_features, nan=0.0)
+                # Stack all features for this column
+                col_features = np.hstack([
+                    col_data,           # Original values
+                    col_rolling,        # Rolling statistics
+                    col_z_scores        # Z-scores
+                ])
+                feature_matrices.append(col_features)
+            
+            if feature_matrices:
+                # Vectorized concatenation
+                combined_features = np.hstack(feature_matrices)
+                
+                # Efficient NaN handling
+                combined_features = np.nan_to_num(combined_features, nan=0.0, 
+                                                posinf=0.0, neginf=0.0)
                 
                 return combined_features
             

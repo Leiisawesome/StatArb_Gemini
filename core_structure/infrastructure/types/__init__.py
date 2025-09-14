@@ -9,7 +9,7 @@ This module now serves as a redirect to maintain backward compatibility.
 """
 
 # Import all types from the consolidated messaging system
-from ..messaging.messaging_system import (
+from core_structure.infrastructure.messaging.messaging_system import (
     # Order Types
     OrderType,
     OrderSide,
