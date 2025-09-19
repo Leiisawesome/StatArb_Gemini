@@ -108,14 +108,12 @@ class TradeSlice:
     trade_id: str
     symbol: str
     side: str
-    
-    # Slice parameters
     target_quantity: float
+    scheduled_time: datetime  # Moved here - required fields first
+    
+    # Optional slice parameters with defaults
     executed_quantity: float = 0.0
     remaining_quantity: float = 0.0
-    
-    # Timing
-    scheduled_time: datetime
     execution_start: Optional[datetime] = None
     execution_end: Optional[datetime] = None
     

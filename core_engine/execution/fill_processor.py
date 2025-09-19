@@ -57,19 +57,15 @@ class TradeExecution:
     order_id: str
     symbol: str
     side: str  # 'BUY' or 'SELL'
-    
-    # Execution details
     quantity: float
     price: float
+    execution_time: datetime  # Moved here - required fields first
+    venue: str
+    
+    # Optional execution details with defaults
     commission: float = 0.0
     fees: float = 0.0
-    
-    # Timing
-    execution_time: datetime
     settlement_date: Optional[datetime] = None
-    
-    # Venue information
-    venue: str
     venue_order_id: Optional[str] = None
     venue_execution_id: Optional[str] = None
     
@@ -110,26 +106,16 @@ class PositionUpdate:
     """Position update from trade execution"""
     symbol: str
     account: str
-    
-    # Position changes
     quantity_change: float
     price: float
-    
-    # Updated position
     new_position: float
     new_avg_cost: float
-    
-    # P&L impact
     realized_pnl: float
     unrealized_pnl_change: float
+    source_execution_id: str  # Moved here - required fields first
     
-    # Timing
+    # Optional fields with defaults
     update_time: datetime = field(default_factory=datetime.now)
-    
-    # Source
-    source_execution_id: str
-    
-    # Commission and fees
     commission: float = 0.0
     fees: float = 0.0
 
