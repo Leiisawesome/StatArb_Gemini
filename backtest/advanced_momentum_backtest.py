@@ -1,482 +1,960 @@
-#!/usr/bin/env python3
-"""
-Advanced Enhanced Momentum Strategy Backtest with Comprehensive Risk Management
-==============================================================================
+#!/usr/bin/env python3#!/usr/bin/env python3
 
-This implementation includes:
-- ✅ ATR-based stop-loss and take-profit
-- ✅ Market regime detection and trend filters
-- ✅ Position size limits and risk management
-- ✅ Longer momentum periods to reduce noise
-- ✅ Sophisticated signal filtering
-- ✅ Dynamic risk adjustments
+""""""
+
+Advanced Enhanced Momentum Strategy Backtest with Comprehensive Risk ManagementAdvanced Enhanced Momentum Strategy Backtest with Comprehensive Risk Management
+
+============================================================================================================================================================
+
+
+
+This implementation includes:This implementation includes:
+
+- ✅ ATR-based stop-loss and take-profit- ✅ ATR-based stop-loss and take-profit
+
+- ✅ Market regime detection and trend filters- ✅ Market regime detection and trend filters
+
+- ✅ Position size limits and risk management- ✅ Position size limits and risk management
+
+- ✅ Longer momentum periods to reduce noise- ✅ Longer momentum periods to reduce noise
+
+- ✅ Sophisticated signal filtering- ✅ Sophisticated signal filtering
+
+- ✅ Dynamic risk adjustments- ✅ Dynamic risk adjustments
+
+- ✅ Integration with 10-component architecture
 
 OPTIMIZATION INTEGRATION:
-- ⚡ 52x faster trading cycle execution
-- 🚀 Sub-millisecond trade processing
+
+OPTIMIZATION INTEGRATION:- ⚡ 52x faster trading cycle execution
+
+- ⚡ 52x faster trading cycle execution- 🚀 Sub-millisecond trade processing
+
+- 🚀 Sub-millisecond trade processing- 📊 Real-time performance monitoring
+
 - 📊 Real-time performance monitoring
 
-Author: StatArb_Gemini Team + Optimization Integration
+- 🏛️ Central Risk Authority integrationAuthor: StatArb_Gemini Team + Optimization Integration
+
 """
 
-import asyncio
-import logging
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-import sys
-import os
-import pytz
-from scipy import stats
-import time
+Author: StatArb_Gemini Team + 10-Component Architecture Integration
 
-# Add project root to path
+"""import asyncio
+
+import logging
+
+import asyncioimport pandas as pd
+
+import loggingimport numpy as np
+
+import pandas as pdfrom datetime import datetime, timedelta
+
+import numpy as npfrom typing import Dict, List, Optional, Any, Tuple
+
+from datetime import datetime, timedeltafrom dataclasses import dataclass, field
+
+from typing import Dict, List, Optional, Any, Tupleimport sys
+
+from dataclasses import dataclass, fieldimport os
+
+import sysimport pytz
+
+import osfrom scipy import stats
+
+import pytzimport time
+
+from scipy import stats
+
+import time# Add project root to path
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 1. ULTIMATE SYSTEM: Use streamlined UnifiedTradingSystem
+# Add project root to path
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))# 1. ULTIMATE SYSTEM: Use streamlined UnifiedTradingSystem
+
 from core_structure import create_production_trading_system, UnifiedTradingSystem as UnifiedTradingEngine
-# Use new reorganized structure
-from core_structure.components.market_data import EnhancedClickHouseLoader, DataRequest
-from core_structure.components.market_data import BacktestingDataProvider
 
-# Test the new consolidated market data module
-from core_structure.components.market_data import UnifiedDataManager, UnifiedDataFeeds
+# 10-COMPONENT ARCHITECTURE INTEGRATION# Use new reorganized structure
 
-# Advanced signal generation (updated to core_structure)
+from core_structure.infrastructure.system_orchestrator import SystemOrchestratorfrom core_structure.components.market_data import EnhancedClickHouseLoader, DataRequest
+
+from core_structure.advanced_risk_management import AdvancedRiskManagerfrom core_structure.components.market_data import BacktestingDataProvider
+
+from core_structure.components.market_data import UnifiedDataManager, BacktestingDataProvider
+
+from core_structure.components.execution import UnifiedExecutionEngine# Test the new consolidated market data module
+
+from core_structure.components.portfolio import PortfolioManagerfrom core_structure.components.market_data import UnifiedDataManager, UnifiedDataFeeds
+
+from core_structure.strategies import StrategyManager, StrategyType
+
+from core_structure.analytics.performance_optimization import performance_optimized# Advanced signal generation (updated to core_structure)
+
 from core_structure.components.signal_generation import (
-    RegimeAnalysisEngine as RegimeAwareFilter,
+
+# Legacy imports for backward compatibility    RegimeAnalysisEngine as RegimeAwareFilter,
+
+from core_structure.components.market_data import EnhancedClickHouseLoader, DataRequest    PortfolioOptimizationEngine, 
+
+from core_structure.components.signal_generation import (    RegimeAnalysisEngine as MarketRegimeDetector
+
+    RegimeAnalysisEngine as RegimeAwareFilter,)
+
     PortfolioOptimizationEngine, 
-    RegimeAnalysisEngine as MarketRegimeDetector
-)
 
-# Missing imports for momentum backtest
-# Config imports removed - using unified configuration system directly
+    UnifiedSignalEngine# Missing imports for momentum backtest
+
+)# Config imports removed - using unified configuration system directly
+
 from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from core_structure.strategies import BaseStrategy as TemplateStrategyBridge
 
-# Compatibility classes for old structure
-from dataclasses import dataclass
-from typing import Dict, Optional
+# Configure loggingfrom core_structure.strategies import BaseStrategy as TemplateStrategyBridge
+
+logging.basicConfig(
+
+    level=logging.INFO,# Compatibility classes for old structure
+
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'from dataclasses import dataclass
+
+)from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Use real core_structure components instead of placeholders
 
 @dataclass
-class SignalRiskConfig:
-    """Compatibility configuration for signal-level risk management"""
-    # ATR settings
-    atr_period: int = 14
-    atr_multiplier_base: float = 2.0
-    
-    # Stop loss settings
-    max_stop_loss_pct: float = 0.15
-    min_stop_loss_pct: float = 0.02
-    trailing_stop_enabled: bool = True
-    trailing_stop_distance: float = 0.05
-    
-    # Take profit settings
-    max_take_profit_pct: float = 0.30
-    min_take_profit_pct: float = 0.05
-    trailing_take_profit_enabled: bool = True
-    
-    # Position exit settings
-    max_hold_time_hours: int = 48
-    volatility_exit_threshold: float = 0.08
-    profit_taking_threshold: float = 0.10
-    
-    def __post_init__(self):
-        # Default regime multipliers
-        self.regime_multipliers = {
-            'trending': {'stop': 2.5, 'target': 4.0},
-            'mean_reverting': {'stop': 1.8, 'target': 3.0},
-            'volatile': {'stop': 3.0, 'target': 3.0},
+
+class MomentumConfig:@dataclass
+
+    """Enhanced momentum strategy configuration for 10-component integration"""class SignalRiskConfig:
+
+        """Compatibility configuration for signal-level risk management"""
+
+    # Strategy parameters    # ATR settings
+
+    lookback_period: int = 60    atr_period: int = 14
+
+    momentum_threshold: float = 0.02    atr_multiplier_base: float = 2.0
+
+    confidence_threshold: float = 0.70    
+
+        # Stop loss settings
+
+    # Risk management    max_stop_loss_pct: float = 0.15
+
+    max_position_size: float = 0.10    min_stop_loss_pct: float = 0.02
+
+    stop_loss_pct: float = 0.03    trailing_stop_enabled: bool = True
+
+    take_profit_pct: float = 0.06    trailing_stop_distance: float = 0.05
+
+    atr_multiplier: float = 2.0    
+
+        # Take profit settings
+
+    # 10-component integration    max_take_profit_pct: float = 0.30
+
+    use_central_risk_authority: bool = True    min_take_profit_pct: float = 0.05
+
+    real_time_monitoring: bool = True    trailing_take_profit_enabled: bool = True
+
+    performance_optimization: bool = True    
+
+    regime_awareness: bool = True    # Position exit settings
+
+        max_hold_time_hours: int = 48
+
+    # Execution settings    volatility_exit_threshold: float = 0.08
+
+    execution_mode: str = "backtest"  # backtest, paper, live    profit_taking_threshold: float = 0.10
+
+    data_source: str = "clickhouse"    
+
+        def __post_init__(self):
+
+    def __post_init__(self):        # Default regime multipliers
+
+        """Validate configuration for 10-component architecture"""        self.regime_multipliers = {
+
+        if self.use_central_risk_authority and self.confidence_threshold < 0.60:            'trending': {'stop': 2.5, 'target': 4.0},
+
+            logger.warning("Central Risk Authority requires confidence >= 0.60")            'mean_reverting': {'stop': 1.8, 'target': 3.0},
+
+            self.confidence_threshold = 0.60            'volatile': {'stop': 3.0, 'target': 3.0},
+
             'stable': {'stop': 2.0, 'target': 3.5}
-        }
 
-# Unified strategy system components (consolidated)
-from core_structure.strategies import (
-    BaseStrategy as TemplateStrategyBridge, 
-    StrategyManager as TemplateConfiguration
-)
+class AdvancedMomentumStrategy:        }
 
-# Note: ProfessionalMomentumTemplate is now handled by the unified strategy system
+    """
 
-# Import unified strategy system components
-from core_structure.strategies import (
-    StrategyManager as UnifiedStrategyConfig,
-    StrategyRegistry as StrategyParameters,
-    ExecutionMode as StrategyExecutionMode,
-    StrategyType
-)
+    Enhanced Momentum Strategy with 10-Component Architecture Integration# Unified strategy system components (consolidated)
 
-# Alias for backward compatibility
-UnifiedStrategyConfig = TemplateConfiguration
-from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
+    from core_structure.strategies import (
 
-# 4. REMOVE LEGACY CODE: Legacy optimization framework (replaced by UnifiedTradingEngine optimizations)
-# from trade_engine.optimization import create_backtest_optimizer, OptimizationMode, CacheConfig, OptimizationConfig
+    Features:    BaseStrategy as TemplateStrategyBridge, 
 
-# Testing framework configuration
-# Config imports removed - using unified configuration system directly, TradingPeriod, StrategyConfig
+    - Central Risk Authority integration    StrategyManager as TemplateConfiguration
 
-# Compatibility class for old DynamicRiskManager
-# Use real UnifiedRiskManager instead of placeholder
+    - Real-time performance monitoring)
 
-# Configure concise logging
-logging.basicConfig(
-    level=logging.WARNING,  # Reduce verbosity
-    format='%(message)s'  # Simplified format
-)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Keep backtest messages
+    - Regime-aware signal generation
 
-# Reduce verbosity of specific loggers
-logging.getLogger('core_structure').setLevel(logging.ERROR)
-logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
+    - Advanced execution management# Note: ProfessionalMomentumTemplate is now handled by the unified strategy system
 
-@dataclass
-# Risk configuration now handled by UnifiedRiskManager via RiskLimits
+    """
 
-@dataclass
-class EnhancedMomentumConfig:
-    """Enhanced momentum strategy configuration"""
-    # Momentum parameters (improved)
-    lookback_period: int = 50  # Increased from 20 to reduce noise
-    momentum_threshold: float = 0.005  # Reduced from 2.5% to 0.5% for more realistic intraday signals
-    
-    # Trend filters
-    trend_filter_enabled: bool = True
-    trend_lookback: int = 100
-    trend_strength_threshold: float = 0.6
-    
-    # Market regime awareness
-    regime_filter_enabled: bool = True
-    volatility_threshold: float = 0.03
-    regime_confidence_threshold: float = 0.3  # Reduced from 0.7 to 0.3 for testing
-    
-    # Signal filtering
-    min_signal_confidence: float = 0.3  # Reduced from 0.6 to 0.3 for testing
-    signal_decay_factor: float = 0.95
-    
-    # Position management
-    position_scaling_enabled: bool = True
-    max_positions: int = 3  # Limit number of positions
+    # Import unified strategy system components
 
-@dataclass
-class PositionInfo:
-    """Enhanced position tracking"""
-    symbol: str
-    shares: float
-    entry_price: float
-    entry_time: datetime
-    stop_loss: float
-    take_profit: float
-    trailing_stop: float
-    unrealized_pnl: float = 0.0
-    max_favorable_excursion: float = 0.0
-    max_adverse_excursion: float = 0.0
+    def __init__(self, config: MomentumConfig):from core_structure.strategies import (
 
-@dataclass
-class AdvancedTestResults:
-    """Enhanced test results with comprehensive metrics"""
-    test_id: str
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    
-    # Portfolio metrics
-    initial_capital: float = 100000.0
-    final_capital: float = 100000.0
-    portfolio_value: float = 100000.0
-    cash_balance: float = 100000.0
-    
-    # Position tracking
-    positions: Dict[str, PositionInfo] = field(default_factory=dict)
-    closed_positions: List[Dict] = field(default_factory=list)
-    
-    # Trade history with enhanced details
-    trade_history: List[Dict] = field(default_factory=list)
-    risk_events: List[Dict] = field(default_factory=list)
-    
-    # Performance metrics
-    total_return: float = 0.0
-    annualized_return: float = 0.0
-    sharpe_ratio: float = 0.0
-    max_drawdown: float = 0.0
-    win_rate: float = 0.0
-    profit_factor: float = 0.0
-    
-    # Risk metrics
-    var_95: float = 0.0
-    expected_shortfall: float = 0.0
-    current_drawdown: float = 0.0
-    daily_returns: List[float] = field(default_factory=list)
-    
-    # Execution metrics
-    slices_processed: int = 0
-    symbols_processed: List[str] = field(default_factory=list)
-    num_trades: int = 0
-    execution_time: float = 0.0
-    
-    # Market regime tracking
-    regime_history: List[Dict] = field(default_factory=list)
-    
-    # Test status
-    test_status: str = "RUNNING"
-    test_score: float = 0.0
+        self.config = config    StrategyManager as UnifiedStrategyConfig,
 
-class AdvancedEnhancedMomentumBacktest:
-    """Advanced momentum strategy backtest with comprehensive risk management"""
-    
-    def __init__(self, config_name: str = "advanced_momentum", custom_config: Optional[Dict] = None):
-        self.logger = logging.getLogger(__name__)
-        self.core_engine = None  # UnifiedTradingEngine instance
-        self.data_provider: Optional[BacktestingDataProvider] = None
-        
-        # Load test configuration
-        # Using unified configuration system directly
-        from core_structure.config import ConfigManager
-        try:
-            self.config_manager = ConfigManager()
-        except Exception:
-            self.config_manager = None
-        
-        self.test_config = self._load_test_config(config_name, custom_config)
-        
-        # Advanced components
-        self.dynamic_risk_manager = None  # RiskManager instance
-        self.regime_filter: Optional[RegimeAwareFilter] = None
-        self.regime_detector: Optional[MarketRegimeDetector] = None
-        self.risk_manager: Optional[RiskManager] = None
-        
-        # Use real strategy components from core_structure
-        self.momentum_strategy = None
-        self.strategy_bridge: Optional[TemplateStrategyBridge] = None
-        
-        # Configuration (simplified - risk now handled by UnifiedRiskManager)
-        self.momentum_config = EnhancedMomentumConfig()
-        
-        # Results tracking
-        self.results: Optional[AdvancedTestResults] = None
-        
-        # Market data history for technical analysis
-        self.market_data_history: Dict[str, pd.DataFrame] = {}
-        
-        # Price history for momentum calculation
-        self.price_history: Dict[str, List[float]] = {}
-        
-        # 4. REMOVE LEGACY CODE: Legacy optimization (now handled by UnifiedTradingEngine)
-        # from trade_engine.optimization import BacktestOptimizer
-        # self.optimization_wrapper: Optional[BacktestOptimizer] = None
-        self.optimization_enabled: bool = True  # Enable by default (via UnifiedTradingEngine)
-        self.optimization_stats = {
-            'optimized_cycles': 0,
-            'legacy_cycles': 0,
-            'avg_cycle_time_ms': 0.0,
-            'performance_improvement': 1.0
-        }
-        
+        self.positions = {}    StrategyRegistry as StrategyParameters,
+
+        self.trades = []    ExecutionMode as StrategyExecutionMode,
+
+        self.performance_metrics = {}    StrategyType
+
+        )
+
+        # 10-component architecture integration
+
+        self.system_orchestrator = None# Alias for backward compatibility
+
+        self.risk_manager = NoneUnifiedStrategyConfig = TemplateConfiguration
+
+        self.data_manager = Nonefrom core_structure.components.risk import RiskManager, TradingMode, RiskLimits
+
+        self.execution_engine = None
+
+        self.portfolio_manager = None# 4. REMOVE LEGACY CODE: Legacy optimization framework (replaced by UnifiedTradingEngine optimizations)
+
+        # from trade_engine.optimization import create_backtest_optimizer, OptimizationMode, CacheConfig, OptimizationConfig
+
+        logger.info("Advanced Momentum Strategy initialized for 10-component architecture")
+
+    # Testing framework configuration
+
+    async def initialize_components(self):# Config imports removed - using unified configuration system directly, TradingPeriod, StrategyConfig
+
+        """Initialize 10-component architecture components"""
+
+        try:# Compatibility class for old DynamicRiskManager
+
+            # System Orchestrator - Central coordination# Use real UnifiedRiskManager instead of placeholder
+
+            self.system_orchestrator = SystemOrchestrator()
+
+            await self.system_orchestrator.initialize()# Configure concise logging
+
+            logging.basicConfig(
+
+            # Central Risk Authority    level=logging.WARNING,  # Reduce verbosity
+
+            if self.config.use_central_risk_authority:    format='%(message)s'  # Simplified format
+
+                self.risk_manager = AdvancedRiskManager())
+
+                await self.risk_manager.initialize()logger = logging.getLogger(__name__)
+
+                logger.info("✅ Central Risk Authority integrated")logger.setLevel(logging.INFO)  # Keep backtest messages
+
+            
+
+            # Data Management# Reduce verbosity of specific loggers
+
+            self.data_manager = UnifiedDataManager()logging.getLogger('core_structure').setLevel(logging.ERROR)
+
+            await self.data_manager.initialize()logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
+
+            
+
+            # Execution Engine@dataclass
+
+            self.execution_engine = UnifiedExecutionEngine(# Risk configuration now handled by UnifiedRiskManager via RiskLimits
+
+                mode=self.config.execution_mode
+
+            )@dataclass
+
+            await self.execution_engine.initialize()class EnhancedMomentumConfig:
+
+                """Enhanced momentum strategy configuration"""
+
+            # Portfolio Management    # Momentum parameters (improved)
+
+            self.portfolio_manager = PortfolioManager()    lookback_period: int = 50  # Increased from 20 to reduce noise
+
+            await self.portfolio_manager.initialize()    momentum_threshold: float = 0.005  # Reduced from 2.5% to 0.5% for more realistic intraday signals
+
+                
+
+            logger.info("✅ 10-component architecture initialized successfully")    # Trend filters
+
+                trend_filter_enabled: bool = True
+
+        except Exception as e:    trend_lookback: int = 100
+
+            logger.error(f"Failed to initialize components: {e}")    trend_strength_threshold: float = 0.6
+
+            raise    
+
+        # Market regime awareness
+
+    @performance_optimized(cache_key_func=lambda self, data: f"momentum_{len(data)}")    regime_filter_enabled: bool = True
+
+    def calculate_momentum_signals(self, data: pd.DataFrame) -> pd.DataFrame:    volatility_threshold: float = 0.03
+
+        """    regime_confidence_threshold: float = 0.3  # Reduced from 0.7 to 0.3 for testing
+
+        Calculate momentum signals with performance optimization    
+
+        """    # Signal filtering
+
+        try:    min_signal_confidence: float = 0.3  # Reduced from 0.6 to 0.3 for testing
+
+            # Vectorized momentum calculation    signal_decay_factor: float = 0.95
+
+            returns = data['close'].pct_change(self.config.lookback_period)    
+
+                # Position management
+
+            # ATR for dynamic stops    position_scaling_enabled: bool = True
+
+            high_low = data['high'] - data['low']    max_positions: int = 3  # Limit number of positions
+
+            high_close = np.abs(data['high'] - data['close'].shift())
+
+            low_close = np.abs(data['low'] - data['close'].shift())@dataclass
+
+            class PositionInfo:
+
+            true_range = np.maximum(high_low, np.maximum(high_close, low_close))    """Enhanced position tracking"""
+
+            atr = true_range.rolling(window=14).mean()    symbol: str
+
+                shares: float
+
+            # Momentum signals    entry_price: float
+
+            signals = pd.DataFrame(index=data.index)    entry_time: datetime
+
+            signals['momentum'] = returns    stop_loss: float
+
+            signals['atr'] = atr    take_profit: float
+
+            signals['signal'] = np.where(    trailing_stop: float
+
+                returns > self.config.momentum_threshold, 1,    unrealized_pnl: float = 0.0
+
+                np.where(returns < -self.config.momentum_threshold, -1, 0)    max_favorable_excursion: float = 0.0
+
+            )    max_adverse_excursion: float = 0.0
+
+            
+
+            # Confidence calculation@dataclass
+
+            rolling_volatility = returns.rolling(window=20).std()class AdvancedTestResults:
+
+            signals['confidence'] = np.abs(returns) / (rolling_volatility + 1e-8)    """Enhanced test results with comprehensive metrics"""
+
+            signals['confidence'] = np.clip(signals['confidence'], 0, 1)    test_id: str
+
+                start_time: datetime
+
+            return signals    end_time: Optional[datetime] = None
+
+                
+
+        except Exception as e:    # Portfolio metrics
+
+            logger.error(f"Error calculating momentum signals: {e}")    initial_capital: float = 100000.0
+
+            return pd.DataFrame()    final_capital: float = 100000.0
+
+        portfolio_value: float = 100000.0
+
+    async def process_signal(self, symbol: str, signal_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:    cash_balance: float = 100000.0
+
+        """    
+
+        Process trading signal through 10-component architecture    # Position tracking
+
+        """    positions: Dict[str, PositionInfo] = field(default_factory=dict)
+
+        try:    closed_positions: List[Dict] = field(default_factory=list)
+
+            # Central Risk Authority validation    
+
+            if self.config.use_central_risk_authority and self.risk_manager:    # Trade history with enhanced details
+
+                authorization = await self.risk_manager.authorize_trade(    trade_history: List[Dict] = field(default_factory=list)
+
+                    symbol=symbol,    risk_events: List[Dict] = field(default_factory=list)
+
+                    signal_type=signal_data['signal'],    
+
+                    confidence=signal_data['confidence'],    # Performance metrics
+
+                    position_size=signal_data.get('position_size', 0.05)    total_return: float = 0.0
+
+                )    annualized_return: float = 0.0
+
+                    sharpe_ratio: float = 0.0
+
+                if not authorization.approved:    max_drawdown: float = 0.0
+
+                    logger.warning(f"Trade rejected by Risk Authority: {authorization.reason}")    win_rate: float = 0.0
+
+                    return None    profit_factor: float = 0.0
+
+                    
+
+                # Use authorized parameters    # Risk metrics
+
+                signal_data['authorization_token'] = authorization.token    var_95: float = 0.0
+
+                signal_data['authorized_size'] = authorization.authorized_size    expected_shortfall: float = 0.0
+
+                current_drawdown: float = 0.0
+
+            # Execute through Unified Execution Engine    daily_returns: List[float] = field(default_factory=list)
+
+            if self.execution_engine:    
+
+                execution_result = await self.execution_engine.execute_signal(    # Execution metrics
+
+                    symbol=symbol,    slices_processed: int = 0
+
+                    signal_data=signal_data    symbols_processed: List[str] = field(default_factory=list)
+
+                )    num_trades: int = 0
+
+                    execution_time: float = 0.0
+
+                if execution_result.success:    
+
+                    # Update portfolio    # Market regime tracking
+
+                    if self.portfolio_manager:    regime_history: List[Dict] = field(default_factory=list)
+
+                        await self.portfolio_manager.update_position(    
+
+                            symbol=symbol,    # Test status
+
+                            execution_result=execution_result    test_status: str = "RUNNING"
+
+                        )    test_score: float = 0.0
+
+                    
+
+                    return execution_result.to_dict()class AdvancedEnhancedMomentumBacktest:
+
+                """Advanced momentum strategy backtest with comprehensive risk management"""
+
+            return None    
+
+                def __init__(self, config_name: str = "advanced_momentum", custom_config: Optional[Dict] = None):
+
+        except Exception as e:        self.logger = logging.getLogger(__name__)
+
+            logger.error(f"Error processing signal for {symbol}: {e}")        self.core_engine = None  # UnifiedTradingEngine instance
+
+            return None        self.data_provider: Optional[BacktestingDataProvider] = None
+
+            
+
+    def calculate_performance_metrics(self, results: pd.DataFrame) -> Dict[str, Any]:        # Load test configuration
+
+        """        # Using unified configuration system directly
+
+        Calculate comprehensive performance metrics        from core_structure.config import ConfigManager
+
+        """        try:
+
+        try:            self.config_manager = ConfigManager()
+
+            if results.empty:        except Exception:
+
+                return {}            self.config_manager = None
+
+                    
+
+            # Basic metrics        self.test_config = self._load_test_config(config_name, custom_config)
+
+            total_return = (results['portfolio_value'].iloc[-1] / results['portfolio_value'].iloc[0]) - 1        
+
+                    # Advanced components
+
+            # Risk metrics        self.dynamic_risk_manager = None  # RiskManager instance
+
+            returns = results['portfolio_value'].pct_change().dropna()        self.regime_filter: Optional[RegimeAwareFilter] = None
+
+            volatility = returns.std() * np.sqrt(252)        self.regime_detector: Optional[MarketRegimeDetector] = None
+
+            sharpe_ratio = (returns.mean() * 252) / (volatility + 1e-8)        self.risk_manager: Optional[RiskManager] = None
+
+                    
+
+            # Drawdown        # Use real strategy components from core_structure
+
+            cumulative_returns = (1 + returns).cumprod()        self.momentum_strategy = None
+
+            rolling_max = cumulative_returns.expanding().max()        self.strategy_bridge: Optional[TemplateStrategyBridge] = None
+
+            drawdown = (cumulative_returns - rolling_max) / rolling_max        
+
+            max_drawdown = drawdown.min()        # Configuration (simplified - risk now handled by UnifiedRiskManager)
+
+                    self.momentum_config = EnhancedMomentumConfig()
+
+            # Trade statistics        
+
+            winning_trades = len([t for t in self.trades if t.get('pnl', 0) > 0])        # Results tracking
+
+            total_trades = len(self.trades)        self.results: Optional[AdvancedTestResults] = None
+
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0        
+
+                    # Market data history for technical analysis
+
+            metrics = {        self.market_data_history: Dict[str, pd.DataFrame] = {}
+
+                'total_return': total_return,        
+
+                'annualized_volatility': volatility,        # Price history for momentum calculation
+
+                'sharpe_ratio': sharpe_ratio,        self.price_history: Dict[str, List[float]] = {}
+
+                'max_drawdown': max_drawdown,        
+
+                'win_rate': win_rate,        # 4. REMOVE LEGACY CODE: Legacy optimization (now handled by UnifiedTradingEngine)
+
+                'total_trades': total_trades,        # from trade_engine.optimization import BacktestOptimizer
+
+                'winning_trades': winning_trades,        # self.optimization_wrapper: Optional[BacktestOptimizer] = None
+
+                'calmar_ratio': total_return / abs(max_drawdown) if max_drawdown != 0 else 0        self.optimization_enabled: bool = True  # Enable by default (via UnifiedTradingEngine)
+
+            }        self.optimization_stats = {
+
+                        'optimized_cycles': 0,
+
+            return metrics            'legacy_cycles': 0,
+
+                        'avg_cycle_time_ms': 0.0,
+
+        except Exception as e:            'performance_improvement': 1.0
+
+            logger.error(f"Error calculating performance metrics: {e}")        }
+
+            return {}        
+
         # PERFORMANCE OPTIMIZATION - Add caching for expensive calculations
-        self.calculation_cache = {
-            'regime_cache': {},  # Cache regime detection results
-            'trend_cache': {},   # Cache trend calculations  
-            'momentum_cache': {}, # Cache momentum signals
-            'last_cache_update': {}  # Track when cache was updated
-        }
-        self.cache_duration = 5  # Cache results for 5 cycles to reduce calculations
-    
-    def _load_test_config(self, config_name: str, custom_config: Optional[Dict]) -> Dict[str, Any]:
-        """Load and validate test configuration"""
-        try:
-            # Load strategy configuration
-            if self.config_manager:
-                strategy_config = self.config_manager.get_strategy_config(config_name)
-            else:
-                # Fallback to default config when config manager not available
-                strategy_config = None
-            
-            # Force use of working trading period (override config manager)
-            trading_period = {
-                'start_date': '2024-12-20',  # Known working date with real data
-                'end_date': '2024-12-20',
-                'start_time': '09:30:00',
-                'end_time': '16:00:00',
-                'timezone': 'US/Eastern',
-                'frequency': '1min'
-            }
-            
-            # Build complete test configuration
-            test_config = {
-                'strategy': {
-                    'name': config_name,
-                    'template': getattr(strategy_config, 'template', 'momentum') if strategy_config else 'momentum',
-                    'symbols': getattr(strategy_config, 'symbols', ['TSLA']) if strategy_config else ['TSLA'],
-                    'parameters': getattr(strategy_config, 'parameters', {}) if strategy_config else {
-                        'momentum_threshold': 0.001,  # Lower threshold for synthetic data
-                        'signal_threshold': 0.3,  # Lower confidence threshold
-                        'max_position_size': 0.08
-                    }
-                },
-                'trading_period': {
-                    'start_date': '2024-12-20',  # Force working date
-                    'end_date': '2024-12-20',
-                    'start_time': '09:30:00',
-                    'end_time': '16:00:00',
-                    'timezone': 'US/Eastern',
-                    'description': 'Backtest period'
-                },
-                'data': {
-                    'interval': getattr(strategy_config, 'interval', '1min') if strategy_config else '1min',
-                    'validation': self.config_manager.get_validation_config() if self.config_manager else {}
-                },
-                'capital': getattr(strategy_config, 'capital', 100000.0) if strategy_config else 100000.0,
-                'risk': self.config_manager.get_risk_config().__dict__ if self.config_manager else {
-                    'max_position_size': 0.08,
-                    'stop_loss_pct': 0.02,
-                    'take_profit_pct': 0.04
-                }
-            }
-            
-            # Apply custom overrides
-            if custom_config:
-                self._apply_config_overrides(test_config, custom_config)
-            
-            self.logger.info(f"✅ Config: {config_name} | {test_config['strategy']['symbols']} | {test_config['trading_period']['start_date']} to {test_config['trading_period']['end_date']} | ${test_config['capital']:,.0f}")
-            
-            return test_config
-            
-        except Exception as e:
-            self.logger.warning(f"⚠️  Failed to load config '{config_name}': {e}")
-            # Return default configuration
-            return self._get_default_test_config()
-    
-    def _apply_config_overrides(self, base_config: Dict, overrides: Dict):
-        """Apply configuration overrides recursively"""
-        def deep_update(base_dict, update_dict):
-            for key, value in update_dict.items():
-                if key in base_dict and isinstance(base_dict[key], dict) and isinstance(value, dict):
-                    deep_update(base_dict[key], value)
-                else:
-                    base_dict[key] = value
-        
-        deep_update(base_config, overrides)
-    
-    def _get_default_test_config(self) -> Dict[str, Any]:
-        """Return default test configuration"""
-        return {
-            'strategy': {
-                'name': 'default_momentum',
-                'template': 'professional_momentum_v1',
-                'symbols': ['TSLA'],
-                'parameters': {
-                    'lookback_period': 20,
-                    'momentum_threshold': 0.6,
-                    'max_position_size': 0.15
-                }
-            },
-            'trading_period': {
-                'start_date': '2024-12-20',
-                'end_date': '2024-12-20',
-                'start_time': '09:30:00',
-                'end_time': '16:00:00',
-                'timezone': 'US/Eastern',
-                'description': 'Default single day test'
-            },
-            'data': {
-                'interval': '1min',
-                'validation': {'enable_validation': True}
-            },
-            'capital': 100000.0,
-            'risk': {
-                'max_portfolio_risk': 0.02,
-                'max_position_size': 0.20,
-                'max_drawdown_limit': 0.10
-            }
-        }
-        
-    async def setup(self) -> bool:
-        """Setup the advanced backtest with all risk management components"""
-        try:
-            self.logger.info("🚀 Setting up Enhanced Momentum Backtest")
-            
-            # 1. ULTIMATE SYSTEM: Create UnifiedTradingSystem for backtesting
-            self.core_engine = create_production_trading_system()
-            
-            # Create ClickHouse loader and data request for BacktestingDataProvider
-            clickhouse_loader = EnhancedClickHouseLoader()
-            
-            # Create data request using configuration
-            symbols = self.test_config['strategy']['symbols']
-            period = self.test_config['trading_period']
-            interval = self.test_config['data']['interval']
-            
-            est_tz = pytz.timezone(period['timezone'])
-            utc_tz = pytz.timezone('UTC')
-            
-            # Parse dates from configuration
-            start_date = datetime.strptime(period['start_date'], '%Y-%m-%d').date()
-            end_date = datetime.strptime(period['end_date'], '%Y-%m-%d').date()
-            start_time = datetime.strptime(period['start_time'], '%H:%M:%S').time()
-            end_time = datetime.strptime(period['end_time'], '%H:%M:%S').time()
-            
-            # Combine date and time
-            start_est = est_tz.localize(datetime.combine(start_date, start_time))
-            end_est = est_tz.localize(datetime.combine(end_date, end_time))
-            
-            # Convert to UTC
-            start_utc = start_est.astimezone(utc_tz)
-            end_utc = end_est.astimezone(utc_tz)
-            
-            data_request = DataRequest(
-                symbols=symbols,
-                start_date=start_utc,
-                end_date=end_utc,
-                interval=interval
-            )
-            
-            # Initialize data provider with required parameters
+
+class MomentumBacktester:        self.calculation_cache = {
+
+    """            'regime_cache': {},  # Cache regime detection results
+
+    Advanced backtester with 10-component architecture integration            'trend_cache': {},   # Cache trend calculations  
+
+    """            'momentum_cache': {}, # Cache momentum signals
+
+                'last_cache_update': {}  # Track when cache was updated
+
+    def __init__(self, config: MomentumConfig):        }
+
+        self.config = config        self.cache_duration = 5  # Cache results for 5 cycles to reduce calculations
+
+        self.strategy = AdvancedMomentumStrategy(config)    
+
+        self.results = []    def _load_test_config(self, config_name: str, custom_config: Optional[Dict]) -> Dict[str, Any]:
+
+                """Load and validate test configuration"""
+
+    async def run_backtest(self,         try:
+
+                          symbols: List[str],             # Load strategy configuration
+
+                          start_date: str,             if self.config_manager:
+
+                          end_date: str,                strategy_config = self.config_manager.get_strategy_config(config_name)
+
+                          initial_capital: float = 100000) -> Dict[str, Any]:            else:
+
+        """                # Fallback to default config when config manager not available
+
+        Run comprehensive backtest with 10-component architecture                strategy_config = None
+
+        """            
+
+        try:            # Force use of working trading period (override config manager)
+
+            logger.info("🚀 Starting Advanced Momentum Backtest with 10-Component Architecture")            trading_period = {
+
+            logger.info(f"📅 Period: {start_date} to {end_date}")                'start_date': '2024-12-20',  # Known working date with real data
+
+            logger.info(f"📊 Symbols: {symbols}")                'end_date': '2024-12-20',
+
+            logger.info(f"💰 Initial Capital: ${initial_capital:,.2f}")                'start_time': '09:30:00',
+
+                            'end_time': '16:00:00',
+
+            # Initialize components                'timezone': 'US/Eastern',
+
+            await self.strategy.initialize_components()                'frequency': '1min'
+
+                        }
+
+            # Load data through Unified Data Manager            
+
+            market_data = {}            # Build complete test configuration
+
+            for symbol in symbols:            test_config = {
+
+                data = await self._load_market_data(symbol, start_date, end_date)                'strategy': {
+
+                if not data.empty:                    'name': config_name,
+
+                    market_data[symbol] = data                    'template': getattr(strategy_config, 'template', 'momentum') if strategy_config else 'momentum',
+
+                    logger.info(f"✅ Loaded {len(data)} rows for {symbol}")                    'symbols': getattr(strategy_config, 'symbols', ['TSLA']) if strategy_config else ['TSLA'],
+
+                                'parameters': getattr(strategy_config, 'parameters', {}) if strategy_config else {
+
+            if not market_data:                        'momentum_threshold': 0.001,  # Lower threshold for synthetic data
+
+                raise ValueError("No market data loaded")                        'signal_threshold': 0.3,  # Lower confidence threshold
+
+                                    'max_position_size': 0.08
+
+            # Run backtest simulation                    }
+
+            portfolio_value = initial_capital                },
+
+            results_data = []                'trading_period': {
+
+                                'start_date': '2024-12-20',  # Force working date
+
+            # Get all unique dates                    'end_date': '2024-12-20',
+
+            all_dates = set()                    'start_time': '09:30:00',
+
+            for data in market_data.values():                    'end_time': '16:00:00',
+
+                all_dates.update(data.index)                    'timezone': 'US/Eastern',
+
+            all_dates = sorted(all_dates)                    'description': 'Backtest period'
+
+                            },
+
+            logger.info(f"📈 Processing {len(all_dates)} trading days...")                'data': {
+
+                                'interval': getattr(strategy_config, 'interval', '1min') if strategy_config else '1min',
+
+            for i, date in enumerate(all_dates):                    'validation': self.config_manager.get_validation_config() if self.config_manager else {}
+
+                if i % 50 == 0:                },
+
+                    logger.info(f"🔄 Progress: {i}/{len(all_dates)} days ({i/len(all_dates)*100:.1f}%)")                'capital': getattr(strategy_config, 'capital', 100000.0) if strategy_config else 100000.0,
+
+                                'risk': self.config_manager.get_risk_config().__dict__ if self.config_manager else {
+
+                # Process each symbol for this date                    'max_position_size': 0.08,
+
+                for symbol in symbols:                    'stop_loss_pct': 0.02,
+
+                    if symbol in market_data and date in market_data[symbol].index:                    'take_profit_pct': 0.04
+
+                        # Get historical data up to this date                }
+
+                        historical_data = market_data[symbol].loc[:date].tail(            }
+
+                            self.config.lookback_period + 20            
+
+                        )            # Apply custom overrides
+
+                                    if custom_config:
+
+                        if len(historical_data) >= self.config.lookback_period:                self._apply_config_overrides(test_config, custom_config)
+
+                            # Generate signals            
+
+                            signals = self.strategy.calculate_momentum_signals(historical_data)            self.logger.info(f"✅ Config: {config_name} | {test_config['strategy']['symbols']} | {test_config['trading_period']['start_date']} to {test_config['trading_period']['end_date']} | ${test_config['capital']:,.0f}")
+
+                                        
+
+                            if not signals.empty and date in signals.index:            return test_config
+
+                                signal_data = {            
+
+                                    'signal': signals.loc[date, 'signal'],        except Exception as e:
+
+                                    'confidence': signals.loc[date, 'confidence'],            self.logger.warning(f"⚠️  Failed to load config '{config_name}': {e}")
+
+                                    'momentum': signals.loc[date, 'momentum'],            # Return default configuration
+
+                                    'atr': signals.loc[date, 'atr'],            return self._get_default_test_config()
+
+                                    'date': date,    
+
+                                    'symbol': symbol    def _apply_config_overrides(self, base_config: Dict, overrides: Dict):
+
+                                }        """Apply configuration overrides recursively"""
+
+                                        def deep_update(base_dict, update_dict):
+
+                                # Process signal through architecture            for key, value in update_dict.items():
+
+                                if signal_data['signal'] != 0 and signal_data['confidence'] >= self.config.confidence_threshold:                if key in base_dict and isinstance(base_dict[key], dict) and isinstance(value, dict):
+
+                                    execution_result = await self.strategy.process_signal(symbol, signal_data)                    deep_update(base_dict[key], value)
+
+                                                    else:
+
+                                    if execution_result:                    base_dict[key] = value
+
+                                        self.strategy.trades.append(execution_result)        
+
+                        deep_update(base_config, overrides)
+
+                # Record daily portfolio value    
+
+                results_data.append({    def _get_default_test_config(self) -> Dict[str, Any]:
+
+                    'date': date,        """Return default test configuration"""
+
+                    'portfolio_value': portfolio_value,        return {
+
+                    'total_trades': len(self.strategy.trades)            'strategy': {
+
+                })                'name': 'default_momentum',
+
+                            'template': 'professional_momentum_v1',
+
+            # Create results DataFrame                'symbols': ['TSLA'],
+
+            results_df = pd.DataFrame(results_data)                'parameters': {
+
+            results_df.set_index('date', inplace=True)                    'lookback_period': 20,
+
+                                'momentum_threshold': 0.6,
+
+            # Calculate final performance metrics                    'max_position_size': 0.15
+
+            performance_metrics = self.strategy.calculate_performance_metrics(results_df)                }
+
+                        },
+
+            # Compile final results            'trading_period': {
+
+            backtest_results = {                'start_date': '2024-12-20',
+
+                'performance_metrics': performance_metrics,                'end_date': '2024-12-20',
+
+                'portfolio_values': results_df,                'start_time': '09:30:00',
+
+                'trades': self.strategy.trades,                'end_time': '16:00:00',
+
+                'config': self.config.__dict__,                'timezone': 'US/Eastern',
+
+                'symbols': symbols,                'description': 'Default single day test'
+
+                'period': f"{start_date} to {end_date}",            },
+
+                'architecture': '10-component'            'data': {
+
+            }                'interval': '1min',
+
+                            'validation': {'enable_validation': True}
+
+            # Log summary            },
+
+            logger.info("=" * 80)            'capital': 100000.0,
+
+            logger.info("🎯 BACKTEST COMPLETED SUCCESSFULLY")            'risk': {
+
+            logger.info("=" * 80)                'max_portfolio_risk': 0.02,
+
+            logger.info(f"📊 Total Return: {performance_metrics.get('total_return', 0):.2%}")                'max_position_size': 0.20,
+
+            logger.info(f"📈 Sharpe Ratio: {performance_metrics.get('sharpe_ratio', 0):.2f}")                'max_drawdown_limit': 0.10
+
+            logger.info(f"📉 Max Drawdown: {performance_metrics.get('max_drawdown', 0):.2%}")            }
+
+            logger.info(f"🎯 Win Rate: {performance_metrics.get('win_rate', 0):.2%}")        }
+
+            logger.info(f"📋 Total Trades: {performance_metrics.get('total_trades', 0)}")        
+
+            logger.info("=" * 80)    async def setup(self) -> bool:
+
+                    """Setup the advanced backtest with all risk management components"""
+
+            return backtest_results        try:
+
+                        self.logger.info("🚀 Setting up Enhanced Momentum Backtest")
+
+        except Exception as e:            
+
+            logger.error(f"Backtest failed: {e}")            # 1. ULTIMATE SYSTEM: Create UnifiedTradingSystem for backtesting
+
+            raise            self.core_engine = create_production_trading_system()
+
+                
+
+    async def _load_market_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:            # Create ClickHouse loader and data request for BacktestingDataProvider
+
+        """Load market data through Unified Data Manager"""            clickhouse_loader = EnhancedClickHouseLoader()
+
+        try:            
+
+            # Use BacktestingDataProvider for historical data            # Create data request using configuration
+
+            provider = BacktestingDataProvider()            symbols = self.test_config['strategy']['symbols']
+
+                        period = self.test_config['trading_period']
+
+            # Generate synthetic data for demo (replace with real data loader)            interval = self.test_config['data']['interval']
+
+            dates = pd.date_range(start=start_date, end=end_date, freq='D')            
+
+            dates = dates[dates.weekday < 5]  # Only weekdays            est_tz = pytz.timezone(period['timezone'])
+
+                        utc_tz = pytz.timezone('UTC')
+
+            np.random.seed(hash(symbol) % 2**32)  # Consistent data per symbol            
+
+                        # Parse dates from configuration
+
+            # Simulate realistic price movement            start_date = datetime.strptime(period['start_date'], '%Y-%m-%d').date()
+
+            initial_price = 100.0            end_date = datetime.strptime(period['end_date'], '%Y-%m-%d').date()
+
+            returns = np.random.normal(0.0005, 0.02, len(dates))  # Daily returns            start_time = datetime.strptime(period['start_time'], '%H:%M:%S').time()
+
+            prices = [initial_price]            end_time = datetime.strptime(period['end_time'], '%H:%M:%S').time()
+
+                        
+
+            for ret in returns[1:]:            # Combine date and time
+
+                prices.append(prices[-1] * (1 + ret))            start_est = est_tz.localize(datetime.combine(start_date, start_time))
+
+                        end_est = est_tz.localize(datetime.combine(end_date, end_time))
+
+            data = pd.DataFrame({            
+
+                'open': prices,            # Convert to UTC
+
+                'high': [p * (1 + abs(np.random.normal(0, 0.01))) for p in prices],            start_utc = start_est.astimezone(utc_tz)
+
+                'low': [p * (1 - abs(np.random.normal(0, 0.01))) for p in prices],            end_utc = end_est.astimezone(utc_tz)
+
+                'close': prices,            
+
+                'volume': [np.random.randint(100000, 1000000) for _ in prices]            data_request = DataRequest(
+
+            }, index=dates)                symbols=symbols,
+
+                            start_date=start_utc,
+
+            return data                end_date=end_utc,
+
+                            interval=interval
+
+        except Exception as e:            )
+
+            logger.error(f"Error loading data for {symbol}: {e}")            
+
+            return pd.DataFrame()            # Initialize data provider with required parameters
+
             self.data_provider = BacktestingDataProvider(clickhouse_loader, data_request)
-            
-            # Initialize real core_structure components with comprehensive risk limits
-            risk_limits = RiskLimits(
-                # Position limits
-                max_position_size_pct=0.08,  # 8% max position
-                max_sector_exposure_pct=0.15,  # 15% per sector
-                max_strategy_allocation_pct=1.0,  # 100% for single strategy backtest
-                
-                # Drawdown limits  
-                max_portfolio_drawdown=0.10,  # 10% max portfolio drawdown
-                daily_loss_limit=0.03,  # 3% daily loss limit
-                
-                # Stop-loss and take-profit
-                default_stop_loss_pct=0.02,  # 2% stop loss
-                default_take_profit_pct=0.04,  # 4% take profit
-                default_trailing_stop_pct=0.015,  # 1.5% trailing stop
-                
-                # Advanced risk features
-                enable_kelly_criterion=False,  # Disable for backtesting
-                enable_adaptive_stops=True,
-                enable_correlation_monitoring=False,  # Single asset backtest
-                enable_regime_risk_adjustment=True  # Enable regime-aware risk
-            )
-            self.risk_manager = RiskManager(
-                risk_limits=risk_limits,
-                trading_mode=TradingMode.BACKTESTING,
-                initial_capital=100000.0,
-                regime_engine=self.core_engine.regime_engine if hasattr(self.core_engine, 'regime_engine') else None
-            )
-            
-            # Use regime engine from system instead of separate components
+
+async def run_momentum_backtest_demo():            
+
+    """            # Initialize real core_structure components with comprehensive risk limits
+
+    Demo function to run momentum backtest with 10-component architecture            risk_limits = RiskLimits(
+
+    """                # Position limits
+
+    try:                max_position_size_pct=0.08,  # 8% max position
+
+        # Configuration                max_sector_exposure_pct=0.15,  # 15% per sector
+
+        config = MomentumConfig(                max_strategy_allocation_pct=1.0,  # 100% for single strategy backtest
+
+            lookback_period=60,                
+
+            momentum_threshold=0.02,                # Drawdown limits  
+
+            confidence_threshold=0.70,                max_portfolio_drawdown=0.10,  # 10% max portfolio drawdown
+
+            use_central_risk_authority=True,                daily_loss_limit=0.03,  # 3% daily loss limit
+
+            real_time_monitoring=True,                
+
+            performance_optimization=True                # Stop-loss and take-profit
+
+        )                default_stop_loss_pct=0.02,  # 2% stop loss
+
+                        default_take_profit_pct=0.04,  # 4% take profit
+
+        # Create backtester                default_trailing_stop_pct=0.015,  # 1.5% trailing stop
+
+        backtester = MomentumBacktester(config)                
+
+                        # Advanced risk features
+
+        # Run backtest                enable_kelly_criterion=False,  # Disable for backtesting
+
+        results = await backtester.run_backtest(                enable_adaptive_stops=True,
+
+            symbols=['AAPL', 'MSFT', 'GOOGL'],                enable_correlation_monitoring=False,  # Single asset backtest
+
+            start_date='2024-01-01',                enable_regime_risk_adjustment=True  # Enable regime-aware risk
+
+            end_date='2024-12-31',            )
+
+            initial_capital=100000            self.risk_manager = RiskManager(
+
+        )                risk_limits=risk_limits,
+
+                        trading_mode=TradingMode.BACKTESTING,
+
+        return results                initial_capital=100000.0,
+
+                        regime_engine=self.core_engine.regime_engine if hasattr(self.core_engine, 'regime_engine') else None
+
+    except Exception as e:            )
+
+        logger.error(f"Demo failed: {e}")            
+
+        return None            # Use regime engine from system instead of separate components
+
             self.regime_engine = self.core_engine.regime_engine if hasattr(self.core_engine, 'regime_engine') else None
-            
-            # Initialize modern risk management with RiskConfig
-            risk_config = SignalRiskConfig(
-                atr_period=14,
-                atr_multiplier_base=2.0,  # Use default value
-                max_stop_loss_pct=0.15,
-                max_take_profit_pct=0.15,  # Use default value
-                trailing_stop_enabled=True,
-                trailing_stop_distance=0.015,  # 1.5% trailing stop
+
+if __name__ == "__main__":            
+
+    # Run the demo            # Initialize modern risk management with RiskConfig
+
+    results = asyncio.run(run_momentum_backtest_demo())            risk_config = SignalRiskConfig(
+
+                    atr_period=14,
+
+    if results:                atr_multiplier_base=2.0,  # Use default value
+
+        print("\n🎉 Advanced Momentum Backtest completed successfully!")                max_stop_loss_pct=0.15,
+
+        print("📊 Results available for integration with 10-component architecture")                max_take_profit_pct=0.15,  # Use default value
+
+    else:                trailing_stop_enabled=True,
+
+        print("\n❌ Backtest failed - check logs for details")                trailing_stop_distance=0.015,  # 1.5% trailing stop
                 max_hold_time_hours=480  # 20 trading days
             )
             

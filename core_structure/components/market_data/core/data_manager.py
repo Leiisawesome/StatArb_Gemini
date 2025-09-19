@@ -500,6 +500,7 @@ __all__ = [
     'BacktestingDataProvider',
     'DataQualityMonitor',
     'MarketDataConfig',
+    'DataConfig',  # Alias for backward compatibility
     'DataQualityThresholds',
     'DataStreamConfig',
     'DataStatus',
@@ -509,3 +510,6 @@ __all__ = [
     'EnhancedDataManager',
     'DataManager'
 ]
+
+# Create alias for backward compatibility
+DataConfig = MarketDataConfig

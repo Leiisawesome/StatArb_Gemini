@@ -1146,4 +1146,7 @@ async def analyze_execution(execution_data: List[Dict[str, Any]]) -> ExecutionMe
     """Convenience function for execution analysis"""
     return await core_analytics.analyze_execution(execution_data)
 
+# Create alias for backward compatibility
+CoreAnalytics = CoreAnalyticsEngine
+
 logger.info("Core Analytics module loaded successfully - 5 modules consolidated into 1")

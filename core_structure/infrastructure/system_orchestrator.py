@@ -505,3 +505,7 @@ class SystemOrchestrator:
                         integration_points[point] = []
                     integration_points[point].append(module_name)
         return integration_points 
+
+def create_system_orchestrator(config: Optional[OrchestrationConfig] = None) -> SystemOrchestrator:
+    """Create a system orchestrator with default configuration"""
+    return SystemOrchestrator(config or OrchestrationConfig()) 

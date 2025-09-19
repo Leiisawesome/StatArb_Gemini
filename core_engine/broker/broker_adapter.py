@@ -145,10 +145,12 @@ class StandardExecution:
     # Execution details
     quantity: float
     price: float
-    commission: float = 0.0
     
     # Timing
     execution_time: datetime
+    
+    # Optional fields with defaults
+    commission: float = 0.0
     
     # Market data
     bid: Optional[float] = None

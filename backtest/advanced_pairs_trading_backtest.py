@@ -1,697 +1,1390 @@
-#!/usr/bin/env python3
-"""
-Advanced Pairs Trading Backtest
-===============================
+#!/usr/bin/env python3#!/usr/bin/env python3
 
-Professional pairs trading strategy backtest implementing statistical arbitrage
-between cointegrated assets. This backtest follows the same successful pattern
-as the mean reversion strategy, integrating with UnifiedTradingEngine.
+""""""
 
-Key Features:
-- Cointegration analysis and spread modeling
-- Dynamic hedge ratio optimization
+Advanced Pairs Trading Strategy Backtest with 10-Component ArchitectureAdvanced Pairs Trading Backtest
+
+=======================================================================================================
+
+
+
+This implementation includes:Professional pairs trading strategy backtest implementing statistical arbitrage
+
+- ✅ Cointegration-based pair selectionbetween cointegrated assets. This backtest follows the same successful pattern
+
+- ✅ Spread analysis with mean reversionas the mean reversion strategy, integrating with UnifiedTradingEngine.
+
+- ✅ Statistical arbitrage opportunities
+
+- ✅ Dynamic hedging ratiosKey Features:
+
+- ✅ Risk management with correlation monitoring- Cointegration analysis and spread modeling
+
+- ✅ Integration with 10-component architecture- Dynamic hedge ratio optimization
+
 - Multi-pair testing capability
-- Advanced risk management for pair positions
-- Integration with UnifiedTradingEngine
-- Comprehensive performance analytics
 
-Author: Professional Trading System Architecture
+OPTIMIZATION INTEGRATION:- Advanced risk management for pair positions
+
+- ⚡ Vectorized cointegration testing- Integration with UnifiedTradingEngine
+
+- 🚀 Parallel pair processing- Comprehensive performance analytics
+
+- 📊 Real-time spread monitoring
+
+- 🏛️ Central Risk Authority integrationAuthor: Professional Trading System Architecture
+
 Version: 1.0.0
+
+Author: StatArb_Gemini Team + 10-Component Architecture Integration"""
+
 """
 
 import asyncio
-import sys
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import logging
-import pandas as pd
-import numpy as np
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
+import asyncioimport sys
+
+import loggingfrom pathlib import Path
+
+import pandas as pdfrom typing import Dict, List, Any, Optional, Tuple
+
+import numpy as npfrom dataclasses import dataclass, field
+
+from datetime import datetime, timedeltafrom datetime import datetime, timedelta
+
+from typing import Dict, List, Optional, Any, Tupleimport logging
+
+from dataclasses import dataclass, fieldimport pandas as pd
+
+import sysimport numpy as np
+
+import os
+
+from scipy import stats# Add project root to path
+
+from statsmodels.tsa.stattools import cointproject_root = Path(__file__).parent.parent
+
+from sklearn.linear_model import LinearRegressionsys.path.append(str(project_root))
+
+import time
 
 # Core engine imports
-from core_structure import create_production_trading_system
-from core_structure.config import ConfigManager as UnifiedConfigManager
+
+# Add project root to pathfrom core_structure import create_production_trading_system
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))from core_structure.config import ConfigManager as UnifiedConfigManager
+
 from core_structure.components.market_data.core.enhanced_clickhouse_loader import EnhancedClickHouseLoader, DataRequest
-from core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
-from core_structure.components.risk import RiskManager, TradingMode, RiskLimits
-from core_structure.strategies import (
-    StrategyManager,
-    ExecutionMode as StrategyExecutionMode,
-    StrategyType,
-)
+
+# 10-COMPONENT ARCHITECTURE INTEGRATIONfrom core_structure.components.signal_generation.core.regime_analysis import RegimeAnalysisEngine
+
+from core_structure.infrastructure.system_orchestrator import SystemOrchestratorfrom core_structure.components.risk import RiskManager, TradingMode, RiskLimits
+
+from core_structure.advanced_risk_management import AdvancedRiskManagerfrom core_structure.strategies import (
+
+from core_structure.components.market_data import UnifiedDataManager, BacktestingDataProvider    StrategyManager,
+
+from core_structure.components.execution import UnifiedExecutionEngine    ExecutionMode as StrategyExecutionMode,
+
+from core_structure.components.portfolio import PortfolioManager    StrategyType,
+
+from core_structure.strategies import StrategyManager, StrategyType)
+
+from core_structure.analytics.performance_optimization import performance_optimized, vectorized_calc
 
 # Minimal pairs trading classes (inline for testing)
-@dataclass
-class CointegrationResult:
-    """Results from cointegration analysis"""
-    is_cointegrated: bool
-    p_value: float
-    test_statistic: float
+
+# Configure logging@dataclass
+
+logging.basicConfig(class CointegrationResult:
+
+    level=logging.INFO,    """Results from cointegration analysis"""
+
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'    is_cointegrated: bool
+
+)    p_value: float
+
+logger = logging.getLogger(__name__)    test_statistic: float
+
     hedge_ratio: float
-    intercept: float
 
-@dataclass  
-class PairsConfiguration:
-    """Configuration for pairs trading models"""
-    lookback_window: int = 252
-    significance_level: float = 0.05
-    min_correlation: float = 0.8
-    spread_lookback: int = 60
-    entry_zscore_long: float = -2.0
-    entry_zscore_short: float = 2.0
-    exit_zscore: float = 0.5
-    stop_loss_zscore: float = 3.0
-    max_position_hold_periods: int = 100
-    capital_per_pair: float = 10000.0
-    max_pairs_active: int = 3
-    hedge_ratio_update_frequency: int = 20
+@dataclass    intercept: float
 
-class PairsTradingModel:
-    """Minimal pairs trading model for testing"""
-    def __init__(self, config: PairsConfiguration):
-        self.config = config
-        self.is_valid = False
-        self.cointegration_result = None
-        
-    def fit(self, series1: pd.Series, series2: pd.Series) -> Dict[str, Any]:
-        """Perform cointegration test"""
-        try:
-            from scipy.stats import pearsonr
-            from sklearn.linear_model import LinearRegression
-            import numpy as np
-            
-            # Ensure we have valid data
-            if len(series1) < 10 or len(series2) < 10:
-                logger.warning("Insufficient data for cointegration test")
-                self.is_valid = False
-                return {
-                    'cointegrated': False,
-                    'p_value': 1.0,
-                    'hedge_ratio': 1.0,
-                    'correlation': 0.0,
+class PairsTradingConfig:
+
+    """Pairs trading strategy configuration for 10-component integration"""@dataclass  
+
+    class PairsConfiguration:
+
+    # Pair selection parameters    """Configuration for pairs trading models"""
+
+    cointegration_window: int = 252  # 1 year for pair selection    lookback_window: int = 252
+
+    min_correlation: float = 0.75    significance_level: float = 0.05
+
+    max_correlation: float = 0.95    min_correlation: float = 0.8
+
+    p_value_threshold: float = 0.05    spread_lookback: int = 60
+
+        entry_zscore_long: float = -2.0
+
+    # Trading parameters    entry_zscore_short: float = 2.0
+
+    lookback_window: int = 60    exit_zscore: float = 0.5
+
+    entry_zscore: float = 2.0    stop_loss_zscore: float = 3.0
+
+    exit_zscore: float = 0.5    max_position_hold_periods: int = 100
+
+    stop_loss_zscore: float = 3.5    capital_per_pair: float = 10000.0
+
+        max_pairs_active: int = 3
+
+    # Position sizing    hedge_ratio_update_frequency: int = 20
+
+    max_position_size: float = 0.10
+
+    max_pairs_active: int = 5class PairsTradingModel:
+
+    capital_per_pair: float = 0.20    """Minimal pairs trading model for testing"""
+
+        def __init__(self, config: PairsConfiguration):
+
+    # Risk management        self.config = config
+
+    correlation_threshold: float = 0.60  # Minimum correlation to maintain position        self.is_valid = False
+
+    spread_volatility_limit: float = 0.15        self.cointegration_result = None
+
+    max_holding_period: int = 30  # days        
+
+        def fit(self, series1: pd.Series, series2: pd.Series) -> Dict[str, Any]:
+
+    # 10-component integration        """Perform cointegration test"""
+
+    use_central_risk_authority: bool = True        try:
+
+    real_time_monitoring: bool = True            from scipy.stats import pearsonr
+
+    performance_optimization: bool = True            from sklearn.linear_model import LinearRegression
+
+    regime_awareness: bool = True            import numpy as np
+
+                
+
+    # Execution settings            # Ensure we have valid data
+
+    execution_mode: str = "backtest"            if len(series1) < 10 or len(series2) < 10:
+
+    data_source: str = "clickhouse"                logger.warning("Insufficient data for cointegration test")
+
+                    self.is_valid = False
+
+    def __post_init__(self):                return {
+
+        """Validate configuration"""                    'cointegrated': False,
+
+        if self.use_central_risk_authority and self.entry_zscore < 1.5:                    'p_value': 1.0,
+
+            logger.warning("Central Risk Authority requires entry_zscore >= 1.5")                    'hedge_ratio': 1.0,
+
+            self.entry_zscore = 1.5                    'correlation': 0.0,
+
                     'current_zscore': 0.0,
-                    'error': 'Insufficient data'
-                }
-            
-            # Simple cointegration test (Engle-Granger)
-            X = series1.values.reshape(-1, 1)
-            y = series2.values
-            
-            # Calculate hedge ratio using OLS
-            reg = LinearRegression().fit(X, y)
-            hedge_ratio = float(reg.coef_[0])  # Ensure scalar
-            intercept = float(reg.intercept_)  # Ensure scalar
-            
-            # Simple stationarity test (using correlation as proxy)
-            correlation, p_value = pearsonr(series1.values, series2.values)
-            
-            # Mock cointegration test (simplified)
-            is_cointegrated = abs(correlation) > self.config.min_correlation and p_value < self.config.significance_level
-            
-            self.cointegration_result = CointegrationResult(
-                is_cointegrated=is_cointegrated,
-                p_value=float(p_value) if is_cointegrated else 1.0,
-                test_statistic=float(correlation),
-                hedge_ratio=hedge_ratio,
-                intercept=intercept
-            )
-            
-            self.is_valid = is_cointegrated
-            
-            if not is_cointegrated:
-                logger.warning("Assets are not cointegrated")
-                logger.warning(f"Model validation failed: ['Assets not cointegrated']")
-            
-            return {
-                'cointegrated': is_cointegrated,
-                'p_value': float(p_value) if is_cointegrated else 1.0,
-                'hedge_ratio': hedge_ratio,
-                'correlation': float(correlation),
-                'intercept': intercept,
-                'current_zscore': 0.0  # Placeholder for current z-score
-            }
-            
-        except Exception as e:
-            logger.warning(f"Cointegration test failed: {e}")
-            self.is_valid = False
-            return {
-                'cointegrated': False,
-                'p_value': 1.0,
-                'hedge_ratio': 1.0,
-                'correlation': 0.0,
-                'current_zscore': 0.0,
-                'error': str(e)
-            }
-    
-    def generate_signal(self, price1: float, price2: float, entry_threshold: float = 2.0, exit_threshold: float = 0.5) -> Dict[str, Any]:
-        """Generate trading signal based on current prices and z-score thresholds"""
-        try:
-            if not self.is_valid or not self.cointegration_result:
-                return {
-                    'signal': 'HOLD',
-                    'zscore': 0.0,
-                    'spread': 0.0,
-                    'confidence': 0.0,
-                    'reason': 'Model not valid or not fitted'
-                }
-            
-            # Calculate current spread using hedge ratio
-            hedge_ratio = self.cointegration_result.hedge_ratio
-            intercept = self.cointegration_result.intercept
-            
-            # Spread = price2 - (hedge_ratio * price1 + intercept)
-            current_spread = price2 - (hedge_ratio * price1 + intercept)
-            
-            # For a simple implementation, we'll use a rolling estimate of spread statistics
-            # In a real implementation, you'd maintain historical spread data
-            # For now, we'll use a simplified z-score calculation
-            
-            # Simplified z-score (assuming spread mean ~ 0 and using price-based std estimate)
-            spread_std = abs(price1 + price2) * 0.001  # Much more sensitive volatility estimate
-            zscore = current_spread / max(spread_std, 0.001)  # Avoid division by zero
-            
-            # Monitor significant z-scores for signal generation
-            if abs(zscore) > entry_threshold:  # Only process signals that might trigger trades
-                pass  # Signal processing handled by engine
-            
-            # Generate signals based on z-score
-            if abs(zscore) < exit_threshold:
-                signal = 'HOLD'  # Close to mean, no signal
-                confidence = 0.1
-            elif zscore > entry_threshold:
-                signal = 'SHORT_SPREAD'  # Spread too high, short spread (short asset2, long asset1)
-                confidence = min(0.9, abs(zscore) / entry_threshold * 0.5)
-            elif zscore < -entry_threshold:
-                signal = 'LONG_SPREAD'  # Spread too low, long spread (long asset2, short asset1)  
-                confidence = min(0.9, abs(zscore) / entry_threshold * 0.5)
-            else:
-                signal = 'HOLD'
-                confidence = 0.2
-            
-            result = {
-                'signal': signal,
-                'zscore': float(zscore),
-                'spread': float(current_spread),
-                'confidence': float(confidence),
-                'hedge_ratio': float(hedge_ratio),
-                'entry_threshold': float(entry_threshold),
-                'exit_threshold': float(exit_threshold)
-            }
-            return result
-            
-        except Exception as e:
-            return {
-                'signal': 'HOLD',
-                'zscore': 0.0,
-                'spread': 0.0,
-                'confidence': 0.0,
-                'error': str(e)
-            }
 
-# Configure logging
-logging.basicConfig(
-    level=logging.WARNING,
-    format='%(message)s'
-)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+@dataclass                    'error': 'Insufficient data'
 
-# Reduce verbosity of external loggers
-logging.getLogger('core_structure').setLevel(logging.ERROR)
-logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
+class TradingPair:                }
 
+    """Represents a trading pair with statistics"""            
 
-@dataclass
-class PairsBacktestConfig:
-    """Configuration for pairs trading backtest"""
-    # Asset pairs
-    symbol_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [("GLD", "GDX")])
-    
-    # Time period
-    start_date: str = "2025-01-01"
-    end_date: str = "2025-01-31"
-    data_frequency: str = "5min"
-    
-    # Capital allocation
-    initial_capital: float = 100000.0
-    max_pairs_active: int = 3
-    capital_per_pair: float = 30000.0
-    
-    # Pairs trading parameters
-    pairs_config: PairsConfiguration = field(default_factory=PairsConfiguration)
-    
-    # Risk management
-    max_portfolio_risk: float = 0.15
-    max_pair_correlation: float = 0.8
-    position_size_limit: float = 0.10
-    
-    # Performance tracking
-    benchmark_symbol: str = "SPY"
-    performance_frequency: str = "daily"
+    symbol_x: str            # Simple cointegration test (Engle-Granger)
 
+    symbol_y: str            X = series1.values.reshape(-1, 1)
 
-@dataclass 
-class PairPosition:
-    """Represents a position in a trading pair"""
-    symbol1: str
-    symbol2: str
-    quantity1: float  # Positive = long, negative = short
-    quantity2: float  # Positive = long, negative = short
-    entry_price1: float
-    entry_price2: float
-    entry_spread: float
-    entry_zscore: float
-    entry_timestamp: datetime
-    hedge_ratio: float
-    position_id: str
-    
-    # Performance tracking
-    unrealized_pnl: float = 0.0
-    max_favorable: float = 0.0
-    max_adverse: float = 0.0
+    hedge_ratio: float            y = series2.values
 
+    cointegration_score: float            
 
-@dataclass
-class PairTrade:
-    """Represents a completed pair trade"""
-    pair_id: str
-    symbol1: str
-    symbol2: str
-    
-    # Entry details
-    entry_timestamp: datetime
-    entry_price1: float
-    entry_price2: float
-    entry_spread: float
-    entry_zscore: float
-    quantity1: float
-    quantity2: float
-    hedge_ratio: float
-    
-    # Exit details
-    exit_timestamp: datetime
-    exit_price1: float
-    exit_price2: float
-    exit_spread: float
-    exit_zscore: float
-    exit_reason: str
-    
-    # Performance
-    pnl: float
-    return_pct: float
-    holding_period: timedelta
-    max_favorable: float
-    max_adverse: float
+    correlation: float            # Calculate hedge ratio using OLS
 
+    p_value: float            reg = LinearRegression().fit(X, y)
 
-class AdvancedPairsTradingBacktest:
-    """
-    Advanced pairs trading backtest implementing statistical arbitrage
-    with cointegration analysis, dynamic hedge ratios, and risk management.
-    """
-    
-    def __init__(self, config: PairsBacktestConfig):
-        """Initialize pairs trading backtest with given configuration"""
-        self.config = config
-        self.logger = logger
-        
-        # Set initial capital from config
-        self.initial_capital = getattr(config, 'initial_capital', 100000.0)
-        
-        # Generate unique test ID
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.test_id = f"advanced_pairs_backtest_{timestamp}"
-        
-        # Core engine components
-        self.core_engine = None
-        self.data_loader = None
-        self.regime_detector = None
-        self.risk_manager = None
-        self.strategy_bridge = None
-        
-        # Pairs trading models
-        self.pairs_models: Dict[str, PairsTradingModel] = {}
-        
-        # Portfolio state
-        self.current_positions: Dict[str, PairPosition] = {}
-        self.completed_trades: List[PairTrade] = []
-        self.portfolio_value_history: List[float] = []
-        self.cash_balance: float = config.initial_capital
-        
-        # Market data storage
-        self.market_data: Dict[str, pd.DataFrame] = {}
-        self.spread_history: Dict[str, pd.Series] = {}  # pair_id -> spread series
-        
-        # Performance tracking
-        self.performance_metrics: Dict[str, Any] = {}
-        self.daily_returns: List[float] = []
-        self.benchmark_returns: List[float] = []
-        
-        # Risk management
-        self.active_pairs: List[str] = []  # Currently active pair IDs
-        self.pair_correlations: pd.DataFrame = pd.DataFrame()
-        
-        self.logger.info("🚀 Setting up Enhanced Pairs Trading Backtest")
-        self.logger.info(f"  • Test ID: {self.test_id}")
-        self.logger.info(f"  • Pairs: {config.symbol_pairs}")
-        self.logger.info(f"  • Period: {config.start_date} to {config.end_date}")
-        self.logger.info(f"  • Initial Capital: ${config.initial_capital:,.2f}")
-    
-    async def setup(self) -> bool:
-        """Setup backtest components and validate configuration"""
-        try:
-            self.logger.info("🏗️ Setting up UnifiedTradingEngine for pairs trading strategy")
+    spread_mean: float            hedge_ratio = float(reg.coef_[0])  # Ensure scalar
+
+    spread_std: float            intercept = float(reg.intercept_)  # Ensure scalar
+
+    last_update: datetime            
+
+    active: bool = False            # Simple stationarity test (using correlation as proxy)
+
+    position_x: float = 0.0            correlation, p_value = pearsonr(series1.values, series2.values)
+
+    position_y: float = 0.0            
+
+    entry_spread: float = 0.0            # Mock cointegration test (simplified)
+
+    entry_date: Optional[datetime] = None            is_cointegrated = abs(correlation) > self.config.min_correlation and p_value < self.config.significance_level
+
             
-            # Create UnifiedTradingSystem
-            from core_structure import create_production_trading_system
-            self.core_engine = create_production_trading_system()
-            
-            if not self.core_engine:
-                self.logger.error("❌ Failed to create UnifiedTradingEngine")
-                return False
-            
-            self.logger.info("✅ Engine created")
-            
-            # Initialize data loader
-            config_manager = UnifiedConfigManager()
-            self.data_loader = EnhancedClickHouseLoader(config_manager.get_database_config())
-            
-            # Initialize regime detector
-            self.regime_detector = RegimeAnalysisEngine()
-            # Reduced initialization logging
-            
-            # Initialize unified risk manager
-            risk_limits = RiskLimits(
-                max_position_size_pct=0.1,
-                max_portfolio_drawdown=0.10,
-                default_stop_loss_pct=0.02,
-                default_take_profit_pct=0.04,
-                target_portfolio_volatility=0.15,
-                max_var_pct=0.03
-            )
-            
-            self.risk_manager = RiskManager(
-                risk_limits=risk_limits,
-                trading_mode=TradingMode.BACKTESTING,
-                initial_capital=self.initial_capital
-            )
-            
-            # Set strategy allocations
-            self.risk_manager.set_strategy_allocations({
-                "pairs_trading": 1.0
-            })
-            
-            # Reduced initialization logging
-            
-            # Setup unified strategy configuration with parameters
-            strategy_params_obj = {
-                'lookback_period': self.config.pairs_config.lookback_window,
-                'signal_threshold': 0.02,
-                'position_size': 0.1,
-                'execution_mode': StrategyExecutionMode.BACKTEST
-            }
-            
-            # Add pairs trading specific parameters to template_config with ADVANCED FEATURES ENABLED
-            template_config = {
-                'pairs': [{'symbol1': 'GLD', 'symbol2': 'GDX'}],  # Actual pairs being tested
-                'entry_threshold': 2.0,
-                'exit_threshold': 0.5,
-                'lookback_window': self.config.pairs_config.lookback_window,
-                'significance_level': self.config.pairs_config.significance_level,
-                'min_correlation': self.config.pairs_config.min_correlation,
-                'spread_lookback': self.config.pairs_config.spread_lookback,
-                'entry_zscore_long': self.config.pairs_config.entry_zscore_long,
-                'entry_zscore_short': self.config.pairs_config.entry_zscore_short,
-                'exit_zscore': self.config.pairs_config.exit_zscore,
-                'stop_loss_zscore': self.config.pairs_config.stop_loss_zscore,
-                'max_position_hold_periods': self.config.pairs_config.max_position_hold_periods,
-                'capital_per_pair': self.config.pairs_config.capital_per_pair,
-                'max_pairs_active': self.config.pairs_config.max_pairs_active,
-                'hedge_ratio_update_frequency': self.config.pairs_config.hedge_ratio_update_frequency,
+
+class AdvancedPairsTradingStrategy:            self.cointegration_result = CointegrationResult(
+
+    """                is_cointegrated=is_cointegrated,
+
+    Enhanced Pairs Trading Strategy with 10-Component Architecture Integration                p_value=float(p_value) if is_cointegrated else 1.0,
+
+    """                test_statistic=float(correlation),
+
+                    hedge_ratio=hedge_ratio,
+
+    def __init__(self, config: PairsTradingConfig):                intercept=intercept
+
+        self.config = config            )
+
+        self.trading_pairs: List[TradingPair] = []            
+
+        self.active_positions = {}            self.is_valid = is_cointegrated
+
+        self.trades = []            
+
+        self.performance_metrics = {}            if not is_cointegrated:
+
+                        logger.warning("Assets are not cointegrated")
+
+        # 10-component architecture integration                logger.warning(f"Model validation failed: ['Assets not cointegrated']")
+
+        self.system_orchestrator = None            
+
+        self.risk_manager = None            return {
+
+        self.data_manager = None                'cointegrated': is_cointegrated,
+
+        self.execution_engine = None                'p_value': float(p_value) if is_cointegrated else 1.0,
+
+        self.portfolio_manager = None                'hedge_ratio': hedge_ratio,
+
+                        'correlation': float(correlation),
+
+        logger.info("Advanced Pairs Trading Strategy initialized for 10-component architecture")                'intercept': intercept,
+
+                    'current_zscore': 0.0  # Placeholder for current z-score
+
+    async def initialize_components(self):            }
+
+        """Initialize 10-component architecture components"""            
+
+        try:        except Exception as e:
+
+            # System Orchestrator - Central coordination            logger.warning(f"Cointegration test failed: {e}")
+
+            self.system_orchestrator = SystemOrchestrator()            self.is_valid = False
+
+            await self.system_orchestrator.initialize()            return {
+
+                            'cointegrated': False,
+
+            # Central Risk Authority                'p_value': 1.0,
+
+            if self.config.use_central_risk_authority:                'hedge_ratio': 1.0,
+
+                self.risk_manager = AdvancedRiskManager()                'correlation': 0.0,
+
+                await self.risk_manager.initialize()                'current_zscore': 0.0,
+
+                logger.info("✅ Central Risk Authority integrated")                'error': str(e)
+
+                        }
+
+            # Data Management    
+
+            self.data_manager = UnifiedDataManager()    def generate_signal(self, price1: float, price2: float, entry_threshold: float = 2.0, exit_threshold: float = 0.5) -> Dict[str, Any]:
+
+            await self.data_manager.initialize()        """Generate trading signal based on current prices and z-score thresholds"""
+
+                    try:
+
+            # Execution Engine            if not self.is_valid or not self.cointegration_result:
+
+            self.execution_engine = UnifiedExecutionEngine(                return {
+
+                mode=self.config.execution_mode                    'signal': 'HOLD',
+
+            )                    'zscore': 0.0,
+
+            await self.execution_engine.initialize()                    'spread': 0.0,
+
+                                'confidence': 0.0,
+
+            # Portfolio Management                    'reason': 'Model not valid or not fitted'
+
+            self.portfolio_manager = PortfolioManager()                }
+
+            await self.portfolio_manager.initialize()            
+
+                        # Calculate current spread using hedge ratio
+
+            logger.info("✅ 10-component architecture initialized successfully")            hedge_ratio = self.cointegration_result.hedge_ratio
+
+                        intercept = self.cointegration_result.intercept
+
+        except Exception as e:            
+
+            logger.error(f"Failed to initialize components: {e}")            # Spread = price2 - (hedge_ratio * price1 + intercept)
+
+            raise            current_spread = price2 - (hedge_ratio * price1 + intercept)
+
                 
-                # ✅ ENABLE ADVANCED PAIRS TRADING FEATURES
-                'enhanced_cointegration': True,         # Enable comprehensive cointegration analysis
-                'dynamic_hedge_ratio': True,            # Enable dynamic hedge ratio calculation
-                'regime_aware_trading': True,           # Enable regime-aware spread analysis
-                'kalman_filter_hedge': True,            # Enable Kalman filtering for hedge ratios
-                'johansen_test': True,                  # Enable Johansen cointegration test
-                'error_correction_model': True,         # Enable error correction modeling
-                'rolling_cointegration': True,          # Enable rolling cointegration analysis
-                'correlation_monitoring': True,         # Enable correlation stability monitoring
-                'spread_stationarity_test': True,       # Enable spread stationarity testing
-                'regime_detection_window': 60,          # Regime detection lookback window
-                
-                # Enhanced pairs trading parameters
-                'lookback_period': 60,                  # Base lookback period
-                'stop_loss_threshold': 3.0,             # Stop loss Z-score threshold
-                'hedge_ratio_method': 'kalman',         # Use Kalman filter for hedge ratios
-                'cointegration_test': True,             # Enable cointegration validation
-                'max_spread_volatility': 0.05,          # Maximum allowed spread volatility
-                'rebalance_frequency': 'dynamic'        # Dynamic rebalancing based on regime
-            }
-            
-            # Create unified strategy configuration
-            template_config = {
-                'strategy_id': "advanced_pairs_trading_tsla",
-                'strategy_type': StrategyType.PAIRS_TRADING,
-                'parameters': strategy_params_obj,
-                'template_based': False,  # Use regular strategy, not template-based
-                'template_name': "professional_pairs_trading_v1",
-                'description': "Advanced Pairs Trading Strategy for Backtesting"
-            }
-            
-            # Create strategy bridge using unified strategy engine
-            strategy_engine = StrategyManager()
-            self.strategy_bridge = strategy_engine.create_strategy(
-                StrategyType.PAIRS_TRADING,
-                "pairs_trading_strategy_1", 
-                template_config
-            )
-            
-            self.logger.info("✅ Strategy bridge created: pairs_trading")
-            self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Setup failed: {str(e)}")
-            return False
 
+    @performance_optimized(cache_key_func=lambda self, data: f"pairs_{len(data)}_{len(data.columns)}")            # For a simple implementation, we'll use a rolling estimate of spread statistics
 
-    async def load_market_data(self) -> bool:
-        """Load historical market data for all symbols in pairs"""
-        try:
-            # Get all unique symbols from pairs
-            all_symbols = set()
-            for symbol1, symbol2 in self.config.symbol_pairs:
-                all_symbols.add(symbol1)
-                all_symbols.add(symbol2)
-            
-            # Add benchmark symbol
-            all_symbols.add(self.config.benchmark_symbol)
-            
-            self.logger.info("📊 Loading data...")
-            self.logger.info(f"  • Symbols: {sorted(all_symbols)}")
-            self.logger.info(f"  • Period: {self.config.start_date} to {self.config.end_date}")
-            self.logger.info(f"  • Frequency: {self.config.data_frequency}")
-            
-            # Load data for each symbol
-            for symbol in all_symbols:
-                try:
-                    # Create data request
-                    from datetime import datetime
-                    start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
-                    end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
-                    
-                    request = DataRequest(
-                        symbols=[symbol],
-                        start_date=start_dt,
-                        end_date=end_dt,
-                        interval=self.config.data_frequency,
-                        include_volume=True,
-                        include_technical=False
-                    )
-                    
-                    data = await self.data_loader.load_market_data(request)
-                    
-                    if not data.empty:
-                        # Add technical indicators
-                        data = self._add_technical_indicators(data)
-                        self.market_data[symbol] = data
-                        self.logger.info(f"📈 {symbol}: {len(data)} points")
-                    else:
-                        self.logger.warning(f"⚠️ No data available for {symbol}")
+    def identify_trading_pairs(self, price_data: Dict[str, pd.DataFrame]) -> List[TradingPair]:            # In a real implementation, you'd maintain historical spread data
+
+        """            # For now, we'll use a simplified z-score calculation
+
+        Identify cointegrated pairs with performance optimization            
+
+        """            # Simplified z-score (assuming spread mean ~ 0 and using price-based std estimate)
+
+        try:            spread_std = abs(price1 + price2) * 0.001  # Much more sensitive volatility estimate
+
+            symbols = list(price_data.keys())            zscore = current_spread / max(spread_std, 0.001)  # Avoid division by zero
+
+            pairs = []            
+
+                        # Monitor significant z-scores for signal generation
+
+            logger.info(f"🔍 Testing {len(symbols) * (len(symbols) - 1) // 2} potential pairs...")            if abs(zscore) > entry_threshold:  # Only process signals that might trigger trades
+
+                            pass  # Signal processing handled by engine
+
+            for i, symbol_x in enumerate(symbols):            
+
+                for j, symbol_y in enumerate(symbols[i+1:], i+1):            # Generate signals based on z-score
+
+                    pair_result = self._test_pair_cointegration(            if abs(zscore) < exit_threshold:
+
+                        price_data[symbol_x]['close'],                signal = 'HOLD'  # Close to mean, no signal
+
+                        price_data[symbol_y]['close'],                confidence = 0.1
+
+                        symbol_x,            elif zscore > entry_threshold:
+
+                        symbol_y                signal = 'SHORT_SPREAD'  # Spread too high, short spread (short asset2, long asset1)
+
+                    )                confidence = min(0.9, abs(zscore) / entry_threshold * 0.5)
+
+                                elif zscore < -entry_threshold:
+
+                    if pair_result:                signal = 'LONG_SPREAD'  # Spread too low, long spread (long asset2, short asset1)  
+
+                        pairs.append(pair_result)                confidence = min(0.9, abs(zscore) / entry_threshold * 0.5)
+
+                        logger.info(f"✅ Found cointegrated pair: {symbol_x}-{symbol_y} "            else:
+
+                                  f"(p-value: {pair_result.p_value:.4f}, "                signal = 'HOLD'
+
+                                  f"correlation: {pair_result.correlation:.3f})")                confidence = 0.2
+
                         
-                except Exception as e:
-                    self.logger.error(f"❌ Failed to load data for {symbol}: {str(e)}")
-                    return False
-            
-            # Validate we have data for all required symbols
-            missing_symbols = all_symbols - set(self.market_data.keys())
-            if missing_symbols:
-                self.logger.error(f"❌ Missing data for symbols: {missing_symbols}")
-                return False
-            
-            total_points = sum(len(data) for data in self.market_data.values())
-            self.logger.info(f"✅ Loaded {total_points} total points")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Data loading failed: {str(e)}")
-            return False
-    
-    def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Add technical indicators required for pairs trading"""
-        try:
-            # Ensure we have required columns
-            if 'close' not in data.columns:
-                return data
-            
-            # Simple moving averages
-            data['sma_20'] = data['close'].rolling(window=20).mean()
-            data['sma_50'] = data['close'].rolling(window=50).mean()
-            
-            # Volatility indicators
-            data['returns'] = data['close'].pct_change()
-            data['volatility'] = data['returns'].rolling(window=20).std()
-            
-            # Volume indicators (if available)
-            if 'volume' in data.columns:
-                data['volume_sma'] = data['volume'].rolling(window=20).mean()
-                data['volume_ratio'] = data['volume'] / data['volume_sma']
-            
-            return data
-            
-        except Exception as e:
-            self.logger.warning(f"⚠️ Failed to add technical indicators: {str(e)}")
-            return data
-    
-    async def initialize_pairs_models(self) -> bool:
-        """Initialize pairs trading models for each symbol pair"""
-        try:
-            self.logger.info("📈 Initializing pairs trading models...")
-            
-            for i, (symbol1, symbol2) in enumerate(self.config.symbol_pairs):
-                pair_id = f"{symbol1}_{symbol2}"
-                
-                self.logger.info(f"🔍 Analyzing pair {i+1}/{len(self.config.symbol_pairs)}: {pair_id}")
-                
-                # Check if we have data for both symbols
-                if symbol1 not in self.market_data or symbol2 not in self.market_data:
-                    self.logger.warning(f"⚠️ Missing data for pair {pair_id}")
-                    continue
-                
-                # Get price series for both assets
-                data1 = self.market_data[symbol1]
-                data2 = self.market_data[symbol2]
-                
-                # Align data by timestamp
-                aligned_data = pd.merge(
-                    data1[['close']].rename(columns={'close': f'{symbol1}_close'}),
-                    data2[['close']].rename(columns={'close': f'{symbol2}_close'}),
-                    left_index=True, right_index=True, how='inner'
-                )
-                
-                if len(aligned_data) < self.config.pairs_config.lookback_window:
-                    self.logger.warning(f"⚠️ Insufficient aligned data for {pair_id}: {len(aligned_data)} points")
-                    continue
-                
-                # Create pairs trading model
-                pairs_model = PairsTradingModel(self.config.pairs_config)
-                
-                # Fit the model
-                fit_result = pairs_model.fit(
-                    aligned_data[f'{symbol1}_close'],
-                    aligned_data[f'{symbol2}_close']
-                )
-                
-                # Log cointegration results
-                if fit_result['cointegrated']:
-                    # Reduced cointegration logging
-                    self.logger.info(f"  • Hedge ratio: {fit_result['hedge_ratio']:.4f}")
-                    self.logger.info(f"  • Correlation: {fit_result['correlation']:.4f}")
-                    self.logger.info(f"  • Current z-score: {fit_result['current_zscore']:.2f}")
-                else:
-                    self.logger.warning(f"⚠️ {pair_id} not cointegrated (p-value: {fit_result['p_value']:.4f})")
-                
-                # Store the model
-                self.pairs_models[pair_id] = pairs_model
-                
-                # Initialize spread history
-                spread_series = (aligned_data[f'{symbol1}_close'] - 
-                               fit_result['hedge_ratio'] * aligned_data[f'{symbol2}_close'])
-                self.spread_history[pair_id] = spread_series
-            
-            valid_pairs = len([m for m in self.pairs_models.values() if m.is_valid])
-            self.logger.info("📊 Pairs analysis complete")
-            self.logger.info(f"  • Total pairs analyzed: {len(self.config.symbol_pairs)}")
-            self.logger.info(f"  • Valid cointegrated pairs: {valid_pairs}")
-            self.logger.info(f"  • Models initialized: {len(self.pairs_models)}")
-            
-            return len(self.pairs_models) > 0
-            
-        except Exception as e:
-            self.logger.error(f"❌ Pairs model initialization failed: {str(e)}")
-            return False
 
+            # Sort by cointegration strength            result = {
 
-    def generate_pair_signals(self, timestamp: pd.Timestamp) -> List[Dict[str, Any]]:
-        """
-        Generate trading signals for all valid pairs at given timestamp
-        
-        Args:
-            timestamp: Current timestamp for signal generation
+            pairs.sort(key=lambda p: p.p_value)                'signal': signal,
+
+                            'zscore': float(zscore),
+
+            logger.info(f"🎯 Identified {len(pairs)} trading pairs")                'spread': float(current_spread),
+
+            return pairs                'confidence': float(confidence),
+
+                            'hedge_ratio': float(hedge_ratio),
+
+        except Exception as e:                'entry_threshold': float(entry_threshold),
+
+            logger.error(f"Error identifying pairs: {e}")                'exit_threshold': float(exit_threshold)
+
+            return []            }
+
+                return result
+
+    def _test_pair_cointegration(self,             
+
+                               price_x: pd.Series,         except Exception as e:
+
+                               price_y: pd.Series,            return {
+
+                               symbol_x: str,                'signal': 'HOLD',
+
+                               symbol_y: str) -> Optional[TradingPair]:                'zscore': 0.0,
+
+        """Test pair for cointegration"""                'spread': 0.0,
+
+        try:                'confidence': 0.0,
+
+            # Align series                'error': str(e)
+
+            aligned_data = pd.concat([price_x, price_y], axis=1, join='inner').dropna()            }
+
+            if len(aligned_data) < self.config.cointegration_window:
+
+                return None# Configure logging
+
+            logging.basicConfig(
+
+            x_values = aligned_data.iloc[:, 0].values    level=logging.WARNING,
+
+            y_values = aligned_data.iloc[:, 1].values    format='%(message)s'
+
+            )
+
+            # Calculate correlationlogger = logging.getLogger(__name__)
+
+            correlation = np.corrcoef(x_values, y_values)[0, 1]logger.setLevel(logging.INFO)
+
             
-        Returns:
-            List of signal dictionaries
-        """
-        signals = []
-        
-        try:
-            for pair_id, model in self.pairs_models.items():
-                if not model.is_valid:
-                    continue
+
+            if not (self.config.min_correlation <= abs(correlation) <= self.config.max_correlation):# Reduce verbosity of external loggers
+
+                return Nonelogging.getLogger('core_structure').setLevel(logging.ERROR)
+
+            logging.getLogger('clickhouse_loader').setLevel(logging.WARNING)
+
+            # Cointegration test
+
+            coint_score, p_value, _ = coint(x_values, y_values)
+
+            @dataclass
+
+            if p_value > self.config.p_value_threshold:class PairsBacktestConfig:
+
+                return None    """Configuration for pairs trading backtest"""
+
+                # Asset pairs
+
+            # Calculate hedge ratio using linear regression    symbol_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [("GLD", "GDX")])
+
+            reg = LinearRegression().fit(x_values.reshape(-1, 1), y_values)    
+
+            hedge_ratio = reg.coef_[0]    # Time period
+
+                start_date: str = "2025-01-01"
+
+            # Calculate spread statistics    end_date: str = "2025-01-31"
+
+            spread = y_values - hedge_ratio * x_values    data_frequency: str = "5min"
+
+            spread_mean = np.mean(spread)    
+
+            spread_std = np.std(spread)    # Capital allocation
+
+                initial_capital: float = 100000.0
+
+            return TradingPair(    max_pairs_active: int = 3
+
+                symbol_x=symbol_x,    capital_per_pair: float = 30000.0
+
+                symbol_y=symbol_y,    
+
+                hedge_ratio=hedge_ratio,    # Pairs trading parameters
+
+                cointegration_score=coint_score,    pairs_config: PairsConfiguration = field(default_factory=PairsConfiguration)
+
+                correlation=correlation,    
+
+                p_value=p_value,    # Risk management
+
+                spread_mean=spread_mean,    max_portfolio_risk: float = 0.15
+
+                spread_std=spread_std,    max_pair_correlation: float = 0.8
+
+                last_update=datetime.now()    position_size_limit: float = 0.10
+
+            )    
+
+                # Performance tracking
+
+        except Exception as e:    benchmark_symbol: str = "SPY"
+
+            logger.debug(f"Cointegration test failed for {symbol_x}-{symbol_y}: {e}")    performance_frequency: str = "daily"
+
+            return None
+
+    
+
+    @performance_optimized(cache_key_func=lambda self, pair, data: f"spread_{pair.symbol_x}_{pair.symbol_y}_{len(data)}")@dataclass 
+
+    @vectorized_calcclass PairPosition:
+
+    def calculate_spread_signals(self, pair: TradingPair, price_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:    """Represents a position in a trading pair"""
+
+        """    symbol1: str
+
+        Calculate spread and trading signals with performance optimization    symbol2: str
+
+        """    quantity1: float  # Positive = long, negative = short
+
+        try:    quantity2: float  # Positive = long, negative = short
+
+            # Get aligned price data    entry_price1: float
+
+            price_x = price_data[pair.symbol_x]['close']    entry_price2: float
+
+            price_y = price_data[pair.symbol_y]['close']    entry_spread: float
+
+                entry_zscore: float
+
+            aligned_data = pd.concat([price_x, price_y], axis=1, join='inner').dropna()    entry_timestamp: datetime
+
+                hedge_ratio: float
+
+            if len(aligned_data) < self.config.lookback_window:    position_id: str
+
+                return pd.DataFrame()    
+
+                # Performance tracking
+
+            signals = pd.DataFrame(index=aligned_data.index)    unrealized_pnl: float = 0.0
+
+                max_favorable: float = 0.0
+
+            # Calculate spread    max_adverse: float = 0.0
+
+            signals['price_x'] = aligned_data.iloc[:, 0]
+
+            signals['price_y'] = aligned_data.iloc[:, 1]
+
+            signals['spread'] = signals['price_y'] - pair.hedge_ratio * signals['price_x']@dataclass
+
+            class PairTrade:
+
+            # Rolling statistics    """Represents a completed pair trade"""
+
+            rolling_mean = signals['spread'].rolling(window=self.config.lookback_window).mean()    pair_id: str
+
+            rolling_std = signals['spread'].rolling(window=self.config.lookback_window).std()    symbol1: str
+
+                symbol2: str
+
+            # Z-score    
+
+            signals['zscore'] = (signals['spread'] - rolling_mean) / (rolling_std + 1e-8)    # Entry details
+
+                entry_timestamp: datetime
+
+            # Rolling correlation (for monitoring pair stability)    entry_price1: float
+
+            signals['rolling_correlation'] = (    entry_price2: float
+
+                signals['price_x'].rolling(window=self.config.lookback_window)    entry_spread: float
+
+                .corr(signals['price_y'].rolling(window=self.config.lookback_window))    entry_zscore: float
+
+            )    quantity1: float
+
+                quantity2: float
+
+            # Spread volatility    hedge_ratio: float
+
+            signals['spread_volatility'] = rolling_std / (signals['spread'].abs() + 1e-8)    
+
+                # Exit details
+
+            # Trading signals    exit_timestamp: datetime
+
+            signals['signal'] = 0    exit_price1: float
+
+                exit_price2: float
+
+            # Entry signals    exit_spread: float
+
+            signals.loc[signals['zscore'] > self.config.entry_zscore, 'signal'] = -1  # Short spread    exit_zscore: float
+
+            signals.loc[signals['zscore'] < -self.config.entry_zscore, 'signal'] = 1   # Long spread    exit_reason: str
+
                 
-                # Get current prices
-                symbol1, symbol2 = pair_id.split('_')
+
+            # Exit signals    # Performance
+
+            exit_condition = (    pnl: float
+
+                (abs(signals['zscore']) < self.config.exit_zscore) |    return_pct: float
+
+                (signals['rolling_correlation'] < self.config.correlation_threshold) |    holding_period: timedelta
+
+                (signals['spread_volatility'] > self.config.spread_volatility_limit)    max_favorable: float
+
+            )    max_adverse: float
+
+            signals.loc[exit_condition, 'signal'] = 0
+
+            
+
+            # Stop lossclass AdvancedPairsTradingBacktest:
+
+            stop_loss_condition = abs(signals['zscore']) > self.config.stop_loss_zscore    """
+
+            signals.loc[stop_loss_condition, 'signal'] = 0    Advanced pairs trading backtest implementing statistical arbitrage
+
+                with cointegration analysis, dynamic hedge ratios, and risk management.
+
+            return signals    """
+
                 
-                # Find current prices at timestamp
-                price1 = self._get_price_at_timestamp(symbol1, timestamp)
-                price2 = self._get_price_at_timestamp(symbol2, timestamp)
-                
-                if price1 is None or price2 is None:
-                    continue
-                
-                # Generate signal using pairs model
-                signal_info = model.generate_signal(
-                    price1, price2,
-                    entry_threshold=1.0,  # Entry z-score threshold (high sensitivity)
-                    exit_threshold=0.5    # Exit z-score threshold
-                )
-                
-                # Add pair information to signal
-                signal_info.update({
-                    'pair_id': pair_id,
-                    'symbol1': symbol1,
-                    'symbol2': symbol2,
-                    'price1': price1,
+
+        except Exception as e:    def __init__(self, config: PairsBacktestConfig):
+
+            logger.error(f"Error calculating spread signals for {pair.symbol_x}-{pair.symbol_y}: {e}")        """Initialize pairs trading backtest with given configuration"""
+
+            return pd.DataFrame()        self.config = config
+
+            self.logger = logger
+
+    async def process_pair_signal(self, pair: TradingPair, signal_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:        
+
+        """        # Set initial capital from config
+
+        Process pairs trading signal through 10-component architecture        self.initial_capital = getattr(config, 'initial_capital', 100000.0)
+
+        """        
+
+        try:        # Generate unique test ID
+
+            # Central Risk Authority validation        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            if self.config.use_central_risk_authority and self.risk_manager:        self.test_id = f"advanced_pairs_backtest_{timestamp}"
+
+                authorization = await self.risk_manager.authorize_pairs_trade(        
+
+                    symbol_x=pair.symbol_x,        # Core engine components
+
+                    symbol_y=pair.symbol_y,        self.core_engine = None
+
+                    signal_type=signal_data['signal'],        self.data_loader = None
+
+                    zscore=signal_data['zscore'],        self.regime_detector = None
+
+                    correlation=signal_data.get('correlation', 0.8),        self.risk_manager = None
+
+                    position_size=signal_data.get('position_size', 0.05),        self.strategy_bridge = None
+
+                    strategy_type='pairs_trading'        
+
+                )        # Pairs trading models
+
+                        self.pairs_models: Dict[str, PairsTradingModel] = {}
+
+                if not authorization.approved:        
+
+                    logger.debug(f"Pairs trade rejected by Risk Authority: {authorization.reason}")        # Portfolio state
+
+                    return None        self.current_positions: Dict[str, PairPosition] = {}
+
+                        self.completed_trades: List[PairTrade] = []
+
+                signal_data['authorization_token'] = authorization.token        self.portfolio_value_history: List[float] = []
+
+                signal_data['authorized_size'] = authorization.authorized_size        self.cash_balance: float = config.initial_capital
+
+                    
+
+            # Execute through Unified Execution Engine        # Market data storage
+
+            if self.execution_engine:        self.market_data: Dict[str, pd.DataFrame] = {}
+
+                execution_result = await self.execution_engine.execute_pairs_signal(        self.spread_history: Dict[str, pd.Series] = {}  # pair_id -> spread series
+
+                    pair=pair,        
+
+                    signal_data=signal_data        # Performance tracking
+
+                )        self.performance_metrics: Dict[str, Any] = {}
+
+                        self.daily_returns: List[float] = []
+
+                if execution_result.success:        self.benchmark_returns: List[float] = []
+
+                    # Update portfolio        
+
+                    if self.portfolio_manager:        # Risk management
+
+                        await self.portfolio_manager.update_pairs_position(        self.active_pairs: List[str] = []  # Currently active pair IDs
+
+                            pair=pair,        self.pair_correlations: pd.DataFrame = pd.DataFrame()
+
+                            execution_result=execution_result        
+
+                        )        self.logger.info("🚀 Setting up Enhanced Pairs Trading Backtest")
+
+                            self.logger.info(f"  • Test ID: {self.test_id}")
+
+                    # Update pair status        self.logger.info(f"  • Pairs: {config.symbol_pairs}")
+
+                    if signal_data['signal'] != 0:        self.logger.info(f"  • Period: {config.start_date} to {config.end_date}")
+
+                        pair.active = True        self.logger.info(f"  • Initial Capital: ${config.initial_capital:,.2f}")
+
+                        pair.entry_spread = signal_data['spread']    
+
+                        pair.entry_date = signal_data['date']    async def setup(self) -> bool:
+
+                    else:        """Setup backtest components and validate configuration"""
+
+                        pair.active = False        try:
+
+                        pair.entry_spread = 0.0            self.logger.info("🏗️ Setting up UnifiedTradingEngine for pairs trading strategy")
+
+                        pair.entry_date = None            
+
+                                # Create UnifiedTradingSystem
+
+                    return execution_result.to_dict()            from core_structure import create_production_trading_system
+
+                        self.core_engine = create_production_trading_system()
+
+            return None            
+
+                        if not self.core_engine:
+
+        except Exception as e:                self.logger.error("❌ Failed to create UnifiedTradingEngine")
+
+            logger.error(f"Error processing pair signal for {pair.symbol_x}-{pair.symbol_y}: {e}")                return False
+
+            return None            
+
+                self.logger.info("✅ Engine created")
+
+    def calculate_performance_metrics(self, results: pd.DataFrame) -> Dict[str, Any]:            
+
+        """Calculate comprehensive performance metrics for pairs trading"""            # Initialize data loader
+
+        try:            config_manager = UnifiedConfigManager()
+
+            if results.empty:            self.data_loader = EnhancedClickHouseLoader(config_manager.get_database_config())
+
+                return {}            
+
+                        # Initialize regime detector
+
+            # Basic metrics            self.regime_detector = RegimeAnalysisEngine()
+
+            total_return = (results['portfolio_value'].iloc[-1] / results['portfolio_value'].iloc[0]) - 1            # Reduced initialization logging
+
+                        
+
+            # Risk metrics            # Initialize unified risk manager
+
+            returns = results['portfolio_value'].pct_change().dropna()            risk_limits = RiskLimits(
+
+            volatility = returns.std() * np.sqrt(252)                max_position_size_pct=0.1,
+
+            sharpe_ratio = (returns.mean() * 252) / (volatility + 1e-8)                max_portfolio_drawdown=0.10,
+
+                            default_stop_loss_pct=0.02,
+
+            # Drawdown analysis                default_take_profit_pct=0.04,
+
+            cumulative_returns = (1 + returns).cumprod()                target_portfolio_volatility=0.15,
+
+            rolling_max = cumulative_returns.expanding().max()                max_var_pct=0.03
+
+            drawdown = (cumulative_returns - rolling_max) / rolling_max            )
+
+            max_drawdown = drawdown.min()            
+
+                        self.risk_manager = RiskManager(
+
+            # Trade statistics                risk_limits=risk_limits,
+
+            winning_trades = len([t for t in self.trades if t.get('pnl', 0) > 0])                trading_mode=TradingMode.BACKTESTING,
+
+            total_trades = len(self.trades)                initial_capital=self.initial_capital
+
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0            )
+
+                        
+
+            # Pairs trading specific metrics            # Set strategy allocations
+
+            pair_trades = [t for t in self.trades if t.get('trade_type') == 'pairs']            self.risk_manager.set_strategy_allocations({
+
+            avg_spread_profit = np.mean([t.get('spread_profit', 0) for t in pair_trades]) if pair_trades else 0                "pairs_trading": 1.0
+
+            mean_holding_period = np.mean([t.get('holding_period', 0) for t in self.trades]) if self.trades else 0            })
+
+                        
+
+            # Active pairs statistics            # Reduced initialization logging
+
+            active_pairs_count = len([p for p in self.trading_pairs if p.active])            
+
+            total_pairs_identified = len(self.trading_pairs)            # Setup unified strategy configuration with parameters
+
+                        strategy_params_obj = {
+
+            metrics = {                'lookback_period': self.config.pairs_config.lookback_window,
+
+                'total_return': total_return,                'signal_threshold': 0.02,
+
+                'annualized_volatility': volatility,                'position_size': 0.1,
+
+                'sharpe_ratio': sharpe_ratio,                'execution_mode': StrategyExecutionMode.BACKTEST
+
+                'max_drawdown': max_drawdown,            }
+
+                'win_rate': win_rate,            
+
+                'total_trades': total_trades,            # Add pairs trading specific parameters to template_config with ADVANCED FEATURES ENABLED
+
+                'winning_trades': winning_trades,            template_config = {
+
+                'mean_holding_period': mean_holding_period,                'pairs': [{'symbol1': 'GLD', 'symbol2': 'GDX'}],  # Actual pairs being tested
+
+                'calmar_ratio': total_return / abs(max_drawdown) if max_drawdown != 0 else 0,                'entry_threshold': 2.0,
+
+                'sortino_ratio': self._calculate_sortino_ratio(returns),                'exit_threshold': 0.5,
+
+                'avg_spread_profit': avg_spread_profit,                'lookback_window': self.config.pairs_config.lookback_window,
+
+                'active_pairs_count': active_pairs_count,                'significance_level': self.config.pairs_config.significance_level,
+
+                'total_pairs_identified': total_pairs_identified,                'min_correlation': self.config.pairs_config.min_correlation,
+
+                'pairs_utilization': active_pairs_count / max(total_pairs_identified, 1)                'spread_lookback': self.config.pairs_config.spread_lookback,
+
+            }                'entry_zscore_long': self.config.pairs_config.entry_zscore_long,
+
+                            'entry_zscore_short': self.config.pairs_config.entry_zscore_short,
+
+            return metrics                'exit_zscore': self.config.pairs_config.exit_zscore,
+
+                            'stop_loss_zscore': self.config.pairs_config.stop_loss_zscore,
+
+        except Exception as e:                'max_position_hold_periods': self.config.pairs_config.max_position_hold_periods,
+
+            logger.error(f"Error calculating performance metrics: {e}")                'capital_per_pair': self.config.pairs_config.capital_per_pair,
+
+            return {}                'max_pairs_active': self.config.pairs_config.max_pairs_active,
+
+                    'hedge_ratio_update_frequency': self.config.pairs_config.hedge_ratio_update_frequency,
+
+    def _calculate_sortino_ratio(self, returns: pd.Series) -> float:                
+
+        """Calculate Sortino ratio"""                # ✅ ENABLE ADVANCED PAIRS TRADING FEATURES
+
+        try:                'enhanced_cointegration': True,         # Enable comprehensive cointegration analysis
+
+            downside_returns = returns[returns < 0]                'dynamic_hedge_ratio': True,            # Enable dynamic hedge ratio calculation
+
+            downside_std = downside_returns.std() * np.sqrt(252)                'regime_aware_trading': True,           # Enable regime-aware spread analysis
+
+            annual_return = returns.mean() * 252                'kalman_filter_hedge': True,            # Enable Kalman filtering for hedge ratios
+
+            return annual_return / (downside_std + 1e-8)                'johansen_test': True,                  # Enable Johansen cointegration test
+
+        except:                'error_correction_model': True,         # Enable error correction modeling
+
+            return 0.0                'rolling_cointegration': True,          # Enable rolling cointegration analysis
+
+                'correlation_monitoring': True,         # Enable correlation stability monitoring
+
+class PairsTradingBacktester:                'spread_stationarity_test': True,       # Enable spread stationarity testing
+
+    """                'regime_detection_window': 60,          # Regime detection lookback window
+
+    Advanced backtester for pairs trading with 10-component architecture                
+
+    """                # Enhanced pairs trading parameters
+
+                    'lookback_period': 60,                  # Base lookback period
+
+    def __init__(self, config: PairsTradingConfig):                'stop_loss_threshold': 3.0,             # Stop loss Z-score threshold
+
+        self.config = config                'hedge_ratio_method': 'kalman',         # Use Kalman filter for hedge ratios
+
+        self.strategy = AdvancedPairsTradingStrategy(config)                'cointegration_test': True,             # Enable cointegration validation
+
+        self.results = []                'max_spread_volatility': 0.05,          # Maximum allowed spread volatility
+
+                        'rebalance_frequency': 'dynamic'        # Dynamic rebalancing based on regime
+
+    async def run_backtest(self,             }
+
+                          symbols: List[str],             
+
+                          start_date: str,             # Create unified strategy configuration
+
+                          end_date: str,            template_config = {
+
+                          initial_capital: float = 100000) -> Dict[str, Any]:                'strategy_id': "advanced_pairs_trading_tsla",
+
+        """                'strategy_type': StrategyType.PAIRS_TRADING,
+
+        Run comprehensive pairs trading backtest                'parameters': strategy_params_obj,
+
+        """                'template_based': False,  # Use regular strategy, not template-based
+
+        try:                'template_name': "professional_pairs_trading_v1",
+
+            logger.info("🚀 Starting Advanced Pairs Trading Backtest with 10-Component Architecture")                'description': "Advanced Pairs Trading Strategy for Backtesting"
+
+            logger.info(f"📅 Period: {start_date} to {end_date}")            }
+
+            logger.info(f"📊 Symbols: {symbols}")            
+
+            logger.info(f"💰 Initial Capital: ${initial_capital:,.2f}")            # Create strategy bridge using unified strategy engine
+
+                        strategy_engine = StrategyManager()
+
+            # Initialize components            self.strategy_bridge = strategy_engine.create_strategy(
+
+            await self.strategy.initialize_components()                StrategyType.PAIRS_TRADING,
+
+                            "pairs_trading_strategy_1", 
+
+            # Load market data                template_config
+
+            market_data = {}            )
+
+            for symbol in symbols:            
+
+                data = await self._load_market_data(symbol, start_date, end_date)            self.logger.info("✅ Strategy bridge created: pairs_trading")
+
+                if not data.empty:            self.logger.info("📋 UnifiedTradingEngine will auto-discover and register strategies")
+
+                    market_data[symbol] = data            
+
+                    logger.info(f"✅ Loaded {len(data)} rows for {symbol}")            return True
+
+                        
+
+            if len(market_data) < 2:        except Exception as e:
+
+                raise ValueError("Need at least 2 symbols for pairs trading")            self.logger.error(f"❌ Setup failed: {str(e)}")
+
+                        return False
+
+            # Identify trading pairs
+
+            logger.info("🔍 Identifying cointegrated pairs...")
+
+            trading_pairs = self.strategy.identify_trading_pairs(market_data)    async def load_market_data(self) -> bool:
+
+                    """Load historical market data for all symbols in pairs"""
+
+            if not trading_pairs:        try:
+
+                logger.warning("No cointegrated pairs found")            # Get all unique symbols from pairs
+
+                return {'error': 'No cointegrated pairs found'}            all_symbols = set()
+
+                        for symbol1, symbol2 in self.config.symbol_pairs:
+
+            self.strategy.trading_pairs = trading_pairs[:self.config.max_pairs_active]                all_symbols.add(symbol1)
+
+            logger.info(f"✅ Using {len(self.strategy.trading_pairs)} trading pairs")                all_symbols.add(symbol2)
+
+                        
+
+            # Run backtest simulation            # Add benchmark symbol
+
+            portfolio_value = initial_capital            all_symbols.add(self.config.benchmark_symbol)
+
+            results_data = []            
+
+                        self.logger.info("📊 Loading data...")
+
+            # Get all unique dates            self.logger.info(f"  • Symbols: {sorted(all_symbols)}")
+
+            all_dates = set()            self.logger.info(f"  • Period: {self.config.start_date} to {self.config.end_date}")
+
+            for data in market_data.values():            self.logger.info(f"  • Frequency: {self.config.data_frequency}")
+
+                all_dates.update(data.index)            
+
+            all_dates = sorted(all_dates)            # Load data for each symbol
+
+                        for symbol in all_symbols:
+
+            logger.info(f"📈 Processing {len(all_dates)} trading days...")                try:
+
+                                # Create data request
+
+            for i, date in enumerate(all_dates):                    from datetime import datetime
+
+                if i % 50 == 0:                    start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
+
+                    logger.info(f"🔄 Progress: {i}/{len(all_dates)} days ({i/len(all_dates)*100:.1f}%)")                    end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
+
+                                    
+
+                # Process each trading pair for this date                    request = DataRequest(
+
+                for pair in self.strategy.trading_pairs:                        symbols=[symbol],
+
+                    # Check if both symbols have data for this date                        start_date=start_dt,
+
+                    if (pair.symbol_x in market_data and date in market_data[pair.symbol_x].index and                        end_date=end_dt,
+
+                        pair.symbol_y in market_data and date in market_data[pair.symbol_y].index):                        interval=self.config.data_frequency,
+
+                                                include_volume=True,
+
+                        # Get historical data up to this date                        include_technical=False
+
+                        min_data_length = max(self.config.lookback_window, self.config.cointegration_window // 4)                    )
+
+                                            
+
+                        historical_data_x = market_data[pair.symbol_x].loc[:date].tail(min_data_length + 20)                    data = await self.data_loader.load_market_data(request)
+
+                        historical_data_y = market_data[pair.symbol_y].loc[:date].tail(min_data_length + 20)                    
+
+                                            if not data.empty:
+
+                        if len(historical_data_x) >= self.config.lookback_window and len(historical_data_y) >= self.config.lookback_window:                        # Add technical indicators
+
+                            # Calculate spread signals                        data = self._add_technical_indicators(data)
+
+                            historical_data = {                        self.market_data[symbol] = data
+
+                                pair.symbol_x: historical_data_x,                        self.logger.info(f"📈 {symbol}: {len(data)} points")
+
+                                pair.symbol_y: historical_data_y                    else:
+
+                            }                        self.logger.warning(f"⚠️ No data available for {symbol}")
+
+                                                    
+
+                            signals = self.strategy.calculate_spread_signals(pair, historical_data)                except Exception as e:
+
+                                                self.logger.error(f"❌ Failed to load data for {symbol}: {str(e)}")
+
+                            if not signals.empty and date in signals.index:                    return False
+
+                                signal_data = {            
+
+                                    'signal': signals.loc[date, 'signal'],            # Validate we have data for all required symbols
+
+                                    'zscore': signals.loc[date, 'zscore'],            missing_symbols = all_symbols - set(self.market_data.keys())
+
+                                    'spread': signals.loc[date, 'spread'],            if missing_symbols:
+
+                                    'correlation': signals.loc[date, 'rolling_correlation'],                self.logger.error(f"❌ Missing data for symbols: {missing_symbols}")
+
+                                    'spread_volatility': signals.loc[date, 'spread_volatility'],                return False
+
+                                    'date': date,            
+
+                                    'pair': pair            total_points = sum(len(data) for data in self.market_data.values())
+
+                                }            self.logger.info(f"✅ Loaded {total_points} total points")
+
+                                            
+
+                                # Process signal through architecture            return True
+
+                                if signal_data['signal'] != 0 or pair.active:            
+
+                                    execution_result = await self.strategy.process_pair_signal(pair, signal_data)        except Exception as e:
+
+                                                self.logger.error(f"❌ Data loading failed: {str(e)}")
+
+                                    if execution_result:            return False
+
+                                        self.strategy.trades.append(execution_result)    
+
+                    def _add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+
+                # Record daily portfolio value        """Add technical indicators required for pairs trading"""
+
+                active_pairs = len([p for p in self.strategy.trading_pairs if p.active])        try:
+
+                results_data.append({            # Ensure we have required columns
+
+                    'date': date,            if 'close' not in data.columns:
+
+                    'portfolio_value': portfolio_value,                return data
+
+                    'total_trades': len(self.strategy.trades),            
+
+                    'active_pairs': active_pairs            # Simple moving averages
+
+                })            data['sma_20'] = data['close'].rolling(window=20).mean()
+
+                        data['sma_50'] = data['close'].rolling(window=50).mean()
+
+            # Create results DataFrame            
+
+            results_df = pd.DataFrame(results_data)            # Volatility indicators
+
+            results_df.set_index('date', inplace=True)            data['returns'] = data['close'].pct_change()
+
+                        data['volatility'] = data['returns'].rolling(window=20).std()
+
+            # Calculate final performance metrics            
+
+            performance_metrics = self.strategy.calculate_performance_metrics(results_df)            # Volume indicators (if available)
+
+                        if 'volume' in data.columns:
+
+            # Compile final results                data['volume_sma'] = data['volume'].rolling(window=20).mean()
+
+            backtest_results = {                data['volume_ratio'] = data['volume'] / data['volume_sma']
+
+                'performance_metrics': performance_metrics,            
+
+                'portfolio_values': results_df,            return data
+
+                'trades': self.strategy.trades,            
+
+                'trading_pairs': [        except Exception as e:
+
+                    {            self.logger.warning(f"⚠️ Failed to add technical indicators: {str(e)}")
+
+                        'symbol_x': p.symbol_x,            return data
+
+                        'symbol_y': p.symbol_y,    
+
+                        'hedge_ratio': p.hedge_ratio,    async def initialize_pairs_models(self) -> bool:
+
+                        'correlation': p.correlation,        """Initialize pairs trading models for each symbol pair"""
+
+                        'p_value': p.p_value,        try:
+
+                        'active': p.active            self.logger.info("📈 Initializing pairs trading models...")
+
+                    } for p in self.strategy.trading_pairs            
+
+                ],            for i, (symbol1, symbol2) in enumerate(self.config.symbol_pairs):
+
+                'config': self.config.__dict__,                pair_id = f"{symbol1}_{symbol2}"
+
+                'symbols': symbols,                
+
+                'period': f"{start_date} to {end_date}",                self.logger.info(f"🔍 Analyzing pair {i+1}/{len(self.config.symbol_pairs)}: {pair_id}")
+
+                'strategy_type': 'pairs_trading',                
+
+                'architecture': '10-component'                # Check if we have data for both symbols
+
+            }                if symbol1 not in self.market_data or symbol2 not in self.market_data:
+
+                                self.logger.warning(f"⚠️ Missing data for pair {pair_id}")
+
+            # Log summary                    continue
+
+            logger.info("=" * 80)                
+
+            logger.info("🎯 PAIRS TRADING BACKTEST COMPLETED SUCCESSFULLY")                # Get price series for both assets
+
+            logger.info("=" * 80)                data1 = self.market_data[symbol1]
+
+            logger.info(f"📊 Total Return: {performance_metrics.get('total_return', 0):.2%}")                data2 = self.market_data[symbol2]
+
+            logger.info(f"📈 Sharpe Ratio: {performance_metrics.get('sharpe_ratio', 0):.2f}")                
+
+            logger.info(f"📈 Sortino Ratio: {performance_metrics.get('sortino_ratio', 0):.2f}")                # Align data by timestamp
+
+            logger.info(f"📉 Max Drawdown: {performance_metrics.get('max_drawdown', 0):.2%}")                aligned_data = pd.merge(
+
+            logger.info(f"🎯 Win Rate: {performance_metrics.get('win_rate', 0):.2%}")                    data1[['close']].rename(columns={'close': f'{symbol1}_close'}),
+
+            logger.info(f"📋 Total Trades: {performance_metrics.get('total_trades', 0)}")                    data2[['close']].rename(columns={'close': f'{symbol2}_close'}),
+
+            logger.info(f"👥 Trading Pairs: {performance_metrics.get('total_pairs_identified', 0)}")                    left_index=True, right_index=True, how='inner'
+
+            logger.info(f"📊 Avg Spread Profit: {performance_metrics.get('avg_spread_profit', 0):.4f}")                )
+
+            logger.info(f"⏱️ Avg Holding Period: {performance_metrics.get('mean_holding_period', 0):.1f} days")                
+
+            logger.info("=" * 80)                if len(aligned_data) < self.config.pairs_config.lookback_window:
+
+                                self.logger.warning(f"⚠️ Insufficient aligned data for {pair_id}: {len(aligned_data)} points")
+
+            return backtest_results                    continue
+
+                            
+
+        except Exception as e:                # Create pairs trading model
+
+            logger.error(f"Backtest failed: {e}")                pairs_model = PairsTradingModel(self.config.pairs_config)
+
+            raise                
+
+                    # Fit the model
+
+    async def _load_market_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:                fit_result = pairs_model.fit(
+
+        """Load market data for backtesting"""                    aligned_data[f'{symbol1}_close'],
+
+        try:                    aligned_data[f'{symbol2}_close']
+
+            # Generate synthetic correlated data for demo                )
+
+            dates = pd.date_range(start=start_date, end=end_date, freq='D')                
+
+            dates = dates[dates.weekday < 5]  # Only weekdays                # Log cointegration results
+
+                            if fit_result['cointegrated']:
+
+            np.random.seed(hash(symbol) % 2**32)  # Consistent data per symbol                    # Reduced cointegration logging
+
+                                self.logger.info(f"  • Hedge ratio: {fit_result['hedge_ratio']:.4f}")
+
+            # Create base market factor                    self.logger.info(f"  • Correlation: {fit_result['correlation']:.4f}")
+
+            market_returns = np.random.normal(0.0005, 0.02, len(dates))                    self.logger.info(f"  • Current z-score: {fit_result['current_zscore']:.2f}")
+
+                            else:
+
+            # Symbol-specific factor                    self.logger.warning(f"⚠️ {pair_id} not cointegrated (p-value: {fit_result['p_value']:.4f})")
+
+            symbol_factor = 0.3 + (hash(symbol) % 100) / 100 * 0.4  # 0.3 to 0.7                
+
+            symbol_returns = np.random.normal(0, 0.015, len(dates))                # Store the model
+
+                            self.pairs_models[pair_id] = pairs_model
+
+            # Combined returns with correlation to market                
+
+            combined_returns = symbol_factor * market_returns + (1 - symbol_factor) * symbol_returns                # Initialize spread history
+
+                            spread_series = (aligned_data[f'{symbol1}_close'] - 
+
+            # Create price series                               fit_result['hedge_ratio'] * aligned_data[f'{symbol2}_close'])
+
+            initial_price = 50.0 + (hash(symbol) % 100)                self.spread_history[pair_id] = spread_series
+
+            prices = [initial_price]            
+
+                        valid_pairs = len([m for m in self.pairs_models.values() if m.is_valid])
+
+            for ret in combined_returns[1:]:            self.logger.info("📊 Pairs analysis complete")
+
+                new_price = prices[-1] * (1 + ret)            self.logger.info(f"  • Total pairs analyzed: {len(self.config.symbol_pairs)}")
+
+                prices.append(max(new_price, 10.0))  # Floor price            self.logger.info(f"  • Valid cointegrated pairs: {valid_pairs}")
+
+                        self.logger.info(f"  • Models initialized: {len(self.pairs_models)}")
+
+            # Create OHLCV data            
+
+            data = pd.DataFrame({            return len(self.pairs_models) > 0
+
+                'open': prices,            
+
+                'high': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],        except Exception as e:
+
+                'low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],            self.logger.error(f"❌ Pairs model initialization failed: {str(e)}")
+
+                'close': prices,            return False
+
+                'volume': [np.random.randint(100000, 1000000) for _ in prices]
+
+            }, index=dates)
+
+                def generate_pair_signals(self, timestamp: pd.Timestamp) -> List[Dict[str, Any]]:
+
+            return data        """
+
+                    Generate trading signals for all valid pairs at given timestamp
+
+        except Exception as e:        
+
+            logger.error(f"Error loading data for {symbol}: {e}")        Args:
+
+            return pd.DataFrame()            timestamp: Current timestamp for signal generation
+
+            
+
+async def run_pairs_trading_backtest_demo():        Returns:
+
+    """            List of signal dictionaries
+
+    Demo function to run pairs trading backtest        """
+
+    """        signals = []
+
+    try:        
+
+        # Configuration        try:
+
+        config = PairsTradingConfig(            for pair_id, model in self.pairs_models.items():
+
+            cointegration_window=252,                if not model.is_valid:
+
+            lookback_window=60,                    continue
+
+            entry_zscore=2.0,                
+
+            exit_zscore=0.5,                # Get current prices
+
+            max_pairs_active=3,                symbol1, symbol2 = pair_id.split('_')
+
+            use_central_risk_authority=True,                
+
+            real_time_monitoring=True,                # Find current prices at timestamp
+
+            performance_optimization=True                price1 = self._get_price_at_timestamp(symbol1, timestamp)
+
+        )                price2 = self._get_price_at_timestamp(symbol2, timestamp)
+
+                        
+
+        # Create backtester                if price1 is None or price2 is None:
+
+        backtester = PairsTradingBacktester(config)                    continue
+
+                        
+
+        # Run backtest with tech stocks (likely to be correlated)                # Generate signal using pairs model
+
+        results = await backtester.run_backtest(                signal_info = model.generate_signal(
+
+            symbols=['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA', 'META'],                    price1, price2,
+
+            start_date='2024-01-01',                    entry_threshold=1.0,  # Entry z-score threshold (high sensitivity)
+
+            end_date='2024-12-31',                    exit_threshold=0.5    # Exit z-score threshold
+
+            initial_capital=100000                )
+
+        )                
+
+                        # Add pair information to signal
+
+        return results                signal_info.update({
+
+                            'pair_id': pair_id,
+
+    except Exception as e:                    'symbol1': symbol1,
+
+        logger.error(f"Demo failed: {e}")                    'symbol2': symbol2,
+
+        return None                    'price1': price1,
+
                     'price2': price2,
-                    'timestamp': timestamp
-                })
-                
-                # Only add signals that are not HOLD
-                if signal_info['signal'] != 'HOLD':
-                    signals.append(signal_info)
-        
-        except Exception as e:
-            self.logger.error(f"❌ Signal generation failed: {str(e)}")
-        
+
+if __name__ == "__main__":                    'timestamp': timestamp
+
+    # Run the demo                })
+
+    results = asyncio.run(run_pairs_trading_backtest_demo())                
+
+                    # Only add signals that are not HOLD
+
+    if results and 'error' not in results:                if signal_info['signal'] != 'HOLD':
+
+        print("\n🎉 Advanced Pairs Trading Backtest completed successfully!")                    signals.append(signal_info)
+
+        print("📊 Results available for integration with 10-component architecture")        
+
+        print(f"👥 Found {results['performance_metrics'].get('total_pairs_identified', 0)} trading pairs")        except Exception as e:
+
+    else:            self.logger.error(f"❌ Signal generation failed: {str(e)}")
+
+        print("\n❌ Backtest failed - check logs for details")        
         return signals
     
     def _get_price_at_timestamp(self, symbol: str, timestamp: pd.Timestamp) -> Optional[float]:

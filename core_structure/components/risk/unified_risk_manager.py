@@ -31,7 +31,8 @@ from abc import ABC, abstractmethod
 
 # Import regime engine
 try:
-    from ...regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
+    from ...interfaces.regime_interfaces import IRegimeSubscriber, RegimeState, RegimeTransition
+    from ...regime_engine import UnifiedRegimeEngine
     REGIME_ENGINE_AVAILABLE = True
 except ImportError:
     REGIME_ENGINE_AVAILABLE = False

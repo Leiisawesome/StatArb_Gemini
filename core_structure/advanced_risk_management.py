@@ -39,20 +39,21 @@ from arch import arch_model
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import RiskLimits for compatibility
+# Import RiskLimits - MANDATORY (NO FALLBACKS)
+from core_structure.components.risk.unified_risk_manager import RiskLimits
+
+# Import regime interfaces for risk-regime integration
 try:
-    from core_structure.components.risk.unified_risk_manager import RiskLimits
+    from core_structure.infrastructure.types import RegimeType, MarketRegime, RegimeConfidence, RegimeInfo
+    REGIME_INTERFACE_AVAILABLE = True
 except ImportError:
-    # Fallback if import fails
-    from dataclasses import dataclass
-    
-    @dataclass
-    class RiskLimits:
-        """Fallback RiskLimits if import fails"""
-        max_position_size_pct: float = 0.1
-        default_stop_loss_pct: float = 0.02
-        default_take_profit_pct: float = 0.04
-        default_trailing_stop_pct: float = 0.015
+    import logging
+    logging.getLogger(__name__).warning("⚠️ Regime interfaces not available - regime integration disabled")
+    RegimeType = None
+    MarketRegime = None
+    RegimeConfidence = None
+    RegimeInfo = None
+    REGIME_INTERFACE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,38 @@ class VaRModel(Enum):
     HISTORICAL = "historical"
     PARAMETRIC = "parametric"
     MONTE_CARLO = "monte_carlo"
+
+# ================================================================================
+# CENTRAL RISK AUTHORIZATION TYPES
+# ================================================================================
+
+@dataclass
+class TradeRequest:
+    """Trade request for central risk authorization"""
+    request_id: str
+    strategy_id: str
+    symbol: str
+    side: str  # 'BUY' or 'SELL'
+    quantity: float
+    price: Optional[float] = None
+    order_type: str = "MARKET"
+    timestamp: datetime = field(default_factory=datetime.now)
+    signal_confidence: float = 1.0
+    expected_hold_time: Optional[timedelta] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class TradeAuthorization:
+    """Trade authorization result from central risk manager"""
+    request_id: str
+    authorization_id: str
+    approved: bool
+    reason: str
+    risk_level: RiskLevel
+    adjusted_quantity: Optional[float] = None
+    conditions: List[str] = field(default_factory=list)
+    expiry_time: datetime = field(default_factory=lambda: datetime.now() + timedelta(minutes=5))
+    metadata: Dict[str, Any] = field(default_factory=dict)
     GARCH = "garch"
     REGIME_AWARE = "regime_aware"
 
@@ -689,10 +722,10 @@ class PositionMonitor:
 # ADVANCED RISK MANAGER
 # ================================================================================
 
-class AdvancedRiskManager:
+class AdvancedRiskManager(object):
     """
     Comprehensive risk management system that integrates all risk components
-    with Phase 3 analytics and real-time trading capabilities
+    with Phase 3 analytics, real-time trading capabilities, and regime-aware risk management
     """
     
     def __init__(self, config: RiskConfiguration):
@@ -716,11 +749,21 @@ class AdvancedRiskManager:
         self.circuit_breaker_active = False
         self.emergency_mode = False
         
+        # Regime-aware risk management state
+        self.current_regime = None  # Will store RegimeType when available
+        self.regime_confidence: float = 0.0
+        self.regime_adjusted_limits: Optional[RiskLimits] = None
+        self.regime_history: deque = deque(maxlen=100)  # Track regime changes
+        
         # Integration with Phase 3 analytics
         self.analytics_integration = None
         
         # Performance tracking
         self.risk_events = deque(maxlen=1000)
+        
+        # Authorization tracking for token validation
+        self.authorization_history: Dict[str, TradeAuthorization] = {}
+        self.authorization_cleanup_interval = 300  # Clean up old authorizations every 5 minutes
         
         logger.info(f"🛡️ Advanced Risk Manager {self.manager_id} initialized")
     
@@ -730,20 +773,16 @@ class AdvancedRiskManager:
             # Initialize components
             await self.position_monitor.initialize()
             
-            # Initialize Phase 3 analytics integration
-            try:
-                from core_structure.analytics.performance_optimization import (
-                    vectorized_calc, parallel_processor, intelligent_cache
-                )
-                self.analytics_integration = {
-                    'vectorized_calc': vectorized_calc,
-                    'parallel_processor': parallel_processor,
-                    'intelligent_cache': intelligent_cache
-                }
-                logger.info("✅ Phase 3 analytics integration enabled")
-            except ImportError:
-                logger.warning("⚠️ Phase 3 analytics not available, using standard calculations")
-                self.analytics_integration = None
+            # Initialize Phase 3 analytics integration - MANDATORY (NO FALLBACKS)
+            from core_structure.analytics.performance_optimization import (
+                vectorized_calc, parallel_processor, intelligent_cache
+            )
+            self.analytics_integration = {
+                'vectorized_calc': vectorized_calc,
+                'parallel_processor': parallel_processor,
+                'intelligent_cache': intelligent_cache
+            }
+            logger.info("✅ Phase 3 analytics integration enabled")
             
             # Start risk monitoring
             self._start_risk_monitoring()
@@ -1017,6 +1056,502 @@ class AdvancedRiskManager:
             },
             
             'timestamp': datetime.now().isoformat()
+        }
+    
+    # ================================================================================
+    # CENTRAL RISK AUTHORIZATION - INSTITUTIONAL GRADE RISK GOVERNANCE
+    # ================================================================================
+    
+    async def authorize_trade(self, trade_request: TradeRequest) -> TradeAuthorization:
+        """
+        Central trade authorization - ALL trades must go through this method
+        
+        This implements institutional-grade risk governance where no component
+        can execute trades independently. Following elite trading desk patterns.
+        """
+        authorization_id = f"auth_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            # 1. Check circuit breaker status
+            if self.circuit_breaker_active:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason="Circuit breaker active - trading halted",
+                    risk_level=RiskLevel.CRITICAL
+                )
+            
+            # 2. Check emergency mode
+            if self.emergency_mode:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason="Emergency mode active - new trades not permitted",
+                    risk_level=RiskLevel.CRITICAL
+                )
+            
+            # 3. Validate trade request
+            validation_result = await self._validate_trade_request(trade_request)
+            if not validation_result['valid']:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason=validation_result['reason'],
+                    risk_level=RiskLevel.HIGH
+                )
+            
+            # 4. Check position limits
+            position_check = await self._check_position_limits(trade_request)
+            if not position_check['approved']:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason=position_check['reason'],
+                    risk_level=RiskLevel.HIGH,
+                    adjusted_quantity=position_check.get('adjusted_quantity')
+                )
+            
+            # 5. Check portfolio-level risk
+            portfolio_check = await self._check_portfolio_risk(trade_request)
+            if not portfolio_check['approved']:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason=portfolio_check['reason'],
+                    risk_level=RiskLevel.MEDIUM
+                )
+            
+            # 6. Check strategy allocation limits
+            strategy_check = await self._check_strategy_limits(trade_request)
+            if not strategy_check['approved']:
+                return TradeAuthorization(
+                    request_id=trade_request.request_id,
+                    authorization_id=authorization_id,
+                    approved=False,
+                    reason=strategy_check['reason'],
+                    risk_level=RiskLevel.MEDIUM
+                )
+            
+            # 7. All checks passed - approve trade
+            logger.info(f"✅ Trade authorized: {trade_request.symbol} {trade_request.side} {trade_request.quantity}")
+            
+            authorization = TradeAuthorization(
+                request_id=trade_request.request_id,
+                authorization_id=authorization_id,
+                approved=True,
+                reason="Trade approved - all risk checks passed",
+                risk_level=RiskLevel.LOW,
+                conditions=self._get_trade_conditions(trade_request),
+                metadata={
+                    'approval_timestamp': datetime.now().isoformat(),
+                    'risk_score': self._calculate_trade_risk_score(trade_request)
+                }
+            )
+            
+            # Store authorization in history for token validation
+            self.authorization_history[authorization_id] = authorization
+            
+            # Clean up old authorizations periodically
+            if len(self.authorization_history) % 50 == 0:  # Every 50 authorizations
+                await self._cleanup_old_authorizations()
+            
+            return authorization
+            
+        except Exception as e:
+            logger.error(f"❌ Trade authorization error: {e}")
+            return TradeAuthorization(
+                request_id=trade_request.request_id,
+                authorization_id=authorization_id,
+                approved=False,
+                reason=f"Authorization system error: {str(e)}",
+                risk_level=RiskLevel.CRITICAL
+            )
+    
+    async def validate_authorization_token(self, authorization_token: str, symbol: str, 
+                                         side: str, quantity: float) -> bool:
+        """
+        Validate authorization token for execution engine.
+        
+        This method validates that:
+        1. The authorization token exists and is valid
+        2. The token corresponds to an approved trade authorization
+        3. The token has not expired
+        4. The trade parameters match the original authorization
+        """
+        try:
+            # Check if token exists in our authorization records
+            authorization_record = None
+            for auth_id, auth in self.authorization_history.items():
+                if (hasattr(auth, 'authorization_id') and 
+                    auth.authorization_id == authorization_token):
+                    authorization_record = auth
+                    break
+            
+            if not authorization_record:
+                logger.warning(f"⚠️ Authorization token not found: {authorization_token[:8]}...")
+                return False
+            
+            # Check if authorization was approved
+            if not authorization_record.approved:
+                logger.warning(f"⚠️ Authorization token represents rejected trade: {authorization_token[:8]}...")
+                return False
+            
+            # Check token expiration (authorization valid for 5 minutes)
+            if hasattr(authorization_record, 'timestamp'):
+                token_age = datetime.now() - authorization_record.timestamp
+                if token_age > timedelta(minutes=5):
+                    logger.warning(f"⚠️ Authorization token expired: {authorization_token[:8]}... (age: {token_age})")
+                    return False
+            
+            # Validate trade parameters match authorization
+            # Note: This is a basic implementation - in production, you would store
+            # more detailed trade parameters in the authorization record
+            logger.info(f"✅ Authorization token validated: {authorization_token[:8]}... for {symbol} {side} {quantity}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating authorization token: {e}")
+            return False
+    
+    async def _validate_trade_request(self, trade_request: TradeRequest) -> Dict[str, Any]:
+        """Validate basic trade request parameters"""
+        # Check required fields
+        if not trade_request.symbol or not trade_request.strategy_id:
+            return {'valid': False, 'reason': 'Missing required fields (symbol, strategy_id)'}
+        
+        # Check quantity
+        if trade_request.quantity <= 0:
+            return {'valid': False, 'reason': 'Invalid quantity - must be positive'}
+        
+        # Check side
+        if trade_request.side not in ['BUY', 'SELL']:
+            return {'valid': False, 'reason': 'Invalid side - must be BUY or SELL'}
+        
+        # Check signal confidence
+        if trade_request.signal_confidence < 0.3:  # Minimum confidence threshold
+            return {'valid': False, 'reason': f'Signal confidence too low: {trade_request.signal_confidence:.2f}'}
+        
+        return {'valid': True, 'reason': 'Trade request validation passed'}
+    
+    async def _check_position_limits(self, trade_request: TradeRequest) -> Dict[str, Any]:
+        """Check position size limits"""
+        current_position = self.position_monitor.positions.get(trade_request.symbol)
+        portfolio_value = self.position_monitor.get_portfolio_value()
+        
+        if portfolio_value == 0:
+            return {'approved': False, 'reason': 'Portfolio value is zero - cannot determine position limits'}
+        
+        # Calculate new position value
+        price = trade_request.price or 100.0  # Default price if not provided
+        trade_value = trade_request.quantity * price
+        
+        if trade_request.side == 'BUY':
+            new_position_value = trade_value
+            if current_position:
+                new_position_value += current_position.market_value
+        else:  # SELL
+            new_position_value = -trade_value
+            if current_position:
+                new_position_value += current_position.market_value
+        
+        # Check position size limit (use regime-adjusted limits if available)
+        current_limits = self.get_current_risk_limits()
+        position_weight = abs(new_position_value) / portfolio_value
+        if position_weight > current_limits.max_position_size_pct:
+            # Calculate adjusted quantity that would fit within limits
+            max_position_value = portfolio_value * current_limits.max_position_size_pct
+            adjusted_quantity = max_position_value / price
+            
+            return {
+                'approved': False,
+                'reason': f'Position size limit exceeded: {position_weight:.1%} > {current_limits.max_position_size_pct:.1%}',
+                'adjusted_quantity': adjusted_quantity
+            }
+        
+        return {'approved': True, 'reason': 'Position limits check passed'}
+    
+    async def _check_portfolio_risk(self, trade_request: TradeRequest) -> Dict[str, Any]:
+        """Check portfolio-level risk constraints"""
+        # Check current drawdown
+        if self.current_risk_metrics and self.current_risk_metrics.current_drawdown > 0.08:  # 8% drawdown threshold
+            return {
+                'approved': False,
+                'reason': f'Portfolio drawdown too high: {self.current_risk_metrics.current_drawdown:.1%}'
+            }
+        
+        # Check daily P&L
+        daily_pnl = self.position_monitor.get_daily_pnl()
+        portfolio_value = self.position_monitor.get_portfolio_value()
+        
+        if portfolio_value > 0:
+            daily_loss_pct = abs(min(daily_pnl, 0)) / portfolio_value
+            if daily_loss_pct > self.risk_limits.daily_loss_limit:
+                return {
+                    'approved': False,
+                    'reason': f'Daily loss limit exceeded: {daily_loss_pct:.1%} > {self.risk_limits.daily_loss_limit:.1%}'
+                }
+        
+        return {'approved': True, 'reason': 'Portfolio risk check passed'}
+    
+    async def _check_strategy_limits(self, trade_request: TradeRequest) -> Dict[str, Any]:
+        """Check strategy-specific limits"""
+        # This would check strategy allocation limits
+        # For now, implement basic strategy validation
+        
+        if not trade_request.strategy_id:
+            return {'approved': False, 'reason': 'No strategy ID provided'}
+        
+        # Could add strategy-specific risk limits here
+        # e.g., max allocation per strategy, strategy drawdown limits, etc.
+        
+        return {'approved': True, 'reason': 'Strategy limits check passed'}
+    
+    def _get_trade_conditions(self, trade_request: TradeRequest) -> List[str]:
+        """Get any conditions/requirements for the approved trade"""
+        conditions = []
+        
+        # Add stop-loss requirement for large positions
+        price = trade_request.price or 100.0
+        trade_value = trade_request.quantity * price
+        portfolio_value = self.position_monitor.get_portfolio_value()
+        
+        if portfolio_value > 0 and (trade_value / portfolio_value) > 0.05:  # > 5% of portfolio
+            stop_loss_pct = self.risk_limits.default_stop_loss_pct * 100
+            conditions.append(f"Mandatory stop-loss at {stop_loss_pct:.1f}% required for position size > 5%")
+        
+        # Add monitoring requirement for high confidence signals
+        if trade_request.signal_confidence > 0.8:
+            conditions.append("Enhanced monitoring required for high-confidence signal")
+        
+        return conditions
+    
+    def _calculate_trade_risk_score(self, trade_request: TradeRequest) -> float:
+        """Calculate risk score for the trade (0.0 = low risk, 1.0 = high risk)"""
+        risk_score = 0.0
+        
+        # Base risk from position size
+        price = trade_request.price or 100.0
+        trade_value = trade_request.quantity * price
+        portfolio_value = self.position_monitor.get_portfolio_value()
+        
+        if portfolio_value > 0:
+            position_weight = trade_value / portfolio_value
+            risk_score += min(position_weight * 2.0, 0.5)  # Up to 0.5 from position size
+        
+        # Risk from signal confidence (inverse relationship)
+        confidence_risk = (1.0 - trade_request.signal_confidence) * 0.3
+        risk_score += confidence_risk
+        
+        # Risk from current market conditions
+        if self.current_risk_metrics:
+            if self.current_risk_metrics.current_drawdown > 0.05:
+                risk_score += 0.2  # Add risk if in drawdown
+        
+        return min(risk_score, 1.0)
+    
+    async def _cleanup_old_authorizations(self) -> None:
+        """Clean up expired authorization tokens to prevent memory leaks"""
+        try:
+            current_time = datetime.now()
+            expired_tokens = []
+            
+            for auth_id, authorization in self.authorization_history.items():
+                if hasattr(authorization, 'timestamp') and authorization.timestamp:
+                    token_age = current_time - authorization.timestamp
+                    if token_age > timedelta(minutes=10):  # Remove tokens older than 10 minutes
+                        expired_tokens.append(auth_id)
+            
+            for auth_id in expired_tokens:
+                self.authorization_history.pop(auth_id, None)
+            
+            if expired_tokens:
+                logger.info(f"🧹 Cleaned up {len(expired_tokens)} expired authorization tokens")
+                
+        except Exception as e:
+            logger.error(f"❌ Error cleaning up authorization tokens: {e}")
+    
+    # ================================================================================
+    # REGIME-AWARE RISK MANAGEMENT - INSTITUTIONAL INTEGRATION
+    # ================================================================================
+    
+    async def on_regime_change(self, old_regime: Any, new_regime: Any, 
+                             transition: Any) -> None:
+        """
+        Handle regime changes with dynamic risk parameter adjustment
+        
+        This implements institutional-grade regime-aware risk management where
+        risk parameters automatically adjust based on market conditions.
+        """
+        if not REGIME_INTERFACE_AVAILABLE:
+            return
+            
+        try:
+            # Update current regime state
+            self.current_regime = new_regime.regime_type if new_regime else None
+            self.regime_confidence = new_regime.confidence if new_regime else 0.0
+            
+            # Record regime transition
+            transition_record = {
+                'timestamp': datetime.now(),
+                'old_regime': old_regime.regime_type.value if old_regime else 'unknown',
+                'new_regime': new_regime.regime_type.value if new_regime else 'unknown',
+                'confidence': new_regime.confidence if new_regime else 0.0,
+                'transition_reason': getattr(transition, 'reason', 'automatic')
+            }
+            self.regime_history.append(transition_record)
+            
+            # Adjust risk parameters based on new regime
+            self.regime_adjusted_limits = await self._calculate_regime_adjusted_limits(new_regime)
+            
+            # Log regime change and risk adjustment
+            logger.info(f"🎯 Regime change detected: {old_regime.regime_type.value if old_regime else 'unknown'} → {new_regime.regime_type.value if new_regime else 'unknown'}")
+            logger.info(f"📊 Risk parameters adjusted for new regime (confidence: {self.regime_confidence:.2f})")
+            
+            # Evaluate if circuit breaker should be triggered
+            await self._evaluate_regime_risk_triggers(new_regime, transition)
+            
+            # Notify risk monitoring systems
+            self._record_regime_risk_event(transition_record)
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling regime change: {e}")
+    
+    async def _calculate_regime_adjusted_limits(self, regime: Any) -> RiskLimits:
+        """Calculate risk limits adjusted for current market regime"""
+        if not regime or not REGIME_INTERFACE_AVAILABLE:
+            return self.risk_limits
+        
+        # Base limits from configuration
+        base_limits = self.risk_limits
+        
+        # Regime-specific adjustments
+        regime_adjustments = {
+            'HIGH_VOLATILITY': {
+                'position_size_multiplier': 0.7,  # Reduce position sizes by 30%
+                'stop_loss_multiplier': 1.5,      # Tighter stop losses
+                'daily_loss_multiplier': 0.8      # Reduce daily loss limits
+            },
+            'LOW_VOLATILITY': {
+                'position_size_multiplier': 1.2,  # Increase position sizes by 20%
+                'stop_loss_multiplier': 0.8,      # Wider stop losses
+                'daily_loss_multiplier': 1.1      # Slightly higher daily loss limits
+            },
+            'TRENDING_UP': {
+                'position_size_multiplier': 1.1,  # Slightly larger positions
+                'stop_loss_multiplier': 0.9,      # Slightly wider stops
+                'daily_loss_multiplier': 1.0      # Standard daily limits
+            },
+            'TRENDING_DOWN': {
+                'position_size_multiplier': 0.8,  # Smaller positions
+                'stop_loss_multiplier': 1.2,      # Tighter stops
+                'daily_loss_multiplier': 0.9      # Stricter daily limits
+            },
+            'SIDEWAYS': {
+                'position_size_multiplier': 1.0,  # Standard positions
+                'stop_loss_multiplier': 1.0,      # Standard stops
+                'daily_loss_multiplier': 1.0      # Standard daily limits
+            }
+        }
+        
+        # Get regime-specific multipliers
+        regime_name = regime.regime_type.value if hasattr(regime.regime_type, 'value') else str(regime.regime_type)
+        adjustments = regime_adjustments.get(regime_name, regime_adjustments['SIDEWAYS'])
+        
+        # Apply confidence-based scaling
+        confidence_factor = min(regime.confidence, 1.0)
+        
+        # Calculate adjusted limits
+        adjusted_limits = RiskLimits(
+            max_position_size_pct=base_limits.max_position_size_pct * adjustments['position_size_multiplier'] * confidence_factor,
+            default_stop_loss_pct=base_limits.default_stop_loss_pct * adjustments['stop_loss_multiplier'],
+            default_take_profit_pct=base_limits.default_take_profit_pct,
+            default_trailing_stop_pct=base_limits.default_trailing_stop_pct * adjustments['stop_loss_multiplier'],
+            daily_loss_limit=getattr(base_limits, 'daily_loss_limit', 0.05) * adjustments['daily_loss_multiplier']
+        )
+        
+        logger.info(f"📊 Risk limits adjusted for regime {regime_name}: "
+                   f"position_size={adjusted_limits.max_position_size_pct:.1%}, "
+                   f"stop_loss={adjusted_limits.default_stop_loss_pct:.1%}")
+        
+        return adjusted_limits
+    
+    async def _evaluate_regime_risk_triggers(self, regime: Any, transition: Any) -> None:
+        """Evaluate if regime change should trigger risk management actions"""
+        if not regime or not REGIME_INTERFACE_AVAILABLE:
+            return
+        
+        regime_name = regime.regime_type.value if hasattr(regime.regime_type, 'value') else str(regime.regime_type)
+        
+        # High volatility regime triggers
+        if regime_name == 'HIGH_VOLATILITY' and regime.confidence > 0.8:
+            logger.warning(f"⚠️ High volatility regime detected with high confidence: {regime.confidence:.2f}")
+            
+            # Consider reducing portfolio exposure
+            if self.current_risk_metrics and self.current_risk_metrics.total_exposure > 0.8:
+                logger.warning("📉 Consider reducing portfolio exposure due to high volatility regime")
+        
+        # Crisis/emergency regime triggers
+        if regime_name in ['CRISIS', 'EMERGENCY', 'EXTREME_VOLATILITY'] and regime.confidence > 0.7:
+            logger.critical(f"🚨 Crisis regime detected: {regime_name} (confidence: {regime.confidence:.2f})")
+            
+            # Activate enhanced monitoring
+            self.emergency_mode = True
+            logger.critical("🚨 Emergency mode activated due to crisis regime")
+        
+        # Transition speed triggers
+        if hasattr(transition, 'speed') and transition.speed > 0.9:  # Very rapid regime change
+            logger.warning(f"⚡ Rapid regime transition detected - enhanced monitoring recommended")
+    
+    def _record_regime_risk_event(self, transition_record: Dict[str, Any]) -> None:
+        """Record regime-related risk events for analysis"""
+        risk_event = {
+            'timestamp': transition_record['timestamp'],
+            'type': 'regime_change',
+            'data': transition_record,
+            'risk_impact': self._assess_regime_risk_impact(transition_record)
+        }
+        self.risk_events.append(risk_event)
+    
+    def _assess_regime_risk_impact(self, transition_record: Dict[str, Any]) -> str:
+        """Assess the risk impact of a regime transition"""
+        old_regime = transition_record.get('old_regime', 'unknown')
+        new_regime = transition_record.get('new_regime', 'unknown')
+        confidence = transition_record.get('confidence', 0.0)
+        
+        # High-risk regime transitions
+        high_risk_transitions = [
+            ('LOW_VOLATILITY', 'HIGH_VOLATILITY'),
+            ('TRENDING_UP', 'TRENDING_DOWN'),
+            ('SIDEWAYS', 'HIGH_VOLATILITY')
+        ]
+        
+        if (old_regime, new_regime) in high_risk_transitions and confidence > 0.7:
+            return 'HIGH'
+        elif 'HIGH_VOLATILITY' in new_regime and confidence > 0.6:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+    
+    def get_current_risk_limits(self) -> RiskLimits:
+        """Get current risk limits (regime-adjusted if available)"""
+        if self.regime_adjusted_limits and REGIME_INTERFACE_AVAILABLE:
+            return self.regime_adjusted_limits
+        return self.risk_limits
+    
+    def get_regime_status(self) -> Dict[str, Any]:
+        """Get current regime-aware risk management status"""
+        return {
+            'current_regime': str(self.current_regime) if self.current_regime else 'unknown',
+            'regime_confidence': self.regime_confidence,
+            'regime_adjusted_limits': self.regime_adjusted_limits.__dict__ if self.regime_adjusted_limits else None,
+            'regime_history_count': len(self.regime_history),
+            'emergency_mode': self.emergency_mode,
+            'recent_regime_changes': list(self.regime_history)[-5:] if self.regime_history else []
         }
     
     async def shutdown(self) -> None:

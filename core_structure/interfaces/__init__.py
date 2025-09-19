@@ -11,6 +11,7 @@ extend from the base classes defined here.
 
 Components:
 - strategy_interfaces.py: Strategy interface definitions and base classes
+- regime_interfaces.py: Regime detection interfaces (to avoid circular imports)
 
 Integration:
 - Used by core_structure/strategies/ for unified strategy system
@@ -33,6 +34,15 @@ from .strategy_interfaces import (
     StrategyConfig
 )
 
+# Regime Interfaces (to avoid circular imports)
+from .regime_interfaces import (
+    RegimeType,
+    RegimeMetrics, 
+    RegimeState,
+    RegimeTransition,
+    IRegimeSubscriber
+)
+
 __all__ = [
     'StrategyInterface',
     'BaseStrategy',
@@ -41,5 +51,10 @@ __all__ = [
     'StrategyFactory',
     'StrategyType',
     'StrategyError',
-    'StrategyConfig'
+    'StrategyConfig',
+    'RegimeType',
+    'RegimeMetrics',
+    'RegimeState', 
+    'RegimeTransition',
+    'IRegimeSubscriber'
 ]

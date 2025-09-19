@@ -693,6 +693,9 @@ PredictiveMonitor = MonitoringAnalyticsEngine
 AnomalyDetector = MonitoringAnalyticsEngine
 MultiStrategyDashboard = MonitoringAnalyticsEngine
 
+# Create alias for backward compatibility  
+MonitoringAnalytics = MonitoringAnalyticsEngine
+
 # Convenience functions
 async def create_alert(severity: AlertSeverity, alert_type: AlertType, title: str, message: str, **kwargs) -> Alert:
     """Convenience function for creating alerts"""

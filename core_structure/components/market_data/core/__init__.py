@@ -27,48 +27,34 @@ from .data_feeds import (
 from .data_manager import DataManager
 from .data_validation_monitor import DataValidationMonitor
 
-# WebSocket diversification
-try:
-    from .websocket_diversification import (
-        WebSocketSource,
-        SourcePriority,
-        DataQuality,
-        SourceConfig,
-        SourceMetrics,
-        WebSocketMessage,
-        WebSocketSourceManager,
-        AlpacaWebSocketManager,
-        PolygonWebSocketManager,
-        WebSocketDiversificationManager,
-        create_websocket_diversification_manager
-    )
-    
-    from .websocket_integration import (
-        IntegrationConfig,
-        MarketDataUpdate,
-        WebSocketStrategyIntegration,
-        WebSocketPaperTradingIntegration,
-        create_websocket_integration
-    )
-    
-    WEBSOCKET_AVAILABLE = True
-    
-except ImportError:
-    WEBSOCKET_AVAILABLE = False
+# WebSocket diversification - MANDATORY (NO FALLBACKS)
+from ..websocket.websocket_diversification import (
+    WebSocketSource,
+    SourcePriority,
+    DataQuality,
+    SourceConfig,
+    SourceMetrics,
+    WebSocketMessage,
+    WebSocketSourceManager,
+    AlpacaWebSocketManager,
+    PolygonWebSocketManager,
+    WebSocketDiversificationManager,
+    create_websocket_diversification_manager
+)
 
-# ClickHouse integration
-try:
-    from .enhanced_clickhouse_loader import EnhancedClickHouseLoader
-    CLICKHOUSE_AVAILABLE = True
-except ImportError:
-    CLICKHOUSE_AVAILABLE = False
+from ..websocket.websocket_integration import (
+    IntegrationConfig,
+    MarketDataUpdate,
+    WebSocketStrategyIntegration,
+    WebSocketPaperTradingIntegration,
+    create_websocket_integration
+)
 
-# Backtesting data
-try:
-    from .backtesting_data_provider import BacktestingDataProvider
-    BACKTESTING_AVAILABLE = True
-except ImportError:
-    BACKTESTING_AVAILABLE = False
+# ClickHouse integration - MANDATORY (NO FALLBACKS)
+from .enhanced_clickhouse_loader import EnhancedClickHouseLoader
+
+# Backtesting data - MANDATORY (NO FALLBACKS)
+from .backtesting_data_provider import BacktestingDataProvider
 
 __all__ = [
     # Core data feeds
@@ -85,7 +71,7 @@ __all__ = [
     'DataManager',
     'DataValidationMonitor',
     
-    # WebSocket diversification (if available)
+    # WebSocket diversification
     'WebSocketSource',
     'SourcePriority',
     'DataQuality',
@@ -98,15 +84,16 @@ __all__ = [
     'WebSocketDiversificationManager',
     'create_websocket_diversification_manager',
     
-    # WebSocket integration (if available)
+    # WebSocket integration
     'IntegrationConfig',
     'MarketDataUpdate',
     'WebSocketStrategyIntegration',
     'WebSocketPaperTradingIntegration',
     'create_websocket_integration',
     
-    # Availability flags
-    'WEBSOCKET_AVAILABLE',
-    'CLICKHOUSE_AVAILABLE',
-    'BACKTESTING_AVAILABLE'
+    # ClickHouse integration
+    'EnhancedClickHouseLoader',
+    
+    # Backtesting data
+    'BacktestingDataProvider'
 ]

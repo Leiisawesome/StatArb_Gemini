@@ -8,6 +8,16 @@ All type definitions have been consolidated into the messaging system.
 This module now serves as a redirect to maintain backward compatibility.
 """
 
+from enum import Enum
+
+# Define MarketDataType that components expect
+class MarketDataType(Enum):
+    """Market data type enumeration for component compatibility"""
+    TICK = "tick"
+    BAR = "bar"
+    QUOTE = "quote"
+    TRADE = "trade"
+
 # Import all types from the consolidated messaging system
 from core_structure.infrastructure.messaging.messaging_system import (
     # Order Types
@@ -36,6 +46,9 @@ from core_structure.infrastructure.messaging.messaging_system import (
 )
 
 __all__ = [
+    # Market Data Types
+    'MarketDataType',
+    
     # Order Types
     'OrderType',
     'OrderSide', 

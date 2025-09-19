@@ -1,0 +1,1061 @@
+"""
+Analytics Engine - Metrics Calculator
+Advanced metrics calculation with risk-adjusted performance and statistical measures
+"""
+
+import logging
+import threading
+import asyncio
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+import time
+from collections import defaultdict, deque
+from abc import ABC, abstractmethod
+import json
+from scipy import stats
+from scipy.optimize import minimize
+from sklearn.preprocessing import StandardScaler
+import warnings
+
+warnings.filterwarnings('ignore')
+logger = logging.getLogger(__name__)
+
+
+class MetricCategory(Enum):
+    """Metric categories"""
+    RETURN = "return"
+    RISK = "risk"
+    RISK_ADJUSTED = "risk_adjusted"
+    DRAWDOWN = "drawdown"
+    DISTRIBUTION = "distribution"
+    TRADING = "trading"
+    BEHAVIORAL = "behavioral"
+    TAIL_RISK = "tail_risk"
+
+
+class MetricFrequency(Enum):
+    """Metric calculation frequencies"""
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    YEARLY = "yearly"
+    ROLLING = "rolling"
+
+
+class BenchmarkType(Enum):
+    """Benchmark types for relative metrics"""
+    MARKET_INDEX = "market_index"
+    SECTOR_INDEX = "sector_index"
+    PEER_GROUP = "peer_group"
+    RISK_FREE = "risk_free"
+    CUSTOM = "custom"
+
+
+@dataclass
+class MetricConfig:
+    """Metrics calculation configuration"""
+    # Risk-free rate
+    risk_free_rate: float = 0.02  # 2% annual
+    
+    # Calculation parameters
+    trading_days_per_year: int = 252
+    confidence_levels: List[float] = field(default_factory=lambda: [0.90, 0.95, 0.99])
+    
+    # Rolling window settings
+    rolling_windows: Dict[str, int] = field(default_factory=lambda: {
+        'short': 21,    # 1 month
+        'medium': 63,   # 3 months
+        'long': 252     # 1 year
+    })
+    
+    # VaR settings
+    var_methods: List[str] = field(default_factory=lambda: ['historical', 'parametric', 'monte_carlo'])
+    monte_carlo_simulations: int = 10000
+    
+    # Drawdown settings
+    drawdown_threshold: float = 0.05  # 5%
+    recovery_threshold: float = 0.95  # 95% recovery
+    
+    # Distribution analysis
+    enable_higher_moments: bool = True
+    enable_tail_analysis: bool = True
+    
+    # Benchmark settings
+    default_benchmark: str = "SPY"
+    
+    # Performance attribution
+    enable_factor_metrics: bool = True
+    factor_models: List[str] = field(default_factory=lambda: ['market', 'fama_french', 'carhart'])
+
+
+@dataclass
+class MetricResult:
+    """Individual metric calculation result"""
+    metric_name: str
+    value: float
+    category: MetricCategory
+    frequency: MetricFrequency
+    
+    # Calculation metadata
+    calculation_date: datetime = field(default_factory=datetime.now)
+    data_points: int = 0
+    confidence_level: Optional[float] = None
+    
+    # Statistical properties
+    standard_error: Optional[float] = None
+    confidence_interval: Optional[Tuple[float, float]] = None
+    
+    # Context
+    benchmark_value: Optional[float] = None
+    percentile_rank: Optional[float] = None
+    
+    # Quality indicators
+    is_significant: bool = False
+    quality_score: float = 0.0  # 0-1 score
+    
+    # Additional metadata
+    calculation_method: str = "standard"
+    notes: List[str] = field(default_factory=list)
+
+
+@dataclass
+class MetricsBundle:
+    """Collection of related metrics"""
+    bundle_name: str
+    category: MetricCategory
+    calculation_timestamp: datetime
+    
+    # Core metrics
+    metrics: Dict[str, MetricResult] = field(default_factory=dict)
+    
+    # Summary statistics
+    summary_stats: Dict[str, float] = field(default_factory=dict)
+    
+    # Rolling metrics
+    rolling_metrics: Dict[str, pd.Series] = field(default_factory=dict)
+    
+    # Comparative metrics
+    relative_metrics: Dict[str, float] = field(default_factory=dict)
+    
+    # Quality assessment
+    data_quality: float = 0.0
+    completeness: float = 0.0
+
+
+class ReturnMetricsCalculator:
+    """Return-based metrics calculator"""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def calculate_return_metrics(self, returns: pd.Series) -> Dict[str, MetricResult]:
+        """Calculate comprehensive return metrics"""
+        
+        metrics = {}
+        
+        if returns.empty:
+            return metrics
+        
+        # Basic return metrics
+        metrics['total_return'] = MetricResult(
+            metric_name='total_return',
+            value=(1 + returns).prod() - 1,
+            category=MetricCategory.RETURN,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns)
+        )
+        
+        # Annualized return
+        periods_per_year = self._get_periods_per_year(returns)
+        if len(returns) > 0:
+            annualized_return = (1 + metrics['total_return'].value) ** (periods_per_year / len(returns)) - 1
+            metrics['annualized_return'] = MetricResult(
+                metric_name='annualized_return',
+                value=annualized_return,
+                category=MetricCategory.RETURN,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(returns)
+            )
+        
+        # Arithmetic and geometric means
+        metrics['arithmetic_mean'] = MetricResult(
+            metric_name='arithmetic_mean',
+            value=returns.mean() * periods_per_year,
+            category=MetricCategory.RETURN,
+            frequency=MetricFrequency.YEARLY,
+            data_points=len(returns)
+        )
+        
+        if (returns > -1).all():  # Check for no -100% returns
+            geometric_mean = (1 + returns).prod() ** (1/len(returns)) - 1
+            metrics['geometric_mean'] = MetricResult(
+                metric_name='geometric_mean',
+                value=geometric_mean * periods_per_year,
+                category=MetricCategory.RETURN,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(returns)
+            )
+        
+        # Excess returns
+        excess_returns = returns - self.config.risk_free_rate / periods_per_year
+        metrics['excess_return'] = MetricResult(
+            metric_name='excess_return',
+            value=excess_returns.mean() * periods_per_year,
+            category=MetricCategory.RETURN,
+            frequency=MetricFrequency.YEARLY,
+            data_points=len(returns)
+        )
+        
+        return metrics
+    
+    def _get_periods_per_year(self, returns: pd.Series) -> float:
+        """Determine periods per year based on data frequency"""
+        
+        if len(returns) < 2:
+            return self.config.trading_days_per_year
+        
+        # Calculate average time difference
+        time_diffs = returns.index.to_series().diff().dropna()
+        avg_diff = time_diffs.mean()
+        
+        if avg_diff <= pd.Timedelta(days=1):
+            return self.config.trading_days_per_year  # Daily
+        elif avg_diff <= pd.Timedelta(weeks=1):
+            return 52  # Weekly
+        elif avg_diff <= pd.Timedelta(days=32):
+            return 12  # Monthly
+        else:
+            return 4  # Quarterly
+
+
+class RiskMetricsCalculator:
+    """Risk metrics calculator"""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def calculate_risk_metrics(self, returns: pd.Series) -> Dict[str, MetricResult]:
+        """Calculate comprehensive risk metrics"""
+        
+        metrics = {}
+        
+        if returns.empty:
+            return metrics
+        
+        periods_per_year = self._get_periods_per_year(returns)
+        
+        # Volatility
+        volatility = returns.std() * np.sqrt(periods_per_year)
+        metrics['volatility'] = MetricResult(
+            metric_name='volatility',
+            value=volatility,
+            category=MetricCategory.RISK,
+            frequency=MetricFrequency.YEARLY,
+            data_points=len(returns)
+        )
+        
+        # Downside volatility
+        downside_returns = returns[returns < 0]
+        if len(downside_returns) > 0:
+            downside_vol = downside_returns.std() * np.sqrt(periods_per_year)
+            metrics['downside_volatility'] = MetricResult(
+                metric_name='downside_volatility',
+                value=downside_vol,
+                category=MetricCategory.RISK,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(downside_returns)
+            )
+        
+        # Semi-deviation (downside deviation from mean)
+        mean_return = returns.mean()
+        semi_deviation = returns[returns < mean_return].std() * np.sqrt(periods_per_year)
+        metrics['semi_deviation'] = MetricResult(
+            metric_name='semi_deviation',
+            value=semi_deviation,
+            category=MetricCategory.RISK,
+            frequency=MetricFrequency.YEARLY,
+            data_points=len(returns[returns < mean_return])
+        )
+        
+        # Value at Risk
+        for confidence_level in self.config.confidence_levels:
+            for method in self.config.var_methods:
+                var_value = self._calculate_var(returns, confidence_level, method)
+                metrics[f'var_{int(confidence_level*100)}_{method}'] = MetricResult(
+                    metric_name=f'var_{int(confidence_level*100)}_{method}',
+                    value=var_value,
+                    category=MetricCategory.TAIL_RISK,
+                    frequency=MetricFrequency.DAILY,
+                    confidence_level=confidence_level,
+                    calculation_method=method,
+                    data_points=len(returns)
+                )
+        
+        # Conditional Value at Risk (Expected Shortfall)
+        for confidence_level in self.config.confidence_levels:
+            cvar_value = self._calculate_cvar(returns, confidence_level)
+            metrics[f'cvar_{int(confidence_level*100)}'] = MetricResult(
+                metric_name=f'cvar_{int(confidence_level*100)}',
+                value=cvar_value,
+                category=MetricCategory.TAIL_RISK,
+                frequency=MetricFrequency.DAILY,
+                confidence_level=confidence_level,
+                data_points=len(returns)
+            )
+        
+        return metrics
+    
+    def _get_periods_per_year(self, returns: pd.Series) -> float:
+        """Get periods per year"""
+        return self.config.trading_days_per_year  # Simplified
+    
+    def _calculate_var(self, returns: pd.Series, confidence_level: float, method: str) -> float:
+        """Calculate Value at Risk"""
+        
+        if returns.empty:
+            return 0.0
+        
+        if method == 'historical':
+            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
+        elif method == 'parametric':
+            return stats.norm.ppf(1 - confidence_level, returns.mean(), returns.std())
+        elif method == 'monte_carlo':
+            # Simplified Monte Carlo
+            np.random.seed(42)
+            simulated = np.random.normal(
+                returns.mean(), 
+                returns.std(), 
+                self.config.monte_carlo_simulations
+            )
+            return np.percentile(simulated, (1 - confidence_level) * 100)
+        else:
+            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
+    
+    def _calculate_cvar(self, returns: pd.Series, confidence_level: float) -> float:
+        """Calculate Conditional Value at Risk"""
+        
+        if returns.empty:
+            return 0.0
+        
+        var = self._calculate_var(returns, confidence_level, 'historical')
+        return returns[returns <= var].mean()
+
+
+class RiskAdjustedMetricsCalculator:
+    """Risk-adjusted metrics calculator"""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def calculate_risk_adjusted_metrics(
+        self, 
+        returns: pd.Series,
+        benchmark_returns: Optional[pd.Series] = None
+    ) -> Dict[str, MetricResult]:
+        """Calculate risk-adjusted metrics"""
+        
+        metrics = {}
+        
+        if returns.empty:
+            return metrics
+        
+        periods_per_year = self.config.trading_days_per_year
+        risk_free_rate = self.config.risk_free_rate / periods_per_year
+        
+        # Excess returns
+        excess_returns = returns - risk_free_rate
+        
+        # Sharpe Ratio
+        if returns.std() > 0:
+            sharpe_ratio = excess_returns.mean() / returns.std() * np.sqrt(periods_per_year)
+            metrics['sharpe_ratio'] = MetricResult(
+                metric_name='sharpe_ratio',
+                value=sharpe_ratio,
+                category=MetricCategory.RISK_ADJUSTED,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(returns)
+            )
+        
+        # Sortino Ratio
+        downside_returns = returns[returns < risk_free_rate]
+        if len(downside_returns) > 0 and downside_returns.std() > 0:
+            sortino_ratio = excess_returns.mean() / downside_returns.std() * np.sqrt(periods_per_year)
+            metrics['sortino_ratio'] = MetricResult(
+                metric_name='sortino_ratio',
+                value=sortino_ratio,
+                category=MetricCategory.RISK_ADJUSTED,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(returns)
+            )
+        
+        # Calmar Ratio
+        max_drawdown = self._calculate_max_drawdown(returns)
+        if max_drawdown > 0:
+            annual_return = returns.mean() * periods_per_year
+            calmar_ratio = annual_return / max_drawdown
+            metrics['calmar_ratio'] = MetricResult(
+                metric_name='calmar_ratio',
+                value=calmar_ratio,
+                category=MetricCategory.RISK_ADJUSTED,
+                frequency=MetricFrequency.YEARLY,
+                data_points=len(returns)
+            )
+        
+        # Information Ratio (if benchmark provided)
+        if benchmark_returns is not None:
+            aligned_returns, aligned_benchmark = returns.align(benchmark_returns, join='inner')
+            if len(aligned_returns) > 1:
+                active_returns = aligned_returns - aligned_benchmark
+                tracking_error = active_returns.std() * np.sqrt(periods_per_year)
+                
+                if tracking_error > 0:
+                    information_ratio = active_returns.mean() / active_returns.std() * np.sqrt(periods_per_year)
+                    metrics['information_ratio'] = MetricResult(
+                        metric_name='information_ratio',
+                        value=information_ratio,
+                        category=MetricCategory.RISK_ADJUSTED,
+                        frequency=MetricFrequency.YEARLY,
+                        data_points=len(aligned_returns),
+                        benchmark_value=0.0  # IR relative to benchmark is 0
+                    )
+        
+        # Omega Ratio
+        threshold = risk_free_rate
+        omega_ratio = self._calculate_omega_ratio(returns, threshold)
+        metrics['omega_ratio'] = MetricResult(
+            metric_name='omega_ratio',
+            value=omega_ratio,
+            category=MetricCategory.RISK_ADJUSTED,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns)
+        )
+        
+        return metrics
+    
+    def _calculate_max_drawdown(self, returns: pd.Series) -> float:
+        """Calculate maximum drawdown"""
+        
+        if returns.empty:
+            return 0.0
+        
+        cumulative = (1 + returns).cumprod()
+        running_max = cumulative.expanding().max()
+        drawdown = (cumulative - running_max) / running_max
+        
+        return abs(drawdown.min())
+    
+    def _calculate_omega_ratio(self, returns: pd.Series, threshold: float) -> float:
+        """Calculate Omega ratio"""
+        
+        if returns.empty:
+            return 0.0
+        
+        excess_returns = returns - threshold
+        positive_returns = excess_returns[excess_returns > 0].sum()
+        negative_returns = -excess_returns[excess_returns < 0].sum()
+        
+        if negative_returns == 0:
+            return np.inf if positive_returns > 0 else 1.0
+        
+        return positive_returns / negative_returns
+
+
+class DrawdownMetricsCalculator:
+    """Drawdown metrics calculator"""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def calculate_drawdown_metrics(self, returns: pd.Series) -> Dict[str, MetricResult]:
+        """Calculate comprehensive drawdown metrics"""
+        
+        metrics = {}
+        
+        if returns.empty:
+            return metrics
+        
+        # Calculate drawdown series
+        cumulative = (1 + returns).cumprod()
+        running_max = cumulative.expanding().max()
+        drawdown_series = (cumulative - running_max) / running_max
+        
+        # Maximum Drawdown
+        max_dd = abs(drawdown_series.min())
+        metrics['maximum_drawdown'] = MetricResult(
+            metric_name='maximum_drawdown',
+            value=max_dd,
+            category=MetricCategory.DRAWDOWN,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns)
+        )
+        
+        # Average Drawdown
+        drawdown_periods = drawdown_series[drawdown_series < 0]
+        if len(drawdown_periods) > 0:
+            avg_dd = abs(drawdown_periods.mean())
+            metrics['average_drawdown'] = MetricResult(
+                metric_name='average_drawdown',
+                value=avg_dd,
+                category=MetricCategory.DRAWDOWN,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(drawdown_periods)
+            )
+        
+        # Drawdown Duration Analysis
+        dd_duration_stats = self._analyze_drawdown_durations(drawdown_series)
+        
+        for stat_name, stat_value in dd_duration_stats.items():
+            metrics[f'drawdown_{stat_name}'] = MetricResult(
+                metric_name=f'drawdown_{stat_name}',
+                value=stat_value,
+                category=MetricCategory.DRAWDOWN,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(returns)
+            )
+        
+        # Recovery Analysis
+        recovery_stats = self._analyze_recovery_periods(drawdown_series, cumulative)
+        
+        for stat_name, stat_value in recovery_stats.items():
+            metrics[f'recovery_{stat_name}'] = MetricResult(
+                metric_name=f'recovery_{stat_name}',
+                value=stat_value,
+                category=MetricCategory.DRAWDOWN,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(returns)
+            )
+        
+        return metrics
+    
+    def _analyze_drawdown_durations(self, drawdown_series: pd.Series) -> Dict[str, float]:
+        """Analyze drawdown durations"""
+        
+        durations = []
+        current_duration = 0
+        in_drawdown = False
+        
+        for dd in drawdown_series:
+            if dd < 0:
+                if not in_drawdown:
+                    in_drawdown = True
+                    current_duration = 1
+                else:
+                    current_duration += 1
+            else:
+                if in_drawdown:
+                    durations.append(current_duration)
+                    in_drawdown = False
+                    current_duration = 0
+        
+        # Handle case where series ends in drawdown
+        if in_drawdown:
+            durations.append(current_duration)
+        
+        if not durations:
+            return {'duration_max': 0, 'duration_avg': 0, 'duration_count': 0}
+        
+        return {
+            'duration_max': max(durations),
+            'duration_avg': np.mean(durations),
+            'duration_count': len(durations)
+        }
+    
+    def _analyze_recovery_periods(
+        self, 
+        drawdown_series: pd.Series, 
+        cumulative_series: pd.Series
+    ) -> Dict[str, float]:
+        """Analyze recovery periods"""
+        
+        recovery_times = []
+        
+        # Find drawdown start and recovery points
+        drawdown_starts = []
+        drawdown_ends = []
+        
+        in_drawdown = False
+        start_idx = None
+        
+        for i, dd in enumerate(drawdown_series):
+            if dd < 0 and not in_drawdown:
+                in_drawdown = True
+                start_idx = i
+            elif dd >= 0 and in_drawdown:
+                in_drawdown = False
+                if start_idx is not None:
+                    drawdown_starts.append(start_idx)
+                    drawdown_ends.append(i)
+        
+        # Calculate recovery times
+        for start, end in zip(drawdown_starts, drawdown_ends):
+            if end < len(cumulative_series):
+                # Find when portfolio reaches new high
+                high_at_start = cumulative_series.iloc[start]
+                recovery_idx = None
+                
+                for i in range(end, len(cumulative_series)):
+                    if cumulative_series.iloc[i] >= high_at_start * self.config.recovery_threshold:
+                        recovery_idx = i
+                        break
+                
+                if recovery_idx is not None:
+                    recovery_time = recovery_idx - start
+                    recovery_times.append(recovery_time)
+        
+        if not recovery_times:
+            return {'time_avg': 0, 'time_max': 0, 'rate': 0}
+        
+        return {
+            'time_avg': np.mean(recovery_times),
+            'time_max': max(recovery_times),
+            'rate': len(recovery_times) / max(len(drawdown_starts), 1)
+        }
+
+
+class DistributionMetricsCalculator:
+    """Distribution and higher moment metrics calculator"""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def calculate_distribution_metrics(self, returns: pd.Series) -> Dict[str, MetricResult]:
+        """Calculate distribution metrics"""
+        
+        metrics = {}
+        
+        if returns.empty or len(returns) < 3:
+            return metrics
+        
+        # Skewness
+        skewness = returns.skew()
+        metrics['skewness'] = MetricResult(
+            metric_name='skewness',
+            value=skewness,
+            category=MetricCategory.DISTRIBUTION,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns),
+            is_significant=abs(skewness) > 0.5
+        )
+        
+        # Kurtosis
+        kurtosis = returns.kurtosis()
+        metrics['kurtosis'] = MetricResult(
+            metric_name='kurtosis',
+            value=kurtosis,
+            category=MetricCategory.DISTRIBUTION,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns),
+            is_significant=abs(kurtosis) > 1.0
+        )
+        
+        # Excess Kurtosis
+        excess_kurtosis = kurtosis - 3  # Normal distribution has kurtosis of 3
+        metrics['excess_kurtosis'] = MetricResult(
+            metric_name='excess_kurtosis',
+            value=excess_kurtosis,
+            category=MetricCategory.DISTRIBUTION,
+            frequency=MetricFrequency.DAILY,
+            data_points=len(returns),
+            is_significant=abs(excess_kurtosis) > 0.5
+        )
+        
+        # Jarque-Bera test for normality
+        if len(returns) >= 8:  # Minimum for JB test
+            jb_stat, jb_pvalue = stats.jarque_bera(returns.dropna())
+            metrics['jarque_bera_stat'] = MetricResult(
+                metric_name='jarque_bera_stat',
+                value=jb_stat,
+                category=MetricCategory.DISTRIBUTION,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(returns),
+                is_significant=jb_pvalue < 0.05
+            )
+            
+            metrics['jarque_bera_pvalue'] = MetricResult(
+                metric_name='jarque_bera_pvalue',
+                value=jb_pvalue,
+                category=MetricCategory.DISTRIBUTION,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(returns)
+            )
+        
+        # Tail metrics
+        if self.config.enable_tail_analysis:
+            tail_metrics = self._calculate_tail_metrics(returns)
+            metrics.update(tail_metrics)
+        
+        return metrics
+    
+    def _calculate_tail_metrics(self, returns: pd.Series) -> Dict[str, MetricResult]:
+        """Calculate tail risk metrics"""
+        
+        metrics = {}
+        
+        # Left tail (negative returns)
+        negative_returns = returns[returns < 0]
+        if len(negative_returns) > 0:
+            # Tail ratio (probability of extreme negative vs positive returns)
+            threshold_5pct = np.percentile(returns, 5)
+            threshold_95pct = np.percentile(returns, 95)
+            
+            extreme_negative = len(returns[returns < threshold_5pct])
+            extreme_positive = len(returns[returns > threshold_95pct])
+            
+            if extreme_positive > 0:
+                tail_ratio = extreme_negative / extreme_positive
+                metrics['tail_ratio'] = MetricResult(
+                    metric_name='tail_ratio',
+                    value=tail_ratio,
+                    category=MetricCategory.TAIL_RISK,
+                    frequency=MetricFrequency.DAILY,
+                    data_points=len(returns)
+                )
+        
+        # Expected shortfall at various levels
+        for percentile in [1, 5, 10]:
+            threshold = np.percentile(returns, percentile)
+            shortfall = returns[returns <= threshold].mean()
+            
+            metrics[f'expected_shortfall_{percentile}pct'] = MetricResult(
+                metric_name=f'expected_shortfall_{percentile}pct',
+                value=shortfall,
+                category=MetricCategory.TAIL_RISK,
+                frequency=MetricFrequency.DAILY,
+                data_points=len(returns[returns <= threshold])
+            )
+        
+        return metrics
+
+
+class MetricsCalculator:
+    """
+    Advanced Metrics Calculator
+    
+    Comprehensive calculation of performance, risk, and statistical metrics
+    with support for rolling calculations and comparative analysis.
+    """
+    
+    def __init__(self, config: Optional[MetricConfig] = None):
+        """Initialize metrics calculator"""
+        self.config = config or MetricConfig()
+        
+        # Component calculators
+        self.return_calculator = ReturnMetricsCalculator(self.config)
+        self.risk_calculator = RiskMetricsCalculator(self.config)
+        self.risk_adjusted_calculator = RiskAdjustedMetricsCalculator(self.config)
+        self.drawdown_calculator = DrawdownMetricsCalculator(self.config)
+        self.distribution_calculator = DistributionMetricsCalculator(self.config)
+        
+        # Metrics storage
+        self._metrics_cache = {}
+        self._rolling_metrics = defaultdict(dict)
+        
+        # Threading
+        self._lock = threading.Lock()
+        
+        logger.info("Metrics Calculator initialized")
+    
+    async def calculate_all_metrics(
+        self,
+        returns: pd.Series,
+        symbol: str,
+        benchmark_returns: Optional[pd.Series] = None,
+        frequency: MetricFrequency = MetricFrequency.DAILY
+    ) -> Dict[MetricCategory, MetricsBundle]:
+        """Calculate all metrics for a return series"""
+        
+        if returns.empty:
+            logger.warning(f"Empty returns series for {symbol}")
+            return {}
+        
+        results = {}
+        
+        try:
+            # Return metrics
+            return_metrics = self.return_calculator.calculate_return_metrics(returns)
+            results[MetricCategory.RETURN] = MetricsBundle(
+                bundle_name=f"{symbol}_returns",
+                category=MetricCategory.RETURN,
+                calculation_timestamp=datetime.now(),
+                metrics=return_metrics,
+                data_quality=self._assess_data_quality(returns),
+                completeness=1.0 - returns.isna().sum() / len(returns)
+            )
+            
+            # Risk metrics
+            risk_metrics = self.risk_calculator.calculate_risk_metrics(returns)
+            results[MetricCategory.RISK] = MetricsBundle(
+                bundle_name=f"{symbol}_risk",
+                category=MetricCategory.RISK,
+                calculation_timestamp=datetime.now(),
+                metrics=risk_metrics,
+                data_quality=self._assess_data_quality(returns),
+                completeness=1.0 - returns.isna().sum() / len(returns)
+            )
+            
+            # Risk-adjusted metrics
+            risk_adj_metrics = self.risk_adjusted_calculator.calculate_risk_adjusted_metrics(
+                returns, benchmark_returns
+            )
+            results[MetricCategory.RISK_ADJUSTED] = MetricsBundle(
+                bundle_name=f"{symbol}_risk_adjusted",
+                category=MetricCategory.RISK_ADJUSTED,
+                calculation_timestamp=datetime.now(),
+                metrics=risk_adj_metrics,
+                data_quality=self._assess_data_quality(returns),
+                completeness=1.0 - returns.isna().sum() / len(returns)
+            )
+            
+            # Drawdown metrics
+            drawdown_metrics = self.drawdown_calculator.calculate_drawdown_metrics(returns)
+            results[MetricCategory.DRAWDOWN] = MetricsBundle(
+                bundle_name=f"{symbol}_drawdown",
+                category=MetricCategory.DRAWDOWN,
+                calculation_timestamp=datetime.now(),
+                metrics=drawdown_metrics,
+                data_quality=self._assess_data_quality(returns),
+                completeness=1.0 - returns.isna().sum() / len(returns)
+            )
+            
+            # Distribution metrics
+            if self.config.enable_higher_moments:
+                dist_metrics = self.distribution_calculator.calculate_distribution_metrics(returns)
+                results[MetricCategory.DISTRIBUTION] = MetricsBundle(
+                    bundle_name=f"{symbol}_distribution",
+                    category=MetricCategory.DISTRIBUTION,
+                    calculation_timestamp=datetime.now(),
+                    metrics=dist_metrics,
+                    data_quality=self._assess_data_quality(returns),
+                    completeness=1.0 - returns.isna().sum() / len(returns)
+                )
+            
+            # Cache results
+            with self._lock:
+                self._metrics_cache[symbol] = results
+            
+            logger.debug(f"Calculated {sum(len(bundle.metrics) for bundle in results.values())} "
+                        f"metrics for {symbol}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error calculating metrics for {symbol}: {e}")
+            return {}
+    
+    def calculate_rolling_metrics(
+        self,
+        returns: pd.Series,
+        symbol: str,
+        window_name: str = 'medium',
+        metrics_list: Optional[List[str]] = None
+    ) -> Dict[str, pd.Series]:
+        """Calculate rolling metrics"""
+        
+        if returns.empty:
+            return {}
+        
+        window = self.config.rolling_windows.get(window_name, 63)
+        
+        if len(returns) < window:
+            logger.warning(f"Insufficient data for rolling calculation: {len(returns)} < {window}")
+            return {}
+        
+        metrics_list = metrics_list or ['sharpe_ratio', 'volatility', 'maximum_drawdown']
+        rolling_results = {}
+        
+        try:
+            for metric_name in metrics_list:
+                rolling_values = []
+                rolling_dates = []
+                
+                for i in range(window, len(returns) + 1):
+                    window_returns = returns.iloc[i-window:i]
+                    
+                    if metric_name == 'sharpe_ratio':
+                        excess_returns = window_returns - self.config.risk_free_rate / 252
+                        if window_returns.std() > 0:
+                            value = excess_returns.mean() / window_returns.std() * np.sqrt(252)
+                        else:
+                            value = 0.0
+                    elif metric_name == 'volatility':
+                        value = window_returns.std() * np.sqrt(252)
+                    elif metric_name == 'maximum_drawdown':
+                        value = self.risk_adjusted_calculator._calculate_max_drawdown(window_returns)
+                    else:
+                        value = 0.0  # Default for unknown metrics
+                    
+                    rolling_values.append(value)
+                    rolling_dates.append(returns.index[i-1])
+                
+                rolling_results[metric_name] = pd.Series(rolling_values, index=rolling_dates)
+            
+            # Cache rolling metrics
+            with self._lock:
+                self._rolling_metrics[symbol].update(rolling_results)
+            
+            logger.debug(f"Calculated rolling metrics for {symbol} with window {window}")
+            
+            return rolling_results
+            
+        except Exception as e:
+            logger.error(f"Error calculating rolling metrics for {symbol}: {e}")
+            return {}
+    
+    def compare_metrics(
+        self,
+        primary_symbol: str,
+        comparison_symbol: str,
+        metric_names: Optional[List[str]] = None
+    ) -> Dict[str, Dict[str, float]]:
+        """Compare metrics between two symbols"""
+        
+        with self._lock:
+            primary_metrics = self._metrics_cache.get(primary_symbol, {})
+            comparison_metrics = self._metrics_cache.get(comparison_symbol, {})
+        
+        if not primary_metrics or not comparison_metrics:
+            logger.warning(f"Metrics not available for comparison: {primary_symbol}, {comparison_symbol}")
+            return {}
+        
+        comparison_results = {}
+        
+        # Default metrics to compare
+        default_metrics = [
+            'annualized_return', 'volatility', 'sharpe_ratio', 'maximum_drawdown',
+            'sortino_ratio', 'calmar_ratio', 'var_95_historical'
+        ]
+        
+        metrics_to_compare = metric_names or default_metrics
+        
+        for metric_name in metrics_to_compare:
+            primary_value = self._find_metric_value(primary_metrics, metric_name)
+            comparison_value = self._find_metric_value(comparison_metrics, metric_name)
+            
+            if primary_value is not None and comparison_value is not None:
+                difference = primary_value - comparison_value
+                relative_difference = difference / abs(comparison_value) if comparison_value != 0 else 0.0
+                
+                comparison_results[metric_name] = {
+                    'primary': primary_value,
+                    'comparison': comparison_value,
+                    'difference': difference,
+                    'relative_difference': relative_difference
+                }
+        
+        return comparison_results
+    
+    def _find_metric_value(
+        self, 
+        metrics_bundles: Dict[MetricCategory, MetricsBundle], 
+        metric_name: str
+    ) -> Optional[float]:
+        """Find metric value across all bundles"""
+        
+        for bundle in metrics_bundles.values():
+            if metric_name in bundle.metrics:
+                return bundle.metrics[metric_name].value
+        
+        return None
+    
+    def _assess_data_quality(self, returns: pd.Series) -> float:
+        """Assess data quality score (0-1)"""
+        
+        if returns.empty:
+            return 0.0
+        
+        quality_score = 1.0
+        
+        # Penalize for missing data
+        missing_ratio = returns.isna().sum() / len(returns)
+        quality_score -= missing_ratio * 0.5
+        
+        # Penalize for extreme outliers (more than 5 standard deviations)
+        if returns.std() > 0:
+            outliers = abs(returns - returns.mean()) > 5 * returns.std()
+            outlier_ratio = outliers.sum() / len(returns)
+            quality_score -= outlier_ratio * 0.3
+        
+        # Penalize for insufficient data
+        if len(returns) < 30:
+            quality_score -= (30 - len(returns)) / 30 * 0.2
+        
+        return max(quality_score, 0.0)
+    
+    def get_metrics_summary(self, symbol: str) -> Dict[str, Any]:
+        """Get metrics summary for a symbol"""
+        
+        with self._lock:
+            metrics_bundles = self._metrics_cache.get(symbol, {})
+            rolling_metrics = self._rolling_metrics.get(symbol, {})
+        
+        if not metrics_bundles:
+            return {}
+        
+        summary = {
+            'symbol': symbol,
+            'calculation_timestamp': datetime.now(),
+            'metrics_calculated': sum(len(bundle.metrics) for bundle in metrics_bundles.values()),
+            'categories': list(metrics_bundles.keys()),
+            'data_quality': np.mean([bundle.data_quality for bundle in metrics_bundles.values()]),
+            'completeness': np.mean([bundle.completeness for bundle in metrics_bundles.values()]),
+            'rolling_metrics_available': list(rolling_metrics.keys())
+        }
+        
+        # Key metrics summary
+        key_metrics = {}
+        for metric_name in ['annualized_return', 'volatility', 'sharpe_ratio', 'maximum_drawdown']:
+            value = self._find_metric_value(metrics_bundles, metric_name)
+            if value is not None:
+                key_metrics[metric_name] = value
+        
+        summary['key_metrics'] = key_metrics
+        
+        return summary
+    
+    def get_cached_metrics(self, symbol: str) -> Optional[Dict[MetricCategory, MetricsBundle]]:
+        """Get cached metrics for a symbol"""
+        
+        with self._lock:
+            return self._metrics_cache.get(symbol)
+    
+    def get_rolling_metrics(self, symbol: str) -> Dict[str, pd.Series]:
+        """Get rolling metrics for a symbol"""
+        
+        with self._lock:
+            return self._rolling_metrics.get(symbol, {})
+    
+    def clear_cache(self) -> None:
+        """Clear metrics cache"""
+        
+        with self._lock:
+            self._metrics_cache.clear()
+            self._rolling_metrics.clear()
+            logger.info("Metrics cache cleared")
+    
+    def get_calculator_statistics(self) -> Dict[str, Any]:
+        """Get calculator statistics"""
+        
+        with self._lock:
+            cached_symbols = len(self._metrics_cache)
+            rolling_symbols = len(self._rolling_metrics)
+            
+            total_metrics = sum(
+                sum(len(bundle.metrics) for bundle in bundles.values())
+                for bundles in self._metrics_cache.values()
+            )
+        
+        return {
+            'cached_symbols': cached_symbols,
+            'rolling_metrics_symbols': rolling_symbols,
+            'total_metrics_calculated': total_metrics,
+            'config': {
+                'trading_days_per_year': self.config.trading_days_per_year,
+                'confidence_levels': self.config.confidence_levels,
+                'rolling_windows': self.config.rolling_windows
+            }
+        }

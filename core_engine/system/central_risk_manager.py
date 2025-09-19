@@ -1,0 +1,829 @@
+"""
+Central Risk Manager - TradeDesk Architecture Compliance
+=======================================================
+
+Enhanced RiskManager implementing the central governance hub pattern.
+Serves as the single authority for ALL trading decisions in the system.
+
+Architecture Compliance:
+- Central hub that encapsulates all trading decisions
+- Controls WHAT (StrategyManager) → HOW (TradingEngine) → ACTION (UnifiedExecutionEngine)
+- No component can execute trades independently
+- All trading decisions flow through RiskManager authorization
+- Regime-aware risk management with direct RegimeEngine integration
+
+Author: StatArb_Gemini Architecture Compliance
+Version: 1.0.0 (TradeDesk Architecture)
+"""
+
+import asyncio
+import logging
+import threading
+import uuid
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Union, Any, Callable, Set
+from dataclasses import dataclass, field
+from enum import Enum
+import pandas as pd
+import numpy as np
+import json
+from collections import defaultdict
+
+# Import the UnifiedExecutionEngine
+from ..unified_execution_engine import (
+    UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
+    ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
+)
+
+logger = logging.getLogger(__name__)
+
+
+class TradingDecisionType(Enum):
+    """Types of trading decisions requiring authorization"""
+    STRATEGY_ACTIVATION = "strategy_activation"
+    STRATEGY_DEACTIVATION = "strategy_deactivation"
+    POSITION_ENTRY = "position_entry"
+    POSITION_EXIT = "position_exit"
+    POSITION_ADJUSTMENT = "position_adjustment"
+    PORTFOLIO_REBALANCING = "portfolio_rebalancing"
+    EMERGENCY_LIQUIDATION = "emergency_liquidation"
+    RISK_LIMIT_ADJUSTMENT = "risk_limit_adjustment"
+
+
+class AuthorizationLevel(Enum):
+    """Authorization levels for different decision types"""
+    AUTOMATIC = "automatic"      # Auto-approved within normal parameters
+    STANDARD = "standard"        # Normal review process
+    ELEVATED = "elevated"        # Requires elevated review
+    EMERGENCY = "emergency"      # Emergency authorization
+    REJECTED = "rejected"        # Authorization denied
+
+
+@dataclass
+class TradingDecisionRequest:
+    """Request for trading decision authorization"""
+    
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    decision_type: TradingDecisionType = TradingDecisionType.POSITION_ENTRY
+    
+    # Request details
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""  # buy/sell/hold
+    quantity: float = 0.0
+    expected_return: float = 0.0
+    confidence: float = 0.0
+    
+    # Risk context
+    current_position: float = 0.0
+    portfolio_impact: float = 0.0
+    risk_score: float = 0.0
+    
+    # Market context
+    market_regime: str = "unknown"
+    regime_confidence: float = 0.0
+    volatility_estimate: float = 0.0
+    
+    # Timing
+    urgency: ExecutionUrgency = ExecutionUrgency.NORMAL
+    max_execution_time: int = 3600  # 1 hour
+    
+    # Metadata
+    created_at: datetime = field(default_factory=datetime.now)
+    requesting_component: str = ""
+    justification: str = ""
+
+
+@dataclass
+class TradingAuthorization:
+    """Authorization result for trading decisions"""
+    
+    authorization_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    request_id: str = ""
+    
+    # Authorization result
+    authorization_level: AuthorizationLevel = AuthorizationLevel.REJECTED
+    authorized_quantity: float = 0.0
+    max_quantity: float = 0.0
+    
+    # Risk constraints
+    position_limit: float = 0.0
+    risk_budget_allocation: float = 0.0
+    max_market_impact: float = 0.01
+    
+    # Execution constraints
+    allowed_algorithms: List[ExecutionAlgorithm] = field(default_factory=list)
+    max_execution_time: int = 3600
+    venue_restrictions: List[str] = field(default_factory=list)
+    
+    # Authorization metadata
+    risk_manager_id: str = "central_risk_manager"
+    authorized_at: datetime = field(default_factory=datetime.now)
+    expires_at: datetime = field(default_factory=lambda: datetime.now() + timedelta(hours=1))
+    
+    # Conditions and restrictions
+    conditions: List[str] = field(default_factory=list)
+    restrictions: List[str] = field(default_factory=list)
+    monitoring_requirements: List[str] = field(default_factory=list)
+    
+    # Validation
+    is_valid: bool = True
+    rejection_reason: str = ""
+
+
+@dataclass
+class RiskManagerConfig:
+    """Configuration for the central risk manager"""
+    
+    # Risk limits
+    max_position_size: float = 0.10  # 10% max position
+    max_daily_var: float = 0.05      # 5% daily VaR
+    max_total_risk: float = 0.20     # 20% total portfolio risk
+    position_concentration_limit: float = 0.15  # 15% per position
+    strategy_allocation_limit: float = 0.33     # 33% per strategy
+    
+    # Authorization settings
+    auto_approval_threshold: float = 0.01  # 1% auto-approve threshold
+    elevated_review_threshold: float = 0.05  # 5% elevated review
+    emergency_threshold: float = 0.10      # 10% emergency threshold
+    
+    # Execution settings
+    default_execution_algorithm: ExecutionAlgorithm = ExecutionAlgorithm.ADAPTIVE
+    max_execution_time: int = 3600  # 1 hour
+    
+    # Monitoring
+    real_time_monitoring: bool = True
+    monitoring_frequency: int = 1  # seconds
+    alert_thresholds: Dict[str, float] = field(default_factory=lambda: {
+        'position_limit_breach': 0.95,
+        'var_limit_breach': 0.90,
+        'concentration_breach': 0.90
+    })
+    
+    # Regime integration
+    regime_risk_multipliers: Dict[str, float] = field(default_factory=lambda: {
+        'bull_market': 0.8,
+        'bear_market': 1.3,
+        'high_volatility': 1.5,
+        'low_volatility': 0.7,
+        'crisis': 2.0,
+        'sideways': 1.0
+    })
+
+
+class CentralRiskManager:
+    """
+    Central Risk Manager - Institutional Governance Hub
+    
+    Implements the central governance pattern where ALL trading decisions
+    flow through the RiskManager. No component can execute trades independently.
+    
+    Architecture:
+    - WHAT (StrategyManager): Determines trading strategies → submits to RiskManager
+    - HOW (TradingEngine): Plans execution methodology → under RiskManager control
+    - ACTION (UnifiedExecutionEngine): Executes trades → requires RiskManager authorization
+    - MONITORING: Continuous risk monitoring and dynamic limit adjustment
+    """
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize central risk manager"""
+        
+        self.config = RiskManagerConfig(**(config or {}))
+        
+        # Core components under RiskManager control
+        self.unified_execution_engine: Optional[UnifiedExecutionEngine] = None
+        self.strategy_manager: Optional[Any] = None  # Will be set by orchestrator
+        self.trading_engine: Optional[Any] = None    # Will be set by orchestrator
+        self.regime_engine: Optional[Any] = None     # Will be set by orchestrator
+        
+        # Authorization tracking
+        self.pending_requests: Dict[str, TradingDecisionRequest] = {}
+        self.active_authorizations: Dict[str, TradingAuthorization] = {}
+        self.authorization_history: List[TradingAuthorization] = []
+        
+        # Risk state
+        self.current_positions: Dict[str, float] = {}
+        self.strategy_allocations: Dict[str, float] = {}
+        self.current_var: float = 0.0
+        self.portfolio_value: float = 1000000.0  # $1M default
+        
+        # Risk metrics
+        self.risk_metrics = {
+            'total_exposure': 0.0,
+            'concentration_risk': 0.0,
+            'var_utilization': 0.0,
+            'strategy_diversification': 0.0,
+            'regime_risk_adjustment': 1.0
+        }
+        
+        # Control state
+        self.is_initialized = False
+        self.is_operational = False
+        self.emergency_mode = False
+        
+        # Threading
+        self.authorization_lock = threading.Lock()
+        self.monitoring_task: Optional[asyncio.Task] = None
+        
+        logger.info("Central Risk Manager initialized - Governance Hub Ready")
+    
+    async def initialize(self, execution_config: Optional[Dict[str, Any]] = None) -> bool:
+        """Initialize the central risk manager and all controlled components"""
+        
+        try:
+            logger.info("Initializing Central Risk Manager...")
+            
+            # Initialize UnifiedExecutionEngine under our control
+            self.unified_execution_engine = UnifiedExecutionEngine(execution_config or {})
+            
+            # Start monitoring
+            if self.config.real_time_monitoring:
+                self.monitoring_task = asyncio.create_task(self._continuous_monitoring())
+            
+            self.is_initialized = True
+            self.is_operational = True
+            
+            logger.info("✅ Central Risk Manager initialization completed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Central Risk Manager initialization failed: {e}")
+            return False
+    
+    def set_controlled_components(self, strategy_manager: Any = None, 
+                                trading_engine: Any = None,
+                                regime_engine: Any = None):
+        """Set components under RiskManager control"""
+        
+        if strategy_manager:
+            self.strategy_manager = strategy_manager
+            logger.info("✅ StrategyManager registered with Central Risk Manager")
+        
+        if trading_engine:
+            self.trading_engine = trading_engine
+            logger.info("✅ TradingEngine registered with Central Risk Manager")
+            
+        if regime_engine:
+            self.regime_engine = regime_engine
+            logger.info("✅ RegimeEngine registered with Central Risk Manager")
+    
+    async def authorize_trading_decision(self, request: TradingDecisionRequest) -> TradingAuthorization:
+        """
+        Central authorization point for ALL trading decisions
+        
+        This is the core governance method - every trading decision in the system
+        must flow through this authorization process.
+        """
+        
+        try:
+            with self.authorization_lock:
+                logger.info(f"Processing authorization request: {request.request_id}")
+                
+                # Store pending request
+                self.pending_requests[request.request_id] = request
+                
+                # Perform comprehensive risk assessment
+                authorization = await self._assess_trading_request(request)
+                
+                # Store authorization
+                if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                    self.active_authorizations[authorization.authorization_id] = authorization
+                
+                # Add to history
+                self.authorization_history.append(authorization)
+                
+                # Clean up pending request
+                self.pending_requests.pop(request.request_id, None)
+                
+                logger.info(f"Authorization completed: {authorization.authorization_level.value}")
+                return authorization
+                
+        except Exception as e:
+            logger.error(f"Authorization process failed: {e}")
+            
+            # Return rejection
+            return TradingAuthorization(
+                request_id=request.request_id,
+                authorization_level=AuthorizationLevel.REJECTED,
+                rejection_reason=f"Authorization process error: {e}"
+            )
+    
+    async def _assess_trading_request(self, request: TradingDecisionRequest) -> TradingAuthorization:
+        """Comprehensive risk assessment of trading request"""
+        
+        try:
+            authorization = TradingAuthorization(request_id=request.request_id)
+            
+            # Risk impact assessment
+            risk_impact = self._calculate_risk_impact(request)
+            
+            # Position limit check
+            position_check = self._check_position_limits(request)
+            
+            # Concentration check
+            concentration_check = self._check_concentration_limits(request)
+            
+            # Strategy allocation check
+            strategy_check = self._check_strategy_limits(request)
+            
+            # Regime-based risk adjustment
+            regime_adjustment = self._get_regime_risk_adjustment(request)
+            
+            # Determine authorization level
+            authorization_level = self._determine_authorization_level(
+                risk_impact, position_check, concentration_check, strategy_check, regime_adjustment
+            )
+            
+            # Set authorization details
+            authorization.authorization_level = authorization_level
+            
+            if authorization_level != AuthorizationLevel.REJECTED:
+                # Calculate authorized quantity
+                authorized_qty = self._calculate_authorized_quantity(request, risk_impact, regime_adjustment)
+                authorization.authorized_quantity = authorized_qty
+                authorization.max_quantity = min(request.quantity, authorized_qty * 1.1)  # 10% buffer
+                
+                # Set risk constraints
+                authorization.position_limit = self._get_position_limit(request.symbol)
+                authorization.risk_budget_allocation = risk_impact
+                authorization.max_market_impact = self._get_max_market_impact(request)
+                
+                # Set execution constraints
+                authorization.allowed_algorithms = self._get_allowed_algorithms(request)
+                authorization.max_execution_time = min(request.max_execution_time, self.config.max_execution_time)
+                
+                # Set conditions and monitoring
+                authorization.conditions = self._get_authorization_conditions(request, risk_impact)
+                authorization.monitoring_requirements = self._get_monitoring_requirements(request)
+                
+                logger.info(f"Authorized: {authorized_qty} of {request.quantity} requested")
+            else:
+                authorization.rejection_reason = self._get_rejection_reason(
+                    position_check, concentration_check, strategy_check, risk_impact
+                )
+                logger.warning(f"Request rejected: {authorization.rejection_reason}")
+            
+            return authorization
+            
+        except Exception as e:
+            logger.error(f"Risk assessment failed: {e}")
+            
+            return TradingAuthorization(
+                request_id=request.request_id,
+                authorization_level=AuthorizationLevel.REJECTED,
+                rejection_reason=f"Risk assessment error: {e}"
+            )
+    
+    async def execute_authorized_trade(self, authorization: TradingAuthorization,
+                                     execution_params: Optional[Dict[str, Any]] = None) -> ExecutionResult:
+        """
+        Execute trade using UnifiedExecutionEngine with RiskManager authorization
+        
+        This method bridges the authorization and execution phases while maintaining
+        central control throughout the process.
+        """
+        
+        try:
+            if not self.unified_execution_engine:
+                raise RuntimeError("UnifiedExecutionEngine not initialized")
+            
+            # Validate authorization
+            if not self._validate_authorization(authorization):
+                return ExecutionResult(
+                    authorization_id=authorization.authorization_id,
+                    status="rejected",
+                    execution_log=["Authorization validation failed"]
+                )
+            
+            # Create execution authorization for UnifiedExecutionEngine
+            execution_auth = ExecutionAuthorization(
+                authorization_id=authorization.authorization_id,
+                risk_manager_id="central_risk_manager",
+                symbol=authorization.request_id,  # TODO: Extract from original request
+                side="buy",  # TODO: Extract from original request
+                quantity=authorization.authorized_quantity,
+                max_quantity=authorization.max_quantity,
+                max_market_impact=authorization.max_market_impact,
+                max_execution_time=authorization.max_execution_time,
+                allowed_algorithms=authorization.allowed_algorithms,
+                expires_at=authorization.expires_at
+            )
+            
+            # Create execution request
+            execution_request = ExecutionRequest(
+                authorization=execution_auth,
+                algorithm=execution_params.get('algorithm', self.config.default_execution_algorithm) if execution_params else self.config.default_execution_algorithm,
+                urgency=execution_params.get('urgency', ExecutionUrgency.NORMAL) if execution_params else ExecutionUrgency.NORMAL
+            )
+            
+            # Execute through UnifiedExecutionEngine
+            logger.info(f"Executing authorized trade: {authorization.authorization_id}")
+            result = await self.unified_execution_engine.execute_authorized_trade(execution_request)
+            
+            # Post-execution risk monitoring
+            await self._post_execution_monitoring(authorization, result)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Authorized trade execution failed: {e}")
+            
+            return ExecutionResult(
+                authorization_id=authorization.authorization_id,
+                status="failed",
+                execution_log=[f"Execution failed: {e}"]
+            )
+    
+    def _calculate_risk_impact(self, request: TradingDecisionRequest) -> float:
+        """Calculate risk impact of trading request"""
+        
+        try:
+            # Position size as percentage of portfolio
+            position_impact = (request.quantity * 100.0) / self.portfolio_value  # Assuming $100/share
+            
+            # Adjust for volatility
+            volatility_adjustment = max(1.0, request.volatility_estimate)
+            
+            # Regime adjustment
+            regime_multiplier = self.config.regime_risk_multipliers.get(request.market_regime, 1.0)
+            
+            # Total risk impact
+            total_impact = position_impact * volatility_adjustment * regime_multiplier
+            
+            return total_impact
+            
+        except Exception as e:
+            logger.error(f"Error calculating risk impact: {e}")
+            return 0.10  # Conservative default
+    
+    def _check_position_limits(self, request: TradingDecisionRequest) -> bool:
+        """Check if request violates position limits"""
+        
+        try:
+            current_position = self.current_positions.get(request.symbol, 0.0)
+            new_position = current_position + request.quantity
+            position_pct = abs(new_position * 100.0) / self.portfolio_value  # Assuming $100/share
+            
+            return position_pct <= self.config.max_position_size
+            
+        except Exception as e:
+            logger.error(f"Error checking position limits: {e}")
+            return False
+    
+    def _check_concentration_limits(self, request: TradingDecisionRequest) -> bool:
+        """Check concentration limits"""
+        
+        try:
+            current_position = self.current_positions.get(request.symbol, 0.0)
+            new_position = current_position + request.quantity
+            concentration = abs(new_position * 100.0) / self.portfolio_value
+            
+            return concentration <= self.config.position_concentration_limit
+            
+        except Exception as e:
+            logger.error(f"Error checking concentration limits: {e}")
+            return False
+    
+    def _check_strategy_limits(self, request: TradingDecisionRequest) -> bool:
+        """Check strategy allocation limits"""
+        
+        try:
+            current_allocation = self.strategy_allocations.get(request.strategy_id, 0.0)
+            return current_allocation <= self.config.strategy_allocation_limit
+            
+        except Exception as e:
+            logger.error(f"Error checking strategy limits: {e}")
+            return False
+    
+    def _get_regime_risk_adjustment(self, request: TradingDecisionRequest) -> float:
+        """Get regime-based risk adjustment"""
+        
+        regime_multiplier = self.config.regime_risk_multipliers.get(request.market_regime, 1.0)
+        confidence_adjustment = max(0.5, request.regime_confidence)  # Minimum 50% confidence
+        
+        return regime_multiplier * confidence_adjustment
+    
+    def _determine_authorization_level(self, risk_impact: float, position_check: bool,
+                                     concentration_check: bool, strategy_check: bool,
+                                     regime_adjustment: float) -> AuthorizationLevel:
+        """Determine authorization level based on risk assessment"""
+        
+        # Check for rejection conditions
+        if not (position_check and concentration_check and strategy_check):
+            return AuthorizationLevel.REJECTED
+        
+        # Adjust risk impact for regime
+        adjusted_risk = risk_impact * regime_adjustment
+        
+        # Determine authorization level
+        if adjusted_risk <= self.config.auto_approval_threshold:
+            return AuthorizationLevel.AUTOMATIC
+        elif adjusted_risk <= self.config.elevated_review_threshold:
+            return AuthorizationLevel.STANDARD
+        elif adjusted_risk <= self.config.emergency_threshold:
+            return AuthorizationLevel.ELEVATED
+        else:
+            return AuthorizationLevel.EMERGENCY
+    
+    def _calculate_authorized_quantity(self, request: TradingDecisionRequest,
+                                     risk_impact: float, regime_adjustment: float) -> float:
+        """Calculate authorized quantity based on risk assessment"""
+        
+        try:
+            # Start with requested quantity
+            authorized_qty = request.quantity
+            
+            # Apply risk-based adjustment
+            if risk_impact > self.config.auto_approval_threshold:
+                # Reduce quantity for higher risk
+                risk_reduction = min(0.5, (risk_impact - self.config.auto_approval_threshold) * 2)
+                authorized_qty *= (1.0 - risk_reduction)
+            
+            # Apply regime adjustment
+            if regime_adjustment > 1.2:  # High risk regime
+                authorized_qty *= 0.8  # Reduce by 20%
+            elif regime_adjustment < 0.8:  # Low risk regime
+                authorized_qty *= 1.1  # Increase by 10%
+            
+            # Ensure positive quantity
+            authorized_qty = max(0.0, authorized_qty)
+            
+            return authorized_qty
+            
+        except Exception as e:
+            logger.error(f"Error calculating authorized quantity: {e}")
+            return 0.0
+    
+    def _get_position_limit(self, symbol: str) -> float:
+        """Get position limit for symbol"""
+        return self.config.max_position_size
+    
+    def _get_max_market_impact(self, request: TradingDecisionRequest) -> float:
+        """Get maximum allowed market impact"""
+        
+        if request.urgency == ExecutionUrgency.EMERGENCY:
+            return 0.05  # 5% max for emergency
+        elif request.urgency == ExecutionUrgency.URGENT:
+            return 0.02  # 2% max for urgent
+        else:
+            return 0.01  # 1% max for normal
+    
+    def _get_allowed_algorithms(self, request: TradingDecisionRequest) -> List[ExecutionAlgorithm]:
+        """Get allowed execution algorithms for request"""
+        
+        if request.urgency == ExecutionUrgency.EMERGENCY:
+            return [ExecutionAlgorithm.MARKET]
+        elif request.urgency == ExecutionUrgency.URGENT:
+            return [ExecutionAlgorithm.MARKET, ExecutionAlgorithm.ADAPTIVE]
+        else:
+            return [ExecutionAlgorithm.MARKET, ExecutionAlgorithm.TWAP, ExecutionAlgorithm.ADAPTIVE]
+    
+    def _get_authorization_conditions(self, request: TradingDecisionRequest, risk_impact: float) -> List[str]:
+        """Get authorization conditions"""
+        
+        conditions = []
+        
+        if risk_impact > self.config.auto_approval_threshold:
+            conditions.append("Enhanced monitoring required")
+        
+        if request.urgency in [ExecutionUrgency.URGENT, ExecutionUrgency.EMERGENCY]:
+            conditions.append("Immediate execution required")
+        
+        if request.regime_confidence < 0.7:
+            conditions.append("Low regime confidence - exercise caution")
+        
+        return conditions
+    
+    def _get_monitoring_requirements(self, request: TradingDecisionRequest) -> List[str]:
+        """Get monitoring requirements for authorization"""
+        
+        requirements = ["Real-time position monitoring", "Market impact tracking"]
+        
+        if request.decision_type == TradingDecisionType.EMERGENCY_LIQUIDATION:
+            requirements.append("Emergency liquidation monitoring")
+        
+        return requirements
+    
+    def _validate_authorization(self, authorization: TradingAuthorization) -> bool:
+        """Validate authorization is still valid"""
+        
+        if datetime.now() > authorization.expires_at:
+            return False
+        
+        if authorization.authorization_level == AuthorizationLevel.REJECTED:
+            return False
+        
+        return authorization.is_valid
+    
+    def _get_rejection_reason(self, position_check: bool, concentration_check: bool,
+                            strategy_check: bool, risk_impact: float) -> str:
+        """Get detailed rejection reason"""
+        
+        reasons = []
+        
+        if not position_check:
+            reasons.append("Position limit exceeded")
+        
+        if not concentration_check:
+            reasons.append("Concentration limit exceeded")
+        
+        if not strategy_check:
+            reasons.append("Strategy allocation limit exceeded")
+        
+        if risk_impact > self.config.emergency_threshold:
+            reasons.append("Risk impact exceeds emergency threshold")
+        
+        return "; ".join(reasons) if reasons else "Risk assessment failed"
+    
+    async def _post_execution_monitoring(self, authorization: TradingAuthorization,
+                                       result: ExecutionResult):
+        """Post-execution monitoring and risk assessment"""
+        
+        try:
+            # Update position tracking
+            # TODO: Extract symbol and quantity from result
+            # self.current_positions[symbol] = self.current_positions.get(symbol, 0.0) + result.filled_quantity
+            
+            # Check for risk limit breaches
+            # TODO: Implement comprehensive post-execution risk checks
+            
+            logger.info(f"Post-execution monitoring completed for {authorization.authorization_id}")
+            
+        except Exception as e:
+            logger.error(f"Post-execution monitoring failed: {e}")
+    
+    async def _continuous_monitoring(self):
+        """Continuous risk monitoring loop"""
+        
+        logger.info("Starting continuous risk monitoring")
+        
+        try:
+            while self.is_operational:
+                # Monitor active positions
+                await self._monitor_positions()
+                
+                # Monitor active authorizations
+                await self._monitor_authorizations()
+                
+                # Check for risk limit breaches
+                await self._check_risk_limits()
+                
+                # Update risk metrics
+                self._update_risk_metrics()
+                
+                # Sleep until next monitoring cycle
+                await asyncio.sleep(self.config.monitoring_frequency)
+                
+        except Exception as e:
+            logger.error(f"Continuous monitoring error: {e}")
+        
+        logger.info("Continuous risk monitoring stopped")
+    
+    async def _monitor_positions(self):
+        """Monitor current positions for risk"""
+        pass  # TODO: Implement position monitoring
+    
+    async def _monitor_authorizations(self):
+        """Monitor active authorizations for expiry"""
+        
+        try:
+            current_time = datetime.now()
+            expired_authorizations = []
+            
+            with self.authorization_lock:
+                for auth_id, authorization in self.active_authorizations.items():
+                    if current_time > authorization.expires_at:
+                        expired_authorizations.append(auth_id)
+                
+                # Remove expired authorizations
+                for auth_id in expired_authorizations:
+                    self.active_authorizations.pop(auth_id, None)
+                    logger.info(f"Authorization expired: {auth_id}")
+                    
+        except Exception as e:
+            logger.error(f"Authorization monitoring error: {e}")
+    
+    async def _check_risk_limits(self):
+        """Check for risk limit breaches"""
+        pass  # TODO: Implement risk limit monitoring
+    
+    def _update_risk_metrics(self):
+        """Update current risk metrics"""
+        
+        try:
+            # Calculate total exposure
+            total_exposure = sum(abs(pos * 100.0) for pos in self.current_positions.values())
+            self.risk_metrics['total_exposure'] = total_exposure / self.portfolio_value
+            
+            # Update other metrics
+            # TODO: Implement comprehensive risk metric calculations
+            
+        except Exception as e:
+            logger.error(f"Risk metrics update error: {e}")
+    
+    def get_risk_status(self) -> Dict[str, Any]:
+        """Get current risk status"""
+        
+        return {
+            'is_operational': self.is_operational,
+            'emergency_mode': self.emergency_mode,
+            'active_authorizations': len(self.active_authorizations),
+            'current_positions': len(self.current_positions),
+            'risk_metrics': self.risk_metrics.copy(),
+            'portfolio_value': self.portfolio_value
+        }
+    
+    def emergency_shutdown(self) -> bool:
+        """Emergency shutdown of all trading operations"""
+        
+        try:
+            logger.warning("🚨 EMERGENCY SHUTDOWN INITIATED")
+            
+            self.emergency_mode = True
+            self.is_operational = False
+            
+            # Cancel all active authorizations
+            with self.authorization_lock:
+                cancelled_count = len(self.active_authorizations)
+                self.active_authorizations.clear()
+                logger.warning(f"Cancelled {cancelled_count} active authorizations")
+            
+            # Stop monitoring
+            if self.monitoring_task:
+                self.monitoring_task.cancel()
+            
+            logger.warning("🚨 EMERGENCY SHUTDOWN COMPLETED")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Emergency shutdown failed: {e}")
+            return False
+    
+    def shutdown(self):
+        """Graceful shutdown of risk manager"""
+        
+        try:
+            logger.info("Shutting down Central Risk Manager")
+            
+            self.is_operational = False
+            
+            # Stop monitoring
+            if self.monitoring_task:
+                self.monitoring_task.cancel()
+            
+            # Shutdown execution engine
+            if self.unified_execution_engine:
+                self.unified_execution_engine.shutdown()
+            
+            logger.info("Central Risk Manager shutdown completed")
+            
+        except Exception as e:
+            logger.error(f"Shutdown error: {e}")
+
+
+# Example usage
+if __name__ == "__main__":
+    async def test_central_risk_manager():
+        """Test the central risk manager"""
+        
+        # Initialize risk manager
+        config = {
+            'max_position_size': 0.10,
+            'auto_approval_threshold': 0.01
+        }
+        
+        risk_manager = CentralRiskManager(config)
+        await risk_manager.initialize()
+        
+        # Create trading decision request
+        request = TradingDecisionRequest(
+            decision_type=TradingDecisionType.POSITION_ENTRY,
+            strategy_id="test_strategy",
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            expected_return=0.05,
+            confidence=0.8,
+            market_regime="bull_market",
+            regime_confidence=0.9,
+            urgency=ExecutionUrgency.NORMAL
+        )
+        
+        # Request authorization
+        print("Requesting trading authorization...")
+        authorization = await risk_manager.authorize_trading_decision(request)
+        
+        print(f"Authorization result: {authorization.authorization_level.value}")
+        print(f"Authorized quantity: {authorization.authorized_quantity}")
+        
+        if authorization.authorization_level != AuthorizationLevel.REJECTED:
+            # Execute authorized trade
+            result = await risk_manager.execute_authorized_trade(authorization)
+            print(f"Execution result: {result.status}")
+        
+        # Get risk status
+        status = risk_manager.get_risk_status()
+        print(f"Risk status: {status}")
+    
+    # Run test
+    asyncio.run(test_central_risk_manager())

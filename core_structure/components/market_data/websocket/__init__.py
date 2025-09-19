@@ -11,22 +11,14 @@ Components:
 - Quality monitoring and failover
 """
 
-# Import main components
-try:
-    from .websocket_diversification import (
-        WebSocketDiversificationManager,
-        WebSocketSource,
-        SourceConfig,
-        SourcePriority,
-        DataType
-    )
-except ImportError:
-    # Fallback if websocket_diversification is not available
-    WebSocketDiversificationManager = None
-    WebSocketSource = None
-    SourceConfig = None
-    SourcePriority = None
-    DataType = None
+# Import main components - MANDATORY (NO FALLBACKS)
+from .websocket_diversification import (
+    WebSocketDiversificationManager,
+    WebSocketSource,
+    SourceConfig,
+    SourcePriority,
+    DataType
+)
 
 try:
     from .websocket_integration import (

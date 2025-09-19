@@ -14,31 +14,15 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Import regime engine for integration
-try:
-    # Try different import paths
-    try:
-        from ...regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
-    except ImportError:
-        # Fallback to absolute import
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        from core_structure.regime_engine import IRegimeSubscriber, RegimeState, RegimeTransition, UnifiedRegimeEngine
-    
-    REGIME_ENGINE_AVAILABLE = True
-    logger.info("✅ Regime engine imports successful")
-except ImportError as e:
-    REGIME_ENGINE_AVAILABLE = False
-    IRegimeSubscriber = None
-    logger.warning(f"⚠️ Regime engine import failed: {e}")
-    # Define dummy classes for type hints
-    class RegimeState:
-        pass
-    class RegimeTransition:
-        pass
-    class UnifiedRegimeEngine:
-        pass
+# Import regime engine interfaces for integration - MANDATORY (NO FALLBACKS)
+from ...interfaces.regime_interfaces import IRegimeSubscriber, RegimeState, RegimeTransition
+
+# Type hint for regime engine (avoid circular import)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ...regime_engine import UnifiedRegimeEngine
+
+logger.info("✅ Regime engine imports successful")
 
 @dataclass
 class PositionMetrics:
@@ -321,10 +305,10 @@ class PnLTracker:
         sortino_ratio = excess_returns.mean() / downside_returns.std() * np.sqrt(252)
         return sortino_ratio
 
-class PortfolioManager(IRegimeSubscriber if REGIME_ENGINE_AVAILABLE else object):
+class PortfolioManager(IRegimeSubscriber):
     """Comprehensive portfolio management system with regime awareness"""
     
-    def __init__(self, initial_capital: float = 100000, regime_engine: Optional[UnifiedRegimeEngine] = None):
+    def __init__(self, initial_capital: float = 100000, regime_engine: Optional['UnifiedRegimeEngine'] = None):
         self.initial_capital = initial_capital
         self.available_capital = initial_capital
         self.positions = {}
@@ -341,11 +325,11 @@ class PortfolioManager(IRegimeSubscriber if REGIME_ENGINE_AVAILABLE else object)
         }
         
         # Subscribe to regime changes if engine provided
-        if self.regime_engine and REGIME_ENGINE_AVAILABLE:
+        if self.regime_engine:
             self.regime_engine.subscribe_to_regime_changes(self)
             logger.info(f"📋 Portfolio manager subscribed to regime engine")
         else:
-            logger.warning(f"📋 Portfolio manager NOT subscribed: regime_engine={self.regime_engine is not None}, available={REGIME_ENGINE_AVAILABLE}")
+            logger.warning(f"📋 Portfolio manager NOT subscribed: regime_engine is None")
         
         # Portfolio tracking
         self.total_market_value = 0.0
@@ -374,9 +358,6 @@ class PortfolioManager(IRegimeSubscriber if REGIME_ENGINE_AVAILABLE else object)
                              new_regime: RegimeState,
                              transition: RegimeTransition) -> None:
         """Handle regime change notification for portfolio rebalancing"""
-        if not REGIME_ENGINE_AVAILABLE:
-            return
-            
         logger.info(f"📊 Portfolio adapting to regime change: "
                    f"{old_regime.primary_regime.value} → {new_regime.primary_regime.value}")
         

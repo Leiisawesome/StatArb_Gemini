@@ -218,118 +218,260 @@ class IntelligentCache(Generic[T]):
             }
 
 # ================================================================================
-# PERFORMANCE MONITORING
+# PERFORMANCE MONITORING (DELEGATION ARCHITECTURE)
 # ================================================================================
+
+# PerformanceMonitor has been refactored to use delegation architecture
+# Import sophisticated components for delegation
+try:
+    # Import existing sophisticated analytical components
+    from .analytics.core_analytics import CoreAnalyticsEngine
+    from .analytics.monitoring_analytics import MonitoringAnalyticsEngine
+    from .infrastructure.monitoring.monitoring_system import RealTimeMonitor, EnhancedHealthMonitor
+    SOPHISTICATED_ANALYTICS_AVAILABLE = True
+    logger.info("✅ Sophisticated analytics components available for delegation")
+except ImportError as e:
+    SOPHISTICATED_ANALYTICS_AVAILABLE = False
+    logger.warning(f"⚠️ Sophisticated analytics not available: {e}")
+
+# Enhanced fallback implementation with sophisticated component integration
+PERFORMANCE_MONITORING_DELEGATION = False
+logger.info("✅ Using enhanced PerformanceMonitor with delegation architecture")
 
 @dataclass
 class PerformanceMetrics:
-    """Performance metrics tracking"""
-    cpu_usage: float = 0.0
-    memory_usage_mb: float = 0.0
-    memory_usage_percent: float = 0.0
-    thread_count: int = 0
-    gc_collections: int = 0
-    cache_hit_rate: float = 0.0
-    average_response_time_ms: float = 0.0
-    throughput_per_second: float = 0.0
-    timestamp: datetime = field(default_factory=datetime.now)
+        """Performance metrics tracking"""
+        cpu_usage: float = 0.0
+        memory_usage_mb: float = 0.0
+        memory_usage_percent: float = 0.0
+        thread_count: int = 0
+        gc_collections: int = 0
+        cache_hit_rate: float = 0.0
+        average_response_time_ms: float = 0.0
+        throughput_per_second: float = 0.0
+        timestamp: datetime = field(default_factory=datetime.now)
 
 class PerformanceMonitor:
-    """
-    Advanced performance monitoring system
-    """
-    
-    def __init__(self, monitoring_interval: float = 1.0):
-        self.monitoring_interval = monitoring_interval
-        self._metrics_history: deque = deque(maxlen=1000)
-        self._monitoring_active = False
-        self._monitor_thread: Optional[threading.Thread] = None
+        """
+        Enhanced performance monitoring system with sophisticated component delegation
         
-        # Response time tracking
-        self._response_times: deque = deque(maxlen=100)
-        self._request_count = 0
-        self._start_time = time.time()
+        DELEGATION ARCHITECTURE:
+        - Performance Analytics -> CoreAnalyticsEngine (1150 lines of vectorized calculations)
+        - System Monitoring -> MonitoringAnalyticsEngine (comprehensive monitoring system)
+        - Infrastructure Monitoring -> RealTimeMonitor & EnhancedHealthMonitor
+        """
         
-        logger.info("Performance monitor initialized")
-    
-    def start_monitoring(self) -> None:
-        """Start performance monitoring"""
-        if self._monitoring_active:
-            return
+        def __init__(self, monitoring_interval: float = 1.0):
+            self.monitoring_interval = monitoring_interval
+            self._metrics_history = deque(maxlen=1000)
+            self._monitoring_active = False
+            self._monitor_thread = None
+            self._response_times = deque(maxlen=100)
+            self._request_count = 0
+            self._start_time = time.time()
+            
+            # Initialize sophisticated delegation components
+            self._initialize_sophisticated_components()
+            
+            logger.info("Enhanced PerformanceMonitor initialized with sophisticated delegation")
         
-        self._monitoring_active = True
-        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self._monitor_thread.start()
+        def _initialize_sophisticated_components(self):
+            """Initialize sophisticated analytical components for delegation"""
+            if SOPHISTICATED_ANALYTICS_AVAILABLE:
+                try:
+                    # CoreAnalyticsEngine for sophisticated performance calculations
+                    self.core_analytics = CoreAnalyticsEngine()
+                    
+                    # MonitoringAnalyticsEngine for comprehensive system monitoring
+                    self.monitoring_analytics = MonitoringAnalyticsEngine()
+                    
+                    # Infrastructure monitoring components
+                    self.real_time_monitor = RealTimeMonitor()
+                    self.health_monitor = EnhancedHealthMonitor()
+                    
+                    logger.info("✅ Sophisticated analytics components initialized for delegation")
+                    logger.info("   📈 CoreAnalyticsEngine: 1150 lines with vectorized calculations")
+                    logger.info("   🔍 MonitoringAnalyticsEngine: Comprehensive system monitoring")
+                    logger.info("   🏗️ RealTimeMonitor & EnhancedHealthMonitor: Infrastructure monitoring")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize sophisticated components: {e}")
+                    self.core_analytics = None
+                    self.monitoring_analytics = None
+                    self.real_time_monitor = None
+                    self.health_monitor = None
+            else:
+                self.core_analytics = None
+                self.monitoring_analytics = None
+                self.real_time_monitor = None
+                self.health_monitor = None
         
-        logger.info("Performance monitoring started")
-    
-    def stop_monitoring(self) -> None:
-        """Stop performance monitoring"""
-        self._monitoring_active = False
-        if self._monitor_thread:
-            self._monitor_thread.join(timeout=2.0)
+        def start_monitoring(self) -> None:
+            """Start performance monitoring with sophisticated delegation"""
+            if self._monitoring_active:
+                return
+            
+            # Start sophisticated monitoring components
+            if self.monitoring_analytics:
+                try:
+                    self.monitoring_analytics.start()
+                    logger.info("✅ MonitoringAnalyticsEngine started")
+                except Exception as e:
+                    logger.error(f"❌ Failed to start MonitoringAnalyticsEngine: {e}")
+            
+            if self.real_time_monitor:
+                try:
+                    self.real_time_monitor.start()
+                    logger.info("✅ RealTimeMonitor started")
+                except Exception as e:
+                    logger.error(f"❌ Failed to start RealTimeMonitor: {e}")
+            
+            self._monitoring_active = True
+            self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self._monitor_thread.start()
+            logger.info("Enhanced performance monitoring started with delegation")
         
-        logger.info("Performance monitoring stopped")
-    
-    def _monitor_loop(self) -> None:
-        """Main monitoring loop"""
-        while self._monitoring_active:
+        def stop_monitoring(self) -> None:
+            """Stop performance monitoring and sophisticated components"""
+            self._monitoring_active = False
+            if self._monitor_thread:
+                self._monitor_thread.join(timeout=2.0)
+            
+            # Stop sophisticated monitoring components
+            if self.monitoring_analytics:
+                try:
+                    self.monitoring_analytics.stop()
+                except Exception as e:
+                    logger.error(f"❌ Error stopping MonitoringAnalyticsEngine: {e}")
+            
+            if self.real_time_monitor:
+                try:
+                    self.real_time_monitor.stop()
+                except Exception as e:
+                    logger.error(f"❌ Error stopping RealTimeMonitor: {e}")
+            
+            logger.info("Enhanced performance monitoring stopped")
+        
+        def _monitor_loop(self) -> None:
+            """Main monitoring loop with sophisticated analytics delegation"""
+            while self._monitoring_active:
+                try:
+                    metrics = self._collect_metrics()
+                    self._metrics_history.append(metrics)
+                    
+                    # Delegate to sophisticated analytics for processing
+                    if self.core_analytics:
+                        self.core_analytics.process_performance_metrics(metrics.__dict__)
+                    
+                    if self.monitoring_analytics:
+                        self.monitoring_analytics.process_metrics(metrics.__dict__)
+                    
+                    time.sleep(self.monitoring_interval)
+                except Exception as e:
+                    logger.error(f"Performance monitoring error: {e}")
+                    time.sleep(self.monitoring_interval)
+        
+        def _collect_metrics(self) -> PerformanceMetrics:
+            """Collect current performance metrics with sophisticated delegation"""
             try:
-                metrics = self._collect_metrics()
-                self._metrics_history.append(metrics)
-                time.sleep(self.monitoring_interval)
+                # Delegate sophisticated metrics collection to infrastructure monitoring
+                if self.real_time_monitor:
+                    sophisticated_metrics = self.real_time_monitor.get_system_metrics()
+                    return PerformanceMetrics(
+                        cpu_usage=sophisticated_metrics.get('cpu_usage', 0.0),
+                        memory_usage_mb=sophisticated_metrics.get('memory_usage_mb', 0.0),
+                        memory_usage_percent=sophisticated_metrics.get('memory_usage_percent', 0.0),
+                        thread_count=sophisticated_metrics.get('thread_count', 0),
+                        gc_collections=sophisticated_metrics.get('gc_collections', 0),
+                        cache_hit_rate=sophisticated_metrics.get('cache_hit_rate', 0.0),
+                        average_response_time_ms=np.mean(self._response_times) if self._response_times else 0.0,
+                        throughput_per_second=self._calculate_throughput()
+                    )
+                else:
+                    # Fallback basic collection
+                    return self._collect_basic_metrics()
+                    
             except Exception as e:
-                logger.error(f"Performance monitoring error: {e}")
-                time.sleep(self.monitoring_interval)
-    
-    def _collect_metrics(self) -> PerformanceMetrics:
-        """Collect current performance metrics"""
-        process = psutil.Process()
+                logger.error(f"Error collecting metrics: {e}")
+                return self._collect_basic_metrics()
         
-        # CPU and memory
-        cpu_usage = process.cpu_percent()
-        memory_info = process.memory_info()
-        memory_usage_mb = memory_info.rss / 1024 / 1024
-        memory_usage_percent = process.memory_percent()
+        def _collect_basic_metrics(self) -> PerformanceMetrics:
+            """Fallback basic metrics collection"""
+            try:
+                process = psutil.Process()
+                cpu_usage = process.cpu_percent()
+                memory_info = process.memory_info()
+                memory_usage_mb = memory_info.rss / 1024 / 1024
+                memory_usage_percent = process.memory_percent()
+                thread_count = process.num_threads()
+                gc_collections = sum(gc.get_stats()[i]['collections'] for i in range(len(gc.get_stats())))
+                avg_response_time = np.mean(self._response_times) if self._response_times else 0.0
+                throughput = self._calculate_throughput()
+                
+                return PerformanceMetrics(
+                    cpu_usage=cpu_usage,
+                    memory_usage_mb=memory_usage_mb,
+                    memory_usage_percent=memory_usage_percent,
+                    thread_count=thread_count,
+                    gc_collections=gc_collections,
+                    average_response_time_ms=avg_response_time,
+                    throughput_per_second=throughput
+                )
+            except Exception as e:
+                logger.error(f"Error in basic metrics collection: {e}")
+                return PerformanceMetrics()
         
-        # Thread count
-        thread_count = process.num_threads()
+        def _calculate_throughput(self) -> float:
+            """Calculate current throughput"""
+            try:
+                elapsed_time = time.time() - self._start_time
+                return self._request_count / elapsed_time if elapsed_time > 0 else 0.0
+            except Exception:
+                return 0.0
         
-        # Garbage collection
-        gc_collections = sum(gc.get_stats()[i]['collections'] for i in range(len(gc.get_stats())))
+        def record_request(self, response_time_ms: float) -> None:
+            """Record a request response time with sophisticated analytics"""
+            self._response_times.append(response_time_ms)
+            self._request_count += 1
+            
+            # Delegate to sophisticated analytics for request analysis
+            if self.core_analytics:
+                self.core_analytics.process_request_data({
+                    'response_time_ms': response_time_ms,
+                    'timestamp': datetime.now(),
+                    'request_count': self._request_count
+                })
         
-        # Response time
-        avg_response_time = np.mean(self._response_times) if self._response_times else 0.0
+        def get_current_metrics(self) -> Optional[PerformanceMetrics]:
+            """Get current performance metrics with sophisticated enhancement"""
+            if self.core_analytics:
+                # Delegate to sophisticated analytics for enhanced metrics
+                try:
+                    enhanced_metrics = self.core_analytics.get_enhanced_performance_metrics()
+                    if enhanced_metrics:
+                        return PerformanceMetrics(**enhanced_metrics)
+                except Exception as e:
+                    logger.error(f"Error getting enhanced metrics: {e}")
+            
+            # Fallback to local metrics
+            if self._metrics_history:
+                return self._metrics_history[-1]
+            return None
         
-        # Throughput
-        elapsed_time = time.time() - self._start_time
-        throughput = self._request_count / elapsed_time if elapsed_time > 0 else 0.0
-        
-        return PerformanceMetrics(
-            cpu_usage=cpu_usage,
-            memory_usage_mb=memory_usage_mb,
-            memory_usage_percent=memory_usage_percent,
-            thread_count=thread_count,
-            gc_collections=gc_collections,
-            average_response_time_ms=avg_response_time,
-            throughput_per_second=throughput
-        )
-    
-    def record_request(self, response_time_ms: float) -> None:
-        """Record a request response time"""
-        self._response_times.append(response_time_ms)
-        self._request_count += 1
-    
-    def get_current_metrics(self) -> Optional[PerformanceMetrics]:
-        """Get current performance metrics"""
-        if self._metrics_history:
-            return self._metrics_history[-1]
-        return None
-    
-    def get_metrics_history(self, minutes: int = 10) -> List[PerformanceMetrics]:
-        """Get metrics history for specified minutes"""
-        cutoff_time = datetime.now() - timedelta(minutes=minutes)
-        return [m for m in self._metrics_history if m.timestamp >= cutoff_time]
+        def get_metrics_history(self, minutes: int = 10) -> List[PerformanceMetrics]:
+            """Get metrics history with sophisticated analytics integration"""
+            if self.monitoring_analytics:
+                try:
+                    # Delegate to sophisticated monitoring analytics
+                    history_data = self.monitoring_analytics.get_performance_history(minutes=minutes)
+                    if history_data:
+                        return [PerformanceMetrics(**data) for data in history_data]
+                except Exception as e:
+                    logger.error(f"Error getting sophisticated metrics history: {e}")
+            
+            # Fallback to local history
+            cutoff_time = datetime.now() - timedelta(minutes=minutes)
+            return [m for m in self._metrics_history if m.timestamp >= cutoff_time]
 
 # ================================================================================
 # PARALLEL PROCESSING OPTIMIZATION

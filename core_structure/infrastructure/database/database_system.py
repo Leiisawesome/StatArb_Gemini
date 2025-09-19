@@ -470,6 +470,10 @@ class ClickHouseClient:
             'password': ''
         }
         
+        # Convert 'username' to 'user' if present (ClickHouse driver expects 'user')
+        if 'username' in self.config:
+            self.config['user'] = self.config.pop('username')
+        
         for key, default_value in required_defaults.items():
             if key not in self.config:
                 self.config[key] = default_value

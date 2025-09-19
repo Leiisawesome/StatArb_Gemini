@@ -21,6 +21,7 @@ from .performance import (
     optimize_portfolio_update, 
     optimize_risk_calculation,
     performance_monitor, 
+    PerformanceMonitor,
     get_performance_summary, 
     get_cache_statistics, 
     clear_all_caches,
@@ -61,6 +62,7 @@ __all__ = [
     'batch_processor',
     'CircularBuffer',
     'FastDataFrame',
+    'PerformanceMonitor',
     
     # Memory
     'PoolManager',

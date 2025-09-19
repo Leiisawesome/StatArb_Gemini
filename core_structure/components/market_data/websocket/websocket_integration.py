@@ -27,33 +27,20 @@ from queue import Queue, Empty
 import pandas as pd
 import json
 
-# Import existing infrastructure
-try:
-    from core_structure.components.market_data.core.websocket_diversification import (
-        WebSocketDiversificationManager, 
-        WebSocketSource, 
-        SourceConfig, 
-        SourcePriority,
-        DataType,
-        WebSocketMessage,
-        create_websocket_diversification_manager
-    )
-    from core_structure.components.market_data.core.data_feeds import MarketDataPoint, DataSource
-    from core_structure.strategies.unified_strategy_system import StrategyEngine
-    from paper_trading.multi_strategy_paper_trading import MultiStrategyPaperTradingEngine
-except ImportError as e:
-    logger = logging.getLogger(__name__)
-    logger.warning(f"Import warning: {e}")
-    
-    # Fallback definitions for development
-    class WebSocketMessage:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-    
-    class DataType:
-        TRADE = "trade"
-        QUOTE = "quote"
+# Import existing infrastructure - MANDATORY (NO FALLBACKS)
+from .websocket_diversification import (
+    WebSocketDiversificationManager, 
+    WebSocketSource, 
+    SourceConfig, 
+    SourcePriority,
+    DataType,
+    WebSocketMessage,
+    create_websocket_diversification_manager
+)
+from ..core.data_feeds import MarketDataPoint, DataSource
+# TODO: Implement these dependencies when ready:
+# from core_structure.strategies.unified_strategy_system import StrategyEngine  
+# from paper_trading.multi_strategy_paper_trading import MultiStrategyPaperTradingEngine
 
 logger = logging.getLogger(__name__)
 
