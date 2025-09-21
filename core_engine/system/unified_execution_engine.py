@@ -549,6 +549,11 @@ class UnifiedExecutionEngine:
         self.execution_history: List[ExecutionResult] = []
         self.authorization_cache: Dict[str, ExecutionAuthorization] = {}
         
+        # ENHANCED: Position tracking integration
+        self.position_update_callback = config.get('position_update_callback')
+        self.risk_manager_callback = config.get('risk_manager_callback')
+        self.enable_position_tracking = config.get('enable_position_tracking', True)
+        
         # Performance tracking
         self.execution_metrics = {
             'total_executions': 0,
@@ -562,7 +567,7 @@ class UnifiedExecutionEngine:
         # Threading
         self.execution_lock = threading.Lock()
         
-        logger.info("Unified Execution Engine initialized")
+        logger.info("✅ Unified Execution Engine initialized with position tracking")
     
     async def execute_authorized_trade(self, request: ExecutionRequest) -> ExecutionResult:
         """
@@ -615,6 +620,9 @@ class UnifiedExecutionEngine:
                 
                 # Update metrics
                 self._update_metrics(result)
+                
+                # ENHANCED: Position tracking integration
+                await self._handle_position_updates(request, result)
                 
                 logger.info(f"Execution completed: {request.request_id} - Status: {result.status}")
             
@@ -835,6 +843,76 @@ class UnifiedExecutionEngine:
         except Exception as e:
             logger.error(f"Error calculating algorithm breakdown: {e}")
             return {}
+    
+    async def _handle_position_updates(self, request: ExecutionRequest, result: ExecutionResult):
+        """
+        Handle position updates after successful execution
+        ENHANCED: Integrated position tracking from test implementation
+        """
+        try:
+            # Only update positions for successful executions
+            if result.status != ExecutionStatus.FILLED or not self.enable_position_tracking:
+                return
+            
+            # Extract execution details
+            symbol = request.authorization.symbol
+            side = request.authorization.side.lower()
+            filled_quantity = result.filled_quantity
+            avg_price = result.avg_fill_price
+            
+            if filled_quantity <= 0:
+                return
+            
+            # Update position via Risk Manager callback (preferred method)
+            if self.risk_manager_callback:
+                try:
+                    await self._update_position_via_risk_manager(symbol, side, filled_quantity, avg_price)
+                except Exception as e:
+                    logger.error(f"❌ Risk Manager position update failed: {e}")
+            
+            # Fallback to direct position update callback
+            elif self.position_update_callback:
+                try:
+                    await self._update_position_via_callback(symbol, side, filled_quantity, avg_price)
+                except Exception as e:
+                    logger.error(f"❌ Direct position update failed: {e}")
+            
+            logger.info(f"📊 Position updated: {symbol} {side.upper()} {filled_quantity} @ ${avg_price:.2f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Position update handling failed: {e}")
+    
+    async def _update_position_via_risk_manager(self, symbol: str, side: str, quantity: float, price: float):
+        """Update position through Risk Manager"""
+        if hasattr(self.risk_manager_callback, 'update_position'):
+            # Direct method call
+            self.risk_manager_callback.update_position(symbol, side, quantity, price)
+        elif callable(self.risk_manager_callback):
+            # Callable function
+            await self.risk_manager_callback(symbol, side, quantity, price)
+        else:
+            logger.warning("Risk Manager callback not callable")
+    
+    async def _update_position_via_callback(self, symbol: str, side: str, quantity: float, price: float):
+        """Update position through direct callback"""
+        if callable(self.position_update_callback):
+            await self.position_update_callback(symbol, side, quantity, price)
+        else:
+            logger.warning("Position update callback not callable")
+    
+    def set_position_callbacks(self, risk_manager_callback: Optional[Callable] = None, 
+                              position_update_callback: Optional[Callable] = None):
+        """
+        Set position update callbacks
+        ENHANCED: Allow dynamic callback registration
+        """
+        if risk_manager_callback:
+            self.risk_manager_callback = risk_manager_callback
+            logger.info("✅ Risk Manager callback registered with Execution Engine")
+        
+        if position_update_callback:
+            self.position_update_callback = position_update_callback
+            logger.info("✅ Position update callback registered with Execution Engine")
     
     def shutdown(self):
         """Shutdown execution engine"""

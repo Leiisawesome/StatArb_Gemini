@@ -1,0 +1,188 @@
+---
+globs: core_engine/**/*.py
+---
+# Component Integration Standards for Core Engine
+
+All components within the `core_engine` must integrate seamlessly with the [HierarchicalSystemOrchestrator](mdc:core_engine/system/hierarchical_orchestrator.py) and adhere to these standards:
+
+## 1. Implement `ISystemComponent`
+
+If a component manages its own lifecycle (initialization, start, stop, health checks), it SHOULD implement the `ISystemComponent` interface.
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
+class ISystemComponent(ABC):
+    @abstractmethod
+    async def initialize(self) -> bool:
+        """Initialize component"""
+        pass
+    
+    @abstractmethod
+    async def start(self) -> bool:
+        """Start component operations"""
+        pass
+    
+    @abstractmethod
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        pass
+    
+    @abstractmethod
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check"""
+        pass
+    
+    @abstractmethod
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        pass
+```
+
+## 2. Component Registration
+
+Components must be registered with the `HierarchicalSystemOrchestrator` using `orchestrator.register_component()`.
+
+```python
+# Register with SystemOrchestrator
+from core_engine.system.hierarchical_orchestrator import (
+    HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
+)
+
+class MyTradingComponent(ISystemComponent):
+    def __init__(self):
+        self.component_id = None
+        self.orchestrator = None
+    
+    def register_with_orchestrator(self, orchestrator: HierarchicalSystemOrchestrator):
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="MyTradingComponent",
+            component=self,
+            layer=ComponentLayer.EXECUTION,  # or SUPPORT, GOVERNANCE
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=20
+        )
+```
+
+## 3. Authorization Request Pattern
+
+Any component requiring a privileged operation (e.g., data request, trade execution, system control) MUST request authorization from the `SystemOrchestrator` using `orchestrator.request_system_authorization()`.
+
+```python
+async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+    """Request authorization from orchestrator"""
+    if not self.orchestrator or not self.component_id:
+        return False
+    
+    return await self.orchestrator.request_system_authorization(
+        operation, self.component_id, details
+    )
+```
+
+## 4. Layer-Specific Guidelines
+
+### Support Layer Components
+- **Purpose**: Data processing, analysis, regime assessment
+- **Authority**: OPERATIONAL
+- **Examples**: DataManager, RegimeEngine, IndicatorsEngine
+- **Restrictions**: Cannot initiate trades
+
+### Governance Layer Components  
+- **Purpose**: Risk management, trading authorization
+- **Authority**: GOVERNANCE_CONTROL
+- **Examples**: CentralRiskManager
+- **Responsibilities**: Authorize all trading decisions
+
+### Execution Layer Components
+- **Purpose**: Strategy execution, order management
+- **Authority**: OPERATIONAL (under governance control)
+- **Examples**: StrategyManager, TradingEngine, ExecutionEngine
+- **Requirements**: Must request authorization for trades
+
+## 5. Component Lifecycle Management
+
+```python
+class MyTradingComponent(ISystemComponent):
+    async def initialize(self) -> bool:
+        """Component initialization"""
+        try:
+            # Initialize component resources
+            self.logger.info("Initializing component...")
+            # ... initialization logic ...
+            return True
+        except Exception as e:
+            self.logger.error(f"Initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start component operations"""
+        if not self.is_initialized:
+            return False
+        self.is_operational = True
+        return True
+    
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        self.is_operational = False
+        return True
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Health check implementation"""
+        return {
+            'healthy': self.is_operational,
+            'initialized': self.is_initialized,
+            'component_type': self.__class__.__name__
+        }
+```
+
+## 6. Error Handling and Logging Standards
+
+```python
+import logging
+
+class MyTradingComponent:
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    async def safe_operation(self):
+        try:
+            # Component operation
+            result = await self.perform_operation()
+            self.logger.info("Operation completed successfully")
+            return result
+        except Exception as e:
+            self.logger.error(f"Operation failed: {e}")
+            # Update component status
+            self.status = "error"
+            self.last_error = str(e)
+            raise
+```
+
+## 7. Configuration Management
+
+Use standardized configuration patterns:
+
+```python
+from dataclasses import dataclass
+from typing import Dict, Any
+
+@dataclass
+class ComponentConfig:
+    """Standardized component configuration"""
+    component_name: str
+    initialization_timeout: int = 60
+    health_check_interval: int = 30
+    max_error_count: int = 5
+    
+    # Component-specific config
+    custom_settings: Dict[str, Any] = None
+```
+
+## 8. Prohibited Integration Patterns
+
+❌ **Direct Component Communication**: Components must communicate through orchestrator
+❌ **Bypassing Registration**: All components must register with orchestrator
+❌ **Independent Lifecycle**: Components cannot manage their own lifecycle
+❌ **Custom Authorization**: Must use orchestrator authorization mechanisms

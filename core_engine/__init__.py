@@ -1,53 +1,63 @@
 """
-Core Engine - Standalone Trading System
+Core Engine - Institutional Trading System
 
-A complete institutional-grade trading engine with no external dependencies.
-Features comprehensive portfolio management, strategy execution, risk controls,
-and performance analytics.
-
-Key Components:
-1. CoreEngine - Main trading engine
-2. Portfolio Management - Position tracking and risk controls
-3. Strategy System - Signal generation and execution
-4. Risk Management - Trade authorization and limits
-5. Data Management - Market data handling
-6. Broker Integration - Order execution (paper and live)
-7. Analytics - Performance measurement and reporting
-8. Regime Detection - Market condition assessment
-
-Usage:
-    from core_engine import CoreEngine
-    
-    engine = CoreEngine({
-        'initial_cash': 100000,
-        'commission_rate': 0.001
-    })
-    
-    engine.initialize()
-    # Add strategies and run backtests
+A complete institutional-grade trading engine following the SystemOrchestrator
+architecture with hierarchical control, central risk governance, and unified
+execution capabilities.
 """
 
-# Import main engine
-from .engine import CoreEngine
+__version__ = "2.0.0"
+__author__ = "StatArb_Gemini"
 
-# Import key types for strategy development
-from .types import (
-    BaseStrategy, StrategyConfig, StrategyType, TradingSignal,
-    PortfolioConfig, RiskConfig, DataConfig,
-    Order, OrderType, OrderSide
-)
-
-__version__ = "1.0.0"
-__all__ = [
-    'CoreEngine',
-    'BaseStrategy', 
-    'StrategyConfig', 
-    'StrategyType', 
-    'TradingSignal',
-    'PortfolioConfig',
-    'RiskConfig', 
-    'DataConfig',
-    'Order',
-    'OrderType', 
-    'OrderSide'
-]
+# Only import components that actually exist after migration
+try:
+    # System components (existing)
+    from .system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
+    from .system.central_risk_manager import CentralRiskManager
+    from .system.unified_execution_engine import UnifiedExecutionEngine
+    
+    # Data management (moved)
+    from .data.manager import ClickHouseDataManager
+    
+    # Regime assessment (existing)
+    from .regime.engine import RegimeEngine
+    
+    # Processing pipeline (moved)
+    from .processing.indicators.engine import EnhancedTechnicalIndicators
+    from .processing.features.engineer import FeatureEngineer
+    from .processing.signals.generator import SignalGenerator
+    
+    # Trading components (moved)
+    from .trading.portfolio.manager import PortfolioManager
+    
+    # Configuration (new)
+    from .config.system_config import SystemConfig
+    from .config.component_config import DataConfig, RiskConfig, ProcessingConfig
+    
+    __all__ = [
+        # System components
+        'HierarchicalSystemOrchestrator',
+        'CentralRiskManager', 
+        'UnifiedExecutionEngine',
+        
+        # Data and processing
+        'ClickHouseDataManager',
+        'RegimeEngine',
+        'EnhancedTechnicalIndicators',
+        'FeatureEngineer',
+        'SignalGenerator',
+        
+        # Trading
+        'PortfolioManager',
+        
+        # Configuration
+        'SystemConfig',
+        'DataConfig',
+        'RiskConfig', 
+        'ProcessingConfig'
+    ]
+    
+except ImportError as e:
+    # Graceful fallback during migration
+    print(f"Warning: Some components not available during migration: {e}")
+    __all__ = []

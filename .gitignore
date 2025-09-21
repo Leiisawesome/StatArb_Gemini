@@ -21,7 +21,7 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
+# Virtual environments
 ai_integration_env/
 venv/
 env/
@@ -43,52 +43,34 @@ ENV/
 ehthumbs.db
 Thumbs.db
 
-# Logs
+# Logs and temporary files
 *.log
-logs/
-
-# Results and temporary files
-results/
-temp/
-tmp/
-test_results/
 *.tmp
+*.temp
+*_report_*.txt
+*_log_*.txt
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Configuration (sensitive)
-*_local.yml
-*_local.yaml
-*.env
-.env
-
-# Jupyter Notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
+# Jupyter Notebook
+.ipynb_checkpoints
 
 # pytest
 .pytest_cache/
+.coverage
+htmlcov/
 
 # mypy
 .mypy_cache/
 .dmypy.json
 dmypy.json
 
-# Backup files
-*.bak
-*.backup
-*~
+# Environments
+.env
+.venv
 
-# Trading specific
-backtest_results_*.yml
-selection_history_*.yml
-validation_report_*.yml
+# ClickHouse
+clickhouse_data/

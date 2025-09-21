@@ -30,7 +30,7 @@ import json
 from collections import defaultdict
 
 # Import the UnifiedExecutionEngine
-from ..unified_execution_engine import (
+from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
@@ -133,7 +133,10 @@ class TradingAuthorization:
 
 @dataclass
 class RiskManagerConfig:
-    """Configuration for the central risk manager"""
+    """
+    Configuration for the central risk manager
+    Enhanced with proper signal confidence requirements from test findings
+    """
     
     # Risk limits
     max_position_size: float = 0.10  # 10% max position
@@ -141,6 +144,11 @@ class RiskManagerConfig:
     max_total_risk: float = 0.20     # 20% total portfolio risk
     position_concentration_limit: float = 0.15  # 15% per position
     strategy_allocation_limit: float = 0.33     # 33% per strategy
+    
+    # Signal confidence requirements (from test findings)
+    min_signal_confidence: float = 0.6  # Minimum confidence for authorization
+    high_confidence_threshold: float = 0.8  # High confidence for automatic approval
+    extreme_confidence_threshold: float = 0.9  # Extreme confidence signals
     
     # Authorization settings
     auto_approval_threshold: float = 0.01  # 1% auto-approve threshold
@@ -331,7 +339,7 @@ class CentralRiskManager:
             
             # Determine authorization level
             authorization_level = self._determine_authorization_level(
-                risk_impact, position_check, concentration_check, strategy_check, regime_adjustment
+                risk_impact, position_check, concentration_check, strategy_check, regime_adjustment, request
             )
             
             # Set authorization details
@@ -505,17 +513,38 @@ class CentralRiskManager:
     
     def _determine_authorization_level(self, risk_impact: float, position_check: bool,
                                      concentration_check: bool, strategy_check: bool,
-                                     regime_adjustment: float) -> AuthorizationLevel:
-        """Determine authorization level based on risk assessment"""
+                                     regime_adjustment: float, request: TradingDecisionRequest = None) -> AuthorizationLevel:
+        """
+        Determine authorization level based on risk assessment
+        Enhanced with signal confidence validation from test findings
+        """
         
         # Check for rejection conditions
         if not (position_check and concentration_check and strategy_check):
             return AuthorizationLevel.REJECTED
         
+        # Signal confidence validation (from test findings)
+        if request and hasattr(request, 'confidence'):
+            if request.confidence < self.config.min_signal_confidence:
+                logger.warning(f"Signal confidence {request.confidence:.2f} below minimum {self.config.min_signal_confidence}")
+                return AuthorizationLevel.REJECTED
+        
         # Adjust risk impact for regime
         adjusted_risk = risk_impact * regime_adjustment
         
-        # Determine authorization level
+        # Enhanced authorization logic with confidence consideration
+        if request and hasattr(request, 'confidence'):
+            # High confidence signals get preferential treatment
+            if request.confidence >= self.config.extreme_confidence_threshold:
+                # Extreme confidence (0.9+) - automatic approval for reasonable risk
+                if adjusted_risk <= self.config.elevated_review_threshold:
+                    return AuthorizationLevel.AUTOMATIC
+            elif request.confidence >= self.config.high_confidence_threshold:
+                # High confidence (0.8+) - automatic approval for low risk
+                if adjusted_risk <= self.config.auto_approval_threshold * 2:
+                    return AuthorizationLevel.AUTOMATIC
+        
+        # Standard risk-based authorization
         if adjusted_risk <= self.config.auto_approval_threshold:
             return AuthorizationLevel.AUTOMATIC
         elif adjusted_risk <= self.config.elevated_review_threshold:
@@ -527,11 +556,46 @@ class CentralRiskManager:
     
     def _calculate_authorized_quantity(self, request: TradingDecisionRequest,
                                      risk_impact: float, regime_adjustment: float) -> float:
-        """Calculate authorized quantity based on risk assessment"""
+        """
+        ARCHITECTURAL FIX: Calculate authorized quantity with proper cash and position validation
+        """
         
         try:
             # Start with requested quantity
             authorized_qty = request.quantity
+            
+            # CRITICAL FIX: Cash availability check for BUY orders BEFORE authorization
+            if request.side.lower() == 'buy':
+                # Get available cash (this should be passed from the trading component)
+                available_cash = getattr(request, 'available_cash', self.portfolio_value * 0.95)  # Conservative default
+                required_cash = authorized_qty * getattr(request, 'price', 100.0)  # Default price if not provided
+                
+                if required_cash > available_cash:
+                    # Reduce quantity to fit available cash
+                    max_affordable_qty = available_cash / getattr(request, 'price', 100.0)
+                    if max_affordable_qty < 1.0:  # Less than 1 share affordable
+                        logger.warning(f"🔒 BUY rejected: Insufficient cash. Need ${required_cash:.2f}, have ${available_cash:.2f}")
+                        return 0.0
+                    else:
+                        logger.info(f"🔒 BUY order capped by cash: requested {authorized_qty}, "
+                                   f"affordable {max_affordable_qty:.2f}, authorized {max_affordable_qty:.2f}")
+                        authorized_qty = max_affordable_qty
+            
+            # CRITICAL FIX: Position-aware SELL order capping with exact precision
+            elif request.side.lower() == 'sell':
+                current_position = self.current_positions.get(request.symbol, 0.0)
+                
+                if current_position <= 0:
+                    # No position to sell
+                    logger.warning(f"🔒 SELL rejected: No position in {request.symbol}")
+                    return 0.0
+                else:
+                    # Cap SELL quantity by actual position with exact precision
+                    max_sellable = abs(current_position)
+                    if authorized_qty > max_sellable:
+                        logger.info(f"🔒 SELL order capped: requested {authorized_qty:.2f}, "
+                                   f"available {max_sellable:.2f}, authorized {max_sellable:.2f}")
+                        authorized_qty = max_sellable
             
             # Apply risk-based adjustment
             if risk_impact > self.config.auto_approval_threshold:
@@ -545,8 +609,8 @@ class CentralRiskManager:
             elif regime_adjustment < 0.8:  # Low risk regime
                 authorized_qty *= 1.1  # Increase by 10%
             
-            # Ensure positive quantity
-            authorized_qty = max(0.0, authorized_qty)
+            # PRECISION FIX: Round to 2 decimal places to avoid floating point errors
+            authorized_qty = max(0.0, round(authorized_qty, 2))
             
             return authorized_qty
             
@@ -637,20 +701,107 @@ class CentralRiskManager:
     
     async def _post_execution_monitoring(self, authorization: TradingAuthorization,
                                        result: ExecutionResult):
-        """Post-execution monitoring and risk assessment"""
+        """
+        Post-execution monitoring and risk assessment
+        ENHANCED: Real-time position tracking and risk updates
+        """
         
         try:
-            # Update position tracking
-            # TODO: Extract symbol and quantity from result
-            # self.current_positions[symbol] = self.current_positions.get(symbol, 0.0) + result.filled_quantity
+            # Extract trade details from authorization and result
+            # Note: This requires the original request to be stored
+            original_request = None
+            for req_id, req in self.pending_requests.items():
+                if req.request_id == authorization.request_id:
+                    original_request = req
+                    break
             
-            # Check for risk limit breaches
-            # TODO: Implement comprehensive post-execution risk checks
+            if original_request and hasattr(result, 'filled_quantity'):
+                symbol = original_request.symbol
+                side = original_request.side.lower()
+                filled_qty = result.filled_quantity
+                
+                # Update position tracking
+                current_position = self.current_positions.get(symbol, 0.0)
+                
+                if side == 'buy':
+                    new_position = current_position + filled_qty
+                elif side == 'sell':
+                    new_position = current_position - filled_qty
+                else:
+                    new_position = current_position
+                
+                self.current_positions[symbol] = new_position
+                
+                logger.info(f"📊 Position updated: {symbol} {current_position} → {new_position} "
+                           f"({side.upper()} {filled_qty})")
+                
+                # Update risk metrics
+                self._update_risk_metrics()
+                
+                # Check for risk limit breaches after position update
+                await self._check_post_execution_risk_limits(symbol, new_position)
             
             logger.info(f"Post-execution monitoring completed for {authorization.authorization_id}")
             
         except Exception as e:
             logger.error(f"Post-execution monitoring failed: {e}")
+    
+    async def _check_post_execution_risk_limits(self, symbol: str, new_position: float):
+        """Check risk limits after position update"""
+        
+        try:
+            # Check position limits
+            position_pct = abs(new_position * 100.0) / self.portfolio_value  # Assuming $100/share
+            
+            if position_pct > self.config.max_position_size:
+                logger.warning(f"⚠️ Position limit breach: {symbol} at {position_pct:.2f}% "
+                              f"(limit: {self.config.max_position_size:.2f}%)")
+                
+                # TODO: Implement automatic risk reduction measures
+            
+            # Check concentration limits
+            if position_pct > self.config.position_concentration_limit:
+                logger.warning(f"⚠️ Concentration limit breach: {symbol} at {position_pct:.2f}% "
+                              f"(limit: {self.config.position_concentration_limit:.2f}%)")
+            
+        except Exception as e:
+            logger.error(f"Post-execution risk check failed: {e}")
+    
+    def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0):
+        """
+        Manual position update method for external position tracking
+        ENHANCED: Unified position tracking for all components
+        """
+        
+        try:
+            current_position = self.current_positions.get(symbol, 0.0)
+            
+            if side.lower() == 'buy':
+                new_position = current_position + quantity
+            elif side.lower() == 'sell':
+                new_position = current_position - quantity
+            else:
+                logger.warning(f"Unknown side: {side}")
+                return
+            
+            self.current_positions[symbol] = new_position
+            
+            logger.info(f"📊 Manual position update: {symbol} {current_position} → {new_position} "
+                       f"({side.upper()} {quantity})")
+            
+            # Update risk metrics
+            self._update_risk_metrics()
+            
+        except Exception as e:
+            logger.error(f"Manual position update failed: {e}")
+    
+    def get_current_position(self, symbol: str) -> float:
+        """Get current position for symbol"""
+        return self.current_positions.get(symbol, 0.0)
+    
+    def get_all_positions(self) -> Dict[str, float]:
+        """Get all current positions"""
+        return self.current_positions.copy()
     
     async def _continuous_monitoring(self):
         """Continuous risk monitoring loop"""

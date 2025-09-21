@@ -153,6 +153,12 @@ class CrossAssetRegime:
     commodity_dollar_correlation: float = 0.0
     risk_on_off_signal: float = 0.0
     
+    # Confidence and quality metrics
+    confidence: float = 0.0  # Overall confidence in regime assessment (0-1)
+    data_quality: float = 1.0  # Quality of underlying data (0-1)
+    regime_strength: float = 0.0  # Strength of regime signals (0-1)
+    consensus_score: float = 0.0  # Agreement across different methods (0-1)
+    
     # Regime coherence
     regime_alignment: float = 0.0  # How aligned are different asset classes
     regime_stability: float = 0.0   # How stable is the current regime
@@ -356,16 +362,128 @@ class CrossAssetAnalyzer:
             # Set asset class regimes
             cross_asset_regime = self._set_asset_class_regimes(cross_asset_regime, asset_profiles)
             
-            # Calculate confidence
-            cross_asset_regime.analysis_confidence = self._calculate_analysis_confidence(
-                asset_profiles, regime_alignment, regime_stability
+            # Calculate confidence metrics
+            confidence_metrics = self._calculate_confidence_metrics(
+                asset_profiles, regime_alignment, regime_stability, returns_data
             )
+            
+            # Set confidence attributes
+            cross_asset_regime.confidence = confidence_metrics.get('overall_confidence', 0.5)
+            cross_asset_regime.data_quality = confidence_metrics.get('data_quality', 1.0)
+            cross_asset_regime.regime_strength = confidence_metrics.get('regime_strength', 0.0)
+            cross_asset_regime.consensus_score = confidence_metrics.get('consensus_score', 0.0)
             
             return cross_asset_regime
             
         except Exception as e:
             logger.error(f"Error analyzing cross-asset regime: {e}")
             return CrossAssetRegime()
+    
+    def _calculate_confidence_metrics(self, asset_profiles: Dict, regime_alignment: float, 
+                                    regime_stability: float, returns_data: pd.DataFrame) -> Dict[str, float]:
+        """Calculate comprehensive confidence metrics for cross-asset regime analysis"""
+        
+        try:
+            # Data quality assessment
+            data_quality = self._assess_data_quality(returns_data)
+            
+            # Regime strength based on signal clarity
+            regime_strength = self._calculate_regime_strength(asset_profiles)
+            
+            # Consensus score based on agreement across assets
+            consensus_score = self._calculate_consensus_score(asset_profiles, regime_alignment)
+            
+            # Overall confidence (weighted combination)
+            overall_confidence = (
+                0.3 * data_quality +
+                0.3 * regime_strength +
+                0.2 * consensus_score +
+                0.1 * regime_alignment +
+                0.1 * regime_stability
+            )
+            
+            # Ensure confidence is in valid range
+            overall_confidence = np.clip(overall_confidence, 0.1, 0.95)
+            
+            return {
+                'overall_confidence': overall_confidence,
+                'data_quality': data_quality,
+                'regime_strength': regime_strength,
+                'consensus_score': consensus_score
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating confidence metrics: {e}")
+            return {
+                'overall_confidence': 0.5,
+                'data_quality': 1.0,
+                'regime_strength': 0.0,
+                'consensus_score': 0.0
+            }
+    
+    def _assess_data_quality(self, returns_data: pd.DataFrame) -> float:
+        """Assess quality of underlying data"""
+        
+        if returns_data.empty:
+            return 0.0
+        
+        # Check for missing data
+        missing_ratio = returns_data.isnull().sum().sum() / (returns_data.shape[0] * returns_data.shape[1])
+        
+        # Check for sufficient data points
+        min_required_points = 50
+        data_sufficiency = min(1.0, len(returns_data) / min_required_points)
+        
+        # Check for extreme outliers
+        outlier_ratio = 0.0
+        for col in returns_data.columns:
+            z_scores = np.abs(stats.zscore(returns_data[col].dropna()))
+            outliers = (z_scores > 3).sum()
+            outlier_ratio += outliers / len(returns_data[col].dropna())
+        outlier_ratio /= len(returns_data.columns)
+        
+        # Combine quality metrics
+        quality_score = (
+            (1 - missing_ratio) * 0.4 +
+            data_sufficiency * 0.4 +
+            (1 - min(outlier_ratio, 0.2) / 0.2) * 0.2
+        )
+        
+        return np.clip(quality_score, 0.0, 1.0)
+    
+    def _calculate_regime_strength(self, asset_profiles: Dict) -> float:
+        """Calculate strength of regime signals across assets"""
+        
+        if not asset_profiles:
+            return 0.0
+        
+        strengths = []
+        for profile in asset_profiles.values():
+            if hasattr(profile, 'regime_confidence'):
+                strengths.append(profile.regime_confidence)
+            elif hasattr(profile, 'confidence'):
+                strengths.append(profile.confidence)
+            else:
+                strengths.append(0.5)  # Default moderate strength
+        
+        return np.mean(strengths) if strengths else 0.0
+    
+    def _calculate_consensus_score(self, asset_profiles: Dict, regime_alignment: float) -> float:
+        """Calculate consensus score based on agreement across different assets"""
+        
+        if not asset_profiles:
+            return 0.0
+        
+        # Use regime alignment as primary consensus measure
+        consensus = regime_alignment
+        
+        # Adjust based on number of assets (more assets = higher confidence if aligned)
+        num_assets = len(asset_profiles)
+        asset_bonus = min(0.2, (num_assets - 1) * 0.05)  # Bonus up to 0.2 for more assets
+        
+        consensus = min(1.0, consensus + asset_bonus)
+        
+        return consensus
     
     def _extract_returns(self, market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Extract returns from market data"""

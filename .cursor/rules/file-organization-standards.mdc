@@ -1,0 +1,106 @@
+---
+alwaysApply: true
+---
+# File Organization Standards
+
+The StatArb_Gemini codebase follows a strict hierarchical organization that reflects the SystemOrchestrator architecture.
+
+## 1. Directory Structure
+
+```
+StatArb_Gemini/
+├── core_engine/              # Main Trading Engine
+│   ├── system/              # Layer 1: System Orchestration
+│   ├── data/                # Layer 2: Data Management
+│   ├── regime/              # Layer 2: Regime Assessment
+│   ├── processing/          # Layer 2: Signal Processing
+│   ├── trading/             # Layer 3: Trading Execution
+│   ├── broker/              # Layer 3: Broker Integration
+│   ├── analytics/           # Layer 4: Performance Analytics
+│   ├── config/              # Configuration Management
+│   ├── utils/               # Utility Functions
+│   ├── examples/            # Usage Examples
+│   └── type_definitions/    # Type Definitions
+├── tests/                   # Testing Infrastructure (moved to root)
+├── backtest/                # Backtesting Scripts
+├── docs/                    # Documentation
+└── ai_integration_env/      # Virtual Environment
+```
+
+## 2. Component Placement Rules
+
+### System Layer (Layer 1)
+- **Location**: `core_engine/system/`
+- **Components**: Orchestrator, Risk Manager, Execution Engine
+- **Files**: 
+  - [hierarchical_orchestrator.py](mdc:core_engine/system/hierarchical_orchestrator.py)
+  - [central_risk_manager.py](mdc:core_engine/system/central_risk_manager.py)
+  - [unified_execution_engine.py](mdc:core_engine/system/unified_execution_engine.py)
+
+### Data Management (Layer 2)
+- **Location**: `core_engine/data/`
+- **Structure**: `sources/`, `cache/`, `validation/`, `feeds/`
+- **Main File**: [manager.py](mdc:core_engine/data/manager.py)
+
+### Signal Processing Pipeline (Layer 2)
+- **Location**: `core_engine/processing/`
+- **Structure**: `indicators/`, `features/`, `signals/`
+- **Key Files**:
+  - [indicators/engine.py](mdc:core_engine/processing/indicators/engine.py)
+  - [features/engineer.py](mdc:core_engine/processing/features/engineer.py)
+  - [signals/generator.py](mdc:core_engine/processing/signals/generator.py)
+
+### Trading Components (Layer 3)
+- **Location**: `core_engine/trading/`
+- **Structure**: `strategies/`, `execution/`, `portfolio/`
+- **Key Files**:
+  - [portfolio/manager.py](mdc:core_engine/trading/portfolio/manager.py)
+  - [strategies/manager.py](mdc:core_engine/trading/strategies/manager.py)
+
+## 3. Import Standards
+
+### Absolute Imports (Preferred)
+```python
+from core_engine.data.manager import ClickHouseDataManager
+from core_engine.processing.signals.generator import SignalGenerator
+from core_engine.system.central_risk_manager import CentralRiskManager
+```
+
+### Relative Imports (Within Modules)
+```python
+# Within core_engine/system/
+from .central_risk_manager import CentralRiskManager
+from .unified_execution_engine import UnifiedExecutionEngine
+
+# From subdirectories to parent
+from ..type_definitions.data import DataConfig
+from ...utils.logging import setup_logger
+```
+
+## 4. File Naming Conventions
+
+- **Main Components**: `manager.py`, `engine.py`, `generator.py`
+- **Implementations**: Use descriptive names in `implementations/` subdirectories
+- **Tests**: `test_*.py` in appropriate `tests/` subdirectories
+- **Configuration**: `*_config.py` in `config/` directory
+- **Types**: Descriptive names in `type_definitions/`
+
+## 5. Prohibited Patterns
+
+❌ **Root Level Components**: No business logic files in project root
+❌ **Mixed Concerns**: Don't mix different architectural layers in same directory
+❌ **Duplicate Files**: Each component should have one clear location
+❌ **Legacy Directories**: Use only the established structure
+
+## 6. Testing Organization
+
+- **Unit Tests**: `tests/unit/test_[component]/`
+- **Integration Tests**: `tests/integration/`
+- **Performance Tests**: `tests/performance/`
+- **Legacy Tests**: Preserved in `legacy/` subdirectories for reference
+
+## 7. Configuration Management
+
+- **System Config**: [core_engine/config/system_config.py](mdc:core_engine/config/system_config.py)
+- **Component Config**: [core_engine/config/component_config.py](mdc:core_engine/config/component_config.py)
+- **Legacy Config**: Preserved in `core_engine/config/legacy/` for reference

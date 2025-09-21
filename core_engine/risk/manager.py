@@ -31,11 +31,11 @@ import sys
 from ..types import (
     RiskConfig, RiskLevel, RiskMetrics, RiskResult, RiskManager as BaseRiskManager
 )
-from ..types.portfolio import Position
+from .type_definitions.portfolio import Position
 
 # Import risk components from core_engine types
-from ..types.risk import RiskLimits, TradingMode
-from ..types.portfolio import Portfolio
+from .type_definitions.risk import RiskLimits, TradingMode
+from .type_definitions.portfolio import Portfolio
 
 logger = logging.getLogger(__name__)
 

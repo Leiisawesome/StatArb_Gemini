@@ -1,0 +1,86 @@
+---
+globs: core_engine/**/*.py
+---
+# Risk Governance and Central Authority Patterns
+
+The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the SINGLE point of authority for ALL trading decisions in the system.
+
+## 1. Mandatory Risk Authorization Pattern
+
+```python
+# REQUIRED: All trading components must use this pattern
+from core_engine.system.central_risk_manager import (
+    CentralRiskManager, TradingDecisionRequest, TradingDecisionType
+)
+
+async def execute_trading_strategy(self, signal):
+    # Step 1: Create authorization request
+    request = TradingDecisionRequest(
+        decision_type=TradingDecisionType.POSITION_ENTRY,
+        symbol=signal.symbol,
+        side=signal.signal_type.value,
+        quantity=signal.quantity,
+        strategy_id=self.strategy_id,
+        confidence=signal.confidence,
+        market_regime=current_regime,
+        requesting_component=self.component_id
+    )
+    
+    # Step 2: Request authorization from RiskManager
+    authorization = await self.risk_manager.authorize_trading_decision(request)
+    
+    # Step 3: Execute only if authorized
+    if authorization.authorization_level != AuthorizationLevel.REJECTED:
+        return await self.execution_engine.execute_authorized_trade(authorization)
+    else:
+        self.logger.warning(f"Trade rejected: {authorization.rejection_reason}")
+        return None
+```
+
+## 2. Risk Manager Integration Requirements
+
+All trading components MUST:
+- Register with the RiskManager during initialization
+- Route ALL trading decisions through `authorize_trading_decision()`
+- Respect authorization limits (quantity, risk budget, position limits)
+- Implement proper error handling for rejected trades
+
+## 3. Regime-Aware Risk Management
+
+Risk decisions MUST incorporate market regime assessment:
+
+```python
+# Get current market regime
+regime_analysis = await self.regime_engine.get_current_regime()
+
+# Include regime in risk assessment
+request.market_regime = regime_analysis.primary_regime.value
+request.regime_confidence = regime_analysis.confidence
+request.volatility_estimate = regime_analysis.volatility
+```
+
+## 4. Position and Risk Limits
+
+The RiskManager enforces these limits (configurable):
+- `max_position_size`: Maximum position as % of portfolio (default: 10%)
+- `max_daily_var`: Maximum daily Value at Risk (default: 5%)
+- `position_concentration_limit`: Maximum concentration per position (default: 15%)
+- `strategy_allocation_limit`: Maximum allocation per strategy (default: 33%)
+
+## 5. Authorization Levels
+
+```python
+class AuthorizationLevel(Enum):
+    AUTOMATIC = "automatic"      # Auto-approved within normal parameters
+    STANDARD = "standard"        # Normal review process
+    ELEVATED = "elevated"        # Requires elevated review
+    EMERGENCY = "emergency"      # Emergency authorization
+    REJECTED = "rejected"        # Authorization denied
+```
+
+## 6. Prohibited Risk Patterns
+
+❌ **Direct Position Management**: Components cannot modify positions directly
+❌ **Risk Limit Bypassing**: Cannot circumvent risk checks
+❌ **Independent Risk Assessment**: Must use centralized risk evaluation
+❌ **Unauthorized Trading**: All trades require explicit authorization tokens

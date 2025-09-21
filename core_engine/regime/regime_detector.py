@@ -217,9 +217,17 @@ class MarkovSwitchingDetector:
             # Get regime probabilities
             regime_probs = self.fitted_model.smoothed_marginal_probabilities
             
-            # Current regime (highest probability)
-            current_regime_idx = np.argmax(regime_probs.iloc[-1])
-            current_regime_prob = regime_probs.iloc[-1, current_regime_idx]
+            # Handle both numpy array and pandas DataFrame formats
+            if isinstance(regime_probs, np.ndarray):
+                # Current regime (highest probability) - numpy array format
+                current_regime_idx = np.argmax(regime_probs[-1])
+                current_regime_prob = regime_probs[-1, current_regime_idx]
+                latest_probs = regime_probs[-1]
+            else:
+                # Current regime (highest probability) - pandas DataFrame format
+                current_regime_idx = np.argmax(regime_probs.iloc[-1])
+                current_regime_prob = regime_probs.iloc[-1, current_regime_idx]
+                latest_probs = regime_probs.iloc[-1]
             
             # Map regime index to regime type
             regime_type = self._map_regime_index(current_regime_idx, returns)
@@ -236,7 +244,7 @@ class MarkovSwitchingDetector:
                 avg_return=regime_returns.mean() if len(regime_returns) > 0 else 0,
                 volatility=regime_returns.std() if len(regime_returns) > 0 else 0,
                 model_output={
-                    'regime_probabilities': regime_probs.iloc[-1].to_dict(),
+                    'regime_probabilities': latest_probs.to_dict() if hasattr(latest_probs, 'to_dict') else dict(enumerate(latest_probs)),
                     'regime_index': current_regime_idx,
                     'aic': self.fitted_model.aic,
                     'bic': self.fitted_model.bic
@@ -256,13 +264,39 @@ class MarkovSwitchingDetector:
             if not self.fitted:
                 return RegimeType.UNKNOWN
             
-            # Get regime parameters
-            regime_means = self.fitted_model.params[f'const[{regime_idx}]']
-            
-            if hasattr(self.fitted_model, 'params') and f'sigma2[{regime_idx}]' in self.fitted_model.params:
-                regime_variance = self.fitted_model.params[f'sigma2[{regime_idx}]']
-            else:
-                regime_variance = 0.0
+            # Get regime parameters safely
+            try:
+                # Try different parameter naming conventions
+                param_names = [f'const[{regime_idx}]', f'const.{regime_idx}', f'regime_{regime_idx}_const']
+                regime_means = None
+                
+                for param_name in param_names:
+                    if hasattr(self.fitted_model, 'params') and param_name in self.fitted_model.params:
+                        regime_means = self.fitted_model.params[param_name]
+                        break
+                
+                if regime_means is None:
+                    # Fallback: calculate from returns data
+                    regime_means = returns.mean()
+                
+                # Try to get variance
+                variance_names = [f'sigma2[{regime_idx}]', f'sigma2.{regime_idx}', f'regime_{regime_idx}_var']
+                regime_variance = None
+                
+                for var_name in variance_names:
+                    if hasattr(self.fitted_model, 'params') and var_name in self.fitted_model.params:
+                        regime_variance = self.fitted_model.params[var_name]
+                        break
+                
+                if regime_variance is None:
+                    # Fallback: calculate from returns data
+                    regime_variance = returns.var()
+                    
+            except Exception as param_error:
+                logger.warning(f"Could not extract regime parameters: {param_error}")
+                # Use fallback values from returns data
+                regime_means = returns.mean()
+                regime_variance = returns.var()
             
             # Classify based on mean return and volatility
             annualized_return = regime_means * 252
@@ -285,7 +319,7 @@ class MarkovSwitchingDetector:
                     return RegimeType.SIDEWAYS
                     
         except Exception as e:
-            logger.error(f"Error mapping regime index: {e}")
+            logger.warning(f"Error mapping regime index: {e}")
             return RegimeType.UNKNOWN
 
 
