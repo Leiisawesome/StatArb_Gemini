@@ -29,11 +29,12 @@ import numpy as np
 import json
 from collections import defaultdict
 
-# Import the UnifiedExecutionEngine
+# Import the UnifiedExecutionEngine and ISystemComponent
 from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
+from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ class RiskManagerConfig:
     })
 
 
-class CentralRiskManager:
+class CentralRiskManager(ISystemComponent):
     """
     Central Risk Manager - Institutional Governance Hub
     
@@ -274,6 +275,70 @@ class CentralRiskManager:
         if regime_engine:
             self.regime_engine = regime_engine
             logger.info("✅ RegimeEngine registered with Central Risk Manager")
+    
+    # ISystemComponent interface implementation
+    async def start(self) -> bool:
+        """Start component operations"""
+        if not self.is_initialized:
+            logger.error("Cannot start CentralRiskManager - not initialized")
+            return False
+        
+        try:
+            self.is_operational = True
+            logger.info("✅ Central Risk Manager started and operational")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Central Risk Manager start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        try:
+            self.is_operational = False
+            
+            # Cancel monitoring task
+            if self.monitoring_task:
+                self.monitoring_task.cancel()
+                
+            logger.info("✅ Central Risk Manager stopped")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Central Risk Manager stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check"""
+        return {
+            'healthy': self.is_operational and self.is_initialized,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_type': 'CentralRiskManager',
+            'active_authorizations': len(self.active_authorizations),
+            'pending_requests': len(self.pending_requests),
+            'current_var': self.current_var,
+            'portfolio_value': self.portfolio_value,
+            'total_positions': len(self.current_positions),
+            'execution_engine_available': self.unified_execution_engine is not None
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        return {
+            'component_type': 'CentralRiskManager',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'active_authorizations': len(self.active_authorizations),
+            'pending_requests': len(self.pending_requests),
+            'current_positions': len(self.current_positions),
+            'portfolio_value': self.portfolio_value,
+            'risk_metrics': self.risk_metrics.copy(),
+            'controlled_components': {
+                'strategy_manager': self.strategy_manager is not None,
+                'trading_engine': self.trading_engine is not None,
+                'regime_engine': self.regime_engine is not None,
+                'execution_engine': self.unified_execution_engine is not None
+            }
+        }
     
     async def authorize_trading_decision(self, request: TradingDecisionRequest) -> TradingAuthorization:
         """

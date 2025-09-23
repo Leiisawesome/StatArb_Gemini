@@ -963,19 +963,38 @@ class BacktestEngine:
                 
                 # Calculate performance metrics using performance calculator
                 if len(result.returns_series.dropna()) > 10:
-                    result.performance_metrics = self.performance_calculator.calculate_comprehensive_metrics(
-                        result.returns_series, strategy.strategy_id
-                    )
+                    try:
+                        # Create basic performance metrics manually since analyze_performance is async
+                        returns = result.returns_series.dropna()
+                        
+                        # Basic metrics
+                        result.annualized_return = returns.mean() * 252
+                        result.volatility = returns.std() * np.sqrt(252)
+                        result.sharpe_ratio = result.annualized_return / result.volatility if result.volatility > 0 else 0
+                        
+                        # Max drawdown
+                        cumulative = (1 + returns).cumprod()
+                        running_max = cumulative.expanding().max()
+                        drawdown = (cumulative - running_max) / running_max
+                        result.max_drawdown = drawdown.min()
+                        
+                        # VaR and CVaR
+                        result.var_95 = np.percentile(returns, 5)
+                        result.cvar_95 = returns[returns <= result.var_95].mean()
+                        
+                        # Sortino ratio
+                        downside_returns = returns[returns < 0]
+                        downside_std = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0
+                        result.sortino_ratio = result.annualized_return / downside_std if downside_std > 0 else 0
+                        
+                        # Calmar ratio
+                        result.calmar_ratio = result.annualized_return / abs(result.max_drawdown) if result.max_drawdown != 0 else 0
+                        
+                    except Exception as e:
+                        logger.warning(f"Performance metrics calculation failed: {e}")
+                        result.performance_metrics = None
                     
-                    if result.performance_metrics:
-                        result.annualized_return = result.performance_metrics.annualized_return
-                        result.volatility = result.performance_metrics.volatility
-                        result.sharpe_ratio = result.performance_metrics.sharpe_ratio
-                        result.max_drawdown = result.performance_metrics.max_drawdown
-                        result.var_95 = result.performance_metrics.var_95
-                        result.cvar_95 = result.performance_metrics.cvar_95
-                        result.sortino_ratio = result.performance_metrics.sortino_ratio
-                        result.calmar_ratio = result.performance_metrics.calmar_ratio
+                    # Performance metrics are now calculated directly above
             
             # Trading statistics
             result.total_trades = len(self.trade_log)

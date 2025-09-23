@@ -32,6 +32,10 @@ from .strategy_manager import StrategyManager
 from .strategy_validator import StrategyValidator
 from .strategy_optimizer import StrategyOptimizer
 from .backtest_engine import BacktestEngine
+from .institutional_backtest_engine import (
+    InstitutionalBacktestEngine, InstitutionalBacktestConfig, 
+    InstitutionalBacktestResult, BacktestPhase
+)
 
 # Strategy implementations
 from .implementations import (
@@ -54,6 +58,8 @@ __all__ = [
     'StrategyRegistry', 'StrategyMetadata',
     'StrategyManager', 'StrategyValidator', 'StrategyOptimizer',
     'BacktestEngine',
+    'InstitutionalBacktestEngine', 'InstitutionalBacktestConfig',
+    'InstitutionalBacktestResult', 'BacktestPhase',
     
     # Strategy implementations
     'AdvancedMomentumStrategy', 'MomentumConfig',

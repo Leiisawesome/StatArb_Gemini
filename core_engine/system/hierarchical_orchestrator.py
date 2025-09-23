@@ -26,8 +26,8 @@ from enum import Enum
 from abc import ABC, abstractmethod
 import json
 
-# Import the Central Risk Manager
-from .central_risk_manager import CentralRiskManager, TradingDecisionRequest, TradingAuthorization
+# Import interfaces to avoid circular imports
+from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
@@ -129,36 +129,7 @@ class SystemOrchestrationConfig:
     resource_allocation_timeout: int = 10  # seconds
 
 
-class ISystemComponent(ABC):
-    """Interface for system components under orchestrator control"""
-    
-    @abstractmethod
-    async def initialize(self) -> bool:
-        """Initialize component"""
-        pass
-    
-    @abstractmethod
-    async def start(self) -> bool:
-        """Start component operations"""
-        pass
-    
-    @abstractmethod
-    async def stop(self) -> bool:
-        """Stop component operations"""
-        pass
-    
-    @abstractmethod
-    async def health_check(self) -> Dict[str, Any]:
-        """Perform health check"""
-        pass
-    
-    @abstractmethod
-    def get_status(self) -> Dict[str, Any]:
-        """Get component status"""
-        pass
-
-
-class HierarchicalSystemOrchestrator:
+class HierarchicalSystemOrchestrator(ISystemComponent):
     """
     Enhanced System Orchestrator - TradeDesk Architecture Compliance
     
@@ -192,7 +163,7 @@ class HierarchicalSystemOrchestrator:
         }
         
         # Core governance components
-        self.central_risk_manager: Optional[CentralRiskManager] = None
+        self.central_risk_manager: Optional[Any] = None
         self.risk_manager_id: Optional[str] = None
         
         # System monitoring
@@ -237,6 +208,7 @@ class HierarchicalSystemOrchestrator:
                 logger.info("🚀 Initializing hierarchical system...")
                 
                 # Initialize Central Risk Manager first (Layer 2 Governance)
+                # Note: CentralRiskManager will be imported dynamically to avoid circular imports
                 if not await self._initialize_central_risk_manager():
                     logger.error("❌ Failed to initialize Central Risk Manager")
                     self.system_status = SystemStatus.EMERGENCY
@@ -267,6 +239,57 @@ class HierarchicalSystemOrchestrator:
             logger.error(f"❌ System initialization failed: {e}")
             self.system_status = SystemStatus.EMERGENCY
             return False
+    
+    # ISystemComponent interface implementation
+    async def initialize(self) -> bool:
+        """Initialize component (ISystemComponent interface)"""
+        return await self.initialize_system()
+    
+    async def start(self) -> bool:
+        """Start component operations"""
+        if self.system_status != SystemStatus.READY:
+            logger.error("Cannot start system - not in ready state")
+            return False
+        
+        try:
+            self.system_status = SystemStatus.OPERATIONAL
+            logger.info("✅ System started and operational")
+            return True
+        except Exception as e:
+            logger.error(f"❌ System start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        try:
+            await self.shutdown_system()
+            return True
+        except Exception as e:
+            logger.error(f"❌ System stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check"""
+        return {
+            'healthy': self.system_status == SystemStatus.OPERATIONAL,
+            'system_status': self.system_status.value,
+            'component_count': len(self.component_registry),
+            'operational_components': len([r for r in self.component_registry.values() 
+                                         if r.status == 'operational']),
+            'uptime_seconds': (datetime.now() - self.started_at).total_seconds() if self.started_at else 0,
+            'emergency_mode': self.emergency_mode
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        return {
+            'component_type': 'HierarchicalSystemOrchestrator',
+            'system_status': self.system_status.value,
+            'component_count': len(self.component_registry),
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'emergency_mode': self.emergency_mode,
+            'central_risk_manager_id': self.central_risk_manager_id
+        }
     
     def register_component(self, name: str, component: Any, 
                          layer: ComponentLayer = ComponentLayer.SUPPORT,
@@ -299,7 +322,7 @@ class HierarchicalSystemOrchestrator:
             logger.error(f"❌ Failed to register component {name}: {e}")
             return ""
     
-    def register_central_risk_manager(self, risk_manager: CentralRiskManager) -> str:
+    def register_central_risk_manager(self, risk_manager: Any) -> str:
         """Register the Central Risk Manager as Layer 2 Governance"""
         
         self.central_risk_manager = risk_manager
@@ -710,6 +733,10 @@ class HierarchicalSystemOrchestrator:
             )
         }
     
+    async def shutdown_system(self) -> bool:
+        """Shutdown the system (alias for graceful_shutdown)"""
+        return await self.graceful_shutdown()
+    
     async def graceful_shutdown(self) -> bool:
         """Perform graceful system shutdown"""
         
@@ -731,9 +758,16 @@ class HierarchicalSystemOrchestrator:
             
             for component_id, registration in components_by_shutdown_order:
                 try:
-                    if hasattr(registration.component_instance, 'shutdown'):
-                        await registration.component_instance.shutdown()
-                        logger.info(f"✅ Shutdown: {registration.name}")
+                    if registration.component_instance is not None:
+                        shutdown_method = getattr(registration.component_instance, 'shutdown', None)
+                        if shutdown_method is not None and callable(shutdown_method):
+                            try:
+                                await shutdown_method()
+                                logger.info(f"✅ Shutdown: {registration.name}")
+                            except Exception as shutdown_error:
+                                logger.warning(f"⚠️ Shutdown method failed for {registration.name}: {shutdown_error}")
+                        else:
+                            logger.debug(f"📝 No shutdown method for {registration.name}")
                     
                     registration.update_status("shutdown")
                     
@@ -762,6 +796,8 @@ if __name__ == "__main__":
         orchestrator = HierarchicalSystemOrchestrator(config)
         
         # Create and register Central Risk Manager
+        # Import CentralRiskManager dynamically to avoid circular imports
+        from .central_risk_manager import CentralRiskManager
         risk_manager = CentralRiskManager()
         orchestrator.register_central_risk_manager(risk_manager)
         
