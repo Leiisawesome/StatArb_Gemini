@@ -28,10 +28,88 @@ from enum import Enum
 
 # Leverage existing high-quality broker components
 # Import core_engine types instead of core_structure
-from .type_definitions.broker import (
-    BaseBroker, Order, OrderResult, OrderStatus, OrderType, OrderSide,
-    AdvancedOrderManager, ExecutionResult, ExecutionParameters
+from ..type_definitions.orders import (
+    Order, ExecutionResult, OrderStatus, OrderType, OrderSide
 )
+
+# Define missing broker types
+from abc import ABC, abstractmethod
+from typing import Protocol
+
+@dataclass
+class OrderResult:
+    """Result of order submission"""
+    success: bool
+    order_id: str
+    status: OrderStatus
+    filled_quantity: float
+    average_price: float
+    error_message: Optional[str] = None
+
+class BaseBroker(ABC):
+    """Abstract base broker interface"""
+    
+    @abstractmethod
+    async def submit_order(self, order: Order) -> OrderResult:
+        """Submit order to broker"""
+        pass
+    
+    @abstractmethod
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel order"""
+        pass
+    
+    @abstractmethod
+    async def get_order_status(self, order_id: str) -> OrderStatus:
+        """Get order status"""
+        pass
+
+@dataclass
+class ExecutionParameters:
+    """Parameters for order execution"""
+    max_slippage: float = 0.01  # 1%
+    timeout_seconds: int = 30
+    allow_partial_fills: bool = True
+    priority: str = "normal"
+
+class AdvancedOrderManager:
+    """Advanced order management capabilities"""
+    
+    def __init__(self):
+        self.pending_orders: Dict[str, Order] = {}
+        self.order_history: List[OrderResult] = []
+    
+    async def submit_bracket_order(self, entry_order: Order, 
+                                 stop_loss: Order, 
+                                 take_profit: Order) -> List[OrderResult]:
+        """Submit bracket order (entry + stop loss + take profit)"""
+        # Mock implementation
+        results = []
+        for order in [entry_order, stop_loss, take_profit]:
+            result = OrderResult(
+                success=True,
+                order_id=order.order_id,
+                status=OrderStatus.SUBMITTED,
+                filled_quantity=0,
+                average_price=0
+            )
+            results.append(result)
+        return results
+    
+    async def submit_oco_order(self, order1: Order, order2: Order) -> List[OrderResult]:
+        """Submit one-cancels-other order"""
+        # Mock implementation
+        results = []
+        for order in [order1, order2]:
+            result = OrderResult(
+                success=True,
+                order_id=order.order_id,
+                status=OrderStatus.SUBMITTED,
+                filled_quantity=0,
+                average_price=0
+            )
+            results.append(result)
+        return results
 
 logger = logging.getLogger(__name__)
 

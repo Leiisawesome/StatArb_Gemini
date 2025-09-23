@@ -16,18 +16,18 @@ import asyncio
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 from dataclasses import dataclass
 from enum import Enum
 
 # Leverage existing high-quality regime components
 # Import regime types from core_engine
-from ..type_definitions.regime import RegimeState, RegimeConfig
+# from ..type_definitions.regime import RegimeState, RegimeConfig
 
 logger = logging.getLogger(__name__)
 

@@ -66,11 +66,11 @@ class EnhancedRiskManager:
         self._lock = threading.Lock()
         
         # Initialize risk components
-        self.exposure_calculator = ExposureCalculator(config.get('exposure_config', {}))
-        self.var_calculator = VarCalculator(config.get('var_config', {}))
-        self.stress_tester = StressTester(config.get('stress_config', {}))
-        self.limit_monitor = LimitMonitor(config.get('limit_config', {}))
-        self.correlation_analyzer = CorrelationAnalyzer(config.get('correlation_config', {}))
+        self.exposure_calculator = ExposureCalculator(self.config.get('exposure_config', {}))
+        self.var_calculator = VarCalculator(self.config.get('var_config', {}))
+        self.stress_tester = StressTester(self.config.get('stress_config', {}))
+        self.limit_monitor = LimitMonitor(self.config.get('limit_config', {}))
+        self.correlation_analyzer = CorrelationAnalyzer(self.config.get('correlation_config', {}))
         
         # Risk snapshots and alerts
         self._risk_snapshots = deque(maxlen=1000)

@@ -1,5 +1,10 @@
 """
-Analytics Engine - Component Initialization
+Analyticfrom .attribution_analyzer import (
+    AttributionAnalyzer,
+    AttributionConfig,
+    AttributionResult,
+    SectorAttributionAnalyzer
+)e - Component Initialization
 Unified imports and component registry for the analytics engine
 """
 
@@ -7,16 +12,14 @@ from .performance_analyzer import (
     PerformanceAnalyzer,
     PerformanceConfig,
     PerformanceMetrics,
-    RiskMetrics,
-    DrawdownAnalysis
+    RiskMetricsCalculator
 )
 
 from .attribution_analyzer import (
     AttributionAnalyzer,
     AttributionConfig,
     AttributionResult,
-    FactorAttribution,
-    SectorAttribution
+    SectorAttributionAnalyzer
 )
 
 from .metrics_calculator import (

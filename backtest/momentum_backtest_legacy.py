@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators, EnhancedIndicatorConfig
 from core_engine.system.central_risk_manager import (
-    CentralRiskManager, TradingDecisionRequest, TradingDecisionType, ExecutionUrgency, AuthorizationLevel
+    CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
 )
 from core_engine.regime.engine import RegimeEngine
 # Performance analytics - using simplified built-in approach
@@ -70,6 +70,13 @@ class MomentumBacktestConfig:
     min_volume_ratio: float = 1.0  # Minimum volume vs average (reduced from 1.2)
     min_rsi_momentum: float = 48  # RSI threshold for momentum (reduced from 55)
     max_volatility: float = 0.08  # 8% max daily volatility (increased from 4%)
+    
+    # Additional thresholds for signal generation
+    min_trend_strength: float = 0.4  # Minimum trend strength for signals
+    strong_momentum_multiplier: float = 2.0  # Multiplier for strong momentum override
+    rsi_oversold_threshold: float = 30  # RSI oversold level for SELL signals
+    momentum_sell_weak_threshold: float = 0.003  # 0.3% minimum momentum for weak SELL signals
+    momentum_sell_strong_threshold: float = 0.003  # 0.3% minimum momentum for strong SELL signals
 
 
 @dataclass
@@ -84,7 +91,7 @@ class MomentumSignal:
     entry_price: float
     stop_loss: float
     take_profit: float
-    position_size: int
+    position_size: float
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -115,85 +122,37 @@ class AdvancedMomentumStrategy:
         """
         try:
             min_required = max(self.config.momentum_lookback, self.config.trend_confirmation_period)
-            self.logger.info(f"🔍 {symbol}: Data length {len(data)}, required {min_required}")
+            self.logger.debug(f"🔍 {symbol}: Data length {len(data)}, required {min_required}")
             
             if len(data) < min_required:
                 self.logger.warning(f"🔍 {symbol}: Insufficient data ({len(data)} < {min_required})")
                 return None
             
             # === MULTI-TIMEFRAME ANALYSIS FOR BETTER SIGNALS ===
-            # Short-term (5-minute window)
-            short_data = data.tail(5) if len(data) >= 5 else data
-            short_momentum = self._calculate_momentum_score(short_data)
-            short_trend = self._calculate_trend_strength(short_data)
+            multi_timeframe_metrics = self._calculate_multi_timeframe_metrics(data)
             
-            # Medium-term (10-minute window) - primary
-            medium_data = data.tail(self.config.momentum_lookback)
-            medium_momentum = self._calculate_momentum_score(medium_data)
-            medium_trend = self._calculate_trend_strength(medium_data)
+            # Extract primary metrics
+            momentum_score = multi_timeframe_metrics['momentum_score']
+            trend_strength = multi_timeframe_metrics['trend_strength']
+            timeframe_quality = multi_timeframe_metrics['timeframe_quality']
             
-            # Long-term (20-minute window)
-            long_data = data.tail(min(20, len(data)))
-            long_momentum = self._calculate_momentum_score(long_data)
-            long_trend = self._calculate_trend_strength(long_data)
-            
-            # === ENHANCED TIMEFRAME ALIGNMENT & PERSISTENCE SCORING ===
-            momentum_alignment = 0.0
-            trend_alignment = 0.0
-            momentum_persistence = 0.0
-            
-            # Check momentum direction alignment
-            if short_momentum > 0 and medium_momentum > 0 and long_momentum > 0:
-                momentum_alignment = 1.0  # All bullish
-            elif short_momentum < 0 and medium_momentum < 0 and long_momentum < 0:
-                momentum_alignment = 1.0  # All bearish
-            elif (short_momentum > 0 and medium_momentum > 0) or (medium_momentum > 0 and long_momentum > 0):
-                momentum_alignment = 0.7  # Partial alignment
-            else:
-                momentum_alignment = 0.3  # Poor alignment
-            
-            # Check trend strength alignment
-            if short_trend > 0.4 and medium_trend > 0.4 and long_trend > 0.4:
-                trend_alignment = 1.0  # Strong trends across timeframes
-            elif (short_trend > 0.4 and medium_trend > 0.4) or (medium_trend > 0.4 and long_trend > 0.4):
-                trend_alignment = 0.7  # Partial trend alignment
-            else:
-                trend_alignment = 0.5  # Weak trend alignment
-            
-            # === MOMENTUM PERSISTENCE ANALYSIS ===
-            # Check if momentum is accelerating or decelerating
-            if abs(short_momentum) > abs(medium_momentum) > abs(long_momentum):
-                momentum_persistence = 1.0  # Accelerating momentum
-            elif abs(short_momentum) > abs(medium_momentum):
-                momentum_persistence = 0.8  # Recent acceleration
-            elif abs(medium_momentum) > abs(long_momentum):
-                momentum_persistence = 0.6  # Medium-term strength
-            else:
-                momentum_persistence = 0.3  # Decelerating momentum
-            
-            # Use medium-term as primary signal
-            momentum_score = medium_momentum
-            trend_strength = medium_trend
             volume_confirmation = self._check_volume_confirmation(data)
             volatility_check = self._check_volatility(data)
-            
-            # ENHANCED Multi-timeframe quality score with persistence
-            timeframe_quality = (momentum_alignment * 0.4 + trend_alignment * 0.3 + momentum_persistence * 0.3)
             
             # RSI momentum filter
             rsi = self._calculate_rsi(data['close'])
             rsi_current = rsi.iloc[-1] if not rsi.empty else 50
             
             # ENHANCED debug logging with all adaptive factors
-            self.logger.info(f"🔍 {symbol} ADVANCED Multi-Timeframe Analysis:")
-            self.logger.info(f"   Short (5m): momentum={short_momentum:.4f}, trend={short_trend:.3f}")
-            self.logger.info(f"   Medium (10m): momentum={medium_momentum:.4f}, trend={medium_trend:.3f}")
-            self.logger.info(f"   Long (20m): momentum={long_momentum:.4f}, trend={long_trend:.3f}")
-            self.logger.info(f"   Alignment: momentum={momentum_alignment:.2f}, trend={trend_alignment:.2f}")
-            self.logger.info(f"   Persistence: {momentum_persistence:.2f}")
-            self.logger.info(f"   ENHANCED Quality Score: {timeframe_quality:.2f}")
-            self.logger.info(f"   Volume: {volume_confirmation}, Volatility: {volatility_check}, RSI: {rsi_current:.1f}")
-            self.logger.info(f"   Thresholds: momentum={self.config.momentum_threshold*100:.1f}%, trend=0.4, RSI={self.config.min_rsi_momentum}")
+            self.logger.debug(f"🔍 {symbol} ADVANCED Multi-Timeframe Analysis:")
+            self.logger.debug(f"   Short (5m): momentum={multi_timeframe_metrics['short_momentum']:.4f}, trend={multi_timeframe_metrics['short_trend']:.3f}")
+            self.logger.debug(f"   Medium (10m): momentum={multi_timeframe_metrics['medium_momentum']:.4f}, trend={multi_timeframe_metrics['medium_trend']:.3f}")
+            self.logger.debug(f"   Long (20m): momentum={multi_timeframe_metrics['long_momentum']:.4f}, trend={multi_timeframe_metrics['long_trend']:.3f}")
+            self.logger.debug(f"   Alignment: momentum={multi_timeframe_metrics['momentum_alignment']:.2f}, trend={multi_timeframe_metrics['trend_alignment']:.2f}")
+            self.logger.debug(f"   Persistence: {multi_timeframe_metrics['momentum_persistence']:.2f}")
+            self.logger.debug(f"   ENHANCED Quality Score: {timeframe_quality:.2f}")
+            self.logger.debug(f"   Volume: {volume_confirmation}, Volatility: {volatility_check}, RSI: {rsi_current:.1f}")
+            self.logger.debug(f"   Thresholds: momentum={self.config.momentum_threshold*100:.1f}%, trend={self.config.min_trend_strength}, RSI={self.config.min_rsi_momentum}")
             
             # Generate signal
             signal_type = None
@@ -202,13 +161,14 @@ class AdvancedMomentumStrategy:
             # Position-aware signal generation
             current_position = self.positions.get(symbol, 0)
             
-            # ADAPTIVE BUY signals - use timeframe quality for position sizing, not filtering
+            # ADAPTIVE BUY signals - more permissive in range-bound markets
             if (current_position <= 0 and
                 momentum_score > self.config.momentum_threshold and
-                trend_strength > 0.4 and
                 volume_confirmation and
                 not volatility_check and
-                rsi_current > self.config.min_rsi_momentum):  # Remove timeframe quality filter
+                rsi_current > self.config.min_rsi_momentum and
+                (trend_strength > self.config.min_trend_strength or  # Strong trend OR
+                 (trend_strength <= self.config.min_trend_strength and momentum_score > self.config.momentum_threshold * 1.5))):  # Weak trend but strong momentum
                 
                 signal_type = 'BUY'
                 # Enhanced confidence with multi-timeframe quality
@@ -225,8 +185,8 @@ class AdvancedMomentumStrategy:
             # SIGNAL THRESHOLD FIX: Enforce proper momentum thresholds for SELL signals
             elif (current_position > 0 and
                   (abs(momentum_score) > self.config.momentum_threshold and momentum_score < 0) or  # Strong bearish momentum
-                  (trend_strength < 0.4 and abs(momentum_score) > self.config.momentum_threshold * 0.5) or  # Weak trend with some momentum
-                  (rsi_current < 30 and abs(momentum_score) > self.config.momentum_threshold * 0.3)):  # RSI oversold with minimal momentum
+                  (trend_strength < self.config.min_trend_strength and abs(momentum_score) > self.config.momentum_sell_weak_threshold) or  # Weak trend with some momentum
+                  (rsi_current < self.config.rsi_oversold_threshold and abs(momentum_score) > self.config.momentum_sell_strong_threshold)):  # RSI oversold with minimal momentum
                 
                 signal_type = 'SELL'
                 momentum_confidence = min(1.0, abs(momentum_score) / self.config.momentum_threshold) if momentum_score < 0 else 0.5
@@ -240,7 +200,7 @@ class AdvancedMomentumStrategy:
                 self.logger.info(f"🔴 ENHANCED SELL signal for {symbol}: momentum={momentum_score:.3%}, quality={timeframe_quality:.2f}, confidence={confidence:.2f}")
             
             # ADAPTIVE Strong momentum override - use timeframe quality for sizing
-            elif (abs(momentum_score) > self.config.momentum_threshold * 2.0 and  # Lower threshold for more opportunities
+            elif (abs(momentum_score) > self.config.momentum_threshold * self.config.strong_momentum_multiplier and  # Lower threshold for more opportunities
                   volume_confirmation and
                   not volatility_check):  # Remove timeframe quality filter
                 
@@ -250,7 +210,7 @@ class AdvancedMomentumStrategy:
                     signal_type = 'SELL'
                     
                 if signal_type:
-                    base_confidence = min(0.85, abs(momentum_score) / (self.config.momentum_threshold * 2.5))
+                    base_confidence = min(0.85, abs(momentum_score) / (self.config.momentum_threshold * self.config.strong_momentum_multiplier))
                     confidence = min(0.95, base_confidence * (0.9 + timeframe_quality * 0.1))
                     self.logger.info(f"🚀 ENHANCED Strong momentum override: {momentum_score:.2%}, quality={timeframe_quality:.2f}, signal: {signal_type}")
             
@@ -260,7 +220,7 @@ class AdvancedMomentumStrategy:
                 if signal_type == 'BUY' and momentum_score <= self.config.momentum_threshold:
                     self.logger.debug(f"❌ BUY signal rejected: momentum {momentum_score:.3%} below threshold {self.config.momentum_threshold:.3%}")
                     return None
-                elif signal_type == 'SELL' and abs(momentum_score) <= self.config.momentum_threshold * 0.3:
+                elif signal_type == 'SELL' and abs(momentum_score) <= self.config.momentum_sell_strong_threshold:
                     self.logger.debug(f"❌ SELL signal rejected: momentum {momentum_score:.3%} too weak")
                     return None
                 
@@ -378,7 +338,8 @@ class AdvancedMomentumStrategy:
         try:
             volume_ratio = self._get_volume_ratio(data)
             return volume_ratio >= self.config.min_volume_ratio
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error checking volume confirmation: {e}")
             return False
     
     def _get_volume_ratio(self, data: pd.DataFrame) -> float:
@@ -387,7 +348,8 @@ class AdvancedMomentumStrategy:
             avg_volume = data['volume'].rolling(20).mean().iloc[-1]
             current_volume = data['volume'].iloc[-1]
             return current_volume / avg_volume if avg_volume > 0 else 1.0
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error calculating volume ratio: {e}")
             return 1.0
     
     def _check_volatility(self, data: pd.DataFrame) -> bool:
@@ -395,7 +357,8 @@ class AdvancedMomentumStrategy:
         try:
             volatility = self._calculate_volatility(data)
             return volatility > self.config.max_volatility
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error checking volatility: {e}")
             return False
     
     def _calculate_volatility(self, data: pd.DataFrame) -> float:
@@ -405,7 +368,8 @@ class AdvancedMomentumStrategy:
             if len(returns) < 10:
                 return 0.02  # Default moderate volatility
             return returns.tail(10).std() * np.sqrt(252)  # Annualized
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error calculating volatility: {e}")
             return 0.02
     
     def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
@@ -417,7 +381,8 @@ class AdvancedMomentumStrategy:
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             return rsi
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error calculating RSI: {e}")
             return pd.Series([50] * len(prices), index=prices.index)
     
     def _calculate_position_size(self, price: float, confidence: float, timeframe_quality: float = 0.5, 
@@ -463,6 +428,74 @@ class AdvancedMomentumStrategy:
             self.logger.warning(f"Error calculating enhanced position size: {e}")
             return 1
 
+    def _calculate_multi_timeframe_metrics(self, data: pd.DataFrame) -> Dict[str, float]:
+        """Calculate multi-timeframe momentum and trend metrics"""
+        # Short-term (5-minute window)
+        short_data = data.tail(5) if len(data) >= 5 else data
+        short_momentum = self._calculate_momentum_score(short_data)
+        short_trend = self._calculate_trend_strength(short_data)
+        
+        # Medium-term (10-minute window) - primary
+        medium_data = data.tail(self.config.momentum_lookback)
+        medium_momentum = self._calculate_momentum_score(medium_data)
+        medium_trend = self._calculate_trend_strength(medium_data)
+        
+        # Long-term (20-minute window)
+        long_data = data.tail(min(20, len(data)))
+        long_momentum = self._calculate_momentum_score(long_data)
+        long_trend = self._calculate_trend_strength(long_data)
+        
+        # === ENHANCED TIMEFRAME ALIGNMENT & PERSISTENCE SCORING ===
+        momentum_alignment = 0.0
+        trend_alignment = 0.0
+        momentum_persistence = 0.0
+        
+        # Check momentum direction alignment
+        if short_momentum > 0 and medium_momentum > 0 and long_momentum > 0:
+            momentum_alignment = 1.0  # All bullish
+        elif short_momentum < 0 and medium_momentum < 0 and long_momentum < 0:
+            momentum_alignment = 1.0  # All bearish
+        elif (short_momentum > 0 and medium_momentum > 0) or (medium_momentum > 0 and long_momentum > 0):
+            momentum_alignment = 0.7  # Partial alignment
+        else:
+            momentum_alignment = 0.3  # Poor alignment
+    
+        # Check trend strength alignment
+        if short_trend > 0.4 and medium_trend > 0.4 and long_trend > 0.4:
+            trend_alignment = 1.0  # Strong trends across timeframes
+        elif (short_trend > 0.4 and medium_trend > 0.4) or (medium_trend > 0.4 and long_trend > 0.4):
+            trend_alignment = 0.7  # Partial trend alignment
+        else:
+            trend_alignment = 0.5  # Weak trend alignment
+    
+        # === MOMENTUM PERSISTENCE ANALYSIS ===
+        # Check if momentum is accelerating or decelerating
+        if abs(short_momentum) > abs(medium_momentum) > abs(long_momentum):
+            momentum_persistence = 1.0  # Accelerating momentum
+        elif abs(short_momentum) > abs(medium_momentum):
+            momentum_persistence = 0.8  # Recent acceleration
+        elif abs(medium_momentum) > abs(long_momentum):
+            momentum_persistence = 0.6  # Medium-term strength
+        else:
+            momentum_persistence = 0.3  # Decelerating momentum
+    
+        # ENHANCED Multi-timeframe quality score with persistence
+        timeframe_quality = (momentum_alignment * 0.4 + trend_alignment * 0.3 + momentum_persistence * 0.3)
+        
+        return {
+            'momentum_score': medium_momentum,
+            'trend_strength': medium_trend,
+            'timeframe_quality': timeframe_quality,
+            'short_momentum': short_momentum,
+            'short_trend': short_trend,
+            'medium_momentum': medium_momentum,
+            'medium_trend': medium_trend,
+            'long_momentum': long_momentum,
+            'long_trend': long_trend,
+            'momentum_alignment': momentum_alignment,
+            'trend_alignment': trend_alignment,
+            'momentum_persistence': momentum_persistence
+        }
 
 class AdvancedMomentumBacktest:
     """
@@ -679,7 +712,7 @@ class AdvancedMomentumBacktest:
         """Process a single symbol through 1-minute bar momentum strategy"""
         
         try:
-            self.logger.info(f"📈 Processing {symbol} with 1-minute bars...")
+            self.logger.debug(f"📈 Processing {symbol} with 1-minute bars...")
             
             # Load market data
             market_data = self.data_manager.get_market_data(symbol=symbol)
@@ -691,7 +724,7 @@ class AdvancedMomentumBacktest:
             # Filter for market hours (9:30 AM - 4:00 PM EST = 14:30 - 21:00 UTC)
             market_data = self._filter_market_hours(market_data)
             
-            self.logger.info(f"📊 Processing {len(market_data)} 1-minute bars for {symbol} during market hours")
+            self.logger.debug(f"📊 Processing {len(market_data)} 1-minute bars for {symbol} during market hours")
             
             # Add symbol column for indicators engine compatibility
             market_data['symbol'] = symbol
@@ -721,7 +754,7 @@ class AdvancedMomentumBacktest:
                     'portfolio_value': portfolio_value
                 })
             
-            self.logger.info(f"✅ {symbol} processing completed - {total_signals} signals generated from {len(market_data)} minute bars")
+            self.logger.debug(f"✅ {symbol} processing completed - {total_signals} signals generated from {len(market_data)} minute bars")
             
         except Exception as e:
             self.logger.error(f"❌ Error processing {symbol}: {e}")
@@ -736,7 +769,7 @@ class AdvancedMomentumBacktest:
             # Filter for market hours (9:30 AM - 4:00 PM EST)
             market_hours = data_copy.between_time('14:30', '21:00')  # UTC equivalent
             
-            self.logger.info(f"Filtered {len(data_copy)} records to {len(market_hours)} market hours records")
+            self.logger.debug(f"Filtered {len(data_copy)} records to {len(market_hours)} market hours records")
             return market_hours
             
         except Exception as e:
@@ -765,17 +798,21 @@ class AdvancedMomentumBacktest:
                     symbol=symbol,
                     timestamp=current_time,
                     signal_type='SELL',
-                    confidence=exit_conditions['exit_confidence'],
                     momentum_score=0.0,  # Not momentum-based
+                    trend_strength=0.0,  # Not applicable for forced exit
+                    confidence=exit_conditions['exit_confidence'],
+                    entry_price=current_price,
+                    stop_loss=current_price * (1 + self.config.stop_loss_pct),  # Conservative stop
+                    take_profit=current_price * (1 - self.config.take_profit_pct),  # Conservative target
                     position_size=self.current_position,
-                    entry_price=current_price
+                    metadata={'forced_exit': True, 'exit_reason': exit_conditions['exit_reason']}
                 )
                 
                 self.logger.info(f"🚨 Dynamic exit triggered for {symbol}: {exit_conditions['exit_reason']}")
                 
                 # Assess regime for the forced exit
                 regime_info = await self._assess_market_regime(data_window, symbol)
-                await self._process_signal(forced_exit_signal, regime_info)
+                await self._process_signal(forced_exit_signal, regime_info, data_window)
                 
                 return [forced_exit_signal]
             
@@ -788,7 +825,7 @@ class AdvancedMomentumBacktest:
             
             # Process signals through risk management
             for signal in momentum_signals:
-                await self._process_signal(signal, regime_info)
+                await self._process_signal(signal, regime_info, data_window)
             
             return momentum_signals
             
@@ -889,7 +926,7 @@ class AdvancedMomentumBacktest:
         signals = []
         
         try:
-            self.logger.info(f"🔍 Analyzing momentum for {symbol} with {len(data)} records...")
+            self.logger.debug(f"🔍 Analyzing momentum for {symbol} with {len(data)} records...")
             # Use momentum strategy to analyze data
             signal = self.momentum_strategy.analyze_momentum(data, symbol)
             self.logger.info(f"🔍 Momentum analysis result: {signal is not None}")
@@ -1015,7 +1052,8 @@ class AdvancedMomentumBacktest:
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             return rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50.0
-        except:
+        except Exception as e:
+            self.logger.warning(f"Error calculating RSI: {e}")
             return 50.0  # Neutral RSI if calculation fails
     
     def _get_regime_parameters(self, signal: MomentumSignal) -> Dict[str, Any]:
@@ -1448,7 +1486,7 @@ class AdvancedMomentumBacktest:
             self.logger.error(f"Attribution analysis failed: {e}")
             return {}
     
-    async def _process_signal(self, signal: MomentumSignal, regime_info: Dict[str, Any]):
+    async def _process_signal(self, signal: MomentumSignal, regime_info: Dict[str, Any], data_window: pd.DataFrame):
         """Process signal through risk management and execution"""
         
         try:
@@ -1513,17 +1551,14 @@ class AdvancedMomentumBacktest:
                     
                     # PHASE 2: Calculate and store dynamic stop-loss
                     if self.dynamic_stops_enabled:
-                        # Get recent market data for stop calculation
-                        recent_data = self.data_manager.get_market_data(
-                            symbol=signal.symbol,
-                            start_date=self.config['start_date'],
-                            end_date=self.config['end_date']
-                        )
-                        if recent_data is not None and len(recent_data) > 0:
-                            dynamic_stop = self._calculate_dynamic_stop_loss(signal.symbol, signal.entry_price, recent_data)
-                            self.logger.info(f"📊 Dynamic stop-loss set: ${dynamic_stop:.2f}")
-                        else:
-                            self.logger.warning("Could not calculate dynamic stop - using fixed 2%")
+                        try:
+                            # Use current data window for dynamic stop calculation
+                            dynamic_stop = self._calculate_dynamic_stop_loss(signal.symbol, signal.entry_price, data_window)
+                            signal.stop_loss = dynamic_stop
+                            self.logger.info(f"📊 Dynamic stop-loss: ${dynamic_stop:.2f} ({((dynamic_stop/signal.entry_price)-1)*100:.2f}%)")
+                        except Exception as e:
+                            self.logger.warning(f"⚠️ Dynamic stop calculation failed, using fixed 2%: {e}")
+                            signal.stop_loss = signal.entry_price * 0.98
                     
                     # POSITION SYNC FIX: Use centralized position synchronization
                     self._synchronize_positions(signal.symbol, self.current_position)
@@ -1651,7 +1686,7 @@ class AdvancedMomentumBacktest:
                             winning_trades += 1
                 
                 win_rate = (winning_trades / total_round_trips * 100) if total_round_trips > 0 else 0
-                
+            
             else:
                 final_portfolio_value = self.config.initial_capital
                 total_return = 0
@@ -1722,8 +1757,8 @@ async def main():
     # Configure backtest (SINGLE SYMBOL TSLA WITH POSITION MANAGEMENT)
     config = MomentumBacktestConfig(
         symbols=['TSLA'],  # Single symbol focus
-        start_date='2024-11-15',  # Successful Range-bound regime day for testing
-        end_date='2024-11-15',
+        start_date='2024-11-06',  # Testing for November 6, 2024
+        end_date='2024-11-06',
         initial_capital=10000.0,  # $10,000 initial capital
         momentum_lookback=10,  # ORIGINAL: 10 minutes (was generating 90 signals!)
         # PHASE 1 OPTIMIZATION: Enhanced Signal Quality
@@ -1746,7 +1781,7 @@ async def main():
     print("🚀 ADVANCED MOMENTUM BACKTEST RESULTS")
     print("="*80)
     
-    print(f"\n📊 BACKTEST CONFIGURATION:")
+    print("\n📊 BACKTEST CONFIGURATION:")
     config_info = results['backtest_config']
     print(f"   • Symbols: {', '.join(config_info['symbols'])}")
     print(f"   • Period: {config_info['period']}")
@@ -1754,15 +1789,31 @@ async def main():
     print(f"   • Strategy: {config_info['strategy']}")
     print(f"   • Position Management: {config_info['position_management']}")
     
-    print(f"\n⚡ EXECUTION SUMMARY:")
+    print("\n⚡ EXECUTION SUMMARY:")
     exec_summary = results['execution_summary']
     print(f"   • Total Signals: {exec_summary['total_signals']}")
     print(f"   • Total Trades: {exec_summary['total_trades']}")
     print(f"   • Minutes Processed: {exec_summary['minutes_processed']}")
     print(f"   • Market Hours Only: {exec_summary['market_hours_only']}")
     
+    # Initialize performance metrics with defaults
+    perf = {
+        'total_return_pct': 0.0,
+        'return_pct': 0.0,
+        'initial_capital': config_info['initial_capital'],
+        'final_portfolio_value': config_info['initial_capital'],
+        'total_return': 0.0,
+        'volatility': 0.0,
+        'sharpe_ratio': 0.0,
+        'max_drawdown_pct': 0.0,
+        'win_rate_pct': 0.0,
+        'total_trades': 0,
+        'buy_trades': 0,
+        'sell_trades': 0
+    }
+    
     if results['performance_metrics']:
-        print(f"\n💰 COMPREHENSIVE PERFORMANCE METRICS:")
+        print("\n💰 COMPREHENSIVE PERFORMANCE METRICS:")
         perf = results['performance_metrics']
         print(f"   • Initial Capital: ${perf['initial_capital']:,.2f}")
         print(f"   • Final Portfolio Value: ${perf['final_portfolio_value']:,.2f}")
@@ -1779,22 +1830,22 @@ async def main():
     actual_return = perf.get('total_return_pct', perf.get('return_pct', 0)) / 100.0
     performance_gap = target_return - actual_return
     
-    print(f"\n📈 FINAL POSITION SUMMARY:")
+    print("\n📈 FINAL POSITION SUMMARY:")
     pos_summary = results['position_summary']
     print(f"   • Final Position: {pos_summary['final_position']} shares")
     print(f"   • Final Cash: ${pos_summary['final_cash']:,.2f}")
     print(f"   • Final Portfolio Value: ${pos_summary['final_portfolio_value']:,.2f}")
     
-    print(f"\n🎯 PERFORMANCE vs TARGET:")
+    print("\n🎯 PERFORMANCE vs TARGET:")
     print(f"   • Target Return: {target_return:.1%}")
     print(f"   • Actual Return: {actual_return:.1%}")
     print(f"   • Performance Gap: {performance_gap:+.1%}")
     
     if performance_gap > 0:
-        print(f"   • Status: ❌ UNDERPERFORMING TARGET")
+        print("   • Status: ❌ UNDERPERFORMING TARGET")
         
         # PROFESSIONAL QUANT ANALYSIS & RECOMMENDATIONS
-        print(f"\n🔍 QUANT ANALYSIS - IMPROVEMENT AREAS:")
+        print("\n🔍 QUANT ANALYSIS - IMPROVEMENT AREAS:")
         
         # Win Rate Analysis
         if perf['win_rate_pct'] < 50:
@@ -1814,18 +1865,18 @@ async def main():
         elif perf['total_trades'] > 50:
             print(f"   • High Trade Frequency ({perf['total_trades']} trades): Increase signal confidence thresholds")
         
-        print(f"\n💡 OPTIMIZATION STRATEGIES:")
-        print(f"   • Parameter Tuning: Optimize momentum thresholds (currently 0.1%)")
-        print(f"   • Position Sizing: Implement Kelly Criterion or risk parity")
-        print(f"   • Regime Adaptation: Adjust strategy parameters by market regime")
-        print(f"   • Signal Enhancement: Add volume confirmation or multi-timeframe filters")
-        print(f"   • Risk Management: Implement dynamic stop-losses based on volatility")
+        print("\n💡 OPTIMIZATION STRATEGIES:")
+        print("   • Parameter Tuning: Optimize momentum thresholds (currently 0.1%)")
+        print("   • Position Sizing: Implement Kelly Criterion or risk parity")
+        print("   • Regime Adaptation: Adjust strategy parameters by market regime")
+        print("   • Signal Enhancement: Add volume confirmation or multi-timeframe filters")
+        print("   • Risk Management: Implement dynamic stop-losses based on volatility")
         
     else:
-        print(f"   • Status: ✅ TARGET ACHIEVED")
-        print(f"\n🎉 EXCELLENT PERFORMANCE - CONSIDER SCALING OR HIGHER TARGETS")
+        print("   • Status: ✅ TARGET ACHIEVED")
+        print("\n🎉 EXCELLENT PERFORMANCE - CONSIDER SCALING OR HIGHER TARGETS")
     
-    print(f"\n🎯 RECENT TRADES:")
+    print("\n🎯 RECENT TRADES:")
     for trade in results['trades'][-5:]:  # Show last 5 trades
         print(f"   • {trade['type']} {trade['quantity']:.2f} {trade['symbol']} @ ${trade['price']:.2f}")
         print(f"     Position After: {trade['position_after']:.2f}, Cash After: ${trade['cash_after']:,.2f}")

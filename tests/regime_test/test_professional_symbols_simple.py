@@ -15,6 +15,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import pytest
 
 # Core engine imports
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
@@ -27,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.asyncio
 async def test_professional_symbols():
     """Test professional symbols for regime detection"""
     
@@ -118,8 +120,7 @@ async def test_professional_symbols():
     else:
         logger.error("❌ No regime detections successful")
     
-    logger.info("=" * 60)
+        logger.info("=" * 60)
 
 
-if __name__ == "__main__":
-    asyncio.run(test_professional_symbols())
+# Remove the main block since this is now a pytest test

@@ -95,6 +95,24 @@ class AlternativeDataPoint:
 
 
 @dataclass
+class AlternativeDataRequest:
+    """Alternative data request"""
+    data_type: str
+    symbols: List[str]
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    custom_params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AlternativeDataResponse:
+    """Alternative data response"""
+    success: bool
+    data: Any
+    error_message: Optional[str] = None
+
+
+@dataclass
 class SentimentAnalysis:
     """Sentiment analysis result"""
     text: str

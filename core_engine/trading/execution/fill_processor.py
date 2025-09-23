@@ -121,6 +121,26 @@ class PositionUpdate:
 
 
 @dataclass
+class FillEvent:
+    """Fill event data"""
+    order_id: str
+    symbol: str
+    quantity: float
+    price: float
+    timestamp: datetime
+    commission: float = 0.0
+
+
+@dataclass
+class FillMetrics:
+    """Fill processing metrics"""
+    total_fills: int = 0
+    total_quantity: float = 0.0
+    average_price: float = 0.0
+    total_commission: float = 0.0
+
+
+@dataclass
 class FillValidationRule:
     """Fill validation rule"""
     rule_id: str
@@ -891,7 +911,32 @@ class FillProcessor:
         self._running = False
         self._processing_task = None
         
+        # Test support attributes
+        self.fill_events = []
+        
         logger.info("Fill Processor initialized")
+    
+    def process_fill_event(self, fill_event: FillEvent) -> None:
+        """Process a fill event (for testing)"""
+        self.fill_events.append(fill_event)
+    
+    def get_fill_metrics(self, symbol: str) -> FillMetrics:
+        """Get fill metrics for a symbol (for testing)"""
+        symbol_fills = [f for f in self.fill_events if f.symbol == symbol]
+        
+        if not symbol_fills:
+            return FillMetrics()
+        
+        total_quantity = sum(f.quantity for f in symbol_fills)
+        total_commission = sum(f.commission for f in symbol_fills)
+        weighted_price = sum(f.price * f.quantity for f in symbol_fills) / total_quantity
+        
+        return FillMetrics(
+            total_fills=len(symbol_fills),
+            total_quantity=total_quantity,
+            average_price=weighted_price,
+            total_commission=total_commission
+        )
     
     async def process_fill(self, execution: TradeExecution) -> bool:
         """Process individual fill"""

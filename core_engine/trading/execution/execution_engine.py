@@ -255,6 +255,18 @@ class ExecutionResult:
     error_messages: List[str] = field(default_factory=list)
 
 
+@dataclass
+class ExecutionMetrics:
+    """Execution performance metrics"""
+    total_executions: int = 0
+    successful_executions: int = 0
+    failed_executions: int = 0
+    avg_execution_time: float = 0.0
+    total_volume: float = 0.0
+    avg_slippage: float = 0.0
+    completion_rate: float = 0.0
+
+
 class MarketDataProvider:
     """Market data provider for execution"""
     
@@ -786,7 +798,7 @@ class ExecutionEngine:
             logger.error(f"Error cancelling execution {request_id}: {e}")
             return False
     
-    def get_execution_metrics(self) -> Dict[str, Any]:
+    def get_execution_metrics(self) -> ExecutionMetrics:
         """Get execution performance metrics"""
         
         with self._lock:
@@ -808,16 +820,13 @@ class ExecutionEngine:
                 avg_market_impact = 0
                 fill_rate = 0
         
-        return {
-            'total_requests': total_requests,
-            'completed_requests': completed_requests,
-            'completion_rate': completed_requests / total_requests if total_requests > 0 else 0,
-            'avg_slippage': avg_slippage,
-            'avg_market_impact': avg_market_impact,
-            'avg_fill_rate': fill_rate,
-            'active_slices': sum(len(r['slices']) for r in self._active_requests.values()),
-            'engine_uptime': datetime.now().isoformat()
-        }
+        return ExecutionMetrics(
+            total_executions=total_requests,
+            successful_executions=completed_requests,
+            failed_executions=total_requests - completed_requests,
+            avg_slippage=avg_slippage,
+            completion_rate=completed_requests / total_requests if total_requests > 0 else 0
+        )
     
     def start(self) -> None:
         """Start execution engine"""

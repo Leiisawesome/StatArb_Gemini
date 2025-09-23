@@ -33,8 +33,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from core_structure.analytics.core_analytics import CoreAnalyticsEngine
-from core_structure.analytics.monitoring_analytics import MonitoringAnalyticsEngine
+from ..performance_analyzer import PerformanceAnalyzer
+from ..manager_enhanced import AnalyticsManager
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +189,8 @@ class PerformanceMonitor:
         self.reporting_task: Optional[asyncio.Task] = None
         
         # Leverage existing analytics engines
-        self.core_analytics: Optional[CoreAnalyticsEngine] = None
-        self.monitoring_analytics: Optional[MonitoringAnalyticsEngine] = None
+        self.core_analytics: Optional[PerformanceAnalyzer] = None
+        self.monitoring_analytics: Optional[AnalyticsManager] = None
         
         logger.info("📊 Performance Monitor initialized")
     
@@ -200,8 +200,8 @@ class PerformanceMonitor:
             logger.info("🔄 Initializing Performance Monitor...")
             
             # Initialize analytics engines
-            self.core_analytics = CoreAnalyticsEngine()
-            self.monitoring_analytics = MonitoringAnalyticsEngine()
+            self.core_analytics = PerformanceAnalyzer()
+            self.monitoring_analytics = AnalyticsManager()
             
             # Initialize metric collections
             for metric_type in MetricType:

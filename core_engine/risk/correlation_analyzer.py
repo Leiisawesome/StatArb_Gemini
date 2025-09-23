@@ -179,7 +179,7 @@ class CorrelationAnalyzer:
             condition_number = max(eigenvalues) / min(eigenvalues) if min(eigenvalues) > 1e-12 else np.inf
             
             # Check if matrix is positive definite
-            is_positive_definite = all(eigenvalues > 1e-12)
+            is_positive_definite = all(e > 1e-12 for e in eigenvalues)
             
             # Create result
             correlation_result = CorrelationMatrix(

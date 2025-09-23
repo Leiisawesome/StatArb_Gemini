@@ -31,8 +31,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from core_structure.infrastructure.types import OrderType, OrderStatus, Order
-from core_structure.components.broker_integration.advanced_order_management import ExecutionResult
+from ..type_definitions import OrderType, OrderStatus, Order, ExecutionResult
 
 logger = logging.getLogger(__name__)
 

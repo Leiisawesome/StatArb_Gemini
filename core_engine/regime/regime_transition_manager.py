@@ -8,25 +8,19 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy import stats
-from scipy.optimize import minimize
-from scipy.signal import find_peaks
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Import regime components
-from .regime_detector import RegimeType, RegimeDetection, DetectionMethod
-from .regime_indicators import RegimeIndicator, TransitionSignal, SignalStrength
+from .regime_detector import RegimeType
+from .regime_indicators import RegimeIndicator, SignalStrength
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

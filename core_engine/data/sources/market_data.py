@@ -184,6 +184,24 @@ class DataFeedAdapter(ABC):
         pass
 
 
+@dataclass
+class MarketDataRequest:
+    """Market data request"""
+    symbols: List[str]
+    fields: List[str]
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    custom_params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MarketDataResponse:
+    """Market data response"""
+    success: bool
+    data: Any
+    error_message: Optional[str] = None
+
+
 class SimulatedDataFeed(DataFeedAdapter):
     """Simulated data feed for testing"""
     

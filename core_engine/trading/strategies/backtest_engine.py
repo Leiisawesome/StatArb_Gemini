@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Import strategy and performance components
 from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition, StrategyMetrics
-from ..performance.performance_calculator import PerformanceCalculator, PerformanceMetrics
+from ...analytics.performance_analyzer import PerformanceAnalyzer, PerformanceMetrics
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -459,7 +459,7 @@ class BacktestEngine:
         # Core components
         self.cost_calculator = TransactionCostCalculator(self.config)
         self.position_manager = PositionManager(self.config)
-        self.performance_calculator = PerformanceCalculator()
+        self.performance_calculator = PerformanceAnalyzer()
         
         # Backtest state
         self.current_portfolio = Portfolio(cash=self.config.initial_capital)

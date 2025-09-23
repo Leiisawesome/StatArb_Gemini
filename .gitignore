@@ -50,6 +50,10 @@ Thumbs.db
 *_report_*.txt
 *_log_*.txt
 
+# Performance profiling
+performance_profiling.py
+performance_profile_*.json
+
 # Database
 *.db
 *.sqlite

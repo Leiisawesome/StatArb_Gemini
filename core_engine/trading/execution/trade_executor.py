@@ -102,6 +102,18 @@ class TradeExecutionRequest:
 
 
 @dataclass
+class TradeExecutionResult:
+    """Trade execution result"""
+    trade_id: str
+    symbol: str
+    quantity: float
+    executed_quantity: float
+    average_price: float
+    total_cost: float
+    status: str
+
+
+@dataclass
 class TradeSlice:
     """Individual trade slice execution"""
     slice_id: str

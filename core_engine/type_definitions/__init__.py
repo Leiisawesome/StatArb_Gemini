@@ -6,7 +6,7 @@ Lightweight implementations replacing core_structure dependencies.
 """
 
 from .orders import Order, OrderType, OrderStatus, OrderSide, ExecutionResult
-from .portfolio import Portfolio, PortfolioManager, PortfolioSnapshot, PortfolioConfig
+from .portfolio import Portfolio, PortfolioManager, PortfolioSnapshot, PortfolioConfig, Position
 from .strategy import (
     BaseStrategy, StrategyInterface, StrategyMetrics, StrategyType, 
     StrategyConfig, TradingSignal, StrategyManager
@@ -22,7 +22,7 @@ __all__ = [
     'Order', 'OrderType', 'OrderStatus', 'OrderSide', 'ExecutionResult',
     
     # Portfolio
-    'Portfolio', 'PortfolioManager', 'PortfolioSnapshot', 'PortfolioConfig',
+    'Portfolio', 'PortfolioManager', 'PortfolioSnapshot', 'PortfolioConfig', 'Position',
     
     # Strategy
     'BaseStrategy', 'StrategyInterface', 'StrategyMetrics', 'StrategyType',

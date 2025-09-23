@@ -7,18 +7,16 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 import inspect
-import ast
-import re
 from pathlib import Path
 import time
 
 # Import strategy components
-from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition, StrategyMetrics
+from .strategy_engine import BaseStrategy
 from .backtest_engine import BacktestEngine, BacktestConfig, BacktestResult
 
 warnings.filterwarnings('ignore')
@@ -576,7 +574,7 @@ class DataValidator:
             
             # Test basic data input
             try:
-                result = strategy.update(sample_data)
+                strategy.update(sample_data)
                 compatibility['accepts_dict_input'] = True
                 compatibility['handles_multiple_symbols'] = len(sample_data) > 1
             except Exception as e:
@@ -624,7 +622,7 @@ class DataValidator:
             
             # Test strategy with missing data
             try:
-                result = strategy.update(test_data)
+                strategy.update(test_data)
                 missing_data_test['handles_missing_values'] = True
             except Exception as e:
                 missing_data_test['missing_values_error'] = str(e)
@@ -632,7 +630,7 @@ class DataValidator:
             # Test with empty symbol data
             try:
                 empty_data = {symbol: pd.DataFrame() for symbol in list(sample_data.keys())[:1]}
-                result = strategy.update(empty_data)
+                strategy.update(empty_data)
                 missing_data_test['handles_incomplete_data'] = True
             except Exception as e:
                 missing_data_test['incomplete_data_error'] = str(e)
@@ -666,7 +664,7 @@ class DataValidator:
                     test_data.iloc[0, test_data.columns.get_loc(outlier_col)] *= 1000
                     
                     try:
-                        result = strategy.update({symbol: test_data})
+                        strategy.update({symbol: test_data})
                         quality_test['handles_outliers'] = True
                     except Exception as e:
                         quality_test['outliers_error'] = str(e)
@@ -695,7 +693,7 @@ class DataValidator:
             # Test processing time
             start_time = time.time()
             try:
-                result = strategy.update(sample_data)
+                strategy.update(sample_data)
                 processing_time = time.time() - start_time
                 performance_test['processing_time'] = processing_time
                 

@@ -46,6 +46,7 @@ class StrategyType(Enum):
     STATISTICAL_ARBITRAGE = "statistical_arbitrage"
     MULTI_FACTOR = "multi_factor"
     MACHINE_LEARNING = "machine_learning"
+    VOLATILITY = "volatility"
     CUSTOM = "custom"
 
 

@@ -21,21 +21,16 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
 # Leverage existing high-quality risk components
-import sys
 # Use internal core_engine types for independence
-from ..types import (
-    RiskConfig, RiskLevel, RiskMetrics, RiskResult, RiskManager as BaseRiskManager
+from ..type_definitions import (
+    RiskLevel, RiskMetrics
 )
-from .type_definitions.portfolio import Position
-
-# Import risk components from core_engine types
-from .type_definitions.risk import RiskLimits, TradingMode
-from .type_definitions.portfolio import Portfolio
+from ..type_definitions import Position
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +284,7 @@ class RiskManager:
             
             # Validate execution details against authorization
             if execution_details.get('quantity', 0) > auth.authorized_quantity:
-                logger.warning(f"⛔ Execution quantity exceeds authorization")
+                logger.warning("⛔ Execution quantity exceeds authorization")
                 return False
             
             # Remove used authorization
