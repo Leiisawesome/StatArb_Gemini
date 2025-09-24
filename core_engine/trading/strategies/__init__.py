@@ -31,10 +31,6 @@ from .strategy_registry import StrategyRegistry, StrategyMetadata
 from .strategy_manager import StrategyManager
 from .strategy_validator import StrategyValidator
 from .strategy_optimizer import StrategyOptimizer
-from .institutional_backtest_engine import (
-    InstitutionalBacktestEngine, InstitutionalBacktestConfig, 
-    InstitutionalBacktestResult, BacktestPhase
-)
 
 # Strategy implementations
 from .implementations import (

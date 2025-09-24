@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 # Core Engine Imports
-from core_engine.trading.strategies.institutional_backtest_engine import (
+from desk.institutional_backtest_engine import (
     InstitutionalBacktestEngine, InstitutionalBacktestConfig
 )
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig

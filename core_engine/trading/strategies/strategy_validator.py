@@ -17,7 +17,7 @@ import time
 
 # Import strategy components
 from .strategy_engine import BaseStrategy
-from .institutional_backtest_engine import BacktestConfig, BacktestResult
+from desk.backtest_types import BacktestConfig, BacktestResult
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

@@ -32,21 +32,24 @@ from pathlib import Path
 import warnings
 
 # Core engine imports
-from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition
-from ...system.hierarchical_orchestrator import (
+from core_engine.trading.strategies.strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition
+from core_engine.system.hierarchical_orchestrator import (
     HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
 )
-from ...system.interfaces import ISystemComponent
-from ...system.central_risk_manager import (
+from core_engine.system.interfaces import ISystemComponent
+from core_engine.system.central_risk_manager import (
     CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
 )
-from ...regime.engine import RegimeEngine, MarketRegime
-from ...data.manager import ClickHouseDataManager
-from ...analytics.performance_analyzer import PerformanceAnalyzer
-from ...processing.indicators.engine import EnhancedTechnicalIndicators
-from ...processing.features.engineer import FeatureEngineer
-from ...processing.signals.generator import SignalGenerator
-from ...utils.logging import get_logger
+from core_engine.regime.engine import RegimeEngine, MarketRegime
+from core_engine.data.manager import ClickHouseDataManager
+from core_engine.analytics.performance_analyzer import PerformanceAnalyzer
+from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
+from core_engine.processing.features.engineer import FeatureEngineer
+from core_engine.processing.signals.generator import SignalGenerator
+from core_engine.utils.logging import get_logger
+
+# Local imports
+from .backtest_types import BacktestConfig, BacktestResult, BacktestMode, ExecutionModel, SlippageModel, CommissionModel
 
 warnings.filterwarnings('ignore')
 logger = get_logger(__name__)

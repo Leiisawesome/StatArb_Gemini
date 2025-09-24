@@ -61,10 +61,10 @@ from core_engine.processing.features.engineer import FeatureEngineer
 from core_engine.regime.engine import RegimeEngine
 
 # Backtest Engine (Target of Assessment)
-from core_engine.trading.strategies.institutional_backtest_engine import (
+from desk.institutional_backtest_engine import (
     InstitutionalBacktestEngine, InstitutionalBacktestConfig, InstitutionalBacktestResult
 )
-from core_engine.trading.strategies.institutional_backtest_engine import (
+from desk.institutional_backtest_engine import (
     BacktestResult, BacktestMode, ExecutionModel, CommissionModel, SlippageModel
 )
 from core_engine.trading.strategies.strategy_engine import (
