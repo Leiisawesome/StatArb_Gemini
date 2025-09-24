@@ -1,6 +1,8 @@
 ---
-globs: core_engine/**/*.py
+alwaysApply: true
+description: "Component Integration Standards and ISystemComponent Interface Requirements"
 ---
+
 # Component Integration Standards for Core Engine
 
 All components within the `core_engine` must integrate seamlessly with the [HierarchicalSystemOrchestrator](mdc:core_engine/system/hierarchical_orchestrator.py) and adhere to these standards:

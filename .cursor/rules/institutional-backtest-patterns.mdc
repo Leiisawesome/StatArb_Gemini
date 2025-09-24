@@ -1,0 +1,250 @@
+---
+globs: desk/**/*.py,**/backtest*.py
+description: "Institutional Backtest Engine Architecture and Historical Simulation Patterns"
+---
+
+# Institutional Backtest Engine Patterns
+
+The [institutional_backtest_engine.py](mdc:desk/institutional_backtest_engine.py) provides professional-grade historical simulation with core engine integration.
+
+## MANDATORY Backtest Architecture
+
+### Core Engine Integration
+```python
+# REQUIRED: All backtests must use core engine for data and processing
+from core_engine.data.manager import ClickHouseDataManager
+from core_engine.system.central_risk_manager import CentralRiskManager
+from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
+from core_engine.regime.engine import UnifiedRegimeEngine
+
+class InstitutionalBacktestEngine:
+    def __init__(self, config):
+        # MANDATORY: Use core engine components
+        self.data_manager = ClickHouseDataManager(config.data_config)
+        self.risk_manager = CentralRiskManager(config.risk_config)
+        self.execution_engine = UnifiedExecutionEngine(config.execution_config)
+        self.regime_engine = UnifiedRegimeEngine(config.regime_config)
+```
+
+### Data Requirements
+- **1-minute ClickHouse data** ingested in **5-minute intervals**
+- **Core engine signal processing** for all strategy signals
+- **Unified data pipeline** through established flow
+
+```python
+# REQUIRED: Data processing through core engine pipeline
+async def process_backtest_data(self, symbol: str, start_date: str, end_date: str):
+    # Step 1: Get data through UnifiedDataManager
+    market_data = await self.data_manager.get_historical_data(
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        interval="1min"
+    )
+    
+    # Step 2: Resample to 5-minute intervals
+    processed_data = market_data.resample('5min').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    })
+    
+    # Step 3: Process through core engine pipeline
+    indicators = await self.indicators_engine.calculate_indicators(processed_data)
+    features = await self.feature_engineer.create_features(indicators)
+    signals = await self.signal_generator.generate_signals(features)
+    
+    return signals
+```
+
+## Risk-Aware Backtesting
+
+### MANDATORY Risk Authorization Simulation
+```python
+async def simulate_trading_decision(self, signal):
+    """Simulate trading decision with proper risk authorization"""
+    
+    # Step 1: Create authorization request (as in live trading)
+    request = TradingDecisionRequest(
+        decision_type=TradingDecisionType.POSITION_ENTRY,
+        symbol=signal.symbol,
+        side=signal.signal_type.value,
+        quantity=signal.quantity,
+        strategy_id=self.strategy_id,
+        confidence=signal.confidence,
+        market_regime=self.current_regime,
+        available_cash=self.current_cash,  # CRITICAL for BUY validation
+        requesting_component="backtest_engine"
+    )
+    
+    # Step 2: Get authorization from RiskManager
+    authorization = await self.risk_manager.authorize_trading_decision(request)
+    
+    # Step 3: Execute only if authorized
+    if authorization.authorization_level != AuthorizationLevel.REJECTED:
+        # Simulate execution with proper market impact
+        execution_result = await self.simulate_execution(authorization, signal)
+        
+        # Update positions and cash
+        await self.update_backtest_positions(execution_result)
+        
+        return execution_result
+    else:
+        self.logger.info(f"🔒 Trade rejected in backtest: {authorization.rejection_reason}")
+        return None
+```
+
+## Position and Cash Management
+
+### CRITICAL: Accurate Position Tracking
+```python
+class BacktestPositionManager:
+    def __init__(self, initial_cash: float = 1000000.0):
+        self.cash = initial_cash
+        self.positions = {}  # symbol -> quantity
+        self.position_values = {}  # symbol -> market_value
+        
+    async def execute_trade(self, symbol: str, side: str, quantity: float, price: float):
+        """Execute trade with proper cash and position validation"""
+        
+        if side.lower() == 'buy':
+            required_cash = quantity * price
+            
+            if required_cash > self.cash:
+                # Insufficient cash - reject or reduce quantity
+                max_affordable = self.cash / price
+                if max_affordable < 1.0:
+                    return None  # Cannot afford even 1 share
+                quantity = max_affordable
+                required_cash = quantity * price
+            
+            # Execute BUY
+            self.cash -= required_cash
+            self.positions[symbol] = self.positions.get(symbol, 0.0) + quantity
+            
+        elif side.lower() == 'sell':
+            current_position = self.positions.get(symbol, 0.0)
+            
+            if current_position <= 0:
+                return None  # No position to sell
+            
+            # Cap SELL by available position
+            quantity = min(quantity, current_position)
+            
+            # Execute SELL
+            self.cash += quantity * price
+            self.positions[symbol] = current_position - quantity
+            
+            # Clean up zero positions
+            if abs(self.positions[symbol]) < 0.01:
+                del self.positions[symbol]
+        
+        return {
+            'symbol': symbol,
+            'side': side,
+            'quantity': quantity,
+            'price': price,
+            'cash_after': self.cash,
+            'position_after': self.positions.get(symbol, 0.0)
+        }
+```
+
+## Regime-Aware Backtesting
+
+### Market Condition Integration
+```python
+async def run_regime_aware_backtest(self, symbols: List[str], start_date: str, end_date: str):
+    """Run backtest with regime awareness"""
+    
+    for timestamp, market_data in self.iterate_historical_data(symbols, start_date, end_date):
+        # Update regime engine with current market data
+        await self.regime_engine.on_market_data(market_data)
+        
+        # Get current regime assessment
+        regime_analysis = await self.regime_engine.get_current_regime()
+        self.current_regime = regime_analysis.primary_regime.value
+        
+        # Process signals with regime context
+        signals = await self.generate_signals_for_timestamp(timestamp, market_data)
+        
+        # Execute trades with regime-aware risk management
+        for signal in signals:
+            signal.market_regime = self.current_regime
+            signal.regime_confidence = regime_analysis.confidence
+            
+            result = await self.simulate_trading_decision(signal)
+            if result:
+                self.backtest_results.append(result)
+```
+
+## Performance Analytics
+
+### Professional Metrics Calculation
+```python
+def calculate_backtest_performance(self) -> Dict[str, Any]:
+    """Calculate institutional-grade performance metrics"""
+    
+    returns = self.calculate_returns()
+    
+    # Core performance metrics
+    total_return = (self.final_portfolio_value / self.initial_portfolio_value - 1) * 100
+    max_drawdown = self.calculate_max_drawdown() * 100
+    sharpe_ratio = self.calculate_sharpe_ratio(returns)
+    sortino_ratio = self.calculate_sortino_ratio(returns)
+    
+    # Risk metrics
+    var_95 = np.percentile(returns, 5) * 100
+    expected_shortfall = returns[returns <= np.percentile(returns, 5)].mean() * 100
+    
+    # Trading metrics
+    win_rate = len([r for r in self.trade_results if r['pnl'] > 0]) / len(self.trade_results)
+    avg_trade_pnl = np.mean([r['pnl'] for r in self.trade_results])
+    
+    return {
+        'total_return_pct': total_return,
+        'max_drawdown_pct': max_drawdown,
+        'sharpe_ratio': sharpe_ratio,
+        'sortino_ratio': sortino_ratio,
+        'var_95_pct': var_95,
+        'expected_shortfall_pct': expected_shortfall,
+        'win_rate_pct': win_rate * 100,
+        'avg_trade_pnl': avg_trade_pnl,
+        'total_trades': len(self.trade_results),
+        'regime_breakdown': self.calculate_regime_performance()
+    }
+```
+
+## PROHIBITED Backtest Patterns
+
+❌ **Direct Data Access**: Must use core engine data pipeline
+❌ **Unrealistic Execution**: Must simulate proper market impact and slippage
+❌ **Cash Overdraft**: Cannot execute BUY orders without sufficient cash
+❌ **Position Overselling**: Cannot SELL more than current position
+❌ **Risk Bypass**: Must simulate proper risk authorization
+❌ **Regime Ignorance**: Must incorporate regime analysis
+
+## Backtest Validation Requirements
+
+```python
+def validate_backtest_integrity(self):
+    """Validate backtest follows proper constraints"""
+    
+    # Check cash never goes negative
+    assert all(snapshot['cash'] >= 0 for snapshot in self.portfolio_snapshots), \
+        "Cash went negative during backtest"
+    
+    # Check position consistency
+    for symbol in self.final_positions:
+        calculated_position = sum(
+            trade['quantity'] if trade['side'] == 'buy' else -trade['quantity']
+            for trade in self.trades if trade['symbol'] == symbol
+        )
+        assert abs(calculated_position - self.final_positions[symbol]) < 0.01, \
+            f"Position inconsistency for {symbol}"
+    
+    # Check all trades were properly authorized
+    assert all(trade.get('authorized', False) for trade in self.trades), \
+        "Unauthorized trades found in backtest"
+```

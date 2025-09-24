@@ -1,0 +1,152 @@
+---
+alwaysApply: true
+description: "Unified Data Flow Pipeline and ClickHouse Integration Patterns"
+---
+
+# Data Flow Architecture and Pipeline Patterns
+
+The core_engine implements a **strict, unified data flow pipeline**. All components must adhere to this sequence.
+
+## MANDATORY Data Flow Pipeline
+
+```
+Market Data Sources
+    ↓ (via UnifiedDataManager)
+Technical Indicators ([core_engine/processing/indicators/engine.py](mdc:core_engine/processing/indicators/engine.py))
+    ↓
+Feature Engineering ([core_engine/processing/features/engineer.py](mdc:core_engine/processing/features/engineer.py))
+    ↓
+Signal Generation ([core_engine/processing/signals/generator.py](mdc:core_engine/processing/signals/generator.py))
+    ↓
+Risk Authorization (CentralRiskManager)
+    ↓
+Execution (UnifiedExecutionEngine)
+```
+
+## Unified Data Manager - SINGLE DATA AUTHORITY
+
+**CRITICAL**: All market data access MUST go through [UnifiedDataManager](mdc:core_engine/data/manager.py). NO direct database queries.
+
+```python
+# CORRECT: Use UnifiedDataManager
+from core_engine.data.manager import ClickHouseDataManager
+
+class TradingComponent:
+    def __init__(self):
+        self.data_manager = ClickHouseDataManager(config)
+    
+    async def get_market_data(self, symbol: str):
+        # All data access through core engine
+        return self.data_manager.get_market_data(symbol)
+
+# INCORRECT: Direct database access
+import clickhouse_connect  # ❌ PROHIBITED
+client = clickhouse_connect.get_client()  # ❌ VIOLATES ARCHITECTURE
+```
+
+## Required Data Processing Components
+
+### Technical Indicators Engine
+```python
+from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
+
+# Use the standardized indicator engine
+indicators_engine = EnhancedTechnicalIndicators()
+indicators = indicators_engine.calculate_indicators(market_data)
+```
+
+### Feature Engineering
+```python
+from core_engine.processing.features.engineer import FeatureEngineer
+
+# Transform indicators into ML-ready features
+feature_engineer = FeatureEngineer()
+features = feature_engineer.create_features(indicators)
+```
+
+### Signal Generation
+```python
+from core_engine.processing.signals.generator import SignalGenerator
+
+# Generate trading signals from features
+signal_generator = SignalGenerator()
+signals = signal_generator.generate_signals(features)
+```
+
+## ClickHouse Integration Standards
+
+### Data Configuration
+```python
+from core_engine.data.manager import ClickHouseDataConfig
+
+data_config = ClickHouseDataConfig(
+    symbols=['NVDA', 'TSLA', 'AAPL'],
+    target_date="2024-12-20",
+    enable_caching=True
+)
+```
+
+### Backtest Data Requirements
+- **1-minute ClickHouse data** ingested in **5-minute intervals**
+- **Core engine processing** for all signal generation
+- **Unified caching** and validation mechanisms
+
+## Regime Integration Requirements
+
+All data processing MUST incorporate regime assessment:
+
+```python
+# Feed market data to regime engine
+for _, row in market_data.iterrows():
+    await regime_engine.on_market_data(row)
+
+# Get regime-adjusted processing
+regime_analysis = await regime_engine.get_current_regime()
+```
+
+## Data Quality and Error Handling
+
+```python
+# Handle missing or invalid data
+if market_data is None or market_data.empty:
+    self.logger.warning(f"No data available for {symbol}")
+    return None
+
+# Validate data quality
+if len(market_data) < minimum_required_points:
+    self.logger.error(f"Insufficient data points: {len(market_data)}")
+    return None
+
+# Handle NaN and inf values
+import numpy as np
+market_data = market_data.replace([np.inf, -np.inf], np.nan)
+market_data = market_data.fillna(method='ffill').fillna(0)
+```
+
+## PROHIBITED Data Patterns
+
+❌ **Direct Database Queries**: Must use UnifiedDataManager
+❌ **Custom Data Sources**: Must integrate through established pipeline
+❌ **Data Caching Bypass**: Must respect core engine caching mechanisms
+❌ **Inconsistent Data Formats**: Must use standardized data structures
+❌ **Pipeline Bypassing**: Cannot skip processing stages
+
+## Data Pipeline Validation
+
+```python
+# Validate pipeline integrity
+def validate_data_pipeline(self, data):
+    """Ensure data follows proper pipeline"""
+    
+    # Check data source
+    if not hasattr(data, 'source') or data.source != 'unified_data_manager':
+        raise ValueError("Data must come from UnifiedDataManager")
+    
+    # Check processing stages
+    required_stages = ['indicators', 'features', 'signals']
+    for stage in required_stages:
+        if stage not in data.processing_history:
+            raise ValueError(f"Missing processing stage: {stage}")
+    
+    return True
+```

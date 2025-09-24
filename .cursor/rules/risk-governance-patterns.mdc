@@ -1,16 +1,19 @@
 ---
-globs: core_engine/**/*.py
+alwaysApply: true
+description: "Central Risk Manager Authority and Trading Authorization Patterns"
 ---
+
 # Risk Governance and Central Authority Patterns
 
-The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the SINGLE point of authority for ALL trading decisions in the system.
+The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the **SINGLE POINT OF AUTHORITY** for ALL trading decisions in the system.
 
-## 1. Mandatory Risk Authorization Pattern
+## MANDATORY Risk Authorization Pattern
+
+**REQUIRED**: All trading components MUST use this exact pattern:
 
 ```python
-# REQUIRED: All trading components must use this pattern
 from core_engine.system.central_risk_manager import (
-    CentralRiskManager, TradingDecisionRequest, TradingDecisionType
+    CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
 )
 
 async def execute_trading_strategy(self, signal):
@@ -37,7 +40,7 @@ async def execute_trading_strategy(self, signal):
         return None
 ```
 
-## 2. Risk Manager Integration Requirements
+## Risk Manager Integration Requirements
 
 All trading components MUST:
 - Register with the RiskManager during initialization
@@ -45,7 +48,7 @@ All trading components MUST:
 - Respect authorization limits (quantity, risk budget, position limits)
 - Implement proper error handling for rejected trades
 
-## 3. Regime-Aware Risk Management
+## Regime-Aware Risk Management
 
 Risk decisions MUST incorporate market regime assessment:
 
@@ -59,15 +62,16 @@ request.regime_confidence = regime_analysis.confidence
 request.volatility_estimate = regime_analysis.volatility
 ```
 
-## 4. Position and Risk Limits
+## Position and Risk Limits
 
 The RiskManager enforces these limits (configurable):
 - `max_position_size`: Maximum position as % of portfolio (default: 10%)
 - `max_daily_var`: Maximum daily Value at Risk (default: 5%)
 - `position_concentration_limit`: Maximum concentration per position (default: 15%)
 - `strategy_allocation_limit`: Maximum allocation per strategy (default: 33%)
+- `min_signal_confidence`: Minimum signal confidence for authorization (default: 60%)
 
-## 5. Authorization Levels
+## Authorization Levels
 
 ```python
 class AuthorizationLevel(Enum):
@@ -78,9 +82,74 @@ class AuthorizationLevel(Enum):
     REJECTED = "rejected"        # Authorization denied
 ```
 
-## 6. Prohibited Risk Patterns
+## Risk Limit Enforcement
+
+### Cash Management for BUY Orders
+```python
+# CRITICAL: Cash availability check for BUY orders
+if request.side.lower() == 'buy':
+    available_cash = getattr(request, 'available_cash', self.portfolio_value * 0.95)
+    required_cash = authorized_qty * getattr(request, 'price', 100.0)
+    
+    if required_cash > available_cash:
+        # Reduce quantity or reject
+        max_affordable_qty = available_cash / price
+        authorized_qty = min(authorized_qty, max_affordable_qty)
+```
+
+### Position-Aware SELL Orders
+```python
+# CRITICAL: Position validation for SELL orders
+elif request.side.lower() == 'sell':
+    current_position = self.current_positions.get(request.symbol, 0.0)
+    
+    if current_position <= 0:
+        return 0.0  # No position to sell
+    else:
+        # Cap SELL quantity by actual position
+        max_sellable = abs(current_position)
+        authorized_qty = min(authorized_qty, max_sellable)
+```
+
+## PROHIBITED Risk Patterns
 
 ❌ **Direct Position Management**: Components cannot modify positions directly
 ❌ **Risk Limit Bypassing**: Cannot circumvent risk checks
 ❌ **Independent Risk Assessment**: Must use centralized risk evaluation
 ❌ **Unauthorized Trading**: All trades require explicit authorization tokens
+❌ **Cash Overdraft**: BUY orders must validate cash availability
+❌ **Short Selling Without Position**: SELL orders must validate position availability
+
+## Position Tracking Integration
+
+The RiskManager maintains real-time position tracking:
+
+```python
+# Position updates after successful execution
+def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0):
+    current_position = self.current_positions.get(symbol, 0.0)
+    
+    if side.lower() == 'buy':
+        new_position = current_position + quantity
+    elif side.lower() == 'sell':
+        new_position = current_position - quantity
+    
+    self.current_positions[symbol] = new_position
+    self._update_risk_metrics()
+```
+
+## Emergency Controls
+
+```python
+# Emergency shutdown capability
+def emergency_shutdown(self) -> bool:
+    self.emergency_mode = True
+    self.is_operational = False
+    
+    # Cancel all active authorizations
+    with self.authorization_lock:
+        cancelled_count = len(self.active_authorizations)
+        self.active_authorizations.clear()
+    
+    return True
+```

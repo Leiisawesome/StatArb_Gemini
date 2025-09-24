@@ -1,6 +1,8 @@
 ---
-globs: core_engine/**/*.py
+alwaysApply: true
+description: "Development Standards, Logging, Error Handling, and Professional Practices"
 ---
+
 # Development Best Practices for StatArb_Gemini
 
 Follow these development standards when working with the StatArb_Gemini codebase.
