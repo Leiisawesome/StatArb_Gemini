@@ -174,7 +174,7 @@ class AdvancedMomentumStrategy(BaseStrategy):
 
             # Set up performance monitoring
             if self.performance_monitor:
-                self.performance_monitor.start_monitoring(f"momentum_{self.config.strategy_id}")
+                self.performance_monitor.start_monitoring()
 
             # Initialize risk management
             self.portfolio_volatility = self.config.volatility_target
@@ -184,7 +184,7 @@ class AdvancedMomentumStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            self.logger.error("Failed to initialize momentum strategy", {'error': str(e)})
+            self.logger.error(f"Failed to initialize momentum strategy: {e}")
             return False
 
     def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
