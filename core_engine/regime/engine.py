@@ -1662,7 +1662,81 @@ class RegimeEngine:
                 await subscriber.on_regime_change(regime_analysis)
             except Exception as e:
                 logger.error(f"❌ Failed to notify regime subscriber {type(subscriber).__name__}: {e}")
-    
+
+    async def detect_transition(
+        self,
+        old_regime: str,
+        new_regime: str,
+        transition_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect and analyze regime transitions
+        
+        This method analyzes whether a regime transition has occurred
+        and provides details about the transition characteristics.
+        """
+        try:
+            # Get current regime analysis
+            current_analysis = await self.analyze_regime()
+            
+            if not current_analysis:
+                return {
+                    'transition_detected': False,
+                    'confidence': 0.0,
+                    'error': 'No regime analysis available'
+                }
+            
+            # Check if transition matches the requested regimes
+            current_regime_str = current_analysis.primary_regime.value
+            
+            # If we have historical regime data, compare
+            if self.regime_history:
+                previous_regime = self.regime_history[-1].primary_regime.value
+                
+                # Check if this matches the requested transition
+                transition_detected = (
+                    previous_regime == old_regime and 
+                    current_regime_str == new_regime
+                )
+                
+                if transition_detected:
+                    # Calculate transition characteristics
+                    transition_confidence = min(
+                        current_analysis.confidence,
+                        self.regime_history[-1].confidence
+                    )
+                    
+                    # Calculate transition magnitude
+                    old_stress = self.regime_history[-1].stress_level
+                    new_stress = current_analysis.stress_level
+                    transition_magnitude = abs(new_stress - old_stress)
+                    
+                    return {
+                        'transition_detected': True,
+                        'confidence': transition_confidence,
+                        'magnitude': transition_magnitude,
+                        'old_regime': old_regime,
+                        'new_regime': new_regime,
+                        'transition_probability': current_analysis.transition_probability,
+                        'regime_stability': current_analysis.regime_stability
+                    }
+            
+            # No transition detected or insufficient history
+            return {
+                'transition_detected': False,
+                'confidence': current_analysis.confidence,
+                'current_regime': current_regime_str,
+                'transition_probability': current_analysis.transition_probability
+            }
+            
+        except Exception as e:
+            logger.error(f"Error detecting regime transition: {e}")
+            return {
+                'transition_detected': False,
+                'confidence': 0.0,
+                'error': str(e)
+            }
+
     def get_regime_status(self) -> Dict[str, Any]:
         """Get regime engine status"""
         return {

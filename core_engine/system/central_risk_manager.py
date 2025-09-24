@@ -606,11 +606,11 @@ class CentralRiskManager(ISystemComponent):
                     return AuthorizationLevel.AUTOMATIC
             elif request.confidence >= self.config.high_confidence_threshold:
                 # High confidence (0.8+) - automatic approval for low risk
-                if adjusted_risk <= self.config.auto_approval_threshold * 2:
+                if adjusted_risk <= self.config.auto_approve_threshold * 2:
                     return AuthorizationLevel.AUTOMATIC
         
         # Standard risk-based authorization
-        if adjusted_risk <= self.config.auto_approval_threshold:
+        if adjusted_risk <= self.config.auto_approve_threshold:
             return AuthorizationLevel.AUTOMATIC
         elif adjusted_risk <= self.config.elevated_review_threshold:
             return AuthorizationLevel.STANDARD
@@ -996,6 +996,527 @@ class CentralRiskManager(ISystemComponent):
         except Exception as e:
             logger.error(f"Shutdown error: {e}")
 
+    # ========================================
+    # RISK AUTHORIZATION METHODS
+    # ========================================
+
+    def authorize_risk_operation(self, risk_operation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Authorize risk operations through central risk governance
+
+        Args:
+            risk_operation: Operation requiring authorization with:
+                - operation_type: Type of risk operation
+                - risk_severity: Risk severity level
+                - impact_assessment: Risk impact assessment
+                - requester: Requesting component/authority
+
+        Returns:
+            Authorization decision
+        """
+        try:
+            operation_type = risk_operation.get('operation_type')
+            risk_severity = risk_operation.get('risk_severity', 'medium')
+            impact_assessment = risk_operation.get('impact_assessment', {})
+            requester = risk_operation.get('requester', 'unknown')
+
+            # Assess risk impact
+            risk_score = self._assess_risk_impact(impact_assessment)
+
+            # Determine authorization requirements
+            required_level = self._determine_authorization_level(risk_severity, risk_score)
+
+            # Check current risk limits
+            limits_check = self._check_risk_limits(risk_operation)
+
+            # Make authorization decision
+            if limits_check['within_limits'] and risk_score < self.risk_limits['max_risk_score']:
+                authorization = {
+                    'authorized': True,
+                    'authorization_level': required_level.value,
+                    'risk_score': risk_score,
+                    'limits_check': limits_check,
+                    'timestamp': datetime.now().isoformat(),
+                    'authorization_id': f"auth_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                }
+            else:
+                authorization = {
+                    'authorized': False,
+                    'reason': limits_check.get('violation_reason', 'risk_limits_exceeded'),
+                    'risk_score': risk_score,
+                    'required_level': required_level.value,
+                    'limits_check': limits_check,
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # Log authorization decision
+            logger.info(f"Risk operation authorization: {operation_type} - {authorization['authorized']}")
+
+            # Add to authorization audit trail
+            audit_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'operation_type': operation_type,
+                'risk_severity': risk_severity,
+                'requester': requester,
+                'risk_score': risk_score,
+                'authorized': authorization['authorized'],
+                'authorization_id': authorization.get('authorization_id')
+            }
+            self.authorization_audit.append(audit_entry)
+
+            return authorization
+
+        except Exception as e:
+            logger.error(f"Risk operation authorization failed: {e}")
+            return {
+                'authorized': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    def escalate_risk_authorization(self, escalation_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Escalate risk authorization to higher authority levels
+
+        Args:
+            escalation_request: Escalation details with:
+                - operation: Operation requiring escalation
+                - current_level: Current authorization level
+                - escalation_reason: Reason for escalation
+                - risk_assessment: Updated risk assessment
+
+        Returns:
+            Escalation result
+        """
+        try:
+            operation = escalation_request.get('operation')
+            current_level = escalation_request.get('current_level', AuthorizationLevel.OPERATIONAL)
+            escalation_reason = escalation_request.get('escalation_reason', 'risk_threshold_exceeded')
+            risk_assessment = escalation_request.get('risk_assessment', {})
+
+            # Determine escalation target
+            escalation_target = self._determine_escalation_target(current_level, escalation_reason)
+
+            # Re-assess risk with additional context
+            updated_risk_score = self._assess_risk_impact(risk_assessment)
+
+            # Perform escalation
+            escalation_result = {
+                'escalated': True,
+                'from_level': current_level.value,
+                'to_level': escalation_target.value,
+                'escalation_reason': escalation_reason,
+                'updated_risk_score': updated_risk_score,
+                'escalation_timestamp': datetime.now().isoformat(),
+                'escalation_id': f"esc_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                'requires_manual_review': escalation_target == AuthorizationLevel.GOVERNANCE_CONTROL
+            }
+
+            # Log escalation
+            logger.warning(f"Risk authorization escalated: {operation} from {current_level.value} to {escalation_target.value}")
+
+            # Add to escalation audit trail
+            escalation_audit = {
+                'timestamp': datetime.now().isoformat(),
+                'operation': operation,
+                'from_level': current_level.value,
+                'to_level': escalation_target.value,
+                'reason': escalation_reason,
+                'risk_score': updated_risk_score,
+                'escalation_id': escalation_result['escalation_id']
+            }
+            self.escalation_audit.append(escalation_audit)
+
+            return escalation_result
+
+        except Exception as e:
+            logger.error(f"Risk authorization escalation failed: {e}")
+            return {
+                'escalated': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    def _assess_risk_impact(self, impact_assessment: Dict[str, Any]) -> float:
+        """
+        Assess the risk impact score for an operation
+
+        Args:
+            impact_assessment: Risk impact assessment data
+
+        Returns:
+            Risk impact score (0-1 scale)
+        """
+        try:
+            # Extract risk factors
+            portfolio_impact = impact_assessment.get('portfolio_impact', 0.1)
+            volatility_impact = impact_assessment.get('volatility_impact', 0.1)
+            liquidity_impact = impact_assessment.get('liquidity_impact', 0.1)
+            correlation_impact = impact_assessment.get('correlation_impact', 0.1)
+
+            # Calculate weighted risk score
+            risk_score = (
+                portfolio_impact * 0.4 +
+                volatility_impact * 0.3 +
+                liquidity_impact * 0.2 +
+                correlation_impact * 0.1
+            )
+
+            return min(risk_score, 1.0)  # Cap at 1.0
+
+        except Exception as e:
+            logger.error(f"Risk impact assessment failed: {e}")
+            return 0.5  # Default medium risk
+
+    def _determine_authorization_level(self, risk_severity: str, risk_score: float) -> AuthorizationLevel:
+        """
+        Determine required authorization level based on risk
+
+        Args:
+            risk_severity: Risk severity level
+            risk_score: Calculated risk score
+
+        Returns:
+            Required authorization level
+        """
+        try:
+            # Base authorization on risk severity
+            severity_levels = {
+                'low': AuthorizationLevel.OPERATIONAL,
+                'medium': AuthorizationLevel.TACTICAL,
+                'high': AuthorizationLevel.STRATEGIC,
+                'critical': AuthorizationLevel.GOVERNANCE_CONTROL
+            }
+
+            base_level = severity_levels.get(risk_severity, AuthorizationLevel.TACTICAL)
+
+            # Escalate based on risk score
+            if risk_score > 0.8:
+                return AuthorizationLevel.GOVERNANCE_CONTROL
+            elif risk_score > 0.6:
+                return AuthorizationLevel.STRATEGIC
+            elif risk_score > 0.4:
+                return AuthorizationLevel.TACTICAL
+            else:
+                return base_level
+
+        except Exception as e:
+            logger.error(f"Authorization level determination failed: {e}")
+            return AuthorizationLevel.TACTICAL
+
+    def _determine_escalation_target(self, current_level: AuthorizationLevel, reason: str) -> AuthorizationLevel:
+        """
+        Determine escalation target based on current level and reason
+
+        Args:
+            current_level: Current authorization level
+            reason: Escalation reason
+
+        Returns:
+            Target escalation level
+        """
+        try:
+            escalation_map = {
+                AuthorizationLevel.OPERATIONAL: AuthorizationLevel.TACTICAL,
+                AuthorizationLevel.TACTICAL: AuthorizationLevel.STRATEGIC,
+                AuthorizationLevel.STRATEGIC: AuthorizationLevel.GOVERNANCE_CONTROL,
+                AuthorizationLevel.GOVERNANCE_CONTROL: AuthorizationLevel.GOVERNANCE_CONTROL
+            }
+
+            # Escalate one level up, or to governance for critical reasons
+            if reason in ['risk_threshold_exceeded', 'emergency_condition', 'system_failure']:
+                return AuthorizationLevel.GOVERNANCE_CONTROL
+            else:
+                return escalation_map.get(current_level, AuthorizationLevel.GOVERNANCE_CONTROL)
+
+        except Exception as e:
+            logger.error(f"Escalation target determination failed: {e}")
+            return AuthorizationLevel.GOVERNANCE_CONTROL
+
+    def _check_risk_limits(self, risk_operation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Check if operation is within current risk limits
+
+        Args:
+            risk_operation: Risk operation details
+
+        Returns:
+            Risk limits check result
+        """
+        try:
+            impact_assessment = risk_operation.get('impact_assessment', {})
+
+            # Check portfolio impact limits
+            portfolio_impact = impact_assessment.get('portfolio_impact', 0)
+            max_portfolio_impact = self.risk_limits.get('max_portfolio_impact', 0.1)
+
+            if portfolio_impact > max_portfolio_impact:
+                return {
+                    'within_limits': False,
+                    'violation_reason': 'portfolio_impact_exceeded',
+                    'current_impact': portfolio_impact,
+                    'limit': max_portfolio_impact
+                }
+
+            # Check position concentration limits
+            concentration_impact = impact_assessment.get('concentration_impact', 0)
+            max_concentration = self.risk_limits.get('max_position_concentration', 0.2)
+
+            if concentration_impact > max_concentration:
+                return {
+                    'within_limits': False,
+                    'violation_reason': 'concentration_limit_exceeded',
+                    'current_concentration': concentration_impact,
+                    'limit': max_concentration
+                }
+
+            return {
+                'within_limits': True,
+                'portfolio_impact': portfolio_impact,
+                'concentration_impact': concentration_impact
+            }
+
+        except Exception as e:
+            logger.error(f"Risk limits check failed: {e}")
+            return {
+                'within_limits': False,
+                'violation_reason': 'check_failed',
+                'error': str(e)
+            }
+
+    async def generate_risk_report(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive risk report
+        
+        Returns:
+            Detailed risk analysis report
+        """
+        try:
+            # Gather current risk metrics
+            risk_metrics = {
+                'portfolio_var': getattr(self, 'portfolio_var', 0.0),
+                'current_exposure': getattr(self, 'current_exposure', 0.0),
+                'risk_limits': self.risk_limits.copy(),
+                'active_positions': len(getattr(self, 'active_positions', {})),
+                'risk_breaches': getattr(self, 'risk_breaches', []),
+                'stress_test_results': getattr(self, 'stress_test_results', {})
+            }
+            
+            # Generate risk assessment
+            risk_assessment = {
+                'overall_risk_level': 'low',  # Would be calculated based on metrics
+                'key_risk_factors': [
+                    'Market volatility',
+                    'Position concentration',
+                    'Liquidity risk',
+                    'Counterparty risk'
+                ],
+                'recommendations': [
+                    'Monitor position sizes',
+                    'Diversify across sectors',
+                    'Maintain liquidity buffers'
+                ]
+            }
+            
+            risk_report = {
+                'report_type': 'risk_analysis',
+                'generation_timestamp': datetime.now().isoformat(),
+                'reporting_period': 'current',
+                'risk_metrics': risk_metrics,
+                'risk_assessment': risk_assessment,
+                'compliance_status': 'compliant',  # Would check against regulatory limits
+                'action_items': [],  # Would list required actions
+                'next_review_date': (datetime.now() + timedelta(days=30)).isoformat()
+            }
+            
+            return risk_report
+            
+        except Exception as e:
+            logger.error(f"Error generating risk report: {e}")
+            return {
+                'report_type': 'risk_analysis',
+                'error': str(e),
+                'generation_timestamp': datetime.now().isoformat()
+            }
+
+
+    # ========================================
+    # POSITION AUTHORIZATION METHODS
+    # ========================================
+
+    async def authorize_position(self, position_request: Dict[str, Any]) -> bool:
+        """
+        Authorize a position through the central risk management system
+
+        Args:
+            position_request: Position authorization request with:
+                - symbol: Trading symbol
+                - quantity: Position size
+                - value: Position value
+                - risk_level: Risk assessment
+
+        Returns:
+            True if position is authorized
+        """
+        try:
+            # Perform risk assessment
+            risk_assessment = self._assess_position_risk(position_request)
+            
+            # Check against risk limits
+            within_limits = self._check_position_limits(position_request)
+            
+            # Make authorization decision
+            authorized = risk_assessment['risk_score'] < 0.7 and within_limits
+            
+            # Log authorization
+            logger.info(f"Position authorization: {position_request.get('symbol', 'unknown')} - {'approved' if authorized else 'rejected'}")
+            
+            return authorized
+
+        except Exception as e:
+            logger.error(f"Position authorization failed: {e}")
+            return False
+
+    def _assess_position_risk(self, position_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Assess risk of a position
+
+        Args:
+            position_request: Position details
+
+        Returns:
+            Risk assessment
+        """
+        try:
+            value = position_request.get('value', 0)
+            quantity = position_request.get('quantity', 0)
+            
+            # Simple risk scoring based on position size
+            risk_score = min(value / 1000000.0, 1.0)  # Scale to 0-1
+            
+            return {
+                'risk_score': risk_score,
+                'risk_factors': ['position_size', 'concentration'],
+                'assessment_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Position risk assessment failed: {e}")
+            return {'risk_score': 1.0, 'error': str(e)}
+
+    def _check_position_limits(self, position_request: Dict[str, Any]) -> bool:
+        """
+        Check if position is within limits
+
+        Args:
+            position_request: Position details
+
+        Returns:
+            True if within limits
+        """
+        try:
+            value = position_request.get('value', 0)
+            max_position_limit = getattr(self, 'max_position_limit', 500000)
+            
+            return value <= max_position_limit
+            
+        except Exception as e:
+            logger.error(f"Position limit check failed: {e}")
+            return False
+
+    # ========================================
+    # RISK LIMIT VALIDATION METHODS
+    # ========================================
+
+    async def validate_risk_limits(self, portfolio_risk: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate portfolio risk against established limits
+
+        Args:
+            portfolio_risk: Portfolio risk metrics with:
+                - total_value: Total portfolio value
+                - current_exposure: Current risk exposure
+                - max_exposure_limit: Maximum allowed exposure
+                - var_limit: Value at Risk limit
+
+        Returns:
+            Risk limit validation result
+        """
+        try:
+            total_value = portfolio_risk.get('total_value', 0)
+            current_exposure = portfolio_risk.get('current_exposure', 0)
+            max_exposure_limit = portfolio_risk.get('max_exposure_limit', total_value * 0.2)
+            var_limit = portfolio_risk.get('var_limit', total_value * 0.05)
+
+            # Validate exposure limits
+            exposure_ratio = current_exposure / total_value if total_value > 0 else 0
+            max_exposure_ratio = max_exposure_limit / total_value if total_value > 0 else 0
+
+            within_limits = True
+            violations = []
+
+            if exposure_ratio > max_exposure_ratio:
+                within_limits = False
+                violations.append({
+                    'type': 'exposure_limit',
+                    'current': exposure_ratio,
+                    'limit': max_exposure_ratio,
+                    'message': f'Exposure ratio {exposure_ratio:.2%} exceeds limit {max_exposure_ratio:.2%}'
+                })
+
+            # Validate VaR limits
+            if 'current_var' in portfolio_risk:
+                current_var = portfolio_risk['current_var']
+                if current_var > var_limit:
+                    within_limits = False
+                    violations.append({
+                        'type': 'var_limit',
+                        'current': current_var,
+                        'limit': var_limit,
+                        'message': f'VaR {current_var:.2f} exceeds limit {var_limit:.2f}'
+                    })
+
+            # Additional risk validations
+            if 'concentration_limit' in portfolio_risk:
+                concentration = portfolio_risk.get('current_concentration', 0)
+                conc_limit = portfolio_risk['concentration_limit']
+                if concentration > conc_limit:
+                    within_limits = False
+                    violations.append({
+                        'type': 'concentration_limit',
+                        'current': concentration,
+                        'limit': conc_limit,
+                        'message': f'Concentration {concentration:.2%} exceeds limit {conc_limit:.2%}'
+                    })
+
+            result = {
+                'within_limits': within_limits,
+                'violations': violations,
+                'exposure_ratio': exposure_ratio,
+                'max_exposure_ratio': max_exposure_ratio,
+                'validation_timestamp': datetime.now().isoformat(),
+                'recommendations': []
+            }
+
+            # Generate recommendations if violations exist
+            if violations:
+                result['recommendations'] = [
+                    "Reduce position sizes to comply with exposure limits",
+                    "Diversify portfolio to reduce concentration risk",
+                    "Implement stricter risk controls"
+                ]
+
+            logger.info(f"Risk limit validation: {'passed' if within_limits else 'failed'}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Risk limit validation failed: {e}")
+            return {
+                'within_limits': False,
+                'error': str(e),
+                'validation_timestamp': datetime.now().isoformat()
+            }
+
 
 # Example usage
 if __name__ == "__main__":
@@ -1040,6 +1561,277 @@ if __name__ == "__main__":
         # Get risk status
         status = risk_manager.get_risk_status()
         print(f"Risk status: {status}")
+    
+    async def authorize_position(self, position_request: Dict[str, Any]) -> bool:
+        """
+        Authorize a position through the central risk management system
+
+        Args:
+            position_request: Position authorization request with:
+                - symbol: Trading symbol
+                - quantity: Position size
+                - value: Position value
+                - risk_level: Risk assessment
+
+        Returns:
+            True if position is authorized
+        """
+        try:
+            # Perform risk assessment
+            risk_assessment = self._assess_position_risk(position_request)
+            
+            # Check against risk limits
+            within_limits = self._check_position_limits(position_request)
+            
+            # Make authorization decision
+            authorized = risk_assessment['risk_score'] < 0.7 and within_limits
+            
+            # Log authorization
+            logger.info(f"Position authorization: {position_request.get('symbol', 'unknown')} - {'approved' if authorized else 'rejected'}")
+            
+            return authorized
+
+        except Exception as e:
+            logger.error(f"Position authorization failed: {e}")
+            return False
+
+    def _assess_position_risk(self, position_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Assess risk of a position
+
+        Args:
+            position_request: Position details
+
+        Returns:
+            Risk assessment
+        """
+        try:
+            value = position_request.get('value', 0)
+            quantity = position_request.get('quantity', 0)
+            
+            # Simple risk scoring based on position size
+            risk_score = min(value / 1000000.0, 1.0)  # Scale to 0-1
+            
+            return {
+                'risk_score': risk_score,
+                'risk_factors': ['position_size', 'concentration'],
+                'assessment_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Position risk assessment failed: {e}")
+            return {'risk_score': 1.0, 'error': str(e)}
+
+    def _check_position_limits(self, position_request: Dict[str, Any]) -> bool:
+        """
+        Check if position is within limits
+
+        Args:
+            position_request: Position details
+
+        Returns:
+            True if within limits
+        """
+        try:
+            value = position_request.get('value', 0)
+            max_position_limit = getattr(self, 'max_position_limit', 500000)
+            
+            return value <= max_position_limit
+            
+        except Exception as e:
+            logger.error(f"Position limit check failed: {e}")
+            return False
+
+    # ========================================
+    # RISK LIMIT VALIDATION METHODS
+    # ========================================
+
+    async def validate_risk_limits(self, portfolio_risk: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate portfolio risk against established limits
+
+        Args:
+            portfolio_risk: Portfolio risk metrics with:
+                - total_value: Total portfolio value
+                - current_exposure: Current risk exposure
+                - max_exposure_limit: Maximum allowed exposure
+                - var_limit: Value at Risk limit
+
+        Returns:
+            Risk limit validation result
+        """
+        try:
+            total_value = portfolio_risk.get('total_value', 0)
+            current_exposure = portfolio_risk.get('current_exposure', 0)
+            max_exposure_limit = portfolio_risk.get('max_exposure_limit', total_value * 0.2)
+            var_limit = portfolio_risk.get('var_limit', total_value * 0.05)
+
+            # Validate exposure limits
+            exposure_ratio = current_exposure / total_value if total_value > 0 else 0
+            max_exposure_ratio = max_exposure_limit / total_value if total_value > 0 else 0
+
+            within_limits = True
+            violations = []
+
+            if exposure_ratio > max_exposure_ratio:
+                within_limits = False
+                violations.append({
+                    'type': 'exposure_limit',
+                    'current': exposure_ratio,
+                    'limit': max_exposure_ratio,
+                    'breach_amount': current_exposure - max_exposure_limit
+                })
+
+            # Validate VaR limits (simplified)
+            if current_exposure > var_limit:
+                within_limits = False
+                violations.append({
+                    'type': 'var_limit',
+                    'current': current_exposure,
+                    'limit': var_limit,
+                    'breach_amount': current_exposure - var_limit
+                })
+
+            validation_result = {
+                'within_limits': within_limits,
+                'exposure_ratio': exposure_ratio,
+                'max_exposure_ratio': max_exposure_ratio,
+                'violations': violations,
+                'timestamp': datetime.now().isoformat(),
+                'validation_id': f"val_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            }
+
+            if not within_limits:
+                logger.warning(f"Risk limits violated: {violations}")
+            else:
+                logger.info("Risk limits validated successfully")
+
+            return validation_result
+
+        except Exception as e:
+            logger.error(f"Risk limit validation failed: {e}")
+            return {
+                'within_limits': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    # ========================================
+    # RISK AUTHORIZATION AUDIT TRAIL
+    # ========================================
+
+    @property
+    def authorization_audit_trail(self) -> List[Dict[str, Any]]:
+        """
+        Get the risk authorization audit trail
+
+        Returns:
+            List of authorization audit entries
+        """
+        return getattr(self, 'authorization_audit', [])
+
+    # ========================================
+    # RISK REPORTING METHODS
+    # ========================================
+
+    def generate_risk_report(self, report_period: str = 'daily') -> Dict[str, Any]:
+        """
+        Generate comprehensive risk report
+
+        Args:
+            report_period: Reporting period ('daily', 'weekly', 'monthly')
+
+        Returns:
+            Risk report data
+        """
+        try:
+            # Generate risk metrics
+            risk_metrics = {
+                'total_exposure': getattr(self, 'total_exposure', 0),
+                'var_95': getattr(self, 'var_95', 0),
+                'expected_shortfall': getattr(self, 'expected_shortfall', 0),
+                'max_drawdown': getattr(self, 'max_drawdown', 0),
+                'sharpe_ratio': getattr(self, 'sharpe_ratio', 0),
+                'stress_test_results': getattr(self, 'stress_test_results', []),
+                'authorization_count': len(getattr(self, 'authorization_audit', [])),
+                'escalation_count': len(getattr(self, 'escalation_audit', []))
+            }
+
+            risk_report = {
+                'report_period': report_period,
+                'generated_at': datetime.now().isoformat(),
+                'risk_metrics': risk_metrics,
+                'authorization_summary': self._summarize_authorizations(),
+                'limit_breaches': getattr(self, 'limit_breaches', []),
+                'recommendations': self._generate_risk_recommendations(risk_metrics)
+            }
+
+            logger.info(f"Risk report generated for period: {report_period}")
+            return risk_report
+
+        except Exception as e:
+            logger.error(f"Risk report generation failed: {e}")
+            return {
+                'error': str(e),
+                'report_period': report_period,
+                'generated_at': datetime.now().isoformat()
+            }
+
+    def _summarize_authorizations(self) -> Dict[str, Any]:
+        """
+        Summarize authorization activities
+
+        Returns:
+            Authorization summary
+        """
+        try:
+            audit_trail = getattr(self, 'authorization_audit', [])
+            if not audit_trail:
+                return {'total_authorizations': 0, 'approved': 0, 'rejected': 0}
+
+            approved = sum(1 for entry in audit_trail if entry.get('authorized', False))
+            rejected = len(audit_trail) - approved
+
+            return {
+                'total_authorizations': len(audit_trail),
+                'approved': approved,
+                'rejected': rejected,
+                'approval_rate': approved / len(audit_trail) if audit_trail else 0
+            }
+
+        except Exception as e:
+            logger.error(f"Authorization summary failed: {e}")
+            return {'error': str(e)}
+
+    def _generate_risk_recommendations(self, risk_metrics: Dict[str, Any]) -> List[str]:
+        """
+        Generate risk management recommendations
+
+        Args:
+            risk_metrics: Current risk metrics
+
+        Returns:
+            List of recommendations
+        """
+        recommendations = []
+
+        try:
+            if risk_metrics.get('var_95', 0) > risk_metrics.get('total_exposure', 1) * 0.1:
+                recommendations.append("Reduce portfolio VaR through diversification")
+
+            if risk_metrics.get('max_drawdown', 0) > 0.15:
+                recommendations.append("Implement stricter drawdown controls")
+
+            if risk_metrics.get('sharpe_ratio', 0) < 0.5:
+                recommendations.append("Review strategy risk-adjusted returns")
+
+            if len(risk_metrics.get('stress_test_results', [])) == 0:
+                recommendations.append("Implement regular stress testing")
+
+        except Exception as e:
+            logger.error(f"Risk recommendations generation failed: {e}")
+
+        return recommendations if recommendations else ["Maintain current risk management practices"]
     
     # Run test
     asyncio.run(test_central_risk_manager())

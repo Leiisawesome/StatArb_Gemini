@@ -618,3 +618,119 @@ class ClickHouseDataManager(BaseDataManager):
             if price is not None:
                 prices[symbol] = price
         return prices
+    
+    def load_data(self, symbols: Optional[List[str]] = None, 
+                  start_time: Optional[datetime] = None,
+                  end_time: Optional[datetime] = None,
+                  interval: Optional[str] = None) -> pd.DataFrame:
+        """
+        Load data from ClickHouse database
+        
+        This is the primary data loading method for institutional backtesting.
+        Provides comprehensive data loading with validation and caching.
+        
+        Args:
+            symbols: List of symbols to load (defaults to config symbols)
+            start_time: Start time for data (defaults to beginning of target date)
+            end_time: End time for data (defaults to end of target date)
+            interval: Data interval (1min, 5min, 15min, 1h)
+            
+        Returns:
+            DataFrame with loaded market data
+        """
+        return self.load_market_data(symbols, start_time, end_time, interval)
+    
+    def validate_data(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Validate loaded data quality and integrity
+        
+        Performs comprehensive validation checks on loaded market data
+        including completeness, consistency, and anomaly detection.
+        
+        Args:
+            data: DataFrame to validate
+            
+        Returns:
+            Dictionary with validation results and quality metrics
+        """
+        if data.empty:
+            return {
+                'valid': False,
+                'score': 0.0,
+                'issues': ['Empty dataset'],
+                'metrics': {}
+            }
+        
+        validation_results = {
+            'valid': True,
+            'score': 1.0,
+            'issues': [],
+            'metrics': {}
+        }
+        
+        try:
+            # Check for required columns
+            required_cols = ['symbol', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in data.columns]
+            if missing_cols:
+                validation_results['issues'].append(f"Missing required columns: {missing_cols}")
+                validation_results['valid'] = False
+                validation_results['score'] -= 0.3
+            
+            # Check for null values
+            null_counts = data.isnull().sum()
+            total_nulls = null_counts.sum()
+            if total_nulls > 0:
+                validation_results['issues'].append(f"Found {total_nulls} null values")
+                validation_results['score'] -= 0.1
+            
+            # Check timestamp ordering
+            if 'timestamp' in data.columns:
+                timestamps = pd.to_datetime(data['timestamp'])
+                if not timestamps.is_monotonic_increasing:
+                    validation_results['issues'].append("Timestamps not in chronological order")
+                    validation_results['score'] -= 0.2
+            
+            # Check price consistency (high >= low, close between high/low)
+            if all(col in data.columns for col in ['open', 'high', 'low', 'close']):
+                invalid_prices = (
+                    (data['high'] < data['low']) |
+                    (data['close'] > data['high']) |
+                    (data['close'] < data['low'])
+                ).sum()
+                if invalid_prices > 0:
+                    validation_results['issues'].append(f"Found {invalid_prices} invalid price relationships")
+                    validation_results['score'] -= 0.2
+            
+            # Check volume is non-negative
+            if 'volume' in data.columns:
+                negative_volume = (data['volume'] < 0).sum()
+                if negative_volume > 0:
+                    validation_results['issues'].append(f"Found {negative_volume} negative volume values")
+                    validation_results['score'] -= 0.1
+            
+            # Calculate quality metrics
+            validation_results['metrics'] = {
+                'total_records': len(data),
+                'symbols_count': data['symbol'].nunique() if 'symbol' in data.columns else 0,
+                'date_range': {
+                    'start': data['timestamp'].min().isoformat() if 'timestamp' in data.columns else None,
+                    'end': data['timestamp'].max().isoformat() if 'timestamp' in data.columns else None
+                },
+                'null_percentage': (total_nulls / (len(data) * len(data.columns))) * 100,
+                'completeness_score': 1.0 - (total_nulls / (len(data) * len(data.columns)))
+            }
+            
+            # Ensure score doesn't go below 0
+            validation_results['score'] = max(0.0, validation_results['score'])
+            
+            # Mark as invalid if score too low
+            if validation_results['score'] < 0.7:
+                validation_results['valid'] = False
+            
+        except Exception as e:
+            validation_results['valid'] = False
+            validation_results['score'] = 0.0
+            validation_results['issues'].append(f"Validation error: {str(e)}")
+        
+        return validation_results

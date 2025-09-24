@@ -361,7 +361,9 @@ class BaseStrategy(ABC):
     def update(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
         """Update strategy with new market data"""
         try:
+            logger.info(f"Strategy.update called, state: {self.state}")
             if self.state != StrategyState.ACTIVE:
+                logger.warning(f"Strategy not active, returning empty signals. State: {self.state}")
                 return []
             
             self._last_update = datetime.now()
@@ -372,9 +374,11 @@ class BaseStrategy(ABC):
             
             # Generate new signals
             new_signals = self.generate_signals(market_data)
+            logger.info(f"Generated {len(new_signals)} signals")
             
             # Validate and filter signals
             valid_signals = self._validate_signals(new_signals)
+            logger.info(f"Validated {len(valid_signals)} signals")
             
             # Update signals list
             self._signals.extend(valid_signals)

@@ -121,6 +121,18 @@ class FeatureEngineer:
         self.logger.info(f"Created {len(self.feature_columns)} features for {len(result)} records")
         return result
     
+    def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generate trading features from indicators DataFrame (alias for create_features)
+        
+        Args:
+            df: DataFrame with indicators (from TechnicalIndicators)
+            
+        Returns:
+            DataFrame with engineered features
+        """
+        return self.create_features(df)
+    
     def _create_symbol_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create features for a single symbol"""
         # Basic price features

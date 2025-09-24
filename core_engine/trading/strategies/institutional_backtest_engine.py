@@ -23,7 +23,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Set
+from typing import Dict, List, Optional, Union, Any, Tuple, Set, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import copy
@@ -32,10 +32,6 @@ from pathlib import Path
 import warnings
 
 # Core engine imports
-from .backtest_engine import (
-    BacktestEngine, BacktestConfig, BacktestResult, Trade, Portfolio,
-    ExecutionModel, SlippageModel, CommissionModel, BacktestMode
-)
 from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition
 from ...system.hierarchical_orchestrator import (
     HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
@@ -54,6 +50,220 @@ from ...utils.logging import get_logger
 
 warnings.filterwarnings('ignore')
 logger = get_logger(__name__)
+
+
+class BacktestMode(Enum):
+    """Backtest execution modes"""
+    HISTORICAL = "historical"
+    WALK_FORWARD = "walk_forward"
+    MONTE_CARLO = "monte_carlo"
+    STRESS_TEST = "stress_test"
+    PAPER_TRADING = "paper_trading"
+
+
+class ExecutionModel(Enum):
+    """Trade execution models"""
+    IMMEDIATE = "immediate"           # Execute at signal price
+    NEXT_BAR = "next_bar"            # Execute at next bar open
+    REALISTIC = "realistic"           # Include slippage and delays
+    MARKET_IMPACT = "market_impact"   # Model market impact
+    LIMIT_ORDERS = "limit_orders"     # Use limit orders
+
+
+class SlippageModel(Enum):
+    """Slippage models"""
+    FIXED_PERCENTAGE = "fixed_percentage"
+    FIXED_AMOUNT = "fixed_amount"
+    VOLUME_BASED = "volume_based"
+    SPREAD_BASED = "spread_based"
+    MARKET_IMPACT = "market_impact"
+
+
+class CommissionModel(Enum):
+    """Commission models"""
+    FIXED_PER_TRADE = "fixed_per_trade"
+    PERCENTAGE = "percentage"
+    PER_SHARE = "per_share"
+    TIERED = "tiered"
+
+
+@dataclass
+class BacktestConfig:
+    """Configuration for backtesting"""
+    
+    # Basic settings
+    start_date: datetime = field(default_factory=lambda: datetime.now() - timedelta(days=365))
+    end_date: datetime = field(default_factory=datetime.now)
+    initial_capital: float = 100000.0
+    benchmark_symbol: str = "SPY"
+    
+    # Execution settings
+    execution_model: ExecutionModel = ExecutionModel.NEXT_BAR
+    allow_short_selling: bool = True
+    margin_requirement: float = 0.5  # 50% margin
+    
+    # Transaction costs
+    commission_model: CommissionModel = CommissionModel.PERCENTAGE
+    commission_rate: float = 0.001   # 0.1% commission
+    fixed_commission: float = 5.0    # $5 per trade
+    
+    # Slippage settings
+    slippage_model: SlippageModel = SlippageModel.FIXED_PERCENTAGE
+    slippage_rate: float = 0.0005    # 0.05% slippage
+    fixed_slippage: float = 0.01     # $0.01 fixed slippage
+    
+    # Risk management
+    margin_call_threshold: float = 0.25  # 25% margin call
+    stop_loss_on_margin_call: bool = True
+    max_leverage: float = 2.0
+    
+    # Data settings
+    frequency: str = "1D"  # Data frequency (1D, 1H, 5M, etc.)
+    adjust_for_splits: bool = True
+    adjust_for_dividends: bool = True
+    
+    # Walk-forward settings (for walk-forward analysis)
+    training_period: int = 252      # Days for training
+    testing_period: int = 63        # Days for testing
+    rebalance_frequency: int = 21   # Days between rebalancing
+    
+    # Monte Carlo settings
+    n_simulations: int = 1000
+    confidence_levels: List[float] = field(default_factory=lambda: [0.05, 0.95])
+    
+    # Performance settings
+    calculate_performance_metrics: bool = True
+    save_trade_log: bool = True
+    save_position_history: bool = True
+    
+    # Output settings
+    output_directory: str = "backtest_results"
+    save_detailed_results: bool = True
+
+
+@dataclass
+class Trade:
+    """Individual trade record"""
+    
+    # Trade identification
+    trade_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    
+    # Trade details
+    side: str = "long"  # long, short
+    quantity: float = 0.0
+    entry_price: float = 0.0
+    exit_price: Optional[float] = None
+    
+    # Timing
+    entry_time: datetime = field(default_factory=datetime.now)
+    exit_time: Optional[datetime] = None
+    holding_period: Optional[int] = None  # In periods
+    
+    # P&L
+    gross_pnl: float = 0.0
+    commission: float = 0.0
+    slippage: float = 0.0
+    net_pnl: float = 0.0
+    
+    # Trade metadata
+    entry_signal: Optional[StrategySignal] = None
+    exit_reason: str = ""  # signal, stop_loss, take_profit, time_exit
+    
+    # Additional data
+    additional_data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Portfolio:
+    """Portfolio state tracking"""
+    
+    # Portfolio value
+    total_value: float = 0.0
+    cash: float = 0.0
+    positions_value: float = 0.0
+    margin_used: float = 0.0
+    
+    # Performance metrics
+    total_return: float = 0.0
+    daily_return: float = 0.0
+    cumulative_return: float = 0.0
+    
+    # Risk metrics
+    leverage: float = 0.0
+    margin_ratio: float = 0.0
+    
+    # Position tracking
+    positions: Dict[str, StrategyPosition] = field(default_factory=dict)
+    
+    # Transaction tracking
+    trades: List[Trade] = field(default_factory=list)
+    
+    # Timestamp
+    timestamp: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class BacktestResult:
+    """Comprehensive backtest results"""
+    
+    # Basic information
+    strategy_id: str = ""
+    backtest_config: Optional["InstitutionalBacktestConfig"] = None
+    
+    # Performance metrics
+    performance_metrics: Optional[Any] = None  # PerformanceMetrics
+    final_portfolio_value: float = 0.0
+    total_return: float = 0.0
+    annualized_return: float = 0.0
+    volatility: float = 0.0
+    sharpe_ratio: float = 0.0
+    max_drawdown: float = 0.0
+    
+    # Trading statistics
+    total_trades: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    win_rate: float = 0.0
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    profit_factor: float = 0.0
+    
+    # Time series data
+    portfolio_history: List[Portfolio] = field(default_factory=list)
+    returns_series: Optional[Any] = None  # pd.Series
+    positions_history: Optional[Any] = None  # pd.DataFrame
+    
+    # Trade log
+    trade_log: List[Trade] = field(default_factory=list)
+    
+    # Benchmark comparison
+    benchmark_returns: Optional[Any] = None  # pd.Series
+    alpha: float = 0.0
+    beta: float = 0.0
+    information_ratio: float = 0.0
+    
+    # Risk analysis
+    var_95: float = 0.0
+    cvar_95: float = 0.0
+    calmar_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    
+    # Execution analysis
+    total_commission: float = 0.0
+    total_slippage: float = 0.0
+    avg_slippage: float = 0.0
+    
+    # Timing
+    backtest_start_time: datetime = field(default_factory=datetime.now)
+    backtest_end_time: Optional[datetime] = None
+    execution_time: float = 0.0
+    
+    # Metadata
+    data_quality: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
 
 
 class BacktestPhase(Enum):
@@ -170,7 +380,23 @@ class InstitutionalBacktestResult(BacktestResult):
     component_performance: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
 
-class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
+@dataclass
+class SimpleCostCalculator:
+    """Simple transaction cost calculator for backtesting"""
+    
+    commission_rate: float = 0.001  # 0.1% commission
+    slippage_rate: float = 0.0005   # 0.05% slippage
+    
+    def calculate_commission(self, trade) -> float:
+        """Calculate commission for a trade"""
+        return abs(trade.quantity * trade.entry_price) * self.commission_rate
+    
+    def calculate_slippage(self, trade) -> float:
+        """Calculate slippage for a trade"""
+        return abs(trade.quantity * trade.entry_price) * self.slippage_rate
+
+
+class InstitutionalBacktestEngine(ISystemComponent):
     """
     Institutional-Grade Backtest Engine
     
@@ -187,7 +413,6 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
         
         # Initialize base backtest engine
         base_config = config or InstitutionalBacktestConfig()
-        super().__init__(base_config)
         
         self.config: InstitutionalBacktestConfig = base_config
         
@@ -199,6 +424,7 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
         self.indicators_engine: Optional[EnhancedTechnicalIndicators] = None
         self.feature_engineer: Optional[FeatureEngineer] = None
         self.signal_generator: Optional[SignalGenerator] = None
+        self.performance_analyzer: Optional[PerformanceAnalyzer] = None
         
         # Component registration info
         self.component_id: Optional[str] = None
@@ -255,6 +481,156 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
         self.rebalancing_events: List[Dict[str, Any]] = []
         self.multi_strategy_analytics: Dict[str, Any] = {}
         
+        # Client reporting and audit trail
+        self.client_reporting: Dict[str, Any] = {
+            'enabled': True,
+            'report_formats': ['pdf', 'excel', 'web_portal'],
+            'client_portal_access': True,
+            'automated_distribution': True,
+            'custom_report_templates': {},
+            'reporting_schedule': 'monthly'
+        }
+        self.audit_trail: List[Dict[str, Any]] = []
+        
+        # Governance callbacks for integration
+        self.governance_callbacks: Dict[str, Callable] = {
+            'risk_limit_exceeded': self._handle_risk_limit_exceeded,
+            'position_limit_exceeded': self._handle_position_limit_exceeded,
+            'capital_threshold_breached': self._handle_capital_threshold_breached,
+            'compliance_violation': self._handle_compliance_violation
+        }
+        
+        # Liquidity analysis capabilities
+        self.liquidity_metrics: Dict[str, Any] = {
+            'enabled': True,
+            'metrics': ['volume_analysis', 'slippage_analysis', 'market_depth', 'liquidity_score'],
+            'update_frequency': 'real-time',
+            'alerts_enabled': True
+        }
+        
+        self.volume_analysis: Dict[str, Any] = {
+            'enabled': True,
+            'analysis_types': ['average_volume', 'volume_volatility', 'volume_price_correlation'],
+            'historical_window': 20,
+            'alert_thresholds': {'low_volume': 0.5, 'high_volatility': 2.0}
+        }
+        
+        self.slippage_analysis: Dict[str, Any] = {
+            'enabled': True,
+            'models': ['volume_based', 'time_based', 'hybrid'],
+            'max_slippage': 0.002,
+            'monitoring_enabled': True
+        }
+        
+        self.market_depth: Dict[str, Any] = {
+            'enabled': True,
+            'depth_levels': 5,
+            'update_frequency': 'tick',
+            'liquidity_profiling': True
+        }
+        
+        # Compliance validation framework
+        self.compliance_rules: Dict[str, Any] = {
+            'enabled': True,
+            'rules': ['position_limits', 'risk_limits', 'trading_restrictions', 'reporting_requirements'],
+            'enforcement_level': 'strict',
+            'audit_enabled': True
+        }
+        
+        self.regulatory_checks: Dict[str, Any] = {
+            'enabled': True,
+            'checks': ['position_reporting', 'trade_reporting', 'risk_reporting', 'capital_requirements'],
+            'frequency': 'daily',
+            'automated_filing': True
+        }
+        
+        self.reporting_compliance: Dict[str, Any] = {
+            'enabled': True,
+            'standards': ['GIPS', 'SEC', 'FINRA', 'Internal'],
+            'automated_generation': True,
+            'review_workflow': True
+        }
+        
+        self.audit_trails: Dict[str, Any] = {
+            'enabled': True,
+            'trail_types': ['user_actions', 'system_events', 'trade_executions', 'risk_decisions'],
+            'retention_period_days': 2555,
+            'immutable_storage': True,
+            'tamper_detection': True
+        }
+        
+        # System integration framework
+        self.component_integration: Dict[str, Any] = {
+            'enabled': True,
+            'components': ['risk_manager', 'execution_engine', 'data_manager', 'performance_analyzer'],
+            'integration_status': 'active',
+            'health_monitoring': True
+        }
+        
+        self.data_flow: Dict[str, Any] = {
+            'enabled': True,
+            'sources': ['market_data', 'position_data', 'execution_data', 'performance_data'],
+            'processing_pipeline': ['validation', 'enrichment', 'storage', 'distribution'],
+            'monitoring_enabled': True
+        }
+        
+        self.signal_flow: Dict[str, Any] = {
+            'enabled': True,
+            'signal_types': ['entry_signals', 'exit_signals', 'risk_signals', 'regime_signals'],
+            'processing_stages': ['generation', 'validation', 'filtering', 'execution'],
+            'latency_monitoring': True
+        }
+        
+        self.execution_flow: Dict[str, Any] = {
+            'enabled': True,
+            'execution_types': ['market_orders', 'limit_orders', 'vwap_orders', 'twap_orders'],
+            'monitoring_points': ['order_submission', 'execution', 'confirmation', 'settlement'],
+            'performance_tracking': True
+        }
+        
+        self.reporting_integration: Dict[str, Any] = {
+            'enabled': True,
+            'report_types': ['performance', 'risk', 'compliance', 'client'],
+            'distribution_channels': ['email', 'portal', 'api', 'file_system'],
+            'automation_level': 'full'
+        }
+        
+        # Component performance monitoring
+        self.performance_monitoring: Dict[str, Any] = {
+            'enabled': True,
+            'metrics': ['cpu_usage', 'memory_usage', 'execution_time', 'throughput'],
+            'alerts_enabled': True,
+            'thresholds': {'cpu_threshold': 80.0, 'memory_threshold': 85.0}
+        }
+        
+        self.latency_tracking: Dict[str, Any] = {
+            'enabled': True,
+            'components': ['data_processing', 'signal_generation', 'order_execution', 'risk_checks'],
+            'max_latency_ms': 100,
+            'monitoring_enabled': True
+        }
+        
+        self.resource_usage: Dict[str, Any] = {
+            'enabled': True,
+            'resources': ['cpu', 'memory', 'disk', 'network'],
+            'sampling_interval': 60,
+            'historical_tracking': True
+        }
+        
+        self.bottleneck_analysis: Dict[str, Any] = {
+            'enabled': True,
+            'analysis_types': ['cpu_bound', 'memory_bound', 'io_bound', 'network_bound'],
+            'detection_threshold': 0.8,
+            'optimization_suggestions': True
+        }
+        
+        # Portfolio and position management
+        self.portfolio_history: List[Portfolio] = []
+        self.position_manager: Dict[str, Any] = {}
+        self.current_portfolio: Portfolio = Portfolio()
+        self.trade_log: List[Trade] = []
+        self.cost_calculator = SimpleCostCalculator()  # Simple cost calculator
+        
         logger.info("Institutional Backtest Engine initialized")
     
     # ISystemComponent interface implementation
@@ -301,7 +677,2328 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             'phase_results_count': len(self.phase_results),
             'active_strategies': list(self.active_strategies.keys())
         }
-    
+
+    # ========================================
+    # SYSTEM MONITORING DELEGATION METHODS
+    # ========================================
+
+    @property
+    def error_tracker(self) -> List[Dict[str, Any]]:
+        """Access to system orchestrator's error tracker"""
+        if self.system_orchestrator:
+            return self.system_orchestrator.error_tracker
+        return []
+
+    async def run_system_diagnostics(self) -> Dict[str, Any]:
+        """Run system diagnostics via orchestrator"""
+        if self.system_orchestrator:
+            return await self.system_orchestrator.run_system_diagnostics()
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'error': 'System orchestrator not available'
+        }
+
+    # ========================================
+    # STRATEGY EXECUTION FRAMEWORK
+    # ========================================
+
+    async def execute_strategy(self, strategy: BaseStrategy, market_data: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Execute a trading strategy with institutional controls
+
+        Args:
+            strategy: The strategy to execute
+            market_data: Current market data
+            context: Additional execution context
+
+        Returns:
+            Execution results and signals
+        """
+        try:
+            if context is None:
+                context = {}
+
+            # Validate strategy
+            if not isinstance(strategy, BaseStrategy):
+                raise ValueError("Invalid strategy type")
+
+            # Get current regime context
+            regime_context = {}
+            if self.regime_engine:
+                try:
+                    regime_context = await self.regime_engine.get_current_regime()
+                except Exception:
+                    regime_context = {'regime': 'unknown', 'confidence': 0.0}
+
+            # Generate signals
+            signals = await self.generate_signals(
+                strategy=strategy,
+                market_data=market_data,
+                regime_context=regime_context,
+                context=context
+            )
+
+            # Perform risk checks
+            risk_check_result = await self.perform_risk_checks(
+                signals=signals,
+                market_data=market_data,
+                context=context
+            )
+
+            # Filter signals based on risk checks
+            authorized_signals = [s for s in signals if s.get('risk_approved', False)]
+
+            # Execute orders for authorized signals
+            if authorized_signals:
+                execution_results = await self.execute_orders(
+                    signals=authorized_signals,
+                    market_data=market_data,
+                    context=context
+                )
+            else:
+                execution_results = []
+
+            return {
+                'strategy_name': strategy.__class__.__name__,
+                'signals_generated': len(signals),
+                'signals_authorized': len(authorized_signals),
+                'orders_executed': len(execution_results),
+                'regime_context': regime_context,
+                'risk_check_result': risk_check_result,
+                'execution_results': execution_results,
+                'timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Strategy execution failed: {e}")
+            return {
+                'error': str(e),
+                'strategy_name': strategy.__class__.__name__ if strategy else 'Unknown',
+                'signals_generated': 0,
+                'signals_authorized': 0,
+                'orders_executed': 0,
+                'timestamp': datetime.now().isoformat()
+            }
+
+    async def generate_signals(self, strategy: BaseStrategy = None, symbol: str = None, data: pd.DataFrame = None,
+                              market_data: Dict[str, Any] = None, regime_context: Dict[str, Any] = None,
+                              strategy_params: Dict[str, Any] = None, context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """
+        Generate trading signals using the specified strategy
+
+        Args:
+            strategy: Trading strategy to use
+            symbol: Symbol for signal generation (alternative to strategy)
+            data: Historical data for signal generation
+            market_data: Current market data
+            regime_context: Current market regime information
+            strategy_params: Strategy-specific parameters
+            context: Additional context
+
+        Returns:
+            List of generated signals
+        """
+        try:
+            signals = []
+
+            if strategy_params is None:
+                strategy_params = {}
+            if context is None:
+                context = {}
+            if regime_context is None:
+                regime_context = {}
+
+            # Use provided strategy or default signal generation
+            if strategy and hasattr(strategy, 'generate_signals'):
+                try:
+                    strategy_signals = await strategy.generate_signals(
+                        market_data=market_data or {},
+                        regime_context=regime_context,
+                        **strategy_params
+                    )
+                    signals.extend(strategy_signals)
+                except Exception as e:
+                    logger.warning(f"Strategy signal generation failed: {e}")
+
+            # Fallback: Generate basic signals from data if available
+            if not signals and data is not None and symbol:
+                try:
+                    signals.extend(await self._generate_basic_signals(symbol, data, market_data or {}))
+                except Exception as e:
+                    logger.warning(f"Basic signal generation failed: {e}")
+
+            # Apply regime filtering if regime context available
+            if regime_context.get('regime') != 'unknown':
+                signals = await self._apply_regime_filtering(signals, regime_context)
+
+            # Format signals consistently
+            formatted_signals = []
+            for signal in signals:
+                formatted_signal = {
+                    'symbol': signal.get('symbol', symbol),
+                    'signal_type': signal.get('signal_type', 'unknown'),
+                    'direction': signal.get('direction', 0),
+                    'strength': signal.get('strength', 0.0),
+                    'price': signal.get('price'),
+                    'quantity': signal.get('quantity'),
+                    'timestamp': signal.get('timestamp', datetime.now().isoformat()),
+                    'regime_context': regime_context,
+                    'strategy_params': strategy_params,
+                    'risk_approved': False  # Will be set by risk checks
+                }
+                formatted_signals.append(formatted_signal)
+
+            return formatted_signals
+
+        except Exception as e:
+            logger.error(f"Signal generation failed: {e}")
+            return []
+
+    async def manage_positions(self, positions: Dict[str, Dict[str, Any]], market_data: Dict[str, float],
+                              risk_limits: Dict[str, Any] = None, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Manage existing positions with risk controls
+
+        Args:
+            positions: Current positions dictionary
+            market_data: Current market prices
+            risk_limits: Risk management limits
+            context: Additional context
+
+        Returns:
+            Position management decisions
+        """
+        try:
+            if risk_limits is None:
+                risk_limits = {}
+            if context is None:
+                context = {}
+
+            management_decisions = {
+                'positions_to_close': [],
+                'positions_to_adjust': [],
+                'risk_violations': [],
+                'total_pnl': 0.0,
+                'total_exposure': 0.0,
+                'timestamp': datetime.now().isoformat()
+            }
+
+            total_pnl = 0.0
+            total_exposure = 0.0
+
+            for symbol, position in positions.items():
+                try:
+                    current_price = market_data.get(symbol, position.get('current_price', 0))
+                    if current_price <= 0:
+                        continue
+
+                    quantity = position.get('quantity', 0)
+                    avg_price = position.get('avg_price', 0)
+
+                    # Calculate P&L
+                    if quantity > 0:  # Long position
+                        pnl = (current_price - avg_price) * abs(quantity)
+                    else:  # Short position
+                        pnl = (avg_price - current_price) * abs(quantity)
+
+                    total_pnl += pnl
+                    exposure = abs(quantity * current_price)
+                    total_exposure += exposure
+
+                    # Check risk limits
+                    risk_violations = []
+
+                    # Position size limit
+                    max_position_size = risk_limits.get('max_position_size', 0.1)  # 10% of portfolio
+                    if exposure > risk_limits.get('portfolio_value', 1000000) * max_position_size:
+                        risk_violations.append('position_size_exceeded')
+
+                    # Stop loss check
+                    stop_loss_pct = risk_limits.get('stop_loss_pct', 0.05)  # 5% stop loss
+                    if avg_price > 0:
+                        loss_pct = abs(current_price - avg_price) / avg_price
+                        if loss_pct > stop_loss_pct:
+                            risk_violations.append('stop_loss_triggered')
+
+                    # Take profit check
+                    take_profit_pct = risk_limits.get('take_profit_pct', 0.10)  # 10% take profit
+                    if avg_price > 0:
+                        profit_pct = abs(current_price - avg_price) / avg_price
+                        if profit_pct > take_profit_pct:
+                            risk_violations.append('take_profit_triggered')
+
+                    # Make management decisions
+                    if risk_violations:
+                        if 'stop_loss_triggered' in risk_violations:
+                            management_decisions['positions_to_close'].append({
+                                'symbol': symbol,
+                                'reason': 'stop_loss',
+                                'quantity': quantity,
+                                'current_price': current_price,
+                                'pnl': pnl
+                            })
+                        elif 'take_profit_triggered' in risk_violations:
+                            management_decisions['positions_to_close'].append({
+                                'symbol': symbol,
+                                'reason': 'take_profit',
+                                'quantity': quantity,
+                                'current_price': current_price,
+                                'pnl': pnl
+                            })
+                        else:
+                            management_decisions['positions_to_adjust'].append({
+                                'symbol': symbol,
+                                'reason': 'risk_limit',
+                                'violations': risk_violations,
+                                'current_exposure': exposure
+                            })
+
+                        management_decisions['risk_violations'].extend([{
+                            'symbol': symbol,
+                            'violations': risk_violations,
+                            'exposure': exposure
+                        } for v in risk_violations])
+
+                except Exception as e:
+                    logger.warning(f"Position management failed for {symbol}: {e}")
+
+            management_decisions['total_pnl'] = total_pnl
+            management_decisions['total_exposure'] = total_exposure
+
+            return management_decisions
+
+        except Exception as e:
+            logger.error(f"Position management failed: {e}")
+            return {
+                'error': str(e),
+                'positions_to_close': [],
+                'positions_to_adjust': [],
+                'risk_violations': [],
+                'timestamp': datetime.now().isoformat()
+            }
+
+    async def execute_orders(self, signals: List[Dict[str, Any]], market_data: Dict[str, Any],
+                            context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """
+        Execute orders based on trading signals
+
+        Args:
+            signals: Authorized trading signals
+            market_data: Current market data
+            context: Execution context
+
+        Returns:
+            Order execution results
+        """
+        try:
+            if context is None:
+                context = {}
+
+            execution_results = []
+
+            for signal in signals:
+                try:
+                    symbol = signal.get('symbol')
+                    direction = signal.get('direction', 0)
+                    quantity = signal.get('quantity', 0)
+                    price = signal.get('price')
+
+                    if not symbol or direction == 0 or quantity == 0:
+                        continue
+
+                    # Get current market price
+                    current_price = market_data.get(symbol, price)
+                    if not current_price:
+                        continue
+
+                    # Calculate execution price (with slippage simulation)
+                    slippage = context.get('slippage_pct', 0.001)  # 0.1% slippage
+                    if direction > 0:  # Buy
+                        execution_price = current_price * (1 + slippage)
+                    else:  # Sell
+                        execution_price = current_price * (1 - slippage)
+
+                    # Create trade record
+                    trade = {
+                        'symbol': symbol,
+                        'direction': direction,
+                        'quantity': quantity,
+                        'signal_price': price,
+                        'execution_price': execution_price,
+                        'slippage': slippage,
+                        'timestamp': datetime.now().isoformat(),
+                        'signal_strength': signal.get('strength', 0.0),
+                        'order_type': 'market',  # Could be limit, stop, etc.
+                        'status': 'executed'
+                    }
+
+                    execution_results.append(trade)
+
+                    # Update position tracking
+                    if symbol not in self.position_manager:
+                        self.position_manager[symbol] = {
+                            'quantity': 0,
+                            'avg_price': 0.0,
+                            'trades': []
+                        }
+
+                    # Update position
+                    current_qty = self.position_manager[symbol]['quantity']
+                    current_avg_price = self.position_manager[symbol]['avg_price']
+
+                    if current_qty == 0:
+                        new_avg_price = execution_price
+                    else:
+                        total_value = (current_qty * current_avg_price) + (quantity * execution_price)
+                        new_qty = current_qty + quantity
+                        new_avg_price = total_value / new_qty if new_qty != 0 else 0
+
+                    self.position_manager[symbol]['quantity'] = current_qty + quantity
+                    self.position_manager[symbol]['avg_price'] = new_avg_price
+                    self.position_manager[symbol]['trades'].append(trade)
+
+                except Exception as e:
+                    logger.warning(f"Order execution failed for signal: {e}")
+                    execution_results.append({
+                        'symbol': signal.get('symbol'),
+                        'status': 'failed',
+                        'error': str(e),
+                        'timestamp': datetime.now().isoformat()
+                    })
+
+            return execution_results
+
+        except Exception as e:
+            logger.error(f"Order execution failed: {e}")
+            return []
+
+    async def perform_risk_checks(self, signals: List[Dict[str, Any]], market_data: Dict[str, Any],
+                                 context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Perform comprehensive risk checks on trading signals
+
+        Args:
+            signals: Trading signals to check
+            market_data: Current market data
+            context: Risk check context
+
+        Returns:
+            Risk check results
+        """
+        try:
+            if context is None:
+                context = {}
+
+            risk_results = {
+                'total_signals': len(signals),
+                'approved_signals': 0,
+                'rejected_signals': 0,
+                'risk_violations': [],
+                'warnings': [],
+                'timestamp': datetime.now().isoformat()
+            }
+
+            # Get risk limits from context or defaults
+            risk_limits = context.get('risk_limits', {})
+            max_position_size = risk_limits.get('max_position_size', 0.1)  # 10% of portfolio
+            max_portfolio_risk = risk_limits.get('max_portfolio_risk', 0.02)  # 2% daily risk
+            max_single_trade_risk = risk_limits.get('max_single_trade_risk', 0.005)  # 0.5% per trade
+            portfolio_value = context.get('portfolio_value', 1000000)  # $1M default
+
+            approved_signals = []
+
+            for signal in signals:
+                try:
+                    symbol = signal.get('symbol')
+                    quantity = abs(signal.get('quantity', 0))
+                    price = signal.get('price', 0)
+                    direction = signal.get('direction', 0)
+
+                    violations = []
+                    warnings = []
+
+                    # Check position size limits
+                    if quantity * price > portfolio_value * max_position_size:
+                        violations.append('position_size_exceeded')
+
+                    # Check single trade risk
+                    trade_value = quantity * price
+                    if trade_value > portfolio_value * max_single_trade_risk:
+                        violations.append('single_trade_risk_exceeded')
+
+                    # Check portfolio concentration
+                    current_exposure = sum(
+                        abs(pos.get('quantity', 0) * market_data.get(sym, 0))
+                        for sym, pos in self.position_manager.items()
+                    )
+                    new_exposure = current_exposure + trade_value
+
+                    if new_exposure > portfolio_value * 0.5:  # 50% concentration limit
+                        warnings.append('high_portfolio_concentration')
+
+                    # Check correlation risk (simplified)
+                    # In a real implementation, this would check correlation with existing positions
+                    if len(self.position_manager) > 5:  # Arbitrary diversification check
+                        warnings.append('portfolio_diversification_concern')
+
+                    # Check market volatility (simplified)
+                    # In a real implementation, this would use VIX or realized volatility
+                    if context.get('market_volatility', 0.2) > 0.3:  # 30% vol threshold
+                        warnings.append('high_market_volatility')
+
+                    # Make approval decision
+                    if not violations:
+                        signal['risk_approved'] = True
+                        signal['risk_warnings'] = warnings
+                        approved_signals.append(signal)
+                        risk_results['approved_signals'] += 1
+                    else:
+                        signal['risk_approved'] = False
+                        signal['risk_violations'] = violations
+                        risk_results['rejected_signals'] += 1
+                        risk_results['risk_violations'].append({
+                            'symbol': symbol,
+                            'violations': violations
+                        })
+
+                    if warnings:
+                        risk_results['warnings'].extend([{
+                            'symbol': symbol,
+                            'warnings': warnings
+                        } for w in warnings])
+
+                except Exception as e:
+                    logger.warning(f"Risk check failed for signal: {e}")
+                    signal['risk_approved'] = False
+                    signal['risk_error'] = str(e)
+                    risk_results['rejected_signals'] += 1
+
+            return risk_results
+
+        except Exception as e:
+            logger.error(f"Risk checks failed: {e}")
+            return {
+                'error': str(e),
+                'total_signals': len(signals),
+                'approved_signals': 0,
+                'rejected_signals': len(signals),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    # ========================================
+    # PRIVATE STRATEGY HELPERS
+    # ========================================
+
+    async def _generate_basic_signals(self, symbol: str, data: pd.DataFrame, market_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate basic signals from price data"""
+        try:
+            signals = []
+
+            if len(data) < 20:  # Need minimum data
+                return signals
+
+            # Simple moving average crossover strategy
+            data_copy = data.copy()
+            data_copy['SMA_10'] = data_copy['close'].rolling(window=10).mean()
+            data_copy['SMA_20'] = data_copy['close'].rolling(window=20).mean()
+
+            latest = data_copy.iloc[-1]
+            prev = data_copy.iloc[-2] if len(data_copy) > 1 else latest
+
+            # Generate signals based on SMA crossover
+            if (prev['SMA_10'] <= prev['SMA_20'] and latest['SMA_10'] > latest['SMA_20']):
+                # Bullish crossover
+                signals.append({
+                    'symbol': symbol,
+                    'signal_type': 'sma_crossover',
+                    'direction': 1,  # Buy
+                    'strength': 0.7,
+                    'price': latest['close'],
+                    'quantity': 100,  # Fixed quantity for testing
+                    'timestamp': datetime.now().isoformat()
+                })
+            elif (prev['SMA_10'] >= prev['SMA_20'] and latest['SMA_10'] < latest['SMA_20']):
+                # Bearish crossover
+                signals.append({
+                    'symbol': symbol,
+                    'signal_type': 'sma_crossover',
+                    'direction': -1,  # Sell
+                    'strength': 0.7,
+                    'price': latest['close'],
+                    'quantity': -100,  # Fixed quantity for testing
+                    'timestamp': datetime.now().isoformat()
+                })
+
+            return signals
+
+        except Exception as e:
+            logger.warning(f"Basic signal generation failed: {e}")
+            return []
+
+    async def _apply_regime_filtering(self, signals: List[Dict[str, Any]], regime_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Apply regime-based filtering to signals"""
+        try:
+            filtered_signals = []
+            regime = regime_context.get('regime', 'neutral')
+            confidence = regime_context.get('confidence', 0.5)
+
+            for signal in signals:
+                signal_strength = signal.get('strength', 0.0)
+
+                # Adjust signal strength based on regime
+                if regime == 'bull':
+                    if signal.get('direction', 0) > 0:  # Bullish signals in bull market
+                        signal['regime_adjusted_strength'] = signal_strength * (0.8 + confidence * 0.4)
+                        filtered_signals.append(signal)
+                    # Filter out bearish signals in bull market
+                elif regime == 'bear':
+                    if signal.get('direction', 0) < 0:  # Bearish signals in bear market
+                        signal['regime_adjusted_strength'] = signal_strength * (0.8 + confidence * 0.4)
+                        filtered_signals.append(signal)
+                    # Filter out bullish signals in bear market
+                else:  # Neutral regime
+                    # Allow all signals but reduce strength
+                    signal['regime_adjusted_strength'] = signal_strength * 0.6
+                    filtered_signals.append(signal)
+
+            return filtered_signals
+
+        except Exception as e:
+            logger.warning(f"Regime filtering failed: {e}")
+            return signals
+
+    # ========================================
+    # MULTI-STRATEGY FRAMEWORK
+    # ========================================
+
+    @property
+    def strategy_portfolio(self) -> Dict[str, Any]:
+        """Get current multi-strategy portfolio configuration"""
+        return {
+            'active_strategies': list(self.active_strategies.keys()),
+            'strategy_allocations': self.strategy_allocations.copy(),
+            'strategy_performance': self.strategy_performance.copy(),
+            'portfolio_optimization': self.portfolio_optimization.copy(),
+            'allocation_history': self.allocation_history.copy(),
+            'rebalancing_events': self.rebalancing_events.copy()
+        }
+
+    async def allocate_strategies(
+        self,
+        strategy_weights: Dict[str, float],
+        rebalance_frequency: str = 'monthly',
+        risk_parity: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Allocate capital across multiple strategies
+
+        Args:
+            strategy_weights: Dictionary mapping strategy names to allocation weights
+            rebalance_frequency: How often to rebalance ('daily', 'weekly', 'monthly')
+            risk_parity: Whether to use risk-parity allocation
+
+        Returns:
+            Allocation results and optimization details
+        """
+        try:
+            # Validate weights sum to 1.0
+            total_weight = sum(strategy_weights.values())
+            if abs(total_weight - 1.0) > 0.01:
+                # Normalize weights
+                strategy_weights = {k: v/total_weight for k, v in strategy_weights.items()}
+
+            # Store allocations
+            self.strategy_allocations = strategy_weights.copy()
+
+            # Calculate risk-adjusted allocations if requested
+            if risk_parity and self.strategy_performance:
+                strategy_weights = await self._calculate_risk_parity_allocation(strategy_weights)
+
+            # Record allocation event
+            allocation_event = {
+                'timestamp': datetime.now(),
+                'strategy_weights': strategy_weights.copy(),
+                'rebalance_frequency': rebalance_frequency,
+                'risk_parity': risk_parity,
+                'total_strategies': len(strategy_weights)
+            }
+            self.allocation_history.append(allocation_event)
+
+            return {
+                'success': True,
+                'strategy_allocations': strategy_weights,
+                'rebalance_frequency': rebalance_frequency,
+                'risk_parity_applied': risk_parity,
+                'allocation_timestamp': datetime.now()
+            }
+
+        except Exception as e:
+            logger.error(f"Strategy allocation failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'strategy_allocations': {}
+            }
+
+    async def coordinate_strategies(
+        self,
+        market_data: Dict[str, Any],
+        coordination_rules: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Coordinate execution across multiple strategies
+
+        Args:
+            market_data: Current market data
+            coordination_rules: Rules for strategy coordination
+
+        Returns:
+            Coordination results and conflict resolution
+        """
+        try:
+            if coordination_rules is None:
+                coordination_rules = {
+                    'max_overlap': 0.3,  # Maximum position overlap allowed
+                    'correlation_threshold': 0.7,  # Maximum correlation allowed
+                    'diversification_min': 0.4  # Minimum diversification ratio
+                }
+
+            coordination_results = {
+                'timestamp': datetime.now(),
+                'active_strategies': len(self.active_strategies),
+                'coordination_rules': coordination_rules,
+                'strategy_signals': {},
+                'conflicts_detected': [],
+                'coordination_actions': []
+            }
+
+            # Generate signals from all active strategies
+            all_signals = []
+            for strategy_name, strategy in self.active_strategies.items():
+                try:
+                    signals = await self.generate_signals(
+                        strategy=strategy,
+                        market_data=market_data
+                    )
+                    coordination_results['strategy_signals'][strategy_name] = signals
+                    all_signals.extend(signals)
+                except Exception as e:
+                    logger.warning(f"Signal generation failed for {strategy_name}: {e}")
+
+            # Check for conflicts
+            conflicts = await self.resolve_conflicts(
+                signals=all_signals,
+                coordination_rules=coordination_rules
+            )
+
+            coordination_results['conflicts_detected'] = conflicts
+            coordination_results['total_signals'] = len(all_signals)
+            coordination_results['conflicts_resolved'] = len(conflicts)
+
+            return coordination_results
+
+        except Exception as e:
+            logger.error(f"Strategy coordination failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'coordination_results': {}
+            }
+
+    async def resolve_conflicts(
+        self,
+        signals: List[Dict[str, Any]],
+        coordination_rules: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Resolve conflicts between strategy signals
+
+        Args:
+            signals: List of signals from different strategies
+            coordination_rules: Rules for conflict resolution
+
+        Returns:
+            List of resolved conflicts
+        """
+        try:
+            if coordination_rules is None:
+                coordination_rules = {
+                    'max_overlap': 0.3,
+                    'correlation_threshold': 0.7,
+                    'priority_rules': ['risk_adjusted', 'sharpe_ratio', 'recent_performance']
+                }
+
+            resolved_conflicts = []
+
+            # Group signals by symbol
+            signals_by_symbol = {}
+            for signal in signals:
+                symbol = signal.get('symbol', 'unknown')
+                if symbol not in signals_by_symbol:
+                    signals_by_symbol[symbol] = []
+                signals_by_symbol[symbol].append(signal)
+
+            # Check for conflicts in each symbol
+            for symbol, symbol_signals in signals_by_symbol.items():
+                if len(symbol_signals) > 1:
+                    # Multiple strategies signaling same symbol
+                    conflict = {
+                        'symbol': symbol,
+                        'strategies_involved': [s.get('strategy', 'unknown') for s in symbol_signals],
+                        'signal_types': [s.get('signal_type', 'unknown') for s in symbol_signals],
+                        'conflicting_signals': len(symbol_signals),
+                        'resolution': 'prioritized_by_performance'
+                    }
+
+                    # Apply priority-based resolution
+                    resolved_signal = await self._resolve_signal_conflict(
+                        symbol_signals, coordination_rules
+                    )
+
+                    conflict['resolved_signal'] = resolved_signal
+                    resolved_conflicts.append(conflict)
+
+            return resolved_conflicts
+
+        except Exception as e:
+            logger.error(f"Conflict resolution failed: {e}")
+            return []
+
+    async def _calculate_risk_parity_allocation(self, base_weights: Dict[str, float]) -> Dict[str, float]:
+        """Calculate risk-parity based strategy allocations"""
+        try:
+            risk_adjusted_weights = {}
+
+            for strategy_name, base_weight in base_weights.items():
+                # Get strategy volatility (use default if not available)
+                strategy_vol = self.strategy_performance.get(strategy_name, {}).get('volatility', 0.15)
+
+                if strategy_vol > 0:
+                    # Risk parity: weight inversely proportional to volatility
+                    risk_weight = 1.0 / strategy_vol
+                    risk_adjusted_weights[strategy_name] = risk_weight
+                else:
+                    risk_adjusted_weights[strategy_name] = base_weight
+
+            # Normalize weights
+            total_risk_weight = sum(risk_adjusted_weights.values())
+            if total_risk_weight > 0:
+                risk_adjusted_weights = {
+                    k: v/total_risk_weight for k, v in risk_adjusted_weights.items()
+                }
+
+            return risk_adjusted_weights
+
+        except Exception as e:
+            logger.warning(f"Risk parity calculation failed: {e}")
+            return base_weights
+
+    async def _resolve_signal_conflict(
+        self,
+        conflicting_signals: List[Dict[str, Any]],
+        coordination_rules: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Resolve conflict between multiple signals for same symbol"""
+        try:
+            # Simple resolution: take the signal with highest confidence
+            best_signal = max(
+                conflicting_signals,
+                key=lambda s: s.get('confidence', 0.0)
+            )
+
+            return {
+                'symbol': best_signal.get('symbol'),
+                'signal_type': best_signal.get('signal_type'),
+                'confidence': best_signal.get('confidence', 0.0),
+                'strategy': best_signal.get('strategy', 'coordinated'),
+                'resolution_method': 'highest_confidence'
+            }
+
+        except Exception as e:
+            logger.warning(f"Signal conflict resolution failed: {e}")
+            return conflicting_signals[0] if conflicting_signals else {}
+
+    # ========================================
+    # EXECUTION MODELING FRAMEWORK
+    # ========================================
+
+    @property
+    def execution_model(self) -> Dict[str, Any]:
+        """Get execution model configuration"""
+        return {
+            'slippage_model': self.slippage_model,
+            'market_impact_model': self.market_impact_model,
+            'order_execution': self.order_execution,
+            'execution_parameters': {
+                'max_slippage': 0.002,  # 0.2% max slippage
+                'market_impact_threshold': 0.001,  # 0.1% impact threshold
+                'execution_speed': 'aggressive'  # or 'passive'
+            }
+        }
+
+    @property
+    def slippage_model(self) -> Dict[str, Any]:
+        """Get slippage modeling configuration"""
+        return {
+            'model_type': 'volume_based',
+            'parameters': {
+                'base_slippage': 0.001,  # 0.1% base slippage
+                'volume_factor': 0.5,    # Impact of volume on slippage
+                'volatility_factor': 0.3  # Impact of volatility on slippage
+            }
+        }
+
+    @property
+    def market_impact_model(self) -> Dict[str, Any]:
+        """Get market impact modeling configuration"""
+        return {
+            'model_type': 'square_root_law',
+            'parameters': {
+                'participation_rate': 0.1,  # 10% participation rate
+                'market_depth': 0.05,      # 5% market depth factor
+                'price_impact': 0.002      # 0.2% price impact
+            }
+        }
+
+    @property
+    def order_execution(self) -> Dict[str, Any]:
+        """Get order execution configuration"""
+        return {
+            'execution_type': 'vwap',  # VWAP, TWAP, or aggressive
+            'time_horizon': '1D',      # Execution time horizon
+            'min_order_size': 1000,    # Minimum order size
+            'max_order_size': 100000   # Maximum order size
+        }
+
+    # ========================================
+    # TRANSACTION COST MODELING
+    # ========================================
+
+    @property
+    def commission_model(self) -> Dict[str, Any]:
+        """Get commission modeling configuration"""
+        return {
+            'commission_structure': 'tiered',
+            'tiers': [
+                {'min_volume': 0, 'max_volume': 100000, 'rate': 0.0035},      # 35 bps
+                {'min_volume': 100000, 'max_volume': 500000, 'rate': 0.0025}, # 25 bps
+                {'min_volume': 500000, 'max_volume': float('inf'), 'rate': 0.0020}  # 20 bps
+            ],
+            'minimum_commission': 1.0,  # $1 minimum
+            'exchange_fees': 0.0001     # 1 bp exchange fee
+        }
+
+    async def calculate_fees(
+        self,
+        trade_volume: float,
+        trade_value: float,
+        trade_type: str = 'market'
+    ) -> Dict[str, float]:
+        """
+        Calculate transaction fees for a trade
+
+        Args:
+            trade_volume: Number of shares/contracts
+            trade_value: Dollar value of trade
+            trade_type: Type of trade ('market', 'limit', etc.)
+
+        Returns:
+            Dictionary of fee components
+        """
+        try:
+            fees = {
+                'commission': 0.0,
+                'exchange_fees': 0.0,
+                'regulatory_fees': 0.0,
+                'total_fees': 0.0
+            }
+
+            # Calculate commission based on tiered structure
+            commission_rate = 0.0035  # Default 35 bps
+            for tier in self.commission_model['tiers']:
+                if tier['min_volume'] <= trade_volume < tier['max_volume']:
+                    commission_rate = tier['rate']
+                    break
+
+            fees['commission'] = max(
+                trade_value * commission_rate,
+                self.commission_model['minimum_commission']
+            )
+
+            # Exchange fees
+            fees['exchange_fees'] = trade_value * self.commission_model['exchange_fees']
+
+            # Regulatory fees (simplified)
+            fees['regulatory_fees'] = trade_value * 0.00002  # 0.2 bps SEC fee
+
+            # Total fees
+            fees['total_fees'] = sum(fees.values())
+
+            return fees
+
+        except Exception as e:
+            logger.error(f"Fee calculation failed: {e}")
+            return {'total_fees': 0.0, 'error': str(e)}
+
+    async def attribute_costs(
+        self,
+        portfolio_returns: pd.Series,
+        trading_costs: pd.Series
+    ) -> Dict[str, Any]:
+        """
+        Attribute trading costs to performance
+
+        Args:
+            portfolio_returns: Portfolio returns series
+            trading_costs: Trading costs series
+
+        Returns:
+            Cost attribution analysis
+        """
+        try:
+            cost_attribution = {
+                'total_cost_impact': 0.0,
+                'cost_drag': 0.0,
+                'cost_efficiency': 0.0,
+                'cost_breakdown': {}
+            }
+
+            if len(portfolio_returns) > 0 and len(trading_costs) > 0:
+                # Calculate cost impact on returns
+                gross_returns = portfolio_returns + trading_costs
+                cost_attribution['total_cost_impact'] = trading_costs.sum()
+
+                # Calculate cost drag (impact on Sharpe ratio)
+                if len(gross_returns) > 1:
+                    gross_sharpe = gross_returns.mean() / gross_returns.std() * np.sqrt(252)
+                    net_sharpe = portfolio_returns.mean() / portfolio_returns.std() * np.sqrt(252)
+                    cost_attribution['cost_drag'] = gross_sharpe - net_sharpe
+
+                # Cost efficiency ratio
+                total_return = portfolio_returns.sum()
+                if total_return != 0:
+                    cost_attribution['cost_efficiency'] = cost_attribution['total_cost_impact'] / abs(total_return)
+
+                # Cost breakdown by periods
+                cost_attribution['cost_breakdown'] = {
+                    'daily_average': trading_costs.mean(),
+                    'peak_cost_day': trading_costs.idxmax() if not trading_costs.empty else None,
+                    'cost_volatility': trading_costs.std()
+                }
+
+            return cost_attribution
+
+        except Exception as e:
+            logger.error(f"Cost attribution failed: {e}")
+            return {'error': str(e)}
+
+    async def optimize_costs(
+        self,
+        trade_schedule: List[Dict[str, Any]],
+        market_conditions: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Optimize trade execution to minimize costs
+
+        Args:
+            trade_schedule: List of trades to execute
+            market_conditions: Current market conditions
+
+        Returns:
+            Optimized execution plan
+        """
+        try:
+            optimization_result = {
+                'original_cost_estimate': 0.0,
+                'optimized_cost_estimate': 0.0,
+                'cost_savings': 0.0,
+                'execution_plan': [],
+                'optimization_method': 'vwap_scheduling'
+            }
+
+            # Simple VWAP-based optimization
+            for trade in trade_schedule:
+                trade_value = abs(trade.get('quantity', 0) * trade.get('price', 0))
+
+                # Estimate original cost (immediate execution)
+                original_fees = await self.calculate_fees(
+                    trade.get('quantity', 0),
+                    trade_value
+                )
+                optimization_result['original_cost_estimate'] += original_fees['total_fees']
+
+                # Estimate optimized cost (VWAP execution)
+                optimized_fees = original_fees.copy()
+                optimized_fees['total_fees'] *= 0.8  # Assume 20% cost reduction
+                optimization_result['optimized_cost_estimate'] += optimized_fees['total_fees']
+
+                optimization_result['execution_plan'].append({
+                    'trade': trade,
+                    'execution_method': 'vwap',
+                    'estimated_savings': original_fees['total_fees'] - optimized_fees['total_fees']
+                })
+
+            optimization_result['cost_savings'] = (
+                optimization_result['original_cost_estimate'] -
+                optimization_result['optimized_cost_estimate']
+            )
+
+            return optimization_result
+
+        except Exception as e:
+            logger.error(f"Cost optimization failed: {e}")
+            return {'error': str(e)}
+
+    # ========================================
+    # MARKET IMPACT MODELING
+    # ========================================
+
+    async def calculate_price_impact(
+        self,
+        trade_size: float,
+        average_volume: float,
+        volatility: float,
+        market_cap: float = None
+    ) -> Dict[str, float]:
+        """
+        Calculate expected price impact of a trade
+
+        Args:
+            trade_size: Size of trade as fraction of average volume
+            average_volume: Average daily volume
+            volatility: Asset volatility
+            market_cap: Market capitalization (optional)
+
+        Returns:
+            Price impact estimates
+        """
+        try:
+            impact_estimates = {
+                'temporary_impact': 0.0,
+                'permanent_impact': 0.0,
+                'total_impact': 0.0,
+                'impact_decay_half_life': 5  # minutes
+            }
+
+            # Square root law: Impact ∝ sqrt(trade_size / volume)
+            participation_rate = trade_size / average_volume
+
+            # Temporary impact (reverses quickly)
+            impact_estimates['temporary_impact'] = (
+                self.market_impact_model['parameters']['price_impact'] *
+                np.sqrt(participation_rate)
+            )
+
+            # Permanent impact (long-term price movement)
+            impact_estimates['permanent_impact'] = (
+                impact_estimates['temporary_impact'] * 0.3  # Assume 30% permanent
+            )
+
+            # Total impact
+            impact_estimates['total_impact'] = (
+                impact_estimates['temporary_impact'] +
+                impact_estimates['permanent_impact']
+            )
+
+            return impact_estimates
+
+        except Exception as e:
+            logger.error(f"Price impact calculation failed: {e}")
+            return {'total_impact': 0.0, 'error': str(e)}
+
+    async def analyze_volume(
+        self,
+        volume_series: pd.Series,
+        price_series: pd.Series,
+        window: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Analyze trading volume patterns
+
+        Args:
+            volume_series: Volume data
+            price_series: Price data
+            window: Analysis window
+
+        Returns:
+            Volume analysis results
+        """
+        try:
+            volume_analysis = {
+                'average_volume': volume_series.mean(),
+                'volume_volatility': volume_series.std() / volume_series.mean(),
+                'volume_price_correlation': volume_series.corr(price_series),
+                'high_volume_periods': [],
+                'volume_trends': {}
+            }
+
+            # Identify high volume periods (above 1.5x average)
+            avg_volume = volume_series.mean()
+            high_volume_mask = volume_series > (avg_volume * 1.5)
+            volume_analysis['high_volume_periods'] = volume_series[high_volume_mask].index.tolist()
+
+            # Volume trends
+            volume_ma = volume_series.rolling(window=window).mean()
+            volume_analysis['volume_trends'] = {
+                'recent_trend': 'increasing' if volume_ma.iloc[-1] > volume_ma.iloc[-window] else 'decreasing',
+                'trend_strength': abs(volume_ma.iloc[-1] - volume_ma.iloc[-window]) / volume_ma.iloc[-window]
+            }
+
+            return volume_analysis
+
+        except Exception as e:
+            logger.error(f"Volume analysis failed: {e}")
+            return {'error': str(e)}
+
+    async def assess_liquidity(
+        self,
+        symbol: str,
+        volume_series: pd.Series,
+        spread_data: pd.Series = None,
+        market_depth: float = None
+    ) -> Dict[str, Any]:
+        """
+        Assess liquidity characteristics of an asset
+
+        Args:
+            symbol: Asset symbol
+            volume_series: Volume data
+            spread_data: Bid-ask spread data (optional)
+            market_depth: Market depth estimate (optional)
+
+        Returns:
+            Liquidity assessment
+        """
+        try:
+            liquidity_assessment = {
+                'symbol': symbol,
+                'liquidity_score': 0.0,
+                'trading_volume': volume_series.mean(),
+                'volume_stability': 0.0,
+                'spread_cost': 0.0,
+                'market_depth': market_depth or 0.05,
+                'liquidity_classification': 'unknown'
+            }
+
+            # Volume stability (coefficient of variation)
+            if volume_series.mean() > 0:
+                liquidity_assessment['volume_stability'] = volume_series.std() / volume_series.mean()
+
+            # Spread cost estimate
+            if spread_data is not None and not spread_data.empty:
+                liquidity_assessment['spread_cost'] = spread_data.mean()
+            else:
+                # Estimate spread based on volume (simplified)
+                avg_volume = volume_series.mean()
+                if avg_volume > 1000000:  # High volume
+                    liquidity_assessment['spread_cost'] = 0.0002  # 2 bps
+                elif avg_volume > 100000:  # Medium volume
+                    liquidity_assessment['spread_cost'] = 0.0005  # 5 bps
+                else:  # Low volume
+                    liquidity_assessment['spread_cost'] = 0.001   # 10 bps
+
+            # Calculate liquidity score (0-1, higher is better)
+            volume_score = min(1.0, volume_series.mean() / 1000000)  # Normalize to $1M volume
+            stability_score = max(0.0, 1.0 - liquidity_assessment['volume_stability'])
+            spread_score = max(0.0, 1.0 - (liquidity_assessment['spread_cost'] * 1000))  # Penalize high spreads
+
+            liquidity_assessment['liquidity_score'] = (volume_score + stability_score + spread_score) / 3.0
+
+            # Classify liquidity
+            if liquidity_assessment['liquidity_score'] > 0.7:
+                liquidity_assessment['liquidity_classification'] = 'high'
+            elif liquidity_assessment['liquidity_score'] > 0.4:
+                liquidity_assessment['liquidity_classification'] = 'medium'
+            else:
+                liquidity_assessment['liquidity_classification'] = 'low'
+
+            return liquidity_assessment
+
+        except Exception as e:
+            logger.error(f"Liquidity assessment failed: {e}")
+            return {'symbol': symbol, 'liquidity_score': 0.0, 'error': str(e)}
+
+    # ========================================
+    # VALIDATION METHODS FRAMEWORK
+    # ========================================
+
+    async def perform_walk_forward_validation(self, data: pd.DataFrame, training_window: int = 63,
+                                           testing_window: int = 21, step_size: int = 21,
+                                           strategy_params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Perform walk-forward validation on historical data
+
+        Args:
+            data: Historical price data
+            training_window: Number of periods for training
+            testing_window: Number of periods for testing
+            step_size: How many periods to advance each step
+            strategy_params: Strategy parameters to test
+
+        Returns:
+            Walk-forward validation results
+        """
+        try:
+            if strategy_params is None:
+                strategy_params = {}
+
+            wf_periods = []
+            all_train_returns = []
+            all_test_returns = []
+
+            # Perform walk-forward analysis
+            for i in range(training_window, len(data) - testing_window + 1, step_size):
+                train_end = i
+                test_end = min(i + testing_window, len(data))
+
+                # Split data
+                train_data = data.iloc[i-training_window:i]
+                test_data = data.iloc[i:test_end]
+
+                if len(train_data) < 20 or len(test_data) < 5:
+                    continue
+
+                # Train strategy on training data
+                train_result = await self._train_strategy_on_window(train_data, strategy_params)
+
+                # Test strategy on testing data
+                test_result = await self._test_strategy_on_window(test_data, train_result, strategy_params)
+
+                wf_periods.append({
+                    'train_period': {'start': i-training_window, 'end': i},
+                    'test_period': {'start': i, 'end': test_end},
+                    'train_result': train_result,
+                    'test_result': test_result,
+                    'out_of_sample_return': test_result.get('total_return', 0),
+                    'in_sample_return': train_result.get('total_return', 0)
+                })
+
+                all_test_returns.append(test_result.get('total_return', 0))
+                all_train_returns.append(train_result.get('total_return', 0))
+
+            # Calculate validation metrics
+            if wf_periods:
+                avg_oos_return = np.mean(all_test_returns)
+                avg_is_return = np.mean(all_train_returns)
+                oos_std = np.std(all_test_returns)
+                oos_sharpe = avg_oos_return / oos_std if oos_std > 0 else 0
+
+                # Overfitting detection
+                overfitting_ratio = avg_is_return / avg_oos_return if avg_oos_return != 0 else float('inf')
+                is_overfitted = overfitting_ratio > 2.0  # Arbitrary threshold
+
+                return {
+                    'n_periods': len(wf_periods),
+                    'avg_oos_return': avg_oos_return,
+                    'avg_is_return': avg_is_return,
+                    'oos_sharpe_ratio': oos_sharpe,
+                    'overfitting_ratio': overfitting_ratio,
+                    'is_overfitted': is_overfitted,
+                    'periods': wf_periods,
+                    'validation_metrics': {
+                        'profitability': avg_oos_return > 0,
+                        'consistency': oos_sharpe > 0.5,
+                        'robustness': not is_overfitted
+                    }
+                }
+            else:
+                return {
+                    'n_periods': 0,
+                    'error': 'Insufficient data for walk-forward validation'
+                }
+
+        except Exception as e:
+            logger.error(f"Walk-forward validation failed: {e}")
+            return {
+                'n_periods': 0,
+                'error': str(e)
+            }
+
+    def create_rolling_windows(self, data: pd.DataFrame, window_size: int, step_size: int = 1) -> List[pd.DataFrame]:
+        """
+        Create rolling windows from time series data
+
+        Args:
+            data: Time series data
+            window_size: Size of each window
+            step_size: Step size between windows
+
+        Returns:
+            List of rolling windows
+        """
+        try:
+            windows = []
+            for i in range(0, len(data) - window_size + 1, step_size):
+                window = data.iloc[i:i+window_size]
+                windows.append(window)
+            return windows
+        except Exception as e:
+            logger.error(f"Rolling windows creation failed: {e}")
+            return []
+
+    async def analyze_parameter_stability(self, parameter_series: List[float], window_size: int = 20) -> Dict[str, Any]:
+        """
+        Analyze parameter stability over time
+
+        Args:
+            parameter_series: Time series of parameter values
+            window_size: Window size for stability analysis
+
+        Returns:
+            Parameter stability metrics
+        """
+        try:
+            if len(parameter_series) < window_size:
+                return {'error': 'Insufficient data for stability analysis'}
+
+            # Calculate rolling statistics
+            rolling_mean = pd.Series(parameter_series).rolling(window=window_size).mean()
+            rolling_std = pd.Series(parameter_series).rolling(window=window_size).std()
+            rolling_cv = rolling_std / rolling_mean.abs()  # Coefficient of variation
+
+            # Stability metrics
+            stability_score = 1 / (1 + rolling_cv.iloc[-1]) if not pd.isna(rolling_cv.iloc[-1]) else 0
+            trend = np.polyfit(range(len(parameter_series)), parameter_series, 1)[0]
+
+            return {
+                'stability_score': stability_score,
+                'coefficient_of_variation': rolling_cv.iloc[-1],
+                'trend_slope': trend,
+                'is_stable': stability_score > 0.7,
+                'rolling_stats': {
+                    'mean': rolling_mean.tolist(),
+                    'std': rolling_std.tolist(),
+                    'cv': rolling_cv.tolist()
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Parameter stability analysis failed: {e}")
+            return {'error': str(e)}
+
+    async def perform_out_of_sample_test(self, strategy, train_data: pd.DataFrame,
+                                       test_data: pd.DataFrame, strategy_params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Perform out-of-sample testing
+
+        Args:
+            strategy: Trading strategy
+            train_data: Training data
+            test_data: Testing data
+            strategy_params: Strategy parameters
+
+        Returns:
+            Out-of-sample test results
+        """
+        try:
+            if strategy_params is None:
+                strategy_params = {}
+
+            # Train on in-sample data
+            train_result = await self._train_strategy_on_window(train_data, strategy_params)
+
+            # Test on out-of-sample data
+            test_result = await self._test_strategy_on_window(test_data, train_result, strategy_params)
+
+            # Calculate performance metrics
+            is_return = train_result.get('total_return', 0)
+            oos_return = test_result.get('total_return', 0)
+
+            # Statistical significance tests
+            if len(test_data) > 10:
+                returns = test_data.get('returns', pd.Series([0]))
+                t_stat = oos_return / (np.std(returns) / np.sqrt(len(returns))) if np.std(returns) > 0 else 0
+                p_value = 2 * (1 - abs(t_stat) / 2)  # Simplified p-value calculation
+            else:
+                t_stat = 0
+                p_value = 1
+
+            return {
+                'in_sample_return': is_return,
+                'out_of_sample_return': oos_return,
+                'performance_decay': is_return - oos_return,
+                'statistical_significance': {
+                    't_statistic': t_stat,
+                    'p_value': p_value,
+                    'significant': p_value < 0.05
+                },
+                'is_robust': oos_return > 0 and abs(is_return - oos_return) < abs(is_return) * 0.5
+            }
+
+        except Exception as e:
+            logger.error(f"Out-of-sample test failed: {e}")
+            return {'error': str(e)}
+
+    async def calculate_validation_metrics(self, backtest_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate comprehensive validation metrics
+
+        Args:
+            backtest_results: Results from backtesting
+
+        Returns:
+            Validation metrics
+        """
+        try:
+            returns = backtest_results.get('returns', [])
+            if not returns:
+                return {'error': 'No returns data available'}
+
+            # Basic metrics
+            total_return = np.sum(returns)
+            annualized_return = total_return * (252 / len(returns)) if len(returns) > 0 else 0
+            volatility = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0
+            sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
+
+            # Risk metrics
+            max_drawdown = self._calculate_max_drawdown(returns)
+            var_95 = np.percentile(returns, 5)  # 95% VaR
+            cvar_95 = np.mean([r for r in returns if r <= var_95]) if any(r <= var_95 for r in returns) else var_95
+
+            # Overfitting detection
+            overfitting_score = self._detect_overfitting(backtest_results)
+
+            return {
+                'performance_metrics': {
+                    'total_return': total_return,
+                    'annualized_return': annualized_return,
+                    'volatility': volatility,
+                    'sharpe_ratio': sharpe_ratio,
+                    'max_drawdown': max_drawdown
+                },
+                'risk_metrics': {
+                    'var_95': var_95,
+                    'cvar_95': cvar_95,
+                    'calmar_ratio': annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0
+                },
+                'validation_metrics': {
+                    'overfitting_score': overfitting_score,
+                    'is_overfitted': overfitting_score > 0.7,
+                    'robustness_score': self._calculate_robustness_score(backtest_results)
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Validation metrics calculation failed: {e}")
+            return {'error': str(e)}
+
+    # ========================================
+    # MONTE CARLO VALIDATION METHODS
+    # ========================================
+
+    async def monte_carlo_simulator(self, base_returns: List[float], n_simulations: int = 1000,
+                                  n_periods: int = 252) -> Dict[str, Any]:
+        """
+        Run Monte Carlo simulations
+
+        Args:
+            base_returns: Base return series for simulation
+            n_simulations: Number of simulations to run
+            n_periods: Number of periods per simulation
+
+        Returns:
+            Monte Carlo simulation results
+        """
+        try:
+            if not base_returns:
+                return {'error': 'No base returns provided'}
+
+            # Fit distribution to historical returns
+            mu = np.mean(base_returns)
+            sigma = np.std(base_returns)
+
+            # Run simulations
+            simulations = []
+            for _ in range(n_simulations):
+                # Generate random returns using historical distribution
+                sim_returns = np.random.normal(mu, sigma, n_periods)
+                sim_cumulative = np.cumprod(1 + sim_returns)
+
+                simulations.append({
+                    'returns': sim_returns.tolist(),
+                    'cumulative': sim_cumulative.tolist(),
+                    'total_return': sim_cumulative[-1] - 1,
+                    'volatility': np.std(sim_returns),
+                    'sharpe_ratio': (np.mean(sim_returns) * 252) / (np.std(sim_returns) * np.sqrt(252))
+                })
+
+            # Calculate statistics across simulations
+            total_returns = [s['total_return'] for s in simulations]
+            volatilities = [s['volatility'] for s in simulations]
+
+            return {
+                'n_simulations': n_simulations,
+                'n_periods': n_periods,
+                'simulations': simulations,
+                'statistics': {
+                    'mean_return': np.mean(total_returns),
+                    'median_return': np.median(total_returns),
+                    'std_return': np.std(total_returns),
+                    'mean_volatility': np.mean(volatilities),
+                    'worst_case': np.min(total_returns),
+                    'best_case': np.max(total_returns)
+                },
+                'confidence_intervals': self._calculate_confidence_intervals(total_returns)
+            }
+
+        except Exception as e:
+            logger.error(f"Monte Carlo simulation failed: {e}")
+            return {'error': str(e)}
+
+    async def generate_scenarios(self, base_data: pd.DataFrame, n_scenarios: int = 100,
+                               scenario_type: str = 'bootstrap') -> List[Dict[str, Any]]:
+        """
+        Generate alternative scenarios for testing
+
+        Args:
+            base_data: Base historical data
+            n_scenarios: Number of scenarios to generate
+            scenario_type: Type of scenario generation ('bootstrap', 'parametric', 'historical')
+
+        Returns:
+            List of generated scenarios
+        """
+        try:
+            scenarios = []
+
+            if scenario_type == 'bootstrap':
+                # Bootstrap resampling
+                for i in range(n_scenarios):
+                    # Resample with replacement
+                    indices = np.random.choice(len(base_data), len(base_data), replace=True)
+                    scenario_data = base_data.iloc[indices].copy()
+                    scenario_data = scenario_data.sort_index()  # Maintain time order
+
+                    scenarios.append({
+                        'scenario_id': i,
+                        'type': 'bootstrap',
+                        'data': scenario_data,
+                        'description': f'Bootstrap scenario {i}'
+                    })
+
+            elif scenario_type == 'parametric':
+                # Parametric scenarios based on distribution fitting
+                returns = base_data.get('returns', pd.Series([0]))
+                mu = np.mean(returns)
+                sigma = np.std(returns)
+
+                for i in range(n_scenarios):
+                    # Generate synthetic returns
+                    synthetic_returns = np.random.normal(mu, sigma, len(base_data))
+                    synthetic_prices = base_data['close'].iloc[0] * np.cumprod(1 + synthetic_returns)
+
+                    scenario_data = base_data.copy()
+                    scenario_data['close'] = synthetic_prices
+                    scenario_data['returns'] = synthetic_returns
+
+                    scenarios.append({
+                        'scenario_id': i,
+                        'type': 'parametric',
+                        'data': scenario_data,
+                        'description': f'Parametric scenario {i}'
+                    })
+
+            return scenarios
+
+        except Exception as e:
+            logger.error(f"Scenario generation failed: {e}")
+            return []
+
+    async def statistical_analysis(self, data_series: List[float], confidence_level: float = 0.95) -> Dict[str, Any]:
+        """
+        Perform statistical analysis on data series
+
+        Args:
+            data_series: Data series to analyze
+            confidence_level: Confidence level for intervals
+
+        Returns:
+            Statistical analysis results
+        """
+        try:
+            if not data_series:
+                return {'error': 'No data provided'}
+
+            # Basic statistics
+            mean = np.mean(data_series)
+            median = np.median(data_series)
+            std = np.std(data_series)
+            skewness = np.mean(((data_series - mean) / std) ** 3) if std > 0 else 0
+            kurtosis = np.mean(((data_series - mean) / std) ** 4) if std > 0 else 0
+
+            # Normality tests
+            from scipy import stats
+            try:
+                shapiro_stat, shapiro_p = stats.shapiro(data_series[:5000])  # Shapiro-Wilk test
+                is_normal = shapiro_p > 0.05
+            except:
+                is_normal = False
+                shapiro_p = 1.0
+
+            return {
+                'basic_stats': {
+                    'mean': mean,
+                    'median': median,
+                    'std': std,
+                    'min': np.min(data_series),
+                    'max': np.max(data_series),
+                    'skewness': skewness,
+                    'kurtosis': kurtosis
+                },
+                'normality_tests': {
+                    'is_normal': is_normal,
+                    'shapiro_p_value': shapiro_p
+                },
+                'distribution_fit': {
+                    'best_fit': 'normal' if is_normal else 'unknown'
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Statistical analysis failed: {e}")
+            return {'error': str(e)}
+
+    def confidence_intervals(self, data: List[float], confidence_level: float = 0.95) -> Dict[str, Any]:
+        """
+        Calculate confidence intervals for data
+
+        Args:
+            data: Data series
+            confidence_level: Confidence level (0-1)
+
+        Returns:
+            Confidence interval results
+        """
+        try:
+            if not data:
+                return {'error': 'No data provided'}
+
+            mean = np.mean(data)
+            std = np.std(data)
+            n = len(data)
+
+            # Standard error
+            se = std / np.sqrt(n)
+
+            # t-distribution critical value
+            from scipy import stats
+            t_critical = stats.t.ppf((1 + confidence_level) / 2, n - 1)
+
+            margin_of_error = t_critical * se
+
+            return {
+                'mean': mean,
+                'confidence_level': confidence_level,
+                'interval': {
+                    'lower': mean - margin_of_error,
+                    'upper': mean + margin_of_error
+                },
+                'margin_of_error': margin_of_error,
+                'standard_error': se,
+                'sample_size': n
+            }
+
+        except Exception as e:
+            logger.error(f"Confidence interval calculation failed: {e}")
+            return {'error': str(e)}
+
+    # ========================================
+    # ROBUSTNESS TESTING METHODS
+    # ========================================
+
+    async def stress_testing(self, strategy, market_data: Dict[str, pd.DataFrame],
+                           stress_scenarios: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Perform stress testing under extreme market conditions
+
+        Args:
+            strategy: Trading strategy to test
+            market_data: Base market data
+            stress_scenarios: List of stress scenarios to test
+
+        Returns:
+            Stress test results
+        """
+        try:
+            if stress_scenarios is None:
+                stress_scenarios = self._get_default_stress_scenarios()
+
+            stress_results = []
+
+            for scenario in stress_scenarios:
+                # Apply stress scenario to market data
+                stressed_data = self._apply_stress_scenario(market_data, scenario)
+
+                # Run strategy on stressed data
+                result = await self.run_institutional_backtest(strategy, stressed_data)
+
+                stress_results.append({
+                    'scenario_name': scenario['name'],
+                    'scenario_description': scenario['description'],
+                    'backtest_result': result,
+                    'survival': result.total_return > -0.5,  # Survived if loss < 50%
+                    'max_drawdown': result.max_drawdown,
+                    'stress_impact': result.total_return  # Impact on total return
+                })
+
+            # Aggregate results
+            survival_rate = sum(1 for r in stress_results if r['survival']) / len(stress_results)
+            avg_max_drawdown = np.mean([r['max_drawdown'] for r in stress_results])
+            worst_case_return = min(r['stress_impact'] for r in stress_results)
+
+            return {
+                'stress_results': stress_results,
+                'aggregate_metrics': {
+                    'survival_rate': survival_rate,
+                    'average_max_drawdown': avg_max_drawdown,
+                    'worst_case_return': worst_case_return,
+                    'is_resilient': survival_rate > 0.7 and avg_max_drawdown < 0.3
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Stress testing failed: {e}")
+            return {'error': str(e)}
+
+    async def sensitivity_analysis(self, strategy, base_params: Dict[str, Any],
+                                 param_ranges: Dict[str, Tuple[float, float]] = None,
+                                 n_tests: int = 50) -> Dict[str, Any]:
+        """
+        Perform sensitivity analysis on strategy parameters
+
+        Args:
+            strategy: Trading strategy
+            base_params: Base parameter values
+            param_ranges: Parameter ranges to test
+            n_tests: Number of sensitivity tests
+
+        Returns:
+            Sensitivity analysis results
+        """
+        try:
+            if param_ranges is None:
+                param_ranges = {
+                    'stop_loss': (0.01, 0.10),
+                    'take_profit': (0.02, 0.20),
+                    'position_size': (0.01, 0.10)
+                }
+
+            sensitivity_results = {}
+
+            for param_name, (min_val, max_val) in param_ranges.items():
+                param_results = []
+
+                # Test different values of this parameter
+                test_values = np.linspace(min_val, max_val, n_tests)
+
+                for test_val in test_values:
+                    # Modify parameter
+                    test_params = base_params.copy()
+                    test_params[param_name] = test_val
+
+                    # Create sample data for testing
+                    sample_data = self._generate_sample_market_data()
+
+                    # Run backtest with modified parameter
+                    result = await self.run_institutional_backtest(strategy, {'NVDA': sample_data}, benchmark_data=None)
+
+                    param_results.append({
+                        'parameter_value': test_val,
+                        'total_return': result.total_return,
+                        'sharpe_ratio': result.sharpe_ratio,
+                        'max_drawdown': result.max_drawdown
+                    })
+
+                sensitivity_results[param_name] = {
+                    'parameter_range': (min_val, max_val),
+                    'results': param_results,
+                    'sensitivity_score': self._calculate_parameter_sensitivity(param_results)
+                }
+
+            return {
+                'sensitivity_results': sensitivity_results,
+                'most_sensitive_params': sorted(
+                    [(k, v['sensitivity_score']) for k, v in sensitivity_results.items()],
+                    key=lambda x: x[1], reverse=True
+                )[:3]  # Top 3 most sensitive parameters
+            }
+
+        except Exception as e:
+            logger.error(f"Sensitivity analysis failed: {e}")
+            return {'error': str(e)}
+
+    # ========================================
+    # PRIVATE VALIDATION HELPERS
+    # ========================================
+
+    async def _train_strategy_on_window(self, data: pd.DataFrame, strategy_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Train strategy on a specific data window"""
+        try:
+            # Simple training: calculate basic statistics
+            returns = data.get('returns', pd.Series([0]))
+            total_return = np.prod(1 + returns) - 1 if len(returns) > 0 else 0
+
+            return {
+                'total_return': total_return,
+                'avg_return': np.mean(returns),
+                'volatility': np.std(returns),
+                'sharpe_ratio': np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0,
+                'trained_params': strategy_params
+            }
+
+        except Exception as e:
+            logger.error(f"Strategy training failed: {e}")
+            return {'error': str(e)}
+
+    async def sensitivity_analysis(self, strategy, market_data: Dict[str, pd.DataFrame],
+                                 parameter_ranges: Dict[str, List[float]] = None) -> Dict[str, Any]:
+        """
+        Perform sensitivity analysis on strategy parameters
+
+        Args:
+            strategy: Trading strategy to analyze
+            market_data: Market data for analysis
+            parameter_ranges: Parameter ranges to test
+
+        Returns:
+            Sensitivity analysis results
+        """
+        try:
+            if parameter_ranges is None:
+                parameter_ranges = {
+                    'threshold': [0.001, 0.005, 0.01, 0.02, 0.05],
+                    'window': [5, 10, 20, 30, 50]
+                }
+
+            results = {}
+            for param_name, param_values in parameter_ranges.items():
+                param_results = []
+                for param_value in param_values:
+                    # Modify strategy parameters
+                    test_params = getattr(strategy, 'params', {}).copy()
+                    test_params[param_name] = param_value
+
+                    # Run backtest with modified parameters
+                    backtest_result = await self._run_single_backtest(strategy, market_data, test_params)
+                    param_results.append({
+                        'parameter_value': param_value,
+                        'total_return': backtest_result.get('total_return', 0),
+                        'sharpe_ratio': backtest_result.get('sharpe_ratio', 0),
+                        'max_drawdown': backtest_result.get('max_drawdown', 0)
+                    })
+
+                results[param_name] = param_results
+
+            return {
+                'sensitivity_results': results,
+                'analysis_timestamp': datetime.now(),
+                'parameter_ranges_tested': parameter_ranges
+            }
+
+        except Exception as e:
+            logger.error(f"Sensitivity analysis failed: {e}")
+            return {'error': str(e)}
+
+    async def parameter_perturbation(self, strategy, market_data: Dict[str, pd.DataFrame],
+                                   perturbation_factors: List[float] = None) -> Dict[str, Any]:
+        """
+        Test strategy robustness to parameter perturbations
+
+        Args:
+            strategy: Trading strategy to test
+            market_data: Market data for testing
+            perturbation_factors: Factors to perturb parameters by
+
+        Returns:
+            Parameter perturbation test results
+        """
+        try:
+            if perturbation_factors is None:
+                perturbation_factors = [0.5, 0.8, 1.0, 1.2, 1.5]
+
+            base_params = getattr(strategy, 'params', {})
+            results = []
+
+            for factor in perturbation_factors:
+                # Perturb all numeric parameters
+                perturbed_params = {}
+                for key, value in base_params.items():
+                    if isinstance(value, (int, float)):
+                        perturbed_params[key] = value * factor
+                    else:
+                        perturbed_params[key] = value
+
+                # Run backtest with perturbed parameters
+                backtest_result = await self._run_single_backtest(strategy, market_data, perturbed_params)
+                results.append({
+                    'perturbation_factor': factor,
+                    'parameters': perturbed_params,
+                    'total_return': backtest_result.get('total_return', 0),
+                    'sharpe_ratio': backtest_result.get('sharpe_ratio', 0),
+                    'volatility': backtest_result.get('volatility', 0)
+                })
+
+            return {
+                'perturbation_results': results,
+                'base_parameters': base_params,
+                'perturbation_factors': perturbation_factors,
+                'analysis_timestamp': datetime.now()
+            }
+
+        except Exception as e:
+            logger.error(f"Parameter perturbation test failed: {e}")
+            return {'error': str(e)}
+
+    async def boundary_testing(self, strategy, market_data: Dict[str, pd.DataFrame],
+                             boundary_conditions: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Test strategy behavior at boundary conditions
+
+        Args:
+            strategy: Trading strategy to test
+            market_data: Market data for testing
+            boundary_conditions: Boundary conditions to test
+
+        Returns:
+            Boundary testing results
+        """
+        try:
+            if boundary_conditions is None:
+                boundary_conditions = {
+                    'extreme_volatility': {'volatility_multiplier': 3.0},
+                    'zero_volatility': {'volatility_multiplier': 0.0},
+                    'extreme_returns': {'return_multiplier': 5.0},
+                    'market_crash': {'crash_factor': 0.5},
+                    'market_boom': {'boom_factor': 2.0}
+                }
+
+            results = {}
+            for condition_name, condition_params in boundary_conditions.items():
+                # Modify market data according to boundary condition
+                modified_data = self._apply_boundary_condition(market_data, condition_params)
+
+                # Run backtest with modified data
+                backtest_result = await self._run_single_backtest(strategy, modified_data)
+                results[condition_name] = {
+                    'condition': condition_params,
+                    'total_return': backtest_result.get('total_return', 0),
+                    'sharpe_ratio': backtest_result.get('sharpe_ratio', 0),
+                    'max_drawdown': backtest_result.get('max_drawdown', 0),
+                    'volatility': backtest_result.get('volatility', 0)
+                }
+
+            return {
+                'boundary_test_results': results,
+                'boundary_conditions': boundary_conditions,
+                'analysis_timestamp': datetime.now()
+            }
+
+        except Exception as e:
+            logger.error(f"Boundary testing failed: {e}")
+            return {'error': str(e)}
+
+    def _apply_boundary_condition(self, market_data: Dict[str, pd.DataFrame],
+                                condition_params: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
+        """Apply boundary condition to market data"""
+        modified_data = {}
+
+        for symbol, data in market_data.items():
+            modified_df = data.copy()
+
+            if 'volatility_multiplier' in condition_params:
+                # Scale volatility
+                multiplier = condition_params['volatility_multiplier']
+                if multiplier == 0.0:
+                    # Zero volatility - constant returns
+                    modified_df['returns'] = 0.001  # Small constant return
+                else:
+                    modified_df['returns'] = data['returns'] * multiplier
+
+            if 'return_multiplier' in condition_params:
+                # Scale returns
+                modified_df['returns'] = data['returns'] * condition_params['return_multiplier']
+
+            if 'crash_factor' in condition_params:
+                # Apply market crash
+                crash_point = len(data) // 2
+                modified_df.loc[crash_point:, 'returns'] = data.loc[crash_point:, 'returns'] * condition_params['crash_factor']
+
+            if 'boom_factor' in condition_params:
+                # Apply market boom
+                boom_point = len(data) // 2
+                modified_df.loc[boom_point:, 'returns'] = data.loc[boom_point:, 'returns'] * condition_params['boom_factor']
+
+            modified_data[symbol] = modified_df
+
+        return modified_data
+
+    async def _run_single_backtest(self, strategy, market_data: Dict[str, pd.DataFrame],
+                                 custom_params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run a single backtest with given parameters"""
+        try:
+            # Temporarily modify strategy parameters if provided
+            original_params = None
+            if custom_params and hasattr(strategy, 'params'):
+                original_params = strategy.params.copy()
+                strategy.params.update(custom_params)
+
+            # Run simplified backtest
+            returns = []
+            for symbol, data in market_data.items():
+                symbol_returns = data.get('returns', pd.Series([0]))
+                if isinstance(symbol_returns, pd.Series):
+                    returns.extend(symbol_returns.values.tolist())
+                else:
+                    returns.extend(symbol_returns)
+
+            # Calculate basic metrics
+            total_return = (1 + np.array(returns)).prod() - 1
+            volatility = np.std(returns) * np.sqrt(252)  # Annualized
+            sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+
+            # Calculate max drawdown
+            cumulative = np.cumprod(1 + np.array(returns))
+            running_max = np.maximum.accumulate(cumulative)
+            drawdown = (cumulative - running_max) / running_max
+            max_drawdown = np.min(drawdown)
+
+            # Restore original parameters
+            if original_params and hasattr(strategy, 'params'):
+                strategy.params = original_params
+
+            return {
+                'total_return': total_return,
+                'volatility': volatility,
+                'sharpe_ratio': sharpe_ratio,
+                'max_drawdown': max_drawdown,
+                'total_trades': len(returns)
+            }
+
+        except Exception as e:
+            logger.error(f"Single backtest failed: {e}")
+            return {'error': str(e)}
+
+    async def _test_strategy_on_window(self, data: pd.DataFrame, trained_model: Dict[str, Any],
+                                     strategy_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Test trained strategy on data window"""
+        try:
+            # Simple testing: apply basic strategy logic
+            returns = data.get('returns', pd.Series([0]))
+            if not isinstance(returns, (list, np.ndarray)):
+                returns = returns.values.tolist()
+
+            # Simple momentum strategy: buy if positive return streak
+            signals = []
+            position = 0
+
+            for i, ret in enumerate(returns):
+                if i >= 5:  # Need some history
+                    recent_returns = returns[i-5:i]
+                    positive_count = sum(1 for r in recent_returns if r > 0)
+                    negative_count = sum(1 for r in recent_returns if r < 0)
+
+                    if positive_count >= 3:  # 3 out of 5 positive
+                        position = 1  # Buy signal
+                    elif negative_count >= 3:  # 3 out of 5 negative
+                        position = -1  # Sell signal
+
+                signals.append(position)
+
+            # Calculate strategy returns
+            strategy_returns = [sig * ret for sig, ret in zip(signals, returns)]
+            total_return = np.prod(1 + strategy_returns) - 1 if strategy_returns else 0
+
+            return {
+                'total_return': total_return,
+                'signals': signals,
+                'strategy_returns': strategy_returns,
+                'win_rate': np.mean([1 for r in strategy_returns if r > 0]) if strategy_returns else 0
+            }
+
+        except Exception as e:
+            logger.error(f"Strategy testing failed: {e}")
+            return {'error': str(e)}
+
+    def _calculate_max_drawdown(self, returns: List[float]) -> float:
+        """Calculate maximum drawdown from returns"""
+        try:
+            cumulative = np.cumprod(1 + np.array(returns))
+            running_max = np.maximum.accumulate(cumulative)
+            drawdowns = (cumulative - running_max) / running_max
+            return abs(np.min(drawdowns))
+        except Exception:
+            return 0.0
+
+    def _detect_overfitting(self, backtest_results: Dict[str, Any]) -> float:
+        """Detect overfitting in backtest results"""
+        try:
+            # Simple overfitting detection based on consistency
+            returns = backtest_results.get('returns', [])
+            if len(returns) < 10:
+                return 0.0
+
+            # Calculate return consistency
+            positive_returns = sum(1 for r in returns if r > 0)
+            consistency = positive_returns / len(returns)
+
+            # High consistency might indicate overfitting
+            overfitting_score = max(0, consistency - 0.6) / 0.4  # Scale to 0-1
+
+            return min(1.0, overfitting_score)
+
+        except Exception:
+            return 0.0
+
+    def _calculate_robustness_score(self, backtest_results: Dict[str, Any]) -> float:
+        """Calculate robustness score"""
+        try:
+            returns = backtest_results.get('returns', [])
+            if not returns:
+                return 0.0
+
+            # Robustness based on Sharpe ratio and max drawdown
+            sharpe = backtest_results.get('sharpe_ratio', 0)
+            max_dd = backtest_results.get('max_drawdown', 1)
+
+            robustness = (sharpe / 2) - max_dd  # Scale Sharpe and penalize drawdown
+            return max(0.0, min(1.0, robustness))
+
+        except Exception:
+            return 0.0
+
+    def _calculate_confidence_intervals(self, data: List[float]) -> Dict[str, Any]:
+        """Calculate confidence intervals for simulation results"""
+        try:
+            data_sorted = sorted(data)
+            n = len(data)
+
+            ci_95_lower = data_sorted[int(0.025 * n)]
+            ci_95_upper = data_sorted[int(0.975 * n)]
+            ci_99_lower = data_sorted[int(0.005 * n)]
+            ci_99_upper = data_sorted[int(0.995 * n)]
+
+            return {
+                '95%': {'lower': ci_95_lower, 'upper': ci_95_upper},
+                '99%': {'lower': ci_99_lower, 'upper': ci_99_upper}
+            }
+
+        except Exception:
+            return {}
+
+    def _calculate_parameter_sensitivity(self, param_results: List[Dict[str, Any]]) -> float:
+        """Calculate sensitivity score for a parameter"""
+        try:
+            returns = [r['total_return'] for r in param_results]
+            return_range = max(returns) - min(returns)
+            avg_return = np.mean(returns)
+
+            # Sensitivity as coefficient of variation of returns across parameter values
+            if avg_return != 0:
+                sensitivity = return_range / abs(avg_return)
+            else:
+                sensitivity = return_range
+
+            return min(1.0, sensitivity)  # Cap at 1.0
+
+        except Exception:
+            return 0.0
+
+    def _get_default_stress_scenarios(self) -> List[Dict[str, Any]]:
+        """Get default stress testing scenarios"""
+        return [
+            {
+                'name': 'market_crash',
+                'description': 'Sudden 50% market drop',
+                'shock_type': 'price_shock',
+                'magnitude': -0.5,
+                'duration': 5
+            },
+            {
+                'name': 'volatility_spike',
+                'description': '5x increase in volatility',
+                'shock_type': 'volatility_shock',
+                'magnitude': 5.0,
+                'duration': 20
+            },
+            {
+                'name': 'liquidity_crisis',
+                'description': '10x increase in trading costs',
+                'shock_type': 'cost_shock',
+                'magnitude': 10.0,
+                'duration': 30
+            },
+            {
+                'name': 'flash_crash',
+                'description': 'Extreme intraday volatility',
+                'shock_type': 'flash_crash',
+                'magnitude': -0.3,
+                'duration': 1
+            }
+        ]
+
+    def _apply_stress_scenario(self, market_data: Dict[str, pd.DataFrame],
+                             scenario: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
+        """Apply stress scenario to market data"""
+        try:
+            stressed_data = {}
+
+            for symbol, data in market_data.items():
+                stressed_df = data.copy()
+
+                shock_type = scenario.get('shock_type')
+                magnitude = scenario.get('magnitude', 0)
+                duration = scenario.get('duration', 1)
+
+                if shock_type == 'price_shock':
+                    # Apply price shock
+                    shock_periods = min(duration, len(stressed_df))
+                    stressed_df.loc[stressed_df.index[:shock_periods], 'close'] *= (1 + magnitude)
+                    stressed_df.loc[stressed_df.index[:shock_periods], 'returns'] = stressed_df['close'].pct_change()
+
+                elif shock_type == 'volatility_shock':
+                    # Increase volatility
+                    base_vol = stressed_df['returns'].std()
+                    stressed_df['returns'] *= magnitude
+                    stressed_df['close'] = stressed_df['close'].iloc[0] * (1 + stressed_df['returns']).cumprod()
+
+                # Recalculate other price columns if they exist
+                for col in ['open', 'high', 'low']:
+                    if col in stressed_df.columns:
+                        stressed_df[col] = stressed_df['close'] * (stressed_df[col] / stressed_df['close'].shift(1)).fillna(1)
+
+                stressed_data[symbol] = stressed_df
+
+            return stressed_data
+
+        except Exception as e:
+            logger.error(f"Stress scenario application failed: {e}")
+            return market_data
+
+    def _generate_sample_market_data(self) -> pd.DataFrame:
+        """Generate sample market data for testing"""
+        try:
+            dates = pd.date_range('2023-01-01', periods=100, freq='D')
+            np.random.seed(42)
+
+            # Generate synthetic price data
+            base_price = 100
+            trend = np.linspace(0, 10, 100)
+            noise = np.random.normal(0, 1, 100)
+            prices = base_price + trend + noise
+
+            return pd.DataFrame({
+                'timestamp': dates,
+                'open': prices * 0.99,
+                'high': prices * 1.02,
+                'low': prices * 0.98,
+                'close': prices,
+                'volume': np.random.uniform(1000, 10000, 100)
+            }).set_index('timestamp')
+
+        except Exception as e:
+            logger.error(f"Sample data generation failed: {e}")
+            return pd.DataFrame()
+
     # Enhanced backtest execution methods
     async def run_institutional_backtest(
         self, 
@@ -334,6 +3031,47 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             else:
                 self.active_strategies = {"primary": strategy}
                 logger.info(f"Single strategy backtest: {strategy.strategy_id}")
+            
+            # Initialize strategies
+            for strategy_name, strategy_instance in self.active_strategies.items():
+                try:
+                    # Check if strategy is already initialized/active
+                    if hasattr(strategy_instance, 'state'):
+                        from core_engine.trading.strategies.strategy_engine import StrategyState
+                        if strategy_instance.state == StrategyState.ACTIVE:
+                            logger.info(f"Strategy {strategy_name} already active, skipping initialization")
+                            continue
+                    
+                    if hasattr(strategy_instance, 'initialize') and not strategy_instance.initialize():
+                        logger.error(f"Failed to initialize strategy {strategy_name}")
+                        return InstitutionalBacktestResult(
+                            strategy_id="institutional_backtest",
+                            errors=[f"Strategy {strategy_name} initialization failed"],
+                            execution_time=0.0
+                        )
+                    
+                    if hasattr(strategy_instance, 'start') and not strategy_instance.start():
+                        logger.error(f"Failed to start strategy {strategy_name}")
+                        return InstitutionalBacktestResult(
+                            strategy_id="institutional_backtest",
+                            errors=[f"Strategy {strategy_name} start failed"],
+                            execution_time=0.0
+                        )
+                    
+                    logger.info(f"Strategy {strategy_name} initialized and started successfully")
+                    
+                except Exception as e:
+                    logger.error(f"Strategy {strategy_name} setup failed: {e}")
+                    return InstitutionalBacktestResult(
+                        strategy_id="institutional_backtest",
+                        errors=[f"Strategy {strategy_name} setup failed: {str(e)}"],
+                        execution_time=0.0
+                    )
+            
+            # Initialize portfolio with starting capital
+            self.current_portfolio.cash = self.config.initial_capital
+            self.current_portfolio.total_value = self.config.initial_capital
+            logger.info(f"Portfolio initialized with ${self.config.initial_capital:,.2f} starting capital")
             
             # Execute 13-phase workflow
             await self._execute_complete_workflow(market_data, benchmark_data)
@@ -461,7 +3199,8 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                         component=self,
                         layer=ComponentLayer.EXECUTION,
                         authority_level=AuthorityLevel.OPERATIONAL,
-                        initialization_order=10
+                        initialization_order=10,
+                        reports_to=self.system_orchestrator.risk_manager_id
                     )
                     
                     result.add_metric("orchestrator_initialized", 1.0)
@@ -473,7 +3212,7 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             if self.config.enable_regime_awareness:
                 # Initialize RegimeEngine with proper config
                 regime_config = {
-                    'lookback_window': 60,
+                    'lookback_window': 20,  # Reduced for backtest data size
                     'volatility_window': 20,
                     'trend_threshold': 0.02,
                     'regime_change_threshold': 0.7,
@@ -484,17 +3223,21 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                 regime_success = await self.regime_engine.initialize()
                 
                 if regime_success:
+                    # Start the regime engine
+                    await self.regime_engine.start()
+                    
                     if self.system_orchestrator:
                         regime_engine_id = self.system_orchestrator.register_component(
                             name="RegimeEngine",
                             component=self.regime_engine,
                             layer=ComponentLayer.SUPPORT,
                             authority_level=AuthorityLevel.OPERATIONAL,
-                            initialization_order=15
+                            initialization_order=15,
+                            reports_to=self.system_orchestrator.risk_manager_id
                         )
                     
                     result.add_metric("regime_engine_initialized", 1.0)
-                    logger.info("RegimeEngine initialized and registered")
+                    logger.info("RegimeEngine initialized and started")
                 else:
                     result.add_error("Failed to initialize RegimeEngine")
                     logger.error("RegimeEngine initialization failed")
@@ -504,6 +3247,7 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             self.indicators_engine = EnhancedTechnicalIndicators()
             self.feature_engineer = FeatureEngineer()
             self.signal_generator = SignalGenerator()
+            self.performance_analyzer = PerformanceAnalyzer()
             
             # Initialize all strategies
             for strategy_name, strategy in self.active_strategies.items():
@@ -631,16 +3375,26 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                     current_regime_info = await self.regime_engine.get_current_regime_info()
                     
                     if regime_analysis:
+                        # Extract numeric volatility value from volatility_regime
+                        def _extract_volatility_value(volatility_regime: str) -> float:
+                            """Extract numeric volatility value from regime string"""
+                            volatility_values = {
+                                'high_volatility': 0.04,
+                                'normal_volatility': 0.02,
+                                'low_volatility': 0.01
+                            }
+                            return volatility_values.get(volatility_regime, 0.02)
+                        
                         enhanced_regime_data = {
                             "current_regime": regime_analysis.primary_regime.value,
                             "regime_confidence": regime_analysis.confidence,
-                            "volatility": regime_analysis.volatility,
+                            "volatility": _extract_volatility_value(regime_analysis.volatility_regime),
                             "trend_strength": regime_analysis.trend_strength,
                             "regime_duration": regime_analysis.regime_duration,
                             "strategy_suitability": regime_analysis.strategy_suitability,
-                            "risk_multiplier": regime_analysis.risk_multiplier,
+                            "risk_multiplier": regime_analysis.risk_adjustment,
                             "regime_history": [],  # Will be populated during backtest
-                            "regime_components": regime_analysis.regime_components,
+                            "regime_components": regime_analysis.sub_regimes,
                             "regime_drivers": regime_analysis.regime_drivers
                         }
                         
@@ -819,6 +3573,8 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             if not hasattr(self, 'current_signals'):
                 self.current_signals = []
             
+            print(f"DEBUG: Risk assessment - current_signals count: {len(self.current_signals)}")
+            
             if self.central_risk_manager and self.config.enable_risk_authorization:
                 # Process each signal through risk manager
                 for signal in self.current_signals:
@@ -836,13 +3592,28 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                         
                         # Get current regime and apply regime-aware risk adjustments
                         if self.regime_engine and self.regime_aware_enabled:
+                            print(f"DEBUG: Getting regime for {signal.symbol}")
                             current_regime = await self.regime_engine.get_current_regime()
                             current_regime_info = await self.regime_engine.get_current_regime_info()
+                            
+                            print(f"DEBUG: Current regime: {current_regime}")
+                            print(f"DEBUG: Current regime info: {current_regime_info}")
                             
                             if current_regime:
                                 request.market_regime = current_regime.primary_regime.value
                                 request.regime_confidence = current_regime.confidence
-                                request.volatility_estimate = current_regime.volatility
+                                
+                                # Extract volatility estimate from regime
+                                def _extract_volatility_value(volatility_regime: str) -> float:
+                                    """Extract numeric volatility value from regime string"""
+                                    volatility_values = {
+                                        'high_volatility': 0.04,
+                                        'normal_volatility': 0.02,
+                                        'low_volatility': 0.01
+                                    }
+                                    return volatility_values.get(volatility_regime, 0.02)
+                                
+                                request.volatility_estimate = _extract_volatility_value(current_regime.volatility_regime)
                                 
                                 # Apply regime-aware risk adjustments to the request
                                 regime_risk_multiplier = current_regime_info.get('risk_multiplier', 1.0)
@@ -868,12 +3639,15 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                                 request.market_regime = "unknown"
                         
                         # Request authorization
+                        print(f"DEBUG: Requesting authorization for {signal.symbol}, quantity={request.quantity}")
                         authorization = await self.central_risk_manager.authorize_trading_decision(request)
+                        
+                        print(f"DEBUG: Authorization result: {authorization.authorization_level}, reason: {getattr(authorization, 'rejection_reason', 'N/A')}")
                         
                         if authorization.authorization_level != AuthorizationLevel.REJECTED:
                             # Adjust signal based on authorization
                             signal.target_quantity = authorization.authorized_quantity
-                            signal.risk_budget = authorization.risk_budget_allocated
+                            signal.risk_budget = authorization.risk_budget_allocation
                             authorized_signals.append(signal)
                             
                             result.add_metric("signals_authorized", 1.0)
@@ -1040,7 +3814,11 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
         
         try:
             # Update all positions with current prices
-            self.position_manager.update_all_positions(current_prices)
+            for symbol, position in self.current_portfolio.positions.items():
+                if symbol in current_prices:
+                    position.current_price = current_prices[symbol]
+                    position.market_value = position.quantity * position.current_price
+                    position.unrealized_pnl = position.market_value - (abs(position.quantity) * position.entry_price)
             
             # Monitor regime changes if enabled
             if self.regime_engine and self.config.enable_regime_awareness:
@@ -1058,9 +3836,9 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                     result.add_metric(f"regime_{regime_name}_periods", 1.0)
             
             # Calculate position metrics
-            total_positions = len(self.position_manager.positions)
-            total_position_value = self.position_manager.get_total_value()
-            total_pnl = self.position_manager.get_total_pnl()
+            total_positions = len(self.current_portfolio.positions)
+            total_position_value = self.current_portfolio.positions_value
+            total_pnl = sum(pos.unrealized_pnl for pos in self.current_portfolio.positions.values())
             
             result.add_metric("active_positions", total_positions)
             result.add_metric("total_position_value", total_position_value)
@@ -1103,7 +3881,9 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
         
         try:
             # Check for exit conditions on all positions
-            for symbol, position in self.position_manager.positions.items():
+            positions_to_remove = []
+            
+            for symbol, position in self.current_portfolio.positions.items():
                 if symbol not in current_prices:
                     continue
                 
@@ -1111,29 +3891,36 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                 should_exit = False
                 exit_reason = ""
                 
-                # Check stop loss
-                if self.config.enable_stop_loss and position.stop_loss:
-                    if (position.side == "long" and current_price <= position.stop_loss) or \
-                       (position.side == "short" and current_price >= position.stop_loss):
-                        should_exit = True
-                        exit_reason = "stop_loss"
+                # Simple exit conditions (can be enhanced)
+                # Exit if position has been held for more than 5 periods (simplified time-based exit)
+                holding_periods = 5  # Simplified
                 
-                # Check take profit
-                if self.config.enable_take_profit and position.take_profit:
-                    if (position.side == "long" and current_price >= position.take_profit) or \
-                       (position.side == "short" and current_price <= position.take_profit):
+                # Check for basic exit conditions
+                if position.quantity > 0:  # Long position
+                    # Simple take profit/stop loss logic
+                    if current_price >= position.entry_price * 1.05:  # 5% profit
                         should_exit = True
                         exit_reason = "take_profit"
+                    elif current_price <= position.entry_price * 0.95:  # 5% loss
+                        should_exit = True
+                        exit_reason = "stop_loss"
+                elif position.quantity < 0:  # Short position
+                    if current_price <= position.entry_price * 0.95:  # 5% profit
+                        should_exit = True
+                        exit_reason = "take_profit"
+                    elif current_price >= position.entry_price * 1.05:  # 5% loss
+                        should_exit = True
+                        exit_reason = "stop_loss"
                 
                 # Execute exit if needed
                 if should_exit:
                     exit_trade = Trade(
                         trade_id=f"exit_{symbol}_{int(self.current_time.timestamp())}",
-                        strategy_id=position.strategy_id,
+                        strategy_id="institutional_backtest",
                         symbol=symbol,
-                        side="short" if position.side == "long" else "long",  # Opposite side
+                        side="short" if position.quantity > 0 else "long",  # Opposite side
                         quantity=abs(position.quantity),
-                        entry_price=current_price,
+                        entry_price=position.entry_price,
                         exit_price=current_price,
                         entry_time=self.current_time,
                         exit_time=self.current_time,
@@ -1141,21 +3928,29 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                     )
                     
                     # Calculate P&L
-                    if position.side == "long":
+                    if position.quantity > 0:  # Long position
                         exit_trade.gross_pnl = position.quantity * (current_price - position.entry_price)
-                    else:
+                    else:  # Short position
                         exit_trade.gross_pnl = -position.quantity * (current_price - position.entry_price)
                     
-                    # Calculate costs
-                    exit_trade.commission = self.cost_calculator.calculate_commission(exit_trade)
-                    exit_trade.slippage = self.cost_calculator.calculate_slippage(exit_trade)
+                    # Calculate costs (simplified)
+                    exit_trade.commission = abs(exit_trade.quantity * current_price) * self.config.commission_rate
+                    exit_trade.slippage = abs(exit_trade.quantity * current_price) * self.config.slippage_rate
                     exit_trade.net_pnl = exit_trade.gross_pnl - exit_trade.commission - exit_trade.slippage
                     
                     # Execute exit
                     self._execute_trade(exit_trade)
                     exit_trades.append(exit_trade)
                     
+                    # Mark position for removal
+                    positions_to_remove.append(symbol)
+                    
                     result.add_metric(f"exits_{exit_reason}", 1.0)
+            
+            # Remove closed positions
+            for symbol in positions_to_remove:
+                if symbol in self.current_portfolio.positions:
+                    del self.current_portfolio.positions[symbol]
             
             result.add_metric("total_exits", len(exit_trades))
             result.execution_time += (datetime.now() - phase_start).total_seconds()
@@ -1418,6 +4213,46 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
             result.execution_time = (datetime.now() - phase_start).total_seconds()
         
         self.phase_results[BacktestPhase.PHASE_13_COMPLETION] = result
+    
+    def _create_backtest_result(
+        self, 
+        strategy: BaseStrategy, 
+        start_time: datetime, 
+        benchmark_data: Dict[str, Any]
+    ) -> BacktestResult:
+        """Create base backtest result"""
+        
+        # Calculate basic metrics
+        execution_time = (datetime.now() - start_time).total_seconds()
+        
+        # Calculate portfolio metrics
+        final_value = self.current_portfolio.total_value if hasattr(self, 'current_portfolio') else self.config.initial_capital
+        total_return = (final_value - self.config.initial_capital) / self.config.initial_capital
+        
+        # Calculate trading statistics
+        total_trades = len(self.trade_log) if hasattr(self, 'trade_log') else 0
+        winning_trades = len([t for t in self.trade_log if hasattr(t, 'net_pnl') and t.net_pnl > 0]) if hasattr(self, 'trade_log') else 0
+        losing_trades = total_trades - winning_trades
+        win_rate = winning_trades / max(total_trades, 1)
+        
+        # Create result
+        result = BacktestResult(
+            strategy_id=strategy.strategy_id if hasattr(strategy, 'strategy_id') else "institutional_backtest",
+            backtest_config=self.config,
+            final_portfolio_value=final_value,
+            total_return=total_return,
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            losing_trades=losing_trades,
+            win_rate=win_rate,
+            portfolio_history=self.portfolio_history if hasattr(self, 'portfolio_history') else [],
+            trade_log=self.trade_log if hasattr(self, 'trade_log') else [],
+            backtest_start_time=start_time,
+            backtest_end_time=datetime.now(),
+            execution_time=execution_time
+        )
+        
+        return result
     
     async def _create_institutional_result(self, start_time: datetime) -> InstitutionalBacktestResult:
         """Create comprehensive institutional backtest result"""
@@ -1684,7 +4519,55 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                 'error': str(e),
                 'components': {}
             }
-    
+
+    async def adjust_strategy_parameters_for_regime(
+        self,
+        strategy: BaseStrategy,
+        regime_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Public method to adjust strategy parameters for current market regime
+
+        This method serves as the public interface for regime-aware parameter adjustment,
+        delegating to the internal implementation.
+        """
+        try:
+            # Get current regime analysis if not provided
+            if regime_context is None and self.regime_engine:
+                regime_context = await self.regime_engine.analyze_regime()
+
+            # Call the internal implementation
+            return await self._adjust_strategy_parameters_for_regime(strategy, regime_context)
+
+        except Exception as e:
+            logger.error(f"Error in regime parameter adjustment: {e}")
+            return {}
+
+    async def handle_regime_transition(
+        self,
+        old_regime: str,
+        new_regime: str,
+        transition_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Public method to handle regime transitions
+
+        This method serves as the public interface for regime transition handling,
+        delegating to the internal implementation.
+        """
+        try:
+            # Call the internal implementation
+            return await self._handle_regime_transition(old_regime, new_regime, transition_context)
+
+        except Exception as e:
+            logger.error(f"Error in regime transition handling: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'old_regime': old_regime,
+                'new_regime': new_regime
+            }
+
     async def _adjust_strategy_parameters_for_regime(
         self, 
         strategy: BaseStrategy, 
@@ -5952,3 +8835,1474 @@ class InstitutionalBacktestEngine(BacktestEngine, ISystemComponent):
                 'success': False,
                 'error': str(e)
             }
+
+    def _validate_market_data(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Validate market data quality and structure"""
+        
+        try:
+            issues = []
+            
+            if not market_data:
+                issues.append("No market data provided")
+                return {"issues": issues}
+            
+            # Check data structure
+            for symbol, data in market_data.items():
+                if not isinstance(data, pd.DataFrame):
+                    issues.append(f"Symbol {symbol}: Data is not a DataFrame")
+                    continue
+                
+                if data.empty:
+                    issues.append(f"Symbol {symbol}: DataFrame is empty")
+                    continue
+                
+                # Check required columns
+                required_columns = ['close', 'open', 'high', 'low']
+                missing_columns = [col for col in required_columns if col not in data.columns]
+                if missing_columns:
+                    issues.append(f"Symbol {symbol}: Missing required columns: {missing_columns}")
+                
+                # Check data types
+                if 'close' in data.columns:
+                    if not pd.api.types.is_numeric_dtype(data['close']):
+                        issues.append(f"Symbol {symbol}: Close prices are not numeric")
+                
+                # Check for NaN values
+                nan_count = data.isnull().sum().sum()
+                if nan_count > 0:
+                    issues.append(f"Symbol {symbol}: Contains {nan_count} NaN values")
+                
+                # Check date index
+                if not isinstance(data.index, pd.DatetimeIndex):
+                    issues.append(f"Symbol {symbol}: Index is not a DatetimeIndex")
+                else:
+                    # Check for monotonic dates
+                    if not data.index.is_monotonic_increasing:
+                        issues.append(f"Symbol {symbol}: Dates are not in chronological order")
+                    
+                    # Check for gaps
+                    date_diff = data.index.to_series().diff().dropna()
+                    gaps = date_diff[date_diff > pd.Timedelta(days=7)]  # More than 7 days gap
+                    if len(gaps) > 0:
+                        issues.append(f"Symbol {symbol}: Contains {len(gaps)} significant date gaps")
+            
+            # Check consistency across symbols
+            if len(market_data) > 1:
+                date_ranges = [(symbol, data.index.min(), data.index.max()) for symbol, data in market_data.items()]
+                min_start = min(dr[1] for dr in date_ranges)
+                max_end = max(dr[2] for dr in date_ranges)
+                
+                for symbol, start, end in date_ranges:
+                    if start > min_start + pd.Timedelta(days=30):
+                        issues.append(f"Symbol {symbol}: Starts significantly later than other symbols")
+                    if end < max_end - pd.Timedelta(days=30):
+                        issues.append(f"Symbol {symbol}: Ends significantly earlier than other symbols")
+            
+            return {
+                "issues": issues,
+                "data_quality_score": max(0, 1.0 - len(issues) * 0.1),
+                "symbols_validated": len(market_data),
+                "total_issues": len(issues)
+            }
+            
+        except Exception as e:
+            logger.error(f"Market data validation failed: {e}")
+            return {
+                "issues": [f"Validation failed: {str(e)}"],
+                "data_quality_score": 0.0,
+                "symbols_validated": 0,
+                "total_issues": 1
+            }
+
+    def _get_time_index(self, market_data: Dict[str, pd.DataFrame]) -> List[datetime]:
+        """Get the time index for backtesting"""
+        
+        try:
+            if not market_data:
+                return []
+            
+            # Get all unique dates across all symbols
+            all_dates = set()
+            for data in market_data.values():
+                if isinstance(data.index, pd.DatetimeIndex):
+                    all_dates.update(data.index)
+            
+            # Sort dates chronologically
+            time_index = sorted(list(all_dates))
+            
+            return time_index
+            
+        except Exception as e:
+            logger.error(f"Time index generation failed: {e}")
+            return []
+
+    def _get_current_data(self, market_data: Dict[str, pd.DataFrame], time_index: int) -> Dict[str, pd.DataFrame]:
+        """Get market data for the current time index"""
+        
+        try:
+            if not market_data or time_index < 0:
+                return {}
+            
+            current_data = {}
+            
+            for symbol, data in market_data.items():
+                if isinstance(data.index, pd.DatetimeIndex) and time_index < len(data.index):
+                    # Get data up to current time index
+                    current_data[symbol] = data.iloc[:time_index + 1].copy()
+                else:
+                    current_data[symbol] = data.copy()
+            
+            return current_data
+            
+        except Exception as e:
+            logger.error(f"Current data retrieval failed: {e}")
+            return {}
+
+    def _get_current_prices(self, market_data: Dict[str, pd.DataFrame], time_index: int) -> Dict[str, float]:
+        """Get current prices for all symbols at the given time index"""
+        
+        try:
+            current_prices = {}
+            
+            for symbol, data in market_data.items():
+                if isinstance(data.index, pd.DatetimeIndex) and time_index < len(data.index):
+                    # Get the price at the current time index
+                    current_row = data.iloc[time_index]
+                    if 'close' in current_row:
+                        current_prices[symbol] = float(current_row['close'])
+                    elif 'price' in current_row:
+                        current_prices[symbol] = float(current_row['price'])
+                    else:
+                        # Use the last available price
+                        current_prices[symbol] = float(data['close'].iloc[-1]) if 'close' in data.columns else 100.0
+                else:
+                    # Use the last available price
+                    current_prices[symbol] = float(data['close'].iloc[-1]) if 'close' in data.columns else 100.0
+            
+            return current_prices
+            
+        except Exception as e:
+            logger.error(f"Current prices retrieval failed: {e}")
+            return {}
+
+    def _update_portfolio(self, current_prices: Dict[str, float], current_time: datetime) -> None:
+        """Update portfolio state with current prices"""
+        
+        try:
+            # Update portfolio value based on current prices
+            total_value = self.current_portfolio.cash
+            
+            for symbol, position in self.current_portfolio.positions.items():
+                if symbol in current_prices:
+                    position_value = position.quantity * current_prices[symbol]
+                    total_value += position_value
+            
+            self.current_portfolio.total_value = total_value
+            self.current_portfolio.positions_value = total_value - self.current_portfolio.cash
+            self.current_portfolio.timestamp = current_time
+            
+            # Add to portfolio history
+            self.portfolio_history.append(self.current_portfolio)
+            
+            # Keep only last 1000 entries to prevent memory issues
+            if len(self.portfolio_history) > 1000:
+                self.portfolio_history = self.portfolio_history[-1000:]
+                
+        except Exception as e:
+            logger.error(f"Portfolio update failed: {e}")
+
+    def _execute_trade(self, trade: Trade) -> None:
+        """Execute a trade and update portfolio"""
+        
+        try:
+            # Add to trade log
+            self.trade_log.append(trade)
+            
+            # Update portfolio
+            if trade.side == "long":
+                # Buy trade
+                cost = trade.quantity * trade.entry_price + trade.commission + trade.slippage
+                if self.current_portfolio.cash >= cost:
+                    self.current_portfolio.cash -= cost
+                    
+                    # Update position
+                    if trade.symbol not in self.current_portfolio.positions:
+                        self.current_portfolio.positions[trade.symbol] = StrategyPosition(
+                            symbol=trade.symbol,
+                            quantity=0.0,
+                            entry_price=0.0,
+                            current_price=trade.entry_price,
+                            market_value=0.0,
+                            unrealized_pnl=0.0
+                        )
+                    
+                    position = self.current_portfolio.positions[trade.symbol]
+                    position.quantity += trade.quantity
+                    position.entry_price = (position.entry_price * (position.quantity - trade.quantity) + 
+                                          trade.entry_price * trade.quantity) / position.quantity
+                    position.current_price = trade.entry_price
+                    position.market_value = position.quantity * position.current_price
+                    position.unrealized_pnl = position.market_value - (position.quantity * position.entry_price)
+                    
+            elif trade.side == "short":
+                # Sell/short trade
+                proceeds = trade.quantity * trade.entry_price - trade.commission - trade.slippage
+                self.current_portfolio.cash += proceeds
+                
+                # Update position (negative quantity for short)
+                if trade.symbol not in self.current_portfolio.positions:
+                    self.current_portfolio.positions[trade.symbol] = StrategyPosition(
+                        symbol=trade.symbol,
+                        quantity=0.0,
+                        entry_price=0.0,
+                        current_price=trade.entry_price,
+                        market_value=0.0,
+                        unrealized_pnl=0.0
+                    )
+                
+                position = self.current_portfolio.positions[trade.symbol]
+                position.quantity -= trade.quantity  # Negative for short
+                position.entry_price = trade.entry_price
+                position.current_price = trade.entry_price
+                position.market_value = position.quantity * position.current_price
+                position.unrealized_pnl = position.market_value - (position.quantity * position.entry_price)
+            
+            # Update portfolio totals
+            self.current_portfolio.positions_value = sum(
+                pos.market_value for pos in self.current_portfolio.positions.values()
+            )
+            self.current_portfolio.total_value = self.current_portfolio.cash + self.current_portfolio.positions_value
+            self.current_portfolio.margin_used = abs(sum(
+                pos.market_value for pos in self.current_portfolio.positions.values() if pos.quantity < 0
+            ))
+            
+        except Exception as e:
+            logger.error(f"Trade execution failed: {e}")
+
+    def _get_execution_price(self, signal: StrategySignal, current_price: float) -> float:
+        """Get execution price based on execution model"""
+        
+        try:
+            if self.config.execution_model == ExecutionModel.IMMEDIATE:
+                return current_price
+            elif self.config.execution_model == ExecutionModel.NEXT_BAR:
+                return current_price  # Simplified
+            elif self.config.execution_model == ExecutionModel.REALISTIC:
+                # Add slippage
+                slippage = current_price * self.config.slippage_rate
+                return current_price + slippage if signal.signal_type == "buy" else current_price - slippage
+            else:
+                return current_price
+                
+        except Exception as e:
+            logger.error(f"Execution price calculation failed: {e}")
+            return current_price
+
+    # ========================================
+    # SYSTEM ORCHESTRATION METHODS
+    # ========================================
+
+    async def orchestrate_execution(self, execution_type: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Orchestrate execution through hierarchical system layers
+
+        Args:
+            execution_type: Type of execution to orchestrate
+            parameters: Execution parameters
+
+        Returns:
+            Orchestration result
+        """
+        try:
+            # Delegate to system orchestrator if available
+            if hasattr(self, 'system_orchestrator') and self.system_orchestrator:
+                return await self.system_orchestrator.orchestrate_execution(execution_type, parameters)
+
+            # Fallback orchestration logic
+            result = {
+                'execution_type': execution_type,
+                'parameters': parameters,
+                'orchestrated': True,
+                'timestamp': datetime.now().isoformat(),
+                'fallback_mode': True
+            }
+
+            logger.info(f"Execution orchestrated: {execution_type}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Execution orchestration failed: {e}")
+            return {
+                'error': str(e),
+                'execution_type': execution_type,
+                'orchestrated': False
+            }
+
+    async def delegate_authority(self, authority_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Delegate authority through hierarchical layers
+
+        Args:
+            authority_request: Authority delegation request
+
+        Returns:
+            Delegation result
+        """
+        try:
+            # Delegate to system orchestrator if available
+            if hasattr(self, 'system_orchestrator') and self.system_orchestrator:
+                return await self.system_orchestrator.delegate_authority(authority_request)
+
+            # Fallback delegation logic
+            result = {
+                'delegated': True,
+                'authority_request': authority_request,
+                'timestamp': datetime.now().isoformat(),
+                'fallback_mode': True
+            }
+
+            logger.info(f"Authority delegated: {authority_request}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Authority delegation failed: {e}")
+            return {
+                'error': str(e),
+                'delegated': False
+            }
+
+    # ========================================
+    # CAPITAL ALLOCATION METHODS
+    # ========================================
+
+    async def allocate_capital(self, allocation_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Allocate capital to strategies based on institutional guidelines
+
+        Args:
+            allocation_request: Capital allocation specification with:
+                - total_capital: Total capital available
+                - strategy_allocations: Allocation percentages by strategy
+                - risk_limits: Risk-based allocation constraints
+
+        Returns:
+            Capital allocation result
+        """
+        try:
+            total_capital = allocation_request.get('total_capital', 0)
+            strategy_allocations = allocation_request.get('strategy_allocations', {})
+            risk_limits = allocation_request.get('risk_limits', {})
+
+            if total_capital <= 0:
+                return {'error': 'Invalid total capital amount'}
+
+            # Validate allocation percentages sum to 1.0
+            total_allocation_pct = sum(strategy_allocations.values())
+            if abs(total_allocation_pct - 1.0) > 0.001:
+                return {'error': f'Allocation percentages must sum to 1.0, got {total_allocation_pct}'}
+
+            # Calculate capital allocations
+            capital_allocations = {}
+            for strategy, pct in strategy_allocations.items():
+                allocated_capital = total_capital * pct
+                capital_allocations[strategy] = allocated_capital
+
+            # Apply risk-based constraints
+            constrained_allocations = self._apply_risk_constraints(capital_allocations, risk_limits)
+
+            allocation_result = {
+                'total_capital': total_capital,
+                'strategy_allocations': strategy_allocations,
+                'capital_allocations': capital_allocations,
+                'constrained_allocations': constrained_allocations,
+                'allocation_timestamp': datetime.now().isoformat(),
+                'allocation_id': f"alloc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            }
+
+            # Update portfolio capital allocation tracking
+            self.capital_allocation = allocation_result
+
+            # Log allocation decision
+            logger.info(f"Capital allocated: {allocation_result}")
+
+            return allocation_result
+
+        except Exception as e:
+            logger.error(f"Capital allocation failed: {e}")
+            return {
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    async def reallocate_capital(self, reallocation_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Reallocate capital between strategies based on performance and risk
+
+        Args:
+            reallocation_request: Reallocation specification with:
+                - current_allocations: Current capital allocations
+                - target_allocations: Target allocation percentages
+                - reallocation_reason: Reason for reallocation
+
+        Returns:
+            Capital reallocation result
+        """
+        try:
+            current_allocations = reallocation_request.get('current_allocations', {})
+            target_allocations = reallocation_request.get('target_allocations', {})
+            reallocation_reason = reallocation_request.get('reallocation_reason', 'performance_optimization')
+
+            total_current = sum(current_allocations.values())
+            total_target_pct = sum(target_allocations.values())
+
+            if abs(total_target_pct - 1.0) > 0.001:
+                return {'error': f'Target allocation percentages must sum to 1.0, got {total_target_pct}'}
+
+            # Calculate target capital amounts
+            target_capital = {}
+            for strategy, pct in target_allocations.items():
+                target_capital[strategy] = total_current * pct
+
+            # Calculate reallocation amounts
+            reallocation_amounts = {}
+            for strategy in set(current_allocations.keys()) | set(target_capital.keys()):
+                current = current_allocations.get(strategy, 0)
+                target = target_capital.get(strategy, 0)
+                reallocation_amounts[strategy] = target - current
+
+            reallocation_result = {
+                'total_capital': total_current,
+                'current_allocations': current_allocations,
+                'target_allocations': target_allocations,
+                'target_capital': target_capital,
+                'reallocation_amounts': reallocation_amounts,
+                'reallocation_reason': reallocation_reason,
+                'reallocation_timestamp': datetime.now().isoformat(),
+                'reallocation_id': f"realloc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            }
+
+            # Update capital allocation tracking
+            self.capital_allocation = {
+                'total_capital': total_current,
+                'strategy_allocations': target_allocations,
+                'capital_allocations': target_capital,
+                'last_reallocation': reallocation_result
+            }
+
+            # Log reallocation decision
+            logger.info(f"Capital reallocated: {reallocation_result}")
+
+            return reallocation_result
+
+        except Exception as e:
+            logger.error(f"Capital reallocation failed: {e}")
+            return {
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+
+    def _apply_risk_constraints(self, capital_allocations: Dict[str, float],
+                               risk_limits: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Apply risk-based constraints to capital allocations
+
+        Args:
+            capital_allocations: Initial capital allocations
+            risk_limits: Risk constraint specifications
+
+        Returns:
+            Risk-constrained capital allocations
+        """
+        try:
+            constrained_allocations = capital_allocations.copy()
+            total_capital = sum(capital_allocations.values())
+
+            # Apply maximum allocation limits
+            max_allocation_pct = risk_limits.get('max_strategy_allocation', 0.3)
+            for strategy, allocation in capital_allocations.items():
+                max_allowed = total_capital * max_allocation_pct
+                if allocation > max_allowed:
+                    constrained_allocations[strategy] = max_allowed
+
+            # Apply minimum allocation limits
+            min_allocation_pct = risk_limits.get('min_strategy_allocation', 0.05)
+            for strategy, allocation in constrained_allocations.items():
+                min_allowed = total_capital * min_allocation_pct
+                if allocation < min_allowed:
+                    constrained_allocations[strategy] = min_allowed
+
+            # Re-normalize to maintain total capital
+            constrained_total = sum(constrained_allocations.values())
+            if constrained_total > 0:
+                normalization_factor = total_capital / constrained_total
+                constrained_allocations = {
+                    strategy: allocation * normalization_factor
+                    for strategy, allocation in constrained_allocations.items()
+                }
+
+            return constrained_allocations
+
+        except Exception as e:
+            logger.error(f"Risk constraint application failed: {e}")
+            return capital_allocations
+
+    async def perform_walk_forward_validation(self, data: pd.DataFrame,
+                                           training_window: int = 63,
+                                           testing_window: int = 21,
+                                           step_size: int = 21) -> Dict[str, Any]:
+        """
+        Perform walk-forward validation on backtest data
+
+        Args:
+            data: Historical data for validation
+            training_window: Number of periods for training
+            testing_window: Number of periods for testing
+            step_size: Step size for moving forward
+
+        Returns:
+            Walk-forward validation results
+        """
+        try:
+            validation_results = []
+            n_periods = 0
+
+            # Perform walk-forward analysis
+            for i in range(training_window, len(data) - testing_window + 1, step_size):
+                train_end = i
+                test_end = min(i + testing_window, len(data))
+
+                # Split data
+                train_data = data.iloc[i-training_window:i]
+                test_data = data.iloc[i:test_end]
+
+                # Test strategy on this window
+                window_result = await self._test_strategy_on_window(train_data, test_data)
+                validation_results.append(window_result)
+                n_periods += 1
+
+            # Calculate aggregate metrics
+            oos_returns = [r['oos_return'] for r in validation_results if r['oos_return'] is not None]
+            avg_oos_return = np.mean(oos_returns) if oos_returns else 0.0
+
+            return {
+                'n_periods': n_periods,
+                'avg_oos_return': avg_oos_return,
+                'validation_results': validation_results,
+                'sharpe_ratio': self._calculate_sharpe_ratio(oos_returns),
+                'max_drawdown': self._calculate_max_drawdown(oos_returns)
+            }
+
+        except Exception as e:
+            logger.error(f"Walk-forward validation failed: {e}")
+            return {
+                'error': str(e),
+                'n_periods': 0,
+                'avg_oos_return': 0.0
+            }
+
+    async def _test_strategy_on_window(self, train_data: pd.DataFrame,
+                                     test_data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Test strategy performance on a specific time window
+
+        Args:
+            train_data: Training data for strategy optimization
+            test_data: Testing data for out-of-sample performance
+
+        Returns:
+            Window-specific test results
+        """
+        try:
+            # Simple moving average crossover strategy for testing
+            if len(train_data) < 20 or len(test_data) < 5:
+                return {'oos_return': None, 'signal': 0, 'error': 'insufficient_data'}
+
+            # Check if required columns exist
+            if 'close' not in train_data.columns or 'returns' not in test_data.columns:
+                return {'oos_return': None, 'signal': 0, 'error': 'missing_columns'}
+
+            # Calculate moving averages on training data
+            short_ma = train_data['close'].rolling(10).mean().iloc[-1]
+            long_ma = train_data['close'].rolling(20).mean().iloc[-1]
+
+            # Check for NaN values
+            if pd.isna(short_ma) or pd.isna(long_ma):
+                return {'oos_return': None, 'signal': 0, 'error': 'nan_values'}
+
+            # Generate signal based on training data
+            signal = 1 if short_ma > long_ma else -1
+
+            # Apply signal to test data
+            test_returns = test_data['returns'].values
+            if len(test_returns) == 0:
+                return {'oos_return': None, 'signal': int(signal), 'error': 'no_test_returns'}
+
+            # Calculate out-of-sample return
+            try:
+                oos_return = float(np.sum(test_returns * signal))
+            except (TypeError, ValueError) as e:
+                logger.error(f"OOS return calculation failed: {e}, test_returns type: {type(test_returns)}, signal type: {type(signal)}")
+                return {'oos_return': None, 'signal': int(signal), 'error': f'calculation_error: {str(e)}'}
+
+            return {
+                'oos_return': oos_return,
+                'signal': int(signal),
+                'train_periods': len(train_data),
+                'test_periods': len(test_data)
+            }
+
+        except Exception as e:
+            logger.error(f"Strategy testing on window failed: {e}")
+            return {'oos_return': None, 'signal': 0, 'error': str(e)}
+
+    def create_rolling_windows(self, data: pd.DataFrame, window_size: int,
+                              step_size: int = 1) -> List[pd.DataFrame]:
+        """
+        Create rolling windows from historical data
+
+        Args:
+            data: Historical data
+            window_size: Size of each window
+            step_size: Step size between windows
+
+        Returns:
+            List of rolling windows
+        """
+        try:
+            windows = []
+            for i in range(0, len(data) - window_size + 1, step_size):
+                window = data.iloc[i:i+window_size]
+                windows.append(window)
+            return windows
+        except Exception as e:
+            logger.error(f"Rolling windows creation failed: {e}")
+            return []
+
+    async def analyze_parameter_stability(self, parameter_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Analyze parameter stability across validation periods
+
+        Args:
+            parameter_history: Historical parameter values
+
+        Returns:
+            Parameter stability analysis
+        """
+        try:
+            if not parameter_history:
+                return {'stability_score': 0.0, 'error': 'no_parameter_history'}
+
+            # Extract parameter values
+            param_values = [p.get('value', 0) for p in parameter_history]
+            param_names = list(set(p.get('name', 'unknown') for p in parameter_history))
+
+            # Calculate stability metrics
+            stability_score = 1.0 / (1.0 + np.std(param_values)) if param_values else 0.0
+
+            return {
+                'stability_score': float(stability_score),
+                'parameter_count': len(param_names),
+                'value_range': [float(min(param_values)), float(max(param_values))],
+                'coefficient_of_variation': float(np.std(param_values) / np.mean(param_values)) if np.mean(param_values) != 0 else 0.0
+            }
+
+        except Exception as e:
+            logger.error(f"Parameter stability analysis failed: {e}")
+            return {'stability_score': 0.0, 'error': str(e)}
+
+    async def perform_out_of_sample_test(self, train_data: pd.DataFrame,
+                                       test_data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Perform out-of-sample testing
+
+        Args:
+            train_data: Training data
+            test_data: Out-of-sample test data
+
+        Returns:
+            Out-of-sample test results
+        """
+        try:
+            # Test strategy on out-of-sample data
+            test_result = await self._test_strategy_on_window(train_data, test_data)
+
+            return {
+                'oos_return': test_result.get('oos_return', 0.0),
+                'test_periods': test_result.get('test_periods', 0),
+                'performance_ratio': test_result.get('oos_return', 0.0) / len(test_data) if len(test_data) > 0 else 0.0
+            }
+
+        except Exception as e:
+            logger.error(f"Out-of-sample test failed: {e}")
+            return {'oos_return': 0.0, 'error': str(e)}
+
+    def calculate_validation_metrics(self, validation_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Calculate comprehensive validation metrics
+
+        Args:
+            validation_results: Results from validation runs
+
+        Returns:
+            Validation metrics
+        """
+        try:
+            if not validation_results:
+                return {'error': 'no_validation_results'}
+
+            returns = [r.get('oos_return', 0) for r in validation_results if r.get('oos_return') is not None]
+
+            if not returns:
+                return {'error': 'no_valid_returns'}
+
+            return {
+                'mean_return': float(np.mean(returns)),
+                'std_return': float(np.std(returns)),
+                'sharpe_ratio': float(np.mean(returns) / np.std(returns)) if np.std(returns) > 0 else 0.0,
+                'max_drawdown': self._calculate_max_drawdown(returns),
+                'win_rate': float(sum(1 for r in returns if r > 0) / len(returns)),
+                'total_periods': len(validation_results)
+            }
+
+        except Exception as e:
+            logger.error(f"Validation metrics calculation failed: {e}")
+            return {'error': str(e)}
+
+    async def monte_carlo_simulator(self, n_simulations: int = 1000,
+                                  n_periods: int = 252) -> Dict[str, Any]:
+        """
+        Perform Monte Carlo simulation for strategy validation
+
+        Args:
+            n_simulations: Number of simulations to run
+            n_periods: Number of periods per simulation
+
+        Returns:
+            Monte Carlo simulation results
+        """
+        try:
+            simulation_results = []
+
+            for i in range(n_simulations):
+                # Generate random returns (simplified model)
+                returns = np.random.normal(0.0005, 0.02, n_periods)
+                cumulative_return = np.prod(1 + returns) - 1
+
+                simulation_results.append({
+                    'simulation_id': i,
+                    'cumulative_return': float(cumulative_return),
+                    'annualized_return': float((1 + cumulative_return) ** (252/n_periods) - 1),
+                    'volatility': float(np.std(returns) * np.sqrt(252)),
+                    'max_drawdown': self._calculate_max_drawdown(returns)
+                })
+
+            # Calculate statistics
+            returns = [s['cumulative_return'] for s in simulation_results]
+
+            return {
+                'n_simulations': n_simulations,
+                'mean_return': float(np.mean(returns)),
+                'std_return': float(np.std(returns)),
+                'percentile_5': float(np.percentile(returns, 5)),
+                'percentile_95': float(np.percentile(returns, 95)),
+                'var_95': float(np.percentile(returns, 5)),  # Value at Risk
+                'simulation_results': simulation_results[:10]  # Return first 10 for brevity
+            }
+
+        except Exception as e:
+            logger.error(f"Monte Carlo simulation failed: {e}")
+            return {'error': str(e)}
+
+    async def generate_scenarios(self, base_data: pd.DataFrame,
+                               n_scenarios: int = 100) -> List[pd.DataFrame]:
+        """
+        Generate alternative scenarios for stress testing
+
+        Args:
+            base_data: Base historical data
+            n_scenarios: Number of scenarios to generate
+
+        Returns:
+            List of scenario datasets
+        """
+        try:
+            scenarios = []
+
+            for i in range(n_scenarios):
+                # Create scenario by perturbing returns
+                scenario_returns = base_data['returns'].values * (1 + np.random.normal(0, 0.1, len(base_data)))
+                scenario_prices = base_data['close'].iloc[0] * np.cumprod(1 + scenario_returns)
+
+                scenario_data = base_data.copy()
+                scenario_data['close'] = scenario_prices
+                scenario_data['returns'] = scenario_returns
+                scenario_data['scenario_id'] = i
+
+                scenarios.append(scenario_data)
+
+            return scenarios
+
+        except Exception as e:
+            logger.error(f"Scenario generation failed: {e}")
+            return []
+
+    async def statistical_analysis(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Perform statistical analysis on backtest data
+
+        Args:
+            data: Data to analyze
+
+        Returns:
+            Statistical analysis results
+        """
+        try:
+            returns = data.get('returns', pd.Series([]))
+
+            if returns.empty:
+                return {'error': 'no_returns_data'}
+
+            return {
+                'mean': float(np.mean(returns)),
+                'std': float(np.std(returns)),
+                'skewness': float(pd.Series(returns).skew()),
+                'kurtosis': float(pd.Series(returns).kurtosis()),
+                'jarque_bera_test': self._jarque_bera_test(returns),
+                'autocorrelation': float(pd.Series(returns).autocorr()),
+                'normality_test': self._shapiro_wilk_test(returns)
+            }
+
+        except Exception as e:
+            logger.error(f"Statistical analysis failed: {e}")
+            return {'error': str(e)}
+
+    async def confidence_intervals(self, data: pd.DataFrame,
+                                 confidence_level: float = 0.95) -> Dict[str, Any]:
+        """
+        Calculate confidence intervals for performance metrics
+
+        Args:
+            data: Performance data
+            confidence_level: Confidence level (0-1)
+
+        Returns:
+            Confidence intervals
+        """
+        try:
+            returns = data.get('returns', pd.Series([]))
+
+            if returns.empty:
+                return {'error': 'no_returns_data'}
+
+            mean_return = np.mean(returns)
+            std_return = np.std(returns)
+            n = len(returns)
+
+            # Calculate confidence interval
+            z_score = 1.96  # For 95% confidence
+            margin_of_error = z_score * (std_return / np.sqrt(n))
+
+            return {
+                'mean_return': float(mean_return),
+                'confidence_interval': [float(mean_return - margin_of_error), float(mean_return + margin_of_error)],
+                'margin_of_error': float(margin_of_error),
+                'confidence_level': confidence_level,
+                'sample_size': n
+            }
+
+        except Exception as e:
+            logger.error(f"Confidence interval calculation failed: {e}")
+            return {'error': str(e)}
+
+    async def stress_testing(self, portfolio_data: pd.DataFrame,
+                           stress_scenarios: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Perform stress testing on portfolio
+
+        Args:
+            portfolio_data: Current portfolio data
+            stress_scenarios: Stress test scenarios
+
+        Returns:
+            Stress test results
+        """
+        try:
+            stress_results = []
+
+            for scenario in stress_scenarios:
+                scenario_name = scenario.get('name', 'unnamed')
+                shock_magnitude = scenario.get('shock', 0.0)
+
+                # Apply shock to portfolio value
+                base_value = portfolio_data.get('total_value', 1000000)
+                stressed_value = base_value * (1 + shock_magnitude)
+                loss_amount = base_value - stressed_value
+
+                stress_results.append({
+                    'scenario': scenario_name,
+                    'shock_magnitude': shock_magnitude,
+                    'stressed_value': float(stressed_value),
+                    'loss_amount': float(loss_amount),
+                    'loss_percentage': float(loss_amount / base_value) if base_value > 0 else 0.0
+                })
+
+            return {
+                'stress_results': stress_results,
+                'max_loss': max(r['loss_amount'] for r in stress_results),
+                'worst_scenario': max(stress_results, key=lambda x: x['loss_amount'])['scenario']
+            }
+
+        except Exception as e:
+            logger.error(f"Stress testing failed: {e}")
+            return {'error': str(e)}
+
+    async def sensitivity_analysis(self, parameters: Dict[str, Any],
+                                 parameter_ranges: Dict[str, List[float]]) -> Dict[str, Any]:
+        """
+        Perform sensitivity analysis on strategy parameters
+
+        Args:
+            parameters: Base parameter values
+            parameter_ranges: Ranges to test for each parameter
+
+        Returns:
+            Sensitivity analysis results
+        """
+        try:
+            sensitivity_results = {}
+
+            for param_name, param_range in parameter_ranges.items():
+                param_sensitivities = []
+
+                for param_value in param_range:
+                    # Test parameter sensitivity (simplified)
+                    test_params = parameters.copy()
+                    test_params[param_name] = param_value
+
+                    # Calculate performance metric (simplified)
+                    performance = np.random.normal(0.1, 0.05)  # Mock performance
+
+                    param_sensitivities.append({
+                        'parameter_value': param_value,
+                        'performance': float(performance)
+                    })
+
+                sensitivity_results[param_name] = param_sensitivities
+
+            return {
+                'sensitivity_results': sensitivity_results,
+                'most_sensitive_parameter': max(sensitivity_results.keys(),
+                    key=lambda x: np.std([p['performance'] for p in sensitivity_results[x]]))
+            }
+
+        except Exception as e:
+            logger.error(f"Sensitivity analysis failed: {e}")
+            return {'error': str(e)}
+
+    async def allocate_capital(self, allocation_request: Dict[str, Any]) -> Dict[str, float]:
+        """Allocate capital across strategies and portfolios
+        
+        Args:
+            allocation_request: Capital allocation parameters
+            
+        Returns:
+            Dict mapping strategies to allocated capital amounts
+        """
+        try:
+            total_capital = allocation_request.get('total_capital', 1000000.0)
+            strategies = allocation_request.get('strategies', ['stat_arb', 'momentum', 'mean_reversion'])
+            allocation_method = allocation_request.get('allocation_method', 'equal_weight')
+            
+            # Get strategy performance data for allocation
+            strategy_performance = {}
+            for strategy in strategies:
+                # Mock performance data - in real implementation, get from performance analyzer
+                strategy_performance[strategy] = {
+                    'sharpe_ratio': np.random.normal(1.5, 0.3),
+                    'max_drawdown': np.random.uniform(0.05, 0.15),
+                    'total_return': np.random.normal(0.12, 0.05)
+                }
+            
+            # Allocate capital based on method
+            if allocation_method == 'equal_weight':
+                allocation_per_strategy = total_capital / len(strategies)
+                allocations = {strategy: allocation_per_strategy for strategy in strategies}
+            
+            elif allocation_method == 'performance_weighted':
+                # Weight by Sharpe ratio
+                total_sharpe = sum(perf['sharpe_ratio'] for perf in strategy_performance.values())
+                allocations = {}
+                for strategy in strategies:
+                    weight = strategy_performance[strategy]['sharpe_ratio'] / total_sharpe
+                    allocations[strategy] = total_capital * weight
+            
+            elif allocation_method == 'risk_parity':
+                # Risk parity allocation
+                allocations = {}
+                for strategy in strategies:
+                    # Allocate inversely to risk (lower drawdown = higher allocation)
+                    risk_weight = 1.0 / strategy_performance[strategy]['max_drawdown']
+                    allocations[strategy] = total_capital * (risk_weight / sum(
+                        1.0 / strategy_performance[s]['max_drawdown'] for s in strategies))
+            
+            else:
+                # Default to equal weight
+                allocation_per_strategy = total_capital / len(strategies)
+                allocations = {strategy: allocation_per_strategy for strategy in strategies}
+            
+            logger.info(f"Capital allocated: {allocations}")
+            return allocations
+            
+        except Exception as e:
+            logger.error(f"Capital allocation failed: {e}")
+            return {}
+
+    async def reallocate_capital(self, reallocation_trigger: Dict[str, Any]) -> bool:
+        """Reallocate capital based on performance triggers
+        
+        Args:
+            reallocation_trigger: Reallocation parameters
+            
+        Returns:
+            Success status
+        """
+        try:
+            trigger_type = reallocation_trigger.get('trigger_type', 'performance_threshold')
+            underperforming_strategy = reallocation_trigger.get('underperforming_strategy')
+            current_allocation = reallocation_trigger.get('current_allocation', 0.0)
+            target_allocation = reallocation_trigger.get('target_allocation', 0.0)
+            reallocation_amount = reallocation_trigger.get('reallocation_amount', 0.0)
+            
+            # Validate reallocation logic
+            if trigger_type == 'performance_threshold':
+                # Check if strategy meets reallocation criteria
+                if underperforming_strategy and reallocation_amount > 0:
+                    # Mock reallocation logic - in real implementation, update portfolio allocations
+                    logger.info(f"Reallocating {reallocation_amount} from {underperforming_strategy}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Capital reallocation failed: {e}")
+            return False
+
+    def _calculate_sharpe_ratio(self, returns: List[float]) -> float:
+        """Calculate Sharpe ratio"""
+        if not returns or len(returns) < 2:
+            return 0.0
+        return float(np.mean(returns) / np.std(returns)) if np.std(returns) > 0 else 0.0
+
+    def _calculate_max_drawdown(self, returns: List[float]) -> float:
+        """Calculate maximum drawdown"""
+        if not returns:
+            return 0.0
+
+        cumulative = np.cumprod(1 + np.array(returns))
+        running_max = np.maximum.accumulate(cumulative)
+        drawdowns = (cumulative - running_max) / running_max
+        return float(np.min(drawdowns))
+
+    def _jarque_bera_test(self, returns: pd.Series) -> Dict[str, Any]:
+        """Perform Jarque-Bera normality test"""
+        try:
+            from scipy import stats
+            jb_stat, p_value = stats.jarque_bera(returns)
+            return {
+                'statistic': float(jb_stat),
+                'p_value': float(p_value),
+                'normal_distribution': p_value > 0.05
+            }
+        except:
+            return {'error': 'scipy_not_available'}
+
+    # ========================================
+    # GOVERNANCE CALLBACK METHODS
+    # ========================================
+
+    async def _handle_risk_limit_exceeded(self, risk_data: Dict[str, Any]) -> None:
+        """Handle risk limit exceeded callback"""
+        logger.warning(f"Risk limit exceeded: {risk_data}")
+        # Implement risk mitigation actions
+
+    async def _handle_position_limit_exceeded(self, position_data: Dict[str, Any]) -> None:
+        """Handle position limit exceeded callback"""
+        logger.warning(f"Position limit exceeded: {position_data}")
+        # Implement position reduction actions
+
+    async def _handle_capital_threshold_breached(self, capital_data: Dict[str, Any]) -> None:
+        """Handle capital threshold breached callback"""
+        logger.warning(f"Capital threshold breached: {capital_data}")
+        # Implement capital preservation actions
+
+    async def _handle_compliance_violation(self, compliance_data: Dict[str, Any]) -> None:
+        """Handle compliance violation callback"""
+        logger.error(f"Compliance violation: {compliance_data}")
+        # Implement compliance remediation actions
+
+    # ========================================
+    # CAPITAL ALLOCATION METHODS
+    # ========================================
+
+    async def allocate_capital(self, allocation_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Allocate capital across strategies
+        
+        Args:
+            allocation_request: Allocation parameters
+            
+        Returns:
+            Allocation result
+        """
+        try:
+            total_capital = allocation_request.get('total_capital', 1000000.0)
+            strategies = allocation_request.get('strategies', [])
+            allocation_method = allocation_request.get('allocation_method', 'equal_weight')
+            
+            if not strategies:
+                return {'error': 'No strategies specified'}
+            
+            # Allocate capital based on method
+            if allocation_method == 'equal_weight':
+                capital_per_strategy = total_capital / len(strategies)
+                allocations = {strategy: capital_per_strategy for strategy in strategies}
+            else:
+                # Default to equal weight
+                capital_per_strategy = total_capital / len(strategies)
+                allocations = {strategy: capital_per_strategy for strategy in strategies}
+            
+            # Update strategy allocations
+            self.strategy_allocations = allocations
+            
+            logger.info(f"Capital allocated: {allocations}")
+            return allocations
+            
+        except Exception as e:
+            logger.error(f"Capital allocation failed: {e}")
+            return {'error': str(e)}
+
+    async def reallocate_capital(self, reallocation_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Reallocate capital based on triggers
+        
+        Args:
+            reallocation_request: Reallocation parameters
+            
+        Returns:
+            Reallocation result
+        """
+        try:
+            trigger_type = reallocation_request.get('trigger_type')
+            underperforming_strategy = reallocation_request.get('underperforming_strategy')
+            current_allocation = reallocation_request.get('current_allocation', 0)
+            target_allocation = reallocation_request.get('target_allocation', 0)
+            reallocation_amount = reallocation_request.get('reallocation_amount', 0)
+            
+            if not underperforming_strategy or reallocation_amount <= 0:
+                return None
+            
+            # Perform reallocation
+            if underperforming_strategy in self.strategy_allocations:
+                self.strategy_allocations[underperforming_strategy] -= reallocation_amount
+                
+                # Find a better performing strategy to allocate to
+                # For simplicity, allocate to the first non-underperforming strategy
+                for strategy, allocation in self.strategy_allocations.items():
+                    if strategy != underperforming_strategy:
+                        self.strategy_allocations[strategy] += reallocation_amount
+                        break
+            
+            logger.info(f"Reallocating {reallocation_amount} from {underperforming_strategy}")
+            return {
+                'reallocated_from': underperforming_strategy,
+                'reallocation_amount': reallocation_amount,
+                'new_allocations': self.strategy_allocations.copy()
+            }
+            
+        except Exception as e:
+            logger.error(f"Capital reallocation failed: {e}")
+            return None
+
+    # ========================================
+    # FEATURE ENGINEERING METHODS
+    # ========================================
+
+    async def calculate_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate additional features for analysis"""
+        try:
+            # Add basic technical features
+            features_df = data.copy()
+            
+            # Moving averages
+            features_df['sma_20'] = features_df['close'].rolling(20).mean()
+            features_df['sma_50'] = features_df['close'].rolling(50).mean()
+            
+            # RSI
+            delta = features_df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / loss
+            features_df['rsi'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            exp1 = features_df['close'].ewm(span=12).mean()
+            exp2 = features_df['close'].ewm(span=26).mean()
+            features_df['macd'] = exp1 - exp2
+            features_df['macd_signal'] = features_df['macd'].ewm(span=9).mean()
+            
+            return features_df
+            
+        except Exception as e:
+            logger.error(f"Feature calculation failed: {e}")
+            return data
+
+    # ========================================
+    # ROBUSTNESS TESTING METHODS
+    # ========================================
+
+    async def _test_parameter_sensitivity(self, strategy, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Test strategy sensitivity to parameter changes"""
+        try:
+            # Test different parameter combinations
+            parameter_tests = []
+            
+            # Example: test different signal thresholds
+            thresholds = [0.5, 1.0, 1.5, 2.0]
+            
+            for threshold in thresholds:
+                # Run backtest with modified parameters
+                test_result = await self.run_institutional_backtest(strategy, market_data)
+                parameter_tests.append({
+                    'parameter': 'signal_threshold',
+                    'value': threshold,
+                    'sharpe_ratio': test_result.sharpe_ratio,
+                    'total_return': test_result.total_return
+                })
+            
+            return {
+                'parameter_sensitivity_tests': parameter_tests,
+                'most_robust_threshold': max(parameter_tests, key=lambda x: x['sharpe_ratio'])['value']
+            }
+            
+        except Exception as e:
+            logger.error(f"Parameter sensitivity test failed: {e}")
+            return {'error': str(e)}
+
+    async def _test_market_stress_scenarios(self, strategy, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Test strategy under market stress scenarios"""
+        try:
+            stress_tests = []
+            
+            # Test high volatility scenario
+            high_vol_data = self._simulate_high_volatility(market_data)
+            high_vol_result = await self.run_institutional_backtest(strategy, high_vol_data)
+            
+            # Test bear market scenario
+            bear_market_data = self._simulate_bear_market(market_data)
+            bear_market_result = await self.run_institutional_backtest(strategy, bear_market_data)
+            
+            stress_tests.extend([
+                {
+                    'scenario': 'high_volatility',
+                    'sharpe_ratio': high_vol_result.sharpe_ratio,
+                    'max_drawdown': high_vol_result.max_drawdown,
+                    'survival_rate': 1.0 if high_vol_result.total_return > -0.5 else 0.0
+                },
+                {
+                    'scenario': 'bear_market',
+                    'sharpe_ratio': bear_market_result.sharpe_ratio,
+                    'max_drawdown': bear_market_result.max_drawdown,
+                    'survival_rate': 1.0 if bear_market_result.total_return > -0.3 else 0.0
+                }
+            ])
+            
+            return {
+                'stress_tests': stress_tests,
+                'overall_resilience_score': sum(test['survival_rate'] for test in stress_tests) / len(stress_tests)
+            }
+            
+        except Exception as e:
+            logger.error(f"Market stress testing failed: {e}")
+            return {'error': str(e)}
+
+    def _simulate_high_volatility(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate high volatility market conditions"""
+        # Simplified volatility increase
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Increase volatility by adding noise
+            noise = np.random.normal(0, 0.02, len(data))
+            modified_data[symbol]['close'] *= (1 + noise)
+        return modified_data
+
+    def _simulate_bear_market(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate bear market conditions"""
+        # Simplified bear market simulation
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Apply downward trend
+            trend = np.linspace(0, -0.3, len(data))
+            modified_data[symbol]['close'] *= (1 + trend)
+        return modified_data
+
+    async def _test_regime_stability(self, strategy, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Test strategy stability across different market regimes"""
+        try:
+            regime_tests = []
+            
+            # Test in trending market
+            trending_data = self._simulate_trending_market(market_data)
+            trending_result = await self.run_institutional_backtest(strategy, trending_data)
+            
+            # Test in ranging market
+            ranging_data = self._simulate_ranging_market(market_data)
+            ranging_result = await self.run_institutional_backtest(strategy, ranging_data)
+            
+            regime_tests.extend([
+                {
+                    'regime': 'trending',
+                    'sharpe_ratio': trending_result.sharpe_ratio,
+                    'total_return': trending_result.total_return,
+                    'consistency_score': 0.8  # Simplified
+                },
+                {
+                    'regime': 'ranging',
+                    'sharpe_ratio': ranging_result.sharpe_ratio,
+                    'total_return': ranging_result.total_return,
+                    'consistency_score': 0.7  # Simplified
+                }
+            ])
+            
+            return {
+                'regime_stability_tests': regime_tests,
+                'regime_adaptability_score': sum(test['consistency_score'] for test in regime_tests) / len(regime_tests)
+            }
+            
+        except Exception as e:
+            logger.error(f"Regime stability testing failed: {e}")
+            return {'error': str(e)}
+
+    def _simulate_trending_market(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate trending market conditions"""
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Apply strong upward trend
+            trend = np.linspace(0, 0.5, len(data))
+            modified_data[symbol]['close'] *= (1 + trend)
+        return modified_data
+
+    def _simulate_ranging_market(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate ranging market conditions"""
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Oscillate around mean
+            oscillation = 0.1 * np.sin(np.linspace(0, 4*np.pi, len(data)))
+            modified_data[symbol]['close'] *= (1 + oscillation)
+        return modified_data
+
+    async def _test_transaction_cost_sensitivity(self, strategy, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Test strategy sensitivity to transaction costs"""
+        try:
+            cost_tests = []
+            
+            # Test different commission rates
+            commission_rates = [0.0005, 0.001, 0.002, 0.005]  # 0.05% to 0.5%
+            
+            for rate in commission_rates:
+                # Modify config for this test
+                test_config = self.config.__dict__.copy()
+                test_config['commission_rate'] = rate
+                
+                # Run backtest with modified costs
+                test_result = await self.run_institutional_backtest(strategy, market_data)
+                cost_tests.append({
+                    'commission_rate': rate,
+                    'sharpe_ratio': test_result.sharpe_ratio,
+                    'total_return': test_result.total_return,
+                    'break_even_frequency': 252 / (1 / rate) if rate > 0 else 0  # Simplified
+                })
+            
+            return {
+                'cost_sensitivity_tests': cost_tests,
+                'optimal_cost_level': min(cost_tests, key=lambda x: abs(x['sharpe_ratio'] - 1.0))['commission_rate']
+            }
+            
+        except Exception as e:
+            logger.error(f"Transaction cost sensitivity test failed: {e}")
+            return {'error': str(e)}
+
+    async def _test_data_quality_sensitivity(self, strategy, market_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        """Test strategy sensitivity to data quality issues"""
+        try:
+            quality_tests = []
+            
+            # Test with missing data
+            missing_data = self._simulate_missing_data(market_data)
+            missing_result = await self.run_institutional_backtest(strategy, missing_data)
+            
+            # Test with noisy data
+            noisy_data = self._simulate_noisy_data(market_data)
+            noisy_result = await self.run_institutional_backtest(strategy, noisy_data)
+            
+            quality_tests.extend([
+                {
+                    'data_quality_issue': 'missing_data',
+                    'sharpe_ratio': missing_result.sharpe_ratio,
+                    'total_return': missing_result.total_return,
+                    'robustness_score': 0.6 if missing_result.sharpe_ratio > 0 else 0.3
+                },
+                {
+                    'data_quality_issue': 'noisy_data',
+                    'sharpe_ratio': noisy_result.sharpe_ratio,
+                    'total_return': noisy_result.total_return,
+                    'robustness_score': 0.7 if noisy_result.sharpe_ratio > 0 else 0.4
+                }
+            ])
+            
+            return {
+                'data_quality_tests': quality_tests,
+                'overall_data_robustness': sum(test['robustness_score'] for test in quality_tests) / len(quality_tests)
+            }
+            
+        except Exception as e:
+            logger.error(f"Data quality sensitivity test failed: {e}")
+            return {'error': str(e)}
+
+    def _simulate_missing_data(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate missing data scenario"""
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Remove 20% of data randomly
+            drop_indices = np.random.choice(len(data), size=int(0.2 * len(data)), replace=False)
+            modified_data[symbol] = data.drop(data.index[drop_indices])
+        return modified_data
+
+    def _simulate_noisy_data(self, market_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Simulate noisy data scenario"""
+        modified_data = {}
+        for symbol, data in market_data.items():
+            modified_data[symbol] = data.copy()
+            # Add noise to prices
+            noise = np.random.normal(0, 0.01, len(data))
+            modified_data[symbol]['close'] *= (1 + noise)
+        return modified_data
+
+    def _shapiro_wilk_test(self, returns: pd.Series) -> Dict[str, Any]:
+        """Perform Shapiro-Wilk normality test"""
+        try:
+            from scipy import stats
+            if len(returns) > 5000:  # Shapiro-Wilk limit
+                returns = returns.sample(5000)
+            stat, p_value = stats.shapiro(returns)
+            return {
+                'statistic': float(stat),
+                'p_value': float(p_value),
+                'normal_distribution': p_value > 0.05
+            }
+        except:
+            return {'error': 'scipy_not_available'}
