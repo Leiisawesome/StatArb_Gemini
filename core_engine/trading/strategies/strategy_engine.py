@@ -362,8 +362,10 @@ class BaseStrategy(ABC):
         """Update strategy with new market data"""
         try:
             logger.info(f"Strategy.update called, state: {self.state}")
+            print(f"🔍 STRATEGY STATE DEBUG: {self.strategy_id} state is {self.state}")
             if self.state != StrategyState.ACTIVE:
                 logger.warning(f"Strategy not active, returning empty signals. State: {self.state}")
+                print(f"🔍 STRATEGY STATE DEBUG: Strategy {self.strategy_id} not ACTIVE, returning empty signals")
                 return []
             
             self._last_update = datetime.now()

@@ -973,6 +973,281 @@ class AdvancedPairsTradingStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error("Error updating hedge ratios", {'error': str(e)})
 
+    def _select_pairs(self, market_data: Dict[str, pd.DataFrame]) -> List[TradingPair]:
+        """
+        Select trading pairs based on cointegration and correlation analysis
+        
+        Academic Foundation:
+        - Engle & Granger (1987) cointegration theory
+        - Gatev, Goetzmann & Rouwenhorst (2006) pairs trading methodology
+        - Do & Faff (2010) pairs trading with cointegration
+        
+        Args:
+            market_data: Dictionary of market data for all symbols
+            
+        Returns:
+            List of selected trading pairs with their characteristics
+        """
+        try:
+            from statsmodels.tsa.stattools import coint
+            from itertools import combinations
+            
+            # Get available symbols with sufficient data
+            valid_symbols = []
+            for symbol, data in market_data.items():
+                if len(data) >= self.config.lookback_period:
+                    valid_symbols.append(symbol)
+            
+            if len(valid_symbols) < 2:
+                self.logger.warning("Insufficient symbols for pair selection")
+                return []
+            
+            selected_pairs = []
+            
+            # Test all possible pairs
+            for symbol1, symbol2 in combinations(valid_symbols, 2):
+                try:
+                    # Get price series
+                    prices1 = market_data[symbol1]['close'].dropna()
+                    prices2 = market_data[symbol2]['close'].dropna()
+                    
+                    # Align series
+                    common_index = prices1.index.intersection(prices2.index)
+                    if len(common_index) < self.config.lookback_period:
+                        continue
+                    
+                    prices1_aligned = prices1.loc[common_index]
+                    prices2_aligned = prices2.loc[common_index]
+                    
+                    # Calculate correlation
+                    correlation = prices1_aligned.corr(prices2_aligned)
+                    
+                    # Skip if correlation is too low
+                    if abs(correlation) < self.config.min_correlation:
+                        continue
+                    
+                    # Test for cointegration
+                    coint_stat, coint_p_value, coint_critical_values = coint(prices1_aligned, prices2_aligned)
+                    
+                    # Skip if not cointegrated
+                    if coint_p_value > self.config.cointegration_pvalue_threshold:
+                        continue
+                    
+                    # Calculate hedge ratio using OLS regression
+                    from sklearn.linear_model import LinearRegression
+                    X = prices2_aligned.values.reshape(-1, 1)
+                    y = prices1_aligned.values
+                    
+                    reg = LinearRegression().fit(X, y)
+                    hedge_ratio = reg.coef_[0]
+                    
+                    # Calculate spread statistics
+                    spread = prices1_aligned - hedge_ratio * prices2_aligned
+                    spread_mean = spread.mean()
+                    spread_std = spread.std()
+                    
+                    # Calculate half-life of mean reversion
+                    spread_lagged = spread.shift(1).dropna()
+                    spread_diff = spread.diff().dropna()
+                    
+                    # Align for regression
+                    common_idx = spread_lagged.index.intersection(spread_diff.index)
+                    if len(common_idx) > 10:
+                        X_hl = spread_lagged.loc[common_idx].values.reshape(-1, 1)
+                        y_hl = spread_diff.loc[common_idx].values
+                        
+                        reg_hl = LinearRegression().fit(X_hl, y_hl)
+                        lambda_coef = -reg_hl.coef_[0]
+                        
+                        if lambda_coef > 0:
+                            half_life = np.log(2) / lambda_coef
+                        else:
+                            half_life = np.inf
+                    else:
+                        half_life = np.inf
+                    
+                    # Skip if half-life is outside acceptable range
+                    if half_life < self.config.min_half_life or half_life > self.config.max_half_life:
+                        continue
+                    
+                    # Calculate selection score (combination of correlation, cointegration, half-life)
+                    correlation_score = abs(correlation)
+                    cointegration_score = max(0, 1 - coint_p_value)  # Higher score for lower p-value
+                    half_life_score = max(0, 1 - (half_life - self.config.min_half_life) / (self.config.max_half_life - self.config.min_half_life))
+                    
+                    selection_score = (correlation_score + cointegration_score + half_life_score) / 3
+                    
+                    # Create trading pair
+                    trading_pair = TradingPair(
+                        symbol1=symbol1,
+                        symbol2=symbol2,
+                        hedge_ratio=hedge_ratio,
+                        correlation=correlation,
+                        cointegration_pvalue=coint_p_value,
+                        spread_mean=spread_mean,
+                        spread_std=spread_std,
+                        half_life=half_life,
+                        selection_score=selection_score,
+                        last_update=datetime.now()
+                    )
+                    
+                    selected_pairs.append(trading_pair)
+                    
+                except Exception as e:
+                    self.logger.debug(f"Error analyzing pair {symbol1}-{symbol2}: {e}")
+                    continue
+            
+            # Sort by selection score and take top pairs
+            selected_pairs.sort(key=lambda x: x.selection_score, reverse=True)
+            selected_pairs = selected_pairs[:self.config.max_pairs]
+            
+            self.logger.info(f"Selected {len(selected_pairs)} trading pairs from {len(valid_symbols)} symbols")
+            
+            return selected_pairs
+            
+        except Exception as e:
+            self.logger.error(f"Pair selection failed: {e}")
+            return []
+
+    def _calculate_spread_zscore(self, symbol1: str, symbol2: str, hedge_ratio: float, 
+                               market_data: Dict[str, pd.DataFrame]) -> Optional[float]:
+        """
+        Calculate z-score of the spread between two symbols
+        
+        Academic Foundation:
+        - Standardized spread calculation for pairs trading
+        - Z-score normalization for signal generation
+        - Rolling window statistics for dynamic thresholds
+        
+        Args:
+            symbol1: First symbol in the pair
+            symbol2: Second symbol in the pair
+            hedge_ratio: Hedge ratio for the pair
+            market_data: Current market data
+            
+        Returns:
+            Current z-score of the spread, or None if calculation fails
+        """
+        try:
+            if symbol1 not in market_data or symbol2 not in market_data:
+                return None
+            
+            # Get recent price data
+            prices1 = market_data[symbol1]['close'].dropna()
+            prices2 = market_data[symbol2]['close'].dropna()
+            
+            # Align series
+            common_index = prices1.index.intersection(prices2.index)
+            if len(common_index) < self.config.spread_lookback:
+                return None
+            
+            # Take recent data for spread calculation
+            recent_prices1 = prices1.loc[common_index].tail(self.config.spread_lookback)
+            recent_prices2 = prices2.loc[common_index].tail(self.config.spread_lookback)
+            
+            # Calculate spread
+            spread = recent_prices1 - hedge_ratio * recent_prices2
+            
+            if len(spread) < 10:  # Need minimum data for statistics
+                return None
+            
+            # Calculate rolling statistics
+            spread_mean = spread.mean()
+            spread_std = spread.std()
+            
+            if spread_std == 0:
+                return 0.0
+            
+            # Current spread value
+            current_spread = spread.iloc[-1]
+            
+            # Calculate z-score
+            z_score = (current_spread - spread_mean) / spread_std
+            
+            return float(z_score)
+            
+        except Exception as e:
+            self.logger.error(f"Spread z-score calculation failed for {symbol1}-{symbol2}: {e}")
+            return None
+
+    def _test_pair_cointegration(self, symbol1: str, symbol2: str, 
+                               data1: pd.Series, data2: pd.Series) -> Dict[str, Any]:
+        """
+        Test cointegration between a pair of assets
+        
+        This method is required by the test framework to validate cointegration testing logic.
+        """
+        try:
+            from statsmodels.tsa.stattools import coint
+            
+            # Ensure we have enough data
+            if len(data1) < 30 or len(data2) < 30:
+                return {
+                    'cointegrated': False,
+                    'p_value': 1.0,
+                    'test_statistic': 0.0,
+                    'critical_values': {},
+                    'error': 'Insufficient data for cointegration test'
+                }
+            
+            # Align the data
+            aligned_data = pd.DataFrame({'asset1': data1, 'asset2': data2}).dropna()
+            
+            if len(aligned_data) < 30:
+                return {
+                    'cointegrated': False,
+                    'p_value': 1.0,
+                    'test_statistic': 0.0,
+                    'critical_values': {},
+                    'error': 'Insufficient aligned data for cointegration test'
+                }
+            
+            # Perform Engle-Granger cointegration test
+            test_stat, p_value, critical_values = coint(
+                aligned_data['asset1'], 
+                aligned_data['asset2']
+            )
+            
+            # Determine if cointegrated based on p-value threshold
+            is_cointegrated = p_value < self.config.cointegration_pvalue_threshold
+            
+            result = {
+                'cointegrated': is_cointegrated,
+                'p_value': float(p_value),
+                'test_statistic': float(test_stat),
+                'critical_values': {
+                    '1%': float(critical_values[0]),
+                    '5%': float(critical_values[1]),
+                    '10%': float(critical_values[2])
+                },
+                'symbols': [symbol1, symbol2],
+                'data_points': len(aligned_data),
+                'threshold': self.config.cointegration_pvalue_threshold
+            }
+            
+            self.logger.debug(f"Cointegration test {symbol1}-{symbol2}: "
+                            f"p_value={p_value:.4f}, cointegrated={is_cointegrated}")
+            
+            return result
+            
+        except ImportError:
+            return {
+                'cointegrated': False,
+                'p_value': 1.0,
+                'test_statistic': 0.0,
+                'critical_values': {},
+                'error': 'statsmodels not available for cointegration test'
+            }
+        except Exception as e:
+            self.logger.error(f"Cointegration test failed for {symbol1}-{symbol2}: {e}")
+            return {
+                'cointegrated': False,
+                'p_value': 1.0,
+                'test_statistic': 0.0,
+                'critical_values': {},
+                'error': str(e)
+            }
+
     def get_strategy_metrics(self) -> StrategyMetrics:
         """Get current strategy performance metrics"""
         metrics = StrategyMetrics()

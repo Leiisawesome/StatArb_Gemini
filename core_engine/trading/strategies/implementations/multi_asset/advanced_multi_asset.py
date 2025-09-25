@@ -1016,6 +1016,130 @@ class AdvancedMultiAssetStrategy(BaseStrategy):
         # Simplified - in practice would calculate based on asset currencies
         self.currency_exposures = {"EUR": 0.1, "JPY": 0.05}  # Placeholder
 
+    def _calculate_asset_correlations(self, market_data: Dict[str, pd.DataFrame], 
+                                    lookback_period: int = 252) -> pd.DataFrame:
+        """
+        Calculate correlation matrix between assets
+        
+        This method is required by the test framework to validate correlation calculation logic.
+        """
+        try:
+            # Extract price data for all assets
+            price_data = {}
+            for symbol, data in market_data.items():
+                if data is not None and not data.empty and 'close' in data.columns:
+                    price_data[symbol] = data['close'].tail(lookback_period)
+            
+            if len(price_data) < 2:
+                self.logger.warning("Insufficient assets for correlation calculation")
+                return pd.DataFrame()
+            
+            # Align all price series to common dates
+            price_df = pd.DataFrame(price_data)
+            price_df = price_df.dropna()
+            
+            if len(price_df) < 30:  # Need minimum data for reliable correlations
+                self.logger.warning("Insufficient historical data for correlation calculation")
+                return pd.DataFrame()
+            
+            # Calculate returns
+            returns_df = price_df.pct_change().dropna()
+            
+            # Calculate correlation matrix
+            correlation_matrix = returns_df.corr()
+            
+            # Handle any NaN values
+            correlation_matrix = correlation_matrix.fillna(0)
+            
+            # Ensure diagonal is 1 (self-correlation)
+            np.fill_diagonal(correlation_matrix.values, 1.0)
+            
+            self.logger.debug(f"Calculated correlation matrix for {len(correlation_matrix)} assets")
+            
+            return correlation_matrix
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating asset correlations: {e}")
+            return pd.DataFrame()
+
+    def _optimize_asset_allocation(self, expected_returns: Dict[str, float], 
+                                 correlation_matrix: pd.DataFrame,
+                                 risk_aversion: float = 1.0) -> Dict[str, float]:
+        """
+        Optimize asset allocation using mean-variance optimization
+        
+        This method is required by the test framework to validate portfolio optimization logic.
+        """
+        try:
+            symbols = list(expected_returns.keys())
+            if len(symbols) < 2:
+                self.logger.warning("Need at least 2 assets for optimization")
+                return {}
+            
+            # Ensure correlation matrix matches expected returns
+            common_symbols = [s for s in symbols if s in correlation_matrix.columns]
+            if len(common_symbols) < 2:
+                self.logger.warning("Insufficient overlap between returns and correlation data")
+                return {}
+            
+            # Create expected returns vector
+            returns_vector = np.array([expected_returns[symbol] for symbol in common_symbols])
+            
+            # Create covariance matrix from correlation matrix
+            # Assume equal volatility for simplification (can be enhanced)
+            volatilities = np.array([0.2] * len(common_symbols))  # 20% annual volatility assumption
+            cov_matrix = np.outer(volatilities, volatilities) * correlation_matrix.loc[common_symbols, common_symbols].values
+            
+            # Add small regularization to ensure positive definite
+            cov_matrix += np.eye(len(common_symbols)) * 1e-6
+            
+            # Mean-variance optimization
+            # Maximize: w'μ - (λ/2)w'Σw subject to w'1 = 1
+            
+            try:
+                # Solve using quadratic programming approximation
+                inv_cov = np.linalg.inv(cov_matrix)
+                ones = np.ones(len(common_symbols))
+                
+                # Calculate optimal weights
+                numerator = inv_cov @ (returns_vector - risk_aversion * inv_cov @ ones * (ones.T @ inv_cov @ returns_vector - risk_aversion) / (ones.T @ inv_cov @ ones))
+                denominator = ones.T @ inv_cov @ ones
+                
+                optimal_weights = numerator / denominator
+                
+                # Ensure weights sum to 1
+                optimal_weights = optimal_weights / optimal_weights.sum()
+                
+                # Apply constraints
+                optimal_weights = np.clip(optimal_weights, 0.0, self.config.max_asset_weight)
+                optimal_weights = optimal_weights / optimal_weights.sum()  # Renormalize
+                
+            except np.linalg.LinAlgError:
+                # Fallback to equal weights if optimization fails
+                self.logger.warning("Optimization failed, using equal weights")
+                optimal_weights = np.ones(len(common_symbols)) / len(common_symbols)
+            
+            # Convert back to dictionary
+            allocation = {symbol: float(weight) for symbol, weight in zip(common_symbols, optimal_weights)}
+            
+            # Add zero weights for missing symbols
+            for symbol in symbols:
+                if symbol not in allocation:
+                    allocation[symbol] = 0.0
+            
+            self.logger.debug(f"Optimized allocation for {len(allocation)} assets")
+            
+            return allocation
+            
+        except Exception as e:
+            self.logger.error(f"Error optimizing asset allocation: {e}")
+            # Return equal weights as fallback
+            symbols = list(expected_returns.keys())
+            if symbols:
+                equal_weight = 1.0 / len(symbols)
+                return {symbol: equal_weight for symbol in symbols}
+            return {}
+
     def get_strategy_metrics(self) -> StrategyMetrics:
         """Get current strategy performance metrics"""
         metrics = StrategyMetrics()

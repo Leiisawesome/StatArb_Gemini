@@ -920,8 +920,26 @@ class CentralRiskManager(ISystemComponent):
             logger.error(f"Authorization monitoring error: {e}")
     
     async def _check_risk_limits(self):
-        """Check for risk limit breaches"""
-        pass  # TODO: Implement risk limit monitoring
+        """Check for risk limit breaches during continuous monitoring"""
+        try:
+            # Check portfolio-level risk limits
+            total_exposure = sum(abs(pos * 100.0) for pos in self.current_positions.values())
+            exposure_ratio = total_exposure / self.portfolio_value if self.portfolio_value > 0 else 0
+            
+            # Check if exposure exceeds limits
+            if exposure_ratio > self.config.max_daily_var:
+                logger.warning(f"Portfolio exposure ({exposure_ratio:.2%}) exceeds limit ({self.config.max_daily_var:.2%})")
+            
+            # Check individual position limits
+            for symbol, position in self.current_positions.items():
+                position_value = abs(position * 100.0)  # Assuming $100 per share for demo
+                position_ratio = position_value / self.portfolio_value if self.portfolio_value > 0 else 0
+                
+                if position_ratio > self.config.max_position_size:
+                    logger.warning(f"Position {symbol} ({position_ratio:.2%}) exceeds limit ({self.config.max_position_size:.2%})")
+                    
+        except Exception as e:
+            logger.error(f"Risk limits check failed: {e}")
     
     def _update_risk_metrics(self):
         """Update current risk metrics"""

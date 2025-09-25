@@ -96,10 +96,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ClickHouseDataConfig(DataConfig):
-    """Enhanced data configuration for ClickHouse integration"""
+    """Enhanced data configuration for ClickHouse integration with date range support"""
     # Inherit from core_engine DataConfig for architectural compliance
     symbols: List[str] = None
-    target_date: str = "2024-12-20"
+    
+    # Date range configuration (replaces single target_date)
+    start_date: Optional[str] = None  # Format: "YYYY-MM-DD"
+    end_date: Optional[str] = None    # Format: "YYYY-MM-DD"
+    target_date: Optional[str] = "2024-12-20"  # Backward compatibility (deprecated)
+    
     interval: str = "1min"  # 1min, 5min, 15min, 1h
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
@@ -119,6 +124,43 @@ class ClickHouseDataConfig(DataConfig):
         if self.symbols is None:
             # Top liquid symbols from our ClickHouse data
             self.symbols = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
+        
+        # Date range validation and backward compatibility
+        self._validate_date_configuration()
+    
+    def _validate_date_configuration(self):
+        """Validate and normalize date configuration"""
+        from datetime import datetime
+        
+        # If start_date and end_date are provided, use them (preferred)
+        if self.start_date and self.end_date:
+            # Validate date format
+            try:
+                start_dt = datetime.strptime(self.start_date, "%Y-%m-%d")
+                end_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
+                if start_dt > end_dt:
+                    raise ValueError(f"start_date ({self.start_date}) must be <= end_date ({self.end_date})")
+            except ValueError as e:
+                raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
+        
+        # Backward compatibility: if only target_date is provided
+        elif self.target_date and not (self.start_date or self.end_date):
+            logger.warning("Using deprecated target_date. Consider using start_date/end_date for date ranges.")
+            self.start_date = self.target_date
+            self.end_date = self.target_date
+        
+        # If neither is provided, use default
+        elif not (self.start_date or self.end_date or self.target_date):
+            logger.warning("No date configuration provided. Using default target_date.")
+            self.target_date = "2024-12-20"
+            self.start_date = self.target_date
+            self.end_date = self.target_date
+        
+        # Ensure we have both start_date and end_date for consistent behavior
+        if not self.start_date:
+            self.start_date = self.target_date
+        if not self.end_date:
+            self.end_date = self.target_date
 
 @dataclass
 class EnhancedMarketData(MarketData):
@@ -256,7 +298,7 @@ class ClickHouseDataManager(BaseDataManager):
         query = f"""
         SELECT ticker, COUNT(*) as records
         FROM {self.enhanced_config.clickhouse_database}.ticks 
-        WHERE toDate(toDateTime(window_start / 1000000000)) = '{self.enhanced_config.target_date}'
+        WHERE toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
         HAVING records > 100
         ORDER BY records DESC
@@ -265,7 +307,7 @@ class ClickHouseDataManager(BaseDataManager):
         try:
             result = self._execute_query(query)
             symbols = result['ticker'].tolist()
-            self.logger.info(f"Found {len(symbols)} symbols with data for {self.enhanced_config.target_date}")
+            self.logger.info(f"Found {len(symbols)} symbols with data for period {self.enhanced_config.start_date} to {self.enhanced_config.end_date}")
             return symbols
         except Exception as e:
             self.logger.error(f"Failed to get available symbols: {e}")
@@ -283,8 +325,8 @@ class ClickHouseDataManager(BaseDataManager):
         
         Args:
             symbols: List of symbols to load
-            start_time: Start time (defaults to beginning of target_date)
-            end_time: End time (defaults to end of target_date)  
+            start_time: Start time (defaults to beginning of date range)
+            end_time: End time (defaults to end of date range)  
             interval: Data interval (1min, 5min, 15min, 1h)
             
         Returns:
@@ -293,11 +335,11 @@ class ClickHouseDataManager(BaseDataManager):
         symbols = symbols or self.enhanced_config.symbols
         interval = interval or self.enhanced_config.interval
         
-        # Default to full day if no times specified
+        # Default to full date range if no times specified
         if start_time is None:
-            start_time = datetime.strptime(f"{self.enhanced_config.target_date} 00:00:00", "%Y-%m-%d %H:%M:%S")
+            start_time = datetime.strptime(f"{self.enhanced_config.start_date} 00:00:00", "%Y-%m-%d %H:%M:%S")
         if end_time is None:
-            end_time = datetime.strptime(f"{self.enhanced_config.target_date} 23:59:59", "%Y-%m-%d %H:%M:%S")
+            end_time = datetime.strptime(f"{self.enhanced_config.end_date} 23:59:59", "%Y-%m-%d %H:%M:%S")
         
         # Check cache
         cache_key = f"{'-'.join(symbols)}_{start_time}_{end_time}_{interval}"
@@ -463,7 +505,7 @@ class ClickHouseDataManager(BaseDataManager):
             argMax(close, window_start) as latest_price
         FROM {self.enhanced_config.clickhouse_database}.ticks
         WHERE ticker IN ('{symbols_str}')
-        AND toDate(toDateTime(window_start / 1000000000)) = '{self.enhanced_config.target_date}'
+        AND toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
         """
         
@@ -511,9 +553,9 @@ class ClickHouseDataManager(BaseDataManager):
             end_dt = None
             
             if start_time:
-                start_dt = datetime.strptime(f"{self.enhanced_config.target_date} {start_time}:00", "%Y-%m-%d %H:%M:%S")
+                start_dt = datetime.strptime(f"{self.enhanced_config.start_date} {start_time}:00", "%Y-%m-%d %H:%M:%S")
             if end_time:
-                end_dt = datetime.strptime(f"{self.enhanced_config.target_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
+                end_dt = datetime.strptime(f"{self.enhanced_config.end_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
             
             # Use existing load_market_data method
             df = self.load_market_data(
@@ -586,8 +628,10 @@ class ClickHouseDataManager(BaseDataManager):
         Implements BaseDataManager interface for backward compatibility
         """
         try:
-            # For now, redirect to our ClickHouse data for the target date
-            if start_date.date() <= datetime.strptime(self.enhanced_config.target_date, "%Y-%m-%d").date() <= end_date.date():
+            # Check if requested date range overlaps with our configured date range
+            config_start = datetime.strptime(self.enhanced_config.start_date, "%Y-%m-%d").date()
+            config_end = datetime.strptime(self.enhanced_config.end_date, "%Y-%m-%d").date()
+            if start_date.date() <= config_end and end_date.date() >= config_start:
                 df = self.get_market_data(symbol)
                 if df is not None and not df.empty:
                     return df

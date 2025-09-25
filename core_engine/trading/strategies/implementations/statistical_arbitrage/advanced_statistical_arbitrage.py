@@ -760,6 +760,184 @@ class AdvancedStatisticalArbitrageStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error("Error updating portfolio risk metrics", {'error': str(e)})
 
+    def _estimate_error_correction_model(self, symbol1: str, symbol2: str) -> Dict[str, Any]:
+        """
+        Estimate Error Correction Model (ECM) for cointegrated pairs
+        
+        Academic Foundation:
+        - Engle & Granger (1987) two-step cointegration procedure
+        - Vector Error Correction Model (VECM) theory
+        - Granger Representation Theorem
+        
+        Args:
+            symbol1: First symbol in the pair
+            symbol2: Second symbol in the pair
+            
+        Returns:
+            Dictionary containing ECM parameters and diagnostics
+        """
+        try:
+            from statsmodels.tsa.vector_ar.vecm import VECM
+            from statsmodels.tsa.stattools import coint
+            
+            if symbol1 not in self.price_data or symbol2 not in self.price_data:
+                return {'error': 'Price data not available for both symbols'}
+            
+            # Get price series
+            prices1 = self.price_data[symbol1]['close'].dropna()
+            prices2 = self.price_data[symbol2]['close'].dropna()
+            
+            # Align series
+            common_index = prices1.index.intersection(prices2.index)
+            if len(common_index) < 50:
+                return {'error': 'Insufficient overlapping data points'}
+            
+            prices1_aligned = prices1.loc[common_index]
+            prices2_aligned = prices2.loc[common_index]
+            
+            # Test for cointegration first
+            coint_stat, coint_p_value, coint_critical_values = coint(prices1_aligned, prices2_aligned)
+            
+            if coint_p_value > 0.05:
+                return {
+                    'error': 'Series are not cointegrated',
+                    'cointegration_p_value': float(coint_p_value)
+                }
+            
+            # Prepare data for VECM
+            data = pd.DataFrame({
+                symbol1: prices1_aligned,
+                symbol2: prices2_aligned
+            })
+            
+            # Estimate VECM
+            vecm_model = VECM(data, k_ar_diff=1, coint_rank=1, deterministic='ci')
+            vecm_result = vecm_model.fit()
+            
+            # Extract error correction parameters
+            alpha = vecm_result.alpha  # Adjustment coefficients
+            beta = vecm_result.beta    # Cointegrating vector
+            
+            # Calculate half-life of mean reversion
+            adjustment_speed = abs(alpha[0, 0])  # Speed of adjustment for first equation
+            half_life = np.log(2) / adjustment_speed if adjustment_speed > 0 else np.inf
+            
+            return {
+                'cointegration_statistic': float(coint_stat),
+                'cointegration_p_value': float(coint_p_value),
+                'alpha': alpha.tolist(),  # Adjustment coefficients
+                'beta': beta.tolist(),    # Cointegrating vector
+                'adjustment_speed': float(adjustment_speed),
+                'half_life_days': float(half_life),
+                'log_likelihood': float(vecm_result.llf),
+                'aic': float(vecm_result.aic),
+                'bic': float(vecm_result.bic),
+                'data_points': len(data)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"ECM estimation failed for {symbol1}-{symbol2}: {e}")
+            return {'error': str(e)}
+
+    def _apply_kalman_filter(self, symbol1: str, symbol2: str, spread_data: pd.Series) -> Dict[str, Any]:
+        """
+        Apply Kalman Filter for dynamic hedge ratio estimation
+        
+        Academic Foundation:
+        - Kalman (1960) optimal filtering theory
+        - State-space representation of hedge ratios
+        - Dynamic parameter estimation for pairs trading
+        
+        Args:
+            symbol1: First symbol in the pair
+            symbol2: Second symbol in the pair
+            spread_data: Historical spread data
+            
+        Returns:
+            Dictionary containing filtered hedge ratios and diagnostics
+        """
+        try:
+            if len(spread_data) < 20:
+                return {'error': 'Insufficient data for Kalman filtering'}
+            
+            # Get price data
+            if symbol1 not in self.price_data or symbol2 not in self.price_data:
+                return {'error': 'Price data not available'}
+            
+            prices1 = self.price_data[symbol1]['close'].dropna()
+            prices2 = self.price_data[symbol2]['close'].dropna()
+            
+            # Align data
+            common_index = prices1.index.intersection(prices2.index).intersection(spread_data.index)
+            if len(common_index) < 20:
+                return {'error': 'Insufficient aligned data'}
+            
+            y1 = prices1.loc[common_index].values
+            y2 = prices2.loc[common_index].values
+            
+            n = len(y1)
+            
+            # State-space model: hedge_ratio[t] = hedge_ratio[t-1] + w[t]
+            # Observation: y1[t] = hedge_ratio[t] * y2[t] + v[t]
+            
+            # Initialize parameters
+            hedge_ratio = np.zeros(n)
+            P = np.zeros(n)  # Error covariance
+            
+            # Initial values
+            hedge_ratio[0] = y1[0] / y2[0] if y2[0] != 0 else 1.0
+            P[0] = 1.0
+            
+            # Kalman filter parameters
+            Q = 1e-5  # Process noise variance
+            R = 1e-2  # Measurement noise variance
+            
+            # Forward pass
+            for t in range(1, n):
+                if y2[t] == 0:
+                    hedge_ratio[t] = hedge_ratio[t-1]
+                    P[t] = P[t-1] + Q
+                    continue
+                
+                # Prediction step
+                hedge_ratio_pred = hedge_ratio[t-1]
+                P_pred = P[t-1] + Q
+                
+                # Update step
+                H = y2[t]  # Observation matrix
+                innovation = y1[t] - H * hedge_ratio_pred
+                S = H * P_pred * H + R  # Innovation covariance
+                
+                if S > 0:
+                    K = P_pred * H / S  # Kalman gain
+                    hedge_ratio[t] = hedge_ratio_pred + K * innovation
+                    P[t] = (1 - K * H) * P_pred
+                else:
+                    hedge_ratio[t] = hedge_ratio_pred
+                    P[t] = P_pred
+            
+            # Calculate diagnostics
+            innovations = y1 - hedge_ratio * y2
+            innovation_variance = np.var(innovations)
+            log_likelihood = -0.5 * n * np.log(2 * np.pi * innovation_variance) - 0.5 * np.sum(innovations**2) / innovation_variance
+            
+            return {
+                'filtered_hedge_ratios': hedge_ratio.tolist(),
+                'error_covariances': P.tolist(),
+                'innovations': innovations.tolist(),
+                'innovation_variance': float(innovation_variance),
+                'log_likelihood': float(log_likelihood),
+                'final_hedge_ratio': float(hedge_ratio[-1]),
+                'final_error_covariance': float(P[-1]),
+                'process_noise_variance': Q,
+                'measurement_noise_variance': R,
+                'data_points': n
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Kalman filter failed for {symbol1}-{symbol2}: {e}")
+            return {'error': str(e)}
+
     def get_strategy_metrics(self) -> StrategyMetrics:
         """Get current strategy performance metrics"""
         metrics = StrategyMetrics()

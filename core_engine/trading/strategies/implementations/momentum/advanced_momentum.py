@@ -58,6 +58,11 @@ class MomentumConfig(StrategyConfig):
     lookback_periods: List[int] = field(default_factory=lambda: [1, 3, 6, 12])  # months
     skip_period: int = 1  # Skip most recent month (Jegadeesh & Titman)
     holding_period: int = 1  # Holding period in months
+    
+    # Lookback periods for momentum calculation (in days)
+    short_lookback: int = 20  # Short-term momentum (1 month)
+    medium_lookback: int = 60  # Medium-term momentum (3 months)
+    momentum_lookback: int = 252  # Long-term momentum (1 year)
 
     # Momentum calculation settings
     momentum_types: List[MomentumType] = field(default_factory=lambda: [
@@ -228,8 +233,11 @@ class AdvancedMomentumStrategy(BaseStrategy):
             self.logger.debug(f"Generated {len(signals)} momentum signals")
 
         except Exception as e:
-            self.logger.error("Error generating momentum signals", {'error': str(e)})
+            import traceback
+            self.logger.error(f"Error generating momentum signals: {e}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             # Return empty signals list on error
+            return []
 
         return signals
 
@@ -334,6 +342,180 @@ class AdvancedMomentumStrategy(BaseStrategy):
 
     def _calculate_time_series_momentum(self, symbol: str) -> float:
         """
+        Calculate time-series momentum for a symbol
+        
+        Uses multiple lookback periods to calculate momentum strength.
+        """
+        try:
+            if symbol not in self.price_data or self.price_data[symbol].empty:
+                return 0.0
+            
+            prices = self.price_data[symbol]['close']
+            if len(prices) < self.config.momentum_lookback:
+                return 0.0
+            
+            # Calculate returns over different periods
+            short_return = (prices.iloc[-1] / prices.iloc[-self.config.short_lookback] - 1) if len(prices) >= self.config.short_lookback else 0.0
+            medium_return = (prices.iloc[-1] / prices.iloc[-self.config.medium_lookback] - 1) if len(prices) >= self.config.medium_lookback else 0.0
+            long_return = (prices.iloc[-1] / prices.iloc[-self.config.momentum_lookback] - 1) if len(prices) >= self.config.momentum_lookback else 0.0
+            
+            # Weight different periods (more weight on recent performance)
+            weighted_momentum = (short_return * 0.5 + medium_return * 0.3 + long_return * 0.2)
+            
+            return float(weighted_momentum)
+            
+        except Exception as e:
+            self.logger.warning(f"Error calculating time series momentum for {symbol}: {e}")
+            return 0.0
+
+    def _calculate_volatility_adjusted_momentum(self, symbol: str) -> float:
+        """
+        Calculate volatility-adjusted momentum for a symbol
+        
+        Adjusts momentum by recent volatility to account for risk.
+        """
+        try:
+            if symbol not in self.price_data or self.price_data[symbol].empty:
+                return 0.0
+            
+            prices = self.price_data[symbol]['close']
+            if len(prices) < 20:  # Need minimum data for volatility calculation
+                return 0.0
+            
+            # Calculate returns
+            returns = prices.pct_change().dropna()
+            if len(returns) < 10:
+                return 0.0
+            
+            # Calculate momentum (total return over lookback period)
+            lookback = min(self.config.momentum_lookback, len(prices) - 1)
+            momentum = (prices.iloc[-1] / prices.iloc[-lookback] - 1) if lookback > 0 else 0.0
+            
+            # Calculate volatility (standard deviation of returns)
+            volatility = returns.rolling(window=min(20, len(returns))).std().iloc[-1]
+            
+            # Adjust momentum by volatility (higher volatility = lower adjusted momentum)
+            if volatility > 0:
+                vol_adjusted_momentum = momentum / volatility
+            else:
+                vol_adjusted_momentum = momentum
+            
+            return float(vol_adjusted_momentum)
+            
+        except Exception as e:
+            self.logger.warning(f"Error calculating volatility adjusted momentum for {symbol}: {e}")
+            return 0.0
+
+    def _calculate_momentum_indicators(self, symbol: str, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Calculate momentum indicators for testing framework compatibility
+        
+        Academic Foundation:
+        - Jegadeesh & Titman (1993) momentum factors
+        - Cross-sectional and time-series momentum
+        - Risk-adjusted momentum measures
+        
+        Args:
+            symbol: Symbol to calculate indicators for
+            market_data: Market data for the symbol
+            
+        Returns:
+            Dictionary containing momentum indicators
+        """
+        try:
+            if market_data is None or market_data.empty or 'close' not in market_data.columns:
+                return {'error': 'Invalid market data'}
+            
+            prices = market_data['close'].dropna()
+            if len(prices) < max(self.config.lookback_periods):
+                return {'error': 'Insufficient data for momentum calculation'}
+            
+            returns = prices.pct_change().dropna()
+            
+            # Calculate momentum for different lookback periods
+            momentum_indicators = {}
+            
+            for period in self.config.lookback_periods:
+                if len(returns) >= period:
+                    # Time-series momentum (cumulative return)
+                    momentum_return = (prices.iloc[-1] / prices.iloc[-period] - 1) if period <= len(prices) else 0
+                    
+                    # Volatility-adjusted momentum
+                    period_vol = returns.tail(period).std() * np.sqrt(252)
+                    vol_adj_momentum = momentum_return / period_vol if period_vol > 0 else 0
+                    
+                    momentum_indicators[f'momentum_{period}d'] = momentum_return
+                    momentum_indicators[f'vol_adj_momentum_{period}d'] = vol_adj_momentum
+            
+            # Current price momentum score
+            if len(self.config.lookback_periods) > 0:
+                primary_period = self.config.lookback_periods[0]
+                momentum_indicators['primary_momentum'] = momentum_indicators.get(f'momentum_{primary_period}d', 0)
+            
+            return momentum_indicators
+            
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _assess_trend_strength(self, symbol: str, market_data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Assess trend strength for testing framework compatibility
+        
+        Academic Foundation:
+        - Trend strength measurement using multiple indicators
+        - Statistical significance of trends
+        - Momentum persistence analysis
+        
+        Args:
+            symbol: Symbol to assess trend for
+            market_data: Market data for the symbol
+            
+        Returns:
+            Dictionary containing trend strength assessment
+        """
+        try:
+            if market_data is None or market_data.empty or 'close' not in market_data.columns:
+                return {'error': 'Invalid market data'}
+            
+            prices = market_data['close'].dropna()
+            if len(prices) < 20:
+                return {'error': 'Insufficient data for trend assessment'}
+            
+            # Calculate trend indicators
+            trend_assessment = {}
+            
+            # Simple moving average trend
+            sma_20 = prices.rolling(window=20).mean()
+            current_price = prices.iloc[-1]
+            current_sma = sma_20.iloc[-1]
+            
+            trend_assessment['price_vs_sma'] = (current_price - current_sma) / current_sma
+            trend_assessment['above_sma'] = current_price > current_sma
+            
+            # Price momentum over different periods
+            if len(prices) >= 5:
+                trend_assessment['momentum_5d'] = (prices.iloc[-1] / prices.iloc[-5] - 1)
+            if len(prices) >= 20:
+                trend_assessment['momentum_20d'] = (prices.iloc[-1] / prices.iloc[-20] - 1)
+            
+            # Trend consistency (percentage of recent periods with positive momentum)
+            if len(prices) >= 10:
+                recent_returns = prices.pct_change().tail(10)
+                positive_days = (recent_returns > 0).sum()
+                trend_assessment['trend_consistency'] = positive_days / 10
+            
+            # Overall trend strength score (0-1)
+            momentum_score = abs(trend_assessment.get('momentum_20d', 0))
+            consistency_score = trend_assessment.get('trend_consistency', 0.5)
+            trend_assessment['trend_strength'] = (momentum_score + consistency_score) / 2
+            
+            return trend_assessment
+            
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _calculate_time_series_momentum(self, symbol: str) -> float:
+        """
         Calculate time-series momentum (Jegadeesh & Titman, 1993)
 
         Returns the cumulative return over the lookback period,
@@ -431,7 +613,7 @@ class AdvancedMomentumStrategy(BaseStrategy):
         Determines signal type, position sizing, and risk management levels
         based on momentum score and current market conditions.
         """
-        if not market_data or market_data.empty:
+        if market_data is None or market_data.empty:
             return None
 
         try:
@@ -622,6 +804,44 @@ class AdvancedMomentumStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error("Error updating portfolio risk metrics", {'error': str(e)})
+
+    def _generate_momentum_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate momentum signals for given market data
+        
+        This method is required by the test framework to validate signal generation logic.
+        """
+        try:
+            signals = []
+            
+            for symbol, data in market_data.items():
+                if data is None or data.empty:
+                    continue
+                    
+                # Calculate momentum indicators
+                momentum_indicators = self._calculate_momentum_indicators(data)
+                
+                if momentum_indicators:
+                    # Generate signal based on momentum strength
+                    momentum_score = momentum_indicators.get('momentum_score', 0)
+                    
+                    if momentum_score > self.config.min_momentum_score:
+                        signal = StrategySignal(
+                            signal_id=f"momentum_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            strategy_id=self.config.strategy_id,
+                            symbol=symbol,
+                            signal_type=SignalType.BUY if momentum_score > 0 else SignalType.SELL,
+                            confidence=min(abs(momentum_score) * 2, 1.0),  # Scale to 0-1
+                            strength=abs(momentum_score),
+                            target_quantity=self._calculate_position_size(symbol, abs(momentum_score))
+                        )
+                        signals.append(signal)
+            
+            return signals
+            
+        except Exception as e:
+            self.logger.error(f"Error in _generate_momentum_signals: {e}")
+            return []
 
     def get_strategy_metrics(self) -> StrategyMetrics:
         """Get current strategy performance metrics"""

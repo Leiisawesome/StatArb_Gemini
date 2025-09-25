@@ -165,6 +165,9 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
         Sets up data structures, validates configuration, and prepares
         for signal generation with statistical testing.
         """
+        # DEBUG: Log initialization
+        if hasattr(self, 'logger'):
+            self.logger.info("DEBUG: Mean reversion strategy initialize() called")
         try:
             self.logger.info("Initializing Advanced Mean Reversion Strategy")
 
@@ -212,9 +215,13 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
         Returns:
             List of trading signals
         """
+        # Generate signals based on market data
         signals = []
 
         try:
+            if not market_data:
+                return signals
+            
             # Update internal data cache
             self._update_market_data(market_data)
 
@@ -238,6 +245,87 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
             # Return empty signals list on error
 
         return signals
+
+    def _test_stationarity(self, series: pd.Series, symbol: str = "") -> Dict[str, Any]:
+        """
+        Test stationarity using ADF and KPSS tests
+        
+        Academic Foundation:
+        - Augmented Dickey-Fuller (ADF) test: Dickey & Fuller (1979, 1981)
+        - KPSS test: Kwiatkowski et al. (1992)
+        - Combined approach for robust stationarity assessment
+        
+        Args:
+            series: Time series to test for stationarity
+            symbol: Symbol name for logging
+            
+        Returns:
+            Dictionary containing stationarity test results
+        """
+        try:
+            from statsmodels.tsa.stattools import adfuller, kpss
+            
+            if len(series) < 10:
+                return {
+                    'adf_stationary': False,
+                    'kpss_stationary': False,
+                    'consensus_stationary': False,
+                    'error': 'Insufficient data points'
+                }
+            
+            # Remove NaN values
+            clean_series = series.dropna()
+            if len(clean_series) < 10:
+                return {
+                    'adf_stationary': False,
+                    'kpss_stationary': False,
+                    'consensus_stationary': False,
+                    'error': 'Insufficient clean data points'
+                }
+            
+            # ADF Test (H0: unit root exists, i.e., non-stationary)
+            adf_stat, adf_p_value, adf_used_lag, adf_nobs, adf_critical_values, adf_icbest = adfuller(
+                clean_series, autolag='AIC', regression='c'
+            )
+            
+            # KPSS Test (H0: stationary)
+            kpss_stat, kpss_p_value, kpss_lags, kpss_critical_values = kpss(
+                clean_series, regression='c', nlags='auto'
+            )
+            
+            # Interpret results
+            adf_stationary = adf_p_value < self.config.adf_confidence_level
+            kpss_stationary = kpss_p_value > self.config.adf_confidence_level
+            
+            # Consensus: both tests must agree
+            consensus_stationary = adf_stationary and kpss_stationary
+            
+            # Log results for debugging
+            if symbol:
+                self.logger.debug(f"Stationarity test for {symbol}: ADF p={adf_p_value:.4f}, KPSS p={kpss_p_value:.4f}, Consensus={consensus_stationary}")
+            
+            return {
+                'adf_statistic': float(adf_stat),
+                'adf_p_value': float(adf_p_value),
+                'adf_critical_values': {k: float(v) for k, v in adf_critical_values.items()},
+                'adf_stationary': adf_stationary,
+                'kpss_statistic': float(kpss_stat),
+                'kpss_p_value': float(kpss_p_value),
+                'kpss_critical_values': {k: float(v) for k, v in kpss_critical_values.items()},
+                'kpss_stationary': kpss_stationary,
+                'consensus_stationary': consensus_stationary,
+                'data_points': len(clean_series),
+                'test_confidence_level': self.config.adf_confidence_level
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Stationarity test failed for {symbol}: {e}")
+            return {
+                'adf_stationary': False,
+                'kpss_stationary': False,
+                'consensus_stationary': False,
+                'error': str(e)
+            }
 
     def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         """
@@ -282,8 +370,9 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
             if not self.config.lookback_periods or min(self.config.lookback_periods) < 10:
                 return False
 
-            # Check thresholds
-            if not (0 < self.config.entry_threshold < self.config.exit_threshold):
+            # Check thresholds - FIXED: entry_threshold should be > exit_threshold for mean reversion
+            # Entry when far from mean (high z-score), exit when close to mean (low z-score)
+            if not (0 < self.config.exit_threshold < self.config.entry_threshold):
                 return False
 
             # Check statistical parameters
@@ -319,9 +408,18 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
         - Mean reversion strength metrics
         """
         reversion_stats = {}
+        
+        # Calculate statistics for available symbols
 
         for symbol in self.price_data.keys():
             try:
+                # Check minimum data requirement for statistical significance
+                data_length = len(self.price_data[symbol])
+                min_required = max(self.config.lookback_periods) + 10  # Need enough for longest lookback + buffer
+                
+                if data_length < min_required:
+                    continue
+                
                 stats = self._calculate_symbol_reversion_stats(symbol)
                 if stats and self._passes_statistical_tests(stats):
                     reversion_stats[symbol] = stats
@@ -339,7 +437,8 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
         Returns comprehensive statistics including z-scores, half-life,
         and statistical test results.
         """
-        if symbol not in self.price_data or 'close' in self.price_data[symbol].columns:
+        if symbol not in self.price_data or 'close' not in self.price_data[symbol].columns:
+            print(f"🔍 DEBUG: {symbol} missing price data or close column")
             return None
 
         prices = self.price_data[symbol]['close']
@@ -360,6 +459,10 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
 
         stats['z_scores'] = z_scores
         stats['primary_z_score'] = z_scores.get(max(self.config.lookback_periods), 0.0)
+        
+        # DEBUG: Log z-score values to understand why no signals are generated
+        if hasattr(self, 'logger'):
+            self.logger.info(f"DEBUG Z-SCORES for {symbol}: {z_scores}, primary: {stats['primary_z_score']}")
 
         # Calculate half-life of mean reversion
         half_life = self._calculate_half_life(prices)
@@ -539,7 +642,7 @@ class AdvancedMeanReversionStrategy(BaseStrategy):
         Determines signal type based on z-score magnitude and direction,
         with consideration for existing positions and holding periods.
         """
-        if not market_data or market_data.empty:
+        if market_data is None or market_data.empty:
             return None
 
         try:

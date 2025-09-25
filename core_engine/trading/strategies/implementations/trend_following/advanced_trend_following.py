@@ -245,8 +245,12 @@ class AdvancedTrendFollowingStrategy(BaseStrategy):
             self.exit_signals = {}
 
             # Set up performance monitoring
-            if self.performance_monitor:
-                self.performance_monitor.start_monitoring(f"trend_following_{self.config.strategy_id}")
+            if hasattr(self, 'performance_monitor') and self.performance_monitor:
+                try:
+                    self.performance_monitor.start_monitoring(f"trend_following_{self.config.strategy_id}")
+                except Exception as e:
+                    self.logger.warning(f"Performance monitor setup failed: {e}")
+                    # Continue without performance monitoring
 
             self.logger.info("Advanced Trend Following Strategy initialized successfully")
             return True
@@ -920,6 +924,178 @@ class AdvancedTrendFollowingStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error("Error monitoring trend changes", {'error': str(e)})
+
+    def _identify_trend_direction(self, symbol: str, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Identify trend direction for a given symbol
+        
+        This method is required by the test framework to validate trend direction identification logic.
+        """
+        try:
+            if data is None or data.empty or len(data) < self.config.slow_ma_period:
+                return {'error': 'Insufficient data for trend identification'}
+            
+            # Calculate moving averages
+            fast_ma = data['close'].rolling(self.config.fast_ma_period).mean()
+            slow_ma = data['close'].rolling(self.config.slow_ma_period).mean()
+            
+            if fast_ma.empty or slow_ma.empty:
+                return {'error': 'Unable to calculate moving averages'}
+            
+            # Current values
+            current_fast_ma = fast_ma.iloc[-1]
+            current_slow_ma = slow_ma.iloc[-1]
+            current_price = data['close'].iloc[-1]
+            
+            # Determine trend direction
+            if current_fast_ma > current_slow_ma and current_price > current_fast_ma:
+                trend_direction = 'uptrend'
+                trend_strength_raw = (current_fast_ma - current_slow_ma) / current_slow_ma
+            elif current_fast_ma < current_slow_ma and current_price < current_fast_ma:
+                trend_direction = 'downtrend'
+                trend_strength_raw = (current_slow_ma - current_fast_ma) / current_slow_ma
+            else:
+                trend_direction = 'sideways'
+                trend_strength_raw = 0.0
+            
+            # Calculate trend consistency (how long trend has been in same direction)
+            trend_consistency = 0
+            if len(fast_ma) >= 10 and len(slow_ma) >= 10:
+                for i in range(min(10, len(fast_ma))):
+                    if trend_direction == 'uptrend' and fast_ma.iloc[-(i+1)] > slow_ma.iloc[-(i+1)]:
+                        trend_consistency += 1
+                    elif trend_direction == 'downtrend' and fast_ma.iloc[-(i+1)] < slow_ma.iloc[-(i+1)]:
+                        trend_consistency += 1
+                    else:
+                        break
+            
+            # Calculate slope of trend
+            if len(slow_ma) >= 5:
+                recent_slope = (slow_ma.iloc[-1] - slow_ma.iloc[-5]) / slow_ma.iloc[-5]
+            else:
+                recent_slope = 0.0
+            
+            return {
+                'trend_direction': trend_direction,
+                'trend_strength': float(abs(trend_strength_raw)),
+                'trend_consistency': trend_consistency,
+                'trend_slope': float(recent_slope),
+                'fast_ma': float(current_fast_ma),
+                'slow_ma': float(current_slow_ma),
+                'current_price': float(current_price),
+                'ma_spread': float(current_fast_ma - current_slow_ma),
+                'ma_spread_percentage': float(trend_strength_raw),
+                'data_points': len(data)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error identifying trend direction for {symbol}: {e}")
+            return {'error': str(e)}
+
+    def _calculate_trend_strength(self, symbol: str, data: pd.DataFrame, 
+                                trend_direction: str) -> Dict[str, Any]:
+        """
+        Calculate trend strength for a given symbol and direction
+        
+        This method is required by the test framework to validate trend strength calculation logic.
+        """
+        try:
+            if data is None or data.empty or len(data) < 20:
+                return {'error': 'Insufficient data for trend strength calculation'}
+            
+            # Get trend direction info
+            trend_info = self._identify_trend_direction(symbol, data)
+            if 'error' in trend_info:
+                return trend_info
+            
+            # Calculate ADX (Average Directional Index) approximation
+            high_prices = data['high']
+            low_prices = data['low']
+            close_prices = data['close']
+            
+            # Calculate True Range
+            tr1 = high_prices - low_prices
+            tr2 = abs(high_prices - close_prices.shift(1))
+            tr3 = abs(low_prices - close_prices.shift(1))
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            # Calculate Directional Movement
+            dm_plus = high_prices.diff()
+            dm_minus = low_prices.diff() * -1
+            
+            # Set negative values to 0
+            dm_plus[dm_plus < 0] = 0
+            dm_minus[dm_minus < 0] = 0
+            
+            # Calculate smoothed values (simplified ADX calculation)
+            period = min(14, len(data) // 2)
+            if period < 5:
+                period = 5
+            
+            atr = true_range.rolling(period).mean()
+            di_plus = (dm_plus.rolling(period).mean() / atr) * 100
+            di_minus = (dm_minus.rolling(period).mean() / atr) * 100
+            
+            # Calculate DX and ADX approximation
+            dx = abs(di_plus - di_minus) / (di_plus + di_minus) * 100
+            adx_approx = dx.rolling(period).mean()
+            
+            current_adx = adx_approx.iloc[-1] if not adx_approx.empty else 25.0
+            
+            # Normalize ADX to 0-1 scale
+            adx_normalized = min(current_adx / 100.0, 1.0)
+            
+            # Calculate volatility-adjusted strength
+            returns = close_prices.pct_change().dropna()
+            volatility = returns.rolling(20).std() * np.sqrt(252) if len(returns) >= 20 else 0.2
+            current_volatility = volatility.iloc[-1] if not volatility.empty else 0.2
+            
+            # Adjust strength based on volatility (higher volatility = potentially stronger trend)
+            volatility_adjustment = min(current_volatility / 0.3, 2.0)  # Cap at 2x
+            
+            # Calculate momentum strength
+            momentum_period = min(10, len(close_prices) // 3)
+            if momentum_period >= 5:
+                momentum = (close_prices.iloc[-1] - close_prices.iloc[-momentum_period]) / close_prices.iloc[-momentum_period]
+            else:
+                momentum = 0.0
+            
+            # Combine different strength measures
+            base_strength = trend_info.get('trend_strength', 0.0)
+            consistency_factor = trend_info.get('trend_consistency', 0) / 10.0  # Normalize to 0-1
+            
+            # Final strength calculation
+            combined_strength = (
+                base_strength * 0.3 +
+                adx_normalized * 0.3 +
+                abs(momentum) * 0.2 +
+                consistency_factor * 0.2
+            ) * volatility_adjustment
+            
+            # Cap at 1.0
+            final_strength = min(combined_strength, 1.0)
+            
+            return {
+                'trend_strength': float(final_strength),
+                'adx_value': float(current_adx),
+                'adx_normalized': float(adx_normalized),
+                'momentum': float(momentum),
+                'volatility': float(current_volatility),
+                'consistency_factor': float(consistency_factor),
+                'base_strength': float(base_strength),
+                'volatility_adjustment': float(volatility_adjustment),
+                'trend_direction': trend_direction,
+                'strength_components': {
+                    'base': float(base_strength * 0.3),
+                    'adx': float(adx_normalized * 0.3),
+                    'momentum': float(abs(momentum) * 0.2),
+                    'consistency': float(consistency_factor * 0.2)
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating trend strength for {symbol}: {e}")
+            return {'error': str(e)}
 
     def get_strategy_metrics(self) -> StrategyMetrics:
         """Get current strategy performance metrics"""
