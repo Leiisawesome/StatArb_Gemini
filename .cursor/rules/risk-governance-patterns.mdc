@@ -1,9 +1,9 @@
 ---
 alwaysApply: true
-description: "Central Risk Manager Authority and Trading Authorization Patterns"
+description: "Central Risk Manager Governance and Authorization Patterns"
 ---
 
-# Risk Governance and Central Authority Patterns
+# Central Risk Manager Governance and Authorization Patterns
 
 The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the **SINGLE POINT OF AUTHORITY** for ALL trading decisions in the system.
 
@@ -153,3 +153,23 @@ def emergency_shutdown(self) -> bool:
     
     return True
 ```
+
+## Risk Authorization Audit Trail
+
+All risk decisions are logged and auditable:
+
+```python
+# Authorization audit entry
+audit_entry = {
+    'timestamp': datetime.now().isoformat(),
+    'operation_type': operation_type,
+    'risk_severity': risk_severity,
+    'requester': requester,
+    'risk_score': risk_score,
+    'authorized': authorization['authorized'],
+    'authorization_id': authorization.get('authorization_id')
+}
+self.authorization_audit.append(audit_entry)
+```
+
+This governance model ensures **centralized risk control**, **comprehensive authorization**, and **complete audit trails** for all trading activities.

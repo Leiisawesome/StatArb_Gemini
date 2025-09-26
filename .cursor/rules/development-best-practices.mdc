@@ -1,6 +1,6 @@
 ---
 alwaysApply: true
-description: "Development Standards, Logging, Error Handling, and Professional Practices"
+description: "Development Best Practices for StatArb_Gemini"
 ---
 
 # Development Best Practices for StatArb_Gemini
@@ -208,3 +208,93 @@ class TradingSignal:
 ❌ **Mixed Architectural Layers**: Keep layer separation clean
 ❌ **Hardcoded Configuration**: Use configuration files and classes
 ❌ **Incomplete Error Handling**: Always handle exceptions appropriately
+
+## 9. Testing Standards
+
+### Unit Testing
+```python
+import pytest
+from unittest.mock import Mock, patch
+
+class TestTradingComponent:
+    def setup_method(self):
+        self.component = TradingComponent()
+    
+    async def test_signal_generation(self):
+        # Test signal generation logic
+        signals = await self.component.generate_signals(mock_data)
+        assert len(signals) > 0
+        assert all(signal.confidence >= 0.6 for signal in signals)
+```
+
+### Integration Testing
+```python
+async def test_full_trading_pipeline():
+    # Test complete pipeline from data to execution
+    data_manager = ClickHouseDataManager(config)
+    risk_manager = CentralRiskManager(config)
+    execution_engine = UnifiedExecutionEngine(config)
+    
+    # Test data flow
+    market_data = data_manager.get_market_data("AAPL")
+    assert market_data is not None
+    
+    # Test signal generation and authorization
+    signals = generate_signals(market_data)
+    for signal in signals:
+        authorization = await risk_manager.authorize_trading_decision(signal)
+        assert authorization is not None
+```
+
+## 10. Performance Optimization
+
+### Vectorized Operations
+```python
+# Use pandas vectorized operations instead of loops
+# GOOD
+df['returns'] = df['close'].pct_change()
+df['sma'] = df['close'].rolling(20).mean()
+
+# AVOID
+returns = []
+for i in range(1, len(df)):
+    returns.append((df.iloc[i]['close'] - df.iloc[i-1]['close']) / df.iloc[i-1]['close'])
+```
+
+### Efficient Data Handling
+```python
+# Use appropriate data types
+df['volume'] = df['volume'].astype('int32')  # Instead of int64
+df['price'] = df['price'].astype('float32')  # Instead of float64
+
+# Use categorical for repeated strings
+df['symbol'] = df['symbol'].astype('category')
+```
+
+## 11. Security Practices
+
+### Configuration Security
+```python
+# Use environment variables for sensitive data
+import os
+from dataclasses import dataclass
+
+@dataclass
+class DatabaseConfig:
+    host: str = os.getenv('DB_HOST', 'localhost')
+    port: int = int(os.getenv('DB_PORT', '8123'))
+    password: str = os.getenv('DB_PASSWORD', '')
+```
+
+### Input Validation
+```python
+def validate_symbol(symbol: str) -> bool:
+    """Validate trading symbol format"""
+    if not symbol or not isinstance(symbol, str):
+        return False
+    
+    # Check format (letters only, 1-5 characters)
+    return symbol.isalpha() and 1 <= len(symbol) <= 5
+```
+
+This framework ensures **high-quality code**, **consistent architecture**, and **professional development practices** across the StatArb_Gemini project.

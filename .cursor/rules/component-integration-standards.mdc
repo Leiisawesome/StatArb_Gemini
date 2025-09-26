@@ -1,6 +1,6 @@
 ---
 alwaysApply: true
-description: "Component Integration Standards and ISystemComponent Interface Requirements"
+description: "Component Integration Standards for Core Engine"
 ---
 
 # Component Integration Standards for Core Engine
@@ -182,9 +182,135 @@ class ComponentConfig:
     custom_settings: Dict[str, Any] = None
 ```
 
-## 8. Prohibited Integration Patterns
+## 8. Inter-Component Communication
+
+### Direct Communication (Discouraged)
+```python
+# ❌ AVOID: Direct component-to-component calls
+other_component.some_method()
+```
+
+### Orchestrator-Mediated Communication (Preferred)
+```python
+# ✅ PREFERRED: Communication through orchestrator
+await self.orchestrator.send_message(
+    target_component="DataManager",
+    message_type="data_request",
+    payload={"symbol": "AAPL", "timeframe": "1min"}
+)
+```
+
+### Event-Based Communication (Recommended)
+```python
+# ✅ RECOMMENDED: Event-based communication
+await self.orchestrator.publish_event(
+    event_type="market_data_updated",
+    event_data={"symbol": "AAPL", "price": 150.0}
+)
+```
+
+## 9. Data Sharing Patterns
+
+### Shared State Access
+```python
+# Access shared state through orchestrator
+market_data = await self.orchestrator.get_shared_state("market_data")
+```
+
+### Data Subscription
+```python
+# Subscribe to data updates
+await self.orchestrator.subscribe_to_data(
+    data_type="market_data",
+    callback=self.on_market_data_update
+)
+```
+
+## 10. Component Dependencies
+
+### Dependency Declaration
+```python
+class MyTradingComponent(ISystemComponent):
+    DEPENDENCIES = ["DataManager", "RegimeEngine"]
+    
+    async def initialize(self) -> bool:
+        # Orchestrator ensures dependencies are initialized first
+        self.data_manager = self.orchestrator.get_component("DataManager")
+        self.regime_engine = self.orchestrator.get_component("RegimeEngine")
+        return True
+```
+
+## 11. Prohibited Integration Patterns
 
 ❌ **Direct Component Communication**: Components must communicate through orchestrator
 ❌ **Bypassing Registration**: All components must register with orchestrator
 ❌ **Independent Lifecycle**: Components cannot manage their own lifecycle
 ❌ **Custom Authorization**: Must use orchestrator authorization mechanisms
+❌ **Shared Mutable State**: Avoid direct shared state between components
+
+## 12. Component Testing Standards
+
+### Unit Testing
+```python
+import pytest
+from unittest.mock import Mock
+
+class TestMyTradingComponent:
+    def setup_method(self):
+        self.mock_orchestrator = Mock()
+        self.component = MyTradingComponent()
+        self.component.register_with_orchestrator(self.mock_orchestrator)
+    
+    async def test_initialization(self):
+        result = await self.component.initialize()
+        assert result is True
+        assert self.component.is_initialized
+```
+
+### Integration Testing
+```python
+async def test_component_integration():
+    orchestrator = HierarchicalSystemOrchestrator()
+    component = MyTradingComponent()
+    
+    # Register component
+    component_id = orchestrator.register_component(
+        name="TestComponent",
+        component=component,
+        layer=ComponentLayer.EXECUTION,
+        authority_level=AuthorityLevel.OPERATIONAL
+    )
+    
+    # Test lifecycle
+    await orchestrator.initialize_all_components()
+    await orchestrator.start_all_components()
+    
+    # Verify component is operational
+    status = component.get_status()
+    assert status['operational'] is True
+```
+
+## 13. Performance Monitoring
+
+### Metrics Collection
+```python
+class MyTradingComponent(ISystemComponent):
+    def __init__(self):
+        self.metrics = {
+            'operations_count': 0,
+            'success_rate': 0.0,
+            'avg_response_time': 0.0,
+            'error_count': 0
+        }
+    
+    def update_metrics(self, operation_time: float, success: bool):
+        self.metrics['operations_count'] += 1
+        if success:
+            self.metrics['success_rate'] = (
+                self.metrics['success_rate'] * (self.metrics['operations_count'] - 1) + 1
+            ) / self.metrics['operations_count']
+        else:
+            self.metrics['error_count'] += 1
+```
+
+This integration framework ensures **consistent architecture**, **proper governance**, and **reliable operation** across all core engine components.

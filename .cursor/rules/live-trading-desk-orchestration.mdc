@@ -1,0 +1,580 @@
+---
+description: "Live Trading Desk Architecture and Real-Time Orchestration Patterns"
+---
+
+# Live Trading Desk Orchestration - Instruction Map
+
+This instruction map shows how to compose core_engine components into a real-time institutional trading desk with live market data, continuous risk monitoring, and automated execution capabilities.
+
+## Live Trading Desk Component Stack
+
+### Real-Time Brick Assembly
+```
+┌─────────────────────────────────────┐
+│    HierarchicalSystemOrchestrator   │ ← System Control & Monitoring
+├─────────────────────────────────────┤
+│ LiveDataManager                     │ ← Real-Time Market Data
+│ RegimeEngine (Real-Time)            │ ← Live Market Condition Analysis
+│ StreamingIndicators                 │ ← Real-Time Signal Processing
+│ AdaptiveFeatureEngine               │ ← Dynamic Feature Engineering
+│ LiveSignalGenerator                 │ ← Real-Time Trading Signals
+├─────────────────────────────────────┤
+│ CentralRiskManager (Live)           │ ← Real-Time Risk Governance
+├─────────────────────────────────────┤
+│ StrategyManager (Live)              │ ← Active Strategy Management
+│ RealTimeTradingEngine               │ ← Live Execution Planning
+│ UnifiedExecutionEngine              │ ← Live Order Execution
+│ LivePortfolioManager                │ ← Real-Time Position Tracking
+│ RiskMonitor                         │ ← Continuous Risk Surveillance
+└─────────────────────────────────────┘
+```
+
+## Live Trading Configuration Map
+
+### 1. Real-Time Data Configuration
+```python
+from core_engine.data.manager import LiveDataConfig
+
+# Live market data streaming configuration
+live_data_config = LiveDataConfig(
+    symbols=['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ'],
+    data_sources=['polygon', 'alpaca', 'interactive_brokers'],
+    primary_source='polygon',
+    fallback_sources=['alpaca', 'interactive_brokers'],
+    
+    # Real-time streaming settings
+    streaming_interval=1000,  # 1 second updates
+    buffer_size=10000,        # 10k data points buffer
+    enable_tick_data=True,
+    enable_level2_data=True,
+    
+    # Quality controls
+    data_validation=True,
+    outlier_detection=True,
+    latency_monitoring=True,
+    max_acceptable_latency=100  # 100ms max latency
+)
+```
+
+### 2. Live Risk Management Configuration
+```python
+from core_engine.system.central_risk_manager import LiveRiskConfig
+
+# Real-time risk management settings
+live_risk_config = LiveRiskConfig(
+    # Position limits (more conservative for live trading)
+    max_position_size=0.08,           # 8% max position (vs 10% backtest)
+    max_daily_var=0.03,               # 3% daily VaR (vs 5% backtest)
+    position_concentration_limit=0.12, # 12% concentration (vs 15% backtest)
+    strategy_allocation_limit=0.25,    # 25% per strategy (vs 33% backtest)
+    
+    # Live trading specific limits
+    max_daily_trades=100,
+    max_order_size=10000,
+    max_portfolio_turnover=2.0,       # 200% daily turnover limit
+    
+    # Real-time monitoring
+    risk_check_interval=5,            # 5 second risk checks
+    position_monitoring_interval=1,   # 1 second position updates
+    var_calculation_interval=60,      # 1 minute VaR updates
+    
+    # Emergency controls
+    enable_circuit_breakers=True,
+    max_drawdown_threshold=0.05,      # 5% max drawdown trigger
+    volatility_spike_threshold=3.0,   # 3x normal volatility trigger
+    
+    # Regime-based risk scaling
+    regime_risk_multipliers={
+        'crisis_mode': 0.3,           # Reduce risk by 70% in crisis
+        'high_volatility': 0.6,       # Reduce risk by 40% in high vol
+        'low_volatility': 1.2,        # Increase risk by 20% in low vol
+        'trending': 1.1,              # Increase risk by 10% in trends
+        'mean_reverting': 0.9         # Reduce risk by 10% in mean reversion
+    }
+)
+```
+
+### 3. Live Execution Configuration
+```python
+from core_engine.system.unified_execution_engine import LiveExecutionConfig
+
+# Real-time execution settings
+live_execution_config = LiveExecutionConfig(
+    # Execution algorithms
+    default_algorithm=ExecutionAlgorithm.ADAPTIVE,
+    enable_smart_routing=True,
+    enable_dark_pools=True,
+    
+    # Timing constraints
+    max_execution_time=300,           # 5 minutes max execution
+    slice_interval=30,                # 30 second slicing
+    market_impact_threshold=0.005,    # 0.5% max market impact
+    
+    # Venue preferences
+    primary_venues=['NYSE', 'NASDAQ', 'ARCA'],
+    dark_pool_venues=['IEX', 'BATS', 'EDGX'],
+    venue_allocation_strategy='smart_routing',
+    
+    # Real-time adjustments
+    adaptive_slicing=True,
+    dynamic_venue_selection=True,
+    real_time_cost_analysis=True,
+    
+    # Emergency execution
+    emergency_execution_mode='market_orders',
+    circuit_breaker_execution='cancel_all'
+)
+```
+
+## Live Trading Orchestration Workflow
+
+### Phase 1: Live System Initialization
+```python
+async def initialize_live_trading_system():
+    """Initialize live trading desk with all components"""
+    
+    # 1. Create orchestrator with live monitoring
+    orchestrator = HierarchicalSystemOrchestrator(
+        monitoring_interval=1,  # 1 second monitoring
+        health_check_interval=10,  # 10 second health checks
+        enable_real_time_alerts=True
+    )
+    
+    # 2. Register live data management
+    live_data_manager = LiveDataManager(live_data_config)
+    orchestrator.register_component(
+        name="LiveDataManager",
+        component=live_data_manager,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=1,
+        critical=True  # Critical for live trading
+    )
+    
+    # 3. Register real-time regime analysis
+    live_regime_engine = RegimeEngine(
+        config={**regime_config, 'real_time_mode': True, 'update_frequency': 60}
+    )
+    orchestrator.register_component(
+        name="LiveRegimeEngine",
+        component=live_regime_engine,
+        layer=ComponentLayer.SUPPORT,
+        initialization_order=2,
+        critical=True
+    )
+    
+    # 4. Register streaming processing pipeline
+    streaming_indicators = StreamingTechnicalIndicators(
+        update_frequency=5,  # 5 second updates
+        enable_real_time_calculation=True
+    )
+    adaptive_features = AdaptiveFeatureEngine(
+        adaptation_interval=300,  # 5 minute adaptation
+        enable_online_learning=True
+    )
+    live_signals = LiveSignalGenerator(
+        signal_frequency=10,  # 10 second signal generation
+        confidence_threshold=0.65  # Higher threshold for live trading
+    )
+    
+    orchestrator.register_component("StreamingIndicators", streaming_indicators, ComponentLayer.SUPPORT, initialization_order=3)
+    orchestrator.register_component("AdaptiveFeatures", adaptive_features, ComponentLayer.SUPPORT, initialization_order=4)
+    orchestrator.register_component("LiveSignals", live_signals, ComponentLayer.SUPPORT, initialization_order=5)
+    
+    # 5. Register live risk management (CRITICAL)
+    live_risk_manager = CentralRiskManager(live_risk_config)
+    orchestrator.register_component(
+        name="LiveRiskManager",
+        component=live_risk_manager,
+        layer=ComponentLayer.GOVERNANCE,
+        authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
+        initialization_order=6,
+        critical=True  # CRITICAL - No trading without risk management
+    )
+    
+    # 6. Register live execution layer
+    live_strategy_manager = StrategyManager({
+        **strategy_config,
+        'live_mode': True,
+        'position_sizing_mode': 'dynamic',
+        'regime_adaptation': True
+    })
+    
+    real_time_trading_engine = RealTimeTradingEngine(live_execution_config)
+    unified_execution_engine = UnifiedExecutionEngine({
+        **live_execution_config,
+        'enable_position_tracking': True,
+        'risk_manager_callback': live_risk_manager
+    })
+    
+    live_portfolio_manager = LivePortfolioManager(
+        update_frequency=1,  # 1 second position updates
+        enable_real_time_pnl=True,
+        enable_risk_attribution=True
+    )
+    
+    orchestrator.register_component("LiveStrategyManager", live_strategy_manager, ComponentLayer.EXECUTION, initialization_order=7)
+    orchestrator.register_component("RealTimeTradingEngine", real_time_trading_engine, ComponentLayer.EXECUTION, initialization_order=8)
+    orchestrator.register_component("UnifiedExecutionEngine", unified_execution_engine, ComponentLayer.EXECUTION, initialization_order=9)
+    orchestrator.register_component("LivePortfolioManager", live_portfolio_manager, ComponentLayer.EXECUTION, initialization_order=10)
+    
+    # 7. Register monitoring and alerting
+    risk_monitor = RealTimeRiskMonitor(
+        monitoring_frequency=1,  # 1 second monitoring
+        alert_thresholds=live_risk_config.alert_thresholds,
+        enable_automated_responses=True
+    )
+    orchestrator.register_component("RiskMonitor", risk_monitor, ComponentLayer.GOVERNANCE, initialization_order=11)
+    
+    # 8. Initialize all components with dependency checking
+    initialization_success = await orchestrator.initialize_all_components()
+    if not initialization_success:
+        raise RuntimeError("Critical component initialization failed")
+    
+    # 9. Start all components
+    startup_success = await orchestrator.start_all_components()
+    if not startup_success:
+        raise RuntimeError("Critical component startup failed")
+    
+    # 10. Verify system health before trading
+    system_health = await orchestrator.system_health_check()
+    if not system_health['overall_healthy']:
+        raise RuntimeError(f"System health check failed: {system_health}")
+    
+    logger.info("🚀 Live trading system initialized and operational")
+    return orchestrator
+```
+
+### Phase 2: Real-Time Market Data Processing
+```python
+async def start_live_data_processing(orchestrator):
+    """Start real-time market data processing pipeline"""
+    
+    live_data_manager = orchestrator.get_component("LiveDataManager")
+    streaming_indicators = orchestrator.get_component("StreamingIndicators")
+    adaptive_features = orchestrator.get_component("AdaptiveFeatures")
+    live_signals = orchestrator.get_component("LiveSignals")
+    live_regime_engine = orchestrator.get_component("LiveRegimeEngine")
+    
+    # Start data streaming
+    await live_data_manager.start_streaming()
+    
+    # Set up real-time processing pipeline
+    async def process_market_data_stream():
+        """Process incoming market data in real-time"""
+        
+        async for market_data_batch in live_data_manager.get_data_stream():
+            try:
+                # 1. Update regime analysis
+                await live_regime_engine.update_regime_analysis(market_data_batch)
+                
+                # 2. Calculate streaming indicators
+                indicators = await streaming_indicators.update_indicators(market_data_batch)
+                
+                # 3. Engineer features adaptively
+                features = await adaptive_features.update_features(indicators)
+                
+                # 4. Generate live trading signals
+                signals = await live_signals.generate_signals(features)
+                
+                # 5. Publish signals for strategy consumption
+                if signals:
+                    await orchestrator.publish_event(
+                        event_type="live_signals_generated",
+                        event_data={"signals": signals, "timestamp": datetime.now()}
+                    )
+                
+            except Exception as e:
+                logger.error(f"Error in live data processing: {e}")
+                # Continue processing - don't stop the stream
+    
+    # Start processing task
+    processing_task = asyncio.create_task(process_market_data_stream())
+    
+    return processing_task
+```
+
+### Phase 3: Live Strategy Execution
+```python
+async def run_live_strategy_execution(orchestrator):
+    """Execute live trading strategies with real-time risk management"""
+    
+    live_strategy_manager = orchestrator.get_component("LiveStrategyManager")
+    live_risk_manager = orchestrator.get_component("LiveRiskManager")
+    real_time_trading_engine = orchestrator.get_component("RealTimeTradingEngine")
+    unified_execution_engine = orchestrator.get_component("UnifiedExecutionEngine")
+    
+    # Subscribe to live signals
+    async def handle_live_signals(event_data):
+        """Handle incoming live trading signals"""
+        
+        signals = event_data["signals"]
+        current_regime = await orchestrator.get_component("LiveRegimeEngine").get_current_regime()
+        
+        for signal in signals:
+            try:
+                # 1. Strategy manager evaluates signal
+                strategy_decision = await live_strategy_manager.evaluate_signal(
+                    signal, current_regime
+                )
+                
+                if not strategy_decision.should_trade:
+                    continue
+                
+                # 2. Create trading decision request
+                request = TradingDecisionRequest(
+                    decision_type=TradingDecisionType.POSITION_ENTRY,
+                    symbol=signal.symbol,
+                    side=signal.signal_type.value,
+                    quantity=strategy_decision.quantity,
+                    strategy_id=strategy_decision.strategy_id,
+                    confidence=signal.confidence,
+                    market_regime=current_regime.primary_regime.value,
+                    urgency=ExecutionUrgency.NORMAL,
+                    requesting_component="LiveStrategyManager"
+                )
+                
+                # 3. Request authorization from risk manager (MANDATORY)
+                authorization = await live_risk_manager.authorize_trading_decision(request)
+                
+                if authorization.authorization_level == AuthorizationLevel.REJECTED:
+                    logger.warning(f"Trade rejected: {authorization.rejection_reason}")
+                    continue
+                
+                # 4. Create execution plan
+                execution_plan = await real_time_trading_engine.create_execution_plan(
+                    authorization, current_market_conditions=signal.metadata
+                )
+                
+                # 5. Execute trade
+                execution_result = await unified_execution_engine.execute_authorized_trade(
+                    execution_plan
+                )
+                
+                # 6. Log execution result
+                logger.info(f"Live trade executed: {execution_result.status} - "
+                           f"{signal.symbol} {signal.signal_type} {execution_result.filled_quantity}")
+                
+            except Exception as e:
+                logger.error(f"Error executing live signal: {e}")
+                # Continue with next signal
+    
+    # Subscribe to live signals
+    await orchestrator.subscribe_to_event("live_signals_generated", handle_live_signals)
+```
+
+### Phase 4: Real-Time Risk Monitoring
+```python
+async def start_real_time_risk_monitoring(orchestrator):
+    """Start continuous risk monitoring and alerting"""
+    
+    risk_monitor = orchestrator.get_component("RiskMonitor")
+    live_risk_manager = orchestrator.get_component("LiveRiskManager")
+    live_portfolio_manager = orchestrator.get_component("LivePortfolioManager")
+    
+    async def continuous_risk_monitoring():
+        """Continuous risk monitoring loop"""
+        
+        while orchestrator.is_operational:
+            try:
+                # 1. Get current portfolio state
+                portfolio_state = await live_portfolio_manager.get_current_state()
+                
+                # 2. Calculate real-time risk metrics
+                risk_metrics = await live_risk_manager.calculate_real_time_risk(portfolio_state)
+                
+                # 3. Check for risk limit breaches
+                risk_violations = await risk_monitor.check_risk_violations(risk_metrics)
+                
+                # 4. Handle violations
+                if risk_violations:
+                    await handle_risk_violations(orchestrator, risk_violations)
+                
+                # 5. Update risk dashboard
+                await orchestrator.publish_event(
+                    event_type="risk_metrics_updated",
+                    event_data={
+                        "risk_metrics": risk_metrics,
+                        "violations": risk_violations,
+                        "timestamp": datetime.now()
+                    }
+                )
+                
+                # Wait before next check
+                await asyncio.sleep(live_risk_config.risk_check_interval)
+                
+            except Exception as e:
+                logger.error(f"Error in risk monitoring: {e}")
+                await asyncio.sleep(5)  # Brief pause before retry
+    
+    # Start monitoring task
+    monitoring_task = asyncio.create_task(continuous_risk_monitoring())
+    return monitoring_task
+
+async def handle_risk_violations(orchestrator, violations):
+    """Handle risk limit violations with automated responses"""
+    
+    live_risk_manager = orchestrator.get_component("LiveRiskManager")
+    
+    for violation in violations:
+        if violation.severity == "CRITICAL":
+            # Emergency shutdown
+            logger.critical(f"CRITICAL risk violation: {violation.description}")
+            await live_risk_manager.emergency_shutdown()
+            
+        elif violation.severity == "HIGH":
+            # Reduce positions
+            logger.error(f"HIGH risk violation: {violation.description}")
+            await live_risk_manager.reduce_positions(violation.affected_positions)
+            
+        elif violation.severity == "MEDIUM":
+            # Alert and monitor
+            logger.warning(f"MEDIUM risk violation: {violation.description}")
+            await send_risk_alert(violation)
+```
+
+## Complete Live Trading Desk Function
+
+### Master Live Trading Function
+```python
+async def run_live_trading_desk(
+    symbols: List[str],
+    strategy_configs: List[Dict],
+    risk_config: Dict = None,
+    execution_config: Dict = None
+) -> None:
+    """
+    Complete live trading desk orchestration
+    
+    This function orchestrates all core_engine components for
+    real-time institutional trading with continuous risk monitoring
+    and automated execution.
+    """
+    
+    orchestrator = None
+    
+    try:
+        # Phase 1: Initialize live trading system
+        logger.info("🔧 Initializing live trading desk...")
+        orchestrator = await initialize_live_trading_system()
+        
+        # Phase 2: Start real-time data processing
+        logger.info("📊 Starting live data processing...")
+        data_processing_task = await start_live_data_processing(orchestrator)
+        
+        # Phase 3: Start strategy execution
+        logger.info("🎯 Starting live strategy execution...")
+        await run_live_strategy_execution(orchestrator)
+        
+        # Phase 4: Start risk monitoring
+        logger.info("🛡️ Starting real-time risk monitoring...")
+        risk_monitoring_task = await start_real_time_risk_monitoring(orchestrator)
+        
+        # Phase 5: Run trading desk
+        logger.info("🚀 Live trading desk operational")
+        
+        # Keep system running
+        while orchestrator.is_operational:
+            # System health check
+            health_status = await orchestrator.system_health_check()
+            
+            if not health_status['overall_healthy']:
+                logger.error(f"System health degraded: {health_status}")
+                # Implement recovery procedures
+                await attempt_system_recovery(orchestrator)
+            
+            # Brief pause
+            await asyncio.sleep(10)
+            
+    except KeyboardInterrupt:
+        logger.info("🛑 Shutdown requested by user")
+        
+    except Exception as e:
+        logger.error(f"❌ Live trading desk error: {e}")
+        
+    finally:
+        # Graceful shutdown
+        if orchestrator:
+            logger.info("🔄 Shutting down live trading desk...")
+            await orchestrator.stop_all_components()
+            logger.info("✅ Live trading desk shutdown complete")
+
+async def attempt_system_recovery(orchestrator):
+    """Attempt to recover from system health issues"""
+    
+    logger.info("🔄 Attempting system recovery...")
+    
+    # 1. Check component health
+    component_health = await orchestrator.check_all_component_health()
+    
+    # 2. Restart unhealthy components
+    for component_name, health in component_health.items():
+        if not health['healthy']:
+            logger.warning(f"Restarting unhealthy component: {component_name}")
+            await orchestrator.restart_component(component_name)
+    
+    # 3. Verify recovery
+    recovery_health = await orchestrator.system_health_check()
+    
+    if recovery_health['overall_healthy']:
+        logger.info("✅ System recovery successful")
+    else:
+        logger.error("❌ System recovery failed - initiating emergency shutdown")
+        await orchestrator.emergency_shutdown()
+```
+
+## Live Trading Validation Suite
+
+### Real-Time System Validation
+```python
+async def validate_live_trading_system(orchestrator) -> Dict[str, Any]:
+    """Comprehensive validation of live trading system"""
+    
+    validation_results = {
+        'data_connectivity': await validate_data_connectivity(orchestrator),
+        'execution_connectivity': await validate_execution_connectivity(orchestrator),
+        'risk_controls': await validate_risk_controls(orchestrator),
+        'system_performance': await validate_system_performance(orchestrator),
+        'overall_status': 'unknown'
+    }
+    
+    # Calculate overall status
+    all_validations_passed = all(
+        result.get('status') == 'passed' 
+        for result in validation_results.values() 
+        if isinstance(result, dict)
+    )
+    
+    validation_results['overall_status'] = 'passed' if all_validations_passed else 'failed'
+    
+    return validation_results
+
+async def validate_data_connectivity(orchestrator) -> Dict:
+    """Validate real-time data connectivity"""
+    
+    live_data_manager = orchestrator.get_component("LiveDataManager")
+    
+    # Test data stream
+    test_start = datetime.now()
+    data_received = False
+    
+    try:
+        async with asyncio.timeout(10):  # 10 second timeout
+            async for data_batch in live_data_manager.get_data_stream():
+                if data_batch:
+                    data_received = True
+                    break
+    except asyncio.TimeoutError:
+        pass
+    
+    latency = (datetime.now() - test_start).total_seconds() * 1000  # ms
+    
+    return {
+        'status': 'passed' if data_received and latency < 1000 else 'failed',
+        'data_received': data_received,
+        'latency_ms': latency,
+        'timestamp': datetime.now()
+    }
+```
+
+This instruction map provides a complete blueprint for assembling core_engine components into a real-time institutional trading desk. The architecture emphasizes **real-time processing**, **continuous risk monitoring**, and **automated execution** while maintaining the same governance and risk management standards as the backtesting system.

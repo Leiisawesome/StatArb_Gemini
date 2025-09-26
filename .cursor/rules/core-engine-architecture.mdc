@@ -1,0 +1,137 @@
+---
+alwaysApply: true
+description: "Core Engine Architecture and Component Hierarchy"
+---
+
+# Core Engine Architecture and Component Hierarchy
+
+The StatArb_Gemini core_engine implements a **strict hierarchical governance architecture** with 11 core components organized in 4 layers.
+
+## Layer 1: System Orchestration (SYSTEM_CONTROL)
+
+### HierarchicalSystemOrchestrator
+- **File**: [core_engine/system/hierarchical_orchestrator.py](mdc:core_engine/system/hierarchical_orchestrator.py)
+- **Authority**: SYSTEM_CONTROL - highest level operational control
+- **Responsibility**: Component registration, lifecycle management, system-wide coordination
+
+**MANDATORY**: All components MUST register with the orchestrator:
+```python
+from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
+
+# Required registration pattern
+orchestrator.register_component(
+    name="ComponentName",
+    component=component_instance,
+    layer=ComponentLayer.EXECUTION,  # or SUPPORT, GOVERNANCE
+    authority_level=AuthorityLevel.OPERATIONAL,
+    initialization_order=20
+)
+```
+
+## Layer 2: Support Layer (OPERATIONAL)
+
+### 1. UnifiedDataManager
+- **File**: [core_engine/data/manager.py](mdc:core_engine/data/manager.py)
+- **Authority**: OPERATIONAL - data processing and analysis
+- **Rule**: ALL market data access MUST go through ClickHouse core engine
+
+### 2. UnifiedRegimeEngine
+- **File**: [core_engine/regime/engine.py](mdc:core_engine/regime/engine.py)
+- **Responsibility**: Market condition assessment and regime classification
+
+### 3. Signal Processing Pipeline
+- **Indicators**: [core_engine/processing/indicators/engine.py](mdc:core_engine/processing/indicators/engine.py)
+- **Features**: [core_engine/processing/features/engineer.py](mdc:core_engine/processing/features/engineer.py)
+- **Signals**: [core_engine/processing/signals/generator.py](mdc:core_engine/processing/signals/generator.py)
+- **Flow**: Indicators → Features → Signals
+
+## Layer 3: Governance Layer (GOVERNANCE_CONTROL)
+
+### 4. CentralRiskManager - SINGLE POINT OF AUTHORITY
+- **File**: [core_engine/system/central_risk_manager.py](mdc:core_engine/system/central_risk_manager.py)
+- **Authority**: GOVERNANCE_CONTROL - central trading governance
+- **CRITICAL RULE**: NO component can execute trades independently
+
+**MANDATORY AUTHORIZATION PATTERN**:
+```python
+from core_engine.system.central_risk_manager import (
+    CentralRiskManager, TradingDecisionRequest, TradingDecisionType
+)
+
+# ALL trading decisions MUST follow this pattern
+request = TradingDecisionRequest(
+    decision_type=TradingDecisionType.POSITION_ENTRY,
+    symbol=signal.symbol,
+    side=signal.signal_type.value,
+    quantity=signal.quantity,
+    strategy_id=self.strategy_id,
+    confidence=signal.confidence
+)
+
+authorization = await central_risk_manager.authorize_trading_decision(request)
+if authorization.authorization_level != AuthorizationLevel.REJECTED:
+    result = await execution_engine.execute_authorized_trade(authorization)
+```
+
+## Layer 4: Execution Layer (OPERATIONAL under governance)
+
+### 5. StrategyManager
+- **File**: [core_engine/trading/strategies/manager.py](mdc:core_engine/trading/strategies/manager.py)
+- **Responsibility**: Determines WHAT to trade
+- **Authority**: OPERATIONAL but requires RiskManager authorization
+
+### 6. RealTimeTradingEngine
+- **File**: [core_engine/trading/engine.py](mdc:core_engine/trading/engine.py)
+- **Responsibility**: Plans HOW to execute
+
+### 7. UnifiedExecutionEngine
+- **File**: [core_engine/system/unified_execution_engine.py](mdc:core_engine/system/unified_execution_engine.py)
+- **Responsibility**: Executes ACTION with authorization
+
+## Additional Core Components
+
+### 8. Portfolio Management
+- **Directory**: [core_engine/trading/portfolio/](mdc:core_engine/trading/portfolio/)
+- **Responsibility**: Position tracking and portfolio optimization
+
+### 9. Risk Management
+- **Directory**: [core_engine/risk/](mdc:core_engine/risk/)
+- **Responsibility**: Risk calculation and monitoring
+
+### 10. Analytics Engine
+- **Directory**: [core_engine/analytics/](mdc:core_engine/analytics/)
+- **Responsibility**: Performance analysis and reporting
+
+### 11. Broker Integration
+- **Directory**: [core_engine/broker/](mdc:core_engine/broker/)
+- **Responsibility**: External broker connectivity and order routing
+
+## PROHIBITED ARCHITECTURAL PATTERNS
+
+❌ **Direct Component Communication**: Components must communicate through orchestrator
+❌ **Bypassing Registration**: All components must register with orchestrator
+❌ **Independent Trading**: All trades require RiskManager authorization
+❌ **Custom Authorization**: Must use orchestrator authorization mechanisms
+❌ **Direct Database Access**: Must use UnifiedDataManager for all market data
+
+## MANDATORY INTEGRATION REQUIREMENTS
+
+1. **Component Registration**: All components register with HierarchicalSystemOrchestrator
+2. **Authorization Flow**: All trading through CentralRiskManager
+3. **Data Pipeline**: Unified data access through core engine
+4. **Error Handling**: Comprehensive logging and error management
+5. **Lifecycle Management**: Components follow orchestrator-managed lifecycle
+
+## Component Interaction Flow
+
+```
+Market Data Sources
+    ↓ (via UnifiedDataManager)
+Technical Indicators → Feature Engineering → Signal Generation
+    ↓
+StrategyManager (WHAT) → CentralRiskManager (GOVERNANCE) → TradingEngine (HOW) → UnifiedExecutionEngine (ACTION)
+    ↓
+Portfolio Management ← Risk Management ← Analytics Engine
+```
+
+This architecture ensures **centralized governance**, **risk control**, and **systematic execution** across all trading operations.

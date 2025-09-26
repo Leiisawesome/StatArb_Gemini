@@ -1,0 +1,567 @@
+---
+description: "Specialized Regime Analyzer Architecture and Market Condition Detection Patterns"
+---
+
+# Specialized Regime Analyzer Configuration - Instruction Map
+
+This instruction map shows how to compose core_engine components into a specialized regime analysis system for advanced market condition detection, regime transition prediction, and strategy adaptation.
+
+## Regime Analyzer Component Stack
+
+### Specialized Analysis Brick Assembly
+```
+┌─────────────────────────────────────┐
+│    HierarchicalSystemOrchestrator   │ ← System Control & Coordination
+├─────────────────────────────────────┤
+│ MultiSourceDataManager              │ ← Multi-Asset Data Integration
+│ MacroDataManager                    │ ← Economic & Fundamental Data
+│ AlternativeDataManager              │ ← Sentiment & Flow Data
+├─────────────────────────────────────┤
+│ EnhancedRegimeEngine                │ ← Advanced Regime Detection
+│ RegimeTransitionPredictor           │ ← ML-Based Transition Forecasting
+│ CrossAssetRegimeAnalyzer            │ ← Multi-Asset Regime Correlation
+│ MacroRegimeIntegrator               │ ← Macro-Economic Regime Factors
+├─────────────────────────────────────┤
+│ RegimeStrategyMapper                │ ← Strategy-Regime Optimization
+│ RegimeRiskAdjuster                  │ ← Regime-Aware Risk Management
+├─────────────────────────────────────┤
+│ RegimeAnalytics                     │ ← Regime Performance Analytics
+│ RegimeReportGenerator               │ ← Comprehensive Regime Reporting
+│ RegimeVisualization                 │ ← Advanced Regime Visualization
+└─────────────────────────────────────┘
+```
+
+## Regime Analyzer Configuration Map
+
+### 1. Multi-Source Data Configuration
+```python
+from core_engine.data.manager import MultiSourceDataConfig
+
+# Comprehensive data sources for regime analysis
+regime_data_config = MultiSourceDataConfig(
+    # Core market data
+    equity_symbols=['SPY', 'QQQ', 'IWM', 'VIX', 'NVDA', 'TSLA', 'AAPL'],
+    bond_symbols=['TLT', 'IEF', 'SHY', 'HYG', 'LQD'],
+    commodity_symbols=['GLD', 'SLV', 'USO', 'UNG', 'DBA'],
+    currency_symbols=['UUP', 'FXE', 'FXY', 'EEM'],
+    
+    # Alternative data sources
+    sentiment_data=['AAII_sentiment', 'CNN_fear_greed', 'VIX_term_structure'],
+    flow_data=['fund_flows', 'insider_trading', 'options_flow'],
+    macro_data=['fed_funds_rate', 'yield_curve', 'inflation_expectations'],
+    
+    # Data frequencies
+    high_frequency_interval='1min',
+    medium_frequency_interval='1h',
+    low_frequency_interval='1d',
+    macro_frequency_interval='1w',
+    
+    # Historical depth
+    lookback_years=10,  # 10 years of historical data
+    regime_training_years=5,  # 5 years for regime model training
+    
+    # Quality controls
+    enable_data_validation=True,
+    enable_outlier_detection=True,
+    enable_regime_data_cleaning=True
+)
+```
+
+### 2. Enhanced Regime Engine Configuration
+```python
+from core_engine.regime.engine import EnhancedRegimeConfig
+
+# Advanced regime detection configuration
+enhanced_regime_config = EnhancedRegimeConfig(
+    # Multi-timeframe regime analysis
+    timeframes=['5min', '1H', '1D', '1W', '1M'],
+    primary_timeframe='1D',
+    regime_consensus_threshold=0.7,  # 70% consensus across timeframes
+    
+    # Advanced regime classifications
+    regime_types=[
+        'bull_low_vol', 'bull_high_vol', 'bear_low_vol', 'bear_high_vol',
+        'strong_trending', 'weak_trending', 'range_bound', 'choppy',
+        'crisis_mode', 'recovery_mode', 'euphoria_mode', 'complacency_mode',
+        'liquidity_crunch', 'high_liquidity', 'rotation_mode'
+    ],
+    
+    # Regime detection parameters
+    volatility_lookback=60,
+    trend_strength_window=40,
+    momentum_window=20,
+    mean_reversion_window=30,
+    
+    # Advanced indicators for regime detection
+    regime_indicators=[
+        'volatility_regime', 'trend_regime', 'momentum_regime',
+        'correlation_regime', 'dispersion_regime', 'skew_regime',
+        'term_structure_regime', 'credit_regime', 'sentiment_regime'
+    ],
+    
+    # Machine learning configuration
+    enable_ml_regime_detection=True,
+    ml_model_type='ensemble',  # ensemble, random_forest, gradient_boosting
+    feature_engineering_depth='comprehensive',
+    model_retrain_frequency=30,  # days
+    
+    # Regime transition prediction
+    enable_transition_prediction=True,
+    transition_prediction_horizons=['1D', '1W', '1M'],
+    transition_confidence_threshold=0.65,
+    
+    # Cross-asset regime analysis
+    enable_cross_asset_analysis=True,
+    cross_asset_correlation_window=60,
+    regime_spillover_analysis=True
+)
+```
+
+### 3. Regime Strategy Mapping Configuration
+```python
+from core_engine.regime.strategy_mapper import RegimeStrategyConfig
+
+# Strategy-regime optimization configuration
+regime_strategy_config = RegimeStrategyConfig(
+    # Strategy performance by regime
+    strategy_regime_mapping={
+        'mean_reversion': {
+            'optimal_regimes': ['range_bound', 'mean_reverting', 'low_volatility'],
+            'avoid_regimes': ['strong_trending', 'crisis_mode', 'high_volatility'],
+            'performance_multipliers': {
+                'range_bound': 1.5,
+                'mean_reverting': 1.3,
+                'low_volatility': 1.2,
+                'strong_trending': 0.3,
+                'crisis_mode': 0.1
+            }
+        },
+        'momentum': {
+            'optimal_regimes': ['strong_trending', 'bull_high_vol', 'bear_high_vol'],
+            'avoid_regimes': ['range_bound', 'choppy', 'mean_reverting'],
+            'performance_multipliers': {
+                'strong_trending': 1.8,
+                'bull_high_vol': 1.4,
+                'bear_high_vol': 1.2,
+                'range_bound': 0.2,
+                'choppy': 0.1
+            }
+        },
+        'pairs_trading': {
+            'optimal_regimes': ['range_bound', 'mean_reverting', 'rotation_mode'],
+            'avoid_regimes': ['crisis_mode', 'euphoria_mode', 'strong_trending'],
+            'performance_multipliers': {
+                'range_bound': 1.6,
+                'mean_reverting': 1.4,
+                'rotation_mode': 1.3,
+                'crisis_mode': 0.2
+            }
+        }
+    },
+    
+    # Dynamic strategy allocation
+    enable_dynamic_allocation=True,
+    allocation_adjustment_frequency=1,  # daily
+    max_allocation_change=0.1,  # 10% max daily change
+    
+    # Regime-based risk adjustment
+    regime_risk_multipliers={
+        'crisis_mode': 0.2,      # Reduce risk by 80%
+        'high_volatility': 0.5,  # Reduce risk by 50%
+        'euphoria_mode': 0.6,    # Reduce risk by 40%
+        'low_volatility': 1.3,   # Increase risk by 30%
+        'strong_trending': 1.2,  # Increase risk by 20%
+        'range_bound': 1.1       # Increase risk by 10%
+    }
+)
+```
+
+## Regime Analyzer Orchestration Workflow
+
+### Phase 1: Specialized System Initialization
+```python
+async def initialize_regime_analyzer_system():
+    """Initialize comprehensive regime analysis system"""
+    
+    # 1. Create orchestrator with regime-specific monitoring
+    orchestrator = HierarchicalSystemOrchestrator(
+        monitoring_interval=60,  # 1 minute monitoring for regime changes
+        health_check_interval=300,  # 5 minute health checks
+        enable_regime_alerts=True
+    )
+    
+    # 2. Register multi-source data management
+    multi_source_data_manager = MultiSourceDataManager(regime_data_config)
+    macro_data_manager = MacroDataManager(macro_data_config)
+    alternative_data_manager = AlternativeDataManager(alt_data_config)
+    
+    orchestrator.register_component("MultiSourceDataManager", multi_source_data_manager, ComponentLayer.SUPPORT, initialization_order=1)
+    orchestrator.register_component("MacroDataManager", macro_data_manager, ComponentLayer.SUPPORT, initialization_order=2)
+    orchestrator.register_component("AlternativeDataManager", alternative_data_manager, ComponentLayer.SUPPORT, initialization_order=3)
+    
+    # 3. Register enhanced regime analysis components
+    enhanced_regime_engine = EnhancedRegimeEngine(enhanced_regime_config)
+    regime_transition_predictor = RegimeTransitionPredictor(
+        prediction_horizons=['1D', '1W', '1M'],
+        ml_models=['random_forest', 'gradient_boosting', 'neural_network'],
+        ensemble_method='weighted_voting'
+    )
+    cross_asset_regime_analyzer = CrossAssetRegimeAnalyzer(
+        asset_classes=['equity', 'bond', 'commodity', 'currency'],
+        correlation_analysis=True,
+        spillover_analysis=True
+    )
+    macro_regime_integrator = MacroRegimeIntegrator(
+        macro_factors=['interest_rates', 'inflation', 'growth', 'policy'],
+        integration_method='factor_model'
+    )
+    
+    orchestrator.register_component("EnhancedRegimeEngine", enhanced_regime_engine, ComponentLayer.SUPPORT, initialization_order=4)
+    orchestrator.register_component("RegimeTransitionPredictor", regime_transition_predictor, ComponentLayer.SUPPORT, initialization_order=5)
+    orchestrator.register_component("CrossAssetRegimeAnalyzer", cross_asset_regime_analyzer, ComponentLayer.SUPPORT, initialization_order=6)
+    orchestrator.register_component("MacroRegimeIntegrator", macro_regime_integrator, ComponentLayer.SUPPORT, initialization_order=7)
+    
+    # 4. Register regime strategy optimization
+    regime_strategy_mapper = RegimeStrategyMapper(regime_strategy_config)
+    regime_risk_adjuster = RegimeRiskAdjuster(
+        risk_adjustment_method='dynamic',
+        adjustment_frequency='daily',
+        max_risk_reduction=0.8  # Max 80% risk reduction
+    )
+    
+    orchestrator.register_component("RegimeStrategyMapper", regime_strategy_mapper, ComponentLayer.GOVERNANCE, initialization_order=8)
+    orchestrator.register_component("RegimeRiskAdjuster", regime_risk_adjuster, ComponentLayer.GOVERNANCE, initialization_order=9)
+    
+    # 5. Register analytics and reporting
+    regime_analytics = RegimeAnalytics(
+        performance_attribution=True,
+        regime_persistence_analysis=True,
+        transition_cost_analysis=True
+    )
+    regime_report_generator = RegimeReportGenerator(
+        report_frequency='daily',
+        include_predictions=True,
+        include_strategy_recommendations=True
+    )
+    regime_visualization = RegimeVisualization(
+        chart_types=['regime_timeline', 'transition_matrix', 'performance_heatmap'],
+        interactive_charts=True
+    )
+    
+    orchestrator.register_component("RegimeAnalytics", regime_analytics, ComponentLayer.EXECUTION, initialization_order=10)
+    orchestrator.register_component("RegimeReportGenerator", regime_report_generator, ComponentLayer.EXECUTION, initialization_order=11)
+    orchestrator.register_component("RegimeVisualization", regime_visualization, ComponentLayer.EXECUTION, initialization_order=12)
+    
+    # 6. Initialize all components
+    await orchestrator.initialize_all_components()
+    await orchestrator.start_all_components()
+    
+    logger.info("🧠 Regime Analyzer System initialized and operational")
+    return orchestrator
+```
+
+### Phase 2: Comprehensive Regime Analysis
+```python
+async def run_comprehensive_regime_analysis(orchestrator, analysis_period):
+    """Run comprehensive regime analysis across multiple dimensions"""
+    
+    # Get all regime analysis components
+    multi_source_data = orchestrator.get_component("MultiSourceDataManager")
+    macro_data = orchestrator.get_component("MacroDataManager")
+    alt_data = orchestrator.get_component("AlternativeDataManager")
+    enhanced_regime_engine = orchestrator.get_component("EnhancedRegimeEngine")
+    transition_predictor = orchestrator.get_component("RegimeTransitionPredictor")
+    cross_asset_analyzer = orchestrator.get_component("CrossAssetRegimeAnalyzer")
+    macro_integrator = orchestrator.get_component("MacroRegimeIntegrator")
+    
+    # 1. Load comprehensive data
+    logger.info("📊 Loading multi-source data for regime analysis...")
+    
+    market_data = await multi_source_data.load_comprehensive_data(analysis_period)
+    macro_data_df = await macro_data.load_macro_indicators(analysis_period)
+    sentiment_data = await alt_data.load_sentiment_data(analysis_period)
+    flow_data = await alt_data.load_flow_data(analysis_period)
+    
+    # 2. Enhanced regime detection
+    logger.info("🔍 Performing enhanced regime detection...")
+    
+    regime_analysis = await enhanced_regime_engine.analyze_regimes(
+        market_data=market_data,
+        macro_data=macro_data_df,
+        sentiment_data=sentiment_data,
+        flow_data=flow_data
+    )
+    
+    # 3. Cross-asset regime analysis
+    logger.info("🌐 Analyzing cross-asset regime relationships...")
+    
+    cross_asset_regimes = await cross_asset_analyzer.analyze_cross_asset_regimes(
+        equity_data=market_data['equity'],
+        bond_data=market_data['bond'],
+        commodity_data=market_data['commodity'],
+        currency_data=market_data['currency']
+    )
+    
+    # 4. Macro regime integration
+    logger.info("📈 Integrating macro-economic regime factors...")
+    
+    macro_regime_analysis = await macro_integrator.integrate_macro_factors(
+        market_regimes=regime_analysis,
+        macro_indicators=macro_data_df,
+        integration_method='factor_model'
+    )
+    
+    # 5. Regime transition prediction
+    logger.info("🔮 Predicting regime transitions...")
+    
+    transition_predictions = await transition_predictor.predict_transitions(
+        current_regime=regime_analysis.primary_regime,
+        historical_regimes=regime_analysis.regime_history,
+        macro_context=macro_regime_analysis,
+        prediction_horizons=['1D', '1W', '1M']
+    )
+    
+    return {
+        'regime_analysis': regime_analysis,
+        'cross_asset_regimes': cross_asset_regimes,
+        'macro_regime_analysis': macro_regime_analysis,
+        'transition_predictions': transition_predictions,
+        'analysis_timestamp': datetime.now()
+    }
+```
+
+### Phase 3: Strategy-Regime Optimization
+```python
+async def optimize_strategies_for_regimes(orchestrator, regime_analysis_results):
+    """Optimize strategy allocation based on regime analysis"""
+    
+    regime_strategy_mapper = orchestrator.get_component("RegimeStrategyMapper")
+    regime_risk_adjuster = orchestrator.get_component("RegimeRiskAdjuster")
+    
+    current_regime = regime_analysis_results['regime_analysis'].primary_regime
+    transition_predictions = regime_analysis_results['transition_predictions']
+    
+    # 1. Calculate optimal strategy allocation
+    logger.info("🎯 Calculating optimal strategy allocation for current regime...")
+    
+    optimal_allocation = await regime_strategy_mapper.calculate_optimal_allocation(
+        current_regime=current_regime,
+        regime_confidence=regime_analysis_results['regime_analysis'].confidence,
+        transition_predictions=transition_predictions,
+        cross_asset_context=regime_analysis_results['cross_asset_regimes']
+    )
+    
+    # 2. Adjust risk parameters based on regime
+    logger.info("🛡️ Adjusting risk parameters for regime...")
+    
+    regime_risk_adjustments = await regime_risk_adjuster.calculate_risk_adjustments(
+        current_regime=current_regime,
+        regime_stability=regime_analysis_results['regime_analysis'].regime_stability,
+        transition_probability=regime_analysis_results['regime_analysis'].transition_probability,
+        macro_context=regime_analysis_results['macro_regime_analysis']
+    )
+    
+    # 3. Generate strategy recommendations
+    strategy_recommendations = {
+        'current_regime': current_regime.value,
+        'regime_confidence': regime_analysis_results['regime_analysis'].confidence,
+        'optimal_allocation': optimal_allocation,
+        'risk_adjustments': regime_risk_adjustments,
+        'strategy_actions': await generate_strategy_actions(optimal_allocation),
+        'risk_actions': await generate_risk_actions(regime_risk_adjustments),
+        'monitoring_priorities': await identify_monitoring_priorities(transition_predictions)
+    }
+    
+    return strategy_recommendations
+
+async def generate_strategy_actions(optimal_allocation):
+    """Generate specific strategy actions based on optimal allocation"""
+    
+    actions = []
+    
+    for strategy, allocation in optimal_allocation.items():
+        if allocation > 0.1:  # Significant allocation
+            actions.append({
+                'action': 'increase_allocation',
+                'strategy': strategy,
+                'target_allocation': allocation,
+                'priority': 'high' if allocation > 0.2 else 'medium'
+            })
+        elif allocation < 0.05:  # Low allocation
+            actions.append({
+                'action': 'reduce_allocation',
+                'strategy': strategy,
+                'target_allocation': allocation,
+                'priority': 'medium'
+            })
+    
+    return actions
+```
+
+### Phase 4: Regime Analytics and Reporting
+```python
+async def generate_regime_analytics_report(orchestrator, regime_analysis_results, strategy_recommendations):
+    """Generate comprehensive regime analytics and reporting"""
+    
+    regime_analytics = orchestrator.get_component("RegimeAnalytics")
+    report_generator = orchestrator.get_component("RegimeReportGenerator")
+    visualization = orchestrator.get_component("RegimeVisualization")
+    
+    # 1. Performance attribution analysis
+    logger.info("📊 Calculating regime-based performance attribution...")
+    
+    performance_attribution = await regime_analytics.calculate_regime_attribution(
+        regime_history=regime_analysis_results['regime_analysis'].regime_history,
+        strategy_performance=await get_historical_strategy_performance(),
+        attribution_method='brinson_fachler'
+    )
+    
+    # 2. Regime persistence analysis
+    regime_persistence = await regime_analytics.analyze_regime_persistence(
+        regime_history=regime_analysis_results['regime_analysis'].regime_history,
+        persistence_metrics=['duration', 'stability', 'transition_frequency']
+    )
+    
+    # 3. Transition cost analysis
+    transition_costs = await regime_analytics.calculate_transition_costs(
+        regime_transitions=regime_analysis_results['regime_analysis'].transition_history,
+        strategy_adjustments=strategy_recommendations['strategy_actions'],
+        cost_components=['execution_costs', 'opportunity_costs', 'timing_costs']
+    )
+    
+    # 4. Generate visualizations
+    logger.info("📈 Generating regime visualizations...")
+    
+    regime_charts = await visualization.create_regime_visualizations(
+        regime_timeline=regime_analysis_results['regime_analysis'].regime_history,
+        transition_matrix=regime_analysis_results['transition_predictions'],
+        performance_heatmap=performance_attribution,
+        cross_asset_correlations=regime_analysis_results['cross_asset_regimes']
+    )
+    
+    # 5. Generate comprehensive report
+    logger.info("📋 Generating comprehensive regime report...")
+    
+    comprehensive_report = await report_generator.generate_regime_report(
+        regime_analysis=regime_analysis_results,
+        strategy_recommendations=strategy_recommendations,
+        performance_attribution=performance_attribution,
+        regime_persistence=regime_persistence,
+        transition_costs=transition_costs,
+        visualizations=regime_charts
+    )
+    
+    return comprehensive_report
+```
+
+## Complete Regime Analyzer Function
+
+### Master Regime Analysis Function
+```python
+async def run_specialized_regime_analyzer(
+    analysis_period: Dict[str, str],
+    asset_universe: List[str] = None,
+    analysis_depth: str = 'comprehensive'
+) -> Dict[str, Any]:
+    """
+    Complete specialized regime analyzer workflow
+    
+    This function orchestrates all core_engine components to perform
+    comprehensive regime analysis with cross-asset correlation,
+    macro integration, and strategy optimization.
+    """
+    
+    orchestrator = None
+    
+    try:
+        # Phase 1: Initialize regime analyzer system
+        logger.info("🔧 Initializing specialized regime analyzer...")
+        orchestrator = await initialize_regime_analyzer_system()
+        
+        # Phase 2: Run comprehensive regime analysis
+        logger.info("🧠 Running comprehensive regime analysis...")
+        regime_analysis_results = await run_comprehensive_regime_analysis(
+            orchestrator, analysis_period
+        )
+        
+        # Phase 3: Optimize strategies for regimes
+        logger.info("🎯 Optimizing strategies for current regime...")
+        strategy_recommendations = await optimize_strategies_for_regimes(
+            orchestrator, regime_analysis_results
+        )
+        
+        # Phase 4: Generate analytics and reporting
+        logger.info("📊 Generating regime analytics report...")
+        comprehensive_report = await generate_regime_analytics_report(
+            orchestrator, regime_analysis_results, strategy_recommendations
+        )
+        
+        # Phase 5: Compile final results
+        final_results = {
+            'analysis_config': {
+                'analysis_period': analysis_period,
+                'asset_universe': asset_universe,
+                'analysis_depth': analysis_depth,
+                'analysis_timestamp': datetime.now()
+            },
+            'regime_analysis': regime_analysis_results,
+            'strategy_recommendations': strategy_recommendations,
+            'comprehensive_report': comprehensive_report,
+            'system_health': await orchestrator.system_health_check()
+        }
+        
+        logger.info("✅ Specialized regime analysis completed successfully")
+        return final_results
+        
+    except Exception as e:
+        logger.error(f"❌ Regime analyzer failed: {e}")
+        raise
+        
+    finally:
+        # Cleanup
+        if orchestrator:
+            await orchestrator.stop_all_components()
+```
+
+## Regime Analyzer Validation Suite
+
+### Regime Detection Validation
+```python
+async def validate_regime_detection_accuracy(orchestrator, validation_period):
+    """Validate regime detection accuracy against known market events"""
+    
+    enhanced_regime_engine = orchestrator.get_component("EnhancedRegimeEngine")
+    
+    # Known market events for validation
+    known_events = {
+        '2020-03-01': 'crisis_mode',      # COVID crash
+        '2020-04-01': 'recovery_mode',    # Post-crash recovery
+        '2021-01-01': 'euphoria_mode',    # Meme stock bubble
+        '2022-01-01': 'bear_high_vol',    # 2022 bear market
+        '2023-01-01': 'bull_low_vol'      # 2023 recovery
+    }
+    
+    validation_results = []
+    
+    for event_date, expected_regime in known_events.items():
+        detected_regime = await enhanced_regime_engine.get_regime_for_date(event_date)
+        
+        validation_results.append({
+            'date': event_date,
+            'expected_regime': expected_regime,
+            'detected_regime': detected_regime.primary_regime.value,
+            'confidence': detected_regime.confidence,
+            'match': detected_regime.primary_regime.value == expected_regime
+        })
+    
+    accuracy = sum(1 for r in validation_results if r['match']) / len(validation_results)
+    
+    return {
+        'overall_accuracy': accuracy,
+        'validation_results': validation_results,
+        'accuracy_threshold': 0.8,  # 80% accuracy threshold
+        'validation_passed': accuracy >= 0.8
+    }
+```
+
+This instruction map provides a complete blueprint for assembling core_engine components into a specialized regime analysis system. The architecture emphasizes **multi-dimensional regime detection**, **cross-asset analysis**, **macro integration**, and **strategy optimization** while maintaining institutional-grade analytical standards.

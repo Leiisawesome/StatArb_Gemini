@@ -1,0 +1,419 @@
+---
+description: "Institutional Backtest Engine Architecture and Historical Simulation Patterns"
+---
+
+# Institutional Backtest Workflow - Instruction Map
+
+This instruction map shows how to compose core_engine components into a comprehensive institutional backtesting system using the standardized "Lego brick" architecture.
+
+## Component Assembly for Backtesting
+
+### Core Brick Stack
+```
+┌─────────────────────────────────────┐
+│    HierarchicalSystemOrchestrator   │ ← System Control
+├─────────────────────────────────────┤
+│ ClickHouseDataManager               │ ← Historical Data Authority
+│ RegimeEngine                        │ ← Market Condition Analysis
+│ TechnicalIndicators                 │ ← Signal Processing Pipeline
+│ FeatureEngineer                     │ ← ML Feature Creation
+│ SignalGenerator                     │ ← Trading Signal Generation
+├─────────────────────────────────────┤
+│ CentralRiskManager                  │ ← Governance & Authorization
+├─────────────────────────────────────┤
+│ StrategyManager                     │ ← Strategy Orchestration
+│ BacktestExecutionEngine             │ ← Historical Execution Simulation
+│ PortfolioAnalytics                  │ ← Performance Measurement
+│ RiskAnalytics                       │ ← Risk Assessment
+└─────────────────────────────────────┘
+```
+
+## Backtest Configuration Map
+
+### 1. Data Configuration
+```python
+from core_engine.data.manager import ClickHouseDataConfig
+
+# Historical data specification
+backtest_data_config = ClickHouseDataConfig(
+    symbols=['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ'],
+    start_date="2024-01-01",
+    end_date="2024-12-20",
+    interval="1min",  # 1-minute data ingested in 5-minute intervals
+    enable_caching=True,
+    cache_ttl=3600  # 1 hour cache for backtest data
+)
+```
+
+### 2. Regime Analysis Configuration
+```python
+from core_engine.regime.engine import RegimeEngineConfig
+
+# Market regime detection for historical periods
+regime_config = RegimeEngineConfig(
+    lookback_window=60,
+    volatility_window=20,
+    trend_threshold=0.02,
+    regime_change_threshold=0.7,
+    enable_enhanced_detection=True,
+    # Backtest-specific settings
+    historical_mode=True,
+    regime_persistence_threshold=0.8
+)
+```
+
+### 3. Risk Management Configuration
+```python
+from core_engine.system.central_risk_manager import RiskManagerConfig
+
+# Institutional risk limits for backtesting
+backtest_risk_config = RiskManagerConfig(
+    max_position_size=0.10,  # 10% max position
+    max_daily_var=0.05,      # 5% daily VaR
+    position_concentration_limit=0.15,  # 15% concentration
+    strategy_allocation_limit=0.33,     # 33% per strategy
+    min_signal_confidence=0.6,          # 60% minimum confidence
+    
+    # Backtest-specific risk settings
+    enable_historical_var=True,
+    lookback_var_window=252,  # 1 year lookback
+    stress_test_scenarios=['2008_crisis', '2020_covid', 'flash_crash']
+)
+```
+
+## Backtest Orchestration Workflow
+
+### Phase 1: System Initialization
+```python
+async def initialize_backtest_system():
+    """Initialize all components for backtesting"""
+    
+    # 1. Create orchestrator
+    orchestrator = HierarchicalSystemOrchestrator()
+    
+    # 2. Register data management layer
+    data_manager = ClickHouseDataManager(backtest_data_config)
+    orchestrator.register_component(
+        name="DataManager",
+        component=data_manager,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=1
+    )
+    
+    # 3. Register regime analysis
+    regime_engine = RegimeEngine(regime_config)
+    orchestrator.register_component(
+        name="RegimeEngine", 
+        component=regime_engine,
+        layer=ComponentLayer.SUPPORT,
+        initialization_order=2
+    )
+    
+    # 4. Register processing pipeline
+    indicators_engine = EnhancedTechnicalIndicators()
+    feature_engineer = FeatureEngineer()
+    signal_generator = SignalGenerator()
+    
+    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=3)
+    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=4)
+    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=5)
+    
+    # 5. Register governance layer
+    risk_manager = CentralRiskManager(backtest_risk_config)
+    orchestrator.register_component(
+        name="RiskManager",
+        component=risk_manager,
+        layer=ComponentLayer.GOVERNANCE,
+        authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
+        initialization_order=6
+    )
+    
+    # 6. Register execution layer
+    strategy_manager = StrategyManager(strategy_config)
+    backtest_engine = BacktestExecutionEngine(execution_config)
+    portfolio_analytics = PortfolioAnalytics(analytics_config)
+    
+    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=7)
+    orchestrator.register_component("BacktestEngine", backtest_engine, ComponentLayer.EXECUTION, initialization_order=8)
+    orchestrator.register_component("PortfolioAnalytics", portfolio_analytics, ComponentLayer.EXECUTION, initialization_order=9)
+    
+    # 7. Initialize all components in dependency order
+    await orchestrator.initialize_all_components()
+    await orchestrator.start_all_components()
+    
+    return orchestrator
+```
+
+### Phase 2: Historical Data Processing
+```python
+async def process_historical_data(orchestrator, symbols, start_date, end_date):
+    """Process historical data through the pipeline"""
+    
+    data_manager = orchestrator.get_component("DataManager")
+    regime_engine = orchestrator.get_component("RegimeEngine")
+    indicators_engine = orchestrator.get_component("IndicatorsEngine")
+    feature_engineer = orchestrator.get_component("FeatureEngineer")
+    signal_generator = orchestrator.get_component("SignalGenerator")
+    
+    # Load historical market data
+    market_data = data_manager.load_market_data(
+        symbols=symbols,
+        start_time=datetime.strptime(start_date, "%Y-%m-%d"),
+        end_time=datetime.strptime(end_date, "%Y-%m-%d"),
+        interval="1min"
+    )
+    
+    # Process through pipeline
+    logger.info("Processing historical data through pipeline...")
+    
+    # 1. Calculate technical indicators
+    indicators_df = indicators_engine.calculate_indicators(market_data)
+    
+    # 2. Engineer features for ML
+    features_df = feature_engineer.create_features(indicators_df)
+    
+    # 3. Generate trading signals
+    signals_df = signal_generator.generate_signals(features_df)
+    
+    # 4. Feed data to regime engine for historical regime classification
+    for _, row in market_data.iterrows():
+        await regime_engine.on_market_data(row)
+    
+    return {
+        'market_data': market_data,
+        'indicators': indicators_df,
+        'features': features_df,
+        'signals': signals_df,
+        'regime_history': regime_engine.get_regime_history()
+    }
+```
+
+### Phase 3: Strategy Backtesting
+```python
+async def run_strategy_backtest(orchestrator, processed_data, strategy_configs):
+    """Execute strategy backtesting with risk management"""
+    
+    strategy_manager = orchestrator.get_component("StrategyManager")
+    risk_manager = orchestrator.get_component("RiskManager")
+    backtest_engine = orchestrator.get_component("BacktestEngine")
+    
+    backtest_results = []
+    
+    for strategy_config in strategy_configs:
+        logger.info(f"Backtesting strategy: {strategy_config['name']}")
+        
+        # Initialize strategy
+        strategy = strategy_manager.create_strategy(strategy_config)
+        
+        # Run historical simulation
+        for timestamp, market_state in processed_data['signals'].iterrows():
+            
+            # Generate strategy signals
+            strategy_signals = strategy.generate_signals(market_state)
+            
+            # Process each signal through risk management
+            for signal in strategy_signals:
+                # Create trading decision request
+                request = TradingDecisionRequest(
+                    decision_type=TradingDecisionType.POSITION_ENTRY,
+                    symbol=signal.symbol,
+                    side=signal.signal_type.value,
+                    quantity=signal.quantity,
+                    strategy_id=strategy_config['name'],
+                    confidence=signal.confidence,
+                    market_regime=processed_data['regime_history'].get(timestamp, 'unknown')
+                )
+                
+                # Request authorization from risk manager
+                authorization = await risk_manager.authorize_trading_decision(request)
+                
+                # Execute if authorized
+                if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                    execution_result = await backtest_engine.simulate_execution(
+                        authorization, market_state, timestamp
+                    )
+                    backtest_results.append(execution_result)
+    
+    return backtest_results
+```
+
+### Phase 4: Performance Analytics
+```python
+async def analyze_backtest_performance(orchestrator, backtest_results):
+    """Comprehensive performance analysis"""
+    
+    portfolio_analytics = orchestrator.get_component("PortfolioAnalytics")
+    risk_manager = orchestrator.get_component("RiskManager")
+    
+    # Calculate performance metrics
+    performance_metrics = portfolio_analytics.calculate_performance_metrics(backtest_results)
+    
+    # Risk analysis
+    risk_metrics = await risk_manager.generate_risk_report()
+    
+    # Regime-based performance analysis
+    regime_performance = portfolio_analytics.analyze_regime_performance(
+        backtest_results, processed_data['regime_history']
+    )
+    
+    # Strategy attribution analysis
+    strategy_attribution = portfolio_analytics.calculate_strategy_attribution(backtest_results)
+    
+    return {
+        'performance_metrics': performance_metrics,
+        'risk_metrics': risk_metrics,
+        'regime_performance': regime_performance,
+        'strategy_attribution': strategy_attribution,
+        'execution_quality': portfolio_analytics.analyze_execution_quality(backtest_results)
+    }
+```
+
+## Complete Backtest Execution Map
+
+### Master Backtest Function
+```python
+async def run_institutional_backtest(
+    symbols: List[str],
+    start_date: str,
+    end_date: str,
+    strategy_configs: List[Dict],
+    risk_config: Dict = None
+) -> Dict[str, Any]:
+    """
+    Complete institutional backtest workflow
+    
+    This function orchestrates all core_engine components to run
+    a comprehensive historical simulation with institutional-grade
+    risk management and performance analytics.
+    """
+    
+    try:
+        # Phase 1: Initialize system
+        logger.info("🔧 Initializing backtest system...")
+        orchestrator = await initialize_backtest_system()
+        
+        # Phase 2: Process historical data
+        logger.info("📊 Processing historical data...")
+        processed_data = await process_historical_data(
+            orchestrator, symbols, start_date, end_date
+        )
+        
+        # Phase 3: Run strategy backtests
+        logger.info("🎯 Running strategy backtests...")
+        backtest_results = await run_strategy_backtest(
+            orchestrator, processed_data, strategy_configs
+        )
+        
+        # Phase 4: Analyze performance
+        logger.info("📈 Analyzing performance...")
+        performance_analysis = await analyze_backtest_performance(
+            orchestrator, backtest_results
+        )
+        
+        # Phase 5: Generate comprehensive report
+        logger.info("📋 Generating backtest report...")
+        backtest_report = {
+            'backtest_config': {
+                'symbols': symbols,
+                'start_date': start_date,
+                'end_date': end_date,
+                'strategies': [config['name'] for config in strategy_configs]
+            },
+            'data_summary': {
+                'total_records': len(processed_data['market_data']),
+                'regime_changes': len(processed_data['regime_history']),
+                'signals_generated': len(processed_data['signals'])
+            },
+            'execution_summary': {
+                'total_trades': len(backtest_results),
+                'successful_trades': sum(1 for r in backtest_results if r.status == 'filled'),
+                'total_pnl': sum(r.pnl for r in backtest_results if hasattr(r, 'pnl'))
+            },
+            'performance_analysis': performance_analysis
+        }
+        
+        # Phase 6: Cleanup
+        await orchestrator.stop_all_components()
+        
+        logger.info("✅ Backtest completed successfully")
+        return backtest_report
+        
+    except Exception as e:
+        logger.error(f"❌ Backtest failed: {e}")
+        if 'orchestrator' in locals():
+            await orchestrator.emergency_shutdown()
+        raise
+```
+
+## Validation Suite for Backtests
+
+### Data Quality Validation
+```python
+def validate_backtest_data(processed_data: Dict) -> Dict[str, Any]:
+    """Validate data quality for backtesting"""
+    
+    validation_results = {
+        'data_completeness': {},
+        'signal_quality': {},
+        'regime_consistency': {},
+        'overall_quality': 'unknown'
+    }
+    
+    # Check data completeness
+    market_data = processed_data['market_data']
+    validation_results['data_completeness'] = {
+        'total_records': len(market_data),
+        'missing_values': market_data.isnull().sum().sum(),
+        'date_coverage': {
+            'start': market_data['timestamp'].min(),
+            'end': market_data['timestamp'].max()
+        }
+    }
+    
+    # Check signal quality
+    signals = processed_data['signals']
+    validation_results['signal_quality'] = {
+        'total_signals': len(signals),
+        'high_confidence_signals': len(signals[signals['confidence'] > 0.8]),
+        'signal_distribution': signals['signal_type'].value_counts().to_dict()
+    }
+    
+    # Overall quality score
+    quality_score = calculate_data_quality_score(validation_results)
+    validation_results['overall_quality'] = 'good' if quality_score > 0.8 else 'poor'
+    
+    return validation_results
+```
+
+### Risk Validation
+```python
+def validate_backtest_risk_compliance(backtest_results: List, risk_config: Dict) -> Dict:
+    """Validate backtest results comply with risk limits"""
+    
+    violations = []
+    
+    # Check position size violations
+    for result in backtest_results:
+        if hasattr(result, 'position_size_pct'):
+            if result.position_size_pct > risk_config['max_position_size']:
+                violations.append(f"Position size violation: {result.position_size_pct:.2%}")
+    
+    # Check concentration violations
+    symbol_exposures = {}
+    for result in backtest_results:
+        symbol = result.symbol
+        symbol_exposures[symbol] = symbol_exposures.get(symbol, 0) + result.quantity
+    
+    for symbol, exposure in symbol_exposures.items():
+        if exposure > risk_config['position_concentration_limit']:
+            violations.append(f"Concentration violation in {symbol}: {exposure:.2%}")
+    
+    return {
+        'compliant': len(violations) == 0,
+        'violations': violations,
+        'risk_score': calculate_risk_score(backtest_results)
+    }
+```
+
+This instruction map provides a complete blueprint for assembling core_engine components into an institutional-grade backtesting system. The modular design allows you to swap components, adjust configurations, and extend functionality while maintaining the architectural integrity and risk management standards.

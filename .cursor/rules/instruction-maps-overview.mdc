@@ -1,0 +1,367 @@
+---
+description: "Comprehensive Overview of Core Engine Instruction Maps and Orchestration Patterns"
+---
+
+# Core Engine Instruction Maps - Comprehensive Overview
+
+This overview provides a complete guide to all available instruction maps for composing core_engine components into different institutional-grade trading and analytics systems.
+
+## Available Instruction Maps
+
+### 1. [Institutional Backtest Workflow](mdc:.cursor/rules/institutional-backtest-workflow.mdc)
+**Purpose**: Historical simulation and strategy validation
+**Key Components**: DataManager, RegimeEngine, RiskManager, BacktestEngine, PortfolioAnalytics
+**Use Cases**: Strategy development, historical analysis, performance validation
+**Complexity**: Medium
+**Timeline**: Hours to days
+
+### 2. [Live Trading Desk Orchestration](mdc:.cursor/rules/live-trading-desk-orchestration.mdc)
+**Purpose**: Real-time institutional trading operations
+**Key Components**: LiveDataManager, RealTimeRiskManager, ExecutionEngine, LivePortfolioManager
+**Use Cases**: Production trading, real-time execution, automated trading
+**Complexity**: High
+**Timeline**: Continuous operation
+
+### 3. [Regime Analyzer Configuration](mdc:.cursor/rules/regime-analyzer-configuration.mdc)
+**Purpose**: Advanced market condition detection and analysis
+**Key Components**: EnhancedRegimeEngine, CrossAssetAnalyzer, MacroIntegrator, TransitionPredictor
+**Use Cases**: Market analysis, regime research, strategy adaptation
+**Complexity**: High
+**Timeline**: Minutes to hours
+
+### 4. [Portfolio Analytics Workflow](mdc:.cursor/rules/portfolio-analytics-workflow.mdc)
+**Purpose**: Comprehensive performance measurement and attribution
+**Key Components**: PerformanceCalculator, AttributionAnalyzer, RiskAnalyzer, ReportGenerator
+**Use Cases**: Performance reporting, attribution analysis, investor reporting
+**Complexity**: Medium-High
+**Timeline**: Minutes to hours
+
+### 5. [Risk Monitoring System](mdc:.cursor/rules/risk-monitoring-system.mdc)
+**Purpose**: Real-time risk surveillance and automated responses
+**Key Components**: RiskLimitMonitor, VaRCalculator, AlertEngine, AutomatedResponseSystem
+**Use Cases**: Risk management, compliance monitoring, automated risk control
+**Complexity**: High
+**Timeline**: Continuous operation
+
+### 6. [Strategy Research Workflow](mdc:.cursor/rules/strategy-research-workflow.mdc)
+**Purpose**: Systematic strategy discovery and development
+**Key Components**: FeatureDiscoveryEngine, StrategyGenerator, MLModelTrainer, StrategyValidator
+**Use Cases**: Strategy development, research, alpha discovery, model development
+**Complexity**: Very High
+**Timeline**: Days to weeks
+
+## Component Reusability Matrix
+
+### Core Infrastructure Components (Used in All Maps)
+- **HierarchicalSystemOrchestrator**: System coordination and lifecycle management
+- **CentralRiskManager**: Risk governance and authorization
+- **UnifiedDataManager**: Data access and management
+
+### Specialized Components by Use Case
+
+| Component | Backtest | Live Trading | Regime Analysis | Portfolio Analytics | Risk Monitoring | Strategy Research |
+|-----------|----------|--------------|-----------------|-------------------|-----------------|-------------------|
+| LiveDataStreamer | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ |
+| BacktestEngine | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| RegimeEngine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ExecutionEngine | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| PerformanceCalculator | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ |
+| AlertEngine | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| MLModelTrainer | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| FeatureDiscovery | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
+
+## Orchestration Patterns
+
+### 1. Sequential Processing Pattern
+**Used in**: Backtest Workflow, Portfolio Analytics
+**Pattern**: Data → Processing → Analysis → Reporting
+```python
+# Sequential processing example
+data = await data_manager.load_data()
+indicators = await indicators_engine.calculate(data)
+signals = await signal_generator.generate(indicators)
+results = await backtest_engine.run(signals)
+```
+
+### 2. Real-Time Streaming Pattern
+**Used in**: Live Trading, Risk Monitoring
+**Pattern**: Continuous data streams with event-driven processing
+```python
+# Real-time streaming example
+async for market_data in data_stream:
+    signals = await process_real_time_data(market_data)
+    if signals:
+        await execute_signals(signals)
+```
+
+### 3. Research Pipeline Pattern
+**Used in**: Strategy Research, Regime Analysis
+**Pattern**: Iterative discovery and validation
+```python
+# Research pipeline example
+features = await discover_features(data)
+models = await train_models(features)
+strategies = await generate_strategies(models)
+validated = await validate_strategies(strategies)
+```
+
+### 4. Monitoring and Alert Pattern
+**Used in**: Risk Monitoring, Live Trading
+**Pattern**: Continuous monitoring with threshold-based responses
+```python
+# Monitoring pattern example
+while system_operational:
+    metrics = await calculate_risk_metrics()
+    violations = await check_limits(metrics)
+    if violations:
+        await handle_violations(violations)
+```
+
+## Configuration Templates
+
+### Basic Configuration Template
+```python
+# Minimal configuration for any instruction map
+basic_config = {
+    'orchestrator': {
+        'monitoring_interval': 60,
+        'health_check_interval': 300,
+        'enable_logging': True
+    },
+    'data_manager': {
+        'symbols': ['NVDA', 'TSLA', 'AAPL'],
+        'start_date': '2024-01-01',
+        'end_date': '2024-12-31',
+        'interval': '1min'
+    },
+    'risk_manager': {
+        'max_position_size': 0.10,
+        'max_daily_var': 0.05,
+        'enable_real_time_monitoring': True
+    }
+}
+```
+
+### Production Configuration Template
+```python
+# Production-grade configuration
+production_config = {
+    'orchestrator': {
+        'monitoring_interval': 1,      # 1 second monitoring
+        'health_check_interval': 30,   # 30 second health checks
+        'enable_logging': True,
+        'enable_alerts': True,
+        'enable_audit_trail': True
+    },
+    'data_manager': {
+        'data_sources': ['primary', 'backup', 'tertiary'],
+        'real_time_streaming': True,
+        'data_validation': True,
+        'latency_monitoring': True
+    },
+    'risk_manager': {
+        'real_time_mode': True,
+        'automated_responses': True,
+        'regulatory_compliance': True,
+        'emergency_controls': True
+    }
+}
+```
+
+## Integration Patterns
+
+### 1. Component Composition Pattern
+```python
+# How to compose components for different use cases
+async def compose_backtest_system():
+    orchestrator = HierarchicalSystemOrchestrator()
+    
+    # Core components
+    data_manager = ClickHouseDataManager(config)
+    risk_manager = CentralRiskManager(config)
+    
+    # Specialized components for backtesting
+    backtest_engine = BacktestExecutionEngine(config)
+    portfolio_analytics = PortfolioAnalytics(config)
+    
+    # Register in dependency order
+    orchestrator.register_component("DataManager", data_manager, ComponentLayer.SUPPORT, 1)
+    orchestrator.register_component("RiskManager", risk_manager, ComponentLayer.GOVERNANCE, 2)
+    orchestrator.register_component("BacktestEngine", backtest_engine, ComponentLayer.EXECUTION, 3)
+    orchestrator.register_component("PortfolioAnalytics", portfolio_analytics, ComponentLayer.EXECUTION, 4)
+    
+    return orchestrator
+```
+
+### 2. Configuration-Driven Assembly Pattern
+```python
+# Configuration-driven system assembly
+def assemble_system_from_config(system_type: str, config: Dict):
+    """Assemble system based on configuration"""
+    
+    component_maps = {
+        'backtest': ['DataManager', 'RegimeEngine', 'BacktestEngine', 'PortfolioAnalytics'],
+        'live_trading': ['LiveDataManager', 'RiskManager', 'ExecutionEngine', 'AlertEngine'],
+        'research': ['ResearchDataManager', 'FeatureDiscovery', 'MLTrainer', 'StrategyValidator']
+    }
+    
+    orchestrator = HierarchicalSystemOrchestrator()
+    
+    for component_name in component_maps[system_type]:
+        component = create_component(component_name, config)
+        orchestrator.register_component(component_name, component)
+    
+    return orchestrator
+```
+
+## Validation and Testing Patterns
+
+### 1. System Health Validation
+```python
+async def validate_system_health(orchestrator):
+    """Comprehensive system health validation"""
+    
+    health_checks = {
+        'component_health': await orchestrator.check_all_component_health(),
+        'data_connectivity': await validate_data_connectivity(),
+        'execution_capability': await validate_execution_capability(),
+        'risk_controls': await validate_risk_controls(),
+        'performance_metrics': await validate_performance_metrics()
+    }
+    
+    overall_health = all(check['status'] == 'healthy' for check in health_checks.values())
+    
+    return {
+        'overall_healthy': overall_health,
+        'detailed_checks': health_checks,
+        'validation_timestamp': datetime.now()
+    }
+```
+
+### 2. End-to-End Testing Pattern
+```python
+async def run_end_to_end_test(instruction_map: str):
+    """Run end-to-end test for instruction map"""
+    
+    test_scenarios = {
+        'backtest': test_backtest_workflow,
+        'live_trading': test_live_trading_workflow,
+        'regime_analysis': test_regime_analysis_workflow,
+        'portfolio_analytics': test_portfolio_analytics_workflow,
+        'risk_monitoring': test_risk_monitoring_workflow,
+        'strategy_research': test_strategy_research_workflow
+    }
+    
+    test_function = test_scenarios.get(instruction_map)
+    if test_function:
+        return await test_function()
+    else:
+        raise ValueError(f"Unknown instruction map: {instruction_map}")
+```
+
+## Performance Optimization Guidelines
+
+### 1. Component Initialization Optimization
+- Initialize components in dependency order
+- Use parallel initialization where possible
+- Implement health checks during initialization
+- Cache expensive initialization operations
+
+### 2. Data Flow Optimization
+- Minimize data copying between components
+- Use streaming where appropriate
+- Implement efficient caching strategies
+- Optimize database queries and data access
+
+### 3. Real-Time Performance Optimization
+- Use appropriate update frequencies
+- Implement efficient event handling
+- Minimize latency in critical paths
+- Use asynchronous processing where possible
+
+## Deployment Considerations
+
+### 1. Environment-Specific Configurations
+```python
+# Environment-specific settings
+environments = {
+    'development': {
+        'monitoring_frequency': 60,
+        'data_validation': True,
+        'debug_logging': True
+    },
+    'staging': {
+        'monitoring_frequency': 10,
+        'data_validation': True,
+        'performance_monitoring': True
+    },
+    'production': {
+        'monitoring_frequency': 1,
+        'data_validation': True,
+        'high_availability': True,
+        'disaster_recovery': True
+    }
+}
+```
+
+### 2. Scaling Considerations
+- **Horizontal Scaling**: Distribute components across multiple instances
+- **Vertical Scaling**: Optimize resource usage within single instances
+- **Load Balancing**: Distribute workload across available resources
+- **Fault Tolerance**: Implement redundancy and failover mechanisms
+
+## Best Practices Summary
+
+### 1. Architecture Best Practices
+- Follow the hierarchical governance model
+- Implement proper component registration
+- Use standardized configuration patterns
+- Maintain clear separation of concerns
+
+### 2. Development Best Practices
+- Use comprehensive error handling
+- Implement proper logging and monitoring
+- Follow the data pipeline patterns
+- Maintain audit trails for all operations
+
+### 3. Operational Best Practices
+- Implement comprehensive health checks
+- Use automated deployment pipelines
+- Monitor system performance continuously
+- Maintain disaster recovery procedures
+
+## Quick Start Guide
+
+### 1. Choose Your Use Case
+1. **Historical Analysis**: Use Institutional Backtest Workflow
+2. **Live Trading**: Use Live Trading Desk Orchestration
+3. **Market Research**: Use Regime Analyzer Configuration
+4. **Performance Reporting**: Use Portfolio Analytics Workflow
+5. **Risk Management**: Use Risk Monitoring System
+6. **Strategy Development**: Use Strategy Research Workflow
+
+### 2. Basic Implementation Steps
+```python
+# 1. Import required components
+from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
+
+# 2. Create configuration
+config = create_configuration_for_use_case(use_case)
+
+# 3. Initialize system
+orchestrator = await initialize_system_for_use_case(use_case, config)
+
+# 4. Run workflow
+results = await run_workflow_for_use_case(orchestrator, use_case, parameters)
+
+# 5. Cleanup
+await orchestrator.stop_all_components()
+```
+
+### 3. Customization Guidelines
+- Modify component configurations for specific needs
+- Add custom components following integration standards
+- Implement custom validation rules
+- Extend reporting and analytics capabilities
+
+This comprehensive overview provides the foundation for understanding and implementing any of the available instruction maps, ensuring consistent, professional, and institutional-grade implementations across all use cases.

@@ -1,0 +1,716 @@
+---
+description: "Real-Time Risk Monitoring System Architecture and Surveillance Patterns"
+---
+
+# Real-Time Risk Monitoring System - Instruction Map
+
+This instruction map shows how to compose core_engine components into a comprehensive real-time risk monitoring and surveillance system for continuous portfolio oversight, limit monitoring, and automated risk response.
+
+## Risk Monitoring Component Stack
+
+### Real-Time Surveillance Brick Assembly
+```
+┌─────────────────────────────────────┐
+│    HierarchicalSystemOrchestrator   │ ← System Control & Alert Coordination
+├─────────────────────────────────────┤
+│ RealTimeDataStreamer                │ ← Live Market & Portfolio Data
+│ PositionMonitor                     │ ← Real-Time Position Tracking
+│ PnLCalculator                       │ ← Live P&L Calculation
+├─────────────────────────────────────┤
+│ RiskLimitMonitor                    │ ← Continuous Limit Surveillance
+│ VaRCalculator                       │ ← Real-Time VaR Calculation
+│ StressTestEngine                    │ ← Continuous Stress Testing
+│ CorrelationMonitor                  │ ← Dynamic Correlation Tracking
+├─────────────────────────────────────┤
+│ CentralRiskManager                  │ ← Risk Governance & Control
+├─────────────────────────────────────┤
+│ AlertEngine                         │ ← Multi-Level Alert System
+│ AutomatedResponseSystem             │ ← Automated Risk Responses
+│ RiskDashboard                       │ ← Real-Time Risk Visualization
+│ ComplianceMonitor                   │ ← Regulatory Compliance Tracking
+│ AuditTrail                          │ ← Complete Risk Audit Logging
+└─────────────────────────────────────┘
+```
+
+## Risk Monitoring Configuration Map
+
+### 1. Real-Time Risk Monitoring Configuration
+```python
+from core_engine.risk.monitoring import RealTimeRiskConfig
+
+# Comprehensive real-time risk monitoring configuration
+risk_monitoring_config = RealTimeRiskConfig(
+    # Monitoring frequencies
+    position_update_frequency=1,      # 1 second position updates
+    pnl_calculation_frequency=5,      # 5 second P&L updates
+    var_calculation_frequency=60,     # 1 minute VaR updates
+    stress_test_frequency=300,        # 5 minute stress tests
+    correlation_update_frequency=300, # 5 minute correlation updates
+    
+    # Risk limits (institutional-grade)
+    portfolio_limits={
+        'max_gross_exposure': 2.0,        # 200% gross exposure
+        'max_net_exposure': 1.0,          # 100% net exposure
+        'max_sector_concentration': 0.25,  # 25% per sector
+        'max_single_position': 0.10,      # 10% per position
+        'max_daily_var_95': 0.02,         # 2% daily VaR at 95%
+        'max_daily_var_99': 0.03,         # 3% daily VaR at 99%
+        'max_expected_shortfall': 0.04,   # 4% expected shortfall
+        'max_drawdown_threshold': 0.05,   # 5% max drawdown trigger
+    },
+    
+    # Strategy-specific limits
+    strategy_limits={
+        'mean_reversion': {
+            'max_allocation': 0.40,        # 40% max allocation
+            'max_leverage': 1.5,           # 1.5x max leverage
+            'max_turnover_daily': 2.0      # 200% daily turnover
+        },
+        'momentum': {
+            'max_allocation': 0.35,        # 35% max allocation
+            'max_leverage': 1.3,           # 1.3x max leverage
+            'max_turnover_daily': 1.5      # 150% daily turnover
+        },
+        'pairs_trading': {
+            'max_allocation': 0.30,        # 30% max allocation
+            'max_leverage': 2.0,           # 2.0x max leverage
+            'max_pair_correlation': 0.8    # 80% max pair correlation
+        }
+    },
+    
+    # Alert thresholds (multi-level)
+    alert_thresholds={
+        'yellow_alerts': {  # Warning level
+            'var_utilization': 0.70,       # 70% VaR utilization
+            'position_concentration': 0.80, # 80% of position limit
+            'drawdown_level': 0.02,        # 2% drawdown
+            'correlation_spike': 0.15      # 15% correlation increase
+        },
+        'orange_alerts': {  # Elevated concern
+            'var_utilization': 0.85,       # 85% VaR utilization
+            'position_concentration': 0.90, # 90% of position limit
+            'drawdown_level': 0.03,        # 3% drawdown
+            'correlation_spike': 0.25      # 25% correlation increase
+        },
+        'red_alerts': {     # Critical level
+            'var_utilization': 0.95,       # 95% VaR utilization
+            'position_concentration': 0.95, # 95% of position limit
+            'drawdown_level': 0.04,        # 4% drawdown
+            'correlation_spike': 0.40      # 40% correlation increase
+        }
+    },
+    
+    # Automated response configuration
+    automated_responses={
+        'yellow_alerts': ['log_alert', 'notify_risk_team'],
+        'orange_alerts': ['log_alert', 'notify_risk_team', 'notify_portfolio_manager', 'increase_monitoring'],
+        'red_alerts': ['log_alert', 'notify_all', 'reduce_positions', 'halt_new_trades']
+    },
+    
+    # Stress test scenarios
+    stress_scenarios={
+        'market_crash': {'equity_shock': -0.20, 'vol_shock': 2.0},
+        'interest_rate_shock': {'rate_shock': 0.02, 'curve_twist': 0.01},
+        'credit_crisis': {'credit_spread_shock': 0.03, 'liquidity_shock': 0.5},
+        'flash_crash': {'equity_shock': -0.10, 'vol_shock': 3.0, 'liquidity_shock': 0.8},
+        'correlation_breakdown': {'correlation_shock': 0.5, 'dispersion_shock': 2.0}
+    },
+    
+    # Compliance monitoring
+    regulatory_limits={
+        'gross_leverage_limit': 3.0,      # 3x gross leverage (regulatory)
+        'concentration_limit': 0.20,      # 20% concentration (regulatory)
+        'liquidity_requirement': 0.10,    # 10% cash/liquid securities
+        'var_limit_regulatory': 0.05      # 5% regulatory VaR limit
+    }
+)
+```
+
+### 2. Alert System Configuration
+```python
+from core_engine.risk.alerts import AlertSystemConfig
+
+# Multi-channel alert system configuration
+alert_system_config = AlertSystemConfig(
+    # Alert channels
+    alert_channels={
+        'email': {
+            'enabled': True,
+            'smtp_server': 'smtp.company.com',
+            'recipients': {
+                'risk_team': ['risk@company.com'],
+                'portfolio_managers': ['pm@company.com'],
+                'compliance': ['compliance@company.com'],
+                'executives': ['cro@company.com', 'ceo@company.com']
+            }
+        },
+        'sms': {
+            'enabled': True,
+            'service_provider': 'twilio',
+            'emergency_contacts': ['+1234567890', '+1234567891']
+        },
+        'slack': {
+            'enabled': True,
+            'channels': {
+                'risk_alerts': '#risk-alerts',
+                'trading_desk': '#trading-desk',
+                'executives': '#executive-alerts'
+            }
+        },
+        'dashboard': {
+            'enabled': True,
+            'real_time_updates': True,
+            'alert_persistence': 24  # hours
+        }
+    },
+    
+    # Alert escalation rules
+    escalation_rules={
+        'yellow_alerts': {
+            'initial_notification': ['risk_team'],
+            'escalation_time': 300,  # 5 minutes
+            'escalation_to': ['portfolio_managers']
+        },
+        'orange_alerts': {
+            'initial_notification': ['risk_team', 'portfolio_managers'],
+            'escalation_time': 180,  # 3 minutes
+            'escalation_to': ['compliance', 'executives']
+        },
+        'red_alerts': {
+            'initial_notification': ['risk_team', 'portfolio_managers', 'compliance'],
+            'escalation_time': 60,   # 1 minute
+            'escalation_to': ['executives'],
+            'immediate_action': True
+        }
+    },
+    
+    # Alert suppression (prevent spam)
+    suppression_rules={
+        'duplicate_suppression_time': 300,  # 5 minutes
+        'similar_alert_grouping': True,
+        'max_alerts_per_hour': 50,
+        'emergency_override': True  # Override suppression for red alerts
+    }
+)
+```
+
+### 3. Automated Response Configuration
+```python
+from core_engine.risk.automation import AutomatedResponseConfig
+
+# Automated risk response configuration
+automated_response_config = AutomatedResponseConfig(
+    # Response authorization levels
+    authorization_levels={
+        'automatic': {
+            'max_position_reduction': 0.10,   # 10% max automatic reduction
+            'max_exposure_reduction': 0.05,   # 5% max exposure reduction
+            'actions': ['log_alert', 'notify_team', 'minor_adjustments']
+        },
+        'semi_automatic': {
+            'max_position_reduction': 0.25,   # 25% max reduction with approval
+            'max_exposure_reduction': 0.15,   # 15% max exposure reduction
+            'actions': ['notify_and_wait', 'execute_with_approval']
+        },
+        'manual_only': {
+            'actions': ['alert_only', 'require_manual_intervention']
+        }
+    },
+    
+    # Response strategies
+    response_strategies={
+        'position_reduction': {
+            'method': 'proportional',         # proportional, targeted, systematic
+            'execution_algorithm': 'twap',    # twap, vwap, market
+            'max_market_impact': 0.01,        # 1% max market impact
+            'time_horizon': 300               # 5 minutes execution time
+        },
+        'hedge_overlay': {
+            'hedge_instruments': ['SPY', 'VIX', 'TLT'],
+            'hedge_ratio_calculation': 'beta_adjusted',
+            'max_hedge_size': 0.50,           # 50% max hedge
+            'dynamic_adjustment': True
+        },
+        'liquidity_preservation': {
+            'cash_target': 0.10,              # 10% cash target
+            'liquidation_priority': 'least_liquid_first',
+            'preserve_core_positions': True
+        }
+    },
+    
+    # Circuit breakers
+    circuit_breakers={
+        'portfolio_loss_breaker': {
+            'trigger_threshold': 0.03,        # 3% portfolio loss
+            'action': 'halt_all_trading',
+            'duration': 1800,                 # 30 minutes halt
+            'override_authority': 'cro_only'
+        },
+        'correlation_breaker': {
+            'trigger_threshold': 0.90,        # 90% correlation spike
+            'action': 'reduce_correlated_positions',
+            'max_reduction': 0.30,            # 30% max reduction
+            'review_period': 3600             # 1 hour review
+        },
+        'volatility_breaker': {
+            'trigger_threshold': 3.0,         # 3x normal volatility
+            'action': 'reduce_risk_exposure',
+            'risk_reduction_target': 0.50,    # 50% risk reduction
+            'gradual_restoration': True
+        }
+    }
+)
+```
+
+## Risk Monitoring Orchestration Workflow
+
+### Phase 1: Risk Monitoring System Initialization
+```python
+async def initialize_risk_monitoring_system():
+    """Initialize comprehensive real-time risk monitoring system"""
+    
+    # 1. Create orchestrator with high-frequency monitoring
+    orchestrator = HierarchicalSystemOrchestrator(
+        monitoring_interval=1,    # 1 second system monitoring
+        health_check_interval=30, # 30 second health checks
+        enable_risk_alerts=True,
+        enable_emergency_protocols=True
+    )
+    
+    # 2. Register real-time data streaming
+    real_time_data_streamer = RealTimeDataStreamer(
+        data_sources=['market_data', 'portfolio_data', 'execution_data'],
+        streaming_frequency=1,    # 1 second updates
+        data_validation=True,
+        latency_monitoring=True
+    )
+    
+    position_monitor = PositionMonitor(
+        update_frequency=1,       # 1 second position updates
+        position_sources=['execution_system', 'settlement_system'],
+        real_time_reconciliation=True
+    )
+    
+    pnl_calculator = PnLCalculator(
+        calculation_frequency=5,  # 5 second P&L updates
+        mark_to_market_source='real_time_prices',
+        include_unrealized_pnl=True,
+        currency_hedging=True
+    )
+    
+    orchestrator.register_component("RealTimeDataStreamer", real_time_data_streamer, ComponentLayer.SUPPORT, initialization_order=1)
+    orchestrator.register_component("PositionMonitor", position_monitor, ComponentLayer.SUPPORT, initialization_order=2)
+    orchestrator.register_component("PnLCalculator", pnl_calculator, ComponentLayer.SUPPORT, initialization_order=3)
+    
+    # 3. Register risk calculation engines
+    risk_limit_monitor = RiskLimitMonitor(
+        monitoring_config=risk_monitoring_config,
+        limit_check_frequency=5,  # 5 second limit checks
+        breach_detection=True,
+        trend_analysis=True
+    )
+    
+    var_calculator = VaRCalculator(
+        calculation_methods=['parametric', 'historical', 'monte_carlo'],
+        confidence_levels=[0.95, 0.99],
+        holding_periods=[1, 5, 10],
+        update_frequency=60       # 1 minute VaR updates
+    )
+    
+    stress_test_engine = StressTestEngine(
+        stress_scenarios=risk_monitoring_config.stress_scenarios,
+        test_frequency=300,       # 5 minute stress tests
+        scenario_analysis=True,
+        sensitivity_analysis=True
+    )
+    
+    correlation_monitor = CorrelationMonitor(
+        correlation_calculation_frequency=300,  # 5 minute updates
+        rolling_windows=[20, 60, 252],          # 1M, 3M, 1Y windows
+        correlation_breakdown_detection=True
+    )
+    
+    orchestrator.register_component("RiskLimitMonitor", risk_limit_monitor, ComponentLayer.GOVERNANCE, initialization_order=4)
+    orchestrator.register_component("VaRCalculator", var_calculator, ComponentLayer.GOVERNANCE, initialization_order=5)
+    orchestrator.register_component("StressTestEngine", stress_test_engine, ComponentLayer.GOVERNANCE, initialization_order=6)
+    orchestrator.register_component("CorrelationMonitor", correlation_monitor, ComponentLayer.GOVERNANCE, initialization_order=7)
+    
+    # 4. Register central risk management
+    central_risk_manager = CentralRiskManager(
+        config=risk_monitoring_config,
+        real_time_mode=True,
+        automated_responses=True
+    )
+    
+    orchestrator.register_component("CentralRiskManager", central_risk_manager, ComponentLayer.GOVERNANCE, initialization_order=8, critical=True)
+    
+    # 5. Register alert and response systems
+    alert_engine = AlertEngine(alert_system_config)
+    automated_response_system = AutomatedResponseSystem(automated_response_config)
+    risk_dashboard = RiskDashboard(
+        update_frequency=1,       # 1 second dashboard updates
+        real_time_charts=True,
+        alert_integration=True
+    )
+    compliance_monitor = ComplianceMonitor(
+        regulatory_limits=risk_monitoring_config.regulatory_limits,
+        compliance_check_frequency=60,  # 1 minute compliance checks
+        regulatory_reporting=True
+    )
+    audit_trail = AuditTrail(
+        log_all_risk_events=True,
+        real_time_logging=True,
+        retention_period=2555     # 7 years retention
+    )
+    
+    orchestrator.register_component("AlertEngine", alert_engine, ComponentLayer.EXECUTION, initialization_order=9)
+    orchestrator.register_component("AutomatedResponseSystem", automated_response_system, ComponentLayer.EXECUTION, initialization_order=10)
+    orchestrator.register_component("RiskDashboard", risk_dashboard, ComponentLayer.EXECUTION, initialization_order=11)
+    orchestrator.register_component("ComplianceMonitor", compliance_monitor, ComponentLayer.EXECUTION, initialization_order=12)
+    orchestrator.register_component("AuditTrail", audit_trail, ComponentLayer.EXECUTION, initialization_order=13)
+    
+    # 6. Initialize all components
+    await orchestrator.initialize_all_components()
+    await orchestrator.start_all_components()
+    
+    # 7. Verify critical systems
+    critical_health = await orchestrator.check_critical_components_health()
+    if not critical_health['all_critical_healthy']:
+        raise RuntimeError(f"Critical risk monitoring components failed: {critical_health}")
+    
+    logger.info("🛡️ Real-Time Risk Monitoring System initialized and operational")
+    return orchestrator
+```
+
+### Phase 2: Continuous Risk Monitoring
+```python
+async def start_continuous_risk_monitoring(orchestrator):
+    """Start continuous real-time risk monitoring"""
+    
+    # Get all monitoring components
+    position_monitor = orchestrator.get_component("PositionMonitor")
+    pnl_calculator = orchestrator.get_component("PnLCalculator")
+    risk_limit_monitor = orchestrator.get_component("RiskLimitMonitor")
+    var_calculator = orchestrator.get_component("VaRCalculator")
+    stress_test_engine = orchestrator.get_component("StressTestEngine")
+    correlation_monitor = orchestrator.get_component("CorrelationMonitor")
+    central_risk_manager = orchestrator.get_component("CentralRiskManager")
+    alert_engine = orchestrator.get_component("AlertEngine")
+    
+    # Start monitoring tasks
+    monitoring_tasks = []
+    
+    # 1. Position monitoring task
+    async def position_monitoring_loop():
+        """Continuous position monitoring"""
+        while orchestrator.is_operational:
+            try:
+                # Get current positions
+                current_positions = await position_monitor.get_current_positions()
+                
+                # Check position limits
+                position_violations = await risk_limit_monitor.check_position_limits(current_positions)
+                
+                # Handle violations
+                if position_violations:
+                    await handle_position_violations(orchestrator, position_violations)
+                
+                # Update risk dashboard
+                await orchestrator.publish_event(
+                    event_type="position_update",
+                    event_data={"positions": current_positions, "violations": position_violations}
+                )
+                
+                await asyncio.sleep(risk_monitoring_config.position_update_frequency)
+                
+            except Exception as e:
+                logger.error(f"Position monitoring error: {e}")
+                await asyncio.sleep(5)
+    
+    # 2. P&L monitoring task
+    async def pnl_monitoring_loop():
+        """Continuous P&L monitoring"""
+        while orchestrator.is_operational:
+            try:
+                # Calculate current P&L
+                current_pnl = await pnl_calculator.calculate_real_time_pnl()
+                
+                # Check P&L-based limits
+                pnl_violations = await risk_limit_monitor.check_pnl_limits(current_pnl)
+                
+                # Handle violations
+                if pnl_violations:
+                    await handle_pnl_violations(orchestrator, pnl_violations)
+                
+                # Update dashboard
+                await orchestrator.publish_event(
+                    event_type="pnl_update",
+                    event_data={"pnl": current_pnl, "violations": pnl_violations}
+                )
+                
+                await asyncio.sleep(risk_monitoring_config.pnl_calculation_frequency)
+                
+            except Exception as e:
+                logger.error(f"P&L monitoring error: {e}")
+                await asyncio.sleep(5)
+    
+    # 3. VaR monitoring task
+    async def var_monitoring_loop():
+        """Continuous VaR monitoring"""
+        while orchestrator.is_operational:
+            try:
+                # Calculate current VaR
+                current_var = await var_calculator.calculate_real_time_var()
+                
+                # Check VaR limits
+                var_violations = await risk_limit_monitor.check_var_limits(current_var)
+                
+                # Handle violations
+                if var_violations:
+                    await handle_var_violations(orchestrator, var_violations)
+                
+                # Update dashboard
+                await orchestrator.publish_event(
+                    event_type="var_update",
+                    event_data={"var": current_var, "violations": var_violations}
+                )
+                
+                await asyncio.sleep(risk_monitoring_config.var_calculation_frequency)
+                
+            except Exception as e:
+                logger.error(f"VaR monitoring error: {e}")
+                await asyncio.sleep(30)
+    
+    # 4. Stress testing task
+    async def stress_testing_loop():
+        """Continuous stress testing"""
+        while orchestrator.is_operational:
+            try:
+                # Run stress tests
+                stress_results = await stress_test_engine.run_stress_tests()
+                
+                # Check stress test limits
+                stress_violations = await risk_limit_monitor.check_stress_limits(stress_results)
+                
+                # Handle violations
+                if stress_violations:
+                    await handle_stress_violations(orchestrator, stress_violations)
+                
+                # Update dashboard
+                await orchestrator.publish_event(
+                    event_type="stress_test_update",
+                    event_data={"stress_results": stress_results, "violations": stress_violations}
+                )
+                
+                await asyncio.sleep(risk_monitoring_config.stress_test_frequency)
+                
+            except Exception as e:
+                logger.error(f"Stress testing error: {e}")
+                await asyncio.sleep(60)
+    
+    # Start all monitoring tasks
+    monitoring_tasks.extend([
+        asyncio.create_task(position_monitoring_loop()),
+        asyncio.create_task(pnl_monitoring_loop()),
+        asyncio.create_task(var_monitoring_loop()),
+        asyncio.create_task(stress_testing_loop())
+    ])
+    
+    return monitoring_tasks
+```
+
+### Phase 3: Violation Handling and Automated Responses
+```python
+async def handle_position_violations(orchestrator, violations):
+    """Handle position limit violations"""
+    
+    central_risk_manager = orchestrator.get_component("CentralRiskManager")
+    alert_engine = orchestrator.get_component("AlertEngine")
+    automated_response_system = orchestrator.get_component("AutomatedResponseSystem")
+    audit_trail = orchestrator.get_component("AuditTrail")
+    
+    for violation in violations:
+        # Log violation
+        await audit_trail.log_risk_event(
+            event_type="position_violation",
+            severity=violation.severity,
+            details=violation.details,
+            timestamp=datetime.now()
+        )
+        
+        # Send alerts
+        await alert_engine.send_alert(
+            alert_type="position_limit_breach",
+            severity=violation.severity,
+            message=f"Position limit violation: {violation.description}",
+            affected_positions=violation.affected_positions
+        )
+        
+        # Automated response based on severity
+        if violation.severity == "red":
+            # Critical violation - immediate action
+            logger.critical(f"CRITICAL position violation: {violation.description}")
+            
+            # Halt new trading
+            await central_risk_manager.halt_new_trading()
+            
+            # Reduce positions automatically
+            await automated_response_system.reduce_positions(
+                positions=violation.affected_positions,
+                reduction_percentage=0.20,  # 20% immediate reduction
+                execution_urgency="urgent"
+            )
+            
+        elif violation.severity == "orange":
+            # Elevated violation - semi-automated response
+            logger.error(f"ELEVATED position violation: {violation.description}")
+            
+            # Request approval for position reduction
+            approval = await automated_response_system.request_position_reduction_approval(
+                positions=violation.affected_positions,
+                recommended_reduction=0.10,  # 10% recommended reduction
+                timeout=300  # 5 minute timeout
+            )
+            
+            if approval.approved:
+                await automated_response_system.reduce_positions(
+                    positions=violation.affected_positions,
+                    reduction_percentage=approval.approved_reduction,
+                    execution_urgency="normal"
+                )
+        
+        elif violation.severity == "yellow":
+            # Warning violation - monitoring and notification
+            logger.warning(f"WARNING position violation: {violation.description}")
+            
+            # Increase monitoring frequency
+            await orchestrator.increase_monitoring_frequency(
+                component="PositionMonitor",
+                new_frequency=0.5  # 0.5 second updates
+            )
+
+async def handle_var_violations(orchestrator, violations):
+    """Handle VaR limit violations"""
+    
+    central_risk_manager = orchestrator.get_component("CentralRiskManager")
+    automated_response_system = orchestrator.get_component("AutomatedResponseSystem")
+    
+    for violation in violations:
+        if violation.severity == "red":
+            # Critical VaR violation
+            logger.critical(f"CRITICAL VaR violation: {violation.description}")
+            
+            # Emergency risk reduction
+            await automated_response_system.emergency_risk_reduction(
+                target_var_reduction=0.30,  # 30% VaR reduction
+                execution_method="systematic_reduction",
+                time_horizon=600  # 10 minutes
+            )
+            
+            # Implement hedge overlay
+            await automated_response_system.implement_hedge_overlay(
+                hedge_ratio=0.50,  # 50% hedge
+                hedge_instruments=["SPY", "VIX"],
+                dynamic_adjustment=True
+            )
+
+async def handle_correlation_breakdown(orchestrator, correlation_event):
+    """Handle correlation breakdown events"""
+    
+    correlation_monitor = orchestrator.get_component("CorrelationMonitor")
+    automated_response_system = orchestrator.get_component("AutomatedResponseSystem")
+    
+    if correlation_event.severity == "critical":
+        # Correlation breakdown detected
+        logger.critical(f"Correlation breakdown detected: {correlation_event.description}")
+        
+        # Reduce correlated positions
+        await automated_response_system.reduce_correlated_positions(
+            correlation_threshold=0.80,  # Reduce positions with >80% correlation
+            reduction_percentage=0.25,   # 25% reduction
+            preserve_diversification=True
+        )
+        
+        # Implement correlation hedge
+        await automated_response_system.implement_correlation_hedge(
+            hedge_type="dispersion_trade",
+            hedge_size=0.20  # 20% of portfolio
+        )
+```
+
+## Complete Risk Monitoring Function
+
+### Master Risk Monitoring Function
+```python
+async def run_real_time_risk_monitoring_system(
+    portfolio_config: Dict,
+    risk_limits: Dict = None,
+    monitoring_depth: str = 'comprehensive'
+) -> None:
+    """
+    Complete real-time risk monitoring system
+    
+    This function orchestrates all core_engine components for
+    continuous portfolio risk surveillance with automated
+    responses and comprehensive compliance monitoring.
+    """
+    
+    orchestrator = None
+    monitoring_tasks = []
+    
+    try:
+        # Phase 1: Initialize risk monitoring system
+        logger.info("🔧 Initializing real-time risk monitoring system...")
+        orchestrator = await initialize_risk_monitoring_system()
+        
+        # Phase 2: Start continuous monitoring
+        logger.info("🛡️ Starting continuous risk monitoring...")
+        monitoring_tasks = await start_continuous_risk_monitoring(orchestrator)
+        
+        # Phase 3: Start compliance monitoring
+        logger.info("📋 Starting compliance monitoring...")
+        compliance_task = await start_compliance_monitoring(orchestrator)
+        monitoring_tasks.append(compliance_task)
+        
+        # Phase 4: Start automated response system
+        logger.info("🤖 Starting automated response system...")
+        response_task = await start_automated_response_monitoring(orchestrator)
+        monitoring_tasks.append(response_task)
+        
+        logger.info("✅ Real-time risk monitoring system operational")
+        
+        # Keep system running
+        while orchestrator.is_operational:
+            # System health check
+            health_status = await orchestrator.system_health_check()
+            
+            if not health_status['overall_healthy']:
+                logger.error(f"Risk monitoring system health degraded: {health_status}")
+                await attempt_system_recovery(orchestrator)
+            
+            # Brief pause
+            await asyncio.sleep(30)
+            
+    except KeyboardInterrupt:
+        logger.info("🛑 Risk monitoring shutdown requested")
+        
+    except Exception as e:
+        logger.error(f"❌ Risk monitoring system error: {e}")
+        
+    finally:
+        # Graceful shutdown
+        if monitoring_tasks:
+            logger.info("🔄 Stopping monitoring tasks...")
+            for task in monitoring_tasks:
+                task.cancel()
+            
+            # Wait for tasks to complete
+            await asyncio.gather(*monitoring_tasks, return_exceptions=True)
+        
+        if orchestrator:
+            logger.info("🔄 Shutting down risk monitoring system...")
+            await orchestrator.stop_all_components()
+            logger.info("✅ Risk monitoring system shutdown complete")
+```
+
+This instruction map provides a complete blueprint for assembling core_engine components into a real-time risk monitoring system. The architecture emphasizes **continuous surveillance**, **automated responses**, **multi-level alerting**, and **comprehensive compliance monitoring** while maintaining institutional-grade risk management standards.
