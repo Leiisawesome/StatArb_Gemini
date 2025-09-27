@@ -40,7 +40,7 @@ class CoreEngineError(Exception):
         """Convert error to dictionary for logging/serialization"""
         return {
             "error_type": self.__class__.__name__,
-            "message": self.message,
+            "error_message": self.message,
             "component": self.context.component,
             "operation": self.context.operation,
             "parameters": self.context.parameters,

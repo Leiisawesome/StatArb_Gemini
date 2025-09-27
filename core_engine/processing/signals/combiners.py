@@ -23,6 +23,9 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import warnings
 
+# Import signal types
+from .generator import SignalType, SignalStrength, TradingSignal
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ class SignalWeight(Enum):
 @dataclass
 class CombinationConfig:
     """Signal combination configuration"""
-    method: CombinationMethod
+    method: CombinationMethod = CombinationMethod.WEIGHTED_AVERAGE
     weighting_scheme: SignalWeight = SignalWeight.EQUAL
     
     # Method-specific parameters
@@ -110,14 +113,14 @@ class SignalCombination:
     signal_weights: Dict[str, float]
     
     # Quality metrics
-    combination_quality: float
-    consensus_level: float  # Agreement between signals
-    diversification_score: float
+    combination_quality: float = 0.0
+    consensus_level: float = 0.0  # Agreement between signals
+    diversification_score: float = 0.0
     
     # Performance attribution
-    expected_return: float
-    expected_volatility: float
-    expected_sharpe: float
+    expected_return: float = 0.0
+    expected_volatility: float = 0.2
+    expected_sharpe: float = 0.0
     
     # Metadata
     combination_details: Dict[str, Any] = field(default_factory=dict)
@@ -492,11 +495,10 @@ class SignalCombiner:
         """Combine multiple signals into a single signal"""
         
         if not signals:
-            return None
+            raise ValueError("Cannot combine empty signal list")
         
         if len(signals) < self.config.min_signals:
-            logger.warning(f"Insufficient signals for combination: {len(signals)} < {self.config.min_signals}")
-            return None
+            raise ValueError(f"Insufficient signals for combination: {len(signals)} < {self.config.min_signals}")
         
         context = context or {}
         
@@ -562,6 +564,99 @@ class SignalCombiner:
             logger.error(f"Error combining signals for {symbol}: {e}")
             return None
     
+    def combine_weighted_average(self, signals: List[Any]) -> Optional[TradingSignal]:
+        """Synchronous wrapper for weighted average combination"""
+        import asyncio
+        
+        if not signals:
+            return None
+        
+        # Extract symbol from first signal
+        symbol = getattr(signals[0], 'symbol', 'UNKNOWN')
+        
+        async def _combine():
+            combination = await self.combine_signals(signals, symbol, {"method": "weighted_average"})
+            if combination:
+                return TradingSignal(
+                    symbol=combination.symbol,
+                    timestamp=combination.timestamp,
+                    signal_type=SignalType.HOLD if abs(combination.combined_strength) < 0.1 else (SignalType.BUY if combination.combined_strength > 0 else SignalType.SELL),
+                    strength=SignalStrength.STRONG if abs(combination.combined_strength) > 0.7 else SignalStrength.MODERATE,
+                    confidence=combination.combined_confidence,
+                    price=100.0,  # Default price
+                    strategy="combined",
+                    metadata={"combination_method": "weighted_average"}
+                )
+            return None
+        
+        try:
+            return asyncio.run(_combine())
+        except Exception as e:
+            logger.error(f"Error in combine_weighted_average: {e}")
+            return None
+    
+    def combine_majority_vote(self, signals: List[Any]) -> Optional[TradingSignal]:
+        """Synchronous wrapper for majority vote combination"""
+        import asyncio
+        
+        if not signals:
+            return None
+        
+        # Extract symbol from first signal
+        symbol = getattr(signals[0], 'symbol', 'UNKNOWN')
+        
+        async def _combine():
+            combination = await self.combine_signals(signals, symbol, {"method": "majority_vote"})
+            if combination:
+                return TradingSignal(
+                    symbol=combination.symbol,
+                    timestamp=combination.timestamp,
+                    signal_type=SignalType.HOLD if abs(combination.combined_strength) < 0.1 else (SignalType.BUY if combination.combined_strength > 0 else SignalType.SELL),
+                    strength=SignalStrength.STRONG if abs(combination.combined_strength) > 0.7 else SignalStrength.MODERATE,
+                    confidence=combination.combined_confidence,
+                    price=100.0,  # Default price
+                    strategy="combined",
+                    metadata={"combination_method": "majority_vote"}
+                )
+            return None
+        
+        try:
+            return asyncio.run(_combine())
+        except Exception as e:
+            logger.error(f"Error in combine_majority_vote: {e}")
+            return None
+    
+    def combine_ml_ensemble(self, signals: List[Any]) -> Optional[TradingSignal]:
+        """Synchronous wrapper for ML ensemble combination"""
+        import asyncio
+        
+        if not signals:
+            return None
+        
+        # Extract symbol from first signal
+        symbol = getattr(signals[0], 'symbol', 'UNKNOWN')
+        
+        async def _combine():
+            combination = await self.combine_signals(signals, symbol, {"method": "machine_learning"})
+            if combination:
+                return TradingSignal(
+                    symbol=combination.symbol,
+                    timestamp=combination.timestamp,
+                    signal_type=SignalType.HOLD if abs(combination.combined_strength) < 0.1 else (SignalType.BUY if combination.combined_strength > 0 else SignalType.SELL),
+                    strength=SignalStrength.STRONG if abs(combination.combined_strength) > 0.7 else SignalStrength.MODERATE,
+                    confidence=combination.combined_confidence,
+                    price=100.0,  # Default price
+                    strategy="ml_ensemble",
+                    metadata={"combination_method": "machine_learning"}
+                )
+            return None
+        
+        try:
+            return asyncio.run(_combine())
+        except Exception as e:
+            logger.error(f"Error in combine_ml_ensemble: {e}")
+            return None
+    
     def _filter_signals(self, signals: List[Any], context: Dict[str, Any]) -> List[Any]:
         """Filter signals based on quality and consistency"""
         
@@ -593,7 +688,8 @@ class SignalCombiner:
         # Score signals by confidence * |strength|
         scored_signals = []
         for signal in signals:
-            score = getattr(signal, 'confidence', 0.5) * abs(getattr(signal, 'strength', 0.0))
+            strength_value = getattr(signal, 'strength', SignalStrength.MODERATE).value
+            score = getattr(signal, 'confidence', 0.5) * strength_value
             scored_signals.append((score, signal))
         
         # Sort by score and take top signals
@@ -609,7 +705,9 @@ class SignalCombiner:
     ) -> SignalCombination:
         """Simple average combination"""
         
-        strengths = [getattr(s, 'strength', 0.0) for s in signals]
+        strengths = [getattr(s, 'strength', SignalStrength.MODERATE).value * 
+                     (-1 if getattr(s, 'signal_type', SignalType.BUY) == SignalType.SELL else 1) 
+                     for s in signals]
         confidences = [getattr(s, 'confidence', 0.5) for s in signals]
         position_sizes = [getattr(s, 'suggested_position_size', 0.0) for s in signals]
         
@@ -645,11 +743,16 @@ class SignalCombiner:
         combined_confidence = 0.0
         combined_position_size = 0.0
         
-        for signal in signals:
-            signal_id = getattr(signal, 'signal_id', f'signal_{id(signal)}')
+        for i, signal in enumerate(signals):
+            signal_id = getattr(signal, 'signal_id', f'signal_{i}')
             weight = weights.get(signal_id, 0.0)
             
-            combined_strength += weight * getattr(signal, 'strength', 0.0)
+            # Get strength with direction based on signal type
+            strength_value = getattr(signal, 'strength', SignalStrength.MODERATE).value
+            if getattr(signal, 'signal_type', SignalType.BUY) == SignalType.SELL:
+                strength_value = -strength_value
+            
+            combined_strength += weight * strength_value
             combined_confidence += weight * getattr(signal, 'confidence', 0.5)
             combined_position_size += weight * getattr(signal, 'suggested_position_size', 0.0)
         
@@ -691,7 +794,12 @@ class SignalCombiner:
             signal_id = getattr(signal, 'signal_id', f'signal_{i}')
             weights[signal_id] = weight
             
-            combined_strength += weight * getattr(signal, 'strength', 0.0)
+            # Get strength with direction based on signal type
+            strength_value = getattr(signal, 'strength', SignalStrength.MODERATE).value
+            if getattr(signal, 'signal_type', SignalType.BUY) == SignalType.SELL:
+                strength_value = -strength_value
+            
+            combined_strength += weight * strength_value
             combined_position_size += weight * getattr(signal, 'suggested_position_size', 0.0)
         
         combined_confidence = np.mean(confidences)  # Average confidence
@@ -801,8 +909,8 @@ class SignalCombiner:
         """Ensemble voting combination"""
         
         # Count votes for long/short/neutral
-        long_votes = sum(1 for s in signals if getattr(s, 'strength', 0.0) > 0.1)
-        short_votes = sum(1 for s in signals if getattr(s, 'strength', 0.0) < -0.1)
+        long_votes = sum(1 for s in signals if getattr(s, 'strength', SignalStrength.MODERATE).value > 0.1)
+        short_votes = sum(1 for s in signals if getattr(s, 'strength', SignalStrength.MODERATE).value < -0.1)
         neutral_votes = len(signals) - long_votes - short_votes
         
         total_votes = len(signals)
@@ -903,7 +1011,7 @@ class SignalCombiner:
         avg_confidence = np.mean([getattr(s, 'confidence', 0.5) for s in signals])
         
         # Signal strength consistency
-        strengths = [getattr(s, 'strength', 0.0) for s in signals]
+        strengths = [getattr(s, 'strength', SignalStrength.MODERATE).value for s in signals]
         strength_std = np.std(strengths) if len(strengths) > 1 else 0.0
         consistency_score = 1.0 / (1.0 + strength_std)  # Higher for more consistent signals
         
@@ -917,7 +1025,7 @@ class SignalCombiner:
     def _calculate_consensus_level(self, signals: List[Any]) -> float:
         """Calculate consensus level among signals"""
         
-        strengths = [getattr(s, 'strength', 0.0) for s in signals]
+        strengths = [getattr(s, 'strength', SignalStrength.MODERATE).value for s in signals]
         
         if not strengths:
             return 0.0

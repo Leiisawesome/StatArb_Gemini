@@ -808,8 +808,13 @@ class CrossAssetAnalyzer:
             
             # Systemic stress (average correlation)
             if len(correlations) > 0:
-                avg_correlation = correlations.values[np.triu_indices_from(correlations.values, k=1)].mean()
-                stress_indicators['systemic_stress'] = max(0, min(1, (avg_correlation - 0.3) / 0.5))
+                triu_indices = np.triu_indices_from(correlations.values, k=1)
+                triu_values = correlations.values[triu_indices]
+                if len(triu_values) > 0:
+                    avg_correlation = triu_values.mean()
+                    stress_indicators['systemic_stress'] = max(0, min(1, (avg_correlation - 0.3) / 0.5))
+                else:
+                    stress_indicators['systemic_stress'] = 0.0
             else:
                 stress_indicators['systemic_stress'] = 0.0
             

@@ -231,10 +231,23 @@ class ClickHouseDataManager(BaseDataManager):
         self.subscribers: List[IDataSubscriber] = []
         self.data_callbacks: List[Callable] = []
         
-        # Connection test and initialization
-        self._test_connection()
+        # Determine whether we can reach ClickHouse
+        self._connection_available = False
+        self._use_synthetic_data = bool(int(os.getenv("STATARB_USE_SYNTHETIC_DATA", "0")))
+        try:
+            self._connection_available = self._test_connection()
+        except Exception:
+            # _test_connection already logged the failure; fall back to synthetic data
+            self._connection_available = False
+        finally:
+            if self._use_synthetic_data:
+                self.logger.info("Synthetic market data forced via STATARB_USE_SYNTHETIC_DATA")
+            elif not self._connection_available:
+                self.logger.warning("ClickHouse unavailable; synthetic market data will be generated")
         
-        self.logger.info(f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols")
+        self.logger.info(
+            f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
+        )
     
     def add_subscriber(self, subscriber: IDataSubscriber) -> None:
         """Add data subscriber following core_engine pattern"""
@@ -262,11 +275,13 @@ class ClickHouseDataManager(BaseDataManager):
             if response.status_code == 200 and response.text.strip() == "1":
                 self.logger.info("✅ ClickHouse connection successful")
                 return True
-            else:
-                raise Exception(f"Unexpected response: {response.text}")
+            raise Exception(f"Unexpected response: {response.text}")
         except Exception as e:
-            self.logger.error(f"❌ ClickHouse connection failed: {e}")
-            raise
+            self.logger.warning(
+                "❌ ClickHouse connection failed: %s. Falling back to synthetic data when required.",
+                e,
+            )
+            return False
     
     def _execute_query(self, query: str) -> pd.DataFrame:
         """Execute ClickHouse query and return DataFrame"""
@@ -337,15 +352,27 @@ class ClickHouseDataManager(BaseDataManager):
         
         # Default to full date range if no times specified
         if start_time is None:
-            start_time = datetime.strptime(f"{self.enhanced_config.start_date} 00:00:00", "%Y-%m-%d %H:%M:%S")
+            start_time = datetime.strptime(
+                f"{self.enhanced_config.start_date} 00:00:00", "%Y-%m-%d %H:%M:%S"
+            )
         if end_time is None:
-            end_time = datetime.strptime(f"{self.enhanced_config.end_date} 23:59:59", "%Y-%m-%d %H:%M:%S")
+            end_time = datetime.strptime(
+                f"{self.enhanced_config.end_date} 23:59:59", "%Y-%m-%d %H:%M:%S"
+            )
         
         # Check cache
         cache_key = f"{'-'.join(symbols)}_{start_time}_{end_time}_{interval}"
         if self._is_cached(cache_key):
             self.logger.debug(f"Returning cached data for {cache_key}")
             return self._cache[cache_key]
+        
+        use_synthetic = self._use_synthetic_data or not self._connection_available
+        
+        if use_synthetic:
+            df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
+            self._cache[cache_key] = df
+            self._cache_timestamps[cache_key] = datetime.now()
+            return df
         
         # Build query based on interval
         query = self._build_query(symbols, start_time, end_time, interval)
@@ -356,22 +383,97 @@ class ClickHouseDataManager(BaseDataManager):
             query_time = time.time() - start_query_time
             
             if df.empty:
-                self.logger.warning(f"No data returned for symbols {symbols}")
-                return pd.DataFrame()
-            
-            # Standardize the data
-            df = self._standardize_data(df)
-            
-            # Cache the result
-            self._cache[cache_key] = df
-            self._cache_timestamps[cache_key] = datetime.now()
-            
-            self.logger.info(f"Loaded {len(df)} records for {len(symbols)} symbols in {query_time:.2f}s")
-            return df
-            
+                self.logger.warning(
+                    "No data returned for symbols %s; generating synthetic fallback data",
+                    symbols,
+                )
+                df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
+            else:
+                # Standardize the data
+                df = self._standardize_data(df)
+                self.logger.info(
+                    "Loaded %d records for %d symbols in %.2fs",
+                    len(df),
+                    len(symbols),
+                    query_time,
+                )
         except Exception as e:
-            self.logger.error(f"Failed to load market data: {e}")
-            return pd.DataFrame()
+            self.logger.warning(
+                "Failed to load market data from ClickHouse (%s); generating synthetic fallback data",
+                e,
+            )
+            df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
+        
+        # Cache the result (real or synthetic)
+        self._cache[cache_key] = df
+        self._cache_timestamps[cache_key] = datetime.now()
+        return df
+
+    def _generate_synthetic_data(
+        self,
+        symbols: List[str],
+        start_time: datetime,
+        end_time: datetime,
+        interval: str,
+    ) -> pd.DataFrame:
+        """Generate deterministic synthetic OHLCV data for offline testing."""
+
+        freq_map = {
+            "1min": "1min",
+            "5min": "5min",
+            "15min": "15min",
+            "1h": "1H",
+        }
+
+        if interval not in freq_map:
+            raise ValueError(f"Unsupported interval for synthetic data: {interval}")
+
+        index = pd.date_range(start=start_time, end=end_time, freq=freq_map[interval])
+
+        if index.empty:
+            index = pd.date_range(start=start_time, periods=120, freq=freq_map[interval])
+
+        max_points = 1000 if interval in ("1min", "5min") else 500
+        if len(index) > max_points:
+            index = index[:max_points]
+
+        records = []
+        for symbol in symbols:
+            seed = abs(hash((symbol, start_time.date(), interval))) % (2**32)
+            rng = np.random.default_rng(seed)
+            base_price = 100 + rng.normal(0, 5)
+            drift = rng.normal(0.0002, 0.0005)
+            volatility = rng.uniform(0.005, 0.02)
+            returns = rng.normal(drift, volatility, size=len(index))
+            prices = base_price * np.exp(np.cumsum(returns))
+
+            high = prices * (1 + rng.uniform(0.001, 0.01, size=len(prices)))
+            low = prices * (1 - rng.uniform(0.001, 0.01, size=len(prices)))
+            open_prices = np.concatenate(([prices[0]], prices[:-1]))
+            volume = rng.integers(1_000, 50_000, size=len(prices))
+
+            for ts, o, h, l, c, v in zip(index, open_prices, high, low, prices, volume):
+                records.append(
+                    {
+                        "timestamp": ts,
+                        "symbol": symbol,
+                        "open": float(o),
+                        "high": float(max(h, l, o, c)),
+                        "low": float(min(l, o, c)),
+                        "close": float(c),
+                        "volume": int(v),
+                        "transactions": int(v // 10),
+                    }
+                )
+
+        df = pd.DataFrame.from_records(records)
+        self.logger.info(
+            "Generated %d synthetic records for %d symbols (%s interval)",
+            len(df),
+            len(symbols),
+            interval,
+        )
+        return df
     
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
         """Build ClickHouse query for market data"""

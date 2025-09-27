@@ -575,188 +575,52 @@ class SignalValidator:
         
         logger.info("SignalValidator initialized")
     
-    async def validate_signal(
+    def validate_signal(
         self,
-        signal: Any,
-        context: Optional[Dict[str, Any]] = None
-    ) -> SignalValidationReport:
-        """Validate a single signal"""
+        signal,
+        market_data: Dict[str, Any],
+        market_conditions: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Validate a single signal comprehensively"""
         
-        start_time = time.time()
-        context = context or {}
+        # Run individual validations
+        confidence_valid, confidence_status, confidence_msg = self.validate_confidence(signal)
+        age_valid, age_status, age_msg = self.validate_age(signal)
+        indicators_valid, indicators_status, indicators_msg = self.validate_indicators(signal)
+        risk_valid, risk_status, risk_msg = self.validate_risk_limits(signal, market_data)
+        market_valid, market_status, market_msg = self.validate_market_conditions(signal, market_conditions)
         
-        # Add recent signals to context
-        symbol = getattr(signal, 'symbol', '')
-        with self._lock:
-            context['recent_signals'] = self._signal_history.get(symbol, [])
+        # Determine overall status
+        all_validations = [confidence_valid, age_valid, indicators_valid, risk_valid, market_valid]
+        overall_status = ValidationStatus.PASSED if all(all_validations) else ValidationStatus.FAILED
         
-        # Initialize report
-        report = SignalValidationReport(
-            signal_id=getattr(signal, 'signal_id', f'signal_{int(time.time())}'),
-            symbol=symbol,
-            validation_timestamp=datetime.now(),
-            overall_status=ValidationStatus.PASSED,
-            overall_score=0.0,
-            confidence_level=0.0
-        )
+        # Collect warnings
+        warnings = []
+        if not confidence_valid:
+            warnings.append(confidence_msg)
+        if not age_valid:
+            warnings.append(age_msg)
+        if not indicators_valid:
+            warnings.append(indicators_msg)
+        if not risk_valid:
+            warnings.append(risk_msg)
+        if not market_valid:
+            warnings.append(market_msg)
         
-        try:
-            # Run all validation rules
-            category_scores = defaultdict(list)
-            category_weights = {
-                ValidationCategory.DATA_QUALITY: 0.3,
-                ValidationCategory.SIGNAL_QUALITY: 0.25,
-                ValidationCategory.RISK_VALIDATION: 0.25,
-                ValidationCategory.CONSISTENCY: 0.1,
-                ValidationCategory.STATISTICAL: 0.1
-            }
-            
-            for rule in self.rule_engine.get_rules():
-                if not rule.enabled:
-                    continue
-                
-                try:
-                    # Run validation rule
-                    result = await self._run_validation_rule(rule, signal, context)
-                    report.validation_results.append(result)
-                    
-                    # Update category scores
-                    category_scores[rule.category].append(result.score * rule.weight)
-                    
-                    # Update counts
-                    if result.status == ValidationStatus.PASSED:
-                        report.rules_passed += 1
-                    elif result.status == ValidationStatus.WARNING:
-                        report.rules_warning += 1
-                    elif result.status == ValidationStatus.FAILED:
-                        report.rules_failed += 1
-                    elif result.status == ValidationStatus.CRITICAL_FAILURE:
-                        report.rules_critical += 1
-                    
-                    # Check for critical failures
-                    if (result.status == ValidationStatus.CRITICAL_FAILURE or 
-                        (rule.level == ValidationLevel.CRITICAL and result.status == ValidationStatus.FAILED)):
-                        
-                        if self.fail_on_critical:
-                            report.overall_status = ValidationStatus.CRITICAL_FAILURE
-                            report.risk_warnings.append(f"Critical validation failure: {result.message}")
-                
-                except Exception as e:
-                    logger.error(f"Error running validation rule {rule.rule_id}: {e}")
-                    continue
-            
-            # Calculate category scores
-            for category, scores in category_scores.items():
-                if scores:
-                    avg_score = np.mean(scores)
-                    
-                    if category == ValidationCategory.DATA_QUALITY:
-                        report.data_quality_score = avg_score
-                    elif category == ValidationCategory.SIGNAL_QUALITY:
-                        report.signal_quality_score = avg_score
-                    elif category == ValidationCategory.RISK_VALIDATION:
-                        report.risk_score = avg_score
-                    elif category == ValidationCategory.CONSISTENCY:
-                        report.consistency_score = avg_score
-            
-            # Calculate overall score
-            total_score = 0.0
-            total_weight = 0.0
-            
-            for category, weight in category_weights.items():
-                if category_scores[category]:
-                    category_score = np.mean(category_scores[category])
-                    total_score += category_score * weight
-                    total_weight += weight
-            
-            report.overall_score = total_score / total_weight if total_weight > 0 else 0.0
-            
-            # Determine overall status
-            if report.overall_status != ValidationStatus.CRITICAL_FAILURE:
-                if report.overall_score >= 0.8:
-                    report.overall_status = ValidationStatus.PASSED
-                elif report.overall_score >= self.min_overall_score:
-                    report.overall_status = ValidationStatus.WARNING
-                else:
-                    report.overall_status = ValidationStatus.FAILED
-            
-            # Set confidence level
-            report.confidence_level = min(report.overall_score * getattr(signal, 'confidence', 0.5), 1.0)
-            
-            # Generate recommendations
-            report.recommendations = self._generate_recommendations(report)
-            
-            # Record validation time
-            validation_time = (time.time() - start_time) * 1000
-            report.validation_duration_ms = validation_time
-            
-            # Update statistics
-            with self._lock:
-                self._validation_times.append(validation_time)
-                self._validation_stats[report.overall_status.value] += 1
-                self._validation_history.append(report)
-                
-                # Add to signal history
-                if symbol:
-                    self._signal_history[symbol].append(signal)
-                    # Keep only recent signals
-                    self._signal_history[symbol] = self._signal_history[symbol][-50:]
-            
-            logger.debug(f"Signal validation completed: {report.overall_status.value} (score: {report.overall_score:.2f})")
-            
-            return report
-            
-        except Exception as e:
-            logger.error(f"Error validating signal: {e}")
-            report.overall_status = ValidationStatus.CRITICAL_FAILURE
-            report.overall_score = 0.0
-            report.risk_warnings.append(f"Validation error: {str(e)}")
-            return report
-    
-    async def _run_validation_rule(
-        self,
-        rule: ValidationRule,
-        signal: Any,
-        context: Dict[str, Any]
-    ) -> ValidationResult:
-        """Run a single validation rule"""
+        # Validation details
+        validation_details = {
+            "confidence": {"valid": confidence_valid, "status": confidence_status, "message": confidence_msg},
+            "age": {"valid": age_valid, "status": age_status, "message": age_msg},
+            "indicators": {"valid": indicators_valid, "status": indicators_status, "message": indicators_msg},
+            "risk_limits": {"valid": risk_valid, "status": risk_status, "message": risk_msg},
+            "market_conditions": {"valid": market_valid, "status": market_status, "message": market_msg}
+        }
         
-        start_time = time.time()
-        
-        try:
-            if rule.validation_function:
-                result = rule.validation_function(signal, context)
-                result.execution_time_ms = (time.time() - start_time) * 1000
-                return result
-            else:
-                # Generic validation based on rule parameters
-                return self._generic_validation(rule, signal, context)
-                
-        except Exception as e:
-            logger.error(f"Error in validation rule {rule.rule_id}: {e}")
-            return ValidationResult(
-                rule_id=rule.rule_id,
-                status=ValidationStatus.FAILED,
-                message=f"Validation rule error: {str(e)}",
-                score=0.0,
-                execution_time_ms=(time.time() - start_time) * 1000
-            )
-    
-    def _generic_validation(
-        self,
-        rule: ValidationRule,
-        signal: Any,
-        context: Dict[str, Any]
-    ) -> ValidationResult:
-        """Generic validation based on rule parameters"""
-        
-        # This is a fallback for rules without specific validation functions
-        return ValidationResult(
-            rule_id=rule.rule_id,
-            status=ValidationStatus.PASSED,
-            message="Generic validation passed",
-            score=0.8
-        )
+        return {
+            "overall_status": overall_status,
+            "validation_details": validation_details,
+            "warnings": warnings
+        }
     
     def _generate_recommendations(self, report: SignalValidationReport) -> List[str]:
         """Generate recommendations based on validation results"""
@@ -944,6 +808,75 @@ class SignalValidator:
     def get_validation_rules(self) -> List[ValidationRule]:
         """Get all validation rules"""
         return list(self.rule_engine.rules.values())
+    
+    def validate_confidence(self, signal) -> Tuple[bool, ValidationStatus, str]:
+        """Validate signal confidence against minimum threshold"""
+        min_confidence = self.config.get('min_confidence', 0.5)
+        confidence = getattr(signal, 'confidence', 0.5)
+        
+        if confidence >= min_confidence:
+            return True, ValidationStatus.PASSED, f"Confidence {confidence:.3f} meets minimum threshold {min_confidence:.3f}"
+        else:
+            return False, ValidationStatus.FAILED, f"Confidence {confidence:.3f} below minimum threshold {min_confidence:.3f}"
+    
+    def validate_age(self, signal) -> Tuple[bool, ValidationStatus, str]:
+        """Validate signal age (freshness)"""
+        max_age_seconds = self.config.get('max_age_seconds', 300)  # 5 minutes default
+        timestamp = getattr(signal, 'timestamp', datetime.now())
+        
+        age_seconds = (datetime.now() - timestamp).total_seconds()
+        
+        if age_seconds <= max_age_seconds:
+            return True, ValidationStatus.PASSED, f"Signal age {age_seconds:.1f}s within limit {max_age_seconds}s"
+        else:
+            return False, ValidationStatus.FAILED, f"Signal age {age_seconds:.1f}s exceeds limit {max_age_seconds}s"
+    
+    def validate_indicators(self, signal) -> Tuple[bool, ValidationStatus, str]:
+        """Validate required indicators are present"""
+        required_indicators = self.config.get('required_indicators', ['rsi', 'macd', 'volume'])
+        metadata = getattr(signal, 'metadata', {})
+        indicators = metadata.get('indicators', {})
+        
+        missing_indicators = [ind for ind in required_indicators if ind not in indicators]
+        
+        if not missing_indicators:
+            return True, ValidationStatus.PASSED, f"All required indicators present: {required_indicators}"
+        else:
+            return False, ValidationStatus.FAILED, f"Missing required indicators: {missing_indicators}"
+    
+    def validate_risk_limits(self, signal, market_data: Dict[str, Any]) -> Tuple[bool, ValidationStatus, str]:
+        """Validate risk limits against market data"""
+        max_position_size = self.config.get('max_position_size', 100000)
+        max_drawdown = self.config.get('max_drawdown', 0.1)
+        max_volatility = self.config.get('max_volatility', 0.5)
+        
+        position_size = market_data.get('position_size', 0)
+        current_drawdown = market_data.get('current_drawdown', 0)
+        volatility = market_data.get('volatility', 0)
+        
+        if position_size > max_position_size:
+            return False, ValidationStatus.FAILED, f"Position size {position_size} exceeds limit {max_position_size}"
+        elif current_drawdown > max_drawdown:
+            return False, ValidationStatus.FAILED, f"Drawdown {current_drawdown:.3f} exceeds limit {max_drawdown:.3f}"
+        elif volatility > max_volatility:
+            return False, ValidationStatus.FAILED, f"Volatility {volatility:.3f} exceeds limit {max_volatility:.3f}"
+        else:
+            return True, ValidationStatus.PASSED, "All risk limits within acceptable ranges"
+    
+    def validate_market_conditions(self, signal, market_conditions: Dict[str, Any]) -> Tuple[bool, ValidationStatus, str]:
+        """Validate market conditions"""
+        min_volume = self.config.get('min_volume', 1000)
+        max_spread = self.config.get('max_spread', 0.05)
+        
+        volume = market_conditions.get('volume', 0)
+        spread = market_conditions.get('spread', 0)
+        
+        if volume < min_volume:
+            return False, ValidationStatus.FAILED, f"Volume {volume} below minimum {min_volume}"
+        elif spread > max_spread:
+            return False, ValidationStatus.FAILED, f"Spread {spread:.4f} exceeds maximum {max_spread:.4f}"
+        else:
+            return True, ValidationStatus.PASSED, "Market conditions acceptable"
     
     def update_rule_config(self, rule_id: str, **kwargs) -> bool:
         """Update rule configuration"""

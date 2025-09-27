@@ -19,6 +19,7 @@ import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -55,6 +56,69 @@ class TradingSignal:
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
+        
+        # Validate confidence range
+        if not (0.0 <= self.confidence <= 1.0):
+            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert signal to dictionary representation"""
+        return {
+            "symbol": self.symbol,
+            "timestamp": self.timestamp.isoformat() if isinstance(self.timestamp, datetime) else str(self.timestamp),
+            "signal_type": self.signal_type.name,
+            "strength": self.strength.name,
+            "confidence": self.confidence,
+            "price": self.price,
+            "target_price": self.target_price,
+            "stop_loss": self.stop_loss,
+            "position_size": self.position_size,
+            "strategy": self.strategy,
+            "metadata": self.metadata.copy() if self.metadata else {}
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TradingSignal':
+        """Create signal from dictionary representation"""
+        # Convert string values back to enums (case-insensitive)
+        def get_enum_value(enum_class, value):
+            if isinstance(value, str):
+                # Try exact match first
+                try:
+                    return enum_class[value.upper()]
+                except KeyError:
+                    # Try value match
+                    for member in enum_class:
+                        if member.value == value.lower():
+                            return member
+                    raise ValueError(f"Invalid {enum_class.__name__} value: {value}")
+            return value
+        
+        signal_type = get_enum_value(SignalType, data["signal_type"])
+        strength = get_enum_value(SignalStrength, data["strength"])
+        
+        # Parse timestamp
+        timestamp = data["timestamp"]
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp)
+            except ValueError:
+                # If not ISO format, try pandas parsing
+                timestamp = pd.to_datetime(timestamp)
+        
+        return cls(
+            symbol=data["symbol"],
+            timestamp=timestamp,
+            signal_type=signal_type,
+            strength=strength,
+            confidence=data["confidence"],
+            price=data["price"],
+            target_price=data.get("target_price"),
+            stop_loss=data.get("stop_loss"),
+            position_size=data.get("position_size", 0.0),
+            strategy=data.get("strategy", "multi_factor"),
+            metadata=data.get("metadata", {})
+        )
 
 @dataclass
 class SignalConfig:
@@ -397,8 +461,8 @@ class SignalGenerator:
             combined_score = 0.7 * combined_score + 0.3 * ml_score
         
         # Generate signals from combined scores
-        for idx, row in df.iterrows():
-            score = combined_score.iloc[idx] if idx < len(combined_score) else 0
+        for i, (idx, row) in enumerate(df.iterrows()):
+            score = combined_score.iloc[i] if i < len(combined_score) else 0
             
             # Enhanced confidence calculation from test findings
             raw_confidence = abs(score)
@@ -457,9 +521,9 @@ class SignalGenerator:
                 position_size=position_size,
                 strategy="multi_factor",
                 metadata={
-                    'mean_reversion_score': mean_rev['mean_reversion_score'].iloc[idx],
-                    'momentum_score': momentum['momentum_score'].iloc[idx],
-                    'volume_score': volume['volume_score'].iloc[idx],
+                    'mean_reversion_score': mean_rev['mean_reversion_score'].loc[idx],
+                    'momentum_score': momentum['momentum_score'].loc[idx],
+                    'volume_score': volume['volume_score'].loc[idx],
                     'combined_score': score,
                     'rsi': row.get('rsi', None),
                     'volume_ratio': row.get('volume_ratio', None)
@@ -544,6 +608,143 @@ class SignalGenerator:
             filtered.append(signal)
         
         return filtered
+    
+    def generate_all_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
+        """Generate all types of signals for a symbol"""
+        if df.empty:
+            raise ValueError("Cannot generate signals from empty DataFrame")
+        
+        # Filter data for the specific symbol
+        symbol_data = df[df['symbol'] == symbol].copy()
+        if symbol_data.empty:
+            return []
+        
+        # Use the main generate_signals method
+        return self.generate_signals(symbol_data)
+    
+    def generate_rsi_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
+        """Generate RSI-based signals for a specific symbol"""
+        symbol_data = df[df['symbol'] == symbol].copy()
+        if symbol_data.empty:
+            return []
+        
+        mean_rev_signals = self._generate_mean_reversion_signals(symbol_data)
+        signals = []
+        
+        for idx, row in mean_rev_signals.iterrows():
+            if pd.notna(row.get('rsi_signal', 0)) and abs(row['rsi_signal']) > self.config.signal_threshold:
+                signal_type = SignalType.BUY if row['rsi_signal'] > 0 else SignalType.SELL
+                confidence = min(abs(row['rsi_signal']), 1.0)
+                
+                signal = TradingSignal(
+                    symbol=symbol,
+                    timestamp=idx,
+                    signal_type=signal_type,
+                    strength=SignalStrength.STRONG if confidence > self.config.strong_signal_threshold else SignalStrength.MODERATE,
+                    confidence=confidence,
+                    price=row['close'],
+                    strategy="rsi",
+                    metadata={"rsi_value": row.get('rsi', 50), "signal_source": "rsi"}
+                )
+                signals.append(signal)
+        
+        return self._filter_signals(signals, symbol_data)
+    
+    def generate_macd_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
+        """Generate MACD-based signals for a specific symbol"""
+        symbol_data = df[df['symbol'] == symbol].copy()
+        if symbol_data.empty:
+            return []
+        
+        momentum_signals = self._generate_momentum_signals(symbol_data)
+        signals = []
+        
+        for idx, row in momentum_signals.iterrows():
+            if pd.notna(row.get('macd_signal', 0)) and abs(row['macd_signal']) > self.config.signal_threshold:
+                signal_type = SignalType.BUY if row['macd_signal'] > 0 else SignalType.SELL
+                confidence = min(abs(row['macd_signal']), 1.0)
+                
+                signal = TradingSignal(
+                    symbol=symbol,
+                    timestamp=idx,
+                    signal_type=signal_type,
+                    strength=SignalStrength.STRONG if confidence > self.config.strong_signal_threshold else SignalStrength.MODERATE,
+                    confidence=confidence,
+                    price=row['close'],
+                    strategy="macd",
+                    metadata={"macd_value": row.get('macd_line', 0), "signal_source": "macd"}
+                )
+                signals.append(signal)
+        
+        return self._filter_signals(signals, symbol_data)
+    
+    def generate_sma_crossover_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
+        """Generate SMA crossover signals for a specific symbol"""
+        symbol_data = df[df['symbol'] == symbol].copy()
+        if symbol_data.empty:
+            return []
+        
+        momentum_signals = self._generate_momentum_signals(symbol_data)
+        signals = []
+        
+        for idx, row in momentum_signals.iterrows():
+            if pd.notna(row.get('sma_crossover_signal', 0)) and abs(row['sma_crossover_signal']) > self.config.signal_threshold:
+                signal_type = SignalType.BUY if row['sma_crossover_signal'] > 0 else SignalType.SELL
+                confidence = min(abs(row['sma_crossover_signal']), 1.0)
+                
+                signal = TradingSignal(
+                    symbol=symbol,
+                    timestamp=idx,
+                    signal_type=signal_type,
+                    strength=SignalStrength.STRONG if confidence > self.config.strong_signal_threshold else SignalStrength.MODERATE,
+                    confidence=confidence,
+                    price=row['close'],
+                    strategy="sma_crossover",
+                    metadata={"sma_20": row.get('sma_20', 0), "sma_50": row.get('sma_50', 0), "signal_source": "sma_crossover"}
+                )
+                signals.append(signal)
+        
+        return self._filter_signals(signals, symbol_data)
+    
+    def generate_volume_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
+        """Generate volume-based signals for a specific symbol"""
+        symbol_data = df[df['symbol'] == symbol].copy()
+        if symbol_data.empty:
+            return []
+        
+        volume_signals = self._generate_volume_signals(symbol_data)
+        signals = []
+        
+        for idx, row in volume_signals.iterrows():
+            if pd.notna(row.get('volume_signal', 0)) and abs(row['volume_signal']) > self.config.signal_threshold:
+                signal_type = SignalType.BUY if row['volume_signal'] > 0 else SignalType.SELL
+                confidence = min(abs(row['volume_signal']), 1.0)
+                
+                signal = TradingSignal(
+                    symbol=symbol,
+                    timestamp=idx,
+                    signal_type=signal_type,
+                    strength=SignalStrength.STRONG if confidence > self.config.strong_signal_threshold else SignalStrength.MODERATE,
+                    confidence=confidence,
+                    price=row['close'],
+                    strategy="volume",
+                    metadata={"volume_ratio": row.get('volume_ratio', 1.0), "signal_source": "volume"}
+                )
+                signals.append(signal)
+        
+        return self._filter_signals(signals, symbol_data)
+    
+    def generate_combined_signals(self, df: pd.DataFrame, symbol: str, min_confidence: Optional[float] = None) -> List[TradingSignal]:
+        """Generate combined signals for a specific symbol with optional confidence filtering"""
+        if min_confidence is not None and (min_confidence < 0.0 or min_confidence > 1.0):
+            raise ValueError("min_confidence must be between 0.0 and 1.0")
+        
+        signals = self.generate_all_signals(df, symbol)
+        
+        if min_confidence is not None:
+            signals = [s for s in signals if s.confidence >= min_confidence]
+        
+        return signals
     
     def get_signal_summary(self, signals: List[TradingSignal]) -> Dict[str, Any]:
         """Get summary statistics of generated signals"""

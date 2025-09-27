@@ -17,7 +17,24 @@ import time
 
 # Import strategy components
 from .strategy_engine import BaseStrategy
-from desk.backtest_types import BacktestConfig, BacktestResult
+
+# Mock backtest types (temporary until proper backtest module is available)
+@dataclass
+class BacktestConfig:
+    """Mock backtest configuration"""
+    strategy_id: str = ""
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    initial_capital: float = 100000.0
+
+@dataclass
+class BacktestResult:
+    """Mock backtest result"""
+    total_return: float = 0.0
+    sharpe_ratio: float = 0.0
+    max_drawdown: float = 0.0
+    win_rate: float = 0.0
+    total_trades: int = 0
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

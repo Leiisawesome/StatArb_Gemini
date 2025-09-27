@@ -4,7 +4,19 @@ Streamlined Professional Regime Detection Test
 ==============================================
 
 Efficient test demonstrating professional regime detection using multiple symbols
-and sophisticated detection methods without hanging issues.
+and sophisticated detection methods w            # Show top features
+            if hasattr(classification_result, 'feature_contributions') and classification_result.feature_contributions:
+                top_features = sorted(
+                    classification_result.feature_contributions.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
+                
+                logger.info("  🏆 Top Features:")
+                for feature, importance in top_features:
+                    logger.info(f"    - {feature}: {importance:.4f}")
+            
+            return classification_resultg issues.
 
 Author: StatArb_Gemini Professional Regime Detection System
 """
@@ -235,9 +247,9 @@ class StreamlinedRegimeTest:
                 price_data=primary_data
             )
             
-            logger.info(f"  🎯 Classified Regime: {classification_result.regime_class}")
-            logger.info(f"  📊 Classification Confidence: {classification_result.confidence:.3f}")
-            logger.info(f"  🔍 Feature Importance: {len(classification_result.feature_importance)} features")
+            logger.info(f"  🎯 Classified Regime: {classification_result.predicted_regime}")
+            logger.info(f"  📊 Classification Confidence: {classification_result.prediction_confidence:.3f}")
+            logger.info(f"  🔍 Feature Importance: {len(classification_result.feature_contributions)} features")
             
             # Show top features
             if hasattr(classification_result, 'feature_importance'):
@@ -292,8 +304,8 @@ class StreamlinedRegimeTest:
         # Classification summary
         if classification_result:
             print(f"\n🤖 ML CLASSIFICATION:")
-            print(f"  • Regime Class: {classification_result.regime_class}")
-            print(f"  • Classification Confidence: {classification_result.confidence:.3f}")
+            print(f"  • Regime Class: {classification_result.predicted_regime}")
+            print(f"  • Classification Confidence: {classification_result.prediction_confidence:.3f}")
         
         # Professional insights
         print(f"\n💡 PROFESSIONAL INSIGHTS:")

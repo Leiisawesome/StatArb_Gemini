@@ -34,7 +34,7 @@ class StructuredFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
             "module": record.module,
-            "function": record.funcName,
+            "function": record.funcName or "<unknown>",
             "line": record.lineno,
             "thread": record.thread,
             "thread_name": threading.current_thread().name

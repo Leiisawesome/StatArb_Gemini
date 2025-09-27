@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, List, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from contextlib import contextmanager
+import contextlib
 from functools import wraps
 import cProfile
 import pstats
@@ -378,6 +379,7 @@ class PerformanceMonitor:
         else:
             # Return stats as string
             output = io.StringIO()
+            stats.stream = output
             stats.print_stats(20)
             profile_str = output.getvalue()
             logger.info("CPU profiling completed")

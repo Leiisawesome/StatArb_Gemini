@@ -245,7 +245,7 @@ class FeatureEngineer:
             combined_features = self._remove_correlated_features(combined_features)
             
             # Forward fill and drop NaN
-            combined_features = combined_features.fillna(method='ffill').dropna()
+            combined_features = combined_features.ffill().dropna()
             
             logger.info(f"Engineered {len(combined_features.columns)} features")
             return combined_features
@@ -582,6 +582,7 @@ class RegimeModelTrainer:
         self.scalers = {}
         self.label_encoder = LabelEncoder()
         self.feature_selector = None
+        self.training_feature_names = None  # Store feature names from training
         self.is_trained = False
         
         logger.info("Model trainer initialized")
@@ -615,6 +616,9 @@ class RegimeModelTrainer:
             # Feature selection
             X_selected = self._select_features(X, y_encoded)
             
+            # Store training feature names for consistent prediction
+            self.training_feature_names = list(X_selected.columns)
+            
             # Train-test split
             if self.config.cross_validation_method == "time_series":
                 # Time series split (no shuffling)
@@ -628,9 +632,14 @@ class RegimeModelTrainer:
                 )
             
             # Scale features
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
+            scaler = RobustScaler()
+            
+            # Clean data to avoid numerical issues while preserving DataFrame structure
+            X_train_clean = X_train.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            X_test_clean = X_test.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            
+            X_train_scaled = scaler.fit_transform(X_train_clean)
+            X_test_scaled = scaler.transform(X_test_clean)
             
             self.scalers['main'] = scaler
             
@@ -645,13 +654,17 @@ class RegimeModelTrainer:
                     model = self._create_model(model_type)
                     
                     start_time = datetime.now()
-                    model.fit(X_train_scaled, y_train)
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+                        model.fit(X_train_scaled, y_train)
                     training_time = (datetime.now() - start_time).total_seconds()
                     
                     # Calibrate probabilities if requested
                     if self.config.calibrate_probabilities:
-                        model = CalibratedClassifierCV(model, cv=3)
-                        model.fit(X_train_scaled, y_train)
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+                            model = CalibratedClassifierCV(model, cv=3)
+                            model.fit(X_train_scaled, y_train)
                     
                     self.models[model_type.value] = model
                     
@@ -764,9 +777,11 @@ class RegimeModelTrainer:
             
             elif model_type == MLModel.LOGISTIC_REGRESSION:
                 return LogisticRegression(
-                    C=1.0,
+                    C=0.1,  # Stronger regularization
                     class_weight='balanced' if self.config.use_class_weights else None,
-                    max_iter=1000,
+                    max_iter=2000,
+                    tol=1e-6,
+                    solver='lbfgs',
                     random_state=42
                 )
             
@@ -796,11 +811,14 @@ class RegimeModelTrainer:
             accuracy = accuracy_score(y_test, y_pred)
             precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted')
             
-            # Cross-validation
+            # Cross-validation - adapt to dataset size
+            min_samples_per_class = min(np.bincount(y_train))
+            max_splits = min(5, max(2, min_samples_per_class - 1))  # At least 2 splits, max 5
+            
             if self.config.cross_validation_method == "time_series":
-                cv = TimeSeriesSplit(n_splits=self.config.validation_splits)
+                cv = TimeSeriesSplit(n_splits=min(max_splits, self.config.validation_splits))
             else:
-                cv = self.config.validation_splits
+                cv = min(max_splits, self.config.validation_splits)
             
             cv_scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='accuracy')
             
@@ -830,19 +848,21 @@ class RegimeModelTrainer:
             regime_specific = {}
             unique_regimes = np.unique(y_test)
             
-            for regime_idx in unique_regimes:
-                regime_mask = y_test == regime_idx
-                if regime_mask.sum() > 0:
-                    regime_pred = y_pred[regime_mask]
-                    regime_actual = y_test[regime_mask]
-                    
-                    regime_name = self.label_encoder.inverse_transform([regime_idx])[0]
-                    regime_specific[regime_name] = {
-                        'precision': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted')[0],
-                        'recall': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted')[1],
-                        'f1_score': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted')[2],
-                        'support': regime_mask.sum()
-                    }
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="sklearn.metrics")
+                for regime_idx in unique_regimes:
+                    regime_mask = y_test == regime_idx
+                    if regime_mask.sum() > 0:
+                        regime_pred = y_pred[regime_mask]
+                        regime_actual = y_test[regime_mask]
+                        
+                        regime_name = self.label_encoder.inverse_transform([regime_idx])[0]
+                        regime_specific[regime_name] = {
+                            'precision': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted', zero_division=0)[0],
+                            'recall': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted', zero_division=0)[1],
+                            'f1_score': precision_recall_fscore_support(regime_actual, regime_pred, average='weighted', zero_division=0)[2],
+                            'support': regime_mask.sum()
+                        }
             
             return ModelPerformance(
                 model_name=model_name,
@@ -916,8 +936,20 @@ class RegimeModelTrainer:
                 logger.warning("Scaler not available")
                 return None
             
-            # Prepare features
-            if self.feature_selector is not None:
+            # Prepare features - align with training features
+            if self.training_feature_names is not None:
+                # Create feature matrix aligned with training features
+                aligned_features = pd.DataFrame(index=features.index, columns=self.training_feature_names)
+                
+                # Fill with available features, pad missing with zeros
+                for col in self.training_feature_names:
+                    if col in features.columns:
+                        aligned_features[col] = features[col]
+                    else:
+                        aligned_features[col] = 0.0
+                
+                features_selected = aligned_features
+            elif self.feature_selector is not None:
                 features_selected = features.iloc[:, self.feature_selector.get_support()]
             else:
                 features_selected = features
@@ -974,6 +1006,7 @@ class RegimeModelTrainer:
                 'scalers': self.scalers,
                 'label_encoder': self.label_encoder,
                 'feature_selector': self.feature_selector,
+                'training_feature_names': self.training_feature_names,
                 'config': self.config,
                 'is_trained': self.is_trained
             }
@@ -996,6 +1029,7 @@ class RegimeModelTrainer:
             self.scalers = model_data['scalers']
             self.label_encoder = model_data['label_encoder']
             self.feature_selector = model_data['feature_selector']
+            self.training_feature_names = model_data.get('training_feature_names')  # Backward compatibility
             self.is_trained = model_data['is_trained']
             
             logger.info(f"Models loaded from {filepath}")

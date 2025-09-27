@@ -252,7 +252,8 @@ class TestCorrelationAnalyzer:
         assert CorrelationMethod.SPEARMAN.value == "spearman"
         assert CorrelationMethod.KENDALL.value == "kendall"
 
-    def test_basic_correlation_analysis(self, correlation_analyzer):
+    @pytest.mark.asyncio
+    async def test_basic_correlation_analysis(self, correlation_analyzer):
         """Test basic correlation analysis."""
         # Create simple price data
         prices = pd.DataFrame({
@@ -261,7 +262,7 @@ class TestCorrelationAnalyzer:
         })
 
         try:
-            result = correlation_analyzer.calculate_correlation_matrix(prices)
+            result = await correlation_analyzer.calculate_correlation_matrix(prices)
             assert result is not None
             assert hasattr(result, 'matrix')
         except Exception as e:

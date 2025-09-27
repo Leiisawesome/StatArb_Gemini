@@ -233,7 +233,10 @@ class MarkovSwitchingDetector:
             regime_type = self._map_regime_index(current_regime_idx, returns)
             
             # Calculate regime characteristics
-            regime_returns = returns[regime_probs.iloc[:, current_regime_idx] > 0.5]
+            if isinstance(regime_probs, np.ndarray):
+                regime_returns = returns[regime_probs[:, current_regime_idx] > 0.5]
+            else:
+                regime_returns = returns[regime_probs.iloc[:, current_regime_idx] > 0.5]
             
             detection = RegimeDetection(
                 timestamp=timestamp,

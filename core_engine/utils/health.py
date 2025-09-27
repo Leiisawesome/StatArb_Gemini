@@ -62,8 +62,8 @@ class HealthCheck:
 class DatabaseHealthCheck(HealthCheck):
     """Health check for database connectivity"""
 
-    def __init__(self, component: str, connection_check_func: Callable[[], Awaitable[bool]]):
-        super().__init__("database", component)
+    def __init__(self, component: str, connection_check_func: Callable[[], Awaitable[bool]], timeout_seconds: float = 5.0):
+        super().__init__("database", component, timeout_seconds)
         self.connection_check_func = connection_check_func
 
     async def check(self) -> HealthCheckResult:
