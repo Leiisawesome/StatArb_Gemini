@@ -37,6 +37,32 @@ import time
 from collections import defaultdict, deque
 import warnings
 
+# Import ISystemComponent for orchestrator integration
+try:
+    from .interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -513,7 +539,7 @@ class ExecutionValidator:
         return len(errors) == 0, errors
 
 
-class UnifiedExecutionEngine:
+class UnifiedExecutionEngine(ISystemComponent):
     """
     Unified Execution Engine - TradeDesk Architecture Compliance
     
@@ -567,7 +593,164 @@ class UnifiedExecutionEngine:
         # Threading
         self.execution_lock = threading.Lock()
         
+        # ISystemComponent state management
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.last_error: Optional[str] = None
+        
         logger.info("✅ Unified Execution Engine initialized with position tracking")
+    
+    # ========================================
+    # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION
+    # ========================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the execution engine"""
+        
+        try:
+            logger.info("🔄 Initializing UnifiedExecutionEngine...")
+            
+            # Initialize execution algorithms
+            for algo_name, algorithm in self.algorithms.items():
+                if hasattr(algorithm, 'initialize'):
+                    success = await algorithm.initialize()
+                    if not success:
+                        logger.error(f"❌ Failed to initialize algorithm: {algo_name}")
+                        return False
+            
+            # Initialize market impact model
+            if hasattr(self.impact_model, 'initialize'):
+                success = await self.impact_model.initialize()
+                if not success:
+                    logger.error("❌ Failed to initialize market impact model")
+                    return False
+            
+            # Initialize validator
+            if hasattr(self.validator, 'initialize'):
+                success = await self.validator.initialize()
+                if not success:
+                    logger.error("❌ Failed to initialize execution validator")
+                    return False
+            
+            self.is_initialized = True
+            logger.info("✅ UnifiedExecutionEngine initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ UnifiedExecutionEngine initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the execution engine operations"""
+        
+        try:
+            if not self.is_initialized:
+                logger.error("❌ Cannot start - engine not initialized")
+                return False
+            
+            logger.info("🚀 Starting UnifiedExecutionEngine operations...")
+            
+            # Start algorithm components
+            for algo_name, algorithm in self.algorithms.items():
+                if hasattr(algorithm, 'start'):
+                    success = await algorithm.start()
+                    if not success:
+                        logger.warning(f"⚠️ Failed to start algorithm: {algo_name}")
+            
+            self.is_operational = True
+            logger.info("✅ UnifiedExecutionEngine operational")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ UnifiedExecutionEngine start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the execution engine operations"""
+        
+        try:
+            logger.info("🔄 Stopping UnifiedExecutionEngine...")
+            
+            # Cancel all active executions
+            with self.execution_lock:
+                active_count = len(self.active_executions)
+                self.active_executions.clear()
+            
+            # Stop algorithm components
+            for algo_name, algorithm in self.algorithms.items():
+                if hasattr(algorithm, 'stop'):
+                    await algorithm.stop()
+            
+            self.is_operational = False
+            logger.info(f"✅ UnifiedExecutionEngine stopped (cancelled {active_count} active executions)")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ UnifiedExecutionEngine stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check of the execution engine"""
+        
+        try:
+            health_status = {
+                'healthy': True,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'component_type': 'UnifiedExecutionEngine',
+                'active_executions': len(self.active_executions),
+                'total_executions': len(self.execution_history),
+                'last_error': self.last_error,
+                'algorithms_status': {},
+                'performance_metrics': self.execution_metrics.copy()
+            }
+            
+            # Check algorithm health
+            for algo_name, algorithm in self.algorithms.items():
+                if hasattr(algorithm, 'health_check'):
+                    algo_health = await algorithm.health_check()
+                    health_status['algorithms_status'][algo_name.value] = algo_health
+                    if not algo_health.get('healthy', True):
+                        health_status['healthy'] = False
+                else:
+                    health_status['algorithms_status'][algo_name.value] = {'healthy': True}
+            
+            # Check execution performance
+            if self.execution_metrics['total_executions'] > 0:
+                success_rate = (self.execution_metrics['successful_executions'] / 
+                              self.execution_metrics['total_executions'])
+                if success_rate < 0.95:  # Less than 95% success rate
+                    health_status['healthy'] = False
+                    health_status['warning'] = f"Low success rate: {success_rate:.1%}"
+            
+            return health_status
+            
+        except Exception as e:
+            return {
+                'healthy': False,
+                'error': str(e),
+                'component_type': 'UnifiedExecutionEngine'
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of the execution engine"""
+        
+        return {
+            'component_id': self.component_id,
+            'component_type': 'UnifiedExecutionEngine',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'active_executions': len(self.active_executions),
+            'total_executions': len(self.execution_history),
+            'execution_metrics': self.execution_metrics.copy(),
+            'last_error': self.last_error,
+            'algorithms_count': len(self.algorithms),
+            'position_tracking_enabled': self.enable_position_tracking
+        }
     
     async def execute_authorized_trade(self, request: ExecutionRequest) -> ExecutionResult:
         """
@@ -885,11 +1068,17 @@ class UnifiedExecutionEngine:
     async def _update_position_via_risk_manager(self, symbol: str, side: str, quantity: float, price: float):
         """Update position through Risk Manager"""
         if hasattr(self.risk_manager_callback, 'update_position'):
-            # Direct method call
-            self.risk_manager_callback.update_position(symbol, side, quantity, price)
+            # Direct method call - check if it's async
+            if asyncio.iscoroutinefunction(self.risk_manager_callback.update_position):
+                await self.risk_manager_callback.update_position(symbol, side, quantity, price)
+            else:
+                self.risk_manager_callback.update_position(symbol, side, quantity, price)
         elif callable(self.risk_manager_callback):
             # Callable function
-            await self.risk_manager_callback(symbol, side, quantity, price)
+            if asyncio.iscoroutinefunction(self.risk_manager_callback):
+                await self.risk_manager_callback(symbol, side, quantity, price)
+            else:
+                self.risk_manager_callback(symbol, side, quantity, price)
         else:
             logger.warning("Risk Manager callback not callable")
     
@@ -914,7 +1103,7 @@ class UnifiedExecutionEngine:
             self.position_update_callback = position_update_callback
             logger.info("✅ Position update callback registered with Execution Engine")
     
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shutdown execution engine"""
         
         try:

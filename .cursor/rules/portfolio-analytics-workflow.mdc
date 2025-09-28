@@ -1,7 +1,6 @@
 ---
-description: "Portfolio Analytics Engine Architecture and Performance Analysis Patterns"
+alwaysApply: false
 ---
-
 # Portfolio Analytics Workflow - Instruction Map
 
 This instruction map shows how to compose core_engine components into a comprehensive portfolio analytics system for institutional-grade performance measurement, attribution analysis, and risk assessment.

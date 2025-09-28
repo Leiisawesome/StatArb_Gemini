@@ -1,7 +1,6 @@
 ---
-description: "Institutional Backtest Engine Architecture and Historical Simulation Patterns"
+alwaysApply: false
 ---
-
 # Institutional Backtest Workflow - Instruction Map
 
 This instruction map shows how to compose core_engine components into a comprehensive institutional backtesting system using the standardized "Lego brick" architecture.

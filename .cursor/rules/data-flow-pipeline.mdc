@@ -5,22 +5,43 @@ description: "Unified Data Flow Pipeline and Processing Patterns"
 
 # Unified Data Flow Pipeline and Processing Patterns
 
-The core_engine implements a **strict, unified data flow pipeline**. All components must adhere to this sequence.
+The core_engine implements a **strict, unified data flow pipeline** supporting **multi-strategy coordination** and **parallel processing**. All components must adhere to this enhanced sequence.
 
-## MANDATORY Data Flow Pipeline
+## ENHANCED: Multi-Strategy Data Flow Pipeline
 
 ```
 Market Data Sources
-    ↓ (via UnifiedDataManager)
-Technical Indicators ([core_engine/processing/indicators/engine.py](mdc:core_engine/processing/indicators/engine.py))
+    ↓ (via ClickHouseDataManager - Single Data Authority)
+Enhanced Technical Indicators (ISystemComponent)
     ↓
-Feature Engineering ([core_engine/processing/features/engineer.py](mdc:core_engine/processing/features/engineer.py))
+Enhanced Feature Engineering (ISystemComponent)
     ↓
-Signal Generation ([core_engine/processing/signals/generator.py](mdc:core_engine/processing/signals/generator.py))
+Enhanced Signal Generation (ISystemComponent)
     ↓
-Risk Authorization (CentralRiskManager)
+Multi-Strategy Signal Aggregation
+    ↓ ↓ ↓
+[Strategy A] [Strategy B] [Strategy C] ... [Strategy N]
+    ↓ ↓ ↓
+Signal Conflict Resolution & Weighting
     ↓
-Execution (UnifiedExecutionEngine)
+Regime-Aware Risk Authorization (CentralRiskManager)
+    ↓
+Institutional Execution (UnifiedExecutionEngine)
+    ↓
+Position Management (EnhancedPortfolioManager)
+    ↓
+Performance Analytics (EnhancedAnalyticsManager)
+```
+
+## ENHANCED: Parallel Multi-Strategy Processing
+
+```
+Market Data → [Parallel Strategy Pipelines] → Risk Aggregation → Unified Execution
+
+Pipeline A: Data → Indicators → Features → StatArb Signals → Risk Auth → Execution
+Pipeline B: Data → Indicators → Features → Momentum Signals → Risk Auth → Execution  
+Pipeline C: Data → Indicators → Features → Mean Rev Signals → Risk Auth → Execution
+Pipeline D: Data → Indicators → Features → Breakout Signals → Risk Auth → Execution
 ```
 
 ## Unified Data Manager - SINGLE DATA AUTHORITY

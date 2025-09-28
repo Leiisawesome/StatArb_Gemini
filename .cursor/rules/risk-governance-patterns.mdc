@@ -71,6 +71,132 @@ The RiskManager enforces these limits (configurable):
 - `strategy_allocation_limit`: Maximum allocation per strategy (default: 33%)
 - `min_signal_confidence`: Minimum signal confidence for authorization (default: 60%)
 
+## Professional Risk Metrics Framework
+
+### Core Risk Metrics
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+import numpy as np
+
+@dataclass
+class RiskMetrics:
+    """Professional risk metrics for institutional trading"""
+    
+    # Value at Risk (VaR)
+    var_95: float          # 95% Value at Risk (1-day)
+    var_99: float          # 99% Value at Risk (1-day)
+    conditional_var: float # Expected Shortfall (CVaR)
+    
+    # Drawdown Metrics
+    max_drawdown: float    # Maximum drawdown from peak
+    current_drawdown: float # Current drawdown from peak
+    drawdown_duration: int  # Days in current drawdown
+    
+    # Risk-Adjusted Returns
+    sharpe_ratio: float    # Risk-adjusted return ratio
+    sortino_ratio: float   # Downside deviation ratio
+    calmar_ratio: float    # Return/MaxDD ratio
+    information_ratio: float # Active return/active risk
+    
+    # Tail Risk
+    tail_risk: float       # Tail risk exposure (beyond VaR)
+    skewness: float        # Return distribution skewness
+    kurtosis: float        # Return distribution kurtosis
+    
+    # Concentration Risk
+    herfindahl_index: float # Portfolio concentration index
+    max_sector_weight: float # Maximum sector concentration
+    correlation_risk: float  # Average correlation exposure
+    
+    # Liquidity Risk
+    liquidity_risk: float   # Portfolio liquidity score
+    market_impact: float   # Estimated market impact cost
+    bid_ask_spread: float   # Average bid-ask spread
+```
+
+### Risk Calculation Methods
+```python
+def calculate_var_historical(self, returns: List[float], confidence: float = 0.95) -> float:
+    """Calculate Value at Risk using historical simulation"""
+    return np.percentile(returns, (1 - confidence) * 100)
+
+def calculate_conditional_var(self, returns: List[float], var_threshold: float) -> float:
+    """Calculate Conditional Value at Risk (Expected Shortfall)"""
+    tail_returns = [r for r in returns if r <= var_threshold]
+    return np.mean(tail_returns) if tail_returns else 0.0
+
+def calculate_max_drawdown(self, cumulative_returns: List[float]) -> float:
+    """Calculate maximum drawdown from peak"""
+    peak = np.maximum.accumulate(cumulative_returns)
+    drawdown = (peak - cumulative_returns) / peak
+    return np.max(drawdown)
+
+def calculate_sharpe_ratio(self, returns: List[float], risk_free_rate: float = 0.02) -> float:
+    """Calculate Sharpe ratio"""
+    excess_returns = [r - risk_free_rate/252 for r in returns]  # Daily risk-free rate
+    return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+```
+
+## Regime-Aware Risk Scaling
+
+### Market Regime Risk Adjustment
+```python
+def calculate_regime_adjusted_risk(self, base_risk: float, regime: str, 
+                                 volatility_regime: str, liquidity_regime: str) -> float:
+    """Scale risk based on market regime conditions"""
+    
+    # Base regime multipliers
+    regime_multipliers = {
+        'low_volatility': 1.2,    # Increase risk in low vol (more opportunities)
+        'normal_volatility': 1.0, # Normal risk in normal vol
+        'high_volatility': 0.7,   # Reduce risk in high vol (more dangerous)
+        'extreme_volatility': 0.4, # Significantly reduce risk in extreme vol
+        
+        'trending': 1.1,          # Slightly increase risk in trending markets
+        'sideways': 0.9,          # Reduce risk in sideways markets
+        'choppy': 0.6,            # Significantly reduce risk in choppy markets
+        
+        'high_liquidity': 1.0,    # Normal risk in liquid markets
+        'normal_liquidity': 0.9,   # Slightly reduce risk in normal liquidity
+        'low_liquidity': 0.7,     # Reduce risk in low liquidity
+        'illiquid': 0.4           # Significantly reduce risk in illiquid markets
+    }
+    
+    # Calculate combined risk adjustment
+    regime_factor = regime_multipliers.get(regime, 1.0)
+    vol_factor = regime_multipliers.get(volatility_regime, 1.0)
+    liq_factor = regime_multipliers.get(liquidity_regime, 1.0)
+    
+    # Apply conservative scaling (use minimum of factors)
+    adjusted_risk = base_risk * min(regime_factor, vol_factor, liq_factor)
+    
+    # Ensure risk doesn't exceed maximum allowed
+    max_risk = base_risk * 1.5  # Never more than 50% above base
+    return min(adjusted_risk, max_risk)
+
+def get_regime_risk_limits(self, regime: str) -> Dict[str, float]:
+    """Get risk limits adjusted for current market regime"""
+    base_limits = {
+        'max_position_size': 0.10,
+        'max_daily_var': 0.05,
+        'max_concentration': 0.15
+    }
+    
+    regime_adjustments = {
+        'low_volatility': {'max_position_size': 0.12, 'max_daily_var': 0.06},
+        'high_volatility': {'max_position_size': 0.07, 'max_daily_var': 0.03},
+        'choppy': {'max_position_size': 0.05, 'max_concentration': 0.10},
+        'illiquid': {'max_position_size': 0.08, 'max_concentration': 0.12}
+    }
+    
+    adjusted_limits = base_limits.copy()
+    if regime in regime_adjustments:
+        adjusted_limits.update(regime_adjustments[regime])
+    
+    return adjusted_limits
+```
+
 ## Authorization Levels
 
 ```python
@@ -120,22 +246,185 @@ elif request.side.lower() == 'sell':
 ❌ **Cash Overdraft**: BUY orders must validate cash availability
 ❌ **Short Selling Without Position**: SELL orders must validate position availability
 
-## Position Tracking Integration
+## Centralized Position Management Framework
 
-The RiskManager maintains real-time position tracking:
+### Position Management Authority
+**CRITICAL**: The CentralRiskManager is the **SINGLE SOURCE OF TRUTH** for all position data. NO other component can directly modify positions.
 
+### Position Update Flow
 ```python
-# Position updates after successful execution
-def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0):
+# MANDATORY: All position updates MUST flow through RiskManager
+# Step 1: Execution Engine reports successful trade
+# Step 2: RiskManager updates positions and risk metrics
+# Step 3: RiskManager notifies other components of position changes
+
+class CentralizedPositionManager:
+    """Centralized position management with real-time tracking"""
+    
+    def __init__(self):
+        self.current_positions = {}  # {symbol: position_quantity}
+        self.position_history = []   # Historical position changes
+        self.position_metrics = {}  # Position-level risk metrics
+        self.portfolio_value = 0.0  # Total portfolio value
+        
+    def update_position(self, symbol: str, side: str, quantity: float, 
+                       price: float, timestamp: datetime) -> Dict[str, Any]:
+        """Update position and return position status"""
+        
+        # Get current position
+        current_position = self.current_positions.get(symbol, 0.0)
+        
+        # Calculate new position
+        if side.lower() == 'buy':
+            new_position = current_position + quantity
+        elif side.lower() == 'sell':
+            new_position = current_position - quantity
+        else:
+            raise ValueError(f"Invalid side: {side}")
+        
+        # Update position
+        self.current_positions[symbol] = new_position
+        
+        # Record position change
+        position_change = {
+            'timestamp': timestamp,
+            'symbol': symbol,
+            'side': side,
+            'quantity': quantity,
+            'price': price,
+            'previous_position': current_position,
+            'new_position': new_position,
+            'position_value': new_position * price
+        }
+        self.position_history.append(position_change)
+        
+        # Update portfolio metrics
+        self._update_portfolio_metrics()
+        
+        # Notify components of position change
+        await self._notify_position_change(position_change)
+        
+        return {
+            'symbol': symbol,
+            'position': new_position,
+            'position_value': new_position * price,
+            'portfolio_value': self.portfolio_value,
+            'risk_metrics': self._calculate_position_risk(symbol, new_position)
+        }
+    
+    def _update_portfolio_metrics(self):
+        """Update portfolio-level metrics"""
+        total_value = 0.0
+        for symbol, position in self.current_positions.items():
+            # Get current market price (would come from data manager)
+            current_price = self._get_current_price(symbol)
+            total_value += position * current_price
+        
+        self.portfolio_value = total_value
+        
+        # Update position metrics
+        self.position_metrics = {
+            'total_positions': len([p for p in self.current_positions.values() if p != 0]),
+            'long_positions': len([p for p in self.current_positions.values() if p > 0]),
+            'short_positions': len([p for p in self.current_positions.values() if p < 0]),
+            'net_exposure': sum(self.current_positions.values()),
+            'gross_exposure': sum(abs(p) for p in self.current_positions.values()),
+            'portfolio_value': total_value
+        }
+    
+    async def _notify_position_change(self, position_change: Dict[str, Any]):
+        """Notify all components of position changes"""
+        # Notify Portfolio Manager
+        await self.portfolio_manager.on_position_update(position_change)
+        
+        # Notify Analytics Engine
+        await self.analytics_engine.on_position_update(position_change)
+        
+        # Notify Risk Monitoring
+        await self.risk_monitor.on_position_update(position_change)
+```
+
+### Position Validation and Risk Checks
+```python
+def validate_position_change(self, symbol: str, side: str, quantity: float) -> Tuple[bool, str]:
+    """Validate position change against risk limits"""
+    
     current_position = self.current_positions.get(symbol, 0.0)
     
+    # Calculate new position
     if side.lower() == 'buy':
         new_position = current_position + quantity
     elif side.lower() == 'sell':
         new_position = current_position - quantity
+    else:
+        return False, f"Invalid side: {side}"
     
-    self.current_positions[symbol] = new_position
-    self._update_risk_metrics()
+    # Check position limits
+    max_position = self.risk_limits.get('max_position_size', 0.10) * self.portfolio_value
+    if abs(new_position) > max_position:
+        return False, f"Position would exceed limit: {abs(new_position)} > {max_position}"
+    
+    # Check concentration limits
+    position_value = abs(new_position) * self._get_current_price(symbol)
+    concentration = position_value / self.portfolio_value
+    max_concentration = self.risk_limits.get('max_concentration', 0.15)
+    if concentration > max_concentration:
+        return False, f"Concentration would exceed limit: {concentration:.2%} > {max_concentration:.2%}"
+    
+    # Check short selling limits
+    if new_position < 0 and not self.allow_short_selling:
+        return False, "Short selling not allowed"
+    
+    return True, "Position change validated"
+
+def get_position_risk_metrics(self, symbol: str) -> Dict[str, float]:
+    """Get risk metrics for specific position"""
+    position = self.current_positions.get(symbol, 0.0)
+    current_price = self._get_current_price(symbol)
+    position_value = position * current_price
+    
+    return {
+        'position': position,
+        'position_value': position_value,
+        'position_pct': position_value / self.portfolio_value if self.portfolio_value > 0 else 0,
+        'unrealized_pnl': self._calculate_unrealized_pnl(symbol),
+        'var_contribution': self._calculate_var_contribution(symbol),
+        'beta_exposure': self._calculate_beta_exposure(symbol)
+    }
+```
+
+### Position Reconciliation and Audit
+```python
+def reconcile_positions(self) -> Dict[str, Any]:
+    """Reconcile positions across all components"""
+    
+    reconciliation_report = {
+        'timestamp': datetime.now(),
+        'risk_manager_positions': self.current_positions.copy(),
+        'portfolio_manager_positions': self.portfolio_manager.get_positions(),
+        'execution_engine_positions': self.execution_engine.get_positions(),
+        'discrepancies': [],
+        'reconciliation_status': 'success'
+    }
+    
+    # Check for discrepancies
+    for symbol in set(self.current_positions.keys()) | set(self.portfolio_manager.get_positions().keys()):
+        risk_pos = self.current_positions.get(symbol, 0.0)
+        portfolio_pos = self.portfolio_manager.get_positions().get(symbol, 0.0)
+        
+        if abs(risk_pos - portfolio_pos) > 0.01:  # Allow for small rounding differences
+            reconciliation_report['discrepancies'].append({
+                'symbol': symbol,
+                'risk_manager': risk_pos,
+                'portfolio_manager': portfolio_pos,
+                'difference': risk_pos - portfolio_pos
+            })
+    
+    if reconciliation_report['discrepancies']:
+        reconciliation_report['reconciliation_status'] = 'discrepancies_found'
+        logger.warning(f"Position discrepancies found: {reconciliation_report['discrepancies']}")
+    
+    return reconciliation_report
 ```
 
 ## Emergency Controls

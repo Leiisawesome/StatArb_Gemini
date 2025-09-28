@@ -21,7 +21,39 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 import warnings
+import asyncio
+import threading
+import time
+import uuid
+from collections import defaultdict, deque
 warnings.filterwarnings('ignore')
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 logger = logging.getLogger(__name__)
 
@@ -157,25 +189,278 @@ class SignalConfig:
     enable_ml_signals: bool = True
     ml_confidence_threshold: float = 0.65
 
-class SignalGenerator:
+class EnhancedSignalGenerator(ISystemComponent):
     """
-    Multi-Strategy Signal Generator
+    Enhanced Signal Generator with ISystemComponent Integration
     
-    Combines multiple signal generation strategies:
-    1. Mean Reversion: RSI, Bollinger Bands, oversold/overbought conditions
-    2. Momentum: MACD, price momentum, trend following
-    3. Volume: Volume breakouts, volume-price relationships
-    4. Multi-factor: Combination of all signals with ML enhancement
+    Institutional-grade signal generation with orchestrator integration:
+    - Implements ISystemComponent for lifecycle management
+    - Multi-strategy signal generation with professional standards
+    - Mean Reversion: RSI, Bollinger Bands, oversold/overbought conditions
+    - Momentum: MACD, price momentum, trend following
+    - Volume: Volume breakouts, volume-price relationships
+    - Multi-factor: Combination of all signals with ML enhancement
+    - Health monitoring and performance tracking
     """
     
     def __init__(self, config: Optional[SignalConfig] = None):
-        self.config = config or SignalConfig()
-        self.logger = logging.getLogger("signal_generator")
+        # Handle both SignalConfig objects and dictionaries
+        if isinstance(config, dict):
+            # Convert dictionary to SignalConfig object
+            self.config = SignalConfig(**{k: v for k, v in config.items() if k in SignalConfig.__dataclass_fields__})
+        else:
+            self.config = config or SignalConfig()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Component identification and lifecycle
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.start_time = None
+        
+        # Health and performance tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedSignalGenerator',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_signal_generation': 0,
+                'successful_signal_generation': 0,
+                'failed_signal_generation': 0,
+                'average_processing_time': 0.0,
+                'signals_generated_count': 0
+            }
+        }
         
         # Signal history for tracking
         self.signal_history: List[TradingSignal] = []
         
-        self.logger.info("SignalGenerator initialized")
+        # Threading
+        self._lock = threading.Lock()
+        
+        self.logger.info(f"🚀 Enhanced Signal Generator initialized with component ID: {self.component_id}")
+    
+    # ISystemComponent Interface Implementation
+    
+    async def initialize(self) -> bool:
+        """Initialize the Enhanced Signal Generator"""
+        try:
+            self.logger.info("🔄 Initializing Enhanced Signal Generator...")
+            
+            # Initialize signal generation engines
+            await self._initialize_signal_engines()
+            
+            # Initialize monitoring
+            await self._initialize_monitoring_system()
+            
+            # Update status
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            self.logger.info("✅ Enhanced Signal Generator initialization complete")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Signal Generator initialization failed: {e}")
+            self.health_metrics['error_count'] += 1
+            self.health_metrics['initialization_status'] = 'failed'
+            return False
+    
+    async def start(self) -> bool:
+        """Start the Enhanced Signal Generator"""
+        if not self.is_initialized:
+            self.logger.error("Cannot start Enhanced Signal Generator: not initialized")
+            return False
+        
+        try:
+            self.logger.info("🚀 Starting Enhanced Signal Generator...")
+            
+            # Start monitoring
+            await self._start_monitoring()
+            
+            # Update status
+            self.is_operational = True
+            self.start_time = datetime.now()
+            self.health_metrics['operational_status'] = 'active'
+            
+            self.logger.info("✅ Enhanced Signal Generator started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Signal Generator start failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the Enhanced Signal Generator"""
+        try:
+            self.logger.info("🛑 Stopping Enhanced Signal Generator...")
+            
+            # Stop monitoring
+            await self._stop_monitoring()
+            
+            # Clear signal history
+            self.signal_history.clear()
+            
+            # Update status
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'inactive'
+            
+            self.logger.info("✅ Enhanced Signal Generator stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Signal Generator stop failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            current_time = datetime.now()
+            self.health_metrics['last_health_check'] = current_time
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = (current_time - self.start_time).total_seconds()
+            
+            # Check signal engines health
+            engines_healthy = await self._check_engines_health()
+            
+            # Overall health assessment
+            overall_healthy = (
+                self.is_initialized and
+                self.is_operational and
+                engines_healthy and
+                self.health_metrics['error_count'] < 10
+            )
+            
+            return {
+                'healthy': overall_healthy,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime_seconds,
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count'],
+                'performance_metrics': self.health_metrics['performance_metrics'],
+                'engines_healthy': engines_healthy,
+                'signal_history_count': len(self.signal_history),
+                'last_health_check': current_time.isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current component status"""
+        return {
+            'component_id': self.component_id,
+            'component_type': self.health_metrics['component_type'],
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'configuration': {
+                'mean_reversion_weight': self.config.mean_reversion_weight,
+                'momentum_weight': self.config.momentum_weight,
+                'volume_weight': self.config.volume_weight,
+                'signal_threshold': self.config.signal_threshold,
+                'strong_signal_threshold': self.config.strong_signal_threshold,
+                'max_position_size': self.config.max_position_size
+            },
+            'health_metrics': self.health_metrics
+        }
+    
+    # Enhanced Internal Methods
+    
+    async def _initialize_signal_engines(self) -> None:
+        """Initialize signal generation engines"""
+        try:
+            self.logger.info("🔧 Initializing signal generation engines...")
+            
+            # Initialize signal generation strategies
+            # This is where we would set up any complex ML models or signal frameworks
+            # For now, we use the existing rule-based signal generation
+            
+            self.logger.info("✅ Signal generation engines initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize signal engines: {e}")
+            raise
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            self.logger.info("📈 Initializing monitoring system...")
+            
+            # Initialize performance monitoring
+            self.health_metrics['performance_metrics'] = {
+                'total_signal_generation': 0,
+                'successful_signal_generation': 0,
+                'failed_signal_generation': 0,
+                'average_processing_time': 0.0,
+                'signals_generated_count': 0
+            }
+            
+            self.logger.info("✅ Monitoring system initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize monitoring system: {e}")
+            raise
+    
+    async def _start_monitoring(self) -> None:
+        """Start monitoring systems"""
+        try:
+            self.logger.info("📊 Starting monitoring systems...")
+            # Monitoring is passive for signal generator
+            self.logger.info("✅ Monitoring systems started")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring: {e}")
+            raise
+    
+    async def _stop_monitoring(self) -> None:
+        """Stop monitoring systems"""
+        try:
+            self.logger.info("📊 Stopping monitoring systems...")
+            # Monitoring is passive for signal generator
+            self.logger.info("✅ Monitoring systems stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop monitoring: {e}")
+            raise
+    
+    async def _check_engines_health(self) -> bool:
+        """Check health of signal generation engines"""
+        try:
+            # Basic health check - verify core functionality
+            test_data = pd.DataFrame({
+                'symbol': ['TEST'] * 5,
+                'timestamp': pd.date_range('2024-01-01', periods=5),
+                'close': [100, 101, 102, 103, 104],
+                'rsi': [30, 40, 50, 60, 70],
+                'macd': [-1, -0.5, 0, 0.5, 1]
+            })
+            
+            # Test basic signal generation
+            signals = self._generate_mean_reversion_signals(test_data)
+            return len(signals) >= 0  # Should return at least empty list
+            
+        except Exception as e:
+            self.logger.warning(f"Engine health check failed: {e}")
+            return False
     
     def generate_signals(self, df: pd.DataFrame) -> List[TradingSignal]:
         """

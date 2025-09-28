@@ -15,20 +15,25 @@ The [UnifiedExecutionEngine](mdc:core_engine/system/unified_execution_engine.py)
 from core_engine.system.unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionRequest, ExecutionAuthorization, ExecutionAlgorithm
 )
+from core_engine.trading.engine import RealTimeTradingEngine
 
 # Step 1: Get authorization from RiskManager (REQUIRED)
 authorization = await risk_manager.authorize_trading_decision(request)
 
-# Step 2: Create execution request with authorization
-execution_request = ExecutionRequest(
-    authorization=authorization,
-    algorithm=ExecutionAlgorithm.ADAPTIVE,
-    urgency=ExecutionUrgency.NORMAL,
-    time_horizon=300
-)
-
-# Step 3: Execute only with valid authorization
+# Step 2: Create execution plan via TradingEngine (HOW to execute)
 if authorization.authorization_level != AuthorizationLevel.REJECTED:
+    execution_plan = await trading_engine.create_execution_plan(authorization)
+    
+    # Step 3: Create execution request with plan
+    execution_request = ExecutionRequest(
+        authorization=authorization,
+        execution_plan=execution_plan,
+        algorithm=ExecutionAlgorithm.ADAPTIVE,
+        urgency=ExecutionUrgency.NORMAL,
+        time_horizon=300
+    )
+    
+    # Step 4: Execute via UnifiedExecutionEngine (ACTION)
     result = await execution_engine.execute_authorized_trade(execution_request)
 ```
 
@@ -68,8 +73,9 @@ def select_execution_algorithm(self, request: ExecutionRequest) -> ExecutionAlgo
 
 ## Position Tracking Integration
 
-The execution engine MUST update positions through RiskManager callbacks:
+**CRITICAL**: The execution engine CANNOT directly update positions. ALL position updates MUST flow through the CentralRiskManager.
 
+### Mandatory Position Update Flow
 ```python
 # REQUIRED: Position update after successful execution
 async def _handle_position_updates(self, request: ExecutionRequest, result: ExecutionResult):
@@ -83,12 +89,68 @@ async def _handle_position_updates(self, request: ExecutionRequest, result: Exec
     side = request.authorization.side.lower()
     filled_quantity = result.filled_quantity
     avg_price = result.avg_fill_price
+    timestamp = result.execution_timestamp
     
-    # Update position via Risk Manager (MANDATORY)
+    # MANDATORY: Update position via Risk Manager ONLY
     if self.risk_manager_callback:
-        await self._update_position_via_risk_manager(symbol, side, filled_quantity, avg_price)
+        position_update = await self.risk_manager_callback.update_position(
+            symbol=symbol,
+            side=side,
+            quantity=filled_quantity,
+            price=avg_price,
+            timestamp=timestamp
+        )
+        
+        # Log position update
+        logger.info(f"📊 Position updated via RiskManager: {symbol} {side.upper()} "
+                   f"{filled_quantity} @ ${avg_price:.2f} -> Position: {position_update['position']}")
+        
+        return position_update
+    else:
+        logger.error("❌ No RiskManager callback available for position update")
+        raise RuntimeError("Cannot update position without RiskManager callback")
+
+# PROHIBITED: Direct position updates
+# ❌ self.positions[symbol] = new_position  # NEVER DO THIS
+# ❌ self.portfolio_manager.update_position()  # NEVER DO THIS
+```
+
+### Position Update Validation
+```python
+async def validate_and_update_position(self, symbol: str, side: str, 
+                                     quantity: float, price: float, 
+                                     timestamp: datetime) -> Dict[str, Any]:
+    """Validate and update position through RiskManager"""
     
-    logger.info(f"📊 Position updated: {symbol} {side.upper()} {filled_quantity} @ ${avg_price:.2f}")
+    # Step 1: Validate position change
+    is_valid, validation_message = await self.risk_manager.validate_position_change(
+        symbol, side, quantity
+    )
+    
+    if not is_valid:
+        logger.warning(f"Position change rejected: {validation_message}")
+        return {
+            'status': 'rejected',
+            'reason': validation_message,
+            'position': None
+        }
+    
+    # Step 2: Update position through RiskManager
+    position_update = await self.risk_manager.update_position(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        price=price,
+        timestamp=timestamp
+    )
+    
+    # Step 3: Verify position update
+    if position_update['status'] == 'success':
+        logger.info(f"✅ Position updated successfully: {symbol} = {position_update['position']}")
+        return position_update
+    else:
+        logger.error(f"❌ Position update failed: {position_update.get('error', 'Unknown error')}")
+        return position_update
 ```
 
 ## Market Impact and Cost Analysis
@@ -221,23 +283,232 @@ def emergency_shutdown(self):
         return False
 ```
 
+## Professional Execution Quality Framework
+
+### Execution Quality Metrics
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+import numpy as np
+
+@dataclass
+class ExecutionQuality:
+    """Professional execution quality metrics for institutional trading"""
+    
+    # Core Execution Metrics
+    implementation_shortfall: float  # Actual vs theoretical cost
+    vwap_slippage: float            # VWAP slippage (bps)
+    market_impact: float            # Market impact cost (bps)
+    timing_cost: float              # Timing cost (bps)
+    opportunity_cost: float         # Opportunity cost (bps)
+    
+    # Execution Efficiency
+    fill_rate: float                # Percentage of order filled
+    participation_rate: float       # Order size vs market volume
+    execution_time: float           # Time to complete execution (seconds)
+    venue_utilization: Dict[str, float]  # Venue breakdown
+    
+    # Cost Analysis
+    total_execution_cost: float     # Total cost in basis points
+    commission_cost: float         # Commission cost (bps)
+    spread_cost: float             # Bid-ask spread cost (bps)
+    volatility_cost: float        # Volatility impact cost (bps)
+    
+    # Quality Scores
+    execution_quality_score: float  # Overall quality (0-100)
+    venue_quality_score: float     # Venue selection quality
+    timing_quality_score: float    # Timing quality
+    cost_efficiency_score: float   # Cost efficiency score
+```
+
+### Execution Quality Calculation Methods
+```python
+def calculate_implementation_shortfall(self, order_price: float, 
+                                     execution_prices: List[float],
+                                     benchmark_price: float) -> float:
+    """Calculate implementation shortfall (actual vs benchmark)"""
+    avg_execution_price = np.mean(execution_prices)
+    return (avg_execution_price - benchmark_price) / benchmark_price
+
+def calculate_vwap_slippage(self, execution_prices: List[float], 
+                           vwap_price: float) -> float:
+    """Calculate VWAP slippage in basis points"""
+    avg_execution_price = np.mean(execution_prices)
+    slippage = (avg_execution_price - vwap_price) / vwap_price
+    return slippage * 10000  # Convert to basis points
+
+def calculate_market_impact(self, order_size: float, avg_volume: float,
+                           execution_prices: List[float], 
+                           pre_trade_price: float) -> float:
+    """Calculate market impact cost"""
+    participation_rate = order_size / avg_volume
+    price_impact = (np.mean(execution_prices) - pre_trade_price) / pre_trade_price
+    
+    # Market impact scales with participation rate
+    market_impact = price_impact * (1 + participation_rate)
+    return market_impact * 10000  # Convert to basis points
+
+def calculate_execution_quality_score(self, quality: ExecutionQuality) -> float:
+    """Calculate overall execution quality score (0-100)"""
+    
+    # Weighted scoring system
+    weights = {
+        'implementation_shortfall': 0.25,
+        'market_impact': 0.20,
+        'timing_cost': 0.15,
+        'fill_rate': 0.20,
+        'venue_utilization': 0.20
+    }
+    
+    # Normalize metrics to 0-100 scale
+    shortfall_score = max(0, 100 - abs(quality.implementation_shortfall) * 10000)
+    impact_score = max(0, 100 - quality.market_impact)
+    timing_score = max(0, 100 - quality.timing_cost)
+    fill_score = quality.fill_rate * 100
+    venue_score = self._calculate_venue_score(quality.venue_utilization)
+    
+    # Calculate weighted average
+    total_score = (
+        shortfall_score * weights['implementation_shortfall'] +
+        impact_score * weights['market_impact'] +
+        timing_score * weights['timing_cost'] +
+        fill_score * weights['fill_rate'] +
+        venue_score * weights['venue_utilization']
+    )
+    
+    return min(100, max(0, total_score))
+```
+
+### Smart Order Routing (SOR) Framework
+```python
+def select_optimal_venue(self, order: ExecutionRequest, 
+                        market_data: Dict[str, Any]) -> str:
+    """Select optimal venue for order execution"""
+    
+    venues = market_data.get('venues', {})
+    venue_scores = {}
+    
+    for venue, data in venues.items():
+        # Calculate venue score based on multiple factors
+        liquidity_score = data.get('liquidity_score', 0.5)
+        spread_score = 1.0 / (1.0 + data.get('bid_ask_spread', 0.001))
+        latency_score = 1.0 / (1.0 + data.get('latency_ms', 10) / 1000)
+        capacity_score = min(1.0, data.get('capacity', 0) / order.quantity)
+        
+        # Weighted venue score
+        venue_score = (
+            liquidity_score * 0.3 +
+            spread_score * 0.3 +
+            latency_score * 0.2 +
+            capacity_score * 0.2
+        )
+        
+        venue_scores[venue] = venue_score
+    
+    # Select venue with highest score
+    return max(venue_scores, key=venue_scores.get)
+
+def calculate_optimal_sizing(self, order: ExecutionRequest,
+                           market_data: Dict[str, Any]) -> float:
+    """Calculate optimal order sizing based on market conditions"""
+    
+    # Base sizing from order
+    base_size = order.quantity
+    
+    # Market condition adjustments
+    volatility = market_data.get('volatility', 0.02)
+    liquidity = market_data.get('liquidity', 1.0)
+    spread = market_data.get('bid_ask_spread', 0.001)
+    
+    # Volatility adjustment (reduce size in high vol)
+    vol_adjustment = 1.0 / (1.0 + volatility * 10)
+    
+    # Liquidity adjustment (increase size in liquid markets)
+    liq_adjustment = min(1.5, liquidity)
+    
+    # Spread adjustment (reduce size in wide spreads)
+    spread_adjustment = 1.0 / (1.0 + spread * 1000)
+    
+    # Calculate optimal size
+    optimal_size = base_size * vol_adjustment * liq_adjustment * spread_adjustment
+    
+    # Ensure within reasonable bounds
+    return max(base_size * 0.1, min(optimal_size, base_size * 2.0))
+```
+
 ## Execution Result Processing
 
 ### Result Analysis
 ```python
 def analyze_execution_result(self, result: ExecutionResult) -> Dict[str, Any]:
-    """Analyze execution performance"""
+    """Analyze execution performance with professional metrics"""
+    
+    # Calculate execution quality metrics
+    quality = ExecutionQuality(
+        implementation_shortfall=result.implementation_shortfall,
+        vwap_slippage=result.vwap_slippage,
+        market_impact=result.market_impact,
+        timing_cost=result.timing_cost,
+        opportunity_cost=result.opportunity_cost,
+        fill_rate=result.fill_rate,
+        participation_rate=result.participation_rate,
+        execution_time=result.execution_time,
+        venue_utilization=result.venue_breakdown,
+        total_execution_cost=result.total_cost,
+        commission_cost=result.commission_cost,
+        spread_cost=result.spread_cost,
+        volatility_cost=result.volatility_cost,
+        execution_quality_score=0.0,  # Will be calculated
+        venue_quality_score=0.0,
+        timing_quality_score=0.0,
+        cost_efficiency_score=0.0
+    )
+    
+    # Calculate quality scores
+    quality.execution_quality_score = self.calculate_execution_quality_score(quality)
+    quality.venue_quality_score = self._calculate_venue_score(quality.venue_utilization)
+    quality.timing_quality_score = max(0, 100 - quality.timing_cost)
+    quality.cost_efficiency_score = max(0, 100 - quality.total_execution_cost)
     
     analysis = {
-        'execution_quality': 'good' if result.slippage < 0.001 else 'poor',
-        'market_impact': result.market_impact,
-        'timing_cost': result.timing_cost,
-        'total_cost': result.total_cost,
-        'implementation_shortfall': result.implementation_shortfall,
-        'venue_breakdown': result.venue_breakdown
+        'execution_quality': quality,
+        'performance_grade': self._grade_execution_quality(quality.execution_quality_score),
+        'recommendations': self._generate_execution_recommendations(quality),
+        'benchmark_comparison': self._compare_to_benchmark(quality)
     }
     
     return analysis
+
+def _grade_execution_quality(self, score: float) -> str:
+    """Grade execution quality based on score"""
+    if score >= 90:
+        return "Excellent"
+    elif score >= 80:
+        return "Good"
+    elif score >= 70:
+        return "Fair"
+    elif score >= 60:
+        return "Poor"
+    else:
+        return "Unacceptable"
+
+def _generate_execution_recommendations(self, quality: ExecutionQuality) -> List[str]:
+    """Generate recommendations for improving execution quality"""
+    recommendations = []
+    
+    if quality.market_impact > 5.0:  # > 5 bps
+        recommendations.append("Consider reducing order size or using TWAP/VWAP algorithms")
+    
+    if quality.timing_cost > 3.0:  # > 3 bps
+        recommendations.append("Improve timing by using market microstructure data")
+    
+    if quality.fill_rate < 0.95:  # < 95%
+        recommendations.append("Consider using more aggressive execution algorithms")
+    
+    if quality.execution_time > 300:  # > 5 minutes
+        recommendations.append("Reduce execution time by using faster venues or algorithms")
+    
+    return recommendations
 ```
 
 This execution framework ensures **authorized trading**, **optimal execution**, and **comprehensive monitoring** of all trade executions.

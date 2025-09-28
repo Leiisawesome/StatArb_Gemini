@@ -12,7 +12,7 @@ from .strategy import (
     StrategyConfig, TradingSignal, StrategyManager
 )
 from .risk import RiskManager, RiskMetrics, RiskConfig, RiskResult, RiskLevel
-from .regime import RegimeState, RegimeConfig, RegimeEngine
+from .regime import RegimeState, RegimeConfig
 from .data import DataManager, DataProvider, MarketData, DataConfig
 from .analytics import AnalyticsEngine, PerformanceMetrics
 from .broker import BrokerInterface, BrokerManager, BrokerConfig, PaperBroker, BrokerType

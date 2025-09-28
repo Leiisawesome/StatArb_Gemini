@@ -17,7 +17,40 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from sklearn.preprocessing import StandardScaler, RobustScaler
 import warnings
+import asyncio
+import threading
+import time
+import uuid
+from datetime import datetime
+from collections import defaultdict, deque
 warnings.filterwarnings('ignore')
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 logger = logging.getLogger(__name__)
 
@@ -48,20 +81,50 @@ class FeatureConfig:
         if self.cross_sectional_universe is None:
             self.cross_sectional_universe = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
 
-class FeatureEngineer:
+class EnhancedFeatureEngineer(ISystemComponent):
     """
-    Feature Engineering for Trading Signals
+    Enhanced Feature Engineering with ISystemComponent Integration
     
-    Transforms technical indicators into ML-ready features:
-    - Normalization and scaling
+    Institutional-grade feature engineering with orchestrator integration:
+    - Implements ISystemComponent for lifecycle management
+    - Normalization and scaling with professional standards
     - Lag features for temporal patterns
     - Cross-sectional features for relative analysis
     - Rolling statistics and momentum features
+    - Health monitoring and performance tracking
     """
     
     def __init__(self, config: Optional[FeatureConfig] = None):
-        self.config = config or FeatureConfig()
-        self.logger = logging.getLogger("feature_engineer")
+        # Handle both FeatureConfig objects and dictionaries
+        if isinstance(config, dict):
+            # Convert dictionary to FeatureConfig object
+            self.config = FeatureConfig(**{k: v for k, v in config.items() if k in FeatureConfig.__dataclass_fields__})
+        else:
+            self.config = config or FeatureConfig()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Component identification and lifecycle
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.start_time = None
+        
+        # Health and performance tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedFeatureEngineer',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_feature_engineering': 0,
+                'successful_feature_engineering': 0,
+                'failed_feature_engineering': 0,
+                'average_processing_time': 0.0,
+                'features_created_count': 0
+            }
+        }
         
         # Scalers for different feature types
         self.scalers: Dict[str, Any] = {}
@@ -70,7 +133,234 @@ class FeatureEngineer:
         self.feature_columns: List[str] = []
         self.target_columns: List[str] = []
         
-        self.logger.info("FeatureEngineer initialized")
+        # Threading
+        self._lock = threading.Lock()
+        
+        self.logger.info(f"🚀 Enhanced Feature Engineer initialized with component ID: {self.component_id}")
+    
+    # ISystemComponent Interface Implementation
+    
+    async def initialize(self) -> bool:
+        """Initialize the Enhanced Feature Engineer"""
+        try:
+            self.logger.info("🔄 Initializing Enhanced Feature Engineer...")
+            
+            # Initialize feature engineering engines
+            await self._initialize_feature_engines()
+            
+            # Initialize monitoring
+            await self._initialize_monitoring_system()
+            
+            # Update status
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            self.logger.info("✅ Enhanced Feature Engineer initialization complete")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Feature Engineer initialization failed: {e}")
+            self.health_metrics['error_count'] += 1
+            self.health_metrics['initialization_status'] = 'failed'
+            return False
+    
+    async def start(self) -> bool:
+        """Start the Enhanced Feature Engineer"""
+        if not self.is_initialized:
+            self.logger.error("Cannot start Enhanced Feature Engineer: not initialized")
+            return False
+        
+        try:
+            self.logger.info("🚀 Starting Enhanced Feature Engineer...")
+            
+            # Start monitoring
+            await self._start_monitoring()
+            
+            # Update status
+            self.is_operational = True
+            self.start_time = datetime.now()
+            self.health_metrics['operational_status'] = 'active'
+            
+            self.logger.info("✅ Enhanced Feature Engineer started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Feature Engineer start failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the Enhanced Feature Engineer"""
+        try:
+            self.logger.info("🛑 Stopping Enhanced Feature Engineer...")
+            
+            # Stop monitoring
+            await self._stop_monitoring()
+            
+            # Clear scalers
+            self.scalers.clear()
+            
+            # Update status
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'inactive'
+            
+            self.logger.info("✅ Enhanced Feature Engineer stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Feature Engineer stop failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            current_time = datetime.now()
+            self.health_metrics['last_health_check'] = current_time
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = (current_time - self.start_time).total_seconds()
+            
+            # Check feature engines health
+            engines_healthy = await self._check_engines_health()
+            
+            # Overall health assessment
+            overall_healthy = (
+                self.is_initialized and
+                self.is_operational and
+                engines_healthy and
+                self.health_metrics['error_count'] < 10
+            )
+            
+            return {
+                'healthy': overall_healthy,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime_seconds,
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count'],
+                'performance_metrics': self.health_metrics['performance_metrics'],
+                'engines_healthy': engines_healthy,
+                'scalers_count': len(self.scalers),
+                'feature_columns_count': len(self.feature_columns),
+                'last_health_check': current_time.isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current component status"""
+        return {
+            'component_id': self.component_id,
+            'component_type': self.health_metrics['component_type'],
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'configuration': {
+                'use_normalization': self.config.use_normalization,
+                'normalization_method': self.config.normalization_method,
+                'enable_cross_sectional': self.config.enable_cross_sectional,
+                'max_features': self.config.max_features,
+                'lookback_periods': self.config.lookback_periods,
+                'lag_periods': self.config.lag_periods
+            },
+            'health_metrics': self.health_metrics
+        }
+    
+    # Enhanced Internal Methods
+    
+    async def _initialize_feature_engines(self) -> None:
+        """Initialize feature engineering engines"""
+        try:
+            self.logger.info("🔧 Initializing feature engineering engines...")
+            
+            # Initialize scalers based on configuration
+            if self.config.use_normalization:
+                if self.config.normalization_method == "standard":
+                    self.scalers['default'] = StandardScaler()
+                elif self.config.normalization_method == "robust":
+                    self.scalers['default'] = RobustScaler()
+                else:
+                    self.scalers['default'] = StandardScaler()
+            
+            self.logger.info("✅ Feature engineering engines initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize feature engines: {e}")
+            raise
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            self.logger.info("📈 Initializing monitoring system...")
+            
+            # Initialize performance monitoring
+            self.health_metrics['performance_metrics'] = {
+                'total_feature_engineering': 0,
+                'successful_feature_engineering': 0,
+                'failed_feature_engineering': 0,
+                'average_processing_time': 0.0,
+                'features_created_count': 0
+            }
+            
+            self.logger.info("✅ Monitoring system initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize monitoring system: {e}")
+            raise
+    
+    async def _start_monitoring(self) -> None:
+        """Start monitoring systems"""
+        try:
+            self.logger.info("📊 Starting monitoring systems...")
+            # Monitoring is passive for feature engineer
+            self.logger.info("✅ Monitoring systems started")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring: {e}")
+            raise
+    
+    async def _stop_monitoring(self) -> None:
+        """Stop monitoring systems"""
+        try:
+            self.logger.info("📊 Stopping monitoring systems...")
+            # Monitoring is passive for feature engineer
+            self.logger.info("✅ Monitoring systems stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop monitoring: {e}")
+            raise
+    
+    async def _check_engines_health(self) -> bool:
+        """Check health of feature engineering engines"""
+        try:
+            # Basic health check - verify core functionality
+            test_data = pd.DataFrame({
+                'symbol': ['TEST'] * 5,
+                'timestamp': pd.date_range('2024-01-01', periods=5),
+                'close': [100, 101, 102, 103, 104],
+                'rsi': [50, 55, 60, 65, 70]
+            })
+            
+            # Test basic feature creation
+            result = self._create_lag_features(test_data)
+            return len(result.columns) >= len(test_data.columns)
+            
+        except Exception as e:
+            self.logger.warning(f"Engine health check failed: {e}")
+            return False
     
     def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """

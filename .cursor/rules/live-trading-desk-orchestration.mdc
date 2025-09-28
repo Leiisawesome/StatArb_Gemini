@@ -1,7 +1,6 @@
 ---
-description: "Live Trading Desk Architecture and Real-Time Orchestration Patterns"
+alwaysApply: false
 ---
-
 # Live Trading Desk Orchestration - Instruction Map
 
 This instruction map shows how to compose core_engine components into a real-time institutional trading desk with live market data, continuous risk monitoring, and automated execution capabilities.

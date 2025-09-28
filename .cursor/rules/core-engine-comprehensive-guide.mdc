@@ -1,37 +1,47 @@
 ---
-description: "Comprehensive Core Engine Architecture Guide and Component Relationships"
+alwaysApply: true
 ---
-
 # Comprehensive Core Engine Architecture Guide
 
-This guide provides a complete understanding of the StatArb_Gemini core_engine architecture, its 11 components, their relationships, and how they interact in real trading scenarios.
+This guide provides a complete understanding of the StatArb_Gemini core_engine architecture, its **19 enhanced components**, their relationships, and how they interact in **multi-strategy institutional trading scenarios**.
 
 ## Executive Summary
 
-The core_engine implements a **4-layer hierarchical governance architecture** with **11 core components** that follow strict **centralized risk control** and **systematic execution** patterns. All trading flows through a **single point of authority** (CentralRiskManager) ensuring institutional-grade risk management.
+The core_engine implements a **6-layer hierarchical governance architecture** with **19 enhanced components** that follow strict **centralized risk control**, **multi-strategy coordination**, and **institutional-grade execution** patterns. All trading flows through a **single point of authority** (CentralRiskManager) with **advanced multi-strategy signal aggregation** ensuring institutional-grade risk management.
 
 ## Architecture Overview
 
-### 4-Layer Hierarchy
+### 6-Layer Enhanced Hierarchy
 
 1. **System Orchestration Layer** (SYSTEM_CONTROL)
    - [HierarchicalSystemOrchestrator](mdc:core_engine/system/hierarchical_orchestrator.py)
+   - [SystemIntegrationManager](mdc:core_engine/system/integration_manager.py)
 
-2. **Support Layer** (OPERATIONAL)
-   - [UnifiedDataManager](mdc:core_engine/data/manager.py)
-   - [UnifiedRegimeEngine](mdc:core_engine/regime/engine.py)
-   - [Technical Indicators](mdc:core_engine/processing/indicators/engine.py)
-   - [Feature Engineering](mdc:core_engine/processing/features/engineer.py)
-   - [Signal Generation](mdc:core_engine/processing/signals/generator.py)
-
-3. **Governance Layer** (GOVERNANCE_CONTROL)
+2. **Governance Layer** (GOVERNANCE_CONTROL)
    - [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py)
 
-4. **Execution Layer** (OPERATIONAL under governance)
+3. **Data Management Layer** (SUPPORT)
+   - [ClickHouseDataManager](mdc:core_engine/data/manager.py)
+
+4. **Core Processing Layer** (OPERATIONAL)
+   - [EnhancedRegimeEngine](mdc:core_engine/regime/engine.py)
+   - [EnhancedTechnicalIndicators](mdc:core_engine/processing/indicators/engine.py)
+   - [EnhancedFeatureEngineer](mdc:core_engine/processing/features/engineer.py)
+   - [EnhancedSignalGenerator](mdc:core_engine/processing/signals/generator.py)
+
+5. **Analytics & Strategy Layer** (OPERATIONAL)
+   - [EnhancedAnalyticsManager](mdc:core_engine/analytics/manager_enhanced.py)
+   - [EnhancedMetricsCalculator](mdc:core_engine/analytics/metrics_calculator.py)
+   - [PerformanceAnalyzer](mdc:core_engine/analytics/performance_analyzer.py)
    - [StrategyManager](mdc:core_engine/trading/strategies/manager.py)
-   - [TradingEngine](mdc:core_engine/trading/engine.py)
+   - [StrategyExecutionEngine](mdc:core_engine/trading/strategies/strategy_engine.py)
+   - [EnhancedStrategyValidator](mdc:core_engine/trading/strategies/strategy_validator.py)
+   - [StrategyRegistry](mdc:core_engine/trading/strategies/strategy_registry.py)
+
+6. **Trading & Execution Layer** (OPERATIONAL under governance)
+   - [EnhancedTradingEngine](mdc:core_engine/trading/engine.py)
    - [UnifiedExecutionEngine](mdc:core_engine/system/unified_execution_engine.py)
-   - [Portfolio Management](mdc:core_engine/trading/portfolio/)
+   - [EnhancedPortfolioManager](mdc:core_engine/trading/portfolio/manager_enhanced.py)
 
 ## Component Relationships and Interactions
 

@@ -20,12 +20,12 @@ try:
     from .data.manager import ClickHouseDataManager
     
     # Regime assessment (existing)
-    from .regime.engine import RegimeEngine
+    from .regime.engine import EnhancedRegimeEngine
     
     # Processing pipeline (moved)
     from .processing.indicators.engine import EnhancedTechnicalIndicators
-    from .processing.features.engineer import FeatureEngineer
-    from .processing.signals.generator import SignalGenerator
+    from .processing.features.engineer import EnhancedFeatureEngineer
+    from .processing.signals.generator import EnhancedSignalGenerator
     
     # Trading components (moved)
     from .trading.portfolio.manager import PortfolioManager

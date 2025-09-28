@@ -1,7 +1,6 @@
 ---
-description: "Strategy Research and Development Workflow Architecture and Innovation Patterns"
+alwaysApply: false
 ---
-
 # Strategy Research and Development Workflow - Instruction Map
 
 This instruction map shows how to compose core_engine components into a comprehensive strategy research and development system for systematic strategy discovery, validation, optimization, and deployment.

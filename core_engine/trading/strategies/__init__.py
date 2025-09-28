@@ -34,16 +34,16 @@ from .strategy_optimizer import StrategyOptimizer
 
 # Strategy implementations
 from .implementations import (
-    AdvancedMomentumStrategy, MomentumConfig,
-    AdvancedMeanReversionStrategy, MeanReversionConfig,
-    AdvancedStatisticalArbitrageStrategy, StatisticalArbitrageConfig,
-    AdvancedFactorStrategy, FactorConfig,
-    AdvancedMultiAssetStrategy, MultiAssetConfig,
-    AdvancedTrendFollowingStrategy, TrendFollowingConfig,
-    AdvancedBreakoutStrategy, BreakoutConfig,
-    AdvancedPairsTradingStrategy, PairsTradingConfig,
-    AdvancedVolatilityStrategy, VolatilityStrategyConfig,
-    AdvancedArbitrageStrategy, ArbitrageStrategyConfig
+    EnhancedMomentumStrategy, MomentumConfig,
+    EnhancedMeanReversionStrategy, MeanReversionConfig,
+    EnhancedStatisticalArbitrageStrategy,
+    EnhancedFactorStrategy, FactorConfig,
+    EnhancedMultiAssetStrategy, MultiAssetConfig,
+    EnhancedTrendFollowingStrategy, TrendFollowingConfig,
+    EnhancedBreakoutStrategy, BreakoutConfig,
+    EnhancedPairsTradingStrategy, PairsConfig,
+    EnhancedVolatilityStrategy, VolatilityConfig,
+    EnhancedArbitrageStrategy, ArbitrageConfig
 )
 
 __all__ = [
@@ -57,14 +57,14 @@ __all__ = [
     'InstitutionalBacktestResult', 'BacktestPhase',
     
     # Strategy implementations
-    'AdvancedMomentumStrategy', 'MomentumConfig',
-    'AdvancedMeanReversionStrategy', 'MeanReversionConfig',
-    'AdvancedStatisticalArbitrageStrategy', 'StatisticalArbitrageConfig',
-    'AdvancedFactorStrategy', 'FactorConfig',
-    'AdvancedMultiAssetStrategy', 'MultiAssetConfig',
-    'AdvancedTrendFollowingStrategy', 'TrendFollowingConfig',
-    'AdvancedBreakoutStrategy', 'BreakoutConfig',
-    'AdvancedPairsTradingStrategy', 'PairsTradingConfig',
-    'AdvancedVolatilityStrategy', 'VolatilityStrategyConfig',
-    'AdvancedArbitrageStrategy', 'ArbitrageStrategyConfig'
+    'EnhancedMomentumStrategy', 'MomentumConfig',
+    'EnhancedMeanReversionStrategy', 'MeanReversionConfig',
+    'EnhancedStatisticalArbitrageStrategy',
+    'EnhancedFactorStrategy', 'FactorConfig',
+    'EnhancedMultiAssetStrategy', 'MultiAssetConfig',
+    'EnhancedTrendFollowingStrategy', 'TrendFollowingConfig',
+    'EnhancedBreakoutStrategy', 'BreakoutConfig',
+    'EnhancedPairsTradingStrategy', 'PairsConfig',
+    'EnhancedVolatilityStrategy', 'VolatilityConfig',
+    'EnhancedArbitrageStrategy', 'ArbitrageConfig'
 ]

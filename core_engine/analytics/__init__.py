@@ -1,10 +1,5 @@
 """
-Analyticfrom .attribution_analyzer import (
-    AttributionAnalyzer,
-    AttributionConfig,
-    AttributionResult,
-    SectorAttributionAnalyzer
-)e - Component Initialization
+Analytics Engine - Component Initialization
 Unified imports and component registry for the analytics engine
 """
 
@@ -23,7 +18,7 @@ from .attribution_analyzer import (
 )
 
 from .metrics_calculator import (
-    MetricsCalculator,
+    EnhancedMetricsCalculator,
     MetricConfig,
     MetricResult,
     MetricsBundle,
@@ -49,7 +44,7 @@ from .benchmark_analyzer import (
 )
 
 from .manager_enhanced import (
-    AnalyticsManager,
+    EnhancedAnalyticsManager,
     AnalyticsConfig,
     AnalyticsTask,
     AnalyticsResults,
@@ -65,10 +60,10 @@ __author__ = "StatArb Analytics Team"
 ANALYTICS_COMPONENTS = {
     'performance_analyzer': PerformanceAnalyzer,
     'attribution_analyzer': AttributionAnalyzer,
-    'metrics_calculator': MetricsCalculator,
+    'metrics_calculator': EnhancedMetricsCalculator,
     'report_generator': ReportGenerator,
     'benchmark_analyzer': BenchmarkAnalyzer,
-    'manager': AnalyticsManager
+    'manager': EnhancedAnalyticsManager
 }
 
 # Configuration registry
@@ -102,7 +97,7 @@ def create_analytics_manager(config=None):
     if config is None:
         config = DEFAULT_ANALYTICS_CONFIG
     
-    return AnalyticsManager(config)
+    return EnhancedAnalyticsManager(config)
 
 def create_performance_analyzer(config=None):
     """
@@ -147,7 +142,7 @@ def create_metrics_calculator(config=None):
     if config is None:
         config = DEFAULT_METRICS_CONFIG
     
-    return MetricsCalculator(config)
+    return EnhancedMetricsCalculator(config)
 
 def create_report_generator(config=None):
     """
@@ -182,10 +177,10 @@ def create_benchmark_analyzer(config=None):
 # Convenience imports for common use cases
 __all__ = [
     # Core classes
-    'AnalyticsManager',
+    'EnhancedAnalyticsManager',
     'PerformanceAnalyzer', 
     'AttributionAnalyzer',
-    'MetricsCalculator',
+    'EnhancedMetricsCalculator',
     'ReportGenerator',
     'BenchmarkAnalyzer',
     

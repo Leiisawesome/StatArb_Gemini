@@ -3,6 +3,6 @@ Statistical Arbitrage Trading Strategies
 Statistical arbitrage-based strategy implementations.
 """
 
-from .advanced_statistical_arbitrage import AdvancedStatisticalArbitrageStrategy, StatisticalArbitrageConfig
+from .enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
 
 __all__ = ['AdvancedStatisticalArbitrageStrategy', 'StatisticalArbitrageConfig']

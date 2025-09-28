@@ -6,7 +6,7 @@ or below support levels. These strategies identify consolidation patterns and
 enter positions when price breaks out of established ranges.
 """
 
-from .advanced_breakout import AdvancedBreakoutStrategy, BreakoutConfig, BreakoutType, ConsolidationPattern
+from .enhanced_breakout import EnhancedBreakoutStrategy, BreakoutConfig
 
 __all__ = [
     'AdvancedBreakoutStrategy',

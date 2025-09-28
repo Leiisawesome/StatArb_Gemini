@@ -6,7 +6,7 @@ These include strategies that profit from volatility expansion, contraction,
 or directional volatility moves using options, futures, or spot instruments.
 """
 
-from .advanced_volatility import AdvancedVolatilityStrategy, VolatilityStrategyConfig
+from .enhanced_volatility import EnhancedVolatilityStrategy, VolatilityConfig
 
 __all__ = [
     'AdvancedVolatilityStrategy',

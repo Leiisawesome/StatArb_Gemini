@@ -6,7 +6,7 @@ markets, instruments, or time periods. These strategies aim to lock in risk-free
 profits by simultaneously buying and selling equivalent assets at different prices.
 """
 
-from .advanced_arbitrage import AdvancedArbitrageStrategy, ArbitrageStrategyConfig
+from .enhanced_arbitrage import EnhancedArbitrageStrategy, ArbitrageConfig
 
 __all__ = [
     'AdvancedArbitrageStrategy',

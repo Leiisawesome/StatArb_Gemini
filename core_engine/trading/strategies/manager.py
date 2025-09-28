@@ -29,6 +29,33 @@ from enum import Enum
 # Use internal core_engine types for independence
 from ...type_definitions.strategy import StrategyType, StrategyConfig
 
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
+
 logger = logging.getLogger(__name__)
 
 class SignalType(Enum):
@@ -97,7 +124,7 @@ class IStrategySubscriber:
         """Handle strategy status changes"""
         pass
 
-class StrategyManager:
+class StrategyManager(ISystemComponent):
     """
     Core Engine Strategy Manager - WHAT Component
     
@@ -142,9 +169,11 @@ class StrategyManager:
         # Subscribers
         self.subscribers: List[IStrategySubscriber] = []
         
-        # State
+        # ISystemComponent state management
         self.is_initialized = False
         self.is_running = False
+        self.component_id: Optional[str] = None
+        self.last_error: Optional[str] = None
         self.signal_generation_task: Optional[asyncio.Task] = None
         
         # Leverage existing core strategy manager
@@ -177,14 +206,16 @@ class StrategyManager:
             return True
             
         except Exception as e:
+            self.last_error = str(e)
             logger.error(f"❌ Strategy Manager initialization failed: {e}")
-            raise
+            return False
     
     async def start(self) -> bool:
         """Start strategy manager"""
         try:
             if not self.is_initialized:
-                raise RuntimeError("Strategy Manager not initialized")
+                logger.error("❌ Cannot start - Strategy Manager not initialized")
+                return False
             
             logger.info("🚀 Starting Strategy Manager signal generation...")
             
@@ -219,6 +250,75 @@ class StrategyManager:
         except Exception as e:
             logger.error(f"❌ Failed to stop Strategy Manager: {e}")
             return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check of the strategy manager"""
+        
+        try:
+            health_status = {
+                'healthy': True,
+                'initialized': self.is_initialized,
+                'operational': self.is_running,
+                'component_type': 'StrategyManager',
+                'active_strategies': len(self.active_strategies),
+                'pending_signals': len(self.pending_signals),
+                'total_signals_generated': len(self.signal_history),
+                'strategy_allocations': len(self.strategy_allocations),
+                'current_regime': self.current_regime,
+                'component_connections': {
+                    'risk_manager': self.risk_manager is not None,
+                    'data_manager': self.data_manager is not None,
+                    'regime_engine': self.regime_engine is not None
+                }
+            }
+            
+            # Check strategy health
+            unhealthy_strategies = []
+            for strategy_id, strategy in self.active_strategies.items():
+                if hasattr(strategy, 'health_check'):
+                    strategy_health = await strategy.health_check()
+                    if not strategy_health.get('healthy', True):
+                        unhealthy_strategies.append(strategy_id)
+                        health_status['healthy'] = False
+            
+            if unhealthy_strategies:
+                health_status['unhealthy_strategies'] = unhealthy_strategies
+            
+            # Check signal generation health
+            if self.is_running and not self.signal_generation_task:
+                health_status['healthy'] = False
+                health_status['warning'] = "Signal generation task not running"
+            
+            return health_status
+            
+        except Exception as e:
+            return {
+                'healthy': False,
+                'error': str(e),
+                'component_type': 'StrategyManager'
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of the strategy manager"""
+        
+        return {
+            'component_type': 'StrategyManager',
+            'initialized': self.is_initialized,
+            'operational': self.is_running,
+            'active_strategies': len(self.active_strategies),
+            'strategy_allocations': len(self.strategy_allocations),
+            'pending_signals': len(self.pending_signals),
+            'signal_history_count': len(self.signal_history),
+            'current_regime': self.current_regime,
+            'market_conditions': self.market_conditions.copy(),
+            'subscribers_count': len(self.subscribers),
+            'component_connections': {
+                'risk_manager_connected': self.risk_manager is not None,
+                'data_manager_connected': self.data_manager is not None,
+                'regime_engine_connected': self.regime_engine is not None
+            },
+            'signal_generation_active': self.signal_generation_task is not None and not self.signal_generation_task.done()
+        }
     
     # Component Integration
     def set_risk_manager(self, risk_manager: Any):

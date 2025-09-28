@@ -21,56 +21,55 @@ All strategies follow the BaseStrategy interface for consistency.
 """
 
 # Momentum Strategies
-from .momentum.advanced_momentum import AdvancedMomentumStrategy, MomentumConfig
+from .momentum.enhanced_momentum import EnhancedMomentumStrategy, MomentumConfig
 
 # Mean Reversion Strategies
-from .mean_reversion.advanced_mean_reversion import AdvancedMeanReversionStrategy, MeanReversionConfig
+from .mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy, MeanReversionConfig
 
 # Statistical Arbitrage Strategies
-from .statistical_arbitrage.advanced_statistical_arbitrage import AdvancedStatisticalArbitrageStrategy, StatisticalArbitrageConfig
+from .statistical_arbitrage.enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
 
 # Factor-based Strategies
-from .factor.advanced_factor import AdvancedFactorStrategy, FactorConfig
+from .factor.enhanced_factor import EnhancedFactorStrategy, FactorConfig
 
 # Multi-asset Strategies
-from .multi_asset.advanced_multi_asset import AdvancedMultiAssetStrategy, MultiAssetConfig
+from .multi_asset.enhanced_multi_asset import EnhancedMultiAssetStrategy, MultiAssetConfig
 
 # Trend Following Strategies
-from .trend_following.advanced_trend_following import AdvancedTrendFollowingStrategy, TrendFollowingConfig
+from .trend_following.enhanced_trend_following import EnhancedTrendFollowingStrategy, TrendFollowingConfig
 
 # Breakout Strategies
-from .breakout.advanced_breakout import AdvancedBreakoutStrategy, BreakoutConfig
+from .breakout.enhanced_breakout import EnhancedBreakoutStrategy, BreakoutConfig
 
 # Pairs Trading Strategies
-from .pairs_trading.advanced_pairs_trading import AdvancedPairsTradingStrategy, PairsTradingConfig
+from .pairs_trading.enhanced_pairs_trading import EnhancedPairsTradingStrategy, PairsConfig
 
 # Volatility Strategies
-from .volatility.advanced_volatility import AdvancedVolatilityStrategy, VolatilityStrategyConfig
+from .volatility.enhanced_volatility import EnhancedVolatilityStrategy, VolatilityConfig
 
 # Arbitrage Strategies
-from .arbitrage.advanced_arbitrage import AdvancedArbitrageStrategy, ArbitrageStrategyConfig
+from .arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy, ArbitrageConfig
 
 # Import statements will be added as more implementations are created
 # Currently empty - implementations will be migrated from scattered locations
 __all__ = [
-    'AdvancedMomentumStrategy',
+    'EnhancedMomentumStrategy',
     'MomentumConfig',
-    'AdvancedMeanReversionStrategy',
+    'EnhancedMeanReversionStrategy',
     'MeanReversionConfig',
-    'AdvancedStatisticalArbitrageStrategy',
-    'StatisticalArbitrageConfig',
-    'AdvancedFactorStrategy',
+    'EnhancedStatisticalArbitrageStrategy',
+    'EnhancedFactorStrategy',
     'FactorConfig',
-    'AdvancedMultiAssetStrategy',
+    'EnhancedMultiAssetStrategy',
     'MultiAssetConfig',
-    'AdvancedTrendFollowingStrategy',
+    'EnhancedTrendFollowingStrategy',
     'TrendFollowingConfig',
-    'AdvancedBreakoutStrategy',
+    'EnhancedBreakoutStrategy',
     'BreakoutConfig',
-    'AdvancedPairsTradingStrategy',
-    'PairsTradingConfig',
-    'AdvancedVolatilityStrategy',
-    'VolatilityStrategyConfig',
-    'AdvancedArbitrageStrategy',
-    'ArbitrageStrategyConfig'
+    'EnhancedPairsTradingStrategy',
+    'PairsConfig',
+    'EnhancedVolatilityStrategy',
+    'VolatilityConfig',
+    'EnhancedArbitrageStrategy',
+    'ArbitrageConfig'
 ]

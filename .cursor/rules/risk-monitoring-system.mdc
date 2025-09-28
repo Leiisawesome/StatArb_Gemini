@@ -1,7 +1,6 @@
 ---
-description: "Real-Time Risk Monitoring System Architecture and Surveillance Patterns"
+alwaysApply: false
 ---
-
 # Real-Time Risk Monitoring System - Instruction Map
 
 This instruction map shows how to compose core_engine components into a comprehensive real-time risk monitoring and surveillance system for continuous portfolio oversight, limit monitoring, and automated risk response.

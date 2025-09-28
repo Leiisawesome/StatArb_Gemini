@@ -36,6 +36,34 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'types'))
 
+# Import ISystemComponent for orchestrator integration
+try:
+    from core_engine.system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
+
 try:
     from core_engine.type_definitions.data import (
         DataManager as BaseDataManager, DataProvider, DataConfig, MarketData
@@ -180,7 +208,7 @@ class EnhancedMarketData(MarketData):
             volume=int(self.volume) if self.volume else 0
         )
 
-class ClickHouseDataManager(BaseDataManager):
+class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     """
     Architecturally Compliant ClickHouse Data Manager
     
@@ -231,6 +259,11 @@ class ClickHouseDataManager(BaseDataManager):
         self.subscribers: List[IDataSubscriber] = []
         self.data_callbacks: List[Callable] = []
         
+        # ISystemComponent state management
+        self.is_initialized: bool = False
+        self.is_operational: bool = False
+        self.component_id: Optional[str] = None
+        
         # Determine whether we can reach ClickHouse
         self._connection_available = False
         self._use_synthetic_data = bool(int(os.getenv("STATARB_USE_SYNTHETIC_DATA", "0")))
@@ -248,6 +281,114 @@ class ClickHouseDataManager(BaseDataManager):
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
         )
+    
+    # ========================================
+    # ISystemComponent Interface Implementation
+    # ========================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the data manager component"""
+        try:
+            self.logger.info("Initializing ClickHouseDataManager...")
+            
+            # Test connection if not using synthetic data
+            if not self._use_synthetic_data:
+                self._connection_available = self._test_connection()
+            
+            # Validate configuration
+            if not self.enhanced_config.symbols:
+                self.logger.warning("No symbols configured for data manager")
+            
+            # Pre-warm cache with available symbols if connection is available
+            if self._connection_available:
+                try:
+                    available_symbols = self.get_available_symbols()
+                    self.logger.info(f"Found {len(available_symbols)} available symbols")
+                except Exception as e:
+                    self.logger.warning(f"Could not pre-load available symbols: {e}")
+            
+            self.is_initialized = True
+            self.logger.info("✅ ClickHouseDataManager initialization completed")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ ClickHouseDataManager initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the data manager operations"""
+        if not self.is_initialized:
+            self.logger.error("Cannot start ClickHouseDataManager - not initialized")
+            return False
+        
+        try:
+            self.is_operational = True
+            self.logger.info("✅ ClickHouseDataManager started and operational")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ ClickHouseDataManager start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the data manager operations"""
+        try:
+            self.is_operational = False
+            
+            # Clear cache on shutdown
+            self.clear_cache()
+            
+            self.logger.info("✅ ClickHouseDataManager stopped")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ ClickHouseDataManager stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on the data manager"""
+        health_status = {
+            'healthy': self.is_operational and self.is_initialized,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_type': 'ClickHouseDataManager',
+            'connection_available': self._connection_available,
+            'using_synthetic_data': self._use_synthetic_data,
+            'cache_size': len(self._cache),
+            'configured_symbols': len(self.enhanced_config.symbols),
+            'date_range': {
+                'start_date': self.enhanced_config.start_date,
+                'end_date': self.enhanced_config.end_date
+            }
+        }
+        
+        # Test connection if operational
+        if self.is_operational and not self._use_synthetic_data:
+            try:
+                connection_test = self._test_connection()
+                health_status['connection_test_result'] = connection_test
+                if not connection_test:
+                    health_status['healthy'] = False
+            except Exception as e:
+                health_status['connection_error'] = str(e)
+                health_status['healthy'] = False
+        
+        return health_status
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        return {
+            'component_type': 'ClickHouseDataManager',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'connection_available': self._connection_available,
+            'using_synthetic_data': self._use_synthetic_data,
+            'cache_stats': self.get_cache_stats(),
+            'configuration': {
+                'symbols_count': len(self.enhanced_config.symbols),
+                'interval': self.enhanced_config.interval,
+                'date_range': f"{self.enhanced_config.start_date} to {self.enhanced_config.end_date}",
+                'caching_enabled': self.enhanced_config.enable_caching
+            }
+        }
     
     def add_subscriber(self, subscriber: IDataSubscriber) -> None:
         """Add data subscriber following core_engine pattern"""
@@ -846,14 +987,14 @@ class ClickHouseDataManager(BaseDataManager):
                 ).sum()
                 if invalid_prices > 0:
                     validation_results['issues'].append(f"Found {invalid_prices} invalid price relationships")
-                    validation_results['score'] -= 0.2
+                    validation_results['score'] -= 0.3  # More severe penalty for price inconsistencies
             
             # Check volume is non-negative
             if 'volume' in data.columns:
                 negative_volume = (data['volume'] < 0).sum()
                 if negative_volume > 0:
                     validation_results['issues'].append(f"Found {negative_volume} negative volume values")
-                    validation_results['score'] -= 0.1
+                    validation_results['score'] -= 0.2  # More severe penalty for negative volume
             
             # Calculate quality metrics
             validation_results['metrics'] = {

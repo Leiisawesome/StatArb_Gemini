@@ -7,6 +7,9 @@ import logging
 import json
 import pickle
 import ast
+import uuid
+import asyncio
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set, Type
 from dataclasses import dataclass, field, asdict
@@ -17,11 +20,44 @@ import importlib
 import inspect
 import shutil
 import warnings
+from collections import deque
 
 # Import strategy components
 from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition, StrategyMetrics
-from .strategy_manager import StrategyTemplate, StrategyDeployment
+try:
+    from .strategy_manager import StrategyTemplate, StrategyDeployment
+except ImportError:
+    # Fallback definitions
+    StrategyTemplate = None
+    StrategyDeployment = None
 from .strategy_validator import ValidationResult, ValidationLevel, StrategyValidator
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -443,19 +479,31 @@ class StrategyDiscovery:
             return StrategyCategory.CUSTOM
 
 
-class StrategyRegistry:
+class EnhancedStrategyRegistry(ISystemComponent):
     """
-    Comprehensive Strategy Registry
+    Enhanced Comprehensive Strategy Registry with ISystemComponent Integration
     
     Provides strategy registration, discovery, cataloging, and management capabilities
-    including version control, validation tracking, and deployment management.
+    including version control, validation tracking, deployment management, and
+    orchestrator integration for institutional-grade strategy management.
     """
     
-    def __init__(self, registry_path: str = "strategy_registry"):
-        """Initialize strategy registry"""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize enhanced strategy registry"""
         
+        # Configuration
+        self.config = config or {}
+        registry_path = self.config.get('registry_path', 'strategy_registry')
         self.registry_path = Path(registry_path)
         self.registry_path.mkdir(exist_ok=True)
+        
+        # ISystemComponent state management
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.last_error: Optional[str] = None
+        self.initialization_time: Optional[datetime] = None
+        self.start_time: Optional[datetime] = None
         
         # Registry files
         self.metadata_file = self.registry_path / "strategies.json"
@@ -474,39 +522,275 @@ class StrategyRegistry:
         # Load existing registry
         self._load_registry()
         
-        logger.info(f"Strategy registry initialized at {self.registry_path}")
+        # Enhanced configuration
+        self.auto_discovery_enabled = self.config.get('auto_discovery_enabled', True)
+        self.auto_validation_enabled = self.config.get('auto_validation_enabled', True)
+        self.performance_monitoring_enabled = self.config.get('performance_monitoring_enabled', True)
+        self.cache_enabled = self.config.get('cache_enabled', True)
+        self.backup_enabled = self.config.get('backup_enabled', True)
+        
+        # Component health tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedStrategyRegistry',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_registrations': 0,
+                'successful_registrations': 0,
+                'failed_registrations': 0,
+                'total_discoveries': 0,
+                'total_validations': 0,
+                'avg_registration_time': 0.0,
+                'avg_discovery_time': 0.0,
+                'avg_validation_time': 0.0
+            }
+        }
+        
+        # Enhanced monitoring
+        self._operation_times = deque(maxlen=100)  # Track recent operation times
+        self._discovery_cache = {}  # Cache for discovered strategies
+        self._validation_cache = {}  # Cache for validation results
+        
+        logger.info(f"🚀 Enhanced Strategy Registry initialized at {self.registry_path} with component ID: {self.component_id}")
     
-    def register_strategy(self, strategy_class: Type[BaseStrategy], 
-                         metadata: Optional[StrategyMetadata] = None,
-                         validate: bool = True) -> str:
-        """Register a strategy class"""
+    # ISystemComponent Implementation
+    async def initialize(self) -> bool:
+        """Initialize the enhanced strategy registry"""
+        try:
+            logger.info("🔄 Initializing Enhanced Strategy Registry...")
+            
+            self.initialization_time = datetime.now()
+            
+            # Initialize components
+            self.loader = StrategyLoader()
+            self.discovery = StrategyDiscovery()
+            self.validator = StrategyValidator()
+            
+            # Initialize enhanced features
+            await self._initialize_caching_system()
+            await self._initialize_backup_system()
+            await self._initialize_monitoring_system()
+            
+            # Load existing registry
+            self._load_registry()
+            
+            # Perform auto-discovery if enabled
+            if self.auto_discovery_enabled:
+                await self._perform_auto_discovery()
+            
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            logger.info("✅ Enhanced Strategy Registry initialization complete")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['initialization_status'] = 'failed'
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Enhanced Strategy Registry initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the enhanced strategy registry"""
+        try:
+            if not self.is_initialized:
+                logger.error("❌ Cannot start - Enhanced Strategy Registry not initialized")
+                return False
+            
+            logger.info("🚀 Starting Enhanced Strategy Registry...")
+            
+            self.start_time = datetime.now()
+            
+            # Start monitoring systems
+            if self.performance_monitoring_enabled:
+                await self._start_performance_monitoring()
+            
+            # Start auto-discovery if enabled
+            if self.auto_discovery_enabled:
+                await self._start_auto_discovery()
+            
+            self.is_operational = True
+            self.health_metrics['operational_status'] = 'active'
+            
+            logger.info("✅ Enhanced Strategy Registry started successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Failed to start Enhanced Strategy Registry: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the enhanced strategy registry"""
+        try:
+            logger.info("🛑 Stopping Enhanced Strategy Registry...")
+            
+            # Stop monitoring tasks
+            if hasattr(self, '_monitoring_task') and self._monitoring_task:
+                self._monitoring_task.cancel()
+                try:
+                    await self._monitoring_task
+                except asyncio.CancelledError:
+                    pass
+            
+            if hasattr(self, '_discovery_task') and self._discovery_task:
+                self._discovery_task.cancel()
+                try:
+                    await self._discovery_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Perform final backup
+            if self.backup_enabled:
+                await self._perform_backup()
+            
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'stopped'
+            
+            logger.info("✅ Enhanced Strategy Registry stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Failed to stop Enhanced Strategy Registry: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            health_status = {
+                'healthy': True,
+                'component_id': self.component_id,
+                'component_type': 'EnhancedStrategyRegistry',
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'total_strategies': len(self.strategies),
+                'registry_path': str(self.registry_path),
+                'registry_path_exists': self.registry_path.exists(),
+                'last_error': self.last_error,
+                'uptime_seconds': 0,
+                'performance_metrics': self.health_metrics['performance_metrics'].copy(),
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count']
+            }
+            
+            # Calculate uptime
+            if self.start_time:
+                uptime = (datetime.now() - self.start_time).total_seconds()
+                health_status['uptime_seconds'] = uptime
+            
+            # Check registry files
+            if not self.metadata_file.exists():
+                health_status['healthy'] = False
+                health_status['warning'] = "Metadata file missing"
+            
+            # Check strategy validation status
+            validated_strategies = sum(1 for s in self.strategies.values() if s.validation_result is not None)
+            health_status['validated_strategies'] = validated_strategies
+            health_status['validation_coverage'] = validated_strategies / len(self.strategies) if self.strategies else 0
+            
+            # Check for orphaned strategies
+            orphaned_count = 0
+            for metadata in self.strategies.values():
+                if not Path(metadata.file_path).exists():
+                    orphaned_count += 1
+            
+            if orphaned_count > 0:
+                health_status['healthy'] = False
+                health_status['orphaned_strategies'] = orphaned_count
+            
+            # Update health metrics
+            self.health_metrics['last_health_check'] = datetime.now()
+            
+            return health_status
+            
+        except Exception as e:
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_id': self.component_id,
+                'component_type': 'EnhancedStrategyRegistry',
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of the enhanced strategy registry"""
+        return {
+            'component_id': self.component_id,
+            'component_type': 'EnhancedStrategyRegistry',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'total_strategies': len(self.strategies),
+            'registry_path': str(self.registry_path),
+            'auto_discovery_enabled': self.auto_discovery_enabled,
+            'auto_validation_enabled': self.auto_validation_enabled,
+            'performance_monitoring_enabled': self.performance_monitoring_enabled,
+            'cache_enabled': self.cache_enabled,
+            'backup_enabled': self.backup_enabled,
+            'health_metrics': self.health_metrics.copy(),
+            'last_error': self.last_error,
+            'initialization_time': self.initialization_time,
+            'start_time': self.start_time
+        }
+    
+    # Enhanced Strategy Registration
+    async def register_strategy(self, strategy_class: Type[BaseStrategy], 
+                               metadata: Optional[StrategyMetadata] = None,
+                               validate: bool = True) -> str:
+        """Register a strategy class with enhanced monitoring and validation"""
+        
+        start_time = time.time()
         
         try:
+            self.health_metrics['performance_metrics']['total_registrations'] += 1
+            
             # Create metadata if not provided
             if metadata is None:
                 metadata = self._create_metadata_from_class(strategy_class)
             
-            # Validate strategy if requested
+            # Enhanced validation if requested
             if validate:
+                validation_start = time.time()
                 strategy_instance = strategy_class()
-                validation_result = self.validator.validate_strategy(strategy_instance)
+                validation_result = await self._enhanced_validate_strategy(strategy_instance)
                 metadata.validation_result = validation_result
+                
+                validation_time = time.time() - validation_start
+                self._update_avg_metric('avg_validation_time', validation_time)
+                self.health_metrics['performance_metrics']['total_validations'] += 1
             
-            # Store in registry
+            # Store in registry with enhanced metadata
             strategy_id = metadata.strategy_id
+            metadata.modified_date = datetime.now()
             self.strategies[strategy_id] = metadata
             
-            # Update index
+            # Update index and caches
             self._update_index(metadata)
+            if self.cache_enabled:
+                await self._update_caches(strategy_id, metadata)
             
-            # Save registry
-            self._save_registry()
+            # Save registry with backup
+            await self._save_registry_with_backup()
             
-            logger.info(f"Strategy registered: {strategy_id}")
+            # Update performance metrics
+            registration_time = time.time() - start_time
+            self._update_avg_metric('avg_registration_time', registration_time)
+            self.health_metrics['performance_metrics']['successful_registrations'] += 1
+            
+            logger.info(f"✅ Strategy registered with enhanced features: {strategy_id} (took {registration_time:.3f}s)")
             return strategy_id
             
         except Exception as e:
-            logger.error(f"Error registering strategy: {e}")
+            self.health_metrics['performance_metrics']['failed_registrations'] += 1
+            self.health_metrics['error_count'] += 1
+            self.last_error = str(e)
+            logger.error(f"❌ Error registering strategy: {e}")
             raise
     
     def unregister_strategy(self, strategy_id: str) -> bool:
@@ -1136,7 +1420,22 @@ class StrategyRegistry:
             # Save metadata
             metadata_data = {}
             for strategy_id, metadata in self.strategies.items():
-                metadata_data[strategy_id] = asdict(metadata)
+                metadata_dict = asdict(metadata)
+                
+                # Convert ValidationCategory keys to strings for JSON serialization
+                if 'validation_result' in metadata_dict and metadata_dict['validation_result']:
+                    validation_result = metadata_dict['validation_result']
+                    if 'category_scores' in validation_result and validation_result['category_scores']:
+                        # Convert enum keys to strings
+                        category_scores = {}
+                        for category, score in validation_result['category_scores'].items():
+                            if hasattr(category, 'value'):
+                                category_scores[category.value] = score
+                            else:
+                                category_scores[str(category)] = score
+                        validation_result['category_scores'] = category_scores
+                
+                metadata_data[strategy_id] = metadata_dict
             
             with open(self.metadata_file, 'w') as f:
                 json.dump(metadata_data, f, indent=2, default=str)
@@ -1147,3 +1446,261 @@ class StrategyRegistry:
             
         except Exception as e:
             logger.error(f"Error saving registry: {e}")
+    
+    # Enhanced Internal Methods
+    async def _initialize_caching_system(self) -> None:
+        """Initialize enhanced caching system"""
+        try:
+            if self.cache_enabled:
+                self._discovery_cache = {}
+                self._validation_cache = {}
+                logger.info("📋 Enhanced caching system initialized")
+        except Exception as e:
+            logger.warning(f"Caching system initialization failed: {e}")
+    
+    async def _initialize_backup_system(self) -> None:
+        """Initialize backup system"""
+        try:
+            if self.backup_enabled:
+                self.backup_path = self.registry_path / "backups"
+                self.backup_path.mkdir(exist_ok=True)
+                logger.info("💾 Backup system initialized")
+        except Exception as e:
+            logger.warning(f"Backup system initialization failed: {e}")
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            if self.performance_monitoring_enabled:
+                self._monitoring_task = None
+                logger.info("📊 Monitoring system initialized")
+        except Exception as e:
+            logger.warning(f"Monitoring system initialization failed: {e}")
+    
+    async def _perform_auto_discovery(self) -> None:
+        """Perform automatic strategy discovery"""
+        try:
+            discovery_start = time.time()
+            discovered_ids = self.discover_and_register_strategies(auto_validate=self.auto_validation_enabled)
+            discovery_time = time.time() - discovery_start
+            
+            self._update_avg_metric('avg_discovery_time', discovery_time)
+            self.health_metrics['performance_metrics']['total_discoveries'] += 1
+            
+            logger.info(f"🔍 Auto-discovery completed: {len(discovered_ids)} strategies (took {discovery_time:.3f}s)")
+        except Exception as e:
+            logger.warning(f"Auto-discovery failed: {e}")
+    
+    async def _start_performance_monitoring(self) -> None:
+        """Start performance monitoring task"""
+        try:
+            self._monitoring_task = asyncio.create_task(self._monitoring_loop())
+            logger.info("📊 Performance monitoring started")
+        except Exception as e:
+            logger.warning(f"Performance monitoring start failed: {e}")
+    
+    async def _start_auto_discovery(self) -> None:
+        """Start auto-discovery task"""
+        try:
+            self._discovery_task = asyncio.create_task(self._discovery_loop())
+            logger.info("🔍 Auto-discovery monitoring started")
+        except Exception as e:
+            logger.warning(f"Auto-discovery start failed: {e}")
+    
+    async def _monitoring_loop(self) -> None:
+        """Performance monitoring loop"""
+        while self.is_operational:
+            try:
+                await self._perform_maintenance()
+                await asyncio.sleep(300)  # Monitor every 5 minutes
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Monitoring loop error: {e}")
+                await asyncio.sleep(600)  # Longer wait on error
+    
+    async def _discovery_loop(self) -> None:
+        """Auto-discovery loop"""
+        while self.is_operational:
+            try:
+                await self._perform_auto_discovery()
+                await asyncio.sleep(1800)  # Discover every 30 minutes
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Discovery loop error: {e}")
+                await asyncio.sleep(3600)  # Longer wait on error
+    
+    async def _enhanced_validate_strategy(self, strategy: BaseStrategy) -> ValidationResult:
+        """Enhanced strategy validation with caching"""
+        try:
+            strategy_id = strategy.strategy_id
+            
+            # Check validation cache
+            if self.cache_enabled and strategy_id in self._validation_cache:
+                cached_result = self._validation_cache[strategy_id]
+                if (datetime.now() - cached_result['timestamp']).total_seconds() < 3600:  # 1 hour cache
+                    return cached_result['result']
+            
+            # Perform validation
+            validation_result = self.validator.validate_strategy(strategy)
+            
+            # Cache result
+            if self.cache_enabled:
+                self._validation_cache[strategy_id] = {
+                    'result': validation_result,
+                    'timestamp': datetime.now()
+                }
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Enhanced validation failed: {e}")
+            # Return basic failed result
+            return ValidationResult(
+                strategy_id=strategy.strategy_id if hasattr(strategy, 'strategy_id') else 'unknown',
+                overall_status=ValidationStatus.FAILED
+            )
+    
+    async def _update_caches(self, strategy_id: str, metadata: StrategyMetadata) -> None:
+        """Update caching systems"""
+        try:
+            if self.cache_enabled:
+                # Update discovery cache
+                self._discovery_cache[strategy_id] = {
+                    'metadata': metadata,
+                    'timestamp': datetime.now()
+                }
+        except Exception as e:
+            logger.warning(f"Cache update failed: {e}")
+    
+    async def _save_registry_with_backup(self) -> None:
+        """Save registry with backup support"""
+        try:
+            # Create backup if enabled
+            if self.backup_enabled and self.metadata_file.exists():
+                backup_name = f"registry_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                backup_file = self.backup_path / backup_name
+                shutil.copy2(self.metadata_file, backup_file)
+                
+                # Keep only last 10 backups
+                backups = sorted(self.backup_path.glob("registry_backup_*.json"))
+                if len(backups) > 10:
+                    for old_backup in backups[:-10]:
+                        old_backup.unlink()
+            
+            # Save registry
+            self._save_registry()
+            
+        except Exception as e:
+            logger.error(f"Registry save with backup failed: {e}")
+            # Fallback to regular save
+            self._save_registry()
+    
+    async def _perform_maintenance(self) -> None:
+        """Perform registry maintenance tasks"""
+        try:
+            # Clean up old cache entries
+            if self.cache_enabled:
+                await self._cleanup_caches()
+            
+            # Validate registry integrity
+            await self._validate_registry_integrity()
+            
+            # Update performance metrics
+            await self._update_performance_metrics()
+            
+        except Exception as e:
+            logger.error(f"Maintenance failed: {e}")
+    
+    async def _cleanup_caches(self) -> None:
+        """Clean up old cache entries"""
+        try:
+            current_time = datetime.now()
+            
+            # Clean validation cache (1 hour TTL)
+            expired_keys = [
+                key for key, value in self._validation_cache.items()
+                if (current_time - value['timestamp']).total_seconds() > 3600
+            ]
+            for key in expired_keys:
+                del self._validation_cache[key]
+            
+            # Clean discovery cache (24 hour TTL)
+            expired_keys = [
+                key for key, value in self._discovery_cache.items()
+                if (current_time - value['timestamp']).total_seconds() > 86400
+            ]
+            for key in expired_keys:
+                del self._discovery_cache[key]
+            
+            if expired_keys:
+                logger.info(f"🧹 Cleaned up {len(expired_keys)} expired cache entries")
+                
+        except Exception as e:
+            logger.error(f"Cache cleanup failed: {e}")
+    
+    async def _validate_registry_integrity(self) -> None:
+        """Validate registry integrity"""
+        try:
+            issues = []
+            
+            # Check for missing files
+            for strategy_id, metadata in self.strategies.items():
+                if not Path(metadata.file_path).exists():
+                    issues.append(f"Missing file for strategy: {strategy_id}")
+            
+            # Check for duplicate IDs
+            strategy_ids = list(self.strategies.keys())
+            if len(strategy_ids) != len(set(strategy_ids)):
+                issues.append("Duplicate strategy IDs detected")
+            
+            if issues:
+                self.health_metrics['warning_count'] += len(issues)
+                logger.warning(f"⚠️ Registry integrity issues: {issues}")
+            
+        except Exception as e:
+            logger.error(f"Registry integrity validation failed: {e}")
+    
+    async def _update_performance_metrics(self) -> None:
+        """Update performance metrics"""
+        try:
+            # Update operation time statistics
+            if self._operation_times:
+                avg_time = sum(self._operation_times) / len(self._operation_times)
+                self.health_metrics['performance_metrics']['avg_operation_time'] = avg_time
+            
+        except Exception as e:
+            logger.error(f"Performance metrics update failed: {e}")
+    
+    async def _perform_backup(self) -> None:
+        """Perform final backup"""
+        try:
+            if self.backup_enabled:
+                backup_name = f"final_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                backup_file = self.backup_path / backup_name
+                if self.metadata_file.exists():
+                    shutil.copy2(self.metadata_file, backup_file)
+                    logger.info(f"💾 Final backup created: {backup_name}")
+        except Exception as e:
+            logger.error(f"Final backup failed: {e}")
+    
+    def _update_avg_metric(self, metric_name: str, new_value: float) -> None:
+        """Update average metric with new value"""
+        try:
+            current_avg = self.health_metrics['performance_metrics'].get(metric_name, 0.0)
+            count_key = f"{metric_name}_count"
+            current_count = self.health_metrics['performance_metrics'].get(count_key, 0)
+            
+            new_count = current_count + 1
+            new_avg = ((current_avg * current_count) + new_value) / new_count
+            
+            self.health_metrics['performance_metrics'][metric_name] = new_avg
+            self.health_metrics['performance_metrics'][count_key] = new_count
+            
+        except Exception as e:
+            logger.error(f"Metric update failed for {metric_name}: {e}")
+
+
+# Maintain backward compatibility
+StrategyRegistry = EnhancedStrategyRegistry

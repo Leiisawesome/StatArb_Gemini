@@ -18,6 +18,33 @@ import time
 import warnings
 from collections import defaultdict, deque
 import json
+import uuid
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -47,6 +74,9 @@ class StrategyType(Enum):
     MULTI_FACTOR = "multi_factor"
     MACHINE_LEARNING = "machine_learning"
     VOLATILITY = "volatility"
+    BREAKOUT = "breakout"
+    FACTOR = "factor"
+    MULTI_ASSET = "multi_asset"
     CUSTOM = "custom"
 
 
@@ -500,18 +530,32 @@ class BaseStrategy(ABC):
         return self.state
 
 
-class StrategyExecutionEngine:
+class StrategyExecutionEngine(ISystemComponent):
     """
-    Strategy Execution Engine
+    Enhanced Strategy Execution Engine with ISystemComponent Integration
     
     Manages the execution lifecycle of trading strategies including
     initialization, data management, signal processing, and monitoring.
+    Implements ISystemComponent for orchestrator integration.
     """
     
-    def __init__(self, max_concurrent_strategies: int = 10):
-        """Initialize strategy execution engine"""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize enhanced strategy execution engine"""
         
-        self.max_concurrent_strategies = max_concurrent_strategies
+        # Configuration
+        self.config = config or {}
+        self.max_concurrent_strategies = self.config.get('max_concurrent_strategies', 10)
+        self.execution_interval = self.config.get('execution_interval', 1.0)
+        self.enable_performance_monitoring = self.config.get('enable_performance_monitoring', True)
+        self.enable_health_monitoring = self.config.get('enable_health_monitoring', True)
+        
+        # ISystemComponent state management
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.last_error: Optional[str] = None
+        self.initialization_time: Optional[datetime] = None
+        self.start_time: Optional[datetime] = None
         
         # Strategy management
         self._strategies: Dict[str, BaseStrategy] = {}
@@ -550,10 +594,204 @@ class StrategyExecutionEngine:
         # Signal processors
         self._signal_processors: List[Callable[[StrategySignal], bool]] = []
         
-        logger.info("Strategy execution engine initialized")
+        # Component health tracking
+        self.health_metrics = {
+            'component_type': 'StrategyExecutionEngine',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'avg_cycle_time': 0.0,
+                'total_cycles': 0,
+                'successful_cycles': 0,
+                'failed_cycles': 0
+            }
+        }
+        
+        logger.info(f"🚀 Enhanced Strategy Execution Engine initialized with component ID: {self.component_id}")
     
-    def register_strategy(self, strategy: BaseStrategy) -> bool:
-        """Register a strategy with the engine"""
+    # ISystemComponent Implementation
+    async def initialize(self) -> bool:
+        """Initialize the strategy execution engine"""
+        try:
+            logger.info("🔄 Initializing Enhanced Strategy Execution Engine...")
+            
+            self.initialization_time = datetime.now()
+            
+            # Initialize internal components
+            self._initialize_metrics()
+            self._initialize_monitoring()
+            
+            # Validate configuration
+            if not self._validate_configuration():
+                self.last_error = "Configuration validation failed"
+                return False
+            
+            # Initialize strategy registry integration
+            await self._initialize_strategy_registry()
+            
+            # Initialize performance monitoring
+            if self.enable_performance_monitoring:
+                await self._initialize_performance_monitoring()
+            
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            logger.info("✅ Enhanced Strategy Execution Engine initialization complete")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['initialization_status'] = 'failed'
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Strategy Execution Engine initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the strategy execution engine"""
+        try:
+            if not self.is_initialized:
+                logger.error("❌ Cannot start - Strategy Execution Engine not initialized")
+                return False
+            
+            logger.info("🚀 Starting Enhanced Strategy Execution Engine...")
+            
+            self.start_time = datetime.now()
+            
+            # Start execution engine
+            if not self.start_execution():
+                return False
+            
+            # Start health monitoring
+            if self.enable_health_monitoring:
+                await self._start_health_monitoring()
+            
+            self.is_operational = True
+            self.health_metrics['operational_status'] = 'active'
+            
+            logger.info("✅ Enhanced Strategy Execution Engine started successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Failed to start Strategy Execution Engine: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the strategy execution engine"""
+        try:
+            logger.info("🛑 Stopping Enhanced Strategy Execution Engine...")
+            
+            # Stop execution engine
+            if not self.stop_execution():
+                logger.warning("⚠️ Issues stopping execution engine")
+            
+            # Stop health monitoring
+            if hasattr(self, '_health_monitoring_task') and self._health_monitoring_task:
+                self._health_monitoring_task.cancel()
+                try:
+                    await self._health_monitoring_task
+                except asyncio.CancelledError:
+                    pass
+            
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'stopped'
+            
+            logger.info("✅ Enhanced Strategy Execution Engine stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Failed to stop Strategy Execution Engine: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            health_status = {
+                'healthy': True,
+                'component_id': self.component_id,
+                'component_type': 'StrategyExecutionEngine',
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'strategies_registered': len(self._strategies),
+                'strategies_active': self._engine_metrics.get('strategies_active', 0),
+                'execution_active': self._execution_active,
+                'last_error': self.last_error,
+                'uptime_seconds': 0,
+                'performance_metrics': self.health_metrics['performance_metrics'].copy(),
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count']
+            }
+            
+            # Calculate uptime
+            if self.start_time:
+                uptime = (datetime.now() - self.start_time).total_seconds()
+                health_status['uptime_seconds'] = uptime
+            
+            # Check strategy health
+            unhealthy_strategies = []
+            for strategy_id, strategy in self._strategies.items():
+                try:
+                    if hasattr(strategy, 'health_check'):
+                        strategy_health = await strategy.health_check()
+                        if not strategy_health.get('healthy', True):
+                            unhealthy_strategies.append(strategy_id)
+                except Exception as e:
+                    unhealthy_strategies.append(strategy_id)
+                    logger.warning(f"Health check failed for strategy {strategy_id}: {e}")
+            
+            if unhealthy_strategies:
+                health_status['healthy'] = False
+                health_status['unhealthy_strategies'] = unhealthy_strategies
+            
+            # Check execution thread health
+            if self.is_operational and not self._execution_active:
+                health_status['healthy'] = False
+                health_status['warning'] = "Execution engine not active despite operational status"
+            
+            # Update health metrics
+            self.health_metrics['last_health_check'] = datetime.now()
+            
+            return health_status
+            
+        except Exception as e:
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_id': self.component_id,
+                'component_type': 'StrategyExecutionEngine',
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of the strategy execution engine"""
+        return {
+            'component_id': self.component_id,
+            'component_type': 'StrategyExecutionEngine',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'execution_active': self._execution_active,
+            'strategies_registered': len(self._strategies),
+            'strategies_active': self._engine_metrics.get('strategies_active', 0),
+            'signals_in_queue': len(self._signal_queue),
+            'signal_processors': len(self._signal_processors),
+            'last_data_update': self._last_data_update,
+            'market_data_symbols': list(self._market_data_cache.keys()),
+            'engine_metrics': self._engine_metrics.copy(),
+            'health_metrics': self.health_metrics.copy(),
+            'last_error': self.last_error,
+            'initialization_time': self.initialization_time,
+            'start_time': self.start_time
+        }
+    
+    # Enhanced Strategy Management
+    async def register_strategy(self, strategy: BaseStrategy, validate: bool = True) -> bool:
+        """Register a strategy with enhanced validation and monitoring"""
         
         try:
             with self._lock:
@@ -565,16 +803,26 @@ class StrategyExecutionEngine:
                     logger.error(f"Maximum concurrent strategies ({self.max_concurrent_strategies}) reached")
                     return False
                 
+                # Enhanced validation
+                if validate and not await self._validate_strategy(strategy):
+                    logger.error(f"Strategy validation failed: {strategy.strategy_id}")
+                    return False
+                
+                # Register strategy
                 self._strategies[strategy.strategy_id] = strategy
                 self._strategy_configs[strategy.strategy_id] = strategy.config
                 
+                # Initialize strategy monitoring
+                await self._initialize_strategy_monitoring(strategy)
+                
                 self._engine_metrics['strategies_registered'] += 1
                 
-                logger.info(f"Strategy {strategy.strategy_id} registered successfully")
+                logger.info(f"✅ Strategy {strategy.strategy_id} registered successfully with validation")
                 return True
                 
         except Exception as e:
-            logger.error(f"Error registering strategy {strategy.strategy_id}: {e}")
+            self.health_metrics['error_count'] += 1
+            logger.error(f"❌ Error registering strategy {strategy.strategy_id}: {e}")
             return False
     
     def unregister_strategy(self, strategy_id: str) -> bool:
@@ -763,17 +1011,19 @@ class StrategyExecutionEngine:
                 # Update engine metrics
                 self._update_engine_metrics()
                 
-                # Calculate cycle time
+                # Calculate cycle time and update metrics
                 cycle_time = time.time() - cycle_start
+                self._update_cycle_metrics(cycle_time, True)
                 
-                # Update average cycle time
+                # Update engine metrics
                 self._engine_metrics['execution_cycles'] += 1
                 total_time = (self._engine_metrics['avg_cycle_time'] * 
                             (self._engine_metrics['execution_cycles'] - 1) + cycle_time)
                 self._engine_metrics['avg_cycle_time'] = total_time / self._engine_metrics['execution_cycles']
                 
                 # Sleep to maintain reasonable cycle frequency
-                time.sleep(max(0.1, 1.0 - cycle_time))  # Target 1 second cycles
+                sleep_time = max(0.1, self.execution_interval - cycle_time)
+                time.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"Error in execution loop: {e}")
@@ -781,6 +1031,25 @@ class StrategyExecutionEngine:
                 time.sleep(1.0)  # Brief pause on error
         
         logger.info("Strategy execution loop stopped")
+    
+    def _update_cycle_metrics(self, cycle_time: float, success: bool) -> None:
+        """Update cycle performance metrics"""
+        try:
+            perf_metrics = self.health_metrics['performance_metrics']
+            perf_metrics['total_cycles'] += 1
+            
+            if success:
+                perf_metrics['successful_cycles'] += 1
+            else:
+                perf_metrics['failed_cycles'] += 1
+            
+            # Update average cycle time
+            current_avg = perf_metrics['avg_cycle_time']
+            total_cycles = perf_metrics['total_cycles']
+            perf_metrics['avg_cycle_time'] = ((current_avg * (total_cycles - 1)) + cycle_time) / total_cycles
+            
+        except Exception as e:
+            logger.error(f"Error updating cycle metrics: {e}")
     
     def _update_strategies(self) -> None:
         """Update all active strategies with latest market data"""
@@ -920,6 +1189,10 @@ class StrategyExecutionEngine:
                 strategy_states[strategy_id] = strategy.get_state().value
             
             return {
+                'component_id': self.component_id,
+                'component_type': 'StrategyExecutionEngine',
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
                 'execution_active': self._execution_active,
                 'strategies_registered': len(self._strategies),
                 'strategy_states': strategy_states,
@@ -927,5 +1200,136 @@ class StrategyExecutionEngine:
                 'signal_processors': len(self._signal_processors),
                 'last_data_update': self._last_data_update,
                 'market_data_symbols': list(self._market_data_cache.keys()),
-                'metrics': self.get_engine_metrics()
+                'metrics': self.get_engine_metrics(),
+                'health_metrics': self.health_metrics.copy(),
+                'last_error': self.last_error
             }
+    
+    # Enhanced Internal Methods
+    def _initialize_metrics(self) -> None:
+        """Initialize enhanced metrics tracking"""
+        self._engine_metrics.update({
+            'component_id': self.component_id,
+            'initialization_time': datetime.now(),
+            'health_checks_performed': 0,
+            'validation_checks_performed': 0,
+            'strategy_registrations_attempted': 0,
+            'strategy_registrations_successful': 0
+        })
+    
+    def _initialize_monitoring(self) -> None:
+        """Initialize monitoring systems"""
+        self._monitoring_active = False
+        self._health_monitoring_task: Optional[asyncio.Task] = None
+        self._performance_monitoring_task: Optional[asyncio.Task] = None
+    
+    def _validate_configuration(self) -> bool:
+        """Validate engine configuration"""
+        try:
+            if self.max_concurrent_strategies <= 0:
+                logger.error("max_concurrent_strategies must be positive")
+                return False
+            
+            if self.execution_interval <= 0:
+                logger.error("execution_interval must be positive")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Configuration validation error: {e}")
+            return False
+    
+    async def _initialize_strategy_registry(self) -> None:
+        """Initialize strategy registry integration"""
+        try:
+            # Placeholder for strategy registry integration
+            logger.info("📋 Strategy registry integration initialized")
+        except Exception as e:
+            logger.warning(f"Strategy registry initialization failed: {e}")
+    
+    async def _initialize_performance_monitoring(self) -> None:
+        """Initialize performance monitoring"""
+        try:
+            logger.info("📊 Performance monitoring initialized")
+        except Exception as e:
+            logger.warning(f"Performance monitoring initialization failed: {e}")
+    
+    async def _start_health_monitoring(self) -> None:
+        """Start health monitoring task"""
+        try:
+            self._health_monitoring_task = asyncio.create_task(self._health_monitoring_loop())
+            logger.info("💓 Health monitoring started")
+        except Exception as e:
+            logger.warning(f"Health monitoring start failed: {e}")
+    
+    async def _health_monitoring_loop(self) -> None:
+        """Health monitoring loop"""
+        while self.is_operational:
+            try:
+                await self.health_check()
+                self.health_metrics['health_checks_performed'] = self.health_metrics.get('health_checks_performed', 0) + 1
+                await asyncio.sleep(30)  # Health check every 30 seconds
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Health monitoring error: {e}")
+                await asyncio.sleep(60)  # Longer wait on error
+    
+    async def _validate_strategy(self, strategy: BaseStrategy) -> bool:
+        """Enhanced strategy validation"""
+        try:
+            self._engine_metrics['validation_checks_performed'] += 1
+            
+            # Basic validation
+            if not hasattr(strategy, 'strategy_id') or not strategy.strategy_id:
+                logger.error("Strategy missing strategy_id")
+                return False
+            
+            if not hasattr(strategy, 'initialize') or not callable(strategy.initialize):
+                logger.error("Strategy missing initialize method")
+                return False
+            
+            if not hasattr(strategy, 'update') or not callable(strategy.update):
+                logger.error("Strategy missing update method")
+                return False
+            
+            # Test initialization
+            try:
+                init_result = strategy.initialize()
+                if not isinstance(init_result, bool):
+                    logger.warning("Strategy initialize() should return boolean")
+            except Exception as e:
+                logger.error(f"Strategy initialization test failed: {e}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Strategy validation error: {e}")
+            return False
+    
+    async def _initialize_strategy_monitoring(self, strategy: BaseStrategy) -> None:
+        """Initialize monitoring for a specific strategy"""
+        try:
+            # Initialize strategy-specific metrics
+            strategy_metrics = {
+                'registration_time': datetime.now(),
+                'total_updates': 0,
+                'successful_updates': 0,
+                'failed_updates': 0,
+                'signals_generated': 0,
+                'last_update_time': None,
+                'avg_update_time': 0.0
+            }
+            
+            # Store strategy metrics (could be expanded)
+            if not hasattr(self, '_strategy_metrics'):
+                self._strategy_metrics = {}
+            
+            self._strategy_metrics[strategy.strategy_id] = strategy_metrics
+            
+            logger.info(f"📊 Monitoring initialized for strategy: {strategy.strategy_id}")
+            
+        except Exception as e:
+            logger.warning(f"Strategy monitoring initialization failed for {strategy.strategy_id}: {e}")

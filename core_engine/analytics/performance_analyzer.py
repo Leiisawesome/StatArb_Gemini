@@ -21,6 +21,33 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 import warnings
 
+# Import ISystemComponent for orchestrator integration
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -99,6 +126,16 @@ class PerformanceConfig:
         PerformancePeriod.YEARLY,
         PerformancePeriod.INCEPTION
     ])
+    
+    # Caching settings
+    enable_caching: bool = True
+    cache_ttl: int = 3600  # Cache time-to-live in seconds
+    
+    # Risk-free rate property for backward compatibility
+    @property
+    def risk_free_rate(self) -> float:
+        """Get risk-free rate"""
+        return self.custom_risk_free_rate
 
 
 @dataclass
@@ -440,7 +477,7 @@ class TradingMetricsCalculator:
         return stats
 
 
-class PerformanceAnalyzer:
+class PerformanceAnalyzer(ISystemComponent):
     """
     Advanced Performance Analyzer
     
@@ -465,15 +502,198 @@ class PerformanceAnalyzer:
         # Threading
         self._lock = threading.Lock()
         
+        # ISystemComponent state management
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.last_error: Optional[str] = None
+        
         # Initialize audit trail for institutional compliance
         self.initialize_audit_trail()
         
-        logger.info("Performance Analyzer initialized")
+        logger.info("🔍 Performance Analyzer initialized")
     
     def initialize_audit_trail(self):
         """Initialize audit trail for institutional compliance"""
         self._audit_trail = []
         logger.info("Audit trail initialized for Performance Analyzer")
+    
+    # ========================================
+    # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION
+    # ========================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the performance analyzer"""
+        
+        try:
+            logger.info("🔄 Initializing PerformanceAnalyzer...")
+            
+            # Initialize component calculators
+            if hasattr(self.risk_calculator, 'initialize'):
+                success = await self.risk_calculator.initialize()
+                if not success:
+                    logger.error("❌ Failed to initialize risk calculator")
+                    return False
+            
+            if hasattr(self.benchmark_analyzer, 'initialize'):
+                success = await self.benchmark_analyzer.initialize()
+                if not success:
+                    logger.error("❌ Failed to initialize benchmark analyzer")
+                    return False
+            
+            if hasattr(self.trading_calculator, 'initialize'):
+                success = await self.trading_calculator.initialize()
+                if not success:
+                    logger.error("❌ Failed to initialize trading calculator")
+                    return False
+            
+            # Initialize data caches
+            self._performance_cache.clear()
+            self._benchmark_data.clear()
+            self._risk_free_rates.clear()
+            
+            self.is_initialized = True
+            logger.info("✅ PerformanceAnalyzer initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ PerformanceAnalyzer initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the performance analyzer operations"""
+        
+        try:
+            if not self.is_initialized:
+                logger.error("❌ Cannot start - PerformanceAnalyzer not initialized")
+                return False
+            
+            logger.info("🚀 Starting PerformanceAnalyzer operations...")
+            
+            # Start component calculators
+            if hasattr(self.risk_calculator, 'start'):
+                success = await self.risk_calculator.start()
+                if not success:
+                    logger.warning("⚠️ Failed to start risk calculator")
+            
+            if hasattr(self.benchmark_analyzer, 'start'):
+                success = await self.benchmark_analyzer.start()
+                if not success:
+                    logger.warning("⚠️ Failed to start benchmark analyzer")
+            
+            if hasattr(self.trading_calculator, 'start'):
+                success = await self.trading_calculator.start()
+                if not success:
+                    logger.warning("⚠️ Failed to start trading calculator")
+            
+            self.is_operational = True
+            logger.info("✅ PerformanceAnalyzer operational")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ PerformanceAnalyzer start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the performance analyzer operations"""
+        
+        try:
+            logger.info("🔄 Stopping PerformanceAnalyzer...")
+            
+            # Stop component calculators
+            if hasattr(self.risk_calculator, 'stop'):
+                await self.risk_calculator.stop()
+            
+            if hasattr(self.benchmark_analyzer, 'stop'):
+                await self.benchmark_analyzer.stop()
+            
+            if hasattr(self.trading_calculator, 'stop'):
+                await self.trading_calculator.stop()
+            
+            # Clear caches
+            with self._lock:
+                cache_size = len(self._performance_cache)
+                self._performance_cache.clear()
+                self._benchmark_data.clear()
+            
+            self.is_operational = False
+            logger.info(f"✅ PerformanceAnalyzer stopped (cleared {cache_size} cached entries)")
+            return True
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ PerformanceAnalyzer stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check of the performance analyzer"""
+        
+        try:
+            health_status = {
+                'healthy': True,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'component_type': 'PerformanceAnalyzer',
+                'cache_size': len(self._performance_cache),
+                'benchmark_data_size': len(self._benchmark_data),
+                'risk_free_rates_size': len(self._risk_free_rates),
+                'audit_trail_size': len(self._audit_trail),
+                'last_error': self.last_error,
+                'calculators_status': {}
+            }
+            
+            # Check calculator health
+            calculators = {
+                'risk_calculator': self.risk_calculator,
+                'benchmark_analyzer': self.benchmark_analyzer,
+                'trading_calculator': self.trading_calculator
+            }
+            
+            for calc_name, calculator in calculators.items():
+                if hasattr(calculator, 'health_check'):
+                    calc_health = await calculator.health_check()
+                    health_status['calculators_status'][calc_name] = calc_health
+                    if not calc_health.get('healthy', True):
+                        health_status['healthy'] = False
+                else:
+                    health_status['calculators_status'][calc_name] = {'healthy': True}
+            
+            # Check cache health
+            if len(self._performance_cache) > 10000:  # Large cache warning
+                health_status['healthy'] = False
+                health_status['warning'] = "Performance cache size exceeds recommended limit"
+            
+            return health_status
+            
+        except Exception as e:
+            return {
+                'healthy': False,
+                'error': str(e),
+                'component_type': 'PerformanceAnalyzer'
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of the performance analyzer"""
+        
+        return {
+            'component_id': self.component_id,
+            'component_type': 'PerformanceAnalyzer',
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'cache_size': len(self._performance_cache),
+            'benchmark_data_size': len(self._benchmark_data),
+            'risk_free_rates_size': len(self._risk_free_rates),
+            'audit_trail_size': len(self._audit_trail),
+            'last_error': self.last_error,
+            'config': {
+                'risk_free_rate': self.config.risk_free_rate,
+                'confidence_level': self.config.confidence_level,
+                'enable_caching': self.config.enable_caching,
+                'cache_ttl': self.config.cache_ttl
+            }
+        }
     
     async def analyze_performance(
         self,

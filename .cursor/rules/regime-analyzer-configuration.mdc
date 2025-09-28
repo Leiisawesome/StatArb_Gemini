@@ -1,7 +1,6 @@
 ---
-description: "Specialized Regime Analyzer Architecture and Market Condition Detection Patterns"
+alwaysApply: false
 ---
-
 # Specialized Regime Analyzer Configuration - Instruction Map
 
 This instruction map shows how to compose core_engine components into a specialized regime analysis system for advanced market condition detection, regime transition prediction, and strategy adaptation.

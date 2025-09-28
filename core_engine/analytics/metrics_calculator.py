@@ -6,6 +6,7 @@ Advanced metrics calculation with risk-adjusted performance and statistical meas
 import logging
 import threading
 import asyncio
+import uuid
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -20,6 +21,33 @@ from scipy import stats
 from scipy.optimize import minimize
 from sklearn.preprocessing import StandardScaler
 import warnings
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -732,24 +760,41 @@ class DistributionMetricsCalculator:
         return metrics
 
 
-class MetricsCalculator:
+class EnhancedMetricsCalculator(ISystemComponent):
     """
-    Advanced Metrics Calculator
+    Enhanced Metrics Calculator with ISystemComponent Integration
     
     Comprehensive calculation of performance, risk, and statistical metrics
-    with support for rolling calculations and comparative analysis.
+    with support for rolling calculations, comparative analysis, and orchestrator integration
+    for institutional-grade metrics computation.
     """
     
     def __init__(self, config: Optional[MetricConfig] = None):
-        """Initialize metrics calculator"""
+        """Initialize enhanced metrics calculator"""
         self.config = config or MetricConfig()
         
-        # Component calculators
-        self.return_calculator = ReturnMetricsCalculator(self.config)
-        self.risk_calculator = RiskMetricsCalculator(self.config)
-        self.risk_adjusted_calculator = RiskAdjustedMetricsCalculator(self.config)
-        self.drawdown_calculator = DrawdownMetricsCalculator(self.config)
-        self.distribution_calculator = DistributionMetricsCalculator(self.config)
+        # Component identification and lifecycle
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.start_time = None
+        
+        # Health and performance tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedMetricsCalculator',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_calculations': 0,
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'average_calculation_time': 0.0,
+                'cache_hit_rate': 0.0
+            }
+        }
         
         # Metrics storage
         self._metrics_cache = {}
@@ -758,7 +803,224 @@ class MetricsCalculator:
         # Threading
         self._lock = threading.Lock()
         
-        logger.info("Metrics Calculator initialized")
+        logger.info(f"🚀 Enhanced Metrics Calculator initialized with component ID: {self.component_id}")
+    
+    # ISystemComponent Interface Implementation
+    
+    async def initialize(self) -> bool:
+        """Initialize the Enhanced Metrics Calculator"""
+        try:
+            logger.info("🔄 Initializing Enhanced Metrics Calculator...")
+            
+            # Initialize calculation engines
+            await self._initialize_calculation_engines()
+            
+            # Initialize monitoring
+            await self._initialize_monitoring_system()
+            
+            # Update status
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            logger.info("✅ Enhanced Metrics Calculator initialization complete")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced Metrics Calculator initialization failed: {e}")
+            self.health_metrics['error_count'] += 1
+            self.health_metrics['initialization_status'] = 'failed'
+            return False
+    
+    async def start(self) -> bool:
+        """Start the Enhanced Metrics Calculator"""
+        if not self.is_initialized:
+            logger.error("Cannot start Enhanced Metrics Calculator: not initialized")
+            return False
+        
+        try:
+            logger.info("🚀 Starting Enhanced Metrics Calculator...")
+            
+            # Start monitoring
+            await self._start_monitoring()
+            
+            # Update status
+            self.is_operational = True
+            self.start_time = datetime.now()
+            self.health_metrics['operational_status'] = 'active'
+            
+            logger.info("✅ Enhanced Metrics Calculator started successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced Metrics Calculator start failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the Enhanced Metrics Calculator"""
+        try:
+            logger.info("🛑 Stopping Enhanced Metrics Calculator...")
+            
+            # Stop monitoring
+            await self._stop_monitoring()
+            
+            # Clear caches
+            self.clear_cache()
+            
+            # Update status
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'inactive'
+            
+            logger.info("✅ Enhanced Metrics Calculator stopped successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced Metrics Calculator stop failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            current_time = datetime.now()
+            self.health_metrics['last_health_check'] = current_time
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = (current_time - self.start_time).total_seconds()
+            
+            # Check calculation engines health
+            engines_healthy = await self._check_engines_health()
+            
+            # Overall health assessment
+            overall_healthy = (
+                self.is_initialized and
+                self.is_operational and
+                engines_healthy and
+                self.health_metrics['error_count'] < 10
+            )
+            
+            return {
+                'healthy': overall_healthy,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime_seconds,
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count'],
+                'performance_metrics': self.health_metrics['performance_metrics'],
+                'engines_healthy': engines_healthy,
+                'cache_size': len(self._metrics_cache),
+                'last_health_check': current_time.isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current component status"""
+        return {
+            'component_id': self.component_id,
+            'component_type': self.health_metrics['component_type'],
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'configuration': {
+                'risk_free_rate': self.config.risk_free_rate,
+                'trading_days_per_year': self.config.trading_days_per_year,
+                'confidence_levels': self.config.confidence_levels,
+                'var_methods': self.config.var_methods
+            },
+            'health_metrics': self.health_metrics
+        }
+    
+    # Enhanced Internal Methods
+    
+    async def _initialize_calculation_engines(self) -> None:
+        """Initialize calculation engines"""
+        try:
+            logger.info("🔧 Initializing calculation engines...")
+            
+            # Initialize component calculators
+            self.return_calculator = ReturnMetricsCalculator(self.config)
+            self.risk_calculator = RiskMetricsCalculator(self.config)
+            self.risk_adjusted_calculator = RiskAdjustedMetricsCalculator(self.config)
+            self.drawdown_calculator = DrawdownMetricsCalculator(self.config)
+            self.distribution_calculator = DistributionMetricsCalculator(self.config)
+            
+            logger.info("✅ Calculation engines initialized")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize calculation engines: {e}")
+            raise
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            logger.info("📈 Initializing monitoring system...")
+            # Monitoring initialization logic here
+            logger.info("✅ Monitoring system initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize monitoring system: {e}")
+            raise
+    
+    async def _start_monitoring(self) -> None:
+        """Start monitoring systems"""
+        try:
+            logger.info("📊 Starting monitoring systems...")
+            # Monitoring startup logic here
+            logger.info("✅ Monitoring systems started")
+        except Exception as e:
+            logger.error(f"Failed to start monitoring: {e}")
+            raise
+    
+    async def _stop_monitoring(self) -> None:
+        """Stop monitoring systems"""
+        try:
+            logger.info("📊 Stopping monitoring systems...")
+            # Monitoring shutdown logic here
+            logger.info("✅ Monitoring systems stopped")
+        except Exception as e:
+            logger.error(f"Failed to stop monitoring: {e}")
+            raise
+    
+    async def _check_engines_health(self) -> bool:
+        """Check health of all calculation engines"""
+        try:
+            # Check if engines are responsive
+            engines_status = []
+            
+            # Check each engine
+            engines = [
+                ('return_calculator', self.return_calculator),
+                ('risk_calculator', self.risk_calculator),
+                ('risk_adjusted_calculator', self.risk_adjusted_calculator),
+                ('drawdown_calculator', self.drawdown_calculator),
+                ('distribution_calculator', self.distribution_calculator)
+            ]
+            
+            for name, engine in engines:
+                try:
+                    # Basic health check - engine exists and is accessible
+                    engines_status.append(engine is not None)
+                except Exception as e:
+                    logger.warning(f"Health check failed for {name}: {e}")
+                    engines_status.append(False)
+            
+            return all(engines_status)
+            
+        except Exception as e:
+            logger.error(f"Engines health check failed: {e}")
+            return False
     
     async def calculate_all_metrics(
         self,

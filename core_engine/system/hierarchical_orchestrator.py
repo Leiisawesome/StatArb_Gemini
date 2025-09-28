@@ -30,6 +30,11 @@ import json
 from .interfaces import ISystemComponent
 from .central_risk_manager import TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
 
+# Import modular components
+from .orchestrator_components import ComponentManager, ComponentRegistration, ComponentLayer, AuthorityLevel
+from .orchestrator_monitoring import SystemMonitor
+from .orchestrator_configuration import ConfigurationManager, SystemOrchestrationConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,91 +50,7 @@ class SystemStatus(Enum):
     SHUTDOWN = "shutdown"
 
 
-class ComponentLayer(Enum):
-    """Component layers in hierarchical control"""
-    ORCHESTRATION = "orchestration"    # Layer 1: System control
-    GOVERNANCE = "governance"          # Layer 2: Risk/Trading governance
-    EXECUTION = "execution"            # Layer 3: Trading operations
-    SUPPORT = "support"                # Support components
-
-
-class AuthorityLevel(Enum):
-    """Authority levels for different operations"""
-    SYSTEM_CONTROL = "system_control"        # SystemOrchestrator only
-    GOVERNANCE_CONTROL = "governance_control" # RiskManager authority
-    STRATEGIC = "strategic"                  # Strategic operations
-    TACTICAL = "tactical"                    # Tactical operations
-    OPERATIONAL = "operational"              # Component operations
-    READ_ONLY = "read_only"                 # Monitoring only
-
-
-@dataclass
-class ComponentRegistration:
-    """Component registration with hierarchical control info"""
-    
-    component_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ""
-    layer: ComponentLayer = ComponentLayer.SUPPORT
-    authority_level: AuthorityLevel = AuthorityLevel.READ_ONLY
-    
-    # Hierarchical relationships
-    reports_to: Optional[str] = None  # Parent component ID
-    controls: List[str] = field(default_factory=list)  # Child component IDs
-    
-    # Component instance and metadata
-    component_instance: Optional[Any] = None
-    initialization_order: int = 100  # Lower numbers initialize first
-    shutdown_order: int = 100       # Lower numbers shutdown last
-    
-    # Status tracking
-    status: str = "unregistered"
-    last_heartbeat: Optional[datetime] = None
-    error_count: int = 0
-    last_error: Optional[str] = None
-    
-    # Authority and permissions
-    allowed_operations: Set[str] = field(default_factory=set)
-    required_permissions: Set[str] = field(default_factory=set)
-    
-    # Health monitoring
-    health_check_interval: int = 30  # seconds
-    max_error_count: int = 5
-    
-    def update_status(self, status: str, error: Optional[str] = None):
-        """Update component status"""
-        self.status = status
-        self.last_heartbeat = datetime.now()
-        
-        if error:
-            self.error_count += 1
-            self.last_error = error
-
-
-@dataclass
-class SystemOrchestrationConfig:
-    """Configuration for system orchestration"""
-    
-    # Initialization settings
-    component_startup_timeout: int = 60  # seconds
-    initialization_retry_attempts: int = 3
-    graceful_shutdown_timeout: int = 30  # seconds
-    
-    # Monitoring settings
-    health_check_interval: int = 30      # seconds
-    performance_monitoring_interval: int = 5  # seconds
-    
-    # Authority and governance
-    enforce_hierarchical_control: bool = True
-    require_risk_manager_authorization: bool = True
-    emergency_override_enabled: bool = True
-    
-    # Escalation settings
-    max_component_errors: int = 5
-    escalation_timeout: int = 300  # 5 minutes
-    
-    # Resource management
-    max_concurrent_operations: int = 100
-    resource_allocation_timeout: int = 10  # seconds
+# Duplicate classes removed - now imported from modular components
 
 
 class HierarchicalSystemOrchestrator(ISystemComponent):
@@ -149,40 +70,26 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     - Performance monitoring and resource allocation
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize hierarchical system orchestrator"""
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """Initialize hierarchical system orchestrator with modular composition"""
         
-        self.config = SystemOrchestrationConfig(**(config or {}))
+        # Initialize modular components using composition
+        self.config_manager = ConfigurationManager(config)
+        self.component_manager = ComponentManager()
+        self.system_monitor = SystemMonitor()
         
         # Core system state
         self.system_status = SystemStatus.UNINITIALIZED
         self.system_id = str(uuid.uuid4())
         self.started_at: Optional[datetime] = None
         
-        # Component registry with hierarchical tracking
-        self.component_registry: Dict[str, ComponentRegistration] = {}
-        self.layer_components: Dict[ComponentLayer, List[str]] = {
-            layer: [] for layer in ComponentLayer
-        }
-        
-        # Core governance components
+        # Central Risk Manager reference (Layer 2 Governance)
         self.central_risk_manager: Optional[Any] = None
         self.risk_manager_id: Optional[str] = None
         
-        # System monitoring
-        self.system_metrics = {
-            'total_components': 0,
-            'operational_components': 0,
-            'failed_components': 0,
-            'system_uptime': 0.0,
-            'total_operations': 0,
-            'failed_operations': 0
-        }
-        
-        # Control mechanisms
+        # System coordination and control
         self.initialization_lock = threading.Lock()
-        self.operation_semaphore = asyncio.Semaphore(self.config.max_concurrent_operations)
-        self.monitoring_task: Optional[asyncio.Task] = None
+        self.operation_semaphore = asyncio.Semaphore(self.config_manager.system_config.max_concurrent_operations)
         
         # Emergency state
         self.emergency_mode = False
@@ -197,7 +104,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         
         # System monitoring enhancements
         self.error_tracker: List[Dict[str, Any]] = []
-        self.performance_metrics: Dict[str, Any] = {}
         self.recovery_actions: List[Dict[str, Any]] = []
         
         # Capital allocation tracking
@@ -208,7 +114,36 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'timestamp': datetime.now().isoformat()
         }
         
-        logger.info("Hierarchical System Orchestrator initialized")
+        logger.info("🚀 Hierarchical System Orchestrator initialized with modular architecture")
+    
+    # ========================================
+    # PROPERTIES FOR BACKWARD COMPATIBILITY
+    # ========================================
+    
+    @property
+    def config(self) -> SystemOrchestrationConfig:
+        """Get system configuration"""
+        return self.config_manager.system_config
+    
+    @property
+    def component_registry(self) -> Dict[str, ComponentRegistration]:
+        """Get component registry"""
+        return self.component_manager.component_registry
+    
+    @property
+    def layer_components(self) -> Dict[ComponentLayer, List[str]]:
+        """Get components by layer"""
+        return self.component_manager.layer_components
+    
+    @property
+    def system_metrics(self) -> Dict[str, Any]:
+        """Get system metrics"""
+        return self.system_monitor.get_system_metrics()
+    
+    @property
+    def performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics"""
+        return self.system_monitor.get_performance_metrics()
     
     async def initialize_system(self) -> bool:
         """
@@ -311,7 +246,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'component_count': len(self.component_registry),
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'emergency_mode': self.emergency_mode,
-            'central_risk_manager_id': self.central_risk_manager_id
+            'central_risk_manager_id': getattr(self, 'risk_manager_id', None)
         }
     
     def register_component(self, name: str, component: Any, 
@@ -319,31 +254,16 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                          authority_level: AuthorityLevel = AuthorityLevel.READ_ONLY,
                          initialization_order: int = 100,
                          reports_to: Optional[str] = None) -> str:
-        """Register component with hierarchical control"""
+        """Register component with hierarchical control - delegates to ComponentManager"""
         
-        try:
-            registration = ComponentRegistration(
-                name=name,
-                layer=layer,
-                authority_level=authority_level,
-                component_instance=component,
-                initialization_order=initialization_order,
-                reports_to=reports_to
-            )
-            
-            # Store registration
-            self.component_registry[registration.component_id] = registration
-            self.layer_components[layer].append(registration.component_id)
-            
-            # Set allowed operations based on authority level
-            registration.allowed_operations = self._get_allowed_operations(authority_level)
-            
-            logger.info(f"📝 Registered {name} (Layer: {layer.value}, Authority: {authority_level.value})")
-            return registration.component_id
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to register component {name}: {e}")
-            return ""
+        return self.component_manager.register_component(
+            name=name,
+            component=component,
+            layer=layer,
+            authority_level=authority_level,
+            initialization_order=initialization_order,
+            reports_to=reports_to
+        )
     
     def register_central_risk_manager(self, risk_manager: Any) -> str:
         """Register the Central Risk Manager as Layer 2 Governance"""
@@ -395,60 +315,11 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             return False
     
     async def _initialize_components_hierarchically(self) -> bool:
-        """Initialize components in hierarchical order"""
+        """Initialize components in hierarchical order - delegates to ComponentManager"""
         
-        try:
-            # Get components sorted by initialization order
-            components_by_order = sorted(
-                self.component_registry.items(),
-                key=lambda x: x[1].initialization_order
-            )
-            
-            initialized_count = 0
-            
-            for component_id, registration in components_by_order:
-                # Skip if already initialized (like Central Risk Manager)
-                if registration.status == "operational":
-                    initialized_count += 1
-                    continue
-                
-                logger.info(f"🔄 Initializing {registration.name}...")
-                
-                try:
-                    registration.update_status("initializing")
-                    
-                    # Initialize component if it implements ISystemComponent
-                    if hasattr(registration.component_instance, 'initialize'):
-                        success = await registration.component_instance.initialize()
-                        
-                        if success:
-                            registration.update_status("initialized")
-                            initialized_count += 1
-                            logger.info(f"✅ {registration.name} initialized")
-                        else:
-                            registration.update_status("failed", "Initialization failed")
-                            logger.error(f"❌ {registration.name} initialization failed")
-                    else:
-                        # Assume non-interface components are ready
-                        registration.update_status("initialized")
-                        initialized_count += 1
-                        logger.info(f"✅ {registration.name} registered (no initialization required)")
-                        
-                except Exception as e:
-                    registration.update_status("failed", str(e))
-                    logger.error(f"❌ {registration.name} initialization error: {e}")
-            
-            total_components = len(self.component_registry)
-            success_rate = initialized_count / total_components if total_components > 0 else 0
-            
-            logger.info(f"Component initialization: {initialized_count}/{total_components} ({success_rate:.1%})")
-            
-            # Require at least 80% success rate
-            return success_rate >= 0.8
-            
-        except Exception as e:
-            logger.error(f"❌ Hierarchical component initialization failed: {e}")
-            return False
+        return await self.component_manager.initialize_components_hierarchically()
+    
+# _initialize_single_component method moved to ComponentManager
     
     async def _establish_control_relationships(self) -> bool:
         """Establish hierarchical control relationships"""
@@ -499,17 +370,17 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             logger.error(f"❌ Failed to establish control relationships: {e}")
             return False
     
-    async def _start_system_monitoring(self):
-        """Start continuous system monitoring"""
+    async def _start_system_monitoring(self) -> None:
+        """Start continuous system monitoring - delegates to SystemMonitor"""
         
         try:
-            self.monitoring_task = asyncio.create_task(self._monitoring_loop())
+            await self.system_monitor.start_monitoring()
             logger.info("📊 System monitoring started")
             
         except Exception as e:
             logger.error(f"❌ Failed to start system monitoring: {e}")
     
-    async def _monitoring_loop(self):
+    async def _monitoring_loop(self) -> None:
         """Continuous system monitoring loop"""
         
         logger.info("📊 System monitoring loop started")
@@ -533,7 +404,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         
         logger.info("📊 System monitoring stopped")
     
-    async def _health_check_components(self):
+    async def _health_check_components(self) -> None:
         """Perform health checks on all components"""
         
         try:
@@ -558,7 +429,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ Health check error: {e}")
     
-    def _update_system_metrics(self):
+    def _update_system_metrics(self) -> None:
         """Update system performance metrics"""
         
         try:
@@ -582,7 +453,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ Metrics update error: {e}")
     
-    async def _check_emergency_conditions(self):
+    async def _check_emergency_conditions(self) -> None:
         """Check for conditions requiring emergency response"""
         
         try:
@@ -604,7 +475,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ Emergency condition check error: {e}")
     
-    async def _initiate_emergency_response(self, reason: str):
+    async def _initiate_emergency_response(self, reason: str) -> None:
         """Initiate emergency response procedures"""
         
         try:
@@ -629,7 +500,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ Emergency response failed: {e}")
     
-    async def _emergency_stop_trading(self):
+    async def _emergency_stop_trading(self) -> None:
         """Emergency stop of all trading operations"""
         
         try:
@@ -769,8 +640,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             self.system_status = SystemStatus.SHUTDOWN
             
             # Stop monitoring
-            if self.monitoring_task:
-                self.monitoring_task.cancel()
+            await self.system_monitor.stop_monitoring()
             
             # Shutdown components in reverse order
             components_by_shutdown_order = sorted(
@@ -2236,7 +2106,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         return self._authorization_audit
     
     @authorization_audit.setter
-    def authorization_audit(self, value: List[Dict[str, Any]]):
+    def authorization_audit(self, value: List[Dict[str, Any]]) -> None:
         """Set authorization audit trail
         
         Args:

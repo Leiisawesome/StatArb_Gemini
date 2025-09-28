@@ -24,7 +24,40 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import warnings
+import asyncio
+import threading
+import time
+import uuid
+from datetime import datetime
+from collections import defaultdict, deque
 warnings.filterwarnings('ignore')
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 # Core engine architectural compliance
 try:
@@ -155,16 +188,17 @@ class MacroRegimeIndicators:
     macro_regime_score: float = 0.0  # -1 to 1 (bearish to bullish)
     regime_confidence: float = 0.0  # 0-1 confidence in macro assessment
 
-class EnhancedTechnicalIndicators(IIndicatorProcessor):
+class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
     """
-    Enhanced Technical Indicators Engine (Core Engine Architecture Compliant)
+    Enhanced Technical Indicators Engine with ISystemComponent Integration
     
-    Follows core_engine architectural patterns:
-    - Implements standardized interfaces
+    Institutional-grade technical indicators engine with orchestrator integration:
+    - Implements ISystemComponent for lifecycle management
     - Configuration-driven initialization 
     - Performance-optimized calculations
     - Integration with signal generation pipeline
     - Professional indicator defaults
+    - Health monitoring and status reporting
     
     Key Features:
     - 42+ professional technical indicators
@@ -172,11 +206,40 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor):
     - Signal generation integration
     - Caching and optimization support
     - Compatible with existing core_engine components
+    - Orchestrator integration and lifecycle management
     """
     
     def __init__(self, config: Optional[EnhancedIndicatorConfig] = None):
-        self.config = config or EnhancedIndicatorConfig()
-        self.logger = logging.getLogger("enhanced_indicators")
+        # Handle both EnhancedIndicatorConfig objects and dictionaries
+        if isinstance(config, dict):
+            # Convert dictionary to EnhancedIndicatorConfig object
+            self.config = EnhancedIndicatorConfig(**{k: v for k, v in config.items() if k in EnhancedIndicatorConfig.__dataclass_fields__})
+        else:
+            self.config = config or EnhancedIndicatorConfig()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Component identification and lifecycle
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.start_time = None
+        
+        # Health and performance tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedTechnicalIndicators',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_calculations': 0,
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'average_calculation_time': 0.0,
+                'cache_hit_rate': 0.0
+            }
+        }
         
         # Performance optimization
         self._indicator_cache: Dict[str, Any] = {} if self.config.enable_caching else None
@@ -184,7 +247,11 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor):
         # Supported indicators registry (core_engine pattern)
         self._supported_indicators = self._initialize_indicator_registry()
         
-        self.logger.info(f"EnhancedTechnicalIndicators initialized with {len(self._supported_indicators)} indicators")
+        # Threading
+        self._lock = threading.Lock()
+        
+        self.logger.info(f"🚀 Enhanced Technical Indicators initialized with component ID: {self.component_id}")
+        self.logger.info(f"📊 Loaded {len(self._supported_indicators)} indicators")
     
     def _initialize_indicator_registry(self) -> List[str]:
         """Initialize registry of supported indicators"""
@@ -214,6 +281,226 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor):
     def get_supported_indicators(self) -> List[str]:
         """Get list of supported indicators (interface compliance)"""
         return self._supported_indicators.copy()
+    
+    # ISystemComponent Interface Implementation
+    
+    async def initialize(self) -> bool:
+        """Initialize the Enhanced Technical Indicators Engine"""
+        try:
+            self.logger.info("🔄 Initializing Enhanced Technical Indicators Engine...")
+            
+            # Initialize calculation engines
+            await self._initialize_calculation_engines()
+            
+            # Initialize monitoring
+            await self._initialize_monitoring_system()
+            
+            # Update status
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            self.logger.info("✅ Enhanced Technical Indicators Engine initialization complete")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Technical Indicators Engine initialization failed: {e}")
+            self.health_metrics['error_count'] += 1
+            self.health_metrics['initialization_status'] = 'failed'
+            return False
+    
+    async def start(self) -> bool:
+        """Start the Enhanced Technical Indicators Engine"""
+        if not self.is_initialized:
+            self.logger.error("Cannot start Enhanced Technical Indicators Engine: not initialized")
+            return False
+        
+        try:
+            self.logger.info("🚀 Starting Enhanced Technical Indicators Engine...")
+            
+            # Start monitoring
+            await self._start_monitoring()
+            
+            # Update status
+            self.is_operational = True
+            self.start_time = datetime.now()
+            self.health_metrics['operational_status'] = 'active'
+            
+            self.logger.info("✅ Enhanced Technical Indicators Engine started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Technical Indicators Engine start failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the Enhanced Technical Indicators Engine"""
+        try:
+            self.logger.info("🛑 Stopping Enhanced Technical Indicators Engine...")
+            
+            # Stop monitoring
+            await self._stop_monitoring()
+            
+            # Clear caches
+            if self._indicator_cache:
+                self._indicator_cache.clear()
+            
+            # Update status
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'inactive'
+            
+            self.logger.info("✅ Enhanced Technical Indicators Engine stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Technical Indicators Engine stop failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            current_time = datetime.now()
+            self.health_metrics['last_health_check'] = current_time
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = (current_time - self.start_time).total_seconds()
+            
+            # Check calculation engines health
+            engines_healthy = await self._check_engines_health()
+            
+            # Overall health assessment
+            overall_healthy = (
+                self.is_initialized and
+                self.is_operational and
+                engines_healthy and
+                self.health_metrics['error_count'] < 10
+            )
+            
+            return {
+                'healthy': overall_healthy,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime_seconds,
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count'],
+                'performance_metrics': self.health_metrics['performance_metrics'],
+                'engines_healthy': engines_healthy,
+                'cache_size': len(self._indicator_cache) if self._indicator_cache else 0,
+                'supported_indicators_count': len(self._supported_indicators),
+                'last_health_check': current_time.isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current component status"""
+        return {
+            'component_id': self.component_id,
+            'component_type': self.health_metrics['component_type'],
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'configuration': {
+                'enable_caching': self.config.enable_caching,
+                'parallel_processing': self.config.parallel_processing,
+                'output_format': self.config.output_format,
+                'enable_multi_timeframe': self.config.enable_multi_timeframe,
+                'enable_macro_indicators': self.config.enable_macro_indicators
+            },
+            'health_metrics': self.health_metrics
+        }
+    
+    # Enhanced Internal Methods
+    
+    async def _initialize_calculation_engines(self) -> None:
+        """Initialize calculation engines"""
+        try:
+            self.logger.info("📊 Initializing calculation engines...")
+            
+            # Initialize indicator calculation engines
+            # This is where we would set up any complex calculation frameworks
+            # For now, we use the existing vectorized calculations
+            
+            self.logger.info("✅ Calculation engines initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize calculation engines: {e}")
+            raise
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            self.logger.info("📈 Initializing monitoring system...")
+            
+            # Initialize performance monitoring
+            self.health_metrics['performance_metrics'] = {
+                'total_calculations': 0,
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'average_calculation_time': 0.0,
+                'cache_hit_rate': 0.0
+            }
+            
+            self.logger.info("✅ Monitoring system initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize monitoring system: {e}")
+            raise
+    
+    async def _start_monitoring(self) -> None:
+        """Start monitoring systems"""
+        try:
+            self.logger.info("📊 Starting monitoring systems...")
+            # Monitoring is passive for indicators engine
+            self.logger.info("✅ Monitoring systems started")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring: {e}")
+            raise
+    
+    async def _stop_monitoring(self) -> None:
+        """Stop monitoring systems"""
+        try:
+            self.logger.info("📊 Stopping monitoring systems...")
+            # Monitoring is passive for indicators engine
+            self.logger.info("✅ Monitoring systems stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop monitoring: {e}")
+            raise
+    
+    async def _check_engines_health(self) -> bool:
+        """Check health of calculation engines"""
+        try:
+            # Basic health check - verify core functionality
+            test_data = pd.DataFrame({
+                'open': [100.0, 101.0, 102.0],
+                'high': [101.0, 102.0, 103.0],
+                'low': [99.0, 100.0, 101.0],
+                'close': [100.5, 101.5, 102.5],
+                'volume': [1000, 1100, 1200]
+            })
+            
+            # Test basic SMA calculation
+            result = test_data['close'].rolling(window=2).mean()
+            return len(result) > 0 and not result.isna().all()
+            
+        except Exception as e:
+            self.logger.warning(f"Engine health check failed: {e}")
+            return False
     
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """

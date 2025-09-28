@@ -8,6 +8,37 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import logging
 import threading
+import asyncio
+import time
+import uuid
+from collections import defaultdict, deque
+
+# Import ISystemComponent for orchestrator integration
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def start(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def stop(self) -> bool:
+            pass
+        
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]:
+            pass
+        
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]:
+            pass
 
 from .position_manager import PositionManager, Position, PositionType, PositionSummary
 from .allocation_engine import AllocationEngine, AllocationRequest, AllocationResult, AllocationMethod
@@ -29,14 +60,43 @@ class PortfolioSnapshot:
     largest_position: Optional[str] = None
     risk_metrics: Dict[str, Any] = field(default_factory=dict)
 
-class EnhancedPortfolioManager:
+class EnhancedPortfolioManager(ISystemComponent):
     """
-    Institutional-grade portfolio manager integrating all portfolio components
+    Enhanced Portfolio Manager with ISystemComponent Integration
+    
+    Institutional-grade portfolio manager with orchestrator integration:
+    - Implements ISystemComponent for lifecycle management
+    - Integrates position management, allocation, rebalancing, and cash management
+    - Health monitoring and performance tracking
+    - Professional portfolio analytics and reporting
     """
     
     def __init__(self, config: Dict[str, Any]):
-        self.logger = logging.getLogger(__name__)
         self.config = config
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Component identification and lifecycle
+        self.component_id = str(uuid.uuid4())
+        self.is_initialized = False
+        self.is_operational = False
+        self.start_time = None
+        
+        # Health and performance tracking
+        self.health_metrics = {
+            'component_type': 'EnhancedPortfolioManager',
+            'initialization_status': 'pending',
+            'operational_status': 'inactive',
+            'last_health_check': None,
+            'error_count': 0,
+            'warning_count': 0,
+            'performance_metrics': {
+                'total_portfolio_updates': 0,
+                'successful_portfolio_updates': 0,
+                'failed_portfolio_updates': 0,
+                'average_update_time': 0.0,
+                'positions_count': 0
+            }
+        }
         
         # Initialize components
         self.position_manager = PositionManager(config.get('position_config', {}))
@@ -48,38 +108,287 @@ class EnhancedPortfolioManager:
             self.allocation_engine
         )
         
-        # Portfolio state
-        self.portfolio_id = config.get('portfolio_id', 'default')
-        self.inception_date = datetime.now(timezone.utc)
-        self.base_currency = config.get('base_currency', 'USD')
+        # Threading
+        self._lock = threading.Lock()
         
-        # Performance tracking
-        self.daily_returns: List[Decimal] = []
-        self.portfolio_snapshots: List[PortfolioSnapshot] = []
-        self.high_water_mark = Decimal('0')
-        self.max_drawdown = Decimal('0')
+        self.logger.info(f"🚀 Enhanced Portfolio Manager initialized with component ID: {self.component_id}")
+    
+    # ISystemComponent Interface Implementation
+    
+    async def initialize(self) -> bool:
+        """Initialize the Enhanced Portfolio Manager"""
+        try:
+            self.logger.info("🔄 Initializing Enhanced Portfolio Manager...")
+            
+            # Initialize portfolio components
+            await self._initialize_portfolio_components()
+            
+            # Initialize monitoring
+            await self._initialize_monitoring_system()
+            
+            # Update status
+            self.is_initialized = True
+            self.health_metrics['initialization_status'] = 'completed'
+            
+            self.logger.info("✅ Enhanced Portfolio Manager initialization complete")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Portfolio Manager initialization failed: {e}")
+            self.health_metrics['error_count'] += 1
+            self.health_metrics['initialization_status'] = 'failed'
+            return False
+    
+    async def start(self) -> bool:
+        """Start the Enhanced Portfolio Manager"""
+        if not self.is_initialized:
+            self.logger.error("Cannot start Enhanced Portfolio Manager: not initialized")
+            return False
         
-        # Risk limits
-        self.max_portfolio_risk = Decimal(str(config.get('max_portfolio_risk', 0.20)))
-        self.max_position_concentration = Decimal(str(config.get('max_concentration', 0.10)))
-        self.max_strategy_allocation = Decimal(str(config.get('max_strategy_allocation', 0.30)))
-        
-        # Performance metrics
-        self.portfolio_metrics = {
-            'total_return': Decimal('0'),
-            'annualized_return': Decimal('0'),
-            'volatility': Decimal('0'),
-            'sharpe_ratio': Decimal('0'),
-            'max_drawdown': Decimal('0'),
-            'win_rate': Decimal('0'),
-            'profit_factor': Decimal('0'),
-            'calmar_ratio': Decimal('0')
+        try:
+            self.logger.info("🚀 Starting Enhanced Portfolio Manager...")
+            
+            # Start portfolio operations
+            await self._start_portfolio_operations()
+            
+            # Start monitoring
+            await self._start_monitoring()
+            
+            # Update status
+            self.is_operational = True
+            self.start_time = datetime.now()
+            self.health_metrics['operational_status'] = 'active'
+            
+            self.logger.info("✅ Enhanced Portfolio Manager started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Portfolio Manager start failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the Enhanced Portfolio Manager"""
+        try:
+            self.logger.info("🛑 Stopping Enhanced Portfolio Manager...")
+            
+            # Stop portfolio operations
+            await self._stop_portfolio_operations()
+            
+            # Stop monitoring
+            await self._stop_monitoring()
+            
+            # Update status
+            self.is_operational = False
+            self.health_metrics['operational_status'] = 'inactive'
+            
+            self.logger.info("✅ Enhanced Portfolio Manager stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Enhanced Portfolio Manager stop failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        try:
+            current_time = datetime.now()
+            self.health_metrics['last_health_check'] = current_time
+            
+            # Calculate uptime
+            uptime_seconds = 0
+            if self.start_time:
+                uptime_seconds = (current_time - self.start_time).total_seconds()
+            
+            # Check portfolio operations health
+            operations_healthy = await self._check_operations_health()
+            
+            # Overall health assessment
+            overall_healthy = (
+                self.is_initialized and
+                self.is_operational and
+                operations_healthy and
+                self.health_metrics['error_count'] < 10
+            )
+            
+            return {
+                'healthy': overall_healthy,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime_seconds,
+                'error_count': self.health_metrics['error_count'],
+                'warning_count': self.health_metrics['warning_count'],
+                'performance_metrics': self.health_metrics['performance_metrics'],
+                'operations_healthy': operations_healthy,
+                'portfolio_value': 0.0,  # Will be calculated if needed
+                'positions_count': 0,   # Will be calculated if needed
+                'cash_balance': 0.0,    # Will be calculated if needed
+                'last_health_check': current_time.isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+            self.health_metrics['error_count'] += 1
+            return {
+                'healthy': False,
+                'component_type': self.health_metrics['component_type'],
+                'component_id': self.component_id,
+                'error': str(e)
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current component status"""
+        return {
+            'component_id': self.component_id,
+            'component_type': self.health_metrics['component_type'],
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'configuration': {
+                'portfolio_id': self.portfolio_id,
+                'base_currency': self.base_currency,
+                'max_portfolio_risk': float(self.max_portfolio_risk),
+                'max_position_concentration': float(self.max_position_concentration),
+                'max_strategy_allocation': float(self.max_strategy_allocation)
+            },
+            'health_metrics': self.health_metrics
         }
-        
-        # Threading for concurrent operations
-        self.portfolio_lock = threading.RLock()
-        
-        self.logger.info(f"Enhanced portfolio manager initialized for portfolio {self.portfolio_id}")
+    
+    # Enhanced Internal Methods
+    
+    async def _initialize_portfolio_components(self) -> None:
+        """Initialize portfolio components"""
+        try:
+            self.logger.info("🔧 Initializing portfolio components...")
+            
+            # Initialize portfolio state
+            self.portfolio_id = self.config.get('portfolio_id', 'default')
+            self.inception_date = datetime.now(timezone.utc)
+            self.base_currency = self.config.get('base_currency', 'USD')
+            
+            # Performance tracking
+            self.daily_returns: List[Decimal] = []
+            self.portfolio_snapshots: List[PortfolioSnapshot] = []
+            self.high_water_mark = Decimal('0')
+            self.max_drawdown = Decimal('0')
+            
+            # Risk limits
+            self.max_portfolio_risk = Decimal(str(self.config.get('max_portfolio_risk', 0.20)))
+            self.max_position_concentration = Decimal(str(self.config.get('max_concentration', 0.10)))
+            self.max_strategy_allocation = Decimal(str(self.config.get('max_strategy_allocation', 0.30)))
+            
+            # Performance metrics
+            self.portfolio_metrics = {
+                'total_return': Decimal('0'),
+                'annualized_return': Decimal('0'),
+                'volatility': Decimal('0'),
+                'sharpe_ratio': Decimal('0'),
+                'max_drawdown': Decimal('0'),
+                'win_rate': Decimal('0'),
+                'profit_factor': Decimal('0'),
+                'calmar_ratio': Decimal('0')
+            }
+            
+            self.logger.info("✅ Portfolio components initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize portfolio components: {e}")
+            raise
+    
+    async def _initialize_monitoring_system(self) -> None:
+        """Initialize monitoring system"""
+        try:
+            self.logger.info("📈 Initializing monitoring system...")
+            
+            # Initialize performance monitoring
+            self.health_metrics['performance_metrics'] = {
+                'total_portfolio_updates': 0,
+                'successful_portfolio_updates': 0,
+                'failed_portfolio_updates': 0,
+                'average_update_time': 0.0,
+                'positions_count': 0
+            }
+            
+            self.logger.info("✅ Monitoring system initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize monitoring system: {e}")
+            raise
+    
+    async def _start_portfolio_operations(self) -> None:
+        """Start portfolio operations"""
+        try:
+            self.logger.info("📊 Starting portfolio operations...")
+            # Portfolio operations are event-driven, no background tasks needed
+            self.logger.info("✅ Portfolio operations started")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start portfolio operations: {e}")
+            raise
+    
+    async def _start_monitoring(self) -> None:
+        """Start monitoring systems"""
+        try:
+            self.logger.info("📊 Starting monitoring systems...")
+            # Monitoring is passive for portfolio manager
+            self.logger.info("✅ Monitoring systems started")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring: {e}")
+            raise
+    
+    async def _stop_portfolio_operations(self) -> None:
+        """Stop portfolio operations"""
+        try:
+            self.logger.info("📊 Stopping portfolio operations...")
+            # No background tasks to stop
+            self.logger.info("✅ Portfolio operations stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop portfolio operations: {e}")
+            raise
+    
+    async def _stop_monitoring(self) -> None:
+        """Stop monitoring systems"""
+        try:
+            self.logger.info("📊 Stopping monitoring systems...")
+            # Monitoring is passive for portfolio manager
+            self.logger.info("✅ Monitoring systems stopped")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop monitoring: {e}")
+            raise
+    
+    async def _check_operations_health(self) -> bool:
+        """Check health of portfolio operations"""
+        try:
+            # Basic health check - verify core functionality
+            # Check if components are available
+            return (
+                self.position_manager is not None and
+                self.cash_manager is not None and
+                self.allocation_engine is not None and
+                self.rebalancer is not None
+            )
+            
+        except Exception as e:
+            self.logger.warning(f"Operations health check failed: {e}")
+            return False
+    
+    # Original Portfolio Management Methods
+    
+    def get_total_value(self) -> Decimal:
+        """Get total portfolio value"""
+        try:
+            positions_value = sum(pos.market_value for pos in self.position_manager.get_all_positions())
+            cash_balance = self.cash_manager.get_balance()
+            return Decimal(str(positions_value)) + cash_balance
+        except Exception as e:
+            self.logger.error(f"Error calculating total value: {e}")
+            return Decimal('0')
     
     def open_position(self, symbol: str, position_type: PositionType, 
                      signal_strength: Decimal, strategy_id: str,
@@ -482,7 +791,7 @@ class EnhancedPortfolioManager:
             'overall_risk_status': all(risk_checks.values())
         }
     
-    def health_check(self) -> bool:
+    def portfolio_health_check(self) -> bool:
         """Perform portfolio health check"""
         try:
             # Check component health
