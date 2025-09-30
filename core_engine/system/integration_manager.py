@@ -74,6 +74,12 @@ try:
     from .unified_execution_engine import UnifiedExecutionEngine
     from ..data.manager import ClickHouseDataManager
     
+    # Production monitoring components
+    from .production_monitoring import (
+        ProductionHealthMonitor, GracefulDegradationManager,
+        AuditTrailManager, DisasterRecoveryManager
+    )
+    
     # Phase 2: Analytics & Strategy Layer
     from ..analytics.manager_enhanced import EnhancedAnalyticsManager
     from ..analytics.metrics_calculator import EnhancedMetricsCalculator
@@ -150,9 +156,18 @@ class SystemConfiguration:
     trading_engine_config: Dict[str, Any] = field(default_factory=dict)
     portfolio_manager_config: Dict[str, Any] = field(default_factory=dict)
     
+    # Production Monitoring
+    production_health_monitor_config: Dict[str, Any] = field(default_factory=dict)
+    graceful_degradation_config: Dict[str, Any] = field(default_factory=dict)
+    audit_trail_config: Dict[str, Any] = field(default_factory=dict)
+    disaster_recovery_config: Dict[str, Any] = field(default_factory=dict)
+    
     # System Settings
     enable_performance_monitoring: bool = True
     enable_health_monitoring: bool = True
+    enable_production_monitoring: bool = True
+    enable_audit_trail: bool = True
+    enable_disaster_recovery: bool = True
     health_check_interval: int = 30  # seconds
     performance_report_interval: int = 300  # seconds
     max_initialization_time: int = 120  # seconds
@@ -493,6 +508,7 @@ class SystemIntegrationManager(ISystemComponent):
             await self._initialize_phase_3_components()  # Processing Pipeline
             await self._initialize_phase_4_components()  # Data & Risk Management
             await self._initialize_phase_5_components()  # Trading & Execution
+            await self._initialize_phase_6_components()  # Production Monitoring
             
             self.system_metrics.total_components = len(self.components)
             
@@ -730,6 +746,60 @@ class SystemIntegrationManager(ISystemComponent):
             
         except Exception as e:
             self.logger.error(f"Failed to initialize Phase 5 components: {e}")
+            # Don't raise - continue with other phases
+    
+    async def _initialize_phase_6_components(self) -> None:
+        """Initialize Phase 6: Production Monitoring Components"""
+        try:
+            self.logger.info("📊 Initializing Phase 6: Production Monitoring Components...")
+            
+            # Production Health Monitor
+            if self.config.enable_production_monitoring:
+                try:
+                    health_monitor = ProductionHealthMonitor(self.config.production_health_monitor_config)
+                    await health_monitor.initialize()
+                    self.components['production_health_monitor'] = health_monitor
+                    self.component_status['production_health_monitor'] = ComponentStatus.INITIALIZED
+                    self.logger.info("✅ Production Health Monitor initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Production Health Monitor: {e}")
+            
+            # Graceful Degradation Manager
+            try:
+                degradation_manager = GracefulDegradationManager(self.config.graceful_degradation_config)
+                await degradation_manager.initialize()
+                self.components['graceful_degradation_manager'] = degradation_manager
+                self.component_status['graceful_degradation_manager'] = ComponentStatus.INITIALIZED
+                self.logger.info("✅ Graceful Degradation Manager initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Graceful Degradation Manager: {e}")
+            
+            # Audit Trail Manager
+            if self.config.enable_audit_trail:
+                try:
+                    audit_manager = AuditTrailManager(self.config.audit_trail_config)
+                    await audit_manager.initialize()
+                    self.components['audit_trail_manager'] = audit_manager
+                    self.component_status['audit_trail_manager'] = ComponentStatus.INITIALIZED
+                    self.logger.info("✅ Audit Trail Manager initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Audit Trail Manager: {e}")
+            
+            # Disaster Recovery Manager
+            if self.config.enable_disaster_recovery:
+                try:
+                    disaster_recovery = DisasterRecoveryManager(self.config.disaster_recovery_config)
+                    await disaster_recovery.initialize()
+                    self.components['disaster_recovery_manager'] = disaster_recovery
+                    self.component_status['disaster_recovery_manager'] = ComponentStatus.INITIALIZED
+                    self.logger.info("✅ Disaster Recovery Manager initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Disaster Recovery Manager: {e}")
+            
+            self.logger.info("✅ Phase 6 components initialized")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Phase 6 components: {e}")
             # Don't raise - continue with other phases
     
     async def _setup_component_dependencies(self) -> None:
@@ -1121,8 +1191,36 @@ def create_production_config() -> SystemConfiguration:
         # System Settings
         enable_performance_monitoring=True,
         enable_health_monitoring=True,
+        enable_production_monitoring=True,
+        enable_audit_trail=True,
+        enable_disaster_recovery=True,
         health_check_interval=30,
-        performance_report_interval=300
+        performance_report_interval=300,
+        
+        # Production Monitoring Configuration
+        production_health_monitor_config={
+            'cpu_threshold': 80.0,
+            'memory_threshold': 85.0,
+            'disk_threshold': 90.0,
+            'monitoring_interval': 30
+        },
+        graceful_degradation_config={
+            'enable_auto_degradation': True,
+            'degradation_thresholds': {
+                'critical_components': 2,
+                'warning_components': 3
+            }
+        },
+        audit_trail_config={
+            'storage_backend': 'file',
+            'audit_file_path': './production_audit.jsonl',
+            'buffer_size': 1000
+        },
+        disaster_recovery_config={
+            'backup_locations': ['primary', 'secondary'],
+            'rto_minutes': 15,
+            'rpo_minutes': 5
+        }
     )
 
 

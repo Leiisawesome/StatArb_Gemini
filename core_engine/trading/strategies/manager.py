@@ -51,6 +51,12 @@ from .implementations.statistical_arbitrage import StatisticalArbitrageConfig
 from .base_strategy_enhanced import EnhancedBaseStrategy
 from .strategy_registry import StrategyRegistry
 
+# Import multi-strategy coordination components
+from .multi_strategy_coordinator import (
+    MultiStrategySignalAggregator, SignalConflictResolver, 
+    EnhancedSignal, StrategyRegistration
+)
+
 # Import ISystemComponent for orchestrator integration
 try:
     from ...system.interfaces import ISystemComponent
@@ -137,6 +143,14 @@ class StrategyManagerConfig:
     enable_enhanced_strategies: bool = True  # Enable enhanced strategy implementations
     auto_discover_strategies: bool = True    # Auto-discover strategies on startup
     strategy_registry_path: str = "strategy_registry.json"  # Registry file path
+    
+    # Multi-strategy coordination settings
+    enable_multi_strategy_coordination: bool = True
+    enable_signal_aggregation: bool = True
+    enable_conflict_resolution: bool = True
+    conflict_resolution_method: str = "confidence_weighted"
+    enable_dynamic_weighting: bool = True
+    enable_strategy_attribution: bool = True
 
 
 class EnhancedStrategyFactory:
@@ -290,6 +304,12 @@ class StrategyManager(ISystemComponent):
         self.strategy_allocations: Dict[str, StrategyAllocation] = {}
         self.strategy_performance: Dict[str, Dict[str, Any]] = {}
         
+        # Multi-strategy coordination components
+        self.signal_aggregator: Optional[MultiStrategySignalAggregator] = None
+        self.conflict_resolver: Optional[SignalConflictResolver] = None
+        self.strategy_registrations: Dict[str, StrategyRegistration] = {}
+        self.enable_multi_strategy = self.config.enable_multi_strategy_coordination
+        
         # Signal management
         self.pending_signals: Dict[str, TradingSignal] = {}
         self.signal_history: List[TradingSignal] = []
@@ -410,8 +430,11 @@ class StrategyManager(ISystemComponent):
             # Initialize strategy performance tracking
             await self._initialize_performance_tracking()
             
+            # Initialize multi-strategy coordination if enabled
+            if self.enable_multi_strategy:
+                await self._initialize_multi_strategy_coordination()
+            
             self.is_initialized = True
-            logger.info("✅ Strategy Manager (WHAT) initialization complete")
             logger.info("✅ Enhanced Strategy Manager (WHAT) initialization complete")
             logger.info(f"📊 Active enhanced strategies: {len(self.active_strategies)}")
             return True
@@ -2143,3 +2166,157 @@ class StrategyManager(ISystemComponent):
             
         except Exception:
             return []
+    
+    # ========================================
+    # MULTI-STRATEGY COORDINATION METHODS
+    # ========================================
+    
+    async def _initialize_multi_strategy_coordination(self) -> None:
+        """Initialize multi-strategy coordination components"""
+        try:
+            logger.info("🎯 Initializing multi-strategy coordination...")
+            
+            # Initialize signal aggregator
+            if self.config.enable_signal_aggregation:
+                aggregator_config = {
+                    'max_concurrent_strategies': self.config.max_concurrent_strategies,
+                    'min_confidence_threshold': self.config.min_confidence_threshold,
+                    'enable_dynamic_weighting': self.config.enable_dynamic_weighting
+                }
+                self.signal_aggregator = MultiStrategySignalAggregator(aggregator_config)
+                await self.signal_aggregator.initialize()
+                await self.signal_aggregator.start()
+                logger.info("✅ Signal aggregator initialized")
+            
+            # Initialize conflict resolver
+            if self.config.enable_conflict_resolution:
+                resolver_config = {
+                    'resolution_method': self.config.conflict_resolution_method,
+                    'conflict_threshold': 0.1
+                }
+                self.conflict_resolver = SignalConflictResolver(resolver_config)
+                await self.conflict_resolver.initialize()
+                await self.conflict_resolver.start()
+                logger.info("✅ Conflict resolver initialized")
+            
+            logger.info("✅ Multi-strategy coordination initialized")
+            
+        except Exception as e:
+            logger.error(f"❌ Multi-strategy coordination initialization failed: {e}")
+            raise
+    
+    async def register_enhanced_strategy(self, strategy_type: StrategyType, 
+                                       config: Dict[str, Any]) -> bool:
+        """Register an enhanced strategy for multi-strategy coordination"""
+        try:
+            strategy_id = config.get('name', f"{strategy_type.value}_{uuid.uuid4().hex[:8]}")
+            
+            # Create strategy instance using factory
+            strategy_instance = self.strategy_factory.create_strategy(strategy_type, config)
+            if not strategy_instance:
+                logger.error(f"Failed to create strategy instance: {strategy_type}")
+                return False
+            
+            # Initialize strategy
+            await strategy_instance.initialize()
+            
+            # Store in active strategies
+            self.active_strategies[strategy_id] = strategy_instance
+            
+            # Create strategy allocation
+            allocation = StrategyAllocation(
+                strategy_name=strategy_id,
+                strategy_type=strategy_type,
+                allocation_pct=config.get('allocation_pct', 0.1),
+                max_positions=config.get('max_positions', 5),
+                risk_limit=config.get('risk_limit', 0.05)
+            )
+            self.strategy_allocations[strategy_id] = allocation
+            
+            # Register with signal aggregator if available
+            if self.signal_aggregator:
+                await self.signal_aggregator.register_strategy(
+                    strategy_id=strategy_id,
+                    strategy_instance=strategy_instance,
+                    strategy_type=strategy_type,
+                    weight=config.get('weight', 1.0),
+                    priority=config.get('priority', 1),
+                    allocation_pct=allocation.allocation_pct,
+                    max_positions=allocation.max_positions,
+                    risk_limit=allocation.risk_limit
+                )
+            
+            logger.info(f"✅ Enhanced strategy registered: {strategy_id} ({strategy_type.value})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced strategy registration failed: {e}")
+            return False
+    
+    async def collect_all_signals(self, market_data) -> Dict[str, List[EnhancedSignal]]:
+        """Collect signals from all registered strategies"""
+        if not self.signal_aggregator:
+            logger.warning("Signal aggregator not available")
+            return {}
+        
+        try:
+            return await self.signal_aggregator.collect_all_signals(market_data)
+        except Exception as e:
+            logger.error(f"Signal collection failed: {e}")
+            return {}
+    
+    async def aggregate_strategy_signals(self, strategy_signals: Dict[str, List[EnhancedSignal]]) -> List[EnhancedSignal]:
+        """Aggregate signals from multiple strategies with conflict resolution"""
+        if not self.signal_aggregator:
+            logger.warning("Signal aggregator not available")
+            return []
+        
+        try:
+            return await self.signal_aggregator.aggregate_strategy_signals(strategy_signals)
+        except Exception as e:
+            logger.error(f"Signal aggregation failed: {e}")
+            return []
+    
+    async def generate_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
+        """Generate signals using multi-strategy coordination"""
+        try:
+            if not self.enable_multi_strategy or not self.signal_aggregator:
+                # Fallback to traditional signal generation
+                return await self._generate_traditional_signals(symbols)
+            
+            # Get market data (placeholder - would get from data manager)
+            market_data = await self._get_market_data(symbols)
+            
+            # Collect signals from all strategies
+            strategy_signals = await self.collect_all_signals(market_data)
+            
+            # Aggregate and resolve conflicts
+            aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)
+            
+            logger.info(f"📊 Generated {len(aggregated_signals)} aggregated signals from {len(strategy_signals)} strategies")
+            return aggregated_signals
+            
+        except Exception as e:
+            logger.error(f"Multi-strategy signal generation failed: {e}")
+            return []
+    
+    async def _generate_traditional_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
+        """Fallback traditional signal generation"""
+        # Placeholder - would implement traditional signal generation
+        return []
+    
+    async def _get_market_data(self, symbols: List[str]):
+        """Get market data for signal generation"""
+        # Placeholder - would get data from data manager
+        import pandas as pd
+        return pd.DataFrame()  # Empty DataFrame for now
+    
+    def get_multi_strategy_status(self) -> Dict[str, Any]:
+        """Get multi-strategy coordination status"""
+        return {
+            'multi_strategy_enabled': self.enable_multi_strategy,
+            'signal_aggregator_status': self.signal_aggregator.get_status() if self.signal_aggregator else None,
+            'conflict_resolver_status': self.conflict_resolver.get_status() if self.conflict_resolver else None,
+            'registered_strategies': len(self.strategy_registrations),
+            'active_strategies': len(self.active_strategies)
+        }
