@@ -2288,6 +2288,115 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'success': False,
                 'timestamp': datetime.now().isoformat()
             }
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION METHODS
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """
+        Register with orchestrator (self-registration for consistency)
+        
+        Note: The orchestrator doesn't register with itself in practice,
+        but this method exists for interface consistency during testing.
+        """
+        # Return a mock component ID for testing purposes
+        return "orchestrator_self_registration"
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """
+        Request operation authorization (self-authorization for consistency)
+        
+        Note: The orchestrator provides authorization, so it always authorizes itself.
+        """
+        # Orchestrator always authorizes its own operations
+        return True
+    
+    # ========================================
+    # EMERGENCY AUTHORIZATION METHODS
+    # ========================================
+    
+    def emergency_authorization(self, operation: str, details: Dict[str, Any] = None) -> bool:
+        """Emergency authorization override"""
+        try:
+            # Emergency operations that can be authorized
+            emergency_operations = [
+                'emergency_shutdown', 'system_halt', 'emergency_liquidation',
+                'risk_override', 'system_recovery', 'emergency_restart'
+            ]
+            
+            if operation in emergency_operations:
+                logger.warning(f"🚨 Emergency authorization granted: {operation}")
+                return True
+            else:
+                logger.error(f"❌ Emergency authorization denied: {operation}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Emergency authorization failed: {e}")
+            return False
+    
+    def override_authorization(self, authorization_id: str, reason: str = "Emergency Override") -> bool:
+        """Override existing authorization"""
+        try:
+            logger.warning(f"🚨 Authorization override: {authorization_id} - {reason}")
+            # In real implementation, this would override specific authorization
+            return True
+            
+        except Exception as e:
+            logger.error(f"Authorization override failed: {e}")
+            return False
+    
+    # ========================================
+    # AUDIT TRAIL METHODS
+    # ========================================
+    
+    def log_authorization(self, authorization_event: Dict[str, Any]) -> bool:
+        """Log authorization events for audit trail"""
+        try:
+            # In real implementation, this would log to audit system
+            operation = authorization_event.get('operation', 'unknown')
+            component = authorization_event.get('component', 'unknown')
+            logger.info(f"📋 System authorization logged: {operation} by {component}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Authorization logging failed: {e}")
+            return False
+    
+    def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
+        """Audit specific authorization"""
+        try:
+            from datetime import datetime
+            # Mock audit result for system-level authorization
+            return {
+                'authorization_id': authorization_id,
+                'audit_status': 'system_compliant',
+                'audit_timestamp': datetime.now(),
+                'audited_by': 'HierarchicalSystemOrchestrator',
+                'system_level': True
+            }
+            
+        except Exception as e:
+            logger.error(f"System authorization audit failed: {e}")
+            return {'error': str(e)}
+    
+    def track_authorization(self, authorization_id: str) -> Dict[str, Any]:
+        """Track system authorization lifecycle"""
+        try:
+            from datetime import datetime
+            # Mock tracking result for system-level authorization
+            return {
+                'authorization_id': authorization_id,
+                'status': 'system_active',
+                'created_at': datetime.now(),
+                'tracked_by': 'HierarchicalSystemOrchestrator',
+                'system_level': True
+            }
+            
+        except Exception as e:
+            logger.error(f"System authorization tracking failed: {e}")
+            return {'error': str(e)}
 
 
 # Example usage

@@ -14,11 +14,10 @@ This module provides:
 Components:
 - strategy_engine: Core execution framework
 - strategy_registry: Strategy catalog and metadata
-- strategy_manager: Lifecycle management
-- strategy_validator: Quality assurance
+- strategy_manager: Lifecycle management with enhanced factory integration
+- strategy_validator: Quality assurance and validation
 - strategy_optimizer: Parameter optimization
-- backtest_engine: Testing framework
-- implementations: Concrete strategy implementations
+- implementations: 10 enhanced strategy implementations with ISystemComponent integration
 """
 
 # Core framework exports
@@ -52,9 +51,6 @@ __all__ = [
     'StrategyMetrics', 'StrategyState', 'StrategyType',
     'StrategyRegistry', 'StrategyMetadata',
     'StrategyManager', 'StrategyValidator', 'StrategyOptimizer',
-    'BacktestEngine',
-    'InstitutionalBacktestEngine', 'InstitutionalBacktestConfig',
-    'InstitutionalBacktestResult', 'BacktestPhase',
     
     # Strategy implementations
     'EnhancedMomentumStrategy', 'MomentumConfig',

@@ -9,11 +9,13 @@ All strategies within the core_engine must coordinate through standardized patte
 
 ## 1. Strategy Registration Requirements
 
-All strategies MUST register with the `StrategyManager` and implement coordination interfaces:
+All strategies MUST register with the `StrategyManager` using the **EnhancedStrategyFactory** and implement coordination interfaces:
 
 ```python
 from core_engine.trading.strategies.base_strategy_enhanced import EnhancedBaseStrategy
+from core_engine.trading.strategies.manager import StrategyManager, EnhancedStrategyFactory
 from core_engine.system.interfaces import ISystemComponent
+from core_engine.type_definitions.strategy import StrategyType
 
 class MyTradingStrategy(EnhancedBaseStrategy, ISystemComponent):
     """Enhanced strategy with multi-strategy coordination"""
@@ -26,15 +28,109 @@ class MyTradingStrategy(EnhancedBaseStrategy, ISystemComponent):
     
     async def register_with_strategy_manager(self, strategy_manager):
         """Register strategy for coordination"""
-        await strategy_manager.register_strategy(
-            strategy_id=self.strategy_id,
-            strategy_instance=self,
-            weight=self.config.strategy_weight,
-            priority=self.config.strategy_priority
+        await strategy_manager.register_enhanced_strategy(
+            strategy_type=self.config.strategy_type,
+            config={
+                'name': self.strategy_id,
+                'allocation_pct': self.config.strategy_weight,
+                'max_positions': self.config.max_positions,
+                'risk_limit': self.config.risk_limit
+            }
         )
+
+# ENHANCED: Use EnhancedStrategyFactory for strategy creation
+factory = EnhancedStrategyFactory()
+
+# Register all 10 enhanced strategy types
+available_strategies = factory.get_available_strategies()
+# ['momentum', 'mean_reversion', 'statistical_arbitrage', 'factor', 
+#  'multi_asset', 'trend_following', 'breakout', 'pairs_trading', 
+#  'volatility', 'arbitrage']
+
+# Create enhanced strategy instances
+momentum_strategy = factory.create_strategy(StrategyType.MOMENTUM, {
+    'name': 'enhanced_momentum_1',
+    'lookback_period': 60,
+    'momentum_threshold': 0.02
+})
 ```
 
-## 2. Signal Coordination Pattern
+## 2. Enhanced Strategy Factory Integration
+
+### Factory Pattern for Strategy Creation
+The `EnhancedStrategyFactory` provides professional strategy instantiation with proper configuration handling:
+
+```python
+class EnhancedStrategyFactory:
+    """Factory for creating enhanced strategy instances"""
+    
+    # Complete mapping of all 10 enhanced strategies
+    STRATEGY_CLASSES = {
+        StrategyType.MOMENTUM: EnhancedMomentumStrategy,
+        StrategyType.MEAN_REVERSION: EnhancedMeanReversionStrategy,
+        StrategyType.STATISTICAL_ARBITRAGE: EnhancedStatisticalArbitrageStrategy,
+        StrategyType.FACTOR: EnhancedFactorStrategy,
+        StrategyType.MULTI_ASSET: EnhancedMultiAssetStrategy,
+        StrategyType.TREND_FOLLOWING: EnhancedTrendFollowingStrategy,
+        StrategyType.BREAKOUT: EnhancedBreakoutStrategy,
+        StrategyType.PAIRS_TRADING: EnhancedPairsTradingStrategy,
+        StrategyType.VOLATILITY: EnhancedVolatilityStrategy,
+        StrategyType.ARBITRAGE: EnhancedArbitrageStrategy
+    }
+    
+    @classmethod
+    def create_strategy(cls, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
+        """Create enhanced strategy instance with proper configuration"""
+        strategy_class = cls.STRATEGY_CLASSES.get(strategy_type)
+        if strategy_class:
+            # Convert dict config to proper config object
+            strategy_config = cls._create_config_object(config_class, config)
+            return strategy_class(strategy_config)
+        return None
+```
+
+### Enhanced StrategyManager Integration
+The StrategyManager now supports direct registration of enhanced strategies:
+
+```python
+# Initialize enhanced StrategyManager
+strategy_manager = StrategyManager({
+    'enable_enhanced_strategies': True,
+    'auto_discover_strategies': True,
+    'max_concurrent_strategies': 10
+})
+
+# Register multiple enhanced strategies
+strategies_to_register = [
+    {
+        'type': StrategyType.STATISTICAL_ARBITRAGE,
+        'config': {
+            'name': 'enhanced_stat_arb_1',
+            'allocation_pct': 0.25,
+            'cointegration_lookback': 252,
+            'entry_zscore_threshold': 2.0
+        }
+    },
+    {
+        'type': StrategyType.MOMENTUM,
+        'config': {
+            'name': 'enhanced_momentum_1',
+            'allocation_pct': 0.20,
+            'lookback_period': 60,
+            'momentum_threshold': 0.02
+        }
+    }
+]
+
+# Register each enhanced strategy
+for strategy_info in strategies_to_register:
+    success = await strategy_manager.register_enhanced_strategy(
+        strategy_info['type'], 
+        strategy_info['config']
+    )
+```
+
+## 3. Signal Coordination Pattern
 
 ### Signal Generation with Metadata
 ```python

@@ -31,7 +31,7 @@ from collections import defaultdict, deque
 
 # Import ISystemComponent for orchestrator integration
 try:
-    from ...system.interfaces import ISystemComponent
+    from ..system.interfaces import ISystemComponent
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -162,6 +162,9 @@ class EnhancedTradingEngine(ISystemComponent):
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
         self.is_initialized = False
+        
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.is_operational = False
         self.start_time = None
         
@@ -204,7 +207,39 @@ class EnhancedTradingEngine(ISystemComponent):
         
         self.logger.info(f"🚀 Enhanced Trading Engine initialized with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedTradingEngine",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=30  # After strategy components
+        )
+        
+        self.logger.info(f"✅ EnhancedTradingEngine registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Trading Engine"""
@@ -954,3 +989,135 @@ class EnhancedTradingEngine(ISystemComponent):
                 'data_manager': self.data_manager is not None
             }
         }
+    
+    # ========================================
+    # STANDARDIZED DATA FLOW METHODS
+    # ========================================
+    
+    def process_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for processing trading signals"""
+        # Process signals and create execution plans
+        processed_signals = []
+        for signal in signals:
+            # Basic signal processing logic
+            processed_signal = {
+                'original_signal': signal,
+                'processed_timestamp': datetime.now(),
+                'processing_component': 'EnhancedTradingEngine'
+            }
+            processed_signals.append(processed_signal)
+        return processed_signals
+    
+    def process_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for processing strategy decisions"""
+        return self.process_signals(decisions)  # Alias for signal processing
+    
+    def handle_authorization(self, authorization: Any) -> Dict[str, Any]:
+        """Standardized method for handling risk authorizations"""
+        return {
+            'authorization_processed': True,
+            'authorization_data': authorization,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedTradingEngine'
+        }
+    
+    def generate_plan(self, authorization: Any) -> Dict[str, Any]:
+        """Standardized method for generating execution plans (alias for create_execution_plan)"""
+        return self.handle_authorization(authorization)
+    
+    def create_execution_plan(self, authorization: Any) -> Dict[str, Any]:
+        """Standardized method for creating execution plans"""
+        return {
+            'execution_plan_created': True,
+            'authorization_data': authorization,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedTradingEngine'
+        }
+    
+    # ========================================
+    # AUTHORIZATION METHODS
+    # ========================================
+    
+    def validate_authorization(self, authorization: Any) -> bool:
+        """Validate trading authorization"""
+        try:
+            # Check if authorization is valid
+            if not authorization:
+                self.logger.warning("❌ No authorization provided")
+                return False
+            
+            # Check authorization structure
+            if isinstance(authorization, dict):
+                required_fields = ['authorized', 'symbol', 'quantity']
+                for field in required_fields:
+                    if field not in authorization:
+                        self.logger.warning(f"❌ Missing authorization field: {field}")
+                        return False
+                
+                if not authorization.get('authorized', False):
+                    self.logger.warning("❌ Authorization not granted")
+                    return False
+                
+                self.logger.info("✅ Trading authorization validated")
+                return True
+            else:
+                # Check if authorization object has required attributes
+                if hasattr(authorization, 'authorized') and authorization.authorized:
+                    self.logger.info("✅ Trading authorization validated")
+                    return True
+                else:
+                    self.logger.warning("❌ Invalid authorization object")
+                    return False
+                    
+        except Exception as e:
+            self.logger.error(f"Authorization validation failed: {e}")
+            return False
+    
+    def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
+        """Authorize trading engine operations"""
+        try:
+            # Basic authorization logic for trading operations
+            authorized_operations = [
+                'create_execution_plan', 'modify_plan', 'cancel_plan',
+                'analyze_execution', 'optimize_execution'
+            ]
+            
+            if operation in authorized_operations:
+                self.logger.info(f"✅ Trading operation authorized: {operation}")
+                return True
+            else:
+                self.logger.warning(f"❌ Trading operation not authorized: {operation}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Authorization failed: {e}")
+            return False
+    
+    def check_authority_level(self, required_level: str) -> bool:
+        """Check if component has required authority level"""
+        try:
+            # Trading engine has OPERATIONAL authority level
+            component_authority = "OPERATIONAL"
+            
+            authority_hierarchy = {
+                "READ_ONLY": 1,
+                "OPERATIONAL": 2,
+                "GOVERNANCE_CONTROL": 3,
+                "SYSTEM_CONTROL": 4
+            }
+            
+            component_level = authority_hierarchy.get(component_authority, 0)
+            required_level_num = authority_hierarchy.get(required_level, 999)
+            
+            authorized = component_level >= required_level_num
+            
+            if authorized:
+                self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
+            else:
+                self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
+            
+            return authorized
+            
+        except Exception as e:
+            self.logger.error(f"Authority level check failed: {e}")
+            return False

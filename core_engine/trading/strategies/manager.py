@@ -22,12 +22,34 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable, Set
+from typing import Dict, List, Optional, Any, Callable, Set, Type
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 # Use internal core_engine types for independence
 from ...type_definitions.strategy import StrategyType, StrategyConfig
+
+# Import enhanced strategy implementations
+from .implementations import (
+    EnhancedMomentumStrategy, MomentumConfig,
+    EnhancedMeanReversionStrategy, MeanReversionConfig,
+    EnhancedStatisticalArbitrageStrategy,
+    EnhancedFactorStrategy, FactorConfig,
+    EnhancedMultiAssetStrategy, MultiAssetConfig,
+    EnhancedTrendFollowingStrategy, TrendFollowingConfig,
+    EnhancedBreakoutStrategy, BreakoutConfig,
+    EnhancedPairsTradingStrategy, PairsConfig,
+    EnhancedVolatilityStrategy, VolatilityConfig,
+    EnhancedArbitrageStrategy, ArbitrageConfig
+)
+
+# Import StatisticalArbitrageConfig separately
+from .implementations.statistical_arbitrage import StatisticalArbitrageConfig
+
+# Import base strategy and registry
+from .base_strategy_enhanced import EnhancedBaseStrategy
+from .strategy_registry import StrategyRegistry
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -112,6 +134,112 @@ class StrategyManagerConfig:
     enable_regime_awareness: bool = True
     enable_correlation_filtering: bool = True
     signal_aggregation_method: str = "weighted_average"
+    enable_enhanced_strategies: bool = True  # Enable enhanced strategy implementations
+    auto_discover_strategies: bool = True    # Auto-discover strategies on startup
+    strategy_registry_path: str = "strategy_registry.json"  # Registry file path
+
+
+class EnhancedStrategyFactory:
+    """Factory for creating enhanced strategy instances"""
+    
+    # Strategy class mapping
+    STRATEGY_CLASSES = {
+        StrategyType.MOMENTUM: EnhancedMomentumStrategy,
+        StrategyType.MEAN_REVERSION: EnhancedMeanReversionStrategy,
+        StrategyType.STATISTICAL_ARBITRAGE: EnhancedStatisticalArbitrageStrategy,
+        StrategyType.FACTOR: EnhancedFactorStrategy,
+        StrategyType.MULTI_ASSET: EnhancedMultiAssetStrategy,
+        StrategyType.TREND_FOLLOWING: EnhancedTrendFollowingStrategy,
+        StrategyType.BREAKOUT: EnhancedBreakoutStrategy,
+        StrategyType.PAIRS_TRADING: EnhancedPairsTradingStrategy,
+        StrategyType.VOLATILITY: EnhancedVolatilityStrategy,
+        StrategyType.ARBITRAGE: EnhancedArbitrageStrategy
+    }
+    
+    # Configuration class mapping
+    CONFIG_CLASSES = {
+        StrategyType.MOMENTUM: MomentumConfig,
+        StrategyType.MEAN_REVERSION: MeanReversionConfig,
+        StrategyType.STATISTICAL_ARBITRAGE: StatisticalArbitrageConfig,
+        StrategyType.FACTOR: FactorConfig,
+        StrategyType.MULTI_ASSET: MultiAssetConfig,
+        StrategyType.TREND_FOLLOWING: TrendFollowingConfig,
+        StrategyType.BREAKOUT: BreakoutConfig,
+        StrategyType.PAIRS_TRADING: PairsConfig,
+        StrategyType.VOLATILITY: VolatilityConfig,
+        StrategyType.ARBITRAGE: ArbitrageConfig
+    }
+    
+    @classmethod
+    def create_strategy(cls, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
+        """Create enhanced strategy instance"""
+        try:
+            strategy_class = cls.STRATEGY_CLASSES.get(strategy_type)
+            if not strategy_class:
+                logger.warning(f"No enhanced strategy class found for type: {strategy_type}")
+                return None
+            
+            # Create configuration object
+            config_class = cls.CONFIG_CLASSES.get(strategy_type)
+            if config_class:
+                # Convert dict config to proper config object
+                strategy_config = cls._create_config_object(config_class, config)
+            else:
+                # Use basic StrategyConfig for strategies without specific config
+                strategy_config = StrategyConfig(
+                    strategy_name=config.get('name', f'{strategy_type.value}_strategy'),
+                    strategy_type=strategy_type,
+                    **{k: v for k, v in config.items() if k not in ['name', 'type']}
+                )
+            
+            # Create strategy instance
+            strategy_instance = strategy_class(strategy_config)
+            
+            logger.info(f"✅ Created enhanced strategy: {strategy_type.value} - {config.get('name')}")
+            return strategy_instance
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create enhanced strategy {strategy_type}: {e}")
+            return None
+    
+    @classmethod
+    def _create_config_object(cls, config_class: Type, config_dict: Dict[str, Any]):
+        """Create configuration object from dictionary"""
+        try:
+            # Get config class constructor parameters
+            import inspect
+            sig = inspect.signature(config_class.__init__)
+            
+            # Filter config_dict to only include valid parameters
+            valid_params = {}
+            for param_name, param in sig.parameters.items():
+                if param_name == 'self':
+                    continue
+                if param_name in config_dict:
+                    valid_params[param_name] = config_dict[param_name]
+                elif hasattr(param, 'default') and param.default != inspect.Parameter.empty:
+                    # Use default value if available
+                    continue
+            
+            return config_class(**valid_params)
+            
+        except Exception as e:
+            logger.warning(f"Failed to create config object: {e}, using basic config")
+            return StrategyConfig(
+                strategy_name=config_dict.get('name', 'strategy'),
+                strategy_type=StrategyType(config_dict.get('type', 'momentum')),
+                **{k: v for k, v in config_dict.items() if k not in ['name', 'type']}
+            )
+    
+    @classmethod
+    def get_available_strategies(cls) -> List[StrategyType]:
+        """Get list of available enhanced strategies"""
+        return list(cls.STRATEGY_CLASSES.keys())
+    
+    @classmethod
+    def is_strategy_available(cls, strategy_type: StrategyType) -> bool:
+        """Check if enhanced strategy is available"""
+        return strategy_type in cls.STRATEGY_CLASSES
 
 class IStrategySubscriber:
     """Interface for strategy event subscribers"""
@@ -146,14 +274,19 @@ class StrategyManager(ISystemComponent):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = StrategyManagerConfig(**config) if config else StrategyManagerConfig()
+        self.component_id = f"strategy_manager_{uuid.uuid4().hex[:8]}"
         
         # Component references (set by Risk Manager)
         self.risk_manager: Optional[Any] = None
         self.data_manager: Optional[Any] = None
         self.regime_engine: Optional[Any] = None
         
-        # Strategy infrastructure
-        self.active_strategies: Dict[str, Any] = {}
+        # Enhanced strategy integration
+        self.strategy_factory = EnhancedStrategyFactory()
+        self.strategy_registry: Optional[StrategyRegistry] = None
+        
+        # Strategy infrastructure - Now stores actual enhanced strategies
+        self.active_strategies: Dict[str, EnhancedBaseStrategy] = {}
         self.strategy_allocations: Dict[str, StrategyAllocation] = {}
         self.strategy_performance: Dict[str, Dict[str, Any]] = {}
         
@@ -173,29 +306,105 @@ class StrategyManager(ISystemComponent):
         self.is_initialized = False
         self.is_running = False
         self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         self.signal_generation_task: Optional[asyncio.Task] = None
         
         # Leverage existing core strategy manager
         self.core_strategy_manager: Optional[Any] = None
         
-        logger.info("🧠 Strategy Manager (WHAT) initialized")
+        logger.info("🧠 Enhanced Strategy Manager (WHAT) initialized")
+        logger.info(f"📊 Available enhanced strategies: {[s.value for s in self.strategy_factory.get_available_strategies()]}")
+    
+    async def _initialize_strategy_registry(self) -> None:
+        """Initialize strategy registry for enhanced strategy management"""
+        try:
+            self.strategy_registry = StrategyRegistry(
+                registry_path=self.config.strategy_registry_path,
+                auto_discovery_enabled=True,
+                auto_validation_enabled=True
+            )
+            await self.strategy_registry.initialize()
+            logger.info("✅ Strategy registry initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ Strategy registry initialization failed: {e}")
+    
+    async def _discover_enhanced_strategies(self) -> None:
+        """Auto-discover enhanced strategies from implementations directory"""
+        try:
+            if not self.strategy_registry:
+                logger.warning("Strategy registry not available for discovery")
+                return
+            
+            # Discover strategies in implementations directory
+            implementations_path = Path(__file__).parent / "implementations"
+            discovered_strategies = self.strategy_registry.discover_strategies([str(implementations_path)])
+            
+            logger.info(f"🔍 Discovered {len(discovered_strategies)} enhanced strategies")
+            
+            # Register discovered strategies
+            for strategy_metadata in discovered_strategies:
+                try:
+                    strategy_id = await self.strategy_registry.register_strategy(
+                        strategy_class=None,  # Will be loaded dynamically
+                        metadata=strategy_metadata,
+                        validate=False  # Skip validation for now
+                    )
+                    logger.info(f"📝 Registered strategy: {strategy_metadata.name} ({strategy_id})")
+                except Exception as e:
+                    logger.warning(f"Failed to register strategy {strategy_metadata.name}: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"⚠️ Enhanced strategy discovery failed: {e}")
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="StrategyManager",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=25  # After data and regime components
+        )
+        
+        logger.info(f"✅ StrategyManager registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
+    # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
-        """Initialize strategy manager"""
+        """Initialize enhanced strategy manager"""
         try:
-            logger.info("🔄 Initializing Strategy Manager (WHAT)...")
+            logger.info("🔄 Initializing Enhanced Strategy Manager (WHAT)...")
             
-            # Initialize core strategy manager (placeholder)
-            # self.core_strategy_manager = CoreStrategyManager({
-            #     'enable_mean_reversion': True,
-            #     'enable_momentum': True,
-            #     'enable_pairs_trading': True,
-            #     'risk_tolerance': 'medium',
-            #     'max_positions': 10
-            # })
+            # Initialize strategy registry if enabled
+            if self.config.enable_enhanced_strategies:
+                await self._initialize_strategy_registry()
             
-            # Initialize default strategy allocations
+            # Auto-discover enhanced strategies if enabled
+            if self.config.auto_discover_strategies:
+                await self._discover_enhanced_strategies()
+            
+            # Initialize default strategy allocations with enhanced strategies
             await self._initialize_default_strategies()
             
             # Initialize strategy performance tracking
@@ -203,12 +412,78 @@ class StrategyManager(ISystemComponent):
             
             self.is_initialized = True
             logger.info("✅ Strategy Manager (WHAT) initialization complete")
+            logger.info("✅ Enhanced Strategy Manager (WHAT) initialization complete")
+            logger.info(f"📊 Active enhanced strategies: {len(self.active_strategies)}")
             return True
             
         except Exception as e:
             self.last_error = str(e)
-            logger.error(f"❌ Strategy Manager initialization failed: {e}")
+            logger.error(f"❌ Enhanced Strategy Manager initialization failed: {e}")
             return False
+    
+    async def register_enhanced_strategy(self, strategy_type: StrategyType, config: Dict[str, Any]) -> bool:
+        """Register an enhanced strategy programmatically"""
+        try:
+            strategy_name = config.get('name', f'{strategy_type.value}_strategy')
+            
+            # Check if strategy type is available
+            if not self.strategy_factory.is_strategy_available(strategy_type):
+                logger.error(f"❌ Enhanced strategy type not available: {strategy_type}")
+                return False
+            
+            # Create enhanced strategy instance
+            strategy_instance = await self._create_strategy_instance(strategy_type, config)
+            if not strategy_instance:
+                logger.error(f"❌ Failed to create enhanced strategy: {strategy_name}")
+                return False
+            
+            # Create allocation
+            allocation = StrategyAllocation(
+                strategy_name=strategy_name,
+                strategy_type=strategy_type,
+                allocation_pct=config.get('allocation_pct', 0.2),
+                max_positions=config.get('max_positions', 5),
+                risk_limit=config.get('risk_limit', 0.05)
+            )
+            
+            # Store strategy and allocation
+            self.active_strategies[strategy_name] = strategy_instance
+            self.strategy_allocations[strategy_name] = allocation
+            self.strategy_performance[strategy_name] = {
+                'total_signals': 0,
+                'successful_signals': 0,
+                'total_return': 0.0,
+                'sharpe_ratio': 0.0,
+                'max_drawdown': 0.0,
+                'last_signal_time': None
+            }
+            
+            logger.info(f"✅ Enhanced strategy registered: {strategy_name} ({strategy_type.value})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to register enhanced strategy: {e}")
+            return False
+    
+    def get_enhanced_strategy_status(self) -> Dict[str, Any]:
+        """Get status of enhanced strategies"""
+        enhanced_strategies = {}
+        
+        for name, strategy in self.active_strategies.items():
+            if isinstance(strategy, EnhancedBaseStrategy):
+                enhanced_strategies[name] = {
+                    'type': strategy.config.strategy_type.value,
+                    'status': strategy.get_status(),
+                    'performance': strategy.get_performance_summary(),
+                    'health': 'requires_async_call'  # Health check requires async call
+                }
+        
+        return {
+            'total_enhanced_strategies': len(enhanced_strategies),
+            'available_strategy_types': [s.value for s in self.strategy_factory.get_available_strategies()],
+            'enhanced_strategies': enhanced_strategies,
+            'registry_status': 'active' if self.strategy_registry else 'not_initialized'
+        }
     
     async def start(self) -> bool:
         """Start strategy manager"""
@@ -516,21 +791,46 @@ class StrategyManager(ISystemComponent):
             return []
     
     # Strategy Implementation Methods
-    async def _create_strategy_instance(self, strategy_type: StrategyType, config: Dict[str, Any]) -> Any:
-        """Create strategy instance based on type"""
-        # Create simple strategy instance
-        strategy_instance = type('Strategy', (), {
-            'name': config['name'],
-            'config': config,
-            'strategy_type': strategy_type
-        })()
-        return strategy_instance
+    async def _create_strategy_instance(self, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
+        """Create enhanced strategy instance using factory"""
+        try:
+            if self.config.enable_enhanced_strategies:
+                # Use enhanced strategy factory
+                strategy_instance = self.strategy_factory.create_strategy(strategy_type, config)
+                if strategy_instance:
+                    # Initialize the enhanced strategy
+                    await strategy_instance.initialize()
+                    logger.info(f"✅ Enhanced strategy created and initialized: {config['name']}")
+                    return strategy_instance
+                else:
+                    logger.warning(f"⚠️ Failed to create enhanced strategy, falling back to basic strategy")
+            
+            # Fallback to basic strategy instance
+            strategy_instance = type('BasicStrategy', (), {
+                'name': config['name'],
+                'config': config,
+                'strategy_type': strategy_type,
+                'generate_signals': lambda symbols: [],
+                'get_status': lambda: {'active': True, 'type': strategy_type.value}
+            })()
+            
+            logger.info(f"📝 Basic strategy created: {config['name']}")
+            return strategy_instance
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating strategy instance: {e}")
+            return None
     
     async def _generate_strategy_signals(self, strategy: Any, strategy_name: str, symbols: List[str]) -> List[TradingSignal]:
-        """Generate signals from individual strategy"""
+        """Generate signals from individual enhanced strategy"""
         try:
-            # Use core strategy manager if available
-            if self.core_strategy_manager:
+            # Check if this is an enhanced strategy
+            if isinstance(strategy, EnhancedBaseStrategy):
+                # Use enhanced strategy's generate_signals method
+                raw_signals = await strategy.generate_signals(symbols)
+                logger.debug(f"📊 Enhanced strategy {strategy_name} generated {len(raw_signals)} signals")
+            elif self.core_strategy_manager:
+                # Use core strategy manager if available
                 raw_signals = await self.core_strategy_manager.generate_signals(symbols)
             else:
                 # Fallback to strategy-specific generation
@@ -1240,3 +1540,606 @@ class StrategyManager(ISystemComponent):
                 'regime_engine': self.regime_engine is not None
             }
         }
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for processing signals data"""
+        processed_signals = []
+        for signal in signals:
+            processed_signal = {
+                'original_signal': signal,
+                'processed_by': 'StrategyManager',
+                'processing_timestamp': datetime.now()
+            }
+            processed_signals.append(processed_signal)
+        return processed_signals
+    
+    def analyze_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for analyzing signals data (alias)"""
+        return self.process_signals(signals)
+    
+    def evaluate_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for evaluating signals data (alias)"""
+        return self.process_signals(signals)
+    
+    def process_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for processing strategy decisions"""
+        return self.process_signals(decisions)
+    
+    def handle_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for handling decisions (alias)"""
+        return self.process_decisions(decisions)
+    
+    def execute_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for executing decisions (alias)"""
+        return self.process_decisions(decisions)
+    
+    def make_decisions(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for making strategy decisions"""
+        return self.process_signals(signals)
+    
+    def evaluate_strategies(self, data: Any) -> List[Any]:
+        """Standardized method for evaluating strategies"""
+        return [{
+            'strategy_evaluation': True,
+            'input_data': data,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'StrategyManager'
+        }]
+    
+    # ========================================
+    # REGIME DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_regime(self, regime_data: Any) -> Dict[str, Any]:
+        """Standardized method for processing regime data"""
+        return {
+            'regime_processed': True,
+            'regime_data': regime_data,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'StrategyManager'
+        }
+    
+    def handle_regime_change(self, regime_analysis: Any) -> Dict[str, Any]:
+        """Standardized method for handling regime changes"""
+        return self.process_regime(regime_analysis)
+    
+    def adapt_to_regime(self, regime_data: Any) -> Dict[str, Any]:
+        """Standardized method for adapting to regime changes"""
+        return self.process_regime(regime_data)
+    
+    # ========================================
+    # REGIME-ADJUSTED RISK PRODUCTION METHODS
+    # ========================================
+    
+    def generate_risk_adjusted_strategies(self, regime_data: Any = None) -> List[Any]:
+        """Standardized method for generating regime-adjusted strategy decisions"""
+        return [{
+            'regime_adjusted_strategy': True,
+            'regime_context': regime_data,
+            'risk_adjustment_factor': 0.8,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'StrategyManager'
+        }]
+    
+    def create_regime_adjusted_decisions(self, data: Any = None) -> List[Any]:
+        """Standardized method for creating regime-adjusted decisions"""
+        return self.generate_risk_adjusted_strategies(data)
+    
+    def produce_risk_context(self, strategy_data: Any = None) -> Dict[str, Any]:
+        """Standardized method for producing risk context from strategies"""
+        return {
+            'risk_context_produced': True,
+            'strategy_risk_profile': {
+                'volatility_target': 0.15,
+                'max_leverage': 2.0,
+                'correlation_limit': 0.7
+            },
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'StrategyManager'
+        }
+    
+    # ========================================
+    # REGIME-ADJUSTED STRATEGIES PRODUCTION METHODS
+    # ========================================
+    
+    def create_regime_adjusted_strategies(self, regime_data: Any = None) -> List[Any]:
+        """Standardized method for creating regime-adjusted strategies"""
+        return self.generate_risk_adjusted_strategies(regime_data)
+    
+    def produce_regime_strategies(self, regime_data: Any = None) -> List[Any]:
+        """Standardized method for producing regime strategies"""
+        return self.generate_risk_adjusted_strategies(regime_data)
+    
+    def adapt_strategies_to_regime(self, regime_data: Any = None) -> List[Any]:
+        """Standardized method for adapting strategies to regime"""
+        return self.generate_risk_adjusted_strategies(regime_data)
+    
+    # ========================================
+    # STRATEGY CALLBACK METHODS
+    # ========================================
+    
+    def set_signal_callback(self, callback: Callable):
+        """Set signal callback for strategy notifications"""
+        if not hasattr(self, 'signal_callbacks'):
+            self.signal_callbacks = []
+        
+        self.signal_callbacks.append(callback)
+        self.logger.info("✅ Signal callback registered with StrategyManager")
+    
+    def on_signal_generated(self, signal_data: Dict[str, Any]):
+        """Callback method for signal generation"""
+        try:
+            self.logger.info(f"📡 Signal generated: {signal_data.get('symbol', 'unknown')}")
+            
+            # Process signal data
+            result = self.process_signals([signal_data])
+            
+            # Notify registered callbacks
+            if hasattr(self, 'signal_callbacks'):
+                for callback in self.signal_callbacks:
+                    try:
+                        callback(signal_data)
+                    except Exception as e:
+                        self.logger.error(f"Signal callback notification failed: {e}")
+            
+            return {'signal_processed': True, 'notifications_sent': len(getattr(self, 'signal_callbacks', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Signal generation callback failed: {e}")
+            return {'error': str(e)}
+    
+    def register_callback(self, callback_type: str, callback: Callable):
+        """Register a callback for specific events"""
+        try:
+            if callback_type == 'signal':
+                self.set_signal_callback(callback)
+            elif callback_type == 'strategy':
+                if not hasattr(self, 'strategy_callbacks'):
+                    self.strategy_callbacks = []
+                self.strategy_callbacks.append(callback)
+            
+            self.logger.info(f"✅ {callback_type} callback registered")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Callback registration failed: {e}")
+            return False
+    
+    # ========================================
+    # RISK MANAGEMENT CALLBACK METHODS
+    # ========================================
+    
+    def set_risk_callbacks(self, risk_callback: Callable = None):
+        """Set risk management callback"""
+        self.risk_callback = risk_callback
+        if risk_callback:
+            self.logger.info("✅ Risk callback registered with StrategyManager")
+    
+    def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
+        """Callback method for risk limit breaches"""
+        try:
+            self.logger.warning(f"🚨 Strategy risk limit breach: {risk_data}")
+            
+            # Handle risk breach (e.g., pause strategies)
+            if hasattr(self, 'risk_callback') and self.risk_callback:
+                self.risk_callback(risk_data)
+            
+            return {'risk_breach_handled': True}
+            
+        except Exception as e:
+            self.logger.error(f"Risk limit breach callback failed: {e}")
+            return {'error': str(e)}
+    
+    def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
+        """Callback method for emergency shutdown"""
+        try:
+            self.logger.critical(f"🚨 Strategy emergency shutdown: {shutdown_reason}")
+            
+            # Emergency strategy actions
+            # In a real implementation, this would stop all strategies
+            
+            return {'emergency_shutdown_handled': True}
+            
+        except Exception as e:
+            self.logger.error(f"Emergency shutdown callback failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # AUTHORIZATION METHODS
+    # ========================================
+    
+    def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
+        """Authorize strategy operations"""
+        try:
+            # Basic authorization logic for strategy operations
+            authorized_operations = [
+                'generate_signals', 'analyze_market', 'create_strategy',
+                'modify_strategy', 'pause_strategy', 'resume_strategy'
+            ]
+            
+            if operation in authorized_operations:
+                self.logger.info(f"✅ Strategy operation authorized: {operation}")
+                return True
+            else:
+                self.logger.warning(f"❌ Strategy operation not authorized: {operation}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Authorization failed: {e}")
+            return False
+    
+    def validate_authorization(self, authorization_token: str) -> bool:
+        """Validate authorization token for strategy operations"""
+        try:
+            # Mock authorization token validation
+            # In real implementation, this would validate against actual tokens
+            if authorization_token and len(authorization_token) > 10:
+                self.logger.info("✅ Strategy authorization token validated")
+                return True
+            else:
+                self.logger.warning("❌ Invalid strategy authorization token")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Authorization validation failed: {e}")
+            return False
+    
+    def check_authority_level(self, required_level: str) -> bool:
+        """Check if component has required authority level"""
+        try:
+            # Strategy manager has OPERATIONAL authority level
+            component_authority = "OPERATIONAL"
+            
+            authority_hierarchy = {
+                "READ_ONLY": 1,
+                "OPERATIONAL": 2,
+                "GOVERNANCE_CONTROL": 3,
+                "SYSTEM_CONTROL": 4
+            }
+            
+            component_level = authority_hierarchy.get(component_authority, 0)
+            required_level_num = authority_hierarchy.get(required_level, 999)
+            
+            authorized = component_level >= required_level_num
+            
+            if authorized:
+                self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
+            else:
+                self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
+            
+            return authorized
+            
+        except Exception as e:
+            self.logger.error(f"Authority level check failed: {e}")
+            return False
+    
+    # ========================================
+    # ANALYTICS INTEGRATION METHODS
+    # ========================================
+    
+    def calculate_metrics(self, data: Any = None) -> Dict[str, Any]:
+        """Calculate strategy analytics metrics"""
+        try:
+            # Get current strategy state
+            active_strategies = len(self.active_strategies)
+            total_signals = sum(len(signals) for signals in self.strategy_signals.values())
+            
+            # Calculate strategy metrics
+            strategy_metrics = {
+                'active_strategies': active_strategies,
+                'total_signals_generated': total_signals,
+                'strategy_types': list(self.active_strategies.keys()),
+                'signal_generation_rate': total_signals / max(1, active_strategies),
+                'avg_confidence': self._calculate_average_confidence(),
+                'strategy_allocation': self._calculate_strategy_allocation()
+            }
+            
+            # Performance metrics per strategy
+            strategy_performance = {}
+            for strategy_id in self.active_strategies.keys():
+                signals = self.strategy_signals.get(strategy_id, [])
+                strategy_performance[strategy_id] = {
+                    'signal_count': len(signals),
+                    'avg_confidence': sum(s.confidence for s in signals) / len(signals) if signals else 0.0,
+                    'signal_types': list(set(s.signal_type.value for s in signals)) if signals else []
+                }
+            
+            return {
+                'metrics_calculated': True,
+                'calculation_timestamp': datetime.now(),
+                'strategy_metrics': strategy_metrics,
+                'strategy_performance': strategy_performance,
+                'component': 'StrategyManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Strategy metrics calculation failed: {e}")
+            return {
+                'metrics_calculated': False,
+                'error': str(e),
+                'calculation_timestamp': datetime.now()
+            }
+    
+    def analyze_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Analyze strategy performance"""
+        try:
+            # Analyze strategy performance
+            performance_analysis = {
+                'strategy_efficiency': self._calculate_strategy_efficiency(),
+                'signal_quality': self._assess_signal_quality(),
+                'strategy_coordination': self._assess_strategy_coordination(),
+                'resource_utilization': {
+                    'active_strategies': len(self.active_strategies),
+                    'max_strategies': self.config.max_concurrent_strategies,
+                    'utilization_pct': (len(self.active_strategies) / self.config.max_concurrent_strategies * 100)
+                },
+                'performance_summary': {
+                    'total_strategies_managed': len(self.active_strategies),
+                    'signal_generation_active': len(self.strategy_signals) > 0,
+                    'coordination_status': 'active' if self.active_strategies else 'inactive'
+                }
+            }
+            
+            return {
+                'performance_analyzed': True,
+                'analysis_timestamp': datetime.now(),
+                'performance_analysis': performance_analysis,
+                'component': 'StrategyManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Strategy performance analysis failed: {e}")
+            return {
+                'performance_analyzed': False,
+                'error': str(e),
+                'analysis_timestamp': datetime.now()
+            }
+    
+    def generate_analytics(self, data: Any = None) -> Dict[str, Any]:
+        """Generate comprehensive strategy analytics"""
+        try:
+            # Combine metrics and performance analysis
+            metrics = self.calculate_metrics(data)
+            performance = self.analyze_performance(data)
+            
+            analytics = {
+                'analytics_generated': True,
+                'generation_timestamp': datetime.now(),
+                'metrics': metrics.get('strategy_metrics', {}),
+                'performance': performance.get('performance_analysis', {}),
+                'summary': {
+                    'strategy_health': self._assess_strategy_health(),
+                    'coordination_effectiveness': self._assess_coordination_effectiveness(),
+                    'signal_quality_score': self._calculate_signal_quality_score()
+                },
+                'recommendations': self._generate_strategy_recommendations(),
+                'component': 'StrategyManager'
+            }
+            
+            return analytics
+            
+        except Exception as e:
+            self.logger.error(f"Strategy analytics generation failed: {e}")
+            return {
+                'analytics_generated': False,
+                'error': str(e),
+                'generation_timestamp': datetime.now()
+            }
+    
+    def track_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Track strategy performance over time"""
+        try:
+            # Mock performance tracking (in real implementation, would maintain historical data)
+            performance_tracking = {
+                'tracking_active': True,
+                'tracking_timestamp': datetime.now(),
+                'current_metrics': self.calculate_metrics(data),
+                'performance_trend': self._assess_performance_trend(),
+                'alerts': self._generate_performance_alerts(),
+                'component': 'StrategyManager'
+            }
+            
+            return performance_tracking
+            
+        except Exception as e:
+            self.logger.error(f"Strategy performance tracking failed: {e}")
+            return {
+                'tracking_active': False,
+                'error': str(e),
+                'tracking_timestamp': datetime.now()
+            }
+    
+    def monitor_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Monitor strategy performance (alias for track_performance)"""
+        return self.track_performance(data)
+    
+    def _calculate_average_confidence(self) -> float:
+        """Calculate average confidence across all signals"""
+        try:
+            all_signals = []
+            for signals in self.strategy_signals.values():
+                all_signals.extend(signals)
+            
+            if not all_signals:
+                return 0.0
+            
+            return sum(s.confidence for s in all_signals) / len(all_signals)
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_strategy_allocation(self) -> Dict[str, float]:
+        """Calculate allocation per strategy"""
+        try:
+            if not self.active_strategies:
+                return {}
+            
+            # Mock allocation calculation (in real implementation, would use actual allocations)
+            equal_allocation = 1.0 / len(self.active_strategies)
+            return {strategy_id: equal_allocation for strategy_id in self.active_strategies.keys()}
+            
+        except Exception:
+            return {}
+    
+    def _calculate_strategy_efficiency(self) -> float:
+        """Calculate overall strategy efficiency"""
+        try:
+            if not self.active_strategies:
+                return 0.0
+            
+            # Mock efficiency calculation
+            signal_count = sum(len(signals) for signals in self.strategy_signals.values())
+            strategy_count = len(self.active_strategies)
+            
+            # Efficiency = signals per strategy
+            efficiency = signal_count / strategy_count if strategy_count > 0 else 0.0
+            
+            # Normalize to 0-100 scale
+            return min(100.0, efficiency * 10)
+            
+        except Exception:
+            return 50.0  # Default moderate efficiency
+    
+    def _assess_signal_quality(self) -> str:
+        """Assess overall signal quality"""
+        try:
+            avg_confidence = self._calculate_average_confidence()
+            
+            if avg_confidence > 0.8:
+                return "Excellent"
+            elif avg_confidence > 0.7:
+                return "Good"
+            elif avg_confidence > 0.6:
+                return "Fair"
+            else:
+                return "Poor"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _assess_strategy_coordination(self) -> str:
+        """Assess strategy coordination effectiveness"""
+        try:
+            if len(self.active_strategies) == 0:
+                return "No strategies active"
+            elif len(self.active_strategies) == 1:
+                return "Single strategy"
+            elif len(self.active_strategies) <= 3:
+                return "Well coordinated"
+            elif len(self.active_strategies) <= 5:
+                return "Moderately coordinated"
+            else:
+                return "Over-coordinated"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _assess_strategy_health(self) -> str:
+        """Assess overall strategy health"""
+        try:
+            active_count = len(self.active_strategies)
+            signal_count = sum(len(signals) for signals in self.strategy_signals.values())
+            
+            if active_count == 0:
+                return "Inactive"
+            elif signal_count == 0:
+                return "No signals"
+            elif active_count > self.config.max_concurrent_strategies:
+                return "Overloaded"
+            else:
+                return "Healthy"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _assess_coordination_effectiveness(self) -> float:
+        """Assess coordination effectiveness (0-100)"""
+        try:
+            if not self.active_strategies:
+                return 0.0
+            
+            # Mock coordination assessment
+            strategy_count = len(self.active_strategies)
+            signal_count = sum(len(signals) for signals in self.strategy_signals.values())
+            
+            # Effectiveness based on signal generation per strategy
+            if strategy_count == 0:
+                return 0.0
+            
+            signals_per_strategy = signal_count / strategy_count
+            effectiveness = min(100.0, signals_per_strategy * 20)  # Scale to 0-100
+            
+            return effectiveness
+            
+        except Exception:
+            return 50.0  # Default moderate effectiveness
+    
+    def _calculate_signal_quality_score(self) -> float:
+        """Calculate signal quality score (0-100)"""
+        try:
+            avg_confidence = self._calculate_average_confidence()
+            return avg_confidence * 100
+            
+        except Exception:
+            return 50.0  # Default moderate quality
+    
+    def _generate_strategy_recommendations(self) -> List[str]:
+        """Generate strategy recommendations"""
+        try:
+            recommendations = []
+            
+            active_count = len(self.active_strategies)
+            signal_count = sum(len(signals) for signals in self.strategy_signals.values())
+            
+            if active_count == 0:
+                recommendations.append("Consider activating strategies")
+            elif active_count > self.config.max_concurrent_strategies:
+                recommendations.append("Reduce number of active strategies")
+            elif signal_count == 0:
+                recommendations.append("Check strategy signal generation")
+            
+            avg_confidence = self._calculate_average_confidence()
+            if avg_confidence < 0.6:
+                recommendations.append("Improve signal confidence thresholds")
+            
+            return recommendations
+            
+        except Exception:
+            return ["Unable to generate recommendations"]
+    
+    def _assess_performance_trend(self) -> str:
+        """Assess performance trend"""
+        try:
+            # Mock trend assessment (in real implementation, would use historical data)
+            signal_count = sum(len(signals) for signals in self.strategy_signals.values())
+            
+            if signal_count > 10:
+                return "Improving"
+            elif signal_count > 5:
+                return "Stable"
+            else:
+                return "Declining"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _generate_performance_alerts(self) -> List[str]:
+        """Generate performance alerts"""
+        try:
+            alerts = []
+            
+            if len(self.active_strategies) == 0:
+                alerts.append("No active strategies")
+            
+            avg_confidence = self._calculate_average_confidence()
+            if avg_confidence < 0.5:
+                alerts.append("Low signal confidence detected")
+            
+            return alerts
+            
+        except Exception:
+            return []

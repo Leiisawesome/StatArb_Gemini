@@ -218,6 +218,9 @@ class EnhancedSignalGenerator(ISystemComponent):
         self.is_operational = False
         self.start_time = None
         
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedSignalGenerator',
@@ -243,7 +246,39 @@ class EnhancedSignalGenerator(ISystemComponent):
         
         self.logger.info(f"🚀 Enhanced Signal Generator initialized with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedSignalGenerator",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=24  # After features
+        )
+        
+        self.logger.info(f"✅ EnhancedSignalGenerator registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Signal Generator"""
@@ -1055,3 +1090,32 @@ class EnhancedSignalGenerator(ISystemComponent):
                 "weak": len([s for s in signals if s.strength == SignalStrength.WEAK])
             }
         }
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for processing signals data"""
+        return signals
+    
+    def analyze_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for analyzing signals data (alias)"""
+        return self.process_signals(signals)
+    
+    def evaluate_signals(self, signals: List[Any]) -> List[Any]:
+        """Standardized method for evaluating signals data (alias)"""
+        return self.process_signals(signals)
+    
+    def process_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for processing features data (consumption interface)"""
+        # This component consumes features to produce signals
+        return features
+    
+    def use_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for using features data (consumption interface)"""
+        return self.process_features(features)
+    
+    def analyze_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for analyzing features data (consumption interface)"""
+        return self.process_features(features)

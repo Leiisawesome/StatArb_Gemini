@@ -4,7 +4,7 @@ description: "Comprehensive Overview of Core Engine Instruction Maps and Orchest
 
 # Core Engine Instruction Maps - Comprehensive Overview
 
-This overview provides a complete guide to all available instruction maps for composing core_engine components into different institutional-grade trading and analytics systems.
+This overview provides a complete guide to all available instruction maps for composing core_engine components into different institutional-grade trading and analytics systems using the enhanced 10 Core Architecture Rules.
 
 ## Available Instruction Maps
 
@@ -50,25 +50,53 @@ This overview provides a complete guide to all available instruction maps for co
 **Complexity**: Very High
 **Timeline**: Days to weeks
 
+### 7. [Symbol Selection and Ranking Workflow](mdc:.cursor/rules/symbol-selection-ranking-workflow.mdc)
+**Purpose**: Dynamic symbol selection based on market conditions and regime analysis
+**Key Components**: SymbolRankingEngine, RegimeBasedSelector, UniverseOptimizer, MultiFactorRanking
+**Use Cases**: Adaptive portfolio construction, regime-aware symbol rotation, multi-strategy universe optimization
+**Complexity**: High
+**Timeline**: Hours to days
+
 ## Component Reusability Matrix
 
-### Core Infrastructure Components (Used in All Maps)
+### Core Infrastructure Components (Used in All Maps) - ENHANCED
 - **HierarchicalSystemOrchestrator**: System coordination and lifecycle management
-- **CentralRiskManager**: Risk governance and authorization
-- **UnifiedDataManager**: Data access and management
+- **SystemIntegrationManager**: Multi-phase initialization and comprehensive health monitoring
+- **CentralRiskManager**: Risk governance and authorization with regime awareness
+- **ClickHouseDataManager**: Unified data access and management with ISystemComponent integration
 
 ### Specialized Components by Use Case
 
-| Component | Backtest | Live Trading | Regime Analysis | Portfolio Analytics | Risk Monitoring | Strategy Research |
-|-----------|----------|--------------|-----------------|-------------------|-----------------|-------------------|
-| LiveDataStreamer | ❌ | ✅ | ✅ | ❌ | ✅ | ❌ |
-| BacktestEngine | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| RegimeEngine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ExecutionEngine | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| PerformanceCalculator | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ |
-| AlertEngine | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| MLModelTrainer | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| FeatureDiscovery | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| Component | Backtest | Live Trading | Regime Analysis | Portfolio Analytics | Risk Monitoring | Strategy Research | Symbol Selection |
+|-----------|----------|--------------|-----------------|-------------------|-----------------|-------------------|------------------|
+| **ENHANCED COMPONENTS** | | | | | | | |
+| EnhancedRegimeEngine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| EnhancedTechnicalIndicators | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| EnhancedFeatureEngineer | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| EnhancedSignalGenerator | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| EnhancedAnalyticsManager | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| EnhancedMetricsCalculator | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| PerformanceAnalyzer | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| StrategyManager | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| EnhancedStrategyFactory | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| StrategyExecutionEngine | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| EnhancedStrategyValidator | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| 10 Enhanced Strategies | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| StrategyRegistry | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| EnhancedTradingEngine | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| UnifiedExecutionEngine | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| EnhancedPortfolioManager | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ |
+| **SYMBOL SELECTION COMPONENTS** | | | | | | | |
+| SymbolRankingEngine | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| RegimeBasedSelector | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| UniverseOptimizer | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| MultiFactorRanking | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| DynamicRebalancer | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| **PRODUCTION COMPONENTS** | | | | | | | |
+| ProductionHealthMonitor | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| GracefulDegradationManager | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ |
+| AuditTrailManager | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| DisasterRecoveryManager | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 
 ## Orchestration Patterns
 
@@ -117,27 +145,183 @@ while system_operational:
         await handle_violations(violations)
 ```
 
+## ENHANCED: New Orchestration Patterns (Rules 8-10)
+
+### 5. Multi-Strategy Coordination Pattern
+**Used in**: All workflows with multiple strategies
+**Pattern**: Strategy registration → Signal aggregation → Conflict resolution → Unified execution
+```python
+# Multi-strategy coordination example
+strategy_manager = StrategyManager()
+await strategy_manager.register_strategy("StatArb", stat_arb_strategy, weight=0.4)
+await strategy_manager.register_strategy("Momentum", momentum_strategy, weight=0.3)
+await strategy_manager.register_strategy("MeanRev", mean_rev_strategy, weight=0.3)
+
+# Aggregate and resolve signals
+strategy_signals = await strategy_manager.collect_all_signals(market_data)
+aggregated_signals = await strategy_manager.aggregate_strategy_signals(strategy_signals)
+authorized_trades = await risk_manager.authorize_multi_strategy_signals(aggregated_signals)
+```
+
+### 6. Real-Time Analytics Pattern
+**Used in**: Live Trading, Risk Monitoring, Portfolio Analytics
+**Pattern**: Streaming data → Real-time processing → Event-driven analytics → Performance attribution
+```python
+# Real-time analytics example
+analytics_manager = EnhancedAnalyticsManager()
+async for market_event in market_stream:
+    # Process real-time data
+    real_time_metrics = await analytics_manager.process_real_time_data(market_event)
+    
+    # Update performance attribution
+    if market_event.type == 'trade_execution':
+        await analytics_manager.update_strategy_attribution(market_event)
+    
+    # Check for regime changes
+    regime_update = await regime_engine.process_market_data(market_event)
+    if regime_update.regime_changed:
+        await analytics_manager.adjust_for_regime_change(regime_update)
+```
+
+### 7. Production Deployment Pattern
+**Used in**: All production workflows
+**Pattern**: Health monitoring → Graceful degradation → Audit logging → Disaster recovery
+```python
+# Production deployment example
+health_monitor = ProductionHealthMonitor()
+degradation_manager = GracefulDegradationManager()
+audit_manager = AuditTrailManager()
+
+# Continuous health monitoring
+async def production_monitoring_loop():
+    while system_operational:
+        health_results = await health_monitor.perform_comprehensive_health_check()
+        
+        # Assess degradation needs
+        required_level = await degradation_manager.assess_degradation_level(health_results)
+        await degradation_manager.apply_degradation_level(required_level)
+        
+        # Log all operations
+        await audit_manager.log_audit_event('health_check', 'system', 'monitoring', health_results)
+        
+        await asyncio.sleep(30)  # 30-second monitoring interval
+```
+
+### 8. Enhanced Strategy Integration Pattern
+**Used in**: All strategy-based workflows
+**Pattern**: Factory creation → Strategy registration → Multi-strategy coordination → Signal aggregation
+```python
+# Enhanced strategy integration example
+from core_engine.trading.strategies.manager import StrategyManager, EnhancedStrategyFactory
+from core_engine.type_definitions.strategy import StrategyType
+
+# Initialize enhanced StrategyManager
+strategy_manager = StrategyManager({
+    'enable_enhanced_strategies': True,
+    'auto_discover_strategies': True,
+    'max_concurrent_strategies': 10
+})
+
+# Use factory to create enhanced strategies
+factory = EnhancedStrategyFactory()
+available_strategies = factory.get_available_strategies()
+# ['momentum', 'mean_reversion', 'statistical_arbitrage', 'factor', 
+#  'multi_asset', 'trend_following', 'breakout', 'pairs_trading', 
+#  'volatility', 'arbitrage']
+
+# Register multiple enhanced strategies
+strategies = [
+    {'type': StrategyType.STATISTICAL_ARBITRAGE, 'config': {'name': 'stat_arb_1', 'allocation_pct': 0.25}},
+    {'type': StrategyType.MOMENTUM, 'config': {'name': 'momentum_1', 'allocation_pct': 0.20}},
+    {'type': StrategyType.MEAN_REVERSION, 'config': {'name': 'mean_rev_1', 'allocation_pct': 0.20}}
+]
+
+for strategy_info in strategies:
+    await strategy_manager.register_enhanced_strategy(strategy_info['type'], strategy_info['config'])
+
+# Generate signals from all enhanced strategies
+signals = await strategy_manager.generate_signals(['NVDA', 'TSLA', 'AAPL'])
+```
+
 ## Configuration Templates
 
-### Basic Configuration Template
+### Enhanced Configuration Template (Rules 1-10)
 ```python
-# Minimal configuration for any instruction map
-basic_config = {
+# Enhanced configuration leveraging all 10 architecture rules
+enhanced_config = {
+    'system_integration': {
+        'enable_multi_phase_initialization': True,
+        'enable_comprehensive_health_monitoring': True,
+        'enable_graceful_degradation': True,
+        'enable_audit_logging': True
+    },
     'orchestrator': {
-        'monitoring_interval': 60,
-        'health_check_interval': 300,
-        'enable_logging': True
+        'monitoring_interval': 30,  # Enhanced monitoring
+        'health_check_interval': 60,
+        'enable_logging': True,
+        'enable_performance_metrics': True,
+        'enable_dependency_injection': True
     },
     'data_manager': {
-        'symbols': ['NVDA', 'TSLA', 'AAPL'],
+        'symbols': ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL'],
         'start_date': '2024-01-01',
         'end_date': '2024-12-31',
-        'interval': '1min'
+        'interval': '1min',
+        'enable_caching': True,
+        'enable_data_validation': True
     },
     'risk_manager': {
         'max_position_size': 0.10,
         'max_daily_var': 0.05,
-        'enable_real_time_monitoring': True
+        'enable_real_time_monitoring': True,
+        'enable_regime_awareness': True,
+        'enable_multi_strategy_coordination': True
+    },
+    'multi_strategy': {
+        'enable_enhanced_strategies': True,
+        'enable_signal_aggregation': True,
+        'enable_conflict_resolution': True,
+        'enable_strategy_attribution': True,
+        'auto_discover_strategies': True,
+        'max_concurrent_strategies': 10,
+        'enhanced_strategy_factory': {
+            'available_strategies': [
+                'momentum', 'mean_reversion', 'statistical_arbitrage', 
+                'factor', 'multi_asset', 'trend_following', 'breakout', 
+                'pairs_trading', 'volatility', 'arbitrage'
+            ]
+        },
+        'strategy_configurations': {
+            'statistical_arbitrage': {
+                'allocation_pct': 0.25,
+                'cointegration_lookback': 252,
+                'entry_zscore_threshold': 2.0
+            },
+            'momentum': {
+                'allocation_pct': 0.20,
+                'lookback_period': 60,
+                'momentum_threshold': 0.02
+            },
+            'mean_reversion': {
+                'allocation_pct': 0.20,
+                'lookback_period': 20,
+                'z_score_threshold': 2.0
+            }
+        }
+    },
+    'analytics': {
+        'enable_real_time_processing': True,
+        'enable_batch_processing': True,
+        'enable_performance_attribution': True,
+        'enable_regime_aware_metrics': True,
+        'enable_multi_timeframe_analysis': True
+    },
+    'production': {
+        'enable_health_monitoring': True,
+        'enable_graceful_degradation': True,
+        'enable_audit_trails': True,
+        'enable_disaster_recovery': True,
+        'environment': 'production'
     }
 }
 ```
@@ -339,6 +523,7 @@ environments = {
 4. **Performance Reporting**: Use Portfolio Analytics Workflow
 5. **Risk Management**: Use Risk Monitoring System
 6. **Strategy Development**: Use Strategy Research Workflow
+7. **Symbol Selection**: Use Symbol Selection and Ranking Workflow
 
 ### 2. Basic Implementation Steps
 ```python
@@ -364,4 +549,187 @@ await orchestrator.stop_all_components()
 - Implement custom validation rules
 - Extend reporting and analytics capabilities
 
-This comprehensive overview provides the foundation for understanding and implementing any of the available instruction maps, ensuring consistent, professional, and institutional-grade implementations across all use cases.
+## PHASE 3: Complete Integration Examples Using All 10 Rules
+
+### Example 1: Multi-Strategy Live Trading System
+```python
+# Complete integration example using all 10 enhanced architecture rules
+from core_engine.system.integration_manager import SystemIntegrationManager
+from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
+
+async def deploy_multi_strategy_live_trading_system():
+    """Deploy a complete multi-strategy live trading system using all 10 rules"""
+    
+    # Step 1: Initialize System Integration Manager (Rule 10)
+    integration_manager = SystemIntegrationManager(enhanced_config)
+    
+    # Step 2: Initialize all enhanced components (Rules 1-7)
+    await integration_manager.initialize_all_components()
+    
+    # Step 3: Register multiple strategies (Rule 8)
+    strategy_manager = integration_manager.get_component('StrategyManager')
+    
+    # Register Statistical Arbitrage Strategy
+    stat_arb_strategy = EnhancedStatisticalArbitrage(stat_arb_config)
+    await strategy_manager.register_strategy(
+        strategy_id='stat_arb_001',
+        strategy_instance=stat_arb_strategy,
+        weight=0.4,
+        priority=1
+    )
+    
+    # Register Momentum Strategy
+    momentum_strategy = EnhancedMomentum(momentum_config)
+    await strategy_manager.register_strategy(
+        strategy_id='momentum_001',
+        strategy_instance=momentum_strategy,
+        weight=0.3,
+        priority=2
+    )
+    
+    # Register Mean Reversion Strategy
+    mean_rev_strategy = EnhancedMeanReversion(mean_rev_config)
+    await strategy_manager.register_strategy(
+        strategy_id='mean_rev_001',
+        strategy_instance=mean_rev_strategy,
+        weight=0.3,
+        priority=3
+    )
+    
+    # Step 4: Start real-time analytics (Rule 9)
+    analytics_manager = integration_manager.get_component('EnhancedAnalyticsManager')
+    await analytics_manager.start_real_time_processing()
+    
+    # Step 5: Enable production monitoring (Rule 10)
+    health_monitor = integration_manager.get_component('ProductionHealthMonitor')
+    await health_monitor.start_monitoring()
+    
+    # Step 6: Start live trading loop
+    await run_live_trading_loop(integration_manager)
+
+async def run_live_trading_loop(integration_manager):
+    """Main live trading loop with multi-strategy coordination"""
+    
+    data_manager = integration_manager.get_component('ClickHouseDataManager')
+    strategy_manager = integration_manager.get_component('StrategyManager')
+    risk_manager = integration_manager.get_component('CentralRiskManager')
+    execution_engine = integration_manager.get_component('UnifiedExecutionEngine')
+    analytics_manager = integration_manager.get_component('EnhancedAnalyticsManager')
+    
+    while integration_manager.is_operational:
+        try:
+            # Step 1: Get real-time market data
+            market_data = await data_manager.get_real_time_data()
+            
+            # Step 2: Collect signals from all strategies (Rule 8)
+            strategy_signals = await strategy_manager.collect_all_signals(market_data)
+            
+            # Step 3: Aggregate and resolve signal conflicts (Rule 8)
+            aggregated_signals = await strategy_manager.aggregate_strategy_signals(strategy_signals)
+            
+            # Step 4: Risk authorization with regime awareness (Rules 2, 9)
+            authorized_trades = []
+            for signal in aggregated_signals:
+                authorization = await risk_manager.authorize_trading_decision(signal)
+                if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                    authorized_trades.append(authorization)
+            
+            # Step 5: Execute authorized trades (Rules 6, 7)
+            execution_results = []
+            for trade in authorized_trades:
+                result = await execution_engine.execute_authorized_trade(trade)
+                execution_results.append(result)
+            
+            # Step 6: Update real-time analytics (Rule 9)
+            for result in execution_results:
+                await analytics_manager.process_trade_execution(result)
+                await analytics_manager.update_strategy_attribution(result)
+            
+            # Step 7: Health monitoring and degradation management (Rule 10)
+            health_status = await integration_manager.check_system_health()
+            if health_status['requires_degradation']:
+                await integration_manager.apply_graceful_degradation(health_status['recommended_level'])
+            
+            await asyncio.sleep(1)  # 1-second trading loop
+            
+        except Exception as e:
+            logger.error(f"Trading loop error: {e}")
+            await integration_manager.handle_system_error(e)
+```
+
+### Example 2: Production Deployment with Full Monitoring
+```python
+async def deploy_production_trading_system():
+    """Deploy production system with full monitoring and reliability (Rule 10)"""
+    
+    # Production configuration
+    production_config = {
+        'environment': 'production',
+        'enable_health_monitoring': True,
+        'enable_graceful_degradation': True,
+        'enable_audit_logging': True,
+        'enable_disaster_recovery': True,
+        'monitoring_interval': 30,
+        'alert_thresholds': {
+            'cpu_usage': 80.0,
+            'memory_usage': 85.0,
+            'error_rate': 0.05
+        }
+    }
+    
+    # Initialize production system
+    integration_manager = SystemIntegrationManager(production_config)
+    
+    # Production initialization with validation
+    validation_results = await integration_manager.validate_production_readiness()
+    if not validation_results['production_ready']:
+        raise RuntimeError(f"System not production ready: {validation_results['issues']}")
+    
+    # Initialize all components with production monitoring
+    await integration_manager.initialize_all_components()
+    
+    # Start production monitoring
+    health_monitor = ProductionHealthMonitor()
+    degradation_manager = GracefulDegradationManager()
+    audit_manager = AuditTrailManager()
+    disaster_recovery = DisasterRecoveryManager()
+    
+    # Production monitoring loop
+    async def production_monitoring_loop():
+        while integration_manager.is_operational:
+            # Comprehensive health check
+            health_results = await health_monitor.perform_comprehensive_health_check()
+            
+            # Assess degradation needs
+            required_level = await degradation_manager.assess_degradation_level(health_results)
+            if required_level != degradation_manager.current_level:
+                await degradation_manager.apply_degradation_level(required_level)
+            
+            # Log system status
+            await audit_manager.log_audit_event(
+                'system_health_check',
+                'production_monitor',
+                'health_monitoring',
+                health_results
+            )
+            
+            # Check for disaster recovery needs
+            if health_results.get('critical_failure'):
+                await disaster_recovery.initiate_disaster_recovery(
+                    health_results['failure_type']
+                )
+            
+            await asyncio.sleep(30)  # 30-second monitoring interval
+    
+    # Start monitoring and trading
+    await asyncio.gather(
+        production_monitoring_loop(),
+        run_live_trading_loop(integration_manager)
+    )
+```
+
+This comprehensive integration framework demonstrates how all 10 Core Architecture Rules work together to create **institutional-grade quantitative trading systems** with **multi-strategy coordination**, **advanced analytics**, and **production reliability**.
+
+---
+
+This comprehensive overview provides the foundation for understanding and implementing any of the available instruction maps, ensuring consistent, professional, and institutional-grade implementations across all use cases using the enhanced 10 Core Architecture Rules.

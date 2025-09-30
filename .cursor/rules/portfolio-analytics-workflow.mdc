@@ -7,27 +7,40 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Portfolio Analytics Component Stack
 
-### Analytics Brick Assembly
+### Enhanced Analytics Brick Assembly (Rules 8-10)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← System Control & Coordination
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← System Control & Coordination
+│ SystemIntegrationManager            │ ← Multi-Phase Analytics Init
 ├─────────────────────────────────────┤
-│ PortfolioDataManager                │ ← Portfolio & Benchmark Data
-│ TransactionDataManager              │ ← Trade & Execution Data
-│ MarketDataManager                   │ ← Market & Reference Data
+│ Layer 2: Governance                 │
+│ CentralRiskManager                  │ ← Risk Governance & Limits
 ├─────────────────────────────────────┤
-│ PerformanceCalculator               │ ← Returns & Risk Metrics
-│ AttributionAnalyzer                 │ ← Performance Attribution
-│ RiskAnalyzer                        │ ← Risk Decomposition
-│ BenchmarkAnalyzer                   │ ← Benchmark Comparison
+│ Layer 3: Data Management            │
+│ ClickHouseDataManager               │ ← Portfolio & Market Data Authority
 ├─────────────────────────────────────┤
-│ FactorAnalyzer                      │ ← Factor Exposure Analysis
-│ StyleAnalyzer                       │ ← Style & Sector Analysis
-│ RegimeAnalyzer                      │ ← Regime-Based Analytics
+│ Layer 4: Core Processing            │
+│ EnhancedRegimeEngine                │ ← Regime-Based Analytics
+│ EnhancedTechnicalIndicators         │ ← Technical Analysis
+│ EnhancedFeatureEngineer             │ ← Feature-Based Analytics
+│ EnhancedSignalGenerator             │ ← Signal Performance Analysis
 ├─────────────────────────────────────┤
+│ Layer 5: Analytics & Strategy       │
+│ EnhancedAnalyticsManager            │ ← Analytics Orchestration
+│ EnhancedMetricsCalculator           │ ← Performance & Risk Metrics
+│ PerformanceAnalyzer                 │ ← Comprehensive Performance Analysis
+│ StrategyManager                     │ ← Multi-Strategy Attribution
+│ MultiStrategyAttributionAnalyzer    │ ← Strategy-Level Attribution (Rule 8)
+├─────────────────────────────────────┤
+│ Layer 6: Reporting & Visualization │
 │ ReportGenerator                     │ ← Comprehensive Reporting
 │ VisualizationEngine                 │ ← Advanced Charting
 │ AlertSystem                         │ ← Performance Alerts
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Analytics Health Monitoring
+│ AuditTrailManager                   │ ← Analytics Audit Logging
 └─────────────────────────────────────┘
 ```
 

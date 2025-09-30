@@ -22,7 +22,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
@@ -130,6 +130,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self.is_initialized = False
         self.is_operational = False
         self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         
         # Strategy data
@@ -159,6 +160,74 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self._warning_log: List[Dict[str, Any]] = []
         
         logger.info(f"🧠 Enhanced Strategy {self.strategy_id} ({self.strategy_type.value}) initialized")
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register strategy with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name=f"{self.__class__.__name__}_{self.strategy_id}",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=50  # After all core components
+        )
+        
+        logger.info(f"✅ Strategy {self.strategy_id} registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning(f"No orchestrator available for authorization request in {self.strategy_id}")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
+    # STRATEGY CALLBACK METHODS
+    # ========================================
+    
+    def set_signal_callback(self, callback: Callable):
+        """Set signal callback for strategy notifications"""
+        self.signal_callback = callback
+        self.logger.info("✅ Signal callback registered with strategy")
+    
+    def on_signal_generated(self, signal_data: Dict[str, Any]):
+        """Callback method for signal generation"""
+        try:
+            self.logger.info(f"📡 Strategy signal generated: {signal_data.get('symbol', 'unknown')}")
+            
+            # Notify callback if set
+            if hasattr(self, 'signal_callback') and self.signal_callback:
+                self.signal_callback(signal_data)
+            
+            return {'signal_callback_processed': True}
+            
+        except Exception as e:
+            self.logger.error(f"Signal callback failed: {e}")
+            return {'error': str(e)}
+    
+    def register_callback(self, callback_type: str, callback: Callable):
+        """Register a callback for specific events"""
+        try:
+            if callback_type == 'signal':
+                self.set_signal_callback(callback)
+                return True
+            else:
+                self.logger.warning(f"Unknown callback type: {callback_type}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Callback registration failed: {e}")
+            return False
     
     # ========================================
     # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION

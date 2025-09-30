@@ -107,6 +107,9 @@ class EnhancedFeatureEngineer(ISystemComponent):
         self.component_id = str(uuid.uuid4())
         self.is_initialized = False
         self.is_operational = False
+        
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.start_time = None
         
         # Health and performance tracking
@@ -138,7 +141,39 @@ class EnhancedFeatureEngineer(ISystemComponent):
         
         self.logger.info(f"🚀 Enhanced Feature Engineer initialized with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedFeatureEngineer",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=22  # After indicators
+        )
+        
+        self.logger.info(f"✅ EnhancedFeatureEngineer registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Feature Engineer"""
@@ -823,3 +858,32 @@ class EnhancedFeatureEngineer(ISystemComponent):
         
         self.logger.info(f"Selected {len(selected_features)} features from {len(self.feature_columns)} total")
         return result
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for processing features data"""
+        return features
+    
+    def use_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for using features data (alias)"""
+        return self.process_features(features)
+    
+    def analyze_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for analyzing features data (alias)"""
+        return self.process_features(features)
+    
+    def process_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for processing indicators data (consumption interface)"""
+        # This component consumes indicators to produce features
+        return indicators
+    
+    def use_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for using indicators data (consumption interface)"""
+        return self.process_indicators(indicators)
+    
+    def analyze_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for analyzing indicators data (consumption interface)"""
+        return self.process_indicators(indicators)

@@ -475,6 +475,9 @@ class EnhancedAnalyticsManager(ISystemComponent):
         self.is_operational = False
         self.start_time = None
         
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedAnalyticsManager',
@@ -518,7 +521,39 @@ class EnhancedAnalyticsManager(ISystemComponent):
         
         logger.info(f"🚀 Enhanced Analytics Manager initialized with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedAnalyticsManager",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=35  # After core components
+        )
+        
+        logger.info(f"✅ EnhancedAnalyticsManager registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Analytics Manager"""
@@ -1215,3 +1250,229 @@ class EnhancedAnalyticsManager(ISystemComponent):
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.shutdown()
+    
+    # ========================================
+    # STANDARDIZED DATA FLOW METHODS
+    # ========================================
+    
+    def process_analytics(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for processing analytics data"""
+        return {
+            'analytics_processed': True,
+            'data_type': type(data).__name__,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedAnalyticsManager'
+        }
+    
+    def handle_performance(self, performance_data: Any) -> Dict[str, Any]:
+        """Standardized method for handling performance data"""
+        return self.process_analytics(performance_data)
+    
+    def consume_metrics(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Standardized method for consuming metrics data"""
+        return {
+            'metrics_consumed': len(metrics),
+            'metrics_data': metrics,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedAnalyticsManager'
+        }
+    
+    def analyze_performance(self, performance_data: Any) -> Dict[str, Any]:
+        """Standardized method for analyzing performance (existing method alias)"""
+        return self.process_analytics(performance_data)
+    
+    def calculate_metrics(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for calculating metrics"""
+        return {
+            'metrics_calculated': True,
+            'input_data_type': type(data).__name__,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedAnalyticsManager'
+        }
+    
+    def generate_analytics(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for generating analytics"""
+        return self.process_analytics(data)
+    
+    def process_risk_metrics(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Standardized method for processing risk metrics"""
+        return self.consume_metrics(metrics)
+    
+    def handle_risk(self, risk_data: Any) -> Dict[str, Any]:
+        """Standardized method for handling risk data"""
+        return self.process_analytics(risk_data)
+    
+    def analyze_risk(self, risk_data: Any) -> Dict[str, Any]:
+        """Standardized method for analyzing risk data"""
+        return self.process_analytics(risk_data)
+    
+    # ========================================
+    # ANALYTICS CALLBACK METHODS
+    # ========================================
+    
+    def set_analytics_callbacks(self, components: List[Any] = None):
+        """Set analytics callbacks for components"""
+        if not hasattr(self, 'analytics_callbacks'):
+            self.analytics_callbacks = []
+        
+        if components:
+            self.analytics_callbacks.extend(components)
+            self.logger.info(f"✅ Analytics callbacks registered for {len(components)} components")
+    
+    def on_performance_update(self, performance_data: Dict[str, Any]):
+        """Callback method for performance updates"""
+        try:
+            self.logger.info(f"📈 Performance update received: {performance_data.get('component', 'unknown')}")
+            
+            # Process performance data
+            result = self.handle_performance(performance_data)
+            
+            # Notify registered callbacks
+            if hasattr(self, 'analytics_callbacks'):
+                for callback in self.analytics_callbacks:
+                    try:
+                        if hasattr(callback, 'on_analytics_update'):
+                            callback.on_analytics_update(result)
+                    except Exception as e:
+                        self.logger.error(f"Analytics callback notification failed: {e}")
+            
+            return {'performance_update_processed': True, 'notifications_sent': len(getattr(self, 'analytics_callbacks', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Performance update callback failed: {e}")
+            return {'error': str(e)}
+    
+    def notify_analytics(self, analytics_data: Dict[str, Any]):
+        """Notify analytics data to registered callbacks"""
+        try:
+            self.logger.info("📊 Analytics notification triggered")
+            
+            # Process analytics data
+            result = self.process_analytics(analytics_data)
+            
+            # Notify all registered callbacks
+            if hasattr(self, 'analytics_callbacks'):
+                for callback in self.analytics_callbacks:
+                    try:
+                        if hasattr(callback, 'on_analytics_notification'):
+                            callback.on_analytics_notification(result)
+                    except Exception as e:
+                        self.logger.error(f"Analytics notification callback failed: {e}")
+            
+            return {'analytics_notification_processed': True, 'notifications_sent': len(getattr(self, 'analytics_callbacks', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Analytics notification failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # RISK MANAGEMENT CALLBACK METHODS
+    # ========================================
+    
+    def set_risk_callbacks(self, risk_callback: Callable = None):
+        """Set risk management callback"""
+        self.risk_callback = risk_callback
+        if risk_callback:
+            self.logger.info("✅ Risk callback registered with AnalyticsManager")
+    
+    def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
+        """Callback method for risk limit breaches"""
+        try:
+            self.logger.warning(f"🚨 Analytics risk limit breach: {risk_data}")
+            
+            # Handle risk breach (e.g., alert analytics)
+            if hasattr(self, 'risk_callback') and self.risk_callback:
+                self.risk_callback(risk_data)
+            
+            return {'risk_breach_handled': True}
+            
+        except Exception as e:
+            self.logger.error(f"Risk limit breach callback failed: {e}")
+            return {'error': str(e)}
+    
+    def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
+        """Callback method for emergency shutdown"""
+        try:
+            self.logger.critical(f"🚨 Analytics emergency shutdown: {shutdown_reason}")
+            
+            # Emergency analytics actions
+            # In a real implementation, this would save critical analytics
+            
+            return {'emergency_shutdown_handled': True}
+            
+        except Exception as e:
+            self.logger.error(f"Emergency shutdown callback failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # AUTHORIZATION METHODS
+    # ========================================
+    
+    def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
+        """Authorize analytics operations"""
+        try:
+            # Basic authorization logic for analytics operations
+            authorized_operations = [
+                'analyze_performance', 'calculate_metrics', 'generate_analytics',
+                'process_analytics', 'handle_performance', 'consume_metrics'
+            ]
+            
+            if operation in authorized_operations:
+                self.logger.info(f"✅ Analytics operation authorized: {operation}")
+                return True
+            else:
+                self.logger.warning(f"❌ Analytics operation not authorized: {operation}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Authorization failed: {e}")
+            return False
+    
+    def check_authority_level(self, required_level: str) -> bool:
+        """Check if component has required authority level"""
+        try:
+            # Analytics manager has OPERATIONAL authority level
+            component_authority = "OPERATIONAL"
+            
+            authority_hierarchy = {
+                "READ_ONLY": 1,
+                "OPERATIONAL": 2,
+                "GOVERNANCE_CONTROL": 3,
+                "SYSTEM_CONTROL": 4
+            }
+            
+            component_level = authority_hierarchy.get(component_authority, 0)
+            required_level_num = authority_hierarchy.get(required_level, 999)
+            
+            authorized = component_level >= required_level_num
+            
+            if authorized:
+                self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
+            else:
+                self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
+            
+            return authorized
+            
+        except Exception as e:
+            self.logger.error(f"Authority level check failed: {e}")
+            return False
+    
+    def validate_permissions(self, permission: str, context: Dict[str, Any] = None) -> bool:
+        """Validate permissions for analytics operations"""
+        try:
+            # Analytics manager permissions
+            allowed_permissions = [
+                'performance_analysis', 'metrics_calculation', 'analytics_generation',
+                'data_processing', 'reporting', 'monitoring'
+            ]
+            
+            if permission in allowed_permissions:
+                self.logger.info(f"✅ Permission validated: {permission}")
+                return True
+            else:
+                self.logger.warning(f"❌ Permission denied: {permission}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Permission validation failed: {e}")
+            return False

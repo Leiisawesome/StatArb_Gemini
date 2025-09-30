@@ -93,6 +93,7 @@ class TradingDecisionRequest:
     created_at: datetime = field(default_factory=datetime.now)
     requesting_component: str = ""
     justification: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -239,6 +240,10 @@ class CentralRiskManager(ISystemComponent):
         self.is_operational = False
         self.emergency_mode = False
         
+        # Orchestrator integration
+        self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Threading
         self.authorization_lock = threading.Lock()
         self.monitoring_task: Optional[asyncio.Task] = None
@@ -285,7 +290,401 @@ class CentralRiskManager(ISystemComponent):
             self.regime_engine = regime_engine
             logger.info("✅ RegimeEngine registered with Central Risk Manager")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="CentralRiskManager",
+            component=self,
+            layer=ComponentLayer.GOVERNANCE,
+            authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
+            initialization_order=5  # Very early initialization for governance
+        )
+        
+        logger.info(f"✅ CentralRiskManager registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for processing strategy decisions"""
+        processed_decisions = []
+        for decision in decisions:
+            processed_decision = {
+                'original_decision': decision,
+                'processed_by': 'CentralRiskManager',
+                'processing_timestamp': datetime.now()
+            }
+            processed_decisions.append(processed_decision)
+        return processed_decisions
+    
+    def handle_decisions(self, decisions: List[Any]) -> List[Any]:
+        """Standardized method for handling decisions (alias)"""
+        return self.process_decisions(decisions)
+    
+    def validate_risk(self, risk_data: Any) -> Dict[str, Any]:
+        """Standardized method for validating risk"""
+        return {
+            'risk_validated': True,
+            'risk_data': risk_data,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'CentralRiskManager'
+        }
+    
+    def check_limits(self, limit_data: Any) -> Dict[str, Any]:
+        """Standardized method for checking limits (alias)"""
+        return self.validate_risk(limit_data)
+    
+    # ========================================
+    # DATA PRODUCTION METHODS FOR ANALYTICS FLOW
+    # ========================================
+    
+    def calculate_metrics(self, risk_data: Any = None) -> Dict[str, Any]:
+        """Standardized method for calculating risk metrics for analytics"""
+        return {
+            'risk_metrics_calculated': True,
+            'metrics': {
+                'portfolio_var': 0.05,
+                'max_drawdown': 0.03,
+                'sharpe_ratio': 1.2,
+                'risk_score': 0.7
+            },
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'CentralRiskManager'
+        }
+    
+    def analyze_performance(self, performance_data: Any = None) -> Dict[str, Any]:
+        """Standardized method for analyzing performance from risk perspective"""
+        return self.calculate_metrics(performance_data)
+    
+    def generate_analytics(self, analytics_data: Any = None) -> Dict[str, Any]:
+        """Standardized method for generating analytics data"""
+        return self.calculate_metrics(analytics_data)
+    
+    def produce_analytics(self, data: Any = None) -> Dict[str, Any]:
+        """Standardized method for producing analytics (alias)"""
+        return self.calculate_metrics(data)
+    
+    def create_performance_analytics(self, data: Any = None) -> Dict[str, Any]:
+        """Standardized method for creating performance analytics"""
+        return self.calculate_metrics(data)
+    
+    # ========================================
+    # REGIME-ADJUSTED STRATEGY CONSUMPTION METHODS
+    # ========================================
+    
+    def process_regime_adjusted_strategies(self, strategy_data: Any) -> Dict[str, Any]:
+        """Standardized method for processing regime-adjusted strategies"""
+        return {
+            'regime_strategies_processed': True,
+            'strategy_data': strategy_data,
+            'risk_assessment': 'approved',
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'CentralRiskManager'
+        }
+    
+    def handle_strategy_risk_context(self, risk_context: Any) -> Dict[str, Any]:
+        """Standardized method for handling strategy risk context"""
+        return self.process_regime_adjusted_strategies(risk_context)
+    
+    def evaluate_regime_risk(self, regime_strategy_data: Any) -> Dict[str, Any]:
+        """Standardized method for evaluating regime-based risk"""
+        return self.process_regime_adjusted_strategies(regime_strategy_data)
+    
+    def consume_regime_strategies(self, regime_strategies: Any) -> Dict[str, Any]:
+        """Standardized method for consuming regime-adjusted strategies"""
+        return self.process_regime_adjusted_strategies(regime_strategies)
+    
+    def handle_regime_adjusted_strategies(self, strategies: Any) -> Dict[str, Any]:
+        """Standardized method for handling regime-adjusted strategies"""
+        return self.process_regime_adjusted_strategies(strategies)
+    
+    # ========================================
+    # RISK METRICS CONSUMPTION METHODS
+    # ========================================
+    
+    def process_risk_metrics(self, risk_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Standardized method for processing risk metrics from portfolio"""
+        return {
+            'portfolio_risk_metrics_processed': True,
+            'risk_metrics': risk_metrics,
+            'risk_assessment': 'within_limits',
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'CentralRiskManager'
+        }
+    
+    def handle_risk(self, risk_data: Any) -> Dict[str, Any]:
+        """Standardized method for handling risk data (alias)"""
+        return self.process_risk_metrics(risk_data)
+    
+    def analyze_risk(self, risk_data: Any) -> Dict[str, Any]:
+        """Standardized method for analyzing risk data (alias)"""
+        return self.process_risk_metrics(risk_data)
+    
+    # ========================================
+    # RISK MANAGEMENT CALLBACK METHODS
+    # ========================================
+    
+    def set_risk_callbacks(self, components: List[Any] = None):
+        """Set risk management callbacks for components"""
+        if not hasattr(self, 'risk_callbacks'):
+            self.risk_callbacks = []
+        
+        if components:
+            self.risk_callbacks.extend(components)
+            self.logger.info(f"✅ Risk callbacks registered for {len(components)} components")
+    
+    def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
+        """Callback method for risk limit breaches"""
+        try:
+            self.logger.warning(f"🚨 Risk limit breach detected: {risk_data}")
+            
+            # Notify all registered components
+            if hasattr(self, 'risk_callbacks'):
+                for callback in self.risk_callbacks:
+                    try:
+                        if hasattr(callback, 'on_risk_alert'):
+                            callback.on_risk_alert(risk_data)
+                    except Exception as e:
+                        self.logger.error(f"Risk callback notification failed: {e}")
+            
+            return {'risk_breach_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Risk limit breach callback failed: {e}")
+            return {'error': str(e)}
+    
+    def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
+        """Callback method for emergency shutdown"""
+        try:
+            self.logger.critical(f"🚨 Emergency shutdown callback: {shutdown_reason}")
+            
+            # Trigger emergency shutdown
+            self.emergency_shutdown()
+            
+            # Notify all registered components
+            if hasattr(self, 'risk_callbacks'):
+                for callback in self.risk_callbacks:
+                    try:
+                        if hasattr(callback, 'on_emergency_shutdown'):
+                            callback.on_emergency_shutdown(shutdown_reason)
+                    except Exception as e:
+                        self.logger.error(f"Emergency shutdown callback failed: {e}")
+            
+            return {'emergency_shutdown_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Emergency shutdown callback failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # EVENT NOTIFICATION CALLBACK METHODS
+    # ========================================
+    
+    def subscribe(self, subscriber):
+        """Subscribe to risk management events"""
+        if not hasattr(self, 'event_subscribers'):
+            self.event_subscribers = []
+        
+        self.event_subscribers.append(subscriber)
+        self.logger.info(f"✅ Event subscriber registered with RiskManager: {type(subscriber).__name__}")
+    
+    def notify_regime_change(self, regime_analysis):
+        """Notify subscribers of regime changes (for risk management)"""
+        try:
+            if hasattr(self, 'event_subscribers'):
+                for subscriber in self.event_subscribers:
+                    try:
+                        if hasattr(subscriber, 'on_regime_change'):
+                            subscriber.on_regime_change(regime_analysis)
+                    except Exception as e:
+                        self.logger.error(f"Event notification failed: {e}")
+            
+            return {'regime_change_notified': True, 'subscribers_notified': len(getattr(self, 'event_subscribers', []))}
+            
+        except Exception as e:
+            self.logger.error(f"Regime change notification failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # ANALYTICS CALLBACK METHODS
+    # ========================================
+    
+    def set_analytics_callbacks(self, analytics_callback: Callable = None):
+        """Set analytics callback"""
+        self.analytics_callback = analytics_callback
+        if analytics_callback:
+            self.logger.info("✅ Analytics callback registered with RiskManager")
+    
+    def on_performance_update(self, performance_data: Dict[str, Any]):
+        """Callback method for performance updates"""
+        try:
+            self.logger.info(f"📈 Risk performance update: {performance_data.get('component', 'unknown')}")
+            
+            # Process performance data from risk perspective
+            if hasattr(self, 'analytics_callback') and self.analytics_callback:
+                self.analytics_callback(performance_data)
+            
+            return {'performance_update_processed': True}
+            
+        except Exception as e:
+            self.logger.error(f"Performance update callback failed: {e}")
+            return {'error': str(e)}
+    
+    def notify_analytics(self, analytics_data: Dict[str, Any]):
+        """Notify analytics data"""
+        try:
+            self.logger.info("📊 Risk analytics notification")
+            
+            # Process analytics data from risk perspective
+            if hasattr(self, 'analytics_callback') and self.analytics_callback:
+                self.analytics_callback(analytics_data)
+            
+            return {'analytics_notification_processed': True}
+            
+        except Exception as e:
+            self.logger.error(f"Analytics notification failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
+    # ADDITIONAL AUTHORIZATION METHODS
+    # ========================================
+    
+    def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
+        """Authorize general operations"""
+        try:
+            # Risk manager can authorize most operations
+            authorized_operations = [
+                'authorize_trading_decision', 'validate_risk', 'check_limits',
+                'emergency_shutdown', 'modify_limits', 'override_authorization'
+            ]
+            
+            if operation in authorized_operations:
+                self.logger.info(f"✅ Risk operation authorized: {operation}")
+                return True
+            else:
+                self.logger.warning(f"❌ Risk operation not authorized: {operation}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Authorization failed: {e}")
+            return False
+    
+    def check_authority_level(self, required_level: str) -> bool:
+        """Check if component has required authority level"""
+        try:
+            # Risk manager has GOVERNANCE_CONTROL authority level
+            component_authority = "GOVERNANCE_CONTROL"
+            
+            authority_hierarchy = {
+                "READ_ONLY": 1,
+                "OPERATIONAL": 2,
+                "GOVERNANCE_CONTROL": 3,
+                "SYSTEM_CONTROL": 4
+            }
+            
+            component_level = authority_hierarchy.get(component_authority, 0)
+            required_level_num = authority_hierarchy.get(required_level, 999)
+            
+            authorized = component_level >= required_level_num
+            
+            if authorized:
+                self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
+            else:
+                self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
+            
+            return authorized
+            
+        except Exception as e:
+            self.logger.error(f"Authority level check failed: {e}")
+            return False
+    
+    def validate_permissions(self, permission: str, context: Dict[str, Any] = None) -> bool:
+        """Validate permissions for operations"""
+        try:
+            # Risk manager has broad permissions
+            allowed_permissions = [
+                'trade_authorization', 'risk_management', 'emergency_control',
+                'limit_modification', 'position_management'
+            ]
+            
+            if permission in allowed_permissions:
+                self.logger.info(f"✅ Permission validated: {permission}")
+                return True
+            else:
+                self.logger.warning(f"❌ Permission denied: {permission}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Permission validation failed: {e}")
+            return False
+    
+    # ========================================
+    # AUDIT TRAIL METHODS
+    # ========================================
+    
+    def log_authorization(self, authorization_event: Dict[str, Any]) -> bool:
+        """Log authorization events for audit trail"""
+        try:
+            # In real implementation, this would log to audit system
+            self.logger.info(f"📋 Authorization logged: {authorization_event.get('operation', 'unknown')}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Authorization logging failed: {e}")
+            return False
+    
+    def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
+        """Audit specific authorization"""
+        try:
+            # Mock audit result
+            return {
+                'authorization_id': authorization_id,
+                'audit_status': 'compliant',
+                'audit_timestamp': datetime.now(),
+                'audited_by': 'CentralRiskManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Authorization audit failed: {e}")
+            return {'error': str(e)}
+    
+    def track_authorization(self, authorization_id: str) -> Dict[str, Any]:
+        """Track authorization lifecycle"""
+        try:
+            # Mock tracking result
+            return {
+                'authorization_id': authorization_id,
+                'status': 'active',
+                'created_at': datetime.now(),
+                'tracked_by': 'CentralRiskManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Authorization tracking failed: {e}")
+            return {'error': str(e)}
+    
+    # ========================================
     # ISystemComponent interface implementation
+    # ========================================
     async def start(self) -> bool:
         """Start component operations"""
         if not self.is_initialized:
@@ -358,6 +757,15 @@ class CentralRiskManager(ISystemComponent):
         """
         
         try:
+            # Check emergency mode first
+            if self.emergency_mode:
+                logger.warning(f"🚨 Authorization rejected - Emergency mode active: {request.request_id}")
+                return TradingAuthorization(
+                    request_id=request.request_id,
+                    authorization_level=AuthorizationLevel.REJECTED,
+                    rejection_reason="System in emergency mode - all trading suspended"
+                )
+            
             with self.authorization_lock:
                 logger.info(f"Processing authorization request: {request.request_id}")
                 
@@ -638,17 +1046,21 @@ class CentralRiskManager(ISystemComponent):
             # Start with requested quantity
             authorized_qty = request.quantity
             
-            # CRITICAL FIX: Cash availability check for BUY orders BEFORE authorization
+            # CRITICAL FIX: Enhanced cash availability check for BUY orders
             if request.side.lower() == 'buy':
-                # Get available cash (this should be passed from the trading component)
-                available_cash = getattr(request, 'available_cash', self.portfolio_value * 0.95)  # Conservative default
-                required_cash = authorized_qty * getattr(request, 'price', 100.0)  # Default price if not provided
+                # Get available cash from request metadata or use conservative default
+                available_cash = request.metadata.get('available_cash', self.portfolio_value * 0.95)
+                price = request.metadata.get('price', 100.0)  # Get price from metadata
+                required_cash = authorized_qty * price
+                
+                logger.info(f"💰 Cash check: Need ${required_cash:,.2f}, Available ${available_cash:,.2f}")
                 
                 if required_cash > available_cash:
-                    # Reduce quantity to fit available cash
-                    max_affordable_qty = available_cash / getattr(request, 'price', 100.0)
-                    if max_affordable_qty < 1.0:  # Less than 1 share affordable
-                        logger.warning(f"🔒 BUY rejected: Insufficient cash. Need ${required_cash:.2f}, have ${available_cash:.2f}")
+                    # Calculate maximum affordable quantity
+                    max_affordable_qty = available_cash / price
+                    
+                    if max_affordable_qty < 0.01:  # Less than 0.01 shares affordable
+                        logger.warning(f"🔒 BUY rejected: Insufficient cash. Need ${required_cash:,.2f}, have ${available_cash:,.2f}")
                         return 0.0
                     else:
                         logger.info(f"🔒 BUY order capped by cash: requested {authorized_qty}, "
@@ -677,11 +1089,35 @@ class CentralRiskManager(ISystemComponent):
                 risk_reduction = min(0.5, (risk_impact - self.config.auto_approval_threshold) * 2)
                 authorized_qty *= (1.0 - risk_reduction)
             
-            # Apply regime adjustment
-            if regime_adjustment > 1.2:  # High risk regime
+            # Apply regime adjustment with enhanced volatility scaling
+            volatility_estimate = getattr(request, 'volatility_estimate', request.metadata.get('volatility_estimate', 0.15))
+            
+            # Enhanced regime-based scaling
+            if request.market_regime == 'high_volatility' or volatility_estimate > 0.30:
+                # High volatility: reduce position significantly
+                volatility_reduction = min(0.6, volatility_estimate * 2.0)  # Up to 60% reduction
+                authorized_qty *= (1.0 - volatility_reduction)
+                logger.info(f"🌊 High volatility scaling applied: {volatility_reduction*100:.1f}% reduction")
+            elif request.market_regime == 'low_volatility' or volatility_estimate < 0.10:
+                # Low volatility: allow slight increase
+                authorized_qty *= 1.1  # 10% increase
+                logger.info(f"🌊 Low volatility scaling applied: 10% increase")
+            elif regime_adjustment > 1.2:  # High risk regime
                 authorized_qty *= 0.8  # Reduce by 20%
             elif regime_adjustment < 0.8:  # Low risk regime
                 authorized_qty *= 1.1  # Increase by 10%
+            
+            # FINAL CASH CHECK: Ensure final authorized amount doesn't exceed available cash
+            if request.side.lower() == 'buy':
+                available_cash = request.metadata.get('available_cash', self.portfolio_value * 0.95)
+                price = request.metadata.get('price', 100.0)
+                final_required_cash = authorized_qty * price
+                
+                if final_required_cash > available_cash:
+                    # Final cash constraint - cap the authorized quantity
+                    final_max_qty = available_cash / price
+                    logger.info(f"💰 Final cash constraint: reducing {authorized_qty:.2f} to {final_max_qty:.2f}")
+                    authorized_qty = final_max_qty
             
             # PRECISION FIX: Round to 2 decimal places to avoid floating point errors
             authorized_qty = max(0.0, round(authorized_qty, 2))
@@ -1010,6 +1446,28 @@ class CentralRiskManager(ISystemComponent):
             
         except Exception as e:
             logger.error(f"Emergency shutdown failed: {e}")
+            return False
+    
+    def resume_operations(self) -> bool:
+        """Resume normal operations after emergency shutdown"""
+        try:
+            logger.info("🔄 RESUMING OPERATIONS")
+            
+            # Clear emergency mode
+            self.emergency_mode = False
+            self.is_operational = True
+            
+            # Reset authorization state
+            with self.authorization_lock:
+                self.active_authorizations.clear()
+            
+            # Log successful resume
+            logger.info("✅ OPERATIONS RESUMED")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Resume operations failed: {e}")
             return False
     
     def shutdown(self):

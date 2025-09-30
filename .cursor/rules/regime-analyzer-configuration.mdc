@@ -7,52 +7,204 @@ This instruction map shows how to compose core_engine components into a speciali
 
 ## Regime Analyzer Component Stack
 
-### Specialized Analysis Brick Assembly
+### Enhanced Regime Analysis Brick Assembly (Rules 8-10)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← System Control & Coordination
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← System Control & Coordination
+│ SystemIntegrationManager            │ ← Multi-Phase Regime Init
 ├─────────────────────────────────────┤
-│ MultiSourceDataManager              │ ← Multi-Asset Data Integration
-│ MacroDataManager                    │ ← Economic & Fundamental Data
+│ Layer 2: Governance                 │
+│ CentralRiskManager                  │ ← Regime-Aware Risk Governance
+├─────────────────────────────────────┤
+│ Layer 3: Data Management            │
+│ ClickHouseDataManager               │ ← Multi-Asset Data Authority
 │ AlternativeDataManager              │ ← Sentiment & Flow Data
+│ MacroDataManager                    │ ← Economic & Fundamental Data
 ├─────────────────────────────────────┤
+│ Layer 4: Core Processing            │
 │ EnhancedRegimeEngine                │ ← Advanced Regime Detection
+│ EnhancedTechnicalIndicators         │ ← Regime-Based Indicators
+│ EnhancedFeatureEngineer             │ ← Regime Feature Engineering
+│ EnhancedSignalGenerator             │ ← Regime-Aware Signals
+├─────────────────────────────────────┤
+│ Layer 5: Analytics & Strategy       │
+│ EnhancedAnalyticsManager            │ ← Regime Analytics Orchestration
 │ RegimeTransitionPredictor           │ ← ML-Based Transition Forecasting
 │ CrossAssetRegimeAnalyzer            │ ← Multi-Asset Regime Correlation
 │ MacroRegimeIntegrator               │ ← Macro-Economic Regime Factors
+│ MultiStrategyRegimeMapper           │ ← Multi-Strategy Regime Optimization (Rule 8)
+│ RegimeAttributionAnalyzer           │ ← Regime-Based Performance Attribution
 ├─────────────────────────────────────┤
-│ RegimeStrategyMapper                │ ← Strategy-Regime Optimization
-│ RegimeRiskAdjuster                  │ ← Regime-Aware Risk Management
-├─────────────────────────────────────┤
-│ RegimeAnalytics                     │ ← Regime Performance Analytics
+│ Layer 6: Reporting & Visualization │
 │ RegimeReportGenerator               │ ← Comprehensive Regime Reporting
 │ RegimeVisualization                 │ ← Advanced Regime Visualization
+│ RegimeAlertSystem                   │ ← Regime Change Alerts
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Regime System Health Monitoring
+│ GracefulDegradationManager          │ ← Regime Analysis Degradation
+│ AuditTrailManager                   │ ← Regime Analysis Audit Logging
 └─────────────────────────────────────┘
 ```
 
 ## Regime Analyzer Configuration Map
 
-### 1. Multi-Source Data Configuration
+### 1. Enhanced Multi-Source Data Configuration (Rule 9)
 ```python
-from core_engine.data.manager import MultiSourceDataConfig
+from core_engine.data.manager import ClickHouseDataConfig
+from core_engine.regime.engine import EnhancedRegimeEngineConfig
 
-# Comprehensive data sources for regime analysis
-regime_data_config = MultiSourceDataConfig(
-    # Core market data
-    equity_symbols=['SPY', 'QQQ', 'IWM', 'VIX', 'NVDA', 'TSLA', 'AAPL'],
-    bond_symbols=['TLT', 'IEF', 'SHY', 'HYG', 'LQD'],
-    commodity_symbols=['GLD', 'SLV', 'USO', 'UNG', 'DBA'],
-    currency_symbols=['UUP', 'FXE', 'FXY', 'EEM'],
+# Enhanced data sources for comprehensive regime analysis
+enhanced_regime_data_config = ClickHouseDataConfig(
+    # Core market data with enhanced coverage
+    symbols=[
+        # Equity indices
+        'SPY', 'QQQ', 'IWM', 'VIX', 'NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL',
+        # Fixed income
+        'TLT', 'IEF', 'SHY', 'HYG', 'LQD', 'TIPS',
+        # Commodities
+        'GLD', 'SLV', 'USO', 'UNG', 'DBA', 'PDBC',
+        # Currencies & International
+        'UUP', 'FXE', 'FXY', 'EEM', 'VEA', 'VWO'
+    ],
+    start_date='2020-01-01',  # Extended history for regime analysis
+    end_date='2024-12-31',
+    interval='1min',
+    enable_caching=True,
+    enable_multi_timeframe_data=True,  # Rule 9: Multi-timeframe analysis
+    timeframes=['1min', '5min', '15min', '1h', '1D'],
     
-    # Alternative data sources
-    sentiment_data=['AAII_sentiment', 'CNN_fear_greed', 'VIX_term_structure'],
-    flow_data=['fund_flows', 'insider_trading', 'options_flow'],
-    macro_data=['fed_funds_rate', 'yield_curve', 'inflation_expectations'],
+    # Enhanced data validation for regime analysis
+    enable_data_validation=True,
+    enable_regime_data_preprocessing=True
+)
+```
+
+### 2. Enhanced Regime Engine Configuration (Rules 8-9)
+```python
+# Advanced regime detection with ML and multi-strategy support
+enhanced_regime_config = EnhancedRegimeEngineConfig(
+    # Core regime detection parameters
+    lookback_window=90,  # Extended for better regime detection
+    volatility_window=30,
+    trend_threshold=0.015,
+    regime_change_threshold=0.6,
     
-    # Data frequencies
-    high_frequency_interval='1min',
-    medium_frequency_interval='1h',
-    low_frequency_interval='1d',
+    # Enhanced capabilities (Rule 9)
+    enable_enhanced_detection=True,
+    enable_multi_timeframe_analysis=True,
+    enable_ml_based_prediction=True,
+    enable_regime_persistence_modeling=True,
+    enable_cross_asset_correlation=True,
+    
+    # Multi-strategy integration (Rule 8)
+    enable_multi_strategy_regime_mapping=True,
+    strategy_regime_weights={
+        'statistical_arbitrage': {'low_vol': 1.2, 'high_vol': 0.7, 'trending': 0.9, 'sideways': 1.1},
+        'momentum': {'low_vol': 0.8, 'high_vol': 1.3, 'trending': 1.4, 'sideways': 0.6},
+        'mean_reversion': {'low_vol': 1.1, 'high_vol': 0.8, 'trending': 0.7, 'sideways': 1.3}
+    },
+    
+    # Advanced regime features
+    regime_types=['low_volatility', 'normal_volatility', 'high_volatility', 'extreme_volatility',
+                  'trending_up', 'trending_down', 'sideways', 'choppy'],
+    transition_prediction_horizon=5,  # days
+    regime_confidence_threshold=0.7,
+    
+    # Real-time capabilities
+    enable_real_time_regime_detection=True,
+    real_time_update_frequency=60,  # seconds
+    enable_regime_alerts=True
+)
+```
+
+### 3. Multi-Strategy Regime Mapping Configuration (Rule 8)
+```python
+from core_engine.trading.strategies.manager import MultiStrategyRegimeConfig
+
+# Multi-strategy regime optimization configuration
+multi_strategy_regime_config = MultiStrategyRegimeConfig(
+    # Strategy-regime performance mapping
+    strategy_regime_performance={
+        'statistical_arbitrage': {
+            'optimal_regimes': ['low_volatility', 'sideways'],
+            'suboptimal_regimes': ['high_volatility', 'trending_up', 'trending_down'],
+            'regime_allocation_multipliers': {
+                'low_volatility': 1.3,
+                'normal_volatility': 1.0,
+                'high_volatility': 0.6,
+                'sideways': 1.2,
+                'trending_up': 0.8,
+                'trending_down': 0.8
+            }
+        },
+        'momentum': {
+            'optimal_regimes': ['trending_up', 'trending_down', 'high_volatility'],
+            'suboptimal_regimes': ['sideways', 'low_volatility'],
+            'regime_allocation_multipliers': {
+                'trending_up': 1.4,
+                'trending_down': 1.4,
+                'high_volatility': 1.2,
+                'normal_volatility': 1.0,
+                'low_volatility': 0.7,
+                'sideways': 0.6
+            }
+        },
+        'mean_reversion': {
+            'optimal_regimes': ['sideways', 'low_volatility'],
+            'suboptimal_regimes': ['trending_up', 'trending_down'],
+            'regime_allocation_multipliers': {
+                'sideways': 1.3,
+                'low_volatility': 1.2,
+                'normal_volatility': 1.0,
+                'high_volatility': 0.8,
+                'trending_up': 0.7,
+                'trending_down': 0.7
+            }
+        }
+    },
+    
+    # Dynamic allocation based on regime
+    enable_dynamic_strategy_allocation=True,
+    regime_transition_rebalancing=True,
+    min_regime_confidence_for_rebalancing=0.8,
+    max_allocation_change_per_regime=0.2  # 20% max change
+)
+```
+
+### 4. Advanced Analytics Configuration (Rule 9)
+```python
+from core_engine.analytics.manager_enhanced import RegimeAnalyticsConfig
+
+# Regime-specific analytics configuration
+regime_analytics_config = RegimeAnalyticsConfig(
+    # Real-time regime analytics
+    enable_real_time_regime_analytics=True,
+    enable_regime_performance_attribution=True,
+    enable_regime_transition_analysis=True,
+    enable_cross_regime_correlation_analysis=True,
+    
+    # Multi-timeframe regime analysis
+    enable_multi_timeframe_regime_analysis=True,
+    regime_analysis_timeframes=['5min', '15min', '1h', '4h', '1D'],
+    
+    # Regime prediction and forecasting
+    enable_regime_prediction=True,
+    prediction_models=['hmm', 'lstm', 'transformer', 'ensemble'],
+    prediction_horizon_days=[1, 3, 5, 10],
+    
+    # Performance metrics
+    regime_performance_metrics=[
+        'regime_duration', 'regime_volatility', 'regime_returns',
+        'transition_frequency', 'regime_persistence', 'prediction_accuracy'
+    ],
+    
+    # Reporting frequency
+    real_time_update_frequency=30,  # seconds
+    daily_regime_report=True,
+    weekly_regime_analysis=True,
+    monthly_regime_attribution=True
     macro_frequency_interval='1w',
     
     # Historical depth

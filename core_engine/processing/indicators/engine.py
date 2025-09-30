@@ -224,6 +224,9 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         self.is_operational = False
         self.start_time = None
         
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedTechnicalIndicators',
@@ -282,7 +285,39 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         """Get list of supported indicators (interface compliance)"""
         return self._supported_indicators.copy()
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedTechnicalIndicators",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=20  # After data components
+        )
+        
+        self.logger.info(f"✅ EnhancedTechnicalIndicators registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Technical Indicators Engine"""
@@ -1364,6 +1399,36 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         except Exception as e:
             self.logger.warning(f"Error calculating macro confidence: {e}")
             return 0.0
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for processing indicators data"""
+        # This component produces indicators, so this is a pass-through
+        return indicators
+    
+    def use_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for using indicators data (alias)"""
+        return self.process_indicators(indicators)
+    
+    def analyze_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for analyzing indicators data (alias)"""
+        return self.process_indicators(indicators)
+    
+    def process_market_data(self, market_data: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for processing market data (consumption interface)"""
+        # This component consumes market data to produce indicators
+        return market_data
+    
+    def analyze_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for analyzing data (consumption interface)"""
+        return self.process_market_data(data)
+    
+    def consume_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Standardized method for consuming data (consumption interface)"""
+        return self.process_market_data(data)
 
 
 # ========================================================================================

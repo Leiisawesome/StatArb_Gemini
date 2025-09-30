@@ -7,27 +7,47 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Risk Monitoring Component Stack
 
-### Real-Time Surveillance Brick Assembly
+### Enhanced Real-Time Risk Surveillance Assembly (Rules 8-10)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← System Control & Alert Coordination
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← System Control & Alert Coordination
+│ SystemIntegrationManager            │ ← Multi-Phase Risk System Init
 ├─────────────────────────────────────┤
-│ RealTimeDataStreamer                │ ← Live Market & Portfolio Data
-│ PositionMonitor                     │ ← Real-Time Position Tracking
-│ PnLCalculator                       │ ← Live P&L Calculation
+│ Layer 2: Governance                 │
+│ CentralRiskManager                  │ ← Enhanced Risk Governance & Control
 ├─────────────────────────────────────┤
+│ Layer 3: Data Management            │
+│ ClickHouseDataManager               │ ← Real-Time Market & Portfolio Data
+│ RealTimeDataStreamer                │ ← Live Data Streaming
+├─────────────────────────────────────┤
+│ Layer 4: Core Processing            │
+│ EnhancedRegimeEngine                │ ← Regime-Aware Risk Assessment
+│ EnhancedTechnicalIndicators         │ ← Risk-Based Technical Analysis
+│ EnhancedFeatureEngineer             │ ← Risk Feature Engineering
+│ EnhancedSignalGenerator             │ ← Risk Signal Generation
+├─────────────────────────────────────┤
+│ Layer 5: Analytics & Risk           │
+│ EnhancedAnalyticsManager            │ ← Risk Analytics Orchestration
+│ EnhancedMetricsCalculator           │ ← Real-Time Risk Metrics
+│ MultiStrategyRiskAttributor         │ ← Multi-Strategy Risk Attribution (Rule 8)
 │ RiskLimitMonitor                    │ ← Continuous Limit Surveillance
-│ VaRCalculator                       │ ← Real-Time VaR Calculation
+│ DynamicVaRCalculator                │ ← Regime-Aware VaR Calculation (Rule 9)
 │ StressTestEngine                    │ ← Continuous Stress Testing
 │ CorrelationMonitor                  │ ← Dynamic Correlation Tracking
+│ EnhancedPortfolioManager            │ ← Real-Time Position & Risk Tracking
 ├─────────────────────────────────────┤
-│ CentralRiskManager                  │ ← Risk Governance & Control
-├─────────────────────────────────────┤
+│ Layer 6: Alerts & Response          │
 │ AlertEngine                         │ ← Multi-Level Alert System
 │ AutomatedResponseSystem             │ ← Automated Risk Responses
 │ RiskDashboard                       │ ← Real-Time Risk Visualization
 │ ComplianceMonitor                   │ ← Regulatory Compliance Tracking
-│ AuditTrail                          │ ← Complete Risk Audit Logging
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Risk System Health Monitoring
+│ GracefulDegradationManager          │ ← Risk System Degradation Control
+│ AuditTrailManager                   │ ← Complete Risk Audit Logging
+│ DisasterRecoveryManager             │ ← Risk System Disaster Recovery
 └─────────────────────────────────────┘
 ```
 

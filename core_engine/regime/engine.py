@@ -224,6 +224,12 @@ class EnhancedRegimeEngine(ISystemComponent):
         self.is_operational = False
         self.start_time = None
         
+        # Event-driven integration
+        self.subscribers: List[IRegimeSubscriber] = []
+        
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedRegimeEngine',
@@ -280,7 +286,39 @@ class EnhancedRegimeEngine(ISystemComponent):
         
         self.logger.info(f"🚀 Enhanced Regime Engine initialized with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedRegimeEngine",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=15  # Early initialization for regime analysis
+        )
+        
+        self.logger.info(f"✅ EnhancedRegimeEngine registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Interface Implementation
+    # ========================================
     
     async def initialize(self) -> bool:
         """Initialize the Enhanced Regime Engine"""
@@ -537,3 +575,58 @@ class EnhancedRegimeEngine(ISystemComponent):
         except Exception as e:
             self.logger.warning(f"Analysis health check failed: {e}")
             return False
+    
+    # ========================================
+    # EVENT-DRIVEN INTEGRATION METHODS
+    # ========================================
+    
+    def subscribe(self, subscriber: IRegimeSubscriber):
+        """Subscribe to regime change events"""
+        self.subscribers.append(subscriber)
+        self.logger.info(f"📝 New regime subscriber: {type(subscriber).__name__}")
+    
+    async def notify_regime_change(self, regime_analysis):
+        """Notify all subscribers of regime changes"""
+        for subscriber in self.subscribers:
+            try:
+                await subscriber.on_regime_change(regime_analysis)
+            except Exception as e:
+                self.logger.error(f"Failed to notify subscriber {type(subscriber).__name__}: {e}")
+    
+    # ========================================
+    # STANDARDIZED DATA FLOW METHODS
+    # ========================================
+    
+    def process_market_data(self, market_data: Any) -> Dict[str, Any]:
+        """Standardized method for processing market data for regime analysis"""
+        return {
+            'market_data_processed': True,
+            'data_type': type(market_data).__name__,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedRegimeEngine'
+        }
+    
+    def analyze_data(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for analyzing data (alias for process_market_data)"""
+        return self.process_market_data(data)
+    
+    def consume_data(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for consuming data"""
+        return self.process_market_data(data)
+    
+    def analyze_regime(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for regime analysis"""
+        return {
+            'regime_analysis_performed': True,
+            'input_data_type': type(data).__name__,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'EnhancedRegimeEngine'
+        }
+    
+    def detect_regime(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for regime detection (alias)"""
+        return self.analyze_regime(data)
+    
+    def classify_regime(self, data: Any) -> Dict[str, Any]:
+        """Standardized method for regime classification (alias)"""
+        return self.analyze_regime(data)

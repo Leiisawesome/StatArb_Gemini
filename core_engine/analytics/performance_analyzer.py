@@ -506,6 +506,7 @@ class PerformanceAnalyzer(ISystemComponent):
         self.is_initialized = False
         self.is_operational = False
         self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         
         # Initialize audit trail for institutional compliance
@@ -517,6 +518,36 @@ class PerformanceAnalyzer(ISystemComponent):
         """Initialize audit trail for institutional compliance"""
         self._audit_trail = []
         logger.info("Audit trail initialized for Performance Analyzer")
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="PerformanceAnalyzer",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=33  # After metrics calculator
+        )
+        
+        logger.info(f"✅ PerformanceAnalyzer registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
     
     # ========================================
     # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION
@@ -2414,3 +2445,155 @@ class PerformanceAnalyzer(ISystemComponent):
                 'report_type': 'regulatory',
                 'error': str(e)
             }
+    
+    # ========================================
+    # ANALYTICS INTEGRATION METHODS
+    # ========================================
+    
+    def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """
+        Calculate performance metrics for analytics integration
+        
+        Args:
+            returns: Series of returns data
+            
+        Returns:
+            Dictionary containing performance metrics
+        """
+        try:
+            if returns.empty:
+                return {
+                    'performance_calculated': False,
+                    'error': 'Empty returns series',
+                    'calculation_timestamp': datetime.now()
+                }
+            
+            # Calculate basic performance metrics
+            total_return = returns.sum()
+            annualized_return = returns.mean() * 252
+            volatility = returns.std() * np.sqrt(252)
+            sharpe_ratio = annualized_return / volatility if volatility > 0 else 0.0
+            
+            # Calculate drawdown metrics
+            cumulative_returns = (1 + returns).cumprod()
+            running_max = cumulative_returns.expanding().max()
+            drawdown = (cumulative_returns - running_max) / running_max
+            max_drawdown = drawdown.min()
+            
+            # Calculate additional metrics
+            positive_returns = returns[returns > 0]
+            negative_returns = returns[returns < 0]
+            
+            win_rate = len(positive_returns) / len(returns) if len(returns) > 0 else 0.0
+            avg_win = positive_returns.mean() if len(positive_returns) > 0 else 0.0
+            avg_loss = negative_returns.mean() if len(negative_returns) > 0 else 0.0
+            profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 0.0
+            
+            # Calculate risk metrics
+            var_95 = np.percentile(returns, 5)
+            cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95
+            
+            # Skewness and kurtosis
+            skewness = returns.skew()
+            kurtosis = returns.kurtosis()
+            
+            # Calmar ratio
+            calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0.0
+            
+            # Sortino ratio (downside deviation)
+            downside_returns = returns[returns < 0]
+            downside_deviation = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0.0
+            sortino_ratio = annualized_return / downside_deviation if downside_deviation > 0 else 0.0
+            
+            result = {
+                'performance_calculated': True,
+                'calculation_timestamp': datetime.now(),
+                'data_points': len(returns),
+                'metrics': {
+                    # Return metrics
+                    'total_return': float(total_return),
+                    'annualized_return': float(annualized_return),
+                    'volatility': float(volatility),
+                    
+                    # Risk-adjusted metrics
+                    'sharpe_ratio': float(sharpe_ratio),
+                    'sortino_ratio': float(sortino_ratio),
+                    'calmar_ratio': float(calmar_ratio),
+                    
+                    # Drawdown metrics
+                    'max_drawdown': float(max_drawdown),
+                    
+                    # Trade statistics
+                    'win_rate': float(win_rate),
+                    'avg_win': float(avg_win),
+                    'avg_loss': float(avg_loss),
+                    'profit_factor': float(profit_factor),
+                    
+                    # Risk metrics
+                    'var_95': float(var_95),
+                    'cvar_95': float(cvar_95),
+                    
+                    # Distribution metrics
+                    'skewness': float(skewness),
+                    'kurtosis': float(kurtosis)
+                },
+                'summary': {
+                    'performance_grade': self._grade_performance(sharpe_ratio, max_drawdown),
+                    'risk_level': self._assess_risk_level(volatility, max_drawdown),
+                    'consistency_score': self._calculate_consistency_score(returns)
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Performance metrics calculation failed: {e}")
+            return {
+                'performance_calculated': False,
+                'error': str(e),
+                'calculation_timestamp': datetime.now()
+            }
+    
+    def _grade_performance(self, sharpe_ratio: float, max_drawdown: float) -> str:
+        """Grade overall performance"""
+        if sharpe_ratio > 2.0 and max_drawdown > -0.05:
+            return "Excellent"
+        elif sharpe_ratio > 1.5 and max_drawdown > -0.10:
+            return "Good"
+        elif sharpe_ratio > 1.0 and max_drawdown > -0.15:
+            return "Fair"
+        elif sharpe_ratio > 0.5:
+            return "Poor"
+        else:
+            return "Unacceptable"
+    
+    def _assess_risk_level(self, volatility: float, max_drawdown: float) -> str:
+        """Assess risk level"""
+        if volatility < 0.10 and max_drawdown > -0.05:
+            return "Low"
+        elif volatility < 0.20 and max_drawdown > -0.10:
+            return "Medium"
+        elif volatility < 0.30 and max_drawdown > -0.20:
+            return "High"
+        else:
+            return "Very High"
+    
+    def _calculate_consistency_score(self, returns: pd.Series) -> float:
+        """Calculate consistency score (0-100)"""
+        try:
+            # Calculate rolling Sharpe ratios
+            rolling_sharpe = returns.rolling(window=30).apply(
+                lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else 0
+            ).dropna()
+            
+            if len(rolling_sharpe) == 0:
+                return 50.0  # Neutral score
+            
+            # Consistency is inverse of volatility of rolling Sharpe ratios
+            sharpe_volatility = rolling_sharpe.std()
+            consistency_score = max(0, 100 - sharpe_volatility * 50)
+            
+            return float(min(100, consistency_score))
+            
+        except Exception:
+            return 50.0  # Neutral score on error

@@ -7,23 +7,42 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Component Assembly for Backtesting
 
-### Core Brick Stack
+### Enhanced Core Brick Stack (6-Layer Architecture)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← System Control
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← System Control & Lifecycle
+│ SystemIntegrationManager            │ ← Multi-Phase Initialization
 ├─────────────────────────────────────┤
+│ Layer 2: Governance                 │
+│ CentralRiskManager                  │ ← Risk Governance & Authorization
+├─────────────────────────────────────┤
+│ Layer 3: Data Management            │
 │ ClickHouseDataManager               │ ← Historical Data Authority
-│ RegimeEngine                        │ ← Market Condition Analysis
-│ TechnicalIndicators                 │ ← Signal Processing Pipeline
-│ FeatureEngineer                     │ ← ML Feature Creation
-│ SignalGenerator                     │ ← Trading Signal Generation
 ├─────────────────────────────────────┤
-│ CentralRiskManager                  │ ← Governance & Authorization
+│ Layer 4: Core Processing            │
+│ EnhancedRegimeEngine                │ ← Market Condition Analysis
+│ EnhancedTechnicalIndicators         │ ← Signal Processing Pipeline
+│ EnhancedFeatureEngineer             │ ← ML Feature Creation
+│ EnhancedSignalGenerator             │ ← Multi-Strategy Signal Generation
 ├─────────────────────────────────────┤
-│ StrategyManager                     │ ← Strategy Orchestration
-│ BacktestExecutionEngine             │ ← Historical Execution Simulation
-│ PortfolioAnalytics                  │ ← Performance Measurement
-│ RiskAnalytics                       │ ← Risk Assessment
+│ Layer 5: Analytics & Strategy       │
+│ EnhancedAnalyticsManager            │ ← Analytics Orchestration
+│ EnhancedMetricsCalculator           │ ← Performance Metrics
+│ PerformanceAnalyzer                 │ ← Performance Analysis
+│ StrategyManager                     │ ← Multi-Strategy Coordination
+│ StrategyExecutionEngine             │ ← Strategy Execution
+│ EnhancedStrategyValidator           │ ← Strategy Validation
+│ StrategyRegistry                    │ ← Strategy Discovery
+├─────────────────────────────────────┤
+│ Layer 6: Trading & Execution        │
+│ EnhancedTradingEngine               │ ← Execution Planning
+│ UnifiedExecutionEngine              │ ← Historical Execution Simulation
+│ EnhancedPortfolioManager            │ ← Position Management
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Health Monitoring
+│ AuditTrailManager                   │ ← Audit Logging
 └─────────────────────────────────────┘
 ```
 
@@ -44,24 +63,137 @@ backtest_data_config = ClickHouseDataConfig(
 )
 ```
 
-### 2. Regime Analysis Configuration
+### 2. Enhanced Regime Analysis Configuration (Rule 9)
 ```python
 from core_engine.regime.engine import RegimeEngineConfig
 
-# Market regime detection for historical periods
+# Enhanced market regime detection with multi-timeframe analysis
 regime_config = RegimeEngineConfig(
     lookback_window=60,
     volatility_window=20,
     trend_threshold=0.02,
     regime_change_threshold=0.7,
     enable_enhanced_detection=True,
+    # Enhanced capabilities (Rule 9)
+    enable_multi_timeframe_analysis=True,
+    enable_ml_based_prediction=True,
+    enable_regime_persistence_modeling=True,
     # Backtest-specific settings
     historical_mode=True,
     regime_persistence_threshold=0.8
 )
 ```
 
-### 3. Risk Management Configuration
+### 2.1. Multi-Strategy Configuration (Rule 8)
+```python
+from core_engine.trading.strategies.manager import StrategyManager, EnhancedStrategyFactory
+from core_engine.type_definitions.strategy import StrategyType
+
+# Enhanced Multi-strategy coordination setup for backtesting
+enhanced_strategy_config = {
+    'enable_enhanced_strategies': True,
+    'auto_discover_strategies': True,
+    'max_concurrent_strategies': 10,
+    'enable_signal_aggregation': True,
+    'enable_conflict_resolution': True,
+    'enable_strategy_attribution': True,
+    'signal_aggregation_method': 'weighted_confidence',
+    'conflict_resolution_threshold': 0.1
+}
+
+# Enhanced Strategy Factory Integration
+factory = EnhancedStrategyFactory()
+available_strategies = factory.get_available_strategies()
+# All 10 enhanced strategies: ['momentum', 'mean_reversion', 'statistical_arbitrage', 
+# 'factor', 'multi_asset', 'trend_following', 'breakout', 'pairs_trading', 
+# 'volatility', 'arbitrage']
+
+# Enhanced strategy configurations for backtesting
+enhanced_strategies_config = [
+    {
+        'type': StrategyType.STATISTICAL_ARBITRAGE,
+        'config': {
+            'name': 'enhanced_stat_arb_backtest',
+            'allocation_pct': 0.30,
+            'cointegration_lookback': 252,
+            'entry_zscore_threshold': 2.0,
+            'exit_zscore_threshold': 0.5
+        }
+    },
+    {
+        'type': StrategyType.MOMENTUM,
+        'config': {
+            'name': 'enhanced_momentum_backtest',
+            'allocation_pct': 0.25,
+            'lookback_period': 60,
+            'momentum_threshold': 0.02
+        }
+    },
+    {
+        'type': StrategyType.MEAN_REVERSION,
+        'config': {
+            'name': 'enhanced_mean_rev_backtest',
+            'allocation_pct': 0.25,
+            'lookback_period': 20,
+            'z_score_threshold': 2.0
+        }
+    },
+    {
+        'type': StrategyType.PAIRS_TRADING,
+        'config': {
+            'name': 'enhanced_pairs_backtest',
+            'allocation_pct': 0.20,
+            'correlation_threshold': 0.8,
+            'spread_threshold': 2.0
+        }
+    }
+]
+```
+
+### 2.2. Enhanced Analytics Configuration (Rule 9)
+```python
+from core_engine.analytics.manager_enhanced import EnhancedAnalyticsConfig
+
+# Real-time and batch analytics setup for backtesting
+analytics_config = EnhancedAnalyticsConfig(
+    enable_real_time_processing=False,  # Batch mode for backtesting
+    enable_batch_processing=True,
+    enable_performance_attribution=True,
+    enable_regime_aware_metrics=True,
+    enable_multi_timeframe_analysis=True,
+    attribution_frequency='daily',
+    performance_calculation_frequency='end_of_day',
+    risk_calculation_frequency='hourly'
+)
+```
+
+### 2.3. Production Configuration (Rule 10)
+```python
+from core_engine.system.integration_manager import ProductionConfig
+
+# Production-grade backtest configuration
+production_config = ProductionConfig(
+    # Health monitoring
+    enable_health_monitoring=True,
+    health_check_interval=60,  # seconds
+    enable_performance_monitoring=True,
+    
+    # Audit logging
+    enable_audit_logging=True,
+    audit_log_level='INFO',
+    audit_retention_days=90,
+    
+    # System reliability
+    enable_graceful_degradation=False,  # Not needed for backtesting
+    enable_disaster_recovery=False,     # Not needed for backtesting
+    
+    # Environment settings
+    environment='backtest',
+    enable_production_validation=True
+)
+```
+
+### 3. Enhanced Risk Management Configuration (Rules 8-9)
 ```python
 from core_engine.system.central_risk_manager import RiskManagerConfig
 
@@ -129,13 +261,23 @@ async def initialize_backtest_system():
     )
     
     # 6. Register execution layer
-    strategy_manager = StrategyManager(strategy_config)
-    backtest_engine = BacktestExecutionEngine(execution_config)
-    portfolio_analytics = PortfolioAnalytics(analytics_config)
+    # Initialize enhanced strategy manager
+    strategy_manager = StrategyManager(enhanced_strategy_config)
     
-    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=7)
-    orchestrator.register_component("BacktestEngine", backtest_engine, ComponentLayer.EXECUTION, initialization_order=8)
-    orchestrator.register_component("PortfolioAnalytics", portfolio_analytics, ComponentLayer.EXECUTION, initialization_order=9)
+    # Register enhanced strategies
+    for strategy_info in enhanced_strategies_config:
+        await strategy_manager.register_enhanced_strategy(
+            strategy_info['type'], 
+            strategy_info['config']
+        )
+    
+    # Use existing enhanced components for backtesting
+    enhanced_analytics = EnhancedAnalyticsManager(analytics_config)
+    performance_analyzer = PerformanceAnalyzer()
+    
+    orchestrator.register_component("EnhancedStrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=7)
+    orchestrator.register_component("EnhancedAnalyticsManager", enhanced_analytics, ComponentLayer.EXECUTION, initialization_order=8)
+    orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, initialization_order=9)
     
     # 7. Initialize all components in dependency order
     await orchestrator.initialize_all_components()
@@ -193,9 +335,10 @@ async def process_historical_data(orchestrator, symbols, start_date, end_date):
 async def run_strategy_backtest(orchestrator, processed_data, strategy_configs):
     """Execute strategy backtesting with risk management"""
     
-    strategy_manager = orchestrator.get_component("StrategyManager")
-    risk_manager = orchestrator.get_component("RiskManager")
-    backtest_engine = orchestrator.get_component("BacktestEngine")
+    strategy_manager = orchestrator.get_component("EnhancedStrategyManager")
+    risk_manager = orchestrator.get_component("CentralRiskManager")
+    analytics_manager = orchestrator.get_component("EnhancedAnalyticsManager")
+    performance_analyzer = orchestrator.get_component("PerformanceAnalyzer")
     
     backtest_results = []
     

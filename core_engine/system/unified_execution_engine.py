@@ -597,9 +597,61 @@ class UnifiedExecutionEngine(ISystemComponent):
         self.is_initialized = False
         self.is_operational = False
         self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         
         logger.info("✅ Unified Execution Engine initialized with position tracking")
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="UnifiedExecutionEngine",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=40  # Late initialization after all dependencies
+        )
+        
+        logger.info(f"✅ UnifiedExecutionEngine registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
+    # STANDARDIZED DATA CONSUMPTION METHODS
+    # ========================================
+    
+    def process_plan(self, plan: Any) -> Dict[str, Any]:
+        """Standardized method for processing execution plans"""
+        return {
+            'plan_processed': True,
+            'plan_data': plan,
+            'processing_timestamp': datetime.now(),
+            'processing_component': 'UnifiedExecutionEngine'
+        }
+    
+    def implement_plan(self, plan: Any) -> Dict[str, Any]:
+        """Standardized method for implementing plans (alias)"""
+        return self.process_plan(plan)
+    
+    def execute_plan(self, plan: Any) -> Dict[str, Any]:
+        """Standardized method for executing plans (alias)"""
+        return self.process_plan(plan)
     
     # ========================================
     # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION

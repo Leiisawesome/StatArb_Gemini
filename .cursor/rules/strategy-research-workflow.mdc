@@ -7,34 +7,52 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Strategy Research Component Stack
 
-### Research & Development Brick Assembly
+### Enhanced Strategy Research & Development Assembly (Rules 8-10)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← Research Coordination & Management
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← Research Coordination & Management
+│ SystemIntegrationManager            │ ← Multi-Phase Research System Init
 ├─────────────────────────────────────┤
-│ ResearchDataManager                 │ ← Multi-Source Research Data
+│ Layer 2: Governance                 │
+│ CentralRiskManager                  │ ← Research Risk Governance
+├─────────────────────────────────────┤
+│ Layer 3: Data Management            │
+│ ClickHouseDataManager               │ ← Multi-Source Research Data Authority
 │ AlternativeDataManager              │ ← Alternative Data Sources
 │ MacroDataManager                    │ ← Economic & Fundamental Data
-│ SentimentDataManager                │ ← Market Sentiment Data
 ├─────────────────────────────────────┤
-│ FeatureDiscoveryEngine              │ ← Automated Feature Discovery
-│ PatternRecognitionEngine            │ ← Market Pattern Detection
-│ RegimeAnalysisEngine                │ ← Regime-Based Research
-│ FactorAnalysisEngine                │ ← Factor Research & Discovery
+│ Layer 4: Core Processing            │
+│ EnhancedRegimeEngine                │ ← Regime-Based Research
+│ EnhancedTechnicalIndicators         │ ← Research-Grade Indicators
+│ EnhancedFeatureEngineer             │ ← Automated Feature Discovery
+│ EnhancedSignalGenerator             │ ← Research Signal Generation
 ├─────────────────────────────────────┤
-│ StrategyGenerator                   │ ← Automated Strategy Generation
-│ StrategyOptimizer                   │ ← Multi-Objective Optimization
-│ BacktestEngine                      │ ← Comprehensive Backtesting
-│ WalkForwardAnalyzer                 │ ← Out-of-Sample Validation
+│ Layer 5: Analytics & Strategy       │
+│ EnhancedAnalyticsManager            │ ← Research Analytics Orchestration
+│ EnhancedMetricsCalculator           │ ← Research Performance Metrics
+│ PerformanceAnalyzer                 │ ← Strategy Performance Analysis
+│ StrategyManager                     │ ← Multi-Strategy Research Coordination (Rule 8)
+│ StrategyExecutionEngine             │ ← Research Strategy Execution
+│ EnhancedStrategyValidator           │ ← Enhanced Statistical Validation (Rule 1)
+│ StrategyRegistry                    │ ← Strategy Discovery & Management
+│ MultiStrategyResearchFramework      │ ← Multi-Strategy Research (Rule 8)
 ├─────────────────────────────────────┤
+│ Layer 6: Research & ML              │
 │ MLModelTrainer                      │ ← Machine Learning Pipeline
 │ EnsembleBuilder                     │ ← Model Ensemble Creation
 │ HyperparameterOptimizer             │ ← Automated Hyperparameter Tuning
-├─────────────────────────────────────┤
-│ StrategyValidator                   │ ← Statistical Validation
+│ PatternRecognitionEngine            │ ← Market Pattern Detection
+│ FactorAnalysisEngine                │ ← Factor Research & Discovery
+│ BacktestEngine                      │ ← Comprehensive Backtesting
+│ WalkForwardAnalyzer                 │ ← Out-of-Sample Validation
 │ RobustnessAnalyzer                  │ ← Robustness Testing
 │ CapacityAnalyzer                    │ ← Strategy Capacity Analysis
-│ DeploymentManager                   │ ← Strategy Deployment Pipeline
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Research System Health Monitoring
+│ AuditTrailManager                   │ ← Research Audit Logging
+│ DeploymentManager                   │ ← Production Strategy Deployment
 └─────────────────────────────────────┘
 ```
 

@@ -75,10 +75,12 @@ orchestrator.register_component(
 
 ### Enhanced Strategy Framework
 - **StrategyManager**: [core_engine/trading/strategies/manager.py](mdc:core_engine/trading/strategies/manager.py)
+- **EnhancedStrategyFactory**: Integrated within StrategyManager for professional strategy creation
 - **StrategyExecutionEngine**: [core_engine/trading/strategies/strategy_engine.py](mdc:core_engine/trading/strategies/strategy_engine.py)
 - **EnhancedStrategyValidator**: [core_engine/trading/strategies/strategy_validator.py](mdc:core_engine/trading/strategies/strategy_validator.py)
 - **StrategyRegistry**: [core_engine/trading/strategies/strategy_registry.py](mdc:core_engine/trading/strategies/strategy_registry.py)
-- **Enhancement**: Multi-strategy coordination, professional validation framework
+- **10 Enhanced Strategy Implementations**: [core_engine/trading/strategies/implementations/](mdc:core_engine/trading/strategies/implementations/)
+- **Enhancement**: Complete integration of 10 enhanced strategies with factory pattern, multi-strategy coordination, professional validation framework
 
 ## Layer 6: Trading & Execution (OPERATIONAL under governance)
 

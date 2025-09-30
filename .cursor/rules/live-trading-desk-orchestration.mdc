@@ -7,24 +7,42 @@ This instruction map shows how to compose core_engine components into a real-tim
 
 ## Live Trading Desk Component Stack
 
-### Real-Time Brick Assembly
+### Enhanced Real-Time Brick Assembly (6-Layer + Production)
 ```
 ┌─────────────────────────────────────┐
-│    HierarchicalSystemOrchestrator   │ ← System Control & Monitoring
+│ Layer 1: System Orchestration      │
+│ HierarchicalSystemOrchestrator      │ ← System Control & Monitoring
+│ SystemIntegrationManager            │ ← Multi-Phase Live Initialization
 ├─────────────────────────────────────┤
-│ LiveDataManager                     │ ← Real-Time Market Data
-│ RegimeEngine (Real-Time)            │ ← Live Market Condition Analysis
-│ StreamingIndicators                 │ ← Real-Time Signal Processing
-│ AdaptiveFeatureEngine               │ ← Dynamic Feature Engineering
-│ LiveSignalGenerator                 │ ← Real-Time Trading Signals
-├─────────────────────────────────────┤
+│ Layer 2: Governance                 │
 │ CentralRiskManager (Live)           │ ← Real-Time Risk Governance
 ├─────────────────────────────────────┤
-│ StrategyManager (Live)              │ ← Active Strategy Management
-│ RealTimeTradingEngine               │ ← Live Execution Planning
-│ UnifiedExecutionEngine              │ ← Live Order Execution
-│ LivePortfolioManager                │ ← Real-Time Position Tracking
-│ RiskMonitor                         │ ← Continuous Risk Surveillance
+│ Layer 3: Data Management            │
+│ ClickHouseDataManager (Live)        │ ← Real-Time Market Data Authority
+├─────────────────────────────────────┤
+│ Layer 4: Core Processing            │
+│ EnhancedRegimeEngine (Real-Time)    │ ← Live Market Condition Analysis
+│ EnhancedTechnicalIndicators (Live)  │ ← Real-Time Signal Processing
+│ EnhancedFeatureEngineer (Adaptive)  │ ← Dynamic Feature Engineering
+│ EnhancedSignalGenerator (Live)      │ ← Multi-Strategy Signal Generation
+├─────────────────────────────────────┤
+│ Layer 5: Analytics & Strategy       │
+│ EnhancedAnalyticsManager (Live)     │ ← Real-Time Analytics
+│ EnhancedMetricsCalculator (Live)    │ ← Live Performance Metrics
+│ PerformanceAnalyzer (Real-Time)     │ ← Live Performance Analysis
+│ StrategyManager (Multi-Strategy)    │ ← Active Strategy Coordination
+│ StrategyExecutionEngine (Live)      │ ← Live Strategy Execution
+├─────────────────────────────────────┤
+│ Layer 6: Trading & Execution        │
+│ EnhancedTradingEngine (Live)        │ ← Live Execution Planning
+│ UnifiedExecutionEngine (Live)       │ ← Live Order Execution
+│ EnhancedPortfolioManager (Live)     │ ← Real-Time Position Tracking
+├─────────────────────────────────────┤
+│ Production Components (Rule 10)     │
+│ ProductionHealthMonitor             │ ← Real-Time Health Monitoring
+│ GracefulDegradationManager          │ ← Service Degradation Control
+│ AuditTrailManager                   │ ← Live Audit Logging
+│ DisasterRecoveryManager             │ ← Live Disaster Recovery
 └─────────────────────────────────────┘
 ```
 

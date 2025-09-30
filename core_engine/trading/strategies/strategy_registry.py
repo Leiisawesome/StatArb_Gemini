@@ -505,6 +505,9 @@ class EnhancedStrategyRegistry(ISystemComponent):
         self.initialization_time: Optional[datetime] = None
         self.start_time: Optional[datetime] = None
         
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Registry files
         self.metadata_file = self.registry_path / "strategies.json"
         self.index_file = self.registry_path / "index.json"
@@ -556,7 +559,39 @@ class EnhancedStrategyRegistry(ISystemComponent):
         
         logger.info(f"🚀 Enhanced Strategy Registry initialized at {self.registry_path} with component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedStrategyRegistry",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=24  # Before strategy validation
+        )
+        
+        logger.info(f"✅ EnhancedStrategyRegistry registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Implementation
+    # ========================================
     async def initialize(self) -> bool:
         """Initialize the enhanced strategy registry"""
         try:

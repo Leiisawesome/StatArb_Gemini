@@ -263,6 +263,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self.is_initialized: bool = False
         self.is_operational: bool = False
         self.component_id: Optional[str] = None
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
         # Determine whether we can reach ClickHouse
         self._connection_available = False
@@ -280,6 +281,36 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
+        )
+    
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="ClickHouseDataManager",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=10  # Early initialization for data access
+        )
+        
+        self.logger.info(f"✅ ClickHouseDataManager registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            self.logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
         )
     
     # ========================================
@@ -1021,3 +1052,306 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             validation_results['issues'].append(f"Validation error: {str(e)}")
         
         return validation_results
+    
+    # ========================================
+    # STANDARDIZED DATA FLOW METHODS
+    # ========================================
+    
+    def process_market_data(self, symbol: str, **kwargs) -> pd.DataFrame:
+        """Standardized method for processing market data (alias for get_market_data)"""
+        return self.get_market_data(symbol, **kwargs)
+    
+    def fetch_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
+        """Standardized method for fetching data (alias for load_data)"""
+        return self.load_data(symbols, **kwargs)
+    
+    def process_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
+        """Standardized method for data processing (alias for load_market_data)"""
+        return self.load_market_data(symbols, **kwargs)
+    
+    # ========================================
+    # ANALYTICS INTEGRATION METHODS
+    # ========================================
+    
+    def calculate_metrics(self, data: Any = None) -> Dict[str, Any]:
+        """Calculate data analytics metrics"""
+        try:
+            # Get data manager state
+            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            
+            # Calculate data metrics
+            data_metrics = {
+                'symbols_managed': symbols_count,
+                'data_sources_active': 1 if hasattr(self, 'client') and self.client else 0,
+                'cache_enabled': getattr(self, 'enable_caching', False),
+                'connection_status': 'connected' if hasattr(self, 'client') and self.client else 'disconnected',
+                'data_quality_score': self._calculate_data_quality_score(),
+                'coverage_metrics': self._calculate_coverage_metrics()
+            }
+            
+            return {
+                'metrics_calculated': True,
+                'calculation_timestamp': datetime.now(),
+                'data_metrics': data_metrics,
+                'component': 'ClickHouseDataManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Data metrics calculation failed: {e}")
+            return {
+                'metrics_calculated': False,
+                'error': str(e),
+                'calculation_timestamp': datetime.now()
+            }
+    
+    def analyze_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Analyze data manager performance"""
+        try:
+            # Analyze data performance
+            performance_analysis = {
+                'data_availability': self._assess_data_availability(),
+                'query_performance': self._assess_query_performance(),
+                'data_freshness': self._assess_data_freshness(),
+                'system_health': {
+                    'connection_stable': hasattr(self, 'client') and self.client is not None,
+                    'cache_utilization': self._calculate_cache_utilization(),
+                    'error_rate': 0.0  # Mock low error rate
+                },
+                'performance_summary': {
+                    'data_manager_operational': True,
+                    'symbols_available': len(self.symbols) if hasattr(self, 'symbols') else 0,
+                    'data_pipeline_status': 'active'
+                }
+            }
+            
+            return {
+                'performance_analyzed': True,
+                'analysis_timestamp': datetime.now(),
+                'performance_analysis': performance_analysis,
+                'component': 'ClickHouseDataManager'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Data performance analysis failed: {e}")
+            return {
+                'performance_analyzed': False,
+                'error': str(e),
+                'analysis_timestamp': datetime.now()
+            }
+    
+    def generate_analytics(self, data: Any = None) -> Dict[str, Any]:
+        """Generate comprehensive data analytics"""
+        try:
+            # Combine metrics and performance analysis
+            metrics = self.calculate_metrics(data)
+            performance = self.analyze_performance(data)
+            
+            analytics = {
+                'analytics_generated': True,
+                'generation_timestamp': datetime.now(),
+                'metrics': metrics.get('data_metrics', {}),
+                'performance': performance.get('performance_analysis', {}),
+                'summary': {
+                    'data_health': self._assess_data_health(),
+                    'reliability_score': self._calculate_reliability_score(),
+                    'efficiency_score': self._calculate_efficiency_score()
+                },
+                'recommendations': self._generate_data_recommendations(),
+                'component': 'ClickHouseDataManager'
+            }
+            
+            return analytics
+            
+        except Exception as e:
+            self.logger.error(f"Data analytics generation failed: {e}")
+            return {
+                'analytics_generated': False,
+                'error': str(e),
+                'generation_timestamp': datetime.now()
+            }
+    
+    def track_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Track data manager performance over time"""
+        try:
+            # Mock performance tracking (in real implementation, would maintain historical data)
+            performance_tracking = {
+                'tracking_active': True,
+                'tracking_timestamp': datetime.now(),
+                'current_metrics': self.calculate_metrics(data),
+                'performance_trend': self._assess_performance_trend(),
+                'alerts': self._generate_data_alerts(),
+                'component': 'ClickHouseDataManager'
+            }
+            
+            return performance_tracking
+            
+        except Exception as e:
+            self.logger.error(f"Data performance tracking failed: {e}")
+            return {
+                'tracking_active': False,
+                'error': str(e),
+                'tracking_timestamp': datetime.now()
+            }
+    
+    def monitor_performance(self, data: Any = None) -> Dict[str, Any]:
+        """Monitor data performance (alias for track_performance)"""
+        return self.track_performance(data)
+    
+    def _calculate_data_quality_score(self) -> float:
+        """Calculate data quality score (0-100)"""
+        try:
+            # Mock data quality assessment
+            if hasattr(self, 'client') and self.client:
+                return 85.0  # High quality when connected
+            else:
+                return 50.0  # Moderate quality when disconnected
+                
+        except Exception:
+            return 50.0  # Default moderate quality
+    
+    def _calculate_coverage_metrics(self) -> Dict[str, Any]:
+        """Calculate data coverage metrics"""
+        try:
+            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            
+            return {
+                'symbols_covered': symbols_count,
+                'coverage_percentage': min(100.0, symbols_count * 10),  # Mock calculation
+                'data_completeness': 90.0  # Mock high completeness
+            }
+            
+        except Exception:
+            return {
+                'symbols_covered': 0,
+                'coverage_percentage': 0.0,
+                'data_completeness': 0.0
+            }
+    
+    def _assess_data_availability(self) -> str:
+        """Assess data availability"""
+        try:
+            if hasattr(self, 'client') and self.client:
+                return "High"
+            else:
+                return "Limited"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _assess_query_performance(self) -> str:
+        """Assess query performance"""
+        try:
+            # Mock performance assessment
+            return "Good"  # Assume good performance
+            
+        except Exception:
+            return "Unknown"
+    
+    def _assess_data_freshness(self) -> str:
+        """Assess data freshness"""
+        try:
+            # Mock freshness assessment
+            return "Current"  # Assume current data
+            
+        except Exception:
+            return "Unknown"
+    
+    def _calculate_cache_utilization(self) -> float:
+        """Calculate cache utilization percentage"""
+        try:
+            if getattr(self, 'enable_caching', False):
+                return 75.0  # Mock good cache utilization
+            else:
+                return 0.0  # No caching
+                
+        except Exception:
+            return 0.0
+    
+    def _assess_data_health(self) -> str:
+        """Assess overall data health"""
+        try:
+            if hasattr(self, 'client') and self.client:
+                symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+                if symbols_count > 0:
+                    return "Healthy"
+                else:
+                    return "No symbols configured"
+            else:
+                return "Disconnected"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _calculate_reliability_score(self) -> float:
+        """Calculate reliability score (0-100)"""
+        try:
+            if hasattr(self, 'client') and self.client:
+                return 90.0  # High reliability when connected
+            else:
+                return 30.0  # Low reliability when disconnected
+                
+        except Exception:
+            return 50.0  # Default moderate reliability
+    
+    def _calculate_efficiency_score(self) -> float:
+        """Calculate efficiency score (0-100)"""
+        try:
+            cache_score = 25.0 if getattr(self, 'enable_caching', False) else 0.0
+            connection_score = 50.0 if hasattr(self, 'client') and self.client else 0.0
+            symbols_score = min(25.0, len(self.symbols) * 2.5) if hasattr(self, 'symbols') else 0.0
+            
+            return cache_score + connection_score + symbols_score
+            
+        except Exception:
+            return 50.0  # Default moderate efficiency
+    
+    def _generate_data_recommendations(self) -> List[str]:
+        """Generate data recommendations"""
+        try:
+            recommendations = []
+            
+            if not (hasattr(self, 'client') and self.client):
+                recommendations.append("Establish database connection")
+            
+            if not getattr(self, 'enable_caching', False):
+                recommendations.append("Enable caching for better performance")
+            
+            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            if symbols_count == 0:
+                recommendations.append("Configure symbols for data management")
+            elif symbols_count < 5:
+                recommendations.append("Consider adding more symbols for diversification")
+            
+            return recommendations
+            
+        except Exception:
+            return ["Unable to generate recommendations"]
+    
+    def _assess_performance_trend(self) -> str:
+        """Assess performance trend"""
+        try:
+            # Mock trend assessment
+            if hasattr(self, 'client') and self.client:
+                return "Stable"
+            else:
+                return "Declining"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _generate_data_alerts(self) -> List[str]:
+        """Generate data alerts"""
+        try:
+            alerts = []
+            
+            if not (hasattr(self, 'client') and self.client):
+                alerts.append("Database connection lost")
+            
+            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            if symbols_count == 0:
+                alerts.append("No symbols configured")
+            
+            return alerts
+            
+        except Exception:
+            return []

@@ -782,6 +782,9 @@ class EnhancedStrategyValidator(ISystemComponent):
         self.initialization_time: Optional[datetime] = None
         self.start_time: Optional[datetime] = None
         
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
         # Initialize sub-validators
         self.code_analyzer = CodeAnalyzer()
         self.parameter_validator = ParameterValidator()
@@ -831,7 +834,39 @@ class EnhancedStrategyValidator(ISystemComponent):
         
         logger.info(f"🚀 Enhanced Strategy Validator initialized with {self.validation_level.value} level and component ID: {self.component_id}")
     
+    # ========================================
+    # ORCHESTRATOR INTEGRATION
+    # ========================================
+    
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+        
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="EnhancedStrategyValidator",
+            component=self,
+            layer=ComponentLayer.EXECUTION,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=26  # Before strategy execution
+        )
+        
+        logger.info(f"✅ EnhancedStrategyValidator registered with orchestrator: {self.component_id}")
+        return self.component_id
+    
+    async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+        """Request authorization from orchestrator for privileged operations"""
+        if not self.orchestrator or not self.component_id:
+            logger.warning("No orchestrator available for authorization request")
+            return False
+        
+        return await self.orchestrator.request_system_authorization(
+            operation, self.component_id, details
+        )
+    
+    # ========================================
     # ISystemComponent Implementation
+    # ========================================
     async def initialize(self) -> bool:
         """Initialize the enhanced strategy validator"""
         try:

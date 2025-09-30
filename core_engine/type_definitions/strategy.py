@@ -18,6 +18,12 @@ class StrategyType(Enum):
     MOMENTUM = "momentum"
     PAIRS_TRADING = "pairs_trading"
     ARBITRAGE = "arbitrage"
+    STATISTICAL_ARBITRAGE = "statistical_arbitrage"
+    FACTOR = "factor"
+    MULTI_ASSET = "multi_asset"
+    TREND_FOLLOWING = "trend_following"
+    BREAKOUT = "breakout"
+    VOLATILITY = "volatility"
     CUSTOM = "custom"
 
 
