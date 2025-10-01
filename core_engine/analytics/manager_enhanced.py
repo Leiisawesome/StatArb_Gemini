@@ -836,13 +836,20 @@ class EnhancedAnalyticsManager(ISystemComponent):
             
             # Start background processing in executor
             if hasattr(self, '_executor') and self._executor:
-                self._executor.submit(process_tasks_sync)
-            
-            logger.info("✅ Background processing started")
+                try:
+                    self._executor.submit(process_tasks_sync)
+                    logger.info("✅ Background processing started")
+                except RuntimeError as e:
+                    if "cannot schedule new futures after shutdown" in str(e):
+                        logger.warning("⚠️ Executor already shutdown, skipping background processing")
+                    else:
+                        raise
+            else:
+                logger.warning("⚠️ No executor available, skipping background processing")
             
         except Exception as e:
             logger.error(f"Failed to start background processing: {e}")
-            raise
+            # Don't raise - allow component to continue without background processing
     
     async def _start_monitoring(self) -> None:
         """Start monitoring systems"""

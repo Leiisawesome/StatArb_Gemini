@@ -296,7 +296,10 @@ class SystemIntegrationManager(ISystemComponent):
             
             # Initialize all components first
             await self._initialize_all_components()
-            
+
+            # Inject dependencies after all components are initialized
+            await self._inject_component_dependencies()
+
             # Initialize orchestrator after components are available
             await self._initialize_orchestrator()
             
@@ -452,6 +455,10 @@ class SystemIntegrationManager(ISystemComponent):
                 'current_phase': self.current_phase.value,
                 'error': str(e)
             }
+    
+    def get_component(self, component_name: str) -> Optional[ISystemComponent]:
+        """Get a component by name"""
+        return self.components.get(component_name)
     
     def get_status(self) -> Dict[str, Any]:
         """Get current system status"""
@@ -801,6 +808,64 @@ class SystemIntegrationManager(ISystemComponent):
         except Exception as e:
             self.logger.error(f"Failed to initialize Phase 6 components: {e}")
             # Don't raise - continue with other phases
+    
+    async def _inject_component_dependencies(self) -> None:
+        """Inject dependencies between components after initialization"""
+        try:
+            self.logger.info("🔗 Injecting component dependencies...")
+            
+            # Inject StrategyManager dependencies
+            if 'strategy_manager' in self.components:
+                strategy_manager = self.components['strategy_manager']
+                
+                # Set risk manager dependency
+                if 'risk_manager' in self.components:
+                    strategy_manager.set_risk_manager(self.components['risk_manager'])
+                    self.logger.info("   ✅ StrategyManager -> RiskManager dependency injected")
+                
+                # Set data manager dependency
+                if 'data_manager' in self.components:
+                    strategy_manager.set_data_manager(self.components['data_manager'])
+                    self.logger.info("   ✅ StrategyManager -> DataManager dependency injected")
+                
+                # Set regime engine dependency
+                if 'regime_engine' in self.components:
+                    strategy_manager.set_regime_engine(self.components['regime_engine'])
+                    self.logger.info("   ✅ StrategyManager -> RegimeEngine dependency injected")
+            
+            # Inject TradingEngine dependencies
+            if 'trading_engine' in self.components:
+                trading_engine = self.components['trading_engine']
+                
+                # Set strategy manager dependency if available
+                if hasattr(trading_engine, 'set_strategy_manager') and 'strategy_manager' in self.components:
+                    trading_engine.set_strategy_manager(self.components['strategy_manager'])
+                    self.logger.info("   ✅ TradingEngine -> StrategyManager dependency injected")
+                
+                # Set risk manager dependency if available
+                if hasattr(trading_engine, 'set_risk_manager') and 'risk_manager' in self.components:
+                    trading_engine.set_risk_manager(self.components['risk_manager'])
+                    self.logger.info("   ✅ TradingEngine -> RiskManager dependency injected")
+            
+            # Inject ExecutionEngine dependencies
+            if 'execution_engine' in self.components:
+                execution_engine = self.components['execution_engine']
+                
+                # Set risk manager callback for position updates
+                if 'risk_manager' in self.components:
+                    risk_manager = self.components['risk_manager']
+                    if hasattr(execution_engine, 'set_position_callbacks'):
+                        execution_engine.set_position_callbacks(
+                            risk_manager_callback=risk_manager,
+                            position_update_callback=getattr(risk_manager, 'update_position', None)
+                        )
+                        self.logger.info("   ✅ ExecutionEngine -> RiskManager callbacks injected")
+            
+            self.logger.info("✅ Component dependencies injection completed")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to inject component dependencies: {e}")
+            # Don't raise - this is not critical for basic operation
     
     async def _setup_component_dependencies(self) -> None:
         """Setup component dependencies and initialization order"""

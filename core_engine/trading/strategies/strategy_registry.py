@@ -1396,13 +1396,13 @@ class EnhancedStrategyRegistry(ISystemComponent):
             index_entry = {
                 'name': metadata.name.lower(),
                 'description': metadata.description.lower(),
-                'category': metadata.category.value,
-                'complexity': metadata.complexity.value,
-                'status': metadata.status.value,
+                'category': metadata.category.value if hasattr(metadata.category, 'value') else str(metadata.category),
+                'complexity': metadata.complexity.value if hasattr(metadata.complexity, 'value') else str(metadata.complexity),
+                'status': metadata.status.value if hasattr(metadata.status, 'value') else str(metadata.status),
                 'author': metadata.author.lower(),
                 'tags': [tag.lower() for tag in metadata.tags],
-                'created_date': metadata.created_date.isoformat(),
-                'modified_date': metadata.modified_date.isoformat()
+                'created_date': metadata.created_date.isoformat() if hasattr(metadata.created_date, 'isoformat') else str(metadata.created_date),
+                'modified_date': metadata.modified_date.isoformat() if hasattr(metadata.modified_date, 'isoformat') else str(metadata.modified_date)
             }
             
             self.index[strategy_id] = index_entry

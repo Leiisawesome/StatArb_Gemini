@@ -212,9 +212,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             }
             
             # Check for unhealthy conditions
-            if len(self.indicators) == 0:
-                health_metrics['strategy_healthy'] = False
-                health_metrics['warning'] = "No indicators calculated"
+            # Only require indicators if strategy has been running for a while
+            if len(self.indicators) == 0 and hasattr(self, 'initialization_time'):
+                time_since_init = (datetime.now() - self.initialization_time).total_seconds()
+                if time_since_init > 300:  # 5 minutes grace period
+                    health_metrics['strategy_healthy'] = False
+                    health_metrics['warning'] = "No indicators calculated after 5 minutes"
+                else:
+                    health_metrics['warning'] = f"Indicators not yet calculated (grace period: {300-time_since_init:.0f}s remaining)"
             
             if len(self.active_positions) > len(self.config.symbols):
                 health_metrics['strategy_healthy'] = False

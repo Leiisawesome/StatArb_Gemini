@@ -22,7 +22,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable, Set, Type
+from typing import Dict, List, Optional, Any, Callable, Type
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -340,9 +340,11 @@ class StrategyManager(ISystemComponent):
         """Initialize strategy registry for enhanced strategy management"""
         try:
             self.strategy_registry = StrategyRegistry(
-                registry_path=self.config.strategy_registry_path,
-                auto_discovery_enabled=True,
-                auto_validation_enabled=True
+                config={
+                    'registry_path': self.config.strategy_registry_path,
+                    'auto_discovery_enabled': True,
+                    'auto_validation_enabled': True
+                }
             )
             await self.strategy_registry.initialize()
             logger.info("✅ Strategy registry initialized")
@@ -358,7 +360,7 @@ class StrategyManager(ISystemComponent):
             
             # Discover strategies in implementations directory
             implementations_path = Path(__file__).parent / "implementations"
-            discovered_strategies = self.strategy_registry.discover_strategies([str(implementations_path)])
+            discovered_strategies = self.strategy_registry.discovery.discover_strategies([str(implementations_path)])
             
             logger.info(f"🔍 Discovered {len(discovered_strategies)} enhanced strategies")
             

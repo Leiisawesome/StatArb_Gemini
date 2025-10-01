@@ -1,0 +1,112 @@
+{
+  "core_engine.trading.strategies.implementations.statistical_arbitrage.enhanced_statistical_arbitrage.enhancedstatisticalarbitragestrategy": {
+    "name": "enhancedstatisticalarbitragestrategy",
+    "description": "\n    enhanced statistical arbitrage strategy with isystemcomponent integration\n    \n    professional statistical arbitrage strategy that provides:\n    - isystemcomponent interface compliance\n    - advanced cointegration analysis and spread trading\n    - dynamic hedge ratio estimation using kalman filters\n    - error correction model (ecm) for spread dynamics\n    - comprehensive performance tracking and risk management\n    ",
+    "category": "arbitrage",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.225914",
+    "modified_date": "2025-10-01T11:22:43.262356"
+  },
+  "core_engine.trading.strategies.implementations.trend_following.enhanced_trend_following.enhancedtrendfollowingstrategy": {
+    "name": "enhancedtrendfollowingstrategy",
+    "description": "\n    enhanced trend following strategy with isystemcomponent integration\n    \n    professional trend following strategy that provides:\n    - isystemcomponent interface compliance\n    - adaptive trend detection using multiple indicators\n    - dynamic position sizing based on trend strength\n    - multi-timeframe trend confirmation\n    - comprehensive performance tracking and risk management\n    ",
+    "category": "momentum",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.232703",
+    "modified_date": "2025-10-01T11:22:43.263840"
+  },
+  "core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage.enhancedarbitragestrategy": {
+    "name": "enhancedarbitragestrategy",
+    "description": "\n    enhanced arbitrage strategy with isystemcomponent integration\n    \n    professional arbitrage strategy that provides:\n    - isystemcomponent interface compliance\n    - cross-asset arbitrage opportunity detection\n    - real-time price discrepancy analysis\n    - risk-managed arbitrage execution\n    ",
+    "category": "arbitrage",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.239000",
+    "modified_date": "2025-10-01T11:22:43.264629"
+  },
+  "core_engine.trading.strategies.implementations.momentum.enhanced_momentum.enhancedmomentumstrategy": {
+    "name": "enhancedmomentumstrategy",
+    "description": "\n    enhanced momentum strategy with isystemcomponent integration\n    \n    professional momentum strategy that provides:\n    - isystemcomponent interface compliance\n    - multi-timeframe momentum analysis\n    - trend strength and quality assessment\n    - dynamic position sizing based on momentum strength\n    - comprehensive performance tracking and risk management\n    ",
+    "category": "momentum",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.243473",
+    "modified_date": "2025-10-01T11:22:43.265387"
+  },
+  "core_engine.trading.strategies.implementations.multi_asset.enhanced_multi_asset.enhancedmultiassetstrategy": {
+    "name": "enhancedmultiassetstrategy",
+    "description": "enhanced multi-asset strategy with isystemcomponent integration",
+    "category": "custom",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.247633",
+    "modified_date": "2025-10-01T11:22:43.266143"
+  },
+  "core_engine.trading.strategies.implementations.volatility.enhanced_volatility.enhancedvolatilitystrategy": {
+    "name": "enhancedvolatilitystrategy",
+    "description": "enhanced volatility strategy with isystemcomponent integration",
+    "category": "custom",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.250079",
+    "modified_date": "2025-10-01T11:22:43.266878"
+  },
+  "core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs_trading.enhancedpairstradingstrategy": {
+    "name": "enhancedpairstradingstrategy",
+    "description": "\n    enhanced pairs trading strategy with isystemcomponent integration\n    \n    professional pairs trading strategy that provides:\n    - isystemcomponent interface compliance\n    - advanced pair selection and validation\n    - cointegration-based spread trading\n    - dynamic hedge ratio estimation\n    - comprehensive performance tracking and risk management\n    ",
+    "category": "pairs_trading",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.253232",
+    "modified_date": "2025-10-01T11:22:43.267736"
+  },
+  "core_engine.trading.strategies.implementations.factor.enhanced_factor.enhancedfactorstrategy": {
+    "name": "enhancedfactorstrategy",
+    "description": "enhanced factor strategy with isystemcomponent integration",
+    "category": "custom",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.255475",
+    "modified_date": "2025-10-01T11:22:43.268582"
+  },
+  "core_engine.trading.strategies.implementations.breakout.enhanced_breakout.enhancedbreakoutstrategy": {
+    "name": "enhancedbreakoutstrategy",
+    "description": "enhanced breakout strategy with isystemcomponent integration",
+    "category": "custom",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.257390",
+    "modified_date": "2025-10-01T11:22:43.269368"
+  },
+  "core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion.enhancedmeanreversionstrategy": {
+    "name": "enhancedmeanreversionstrategy",
+    "description": "\n    enhanced mean reversion strategy with isystemcomponent integration\n    \n    professional mean reversion strategy that provides:\n    - isystemcomponent interface compliance\n    - regime-aware mean reversion detection\n    - multi-timeframe analysis and confirmation\n    - dynamic position sizing based on volatility\n    - comprehensive performance tracking and risk management\n    ",
+    "category": "mean_reversion",
+    "complexity": "moderate",
+    "status": "development",
+    "author": "",
+    "tags": [],
+    "created_date": "2025-10-01T11:22:43.260469",
+    "modified_date": "2025-10-01T11:22:43.270171"
+  }
+}

@@ -130,6 +130,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self.is_initialized = False
         self.is_operational = False
         self.component_id: Optional[str] = None
+        self.initialization_time = datetime.now()
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         

@@ -905,7 +905,18 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Check if requested date range overlaps with our configured date range
             config_start = datetime.strptime(self.enhanced_config.start_date, "%Y-%m-%d").date()
             config_end = datetime.strptime(self.enhanced_config.end_date, "%Y-%m-%d").date()
-            if start_date.date() <= config_end and end_date.date() >= config_start:
+            
+            # Handle different date input types
+            if isinstance(start_date, str):
+                start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            if isinstance(end_date, str):
+                end_date = datetime.strptime(end_date, "%Y-%m-%d")
+            
+            # Convert to date objects if they're datetime objects
+            start_date_obj = start_date.date() if hasattr(start_date, 'date') else start_date
+            end_date_obj = end_date.date() if hasattr(end_date, 'date') else end_date
+            
+            if start_date_obj <= config_end and end_date_obj >= config_start:
                 df = self.get_market_data(symbol)
                 if df is not None and not df.empty:
                     return df

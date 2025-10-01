@@ -7,7 +7,7 @@ Ensures proper governance boundaries and authority limits at each layer.
 
 Architecture Compliance:
 - Layer 1: SystemOrchestrator (Operational Control)
-- Layer 2: RiskManager (Trading Governance) 
+- Layer 2: RiskManager (Trading Governance)
 - Layer 3: Trading Components (Operational Execution)
 - Clear escalation procedures and accountability framework
 
@@ -19,16 +19,13 @@ import asyncio
 import logging
 import threading
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Callable, Set
-from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Set
 from enum import Enum
-from abc import ABC, abstractmethod
-import json
 
 # Import interfaces to avoid circular imports
 from .interfaces import ISystemComponent
-from .central_risk_manager import TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
+from .central_risk_manager import TradingDecisionRequest
 
 # Import modular components
 from .orchestrator_components import ComponentManager, ComponentRegistration, ComponentLayer, AuthorityLevel
@@ -56,12 +53,12 @@ class SystemStatus(Enum):
 class HierarchicalSystemOrchestrator(ISystemComponent):
     """
     Enhanced System Orchestrator - TradeDesk Architecture Compliance
-    
+
     Implements institutional hierarchical control pattern:
     Layer 1: SystemOrchestrator (Operational Control)
-    Layer 2: RiskManager (Trading Governance) 
+    Layer 2: RiskManager (Trading Governance)
     Layer 3: Trading Components (Operational Execution)
-    
+
     Key Features:
     - Clear authority boundaries at each layer
     - Mandatory hierarchical authorization flow
@@ -69,43 +66,43 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     - Emergency response coordination
     - Performance monitoring and resource allocation
     """
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         """Initialize hierarchical system orchestrator with modular composition"""
-        
+
         # Initialize modular components using composition
         self.config_manager = ConfigurationManager(config)
         self.component_manager = ComponentManager()
         self.system_monitor = SystemMonitor()
-        
+
         # Core system state
         self.system_status = SystemStatus.UNINITIALIZED
         self.system_id = str(uuid.uuid4())
         self.started_at: Optional[datetime] = None
-        
+
         # Central Risk Manager reference (Layer 2 Governance)
         self.central_risk_manager: Optional[Any] = None
         self.risk_manager_id: Optional[str] = None
-        
+
         # System coordination and control
         self.initialization_lock = threading.Lock()
         self.operation_semaphore = asyncio.Semaphore(self.config_manager.system_config.max_concurrent_operations)
-        
+
         # Emergency state
         self.emergency_mode = False
         self.emergency_initiated_at: Optional[datetime] = None
-        
+
         # Audit trail for institutional compliance
         self.audit_trail: List[Dict[str, Any]] = []
         self.audit_lock = threading.Lock()
-        
+
         # Authorization audit trail for governance compliance
         self._authorization_audit: List[Dict[str, Any]] = []
-        
+
         # System monitoring enhancements
         self.error_tracker: List[Dict[str, Any]] = []
         self.recovery_actions: List[Dict[str, Any]] = []
-        
+
         # Capital allocation tracking
         self.capital_utilization: Dict[str, Any] = {
             'total_capital': 0.0,
@@ -113,102 +110,102 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'utilization_rate': 0.0,
             'timestamp': datetime.now().isoformat()
         }
-        
+
         logger.info("🚀 Hierarchical System Orchestrator initialized with modular architecture")
-    
+
     # ========================================
     # PROPERTIES FOR BACKWARD COMPATIBILITY
     # ========================================
-    
+
     @property
     def config(self) -> SystemOrchestrationConfig:
         """Get system configuration"""
         return self.config_manager.system_config
-    
+
     @property
     def component_registry(self) -> Dict[str, ComponentRegistration]:
         """Get component registry"""
         return self.component_manager.component_registry
-    
+
     @property
     def layer_components(self) -> Dict[ComponentLayer, List[str]]:
         """Get components by layer"""
         return self.component_manager.layer_components
-    
+
     @property
     def system_metrics(self) -> Dict[str, Any]:
         """Get system metrics"""
         return self.system_monitor.get_system_metrics()
-    
+
     @property
     def performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
         return self.system_monitor.get_performance_metrics()
-    
+
     async def initialize_system(self) -> bool:
         """
         Initialize the complete system with hierarchical control
-        
+
         Initialization Order:
         1. Core system infrastructure
         2. Central Risk Manager (Layer 2 Governance)
         3. Trading components under Risk Manager control (Layer 3)
         4. Support components (monitoring, analytics, etc.)
         """
-        
+
         try:
             with self.initialization_lock:
                 if self.system_status != SystemStatus.UNINITIALIZED:
                     logger.warning("System already initialized")
                     return True
-                
+
                 self.system_status = SystemStatus.INITIALIZING
                 logger.info("🚀 Initializing hierarchical system...")
-                
+
                 # Initialize Central Risk Manager first (Layer 2 Governance)
                 # Note: CentralRiskManager will be imported dynamically to avoid circular imports
                 if not await self._initialize_central_risk_manager():
                     logger.error("❌ Failed to initialize Central Risk Manager")
                     self.system_status = SystemStatus.EMERGENCY
                     return False
-                
+
                 # Initialize components in hierarchical order
                 if not await self._initialize_components_hierarchically():
                     logger.error("❌ Failed to initialize components")
                     self.system_status = SystemStatus.EMERGENCY
                     return False
-                
+
                 # Establish hierarchical control relationships
                 if not await self._establish_control_relationships():
                     logger.error("❌ Failed to establish control relationships")
                     self.system_status = SystemStatus.EMERGENCY
                     return False
-                
+
                 # Start system monitoring
                 await self._start_system_monitoring()
-                
+
                 self.system_status = SystemStatus.READY
                 self.started_at = datetime.now()
-                
+
                 logger.info("✅ Hierarchical system initialization completed")
                 return True
-                
+
         except Exception as e:
             logger.error(f"❌ System initialization failed: {e}")
             self.system_status = SystemStatus.EMERGENCY
             return False
-    
+
     # ISystemComponent interface implementation
     async def initialize(self) -> bool:
         """Initialize component (ISystemComponent interface)"""
         return await self.initialize_system()
-    
+
     async def start(self) -> bool:
         """Start component operations"""
         if self.system_status != SystemStatus.READY:
             logger.error("Cannot start system - not in ready state")
             return False
-        
+
         try:
             self.system_status = SystemStatus.OPERATIONAL
             logger.info("✅ System started and operational")
@@ -216,7 +213,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ System start failed: {e}")
             return False
-    
+
     async def stop(self) -> bool:
         """Stop component operations"""
         try:
@@ -225,19 +222,19 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ System stop failed: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check"""
         return {
             'healthy': self.system_status == SystemStatus.OPERATIONAL,
             'system_status': self.system_status.value,
             'component_count': len(self.component_registry),
-            'operational_components': len([r for r in self.component_registry.values() 
+            'operational_components': len([r for r in self.component_registry.values()
                                          if r.status == 'operational']),
             'uptime_seconds': (datetime.now() - self.started_at).total_seconds() if self.started_at else 0,
             'emergency_mode': self.emergency_mode
         }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get component status"""
         return {
@@ -248,14 +245,14 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'emergency_mode': self.emergency_mode,
             'central_risk_manager_id': getattr(self, 'risk_manager_id', None)
         }
-    
-    def register_component(self, name: str, component: Any, 
+
+    def register_component(self, name: str, component: Any,
                          layer: ComponentLayer = ComponentLayer.SUPPORT,
                          authority_level: AuthorityLevel = AuthorityLevel.READ_ONLY,
                          initialization_order: int = 100,
                          reports_to: Optional[str] = None) -> str:
         """Register component with hierarchical control - delegates to ComponentManager"""
-        
+
         return self.component_manager.register_component(
             name=name,
             component=component,
@@ -264,10 +261,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             initialization_order=initialization_order,
             reports_to=reports_to
         )
-    
+
     def register_central_risk_manager(self, risk_manager: Any) -> str:
         """Register the Central Risk Manager as Layer 2 Governance"""
-        
+
         self.central_risk_manager = risk_manager
         self.risk_manager_id = self.register_component(
             name="CentralRiskManager",
@@ -276,340 +273,340 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
             initialization_order=10  # High priority initialization
         )
-        
+
         logger.info("🛡️ Central Risk Manager registered as governance layer")
         return self.risk_manager_id
-    
+
     async def _initialize_central_risk_manager(self) -> bool:
         """Initialize the Central Risk Manager first"""
-        
+
         try:
             if not self.central_risk_manager:
                 logger.error("Central Risk Manager not registered")
                 return False
-            
+
             logger.info("🛡️ Initializing Central Risk Manager...")
-            
+
             # Initialize with system-level configuration
             execution_config = {
                 'max_market_impact': 0.05,
                 'default_time_horizon': 300
             }
-            
+
             success = await self.central_risk_manager.initialize(execution_config)
-            
+
             if success:
                 # Update registration status
                 if self.risk_manager_id:
                     registration = self.component_registry[self.risk_manager_id]
                     registration.update_status("operational")
-                
+
                 logger.info("✅ Central Risk Manager initialized")
             else:
                 logger.error("❌ Central Risk Manager initialization failed")
-            
+
             return success
-            
+
         except Exception as e:
             logger.error(f"❌ Central Risk Manager initialization error: {e}")
             return False
-    
+
     async def _initialize_components_hierarchically(self) -> bool:
         """Initialize components in hierarchical order - delegates to ComponentManager"""
-        
+
         return await self.component_manager.initialize_components_hierarchically()
-    
+
 # _initialize_single_component method moved to ComponentManager
-    
+
     async def _establish_control_relationships(self) -> bool:
         """Establish hierarchical control relationships"""
-        
+
         try:
             logger.info("🔗 Establishing hierarchical control relationships...")
-            
+
             # Set up RiskManager control over trading components
             if self.central_risk_manager and self.risk_manager_id:
                 trading_components = []
-                
+
                 # Find trading components that should report to RiskManager
                 for component_id, registration in self.component_registry.items():
-                    if (registration.layer == ComponentLayer.EXECUTION and 
+                    if (registration.layer == ComponentLayer.EXECUTION and
                         registration.name != "CentralRiskManager"):
-                        
+
                         # Set RiskManager as parent
                         registration.reports_to = self.risk_manager_id
                         trading_components.append(component_id)
-                
+
                 # Update RiskManager's controlled components
                 if self.risk_manager_id in self.component_registry:
                     self.component_registry[self.risk_manager_id].controls = trading_components
-                
+
                 # Register trading components with RiskManager
                 strategy_manager = None
                 trading_engine = None
-                
+
                 for component_id in trading_components:
                     registration = self.component_registry[component_id]
-                    
+
                     if "Strategy" in registration.name:
                         strategy_manager = registration.component_instance
                     elif "Trading" in registration.name or "Execution" in registration.name:
                         trading_engine = registration.component_instance
-                
+
                 # Set controlled components in RiskManager
                 self.central_risk_manager.set_controlled_components(
                     strategy_manager=strategy_manager,
                     trading_engine=trading_engine
                 )
-                
+
                 logger.info(f"✅ RiskManager control established over {len(trading_components)} components")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to establish control relationships: {e}")
             return False
-    
+
     async def _start_system_monitoring(self) -> None:
         """Start continuous system monitoring - delegates to SystemMonitor"""
-        
+
         try:
             await self.system_monitor.start_monitoring()
             logger.info("📊 System monitoring started")
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to start system monitoring: {e}")
-    
+
     async def _monitoring_loop(self) -> None:
         """Continuous system monitoring loop"""
-        
+
         logger.info("📊 System monitoring loop started")
-        
+
         try:
             while self.system_status not in [SystemStatus.SHUTDOWN, SystemStatus.EMERGENCY]:
                 # Health check all components
                 await self._health_check_components()
-                
+
                 # Update system metrics
                 self._update_system_metrics()
-                
+
                 # Check for emergency conditions
                 await self._check_emergency_conditions()
-                
+
                 # Sleep until next monitoring cycle
                 await asyncio.sleep(self.config.health_check_interval)
-                
+
         except Exception as e:
             logger.error(f"❌ System monitoring error: {e}")
-        
+
         logger.info("📊 System monitoring stopped")
-    
+
     async def _health_check_components(self) -> None:
         """Perform health checks on all components"""
-        
+
         try:
             for component_id, registration in self.component_registry.items():
                 if hasattr(registration.component_instance, 'health_check'):
                     try:
                         health_status = await registration.component_instance.health_check()
-                        
+
                         if health_status.get('healthy', False):
                             registration.update_status("operational")
                         else:
                             error_msg = health_status.get('error', 'Health check failed')
                             registration.update_status("unhealthy", error_msg)
-                            
+
                     except Exception as e:
                         registration.update_status("unhealthy", str(e))
                 else:
                     # Assume components without health checks are healthy if no recent errors
                     if registration.error_count == 0:
                         registration.update_status("operational")
-                        
+
         except Exception as e:
             logger.error(f"❌ Health check error: {e}")
-    
+
     def _update_system_metrics(self) -> None:
         """Update system performance metrics"""
-        
+
         try:
             total_components = len(self.component_registry)
             operational_components = sum(
-                1 for reg in self.component_registry.values() 
+                1 for reg in self.component_registry.values()
                 if reg.status == "operational"
             )
             failed_components = sum(
-                1 for reg in self.component_registry.values() 
+                1 for reg in self.component_registry.values()
                 if reg.status in ["failed", "unhealthy"]
             )
-            
+
             self.system_metrics.update({
                 'total_components': total_components,
                 'operational_components': operational_components,
                 'failed_components': failed_components,
                 'system_uptime': (datetime.now() - self.started_at).total_seconds() if self.started_at else 0
             })
-            
+
         except Exception as e:
             logger.error(f"❌ Metrics update error: {e}")
-    
+
     async def _check_emergency_conditions(self) -> None:
         """Check for conditions requiring emergency response"""
-        
+
         try:
             # Check if RiskManager is unhealthy
-            if (self.risk_manager_id and 
+            if (self.risk_manager_id and
                 self.component_registry[self.risk_manager_id].status != "operational"):
-                
+
                 await self._initiate_emergency_response("RiskManager unhealthy")
                 return
-            
+
             # Check component failure rate
             total_components = len(self.component_registry)
             failed_components = self.system_metrics['failed_components']
-            
+
             if total_components > 0 and (failed_components / total_components) > 0.5:
                 await self._initiate_emergency_response("High component failure rate")
                 return
-                
+
         except Exception as e:
             logger.error(f"❌ Emergency condition check error: {e}")
-    
+
     async def _initiate_emergency_response(self, reason: str) -> None:
         """Initiate emergency response procedures"""
-        
+
         try:
             if self.emergency_mode:
                 return  # Already in emergency mode
-            
+
             logger.critical(f"🚨 EMERGENCY RESPONSE INITIATED: {reason}")
-            
+
             self.emergency_mode = True
             self.emergency_initiated_at = datetime.now()
             self.system_status = SystemStatus.EMERGENCY
-            
+
             # Emergency shutdown of RiskManager
             if self.central_risk_manager:
                 self.central_risk_manager.emergency_shutdown()
-            
+
             # Stop all trading operations
             await self._emergency_stop_trading()
-            
+
             logger.critical("🚨 EMERGENCY RESPONSE COMPLETED")
-            
+
         except Exception as e:
             logger.error(f"❌ Emergency response failed: {e}")
-    
+
     async def _emergency_stop_trading(self) -> None:
         """Emergency stop of all trading operations"""
-        
+
         try:
             # Stop all execution layer components
             execution_components = self.layer_components[ComponentLayer.EXECUTION]
-            
+
             for component_id in execution_components:
                 registration = self.component_registry[component_id]
-                
+
                 if hasattr(registration.component_instance, 'emergency_stop'):
                     try:
                         await registration.component_instance.emergency_stop()
                         logger.warning(f"Emergency stopped: {registration.name}")
                     except Exception as e:
                         logger.error(f"Failed to emergency stop {registration.name}: {e}")
-                        
+
         except Exception as e:
             logger.error(f"❌ Emergency stop failed: {e}")
-    
+
     async def request_system_authorization(self, operation: str, component_id: str,
                                          details: Dict[str, Any]) -> bool:
         """Request system-level authorization for operations"""
-        
+
         try:
             # Check if component is registered and authorized
             if component_id not in self.component_registry:
                 logger.error(f"Unauthorized component request: {component_id}")
                 return False
-            
+
             registration = self.component_registry[component_id]
-            
+
             # Check operation authorization
             if operation not in registration.allowed_operations:
                 logger.error(f"Unauthorized operation {operation} for {registration.name}")
                 return False
-            
+
             # For trading operations, must go through RiskManager
-            if (operation.startswith("trade_") and 
+            if (operation.startswith("trade_") and
                 registration.layer == ComponentLayer.EXECUTION and
                 self.config.require_risk_manager_authorization):
-                
+
                 return await self._route_to_risk_manager(operation, component_id, details)
-            
+
             # System-level operations require SYSTEM_CONTROL authority
-            if (operation.startswith("system_") and 
+            if (operation.startswith("system_") and
                 registration.authority_level != AuthorityLevel.SYSTEM_CONTROL):
-                
+
                 logger.error(f"Insufficient authority for {operation}")
                 return False
-            
+
             logger.info(f"✅ Authorized operation {operation} for {registration.name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Authorization request failed: {e}")
             return False
-    
+
     async def _route_to_risk_manager(self, operation: str, component_id: str,
                                    details: Dict[str, Any]) -> bool:
         """Route trading operations to RiskManager for authorization"""
-        
+
         try:
             if not self.central_risk_manager:
                 logger.error("No RiskManager available for authorization")
                 return False
-            
+
             # Convert to trading decision request
             request = TradingDecisionRequest(
                 requesting_component=component_id,
                 justification=f"System operation: {operation}",
                 **details
             )
-            
+
             # Request authorization from RiskManager
             authorization = await self.central_risk_manager.authorize_trading_decision(request)
-            
+
             # Check if authorized
             authorized = authorization.authorization_level.value != "rejected"
-            
+
             if authorized:
                 logger.info(f"✅ RiskManager authorized {operation}")
             else:
                 logger.warning(f"❌ RiskManager rejected {operation}: {authorization.rejection_reason}")
-            
+
             return authorized
-            
+
         except Exception as e:
             logger.error(f"❌ RiskManager routing failed: {e}")
             return False
-    
+
     def _get_allowed_operations(self, authority_level: AuthorityLevel) -> Set[str]:
         """Get allowed operations for authority level"""
-        
+
         operations = {"health_check", "status_report", "metrics_report"}
-        
+
         if authority_level == AuthorityLevel.OPERATIONAL:
             operations.update({"data_request", "signal_generation", "analytics_compute"})
-        
+
         if authority_level == AuthorityLevel.GOVERNANCE_CONTROL:
             operations.update({"trade_authorization", "risk_assessment", "position_management"})
-        
+
         if authority_level == AuthorityLevel.SYSTEM_CONTROL:
             operations.update({"system_shutdown", "emergency_stop", "component_restart"})
-        
+
         return operations
-    
+
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
-        
+
         return {
             'system_id': self.system_id,
             'status': self.system_status.value,
@@ -618,41 +615,41 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'emergency_initiated_at': self.emergency_initiated_at.isoformat() if self.emergency_initiated_at else None,
             'metrics': self.system_metrics.copy(),
             'component_summary': {
-                layer.value: len(components) 
+                layer.value: len(components)
                 for layer, components in self.layer_components.items()
             },
             'risk_manager_status': (
-                self.component_registry[self.risk_manager_id].status 
+                self.component_registry[self.risk_manager_id].status
                 if self.risk_manager_id else "not_registered"
             )
         }
-    
+
     async def shutdown_system(self) -> bool:
         """Shutdown the system (alias for graceful_shutdown)"""
         return await self.graceful_shutdown()
-    
+
     async def graceful_shutdown(self) -> bool:
         """Perform graceful system shutdown"""
-        
+
         try:
             logger.info("🔄 Initiating graceful system shutdown...")
-            
+
             self.system_status = SystemStatus.SHUTDOWN
-            
+
             # Stop monitoring
             await self.system_monitor.stop_monitoring()
-            
+
             # Shutdown components in reverse order
             components_by_shutdown_order = sorted(
                 self.component_registry.items(),
                 key=lambda x: x[1].shutdown_order,
                 reverse=True
             )
-            
+
             for component_id, registration in components_by_shutdown_order:
                 try:
                     if registration.component_instance is not None:
-                        shutdown_method = getattr(registration.component_instance, 'shutdown', None)
+                        shutdown_method = getattr(registration.component_instance, 'stop', None)
                         if shutdown_method is not None and callable(shutdown_method):
                             try:
                                 await shutdown_method()
@@ -661,15 +658,15 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                                 logger.warning(f"⚠️ Shutdown method failed for {registration.name}: {shutdown_error}")
                         else:
                             logger.debug(f"📝 No shutdown method for {registration.name}")
-                    
+
                     registration.update_status("shutdown")
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Failed to shutdown {registration.name}: {e}")
-            
+
             logger.info("✅ Graceful system shutdown completed")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Graceful shutdown failed: {e}")
             return False
@@ -1681,10 +1678,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
     def _distribute_capital(self, capital_distribution: Dict[str, Any]) -> Dict[str, float]:
         """Distribute capital across hierarchical layers
-        
+
         Args:
             capital_distribution: Capital distribution parameters
-            
+
         Returns:
             Dict mapping layers to allocated capital amounts
         """
@@ -1696,19 +1693,19 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'EXECUTION': 0.4,
                 'SUPPORT': 0.1
             })
-            
+
             # Validate allocation percentages sum to 1.0
             total_percentage = sum(layer_allocation.values())
             if abs(total_percentage - 1.0) > 0.01:  # Allow small rounding differences
                 # Normalize if doesn't sum to 1.0
                 for layer in layer_allocation:
                     layer_allocation[layer] /= total_percentage
-            
+
             # Calculate actual capital amounts
             distributed_capital = {}
             for layer, percentage in layer_allocation.items():
                 distributed_capital[layer] = total_capital * percentage
-            
+
             # Update capital utilization tracking
             self.capital_utilization = {
                 'total_capital': total_capital,
@@ -1716,17 +1713,17 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'utilization_rate': sum(distributed_capital.values()) / total_capital,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             logger.info(f"Capital distributed across layers: {distributed_capital}")
             return distributed_capital
-            
+
         except Exception as e:
             logger.error(f"Capital distribution failed: {e}")
             return {}
 
     def capital_utilization(self) -> Dict[str, Any]:
         """Get current capital utilization across the system
-        
+
         Returns:
             Capital utilization data
         """
@@ -2040,10 +2037,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
     def _distribute_capital(self, capital_distribution: Dict[str, Any]) -> Dict[str, float]:
         """Distribute capital across hierarchical layers
-        
+
         Args:
             capital_distribution: Capital distribution parameters
-            
+
         Returns:
             Dict mapping layers to allocated capital amounts
         """
@@ -2055,19 +2052,19 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'EXECUTION': 0.4,
                 'SUPPORT': 0.1
             })
-            
+
             # Validate allocation percentages sum to 1.0
             total_percentage = sum(layer_allocation.values())
             if abs(total_percentage - 1.0) > 0.01:  # Allow small rounding differences
                 # Normalize if doesn't sum to 1.0
                 for layer in layer_allocation:
                     layer_allocation[layer] /= total_percentage
-            
+
             # Calculate actual capital amounts
             distributed_capital = {}
             for layer, percentage in layer_allocation.items():
                 distributed_capital[layer] = total_capital * percentage
-            
+
             # Update capital utilization tracking
             self.capital_utilization = {
                 'total_capital': total_capital,
@@ -2075,17 +2072,17 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'utilization_rate': sum(distributed_capital.values()) / total_capital,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             logger.info(f"Capital distributed across layers: {distributed_capital}")
             return distributed_capital
-            
+
         except Exception as e:
             logger.error(f"Capital distribution failed: {e}")
             return {}
 
     def capital_utilization(self) -> Dict[str, Any]:
         """Get current capital utilization across the system
-        
+
         Returns:
             Capital utilization data
         """
@@ -2099,16 +2096,16 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     @property
     def authorization_audit(self) -> List[Dict[str, Any]]:
         """Get authorization audit trail for governance compliance
-        
+
         Returns:
             Authorization audit trail
         """
         return self._authorization_audit
-    
+
     @authorization_audit.setter
     def authorization_audit(self, value: List[Dict[str, Any]]) -> None:
         """Set authorization audit trail
-        
+
         Args:
             value: Authorization audit trail data
         """
@@ -2117,10 +2114,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     def _get_allowed_operations(self, authority_level: AuthorityLevel) -> Set[str]:
         """
         Get allowed operations for a given authority level
-        
+
         Args:
             authority_level: The authority level to check
-            
+
         Returns:
             Set of allowed operations
         """
@@ -2128,7 +2125,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             # Define operations by authority level
             operations_by_level = {
                 AuthorityLevel.SYSTEM_CONTROL: {
-                    'system_shutdown', 'emergency_stop', 'component_restart', 
+                    'system_shutdown', 'emergency_stop', 'component_restart',
                     'authority_escalation', 'system_configuration', 'capital_reallocation'
                 },
                 AuthorityLevel.GOVERNANCE_CONTROL: {
@@ -2143,23 +2140,23 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                     'read_data', 'view_positions', 'view_performance', 'health_check'
                 }
             }
-            
+
             return operations_by_level.get(authority_level, set())
-            
+
         except Exception as e:
             logger.error(f"Failed to get allowed operations: {e}")
             return set()
 
-    def _check_authorization_flow(self, operation: str, requester_authority: AuthorityLevel, 
+    def _check_authorization_flow(self, operation: str, requester_authority: AuthorityLevel,
                                 required_authority: AuthorityLevel) -> Optional[bool]:
         """
         Check authorization flow for an operation
-        
+
         Args:
             operation: Operation being requested
             requester_authority: Authority level of requester
             required_authority: Required authority level
-            
+
         Returns:
             True if authorized, False if not, None if error
         """
@@ -2171,13 +2168,13 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 AuthorityLevel.GOVERNANCE_CONTROL: 3,
                 AuthorityLevel.SYSTEM_CONTROL: 4
             }
-            
+
             requester_level = authority_hierarchy.get(requester_authority, 0)
             required_level = authority_hierarchy.get(required_authority, 0)
-            
+
             # Check if requester has sufficient authority
             return requester_level >= required_level
-            
+
         except Exception as e:
             logger.error(f"Authorization flow check failed: {e}")
             return None
@@ -2185,10 +2182,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     async def _escalate_authorization(self, escalation_request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Escalate authorization for high-risk operations
-        
+
         Args:
             escalation_request: Escalation request details
-            
+
         Returns:
             Escalation result
         """
@@ -2246,17 +2243,17 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
     async def _distribute_capital(self, capital_distribution: Dict[str, Any]) -> Dict[str, Any]:
         """
         Distribute capital through hierarchical layers
-        
+
         Args:
             capital_distribution: Capital distribution parameters
-            
+
         Returns:
             Distribution result
         """
         try:
             total_capital = capital_distribution.get('total_capital', 0.0)
             layer_allocation = capital_distribution.get('layer_allocation', {})
-            
+
             distribution_result = {
                 'total_capital': total_capital,
                 'layer_allocation': layer_allocation,
@@ -2264,23 +2261,23 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'distribution_timestamp': datetime.now().isoformat(),
                 'success': True
             }
-            
+
             # Distribute capital by layer
             for layer, percentage in layer_allocation.items():
                 layer_capital = total_capital * percentage
                 distribution_result['distributed_capital'][layer] = layer_capital
-                
+
                 # Update capital utilization tracking
                 self.capital_utilization['distributed_capital'][layer] = layer_capital
-            
+
             # Update total capital
             self.capital_utilization['total_capital'] = total_capital
             self.capital_utilization['utilization_rate'] = 1.0  # Fully distributed
             self.capital_utilization['timestamp'] = datetime.now().isoformat()
-            
+
             logger.info(f"Capital distributed hierarchically: {distribution_result}")
             return distribution_result
-            
+
         except Exception as e:
             logger.error(f"Capital distribution failed: {e}")
             return {
@@ -2288,34 +2285,34 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'success': False,
                 'timestamp': datetime.now().isoformat()
             }
-    
+
     # ========================================
     # ORCHESTRATOR INTEGRATION METHODS
     # ========================================
-    
+
     def register_with_orchestrator(self, orchestrator) -> str:
         """
         Register with orchestrator (self-registration for consistency)
-        
+
         Note: The orchestrator doesn't register with itself in practice,
         but this method exists for interface consistency during testing.
         """
         # Return a mock component ID for testing purposes
         return "orchestrator_self_registration"
-    
+
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """
         Request operation authorization (self-authorization for consistency)
-        
+
         Note: The orchestrator provides authorization, so it always authorizes itself.
         """
         # Orchestrator always authorizes its own operations
         return True
-    
+
     # ========================================
     # EMERGENCY AUTHORIZATION METHODS
     # ========================================
-    
+
     def emergency_authorization(self, operation: str, details: Dict[str, Any] = None) -> bool:
         """Emergency authorization override"""
         try:
@@ -2324,33 +2321,33 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'emergency_shutdown', 'system_halt', 'emergency_liquidation',
                 'risk_override', 'system_recovery', 'emergency_restart'
             ]
-            
+
             if operation in emergency_operations:
                 logger.warning(f"🚨 Emergency authorization granted: {operation}")
                 return True
             else:
                 logger.error(f"❌ Emergency authorization denied: {operation}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Emergency authorization failed: {e}")
             return False
-    
+
     def override_authorization(self, authorization_id: str, reason: str = "Emergency Override") -> bool:
         """Override existing authorization"""
         try:
             logger.warning(f"🚨 Authorization override: {authorization_id} - {reason}")
             # In real implementation, this would override specific authorization
             return True
-            
+
         except Exception as e:
             logger.error(f"Authorization override failed: {e}")
             return False
-    
+
     # ========================================
     # AUDIT TRAIL METHODS
     # ========================================
-    
+
     def log_authorization(self, authorization_event: Dict[str, Any]) -> bool:
         """Log authorization events for audit trail"""
         try:
@@ -2359,11 +2356,11 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             component = authorization_event.get('component', 'unknown')
             logger.info(f"📋 System authorization logged: {operation} by {component}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Authorization logging failed: {e}")
             return False
-    
+
     def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
         """Audit specific authorization"""
         try:
@@ -2376,11 +2373,11 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'audited_by': 'HierarchicalSystemOrchestrator',
                 'system_level': True
             }
-            
+
         except Exception as e:
             logger.error(f"System authorization audit failed: {e}")
             return {'error': str(e)}
-    
+
     def track_authorization(self, authorization_id: str) -> Dict[str, Any]:
         """Track system authorization lifecycle"""
         try:
@@ -2393,7 +2390,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'tracked_by': 'HierarchicalSystemOrchestrator',
                 'system_level': True
             }
-            
+
         except Exception as e:
             logger.error(f"System authorization tracking failed: {e}")
             return {'error': str(e)}
@@ -2403,32 +2400,32 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 if __name__ == "__main__":
     async def test_hierarchical_orchestrator():
         """Test the hierarchical system orchestrator"""
-        
+
         # Initialize orchestrator
         config = {
             'component_startup_timeout': 30,
             'health_check_interval': 10
         }
-        
+
         orchestrator = HierarchicalSystemOrchestrator(config)
-        
+
         # Create and register Central Risk Manager
         # Import CentralRiskManager dynamically to avoid circular imports
         from .central_risk_manager import CentralRiskManager
         risk_manager = CentralRiskManager()
         orchestrator.register_central_risk_manager(risk_manager)
-        
+
         # Register mock components
         class MockComponent:
             def __init__(self, name):
                 self.name = name
-            
+
             async def initialize(self):
                 return True
-            
+
             async def health_check(self):
                 return {'healthy': True}
-        
+
         # Register components
         strategy_comp = MockComponent("StrategyManager")
         orchestrator.register_component(
@@ -2436,31 +2433,31 @@ if __name__ == "__main__":
             ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
             initialization_order=20
         )
-        
+
         trading_comp = MockComponent("TradingEngine")
         orchestrator.register_component(
             "TradingEngine", trading_comp,
             ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
             initialization_order=30
         )
-        
+
         # Initialize system
         success = await orchestrator.initialize_system()
         print(f"System initialization: {'Success' if success else 'Failed'}")
-        
+
         # Get system status
         status = orchestrator.get_system_status()
         print(f"System status: {status}")
-        
+
         # Test authorization
         auth_result = await orchestrator.request_system_authorization(
             "health_check", "test_component", {}
         )
         print(f"Authorization test: {auth_result}")
-        
+
         # Shutdown
         await asyncio.sleep(2)  # Let it run briefly
         await orchestrator.graceful_shutdown()
-    
+
     # Run test
     asyncio.run(test_hierarchical_orchestrator())
