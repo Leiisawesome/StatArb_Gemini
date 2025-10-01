@@ -116,6 +116,11 @@ class EnhancedPortfolioManager(ISystemComponent):
         
         self.logger.info(f"🚀 Enhanced Portfolio Manager initialized with component ID: {self.component_id}")
     
+    @property
+    def portfolio_lock(self):
+        """Property to access the portfolio lock"""
+        return self._lock
+    
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================

@@ -49,7 +49,7 @@ class DataFlowValidator:
         self.validation_results = []
         
     async def validate_complete_data_flow(self, test_symbols: List[str] = None, 
-                                        test_date: str = "2024-01-15") -> DataFlowValidationResult:
+                                        test_date: str = "2024-12-20") -> DataFlowValidationResult:
         """Validate complete data flow from ingestion to execution"""
         
         if test_symbols is None:
@@ -191,11 +191,11 @@ class DataFlowValidator:
             for symbol in symbols:
                 try:
                     # Load data for symbol
-                    symbol_data = await data_manager.get_historical_data(
+                    symbol_data = data_manager.get_historical_data(
                         symbol=symbol,
                         start_date=test_date,
                         end_date=test_date,
-                        interval='5min'
+                        timeframe='5min'
                     )
                     
                     processing_time = (datetime.now() - ingestion_start).total_seconds() * 1000
@@ -263,11 +263,11 @@ class DataFlowValidator:
             
             # Get sample data
             data_manager = self.integration_manager.get_component('data_manager')
-            sample_data = await data_manager.get_historical_data(
+            sample_data = data_manager.get_historical_data(
                 symbol=symbols[0],
                 start_date=test_date,
                 end_date=test_date,
-                interval='5min'
+                timeframe='5min'
             )
             
             if sample_data is None or sample_data.empty:
@@ -351,11 +351,11 @@ class DataFlowValidator:
             
             # Get sample data for regime analysis
             data_manager = self.integration_manager.get_component('data_manager')
-            sample_data = await data_manager.get_historical_data(
+            sample_data = data_manager.get_historical_data(
                 symbol=symbols[0],
                 start_date=test_date,
                 end_date=test_date,
-                interval='5min'
+                timeframe='5min'
             )
             
             if sample_data is None or sample_data.empty:
