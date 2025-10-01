@@ -2453,7 +2453,6 @@ if __name__ == "__main__":
         auth_result = await orchestrator.request_system_authorization(
             "health_check", "test_component", {}
         )
-        print(f"Authorization test: {auth_result}")
 
         # Shutdown
         await asyncio.sleep(2)  # Let it run briefly

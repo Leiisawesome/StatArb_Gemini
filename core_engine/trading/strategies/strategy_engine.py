@@ -4,20 +4,17 @@ Advanced strategy execution framework with lifecycle management and monitoring
 """
 
 import logging
-import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Set, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import warnings
-from collections import defaultdict, deque
-import json
+from collections import deque
 import uuid
 
 # Import ISystemComponent for orchestrator integration
@@ -392,10 +389,8 @@ class BaseStrategy(ABC):
         """Update strategy with new market data"""
         try:
             logger.info(f"Strategy.update called, state: {self.state}")
-            print(f"🔍 STRATEGY STATE DEBUG: {self.strategy_id} state is {self.state}")
             if self.state != StrategyState.ACTIVE:
                 logger.warning(f"Strategy not active, returning empty signals. State: {self.state}")
-                print(f"🔍 STRATEGY STATE DEBUG: Strategy {self.strategy_id} not ACTIVE, returning empty signals")
                 return []
             
             self._last_update = datetime.now()

@@ -206,6 +206,13 @@ config/api_keys.py
 .env.local
 .env.production
 
+# Temporary development and validation files
+audit_trail.jsonl
+validation_benchmarks.json
+validation_history.json
+strategy_registry.json/
+strategy_registry/
+
 # IDE and editor files
 .idea/
 .vscode/
