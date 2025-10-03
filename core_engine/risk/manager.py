@@ -82,7 +82,6 @@ class IRiskSubscriber:
     
     async def on_risk_limit_breach(self, risk_event: Dict[str, Any]) -> None:
         """Handle risk limit breach"""
-        pass
 
 class RiskManager:
     """

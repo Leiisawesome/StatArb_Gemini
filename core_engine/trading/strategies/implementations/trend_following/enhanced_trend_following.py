@@ -30,11 +30,10 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -433,9 +432,9 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.BUY,
                         strength=trend_quality,
                         confidence=confidence,
-                        quantity=self.config.base_position_pct,
+                        target_quantity=self.config.base_position_pct,
                         timestamp=datetime.now(),
-                        metadata={
+                        additional_data={
                             'signal_reason': 'uptrend_entry',
                             'trend_direction': trend_direction,
                             'trend_strength': trend_strength.value,
@@ -468,9 +467,9 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.SELL,
                         strength=trend_quality,
                         confidence=confidence,
-                        quantity=self.config.base_position_pct,
+                        target_quantity=self.config.base_position_pct,
                         timestamp=datetime.now(),
-                        metadata={
+                        additional_data={
                             'signal_reason': 'downtrend_entry',
                             'trend_direction': trend_direction,
                             'trend_strength': trend_strength.value,
@@ -952,7 +951,7 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
         """Track position entry for exit management"""
         
         try:
-            entry_price = signal.metadata.get('entry_price', 0)
+            entry_price = signal.additional_data.get('entry_price', 0)
             
             # Get ATR for stop loss calculation
             atr = 0
@@ -974,7 +973,7 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                 'signal_type': signal.signal_type,
                 'entry_time': signal.timestamp,
                 'entry_price': entry_price,
-                'quantity': signal.quantity
+                'quantity': signal.target_quantity
             }
             
             self.entry_prices[symbol] = entry_price
@@ -1128,7 +1127,6 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
         """Update performance tracking metrics"""
         
         # Placeholder for performance tracking updates
-        pass
     
     # ========================================
     # STRATEGY-SPECIFIC METHODS

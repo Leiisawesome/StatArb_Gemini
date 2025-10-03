@@ -12,7 +12,7 @@ Version: 1.0.0 (Modular Architecture)
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

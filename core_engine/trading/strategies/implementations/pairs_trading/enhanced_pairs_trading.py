@@ -30,11 +30,10 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -831,13 +830,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
         """Check stop losses for active pairs"""
         
         # Placeholder for stop loss checking
-        pass
     
     def _update_pair_correlations(self) -> None:
         """Update correlations for active pairs"""
         
         # Placeholder for correlation updates
-        pass
     
     async def _close_all_pairs(self) -> None:
         """Close all active pairs"""

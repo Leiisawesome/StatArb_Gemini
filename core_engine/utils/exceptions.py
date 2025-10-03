@@ -52,176 +52,135 @@ class CoreEngineError(Exception):
 # Configuration Errors
 class ConfigurationError(CoreEngineError):
     """Configuration-related errors"""
-    pass
 
 class ConfigFileNotFoundError(ConfigurationError):
     """Configuration file not found"""
-    pass
 
 class ConfigValidationError(ConfigurationError):
     """Configuration validation error"""
-    pass
 
 class ConfigMergeError(ConfigurationError):
     """Configuration merge error"""
-    pass
 
 # Data Management Errors
 class DataError(CoreEngineError):
     """Data-related errors"""
-    pass
 
 class DataSourceError(DataError):
     """Data source connection/access error"""
-    pass
 
 class DataValidationError(DataError):
     """Data validation error"""
-    pass
 
 class DataNotFoundError(DataError):
     """Requested data not found"""
-    pass
 
 # Trading Errors
 class TradingError(CoreEngineError):
     """Trading-related errors"""
-    pass
 
 class OrderError(TradingError):
     """Order-related errors"""
-    pass
 
 class OrderValidationError(OrderError):
     """Order validation error"""
-    pass
 
 class OrderSubmissionError(OrderError):
     """Order submission error"""
-    pass
 
 class ExecutionError(TradingError):
     """Trade execution errors"""
-    pass
 
 class InsufficientFundsError(ExecutionError):
     """Insufficient funds for trade"""
-    pass
 
 class MarketDataError(TradingError):
     """Market data errors"""
-    pass
 
 # Risk Management Errors
 class RiskError(CoreEngineError):
     """Risk management errors"""
-    pass
 
 class RiskLimitExceededError(RiskError):
     """Risk limit exceeded"""
-    pass
 
 class RiskCalculationError(RiskError):
     """Risk calculation error"""
-    pass
 
 class RiskValidationError(RiskError):
     """Risk validation error"""
-    pass
 
 # Strategy Errors
 class StrategyError(CoreEngineError):
     """Strategy-related errors"""
-    pass
 
 class StrategyInitializationError(StrategyError):
     """Strategy initialization error"""
-    pass
 
 class StrategyExecutionError(StrategyError):
     """Strategy execution error"""
-    pass
 
 class SignalGenerationError(StrategyError):
     """Signal generation error"""
-    pass
 
 # Analytics Errors
 class AnalyticsError(CoreEngineError):
     """Analytics-related errors"""
-    pass
 
 class PerformanceCalculationError(AnalyticsError):
     """Performance calculation error"""
-    pass
 
 class AttributionError(AnalyticsError):
     """Attribution calculation error"""
-    pass
 
 class ReportGenerationError(AnalyticsError):
     """Report generation error"""
-    pass
 
 # Broker Integration Errors
 class BrokerError(CoreEngineError):
     """Broker integration errors"""
-    pass
 
 class BrokerConnectionError(BrokerError):
     """Broker connection error"""
-    pass
 
 class BrokerAuthenticationError(BrokerError):
     """Broker authentication error"""
-    pass
 
 class BrokerAPIError(BrokerError):
     """Broker API error"""
-    pass
 
 # System Errors
 class SystemError(CoreEngineError):
     """System-level errors"""
-    pass
 
 class ComponentInitializationError(SystemError):
     """Component initialization error"""
-    pass
 
 class ComponentCommunicationError(SystemError):
     """Component communication error"""
-    pass
 
 class ResourceExhaustionError(SystemError):
     """Resource exhaustion error"""
-    pass
 
 # Regime Detection Errors
 class RegimeError(CoreEngineError):
     """Regime detection errors"""
-    pass
 
 class RegimeCalculationError(RegimeError):
     """Regime calculation error"""
-    pass
 
 class RegimeClassificationError(RegimeError):
     """Regime classification error"""
-    pass
 
 # Portfolio Management Errors
 class PortfolioError(CoreEngineError):
     """Portfolio management errors"""
-    pass
 
 class PortfolioCalculationError(PortfolioError):
     """Portfolio calculation error"""
-    pass
 
 class PositionError(PortfolioError):
     """Position-related error"""
-    pass
 
 # Utility functions for error handling
 def create_error_context(component: str, operation: str, **kwargs) -> ErrorContext:

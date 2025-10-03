@@ -5,16 +5,14 @@ Comprehensive position exposure analysis with sector, geographic, and factor exp
 
 import logging
 import threading
-import asyncio
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Set, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-import json
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ Lightweight market regime detection for standalone core_engine.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from datetime import datetime
 import pandas as pd
 import numpy as np

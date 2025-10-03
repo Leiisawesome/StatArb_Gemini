@@ -5,17 +5,14 @@ Advanced transaction cost analysis with market microstructure modeling and cost 
 
 import logging
 import threading
-import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
-import time
 from collections import defaultdict, deque
 from scipy import stats
-import json
 
 from .order_manager import Order, OrderSide, OrderExecution
 from .execution_handler import ExecutionReport, ExecutionMetrics

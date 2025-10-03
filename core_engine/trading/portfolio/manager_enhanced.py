@@ -2,16 +2,13 @@
 Enhanced Portfolio Manager - Institutional Grade
 Integrates position management, allocation, rebalancing, and cash management
 """
-from typing import Dict, List, Any, Optional, Union, Tuple, Callable
+from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 import logging
 import threading
-import asyncio
-import time
 import uuid
-from collections import defaultdict, deque
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -101,6 +98,9 @@ class EnhancedPortfolioManager(ISystemComponent):
             }
         }
         
+        # Portfolio configuration
+        self.base_currency = config.get('base_currency', 'USD')
+        
         # Initialize components
         self.position_manager = PositionManager(config.get('position_config', {}))
         self.allocation_engine = AllocationEngine(config.get('allocation_config', {}))
@@ -113,6 +113,9 @@ class EnhancedPortfolioManager(ISystemComponent):
         
         # Threading
         self._lock = threading.Lock()
+        
+        # Portfolio snapshots history
+        self.portfolio_snapshots = []
         
         self.logger.info(f"🚀 Enhanced Portfolio Manager initialized with component ID: {self.component_id}")
     

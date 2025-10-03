@@ -296,17 +296,14 @@ class BaseStrategy(ABC):
     @abstractmethod
     def initialize(self) -> bool:
         """Initialize strategy - must be implemented by subclasses"""
-        pass
     
     @abstractmethod
     def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
         """Generate trading signals - must be implemented by subclasses"""
-        pass
     
     @abstractmethod
     def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         """Update position tracking - must be implemented by subclasses"""
-        pass
     
     def start(self) -> bool:
         """Start strategy execution"""

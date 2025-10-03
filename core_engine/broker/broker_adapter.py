@@ -4,16 +4,15 @@ Multi-broker integration with standardized API abstraction
 """
 
 import logging
-import threading
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
 import numpy as np
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from abc import ABC, abstractmethod
 import uuid
 import warnings
@@ -214,52 +213,42 @@ class BrokerAdapterInterface(ABC):
     @abstractmethod
     async def connect(self) -> bool:
         """Connect to broker"""
-        pass
     
     @abstractmethod
     async def disconnect(self) -> bool:
         """Disconnect from broker"""
-        pass
     
     @abstractmethod
     async def authenticate(self) -> bool:
         """Authenticate with broker"""
-        pass
     
     @abstractmethod
     async def submit_order(self, order: StandardOrder) -> str:
         """Submit order to broker"""
-        pass
     
     @abstractmethod
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel order"""
-        pass
     
     @abstractmethod
     async def modify_order(self, order_id: str, updates: Dict[str, Any]) -> bool:
         """Modify existing order"""
-        pass
     
     @abstractmethod
     async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
         """Get order status"""
-        pass
     
     @abstractmethod
     async def get_positions(self, account_id: Optional[str] = None) -> List[StandardPosition]:
         """Get account positions"""
-        pass
     
     @abstractmethod
     async def get_account_info(self, account_id: Optional[str] = None) -> StandardAccount:
         """Get account information"""
-        pass
     
     @abstractmethod
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get market data for symbol"""
-        pass
     
     def add_event_callback(self, event_type: str, callback: Callable) -> None:
         """Add event callback"""

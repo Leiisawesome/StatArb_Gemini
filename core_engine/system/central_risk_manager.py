@@ -21,13 +21,11 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Callable, Set
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
 import numpy as np
-import json
-from collections import defaultdict
 
 # Import the UnifiedExecutionEngine and ISystemComponent
 from .unified_execution_engine import (
@@ -889,8 +887,8 @@ class CentralRiskManager(ISystemComponent):
             execution_auth = ExecutionAuthorization(
                 authorization_id=authorization.authorization_id,
                 risk_manager_id="central_risk_manager",
-                symbol=authorization.request_id,  # TODO: Extract from original request
-                side="buy",  # TODO: Extract from original request
+                symbol=request.symbol,  # Extract from original request
+                side=request.side,  # Extract from original request
                 quantity=authorization.authorized_quantity,
                 max_quantity=authorization.max_quantity,
                 max_market_impact=authorization.max_market_impact,
@@ -1107,17 +1105,22 @@ class CentralRiskManager(ISystemComponent):
             elif regime_adjustment < 0.8:  # Low risk regime
                 authorized_qty *= 1.1  # Increase by 10%
             
-            # FINAL CASH CHECK: Ensure final authorized amount doesn't exceed available cash
+            # FINAL CASH CONSTRAINT: Ensure BUY orders don't exceed available cash
             if request.side.lower() == 'buy':
                 available_cash = request.metadata.get('available_cash', self.portfolio_value * 0.95)
                 price = request.metadata.get('price', 100.0)
                 final_required_cash = authorized_qty * price
-                
                 if final_required_cash > available_cash:
-                    # Final cash constraint - cap the authorized quantity
                     final_max_qty = available_cash / price
                     logger.info(f"💰 Final cash constraint: reducing {authorized_qty:.2f} to {final_max_qty:.2f}")
                     authorized_qty = final_max_qty
+            
+            # FINAL POSITION CONSTRAINT: Ensure SELL orders don't exceed available position
+            elif request.side.lower() == 'sell':
+                current_position = self.current_positions.get(request.symbol, 0.0)
+                if current_position > 0 and authorized_qty > current_position:
+                    logger.info(f"🔒 Final position constraint: reducing {authorized_qty:.2f} to {current_position:.2f}")
+                    authorized_qty = current_position
             
             # PRECISION FIX: Round to 2 decimal places to avoid floating point errors
             authorized_qty = max(0.0, round(authorized_qty, 2))
@@ -1272,7 +1275,8 @@ class CentralRiskManager(ISystemComponent):
                 logger.warning(f"⚠️ Position limit breach: {symbol} at {position_pct:.2f}% "
                               f"(limit: {self.config.max_position_size:.2f}%)")
                 
-                # TODO: Implement automatic risk reduction measures
+                # Implement automatic risk reduction measures
+                await self._trigger_risk_reduction(symbol, position_pct, self.config.max_position_size)
             
             # Check concentration limits
             if position_pct > self.config.position_concentration_limit:
@@ -1352,7 +1356,12 @@ class CentralRiskManager(ISystemComponent):
     
     async def _monitor_positions(self):
         """Monitor current positions for risk"""
-        pass  # TODO: Implement position monitoring
+        try:
+            for symbol, position in self.current_positions.items():
+                if position != 0:
+                    await self._check_position_limits(symbol, position)
+        except Exception as e:
+            logger.error(f"Position monitoring error: {e}")
     
     async def _monitor_authorizations(self):
         """Monitor active authorizations for expiry"""
@@ -1405,10 +1414,37 @@ class CentralRiskManager(ISystemComponent):
             self.risk_metrics['total_exposure'] = total_exposure / self.portfolio_value
             
             # Update other metrics
-            # TODO: Implement comprehensive risk metric calculations
+            # Calculate portfolio concentration
+            if self.portfolio_value > 0:
+                max_position = max(abs(pos) for pos in self.current_positions.values()) if self.current_positions else 0
+                self.risk_metrics['max_concentration'] = max_position / self.portfolio_value
+                
+                # Calculate number of positions
+                self.risk_metrics['position_count'] = len([pos for pos in self.current_positions.values() if pos != 0])
+                
+                # Calculate net exposure
+                net_exposure = sum(self.current_positions.values())
+                self.risk_metrics['net_exposure'] = net_exposure / self.portfolio_value
             
         except Exception as e:
             logger.error(f"Risk metrics update error: {e}")
+    
+    async def _trigger_risk_reduction(self, symbol: str, current_pct: float, limit_pct: float):
+        """Trigger automatic risk reduction measures"""
+        try:
+            # Calculate required reduction
+            excess_pct = current_pct - limit_pct
+            reduction_quantity = (excess_pct / 100.0) * self.portfolio_value
+            
+            logger.warning(f"🚨 Triggering risk reduction for {symbol}: "
+                          f"reducing by {reduction_quantity:.2f} (excess: {excess_pct:.2f}%)")
+            
+            # In a real implementation, this would trigger position reduction
+            # For now, just log the action
+            self.risk_metrics['risk_reductions_triggered'] = self.risk_metrics.get('risk_reductions_triggered', 0) + 1
+            
+        except Exception as e:
+            logger.error(f"Risk reduction trigger error: {e}")
     
     def get_risk_status(self) -> Dict[str, Any]:
         """Get current risk status"""

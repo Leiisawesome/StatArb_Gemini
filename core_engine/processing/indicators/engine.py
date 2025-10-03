@@ -20,16 +20,13 @@ Version: 2.0.0 (Enhanced Architecture)
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import warnings
-import asyncio
 import threading
-import time
 import uuid
 from datetime import datetime
-from collections import defaultdict, deque
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent for orchestrator integration
@@ -74,12 +71,10 @@ try:
         @abstractmethod
         def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
             """Calculate indicators for market data"""
-            pass
         
         @abstractmethod
         def get_supported_indicators(self) -> List[str]:
             """Get list of supported indicators"""
-            pass
         
 except ImportError:
     # Fallback for architectural compliance

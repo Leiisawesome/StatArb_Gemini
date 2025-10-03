@@ -115,12 +115,10 @@ class BaseStrategy(ABC):
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> List[TradingSignal]:
         """Generate trading signals from market data"""
-        pass
     
     @abstractmethod
     def update_state(self, data: pd.DataFrame):
         """Update internal strategy state"""
-        pass
     
     def validate_signal(self, signal: TradingSignal) -> bool:
         """Validate signal before sending to risk manager"""

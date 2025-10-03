@@ -9,12 +9,11 @@ import asyncio
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Callable, Set, Tuple
+from typing import Dict, List, Optional, Union, Any, Callable, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from collections import defaultdict, deque
-import json
+from collections import deque
 
 logger = logging.getLogger(__name__)
 

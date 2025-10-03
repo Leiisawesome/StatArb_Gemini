@@ -1,7 +1,6 @@
 ---
-description: "Testing and Validation Workflow"
+alwaysApply: false
 ---
-
 # Testing and Validation Workflow
 
 This instruction map provides a comprehensive guide for implementing **institutional-grade testing and validation** using the Phase 1-3 testing frameworks to ensure **performance reliability**, **stress resilience**, and **production readiness**.

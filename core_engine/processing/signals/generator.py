@@ -16,16 +16,13 @@ Version: 1.0.0 (Signal Generation)
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 import warnings
-import asyncio
 import threading
-import time
 import uuid
-from collections import defaultdict, deque
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent for orchestrator integration

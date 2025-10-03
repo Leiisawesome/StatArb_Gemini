@@ -4,9 +4,9 @@ Core Engine Data Types
 Lightweight data management for standalone core_engine.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -71,17 +71,14 @@ class DataProvider(ABC):
     def get_historical_data(self, symbol: str, start_date: datetime, 
                           end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
         """Get historical market data"""
-        pass
     
     @abstractmethod
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current market price"""
-        pass
     
     @abstractmethod
     def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols"""
-        pass
 
 
 class YahooDataProvider(DataProvider):

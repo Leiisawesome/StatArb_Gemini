@@ -22,11 +22,10 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
-import json
 
 # Leverage existing high-quality analytics components
 import sys
@@ -34,7 +33,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from ..performance_analyzer import PerformanceAnalyzer
-from ..manager_enhanced import AnalyticsManager
+from ..manager_enhanced import EnhancedAnalyticsManager
 
 logger = logging.getLogger(__name__)
 
@@ -118,15 +117,12 @@ class IPerformanceSubscriber:
     
     async def on_metric_update(self, metric: PerformanceMetric) -> None:
         """Handle metric updates"""
-        pass
     
     async def on_alert_generated(self, alert: PerformanceAlert) -> None:
         """Handle alert generation"""
-        pass
     
     async def on_health_status_change(self, status: SystemHealthStatus) -> None:
         """Handle health status changes"""
-        pass
 
 class PerformanceMonitor:
     """
@@ -190,7 +186,7 @@ class PerformanceMonitor:
         
         # Leverage existing analytics engines
         self.core_analytics: Optional[PerformanceAnalyzer] = None
-        self.monitoring_analytics: Optional[AnalyticsManager] = None
+        self.monitoring_analytics: Optional[EnhancedAnalyticsManager] = None
         
         logger.info("📊 Performance Monitor initialized")
     
@@ -201,7 +197,7 @@ class PerformanceMonitor:
             
             # Initialize analytics engines
             self.core_analytics = PerformanceAnalyzer()
-            self.monitoring_analytics = AnalyticsManager()
+            self.monitoring_analytics = EnhancedAnalyticsManager()
             
             # Initialize metric collections
             for metric_type in MetricType:

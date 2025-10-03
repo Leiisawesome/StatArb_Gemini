@@ -46,7 +46,8 @@ def execution_config():
         'max_order_size': 10000.0,
         'supported_venues': ['NYSE', 'NASDAQ', 'ARCA'],
         'risk_manager_callback': None,
-        'position_update_callback': None
+        'position_update_callback': None,
+        'test_mode': True  # Enable test mode for faster execution
     }
 
 
@@ -270,7 +271,8 @@ class TestExecutionExecution:
         await execution_engine.start()
         
         # Mock market data for execution
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         assert isinstance(result, ExecutionResult)
@@ -299,7 +301,8 @@ class TestExecutionExecution:
         await execution_engine.start()
         
         # Execute trade
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         # Check status tracking
@@ -322,7 +325,8 @@ class TestPositionTracking:
         await execution_engine.start()
         
         # Execute trade
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         # Verify position update was called if execution was successful
@@ -339,7 +343,8 @@ class TestPositionTracking:
         await engine.start()
         
         # Execute trade
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await engine.execute_authorized_trade(sample_execution_request)
         
         # Should still execute successfully
@@ -359,7 +364,8 @@ class TestExecutionMetrics:
         initial_count = initial_metrics['total_executions']
         
         # Execute trade
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             await execution_engine.execute_authorized_trade(sample_execution_request)
         
         updated_metrics = execution_engine.get_execution_metrics()
@@ -477,7 +483,8 @@ class TestExecutionAlgorithms:
         
         sample_execution_request.algorithm = ExecutionAlgorithm.MARKET
         
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         assert isinstance(result, ExecutionResult)
@@ -492,7 +499,8 @@ class TestExecutionAlgorithms:
         sample_execution_request.algorithm = ExecutionAlgorithm.TWAP
         sample_execution_request.time_horizon = 600  # 10 minutes
         
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         assert isinstance(result, ExecutionResult)
@@ -506,7 +514,8 @@ class TestExecutionAlgorithms:
         
         sample_execution_request.algorithm = ExecutionAlgorithm.ADAPTIVE
         
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         assert isinstance(result, ExecutionResult)
@@ -530,7 +539,8 @@ class TestExecutionIntegration:
         assert status['operational'] is True
         
         # Execute trade
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             result = await execution_engine.execute_authorized_trade(sample_execution_request)
         
         # Verify execution
@@ -582,7 +592,8 @@ class TestExecutionIntegration:
             requests.append(request)
         
         # Execute concurrently
-        with patch('core_engine.system.unified_execution_engine.time.time', return_value=1640995200):
+        with patch('core_engine.system.unified_execution_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2022, 1, 1, 0, 0, 0)
             tasks = [execution_engine.execute_authorized_trade(req) for req in requests]
             results = await asyncio.gather(*tasks)
         

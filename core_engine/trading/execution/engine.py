@@ -21,8 +21,8 @@ Version: 1.0.0 (Clean Production - ACTION Component)
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -103,11 +103,9 @@ class IExecutionSubscriber:
     
     async def on_execution_update(self, execution_report: ExecutionReport) -> None:
         """Handle execution updates"""
-        pass
     
     async def on_fill_received(self, fill_data: Dict[str, Any]) -> None:
         """Handle individual fills"""
-        pass
 
 class ExecutionEngine:
     """

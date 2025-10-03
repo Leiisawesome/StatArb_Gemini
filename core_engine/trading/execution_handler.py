@@ -9,12 +9,11 @@ import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Callable, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-import json
 
 from .order_manager import Order, OrderType, OrderSide, OrderStatus, OrderExecution
 

@@ -72,7 +72,9 @@ def mock_risk_calculator():
     calculator = Mock(spec=RiskMetricsCalculator)
     calculator.calculate_var = Mock(return_value=0.05)
     calculator.calculate_cvar = Mock(return_value=0.07)
-    calculator.calculate_maximum_drawdown = Mock(return_value=0.15)
+    calculator.calculate_maximum_drawdown = Mock(return_value=(0.15, 10))
+    calculator.calculate_downside_volatility = Mock(return_value=0.12)
+    calculator.calculate_omega_ratio = Mock(return_value=1.5)
     calculator.health_check = AsyncMock(return_value={'healthy': True})
     return calculator
 
@@ -81,9 +83,10 @@ def mock_risk_calculator():
 def mock_benchmark_analyzer():
     """Mock benchmark analyzer for testing"""
     analyzer = Mock(spec=BenchmarkAnalyzer)
-    analyzer.calculate_beta = Mock(return_value=1.2)
+    analyzer.calculate_beta = Mock(return_value=(1.2, 0.02))
     analyzer.calculate_alpha = Mock(return_value=0.02)
     analyzer.calculate_tracking_error = Mock(return_value=0.05)
+    analyzer.calculate_information_ratio = Mock(return_value=0.8)
     analyzer.health_check = AsyncMock(return_value={'healthy': True})
     return analyzer
 
@@ -94,6 +97,17 @@ def mock_trading_calculator():
     calculator = Mock(spec=TradingMetricsCalculator)
     calculator.calculate_win_rate = Mock(return_value=0.65)
     calculator.calculate_profit_factor = Mock(return_value=1.8)
+    calculator.calculate_trading_statistics = Mock(return_value={
+        'win_rate': 0.65,
+        'profit_factor': 1.8,
+        'average_win': 0.02,
+        'average_loss': -0.015,
+        'largest_win': 0.05,
+        'largest_loss': -0.03,
+        'total_trades': 100,
+        'winning_trades': 65,
+        'losing_trades': 35
+    })
     calculator.health_check = AsyncMock(return_value={'healthy': True})
     return calculator
 
@@ -266,7 +280,7 @@ class TestPerformanceMetricsCalculation:
         # Test individual metric calculations
         total_return = performance_analyzer.calculate_total_return(sample_returns)
         volatility = performance_analyzer.calculate_volatility(sample_returns)
-        sharpe_ratio = performance_analyzer.calculate_sharpe_ratio(sample_returns)
+        sharpe_ratio = await performance_analyzer.calculate_sharpe_ratio(sample_returns)
         
         assert isinstance(total_return, (int, float))
         assert isinstance(volatility, (int, float))
@@ -378,8 +392,8 @@ class TestBenchmarkAnalysis:
         
         # Mock should have been called
         performance_analyzer.benchmark_analyzer.calculate_beta.assert_called()
-        performance_analyzer.benchmark_analyzer.calculate_alpha.assert_called()
         performance_analyzer.benchmark_analyzer.calculate_tracking_error.assert_called()
+        performance_analyzer.benchmark_analyzer.calculate_information_ratio.assert_called()
     
     @pytest.mark.asyncio
     async def test_benchmark_data_storage(self, performance_analyzer, sample_benchmark_returns):

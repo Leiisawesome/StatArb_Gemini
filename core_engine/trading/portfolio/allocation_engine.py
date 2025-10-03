@@ -2,13 +2,12 @@
 Allocation Engine for Portfolio Component
 Handles capital allocation, position sizing, and allocation optimization
 """
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 import logging
-import math
 from collections import defaultdict
 
 class AllocationMethod(Enum):

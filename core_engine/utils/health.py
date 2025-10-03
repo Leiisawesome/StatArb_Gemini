@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Dict, Any, Optional, List, Callable, Awaitable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 
 from .logging import get_logger

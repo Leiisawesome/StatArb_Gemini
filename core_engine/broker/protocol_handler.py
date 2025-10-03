@@ -4,21 +4,18 @@ Multi-protocol support for broker communications (FIX, REST, WebSocket, etc.)
 """
 
 import logging
-import threading
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Iterator, Set
+from datetime import datetime
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
 import numpy as np
-import time
 from collections import defaultdict, deque
 import uuid
 import warnings
 from abc import ABC, abstractmethod
 import json
-import xml.etree.ElementTree as ET
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -187,38 +184,31 @@ class ProtocolHandlerInterface(ABC):
     @abstractmethod
     async def connect(self) -> bool:
         """Connect using protocol"""
-        pass
     
     @abstractmethod
     async def disconnect(self) -> bool:
         """Disconnect from protocol"""
-        pass
     
     @abstractmethod
     async def send_message(self, message: ProtocolMessage) -> bool:
         """Send message using protocol"""
-        pass
     
     @abstractmethod
     async def receive_message(self) -> Optional[ProtocolMessage]:
         """Receive message using protocol"""
-        pass
     
     @abstractmethod
     def create_message(self, message_type: MessageType, 
                       data: Dict[str, Any]) -> ProtocolMessage:
         """Create protocol-specific message"""
-        pass
     
     @abstractmethod
     def parse_message(self, raw_data: bytes) -> ProtocolMessage:
         """Parse raw data into protocol message"""
-        pass
     
     @abstractmethod
     def validate_message(self, message: ProtocolMessage) -> bool:
         """Validate protocol message"""
-        pass
     
     def add_message_handler(self, message_type: MessageType, 
                            handler: Callable[[ProtocolMessage], None]) -> None:

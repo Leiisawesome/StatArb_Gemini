@@ -7,12 +7,12 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Set
+from typing import Dict, List, Optional, Union, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import json
 import warnings
 from pathlib import Path
@@ -20,7 +20,7 @@ from pathlib import Path
 # Import performance components
 from .performance_calculator import (
     PerformanceCalculator, PerformanceConfig, PerformanceMetrics,
-    PerformanceTimeFrame, AnalysisType, MetricCategory
+    PerformancePeriod, ReturnType, PerformanceFrequency
 )
 from .attribution_engine import (
     AttributionEngine, AttributionConfig, AttributionResult,
@@ -32,7 +32,7 @@ from .benchmark_tracker import (
 )
 from .drawdown_tracker import (
     DrawdownTracker, DrawdownConfig, DrawdownEvent,
-    UnderwaterPeriod, DrawdownMetrics
+    UnderwaterMetrics, DrawdownAnalyzer
 )
 from .risk_adjusted_metrics import (
     RiskAdjustedMetricsCalculator, RiskAdjustedConfig,
@@ -131,9 +131,9 @@ class ComprehensivePerformanceReport:
     benchmark_metrics: Dict[str, RelativePerformanceMetrics] = field(default_factory=dict)
     
     # Drawdown analysis
-    drawdown_metrics: Optional[DrawdownMetrics] = None
+    drawdown_metrics: Optional[UnderwaterMetrics] = None
     drawdown_events: List[DrawdownEvent] = field(default_factory=list)
-    underwater_periods: List[UnderwaterPeriod] = field(default_factory=list)
+    underwater_periods: List[DrawdownEvent] = field(default_factory=list)
     
     # Summary statistics
     total_return: float = 0.0
@@ -590,9 +590,9 @@ class PerformanceReportGenerator:
             'alpha': metrics.alpha
         }
     
-    def _serialize_drawdown_metrics(self, metrics: DrawdownMetrics,
+    def _serialize_drawdown_metrics(self, metrics: UnderwaterMetrics,
                                   events: List[DrawdownEvent],
-                                  underwater_periods: List[UnderwaterPeriod]) -> Dict[str, Any]:
+                                  underwater_periods: List[DrawdownEvent]) -> Dict[str, Any]:
         """Serialize drawdown analysis to dictionary"""
         
         return {

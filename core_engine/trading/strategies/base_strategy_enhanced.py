@@ -17,13 +17,12 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import logging
 import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
-from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
+from dataclasses import dataclass
 from enum import Enum
 import pandas as pd
 import numpy as np
@@ -242,6 +241,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
             
             # Validate configuration
             if not self._validate_configuration():
+                self.last_error = "Configuration validation failed"
                 logger.error(f"❌ Configuration validation failed for {self.strategy_id}")
                 return False
             
@@ -429,17 +429,14 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     @abstractmethod
     async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
         """Generate trading signals based on market data"""
-        pass
     
     @abstractmethod
     async def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         """Update existing positions based on market data"""
-        pass
     
     @abstractmethod
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
         """Calculate position size for a given signal"""
-        pass
     
     # ========================================
     # STRATEGY LIFECYCLE HOOKS (OVERRIDE AS NEEDED)
@@ -455,7 +452,6 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     
     async def _stop_strategy_operations(self) -> None:
         """Stop strategy-specific operations (override in subclass)"""
-        pass
     
     async def _check_strategy_health(self) -> Dict[str, Any]:
         """Check strategy-specific health (override in subclass)"""

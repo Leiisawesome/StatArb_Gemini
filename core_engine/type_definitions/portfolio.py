@@ -4,8 +4,8 @@ Core Engine Portfolio Types
 Lightweight portfolio management for standalone core_engine.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from datetime import datetime
 import pandas as pd
 

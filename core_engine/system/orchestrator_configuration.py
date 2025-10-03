@@ -11,7 +11,7 @@ Version: 1.0.0 (Modular Architecture)
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import json
 import os

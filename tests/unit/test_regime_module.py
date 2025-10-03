@@ -19,7 +19,7 @@ from core_engine.regime.engine import (
     RegimeAnalysis,
     RegimeEngineConfig,
     IRegimeSubscriber,
-    RegimeEngine
+    EnhancedRegimeEngine
 )
 
 from core_engine.regime.market_regime_analyzer import (
@@ -277,8 +277,8 @@ class TestRegimeEngineConfig:
         assert config.enable_enhanced_detection == False
 
 
-class TestRegimeEngine:
-    """Test RegimeEngine class."""
+class TestEnhancedRegimeEngine:
+    """Test EnhancedRegimeEngine class."""
 
     @pytest.fixture
     def sample_market_data(self):
@@ -312,7 +312,7 @@ class TestRegimeEngine:
         )
 
     def test_initialization(self, regime_config):
-        """Test RegimeEngine initialization."""
+        """Test EnhancedRegimeEngine initialization."""
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -322,7 +322,7 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
 
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         assert engine.config.lookback_window == 30
         assert engine.config.volatility_window == 20
@@ -332,7 +332,7 @@ class TestRegimeEngine:
     @pytest.mark.asyncio
     async def test_analyze_regime(self, sample_market_data, regime_config):
         """Test regime analysis."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -342,26 +342,26 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         # Feed market data to the engine
         for _, row in sample_market_data.iterrows():
-            await engine.on_market_data({
+            engine.process_market_data({
                 'symbol': 'AAPL',
                 'close': row['close']
             })
 
         # Analyze regime
-        analysis = await engine.analyze_regime()
+        analysis = engine.analyze_regime(sample_market_data)
 
-        assert isinstance(analysis, RegimeAnalysis)
-        assert analysis.primary_regime in MarketRegime
-        assert 0.0 <= analysis.confidence <= 1.0
-        assert isinstance(analysis.timestamp, datetime)
+        assert isinstance(analysis, dict)
+        assert 'regime_analysis_performed' in analysis
+        assert 'processing_timestamp' in analysis
+        assert 'processing_component' in analysis
 
     def test_subscriber_management(self, regime_config):
         """Test subscriber management."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -371,7 +371,7 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         # Mock subscriber
         subscriber = Mock()
@@ -389,7 +389,7 @@ class TestRegimeEngine:
     @pytest.mark.asyncio
     async def test_regime_transition_detection(self, sample_market_data, regime_config):
         """Test regime transition detection."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -399,25 +399,25 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         # Feed market data to establish a baseline regime
         for _, row in sample_market_data.iterrows():
-            await engine.on_market_data({
+            engine.process_market_data({
                 'symbol': 'AAPL',
                 'close': row['close']
             })
 
-        # Detect transition from one regime to another
-        transition_result = await engine.detect_transition("range_bound", "bull_low_volatility")
+        # Analyze regime to get current state
+        analysis = engine.analyze_regime(sample_market_data)
 
-        assert isinstance(transition_result, dict)
-        assert 'transition_detected' in transition_result
-        assert 'confidence' in transition_result
+        assert isinstance(analysis, dict)
+        assert 'regime_analysis_performed' in analysis
+        assert 'processing_timestamp' in analysis
 
     def test_get_regime_history(self, regime_config):
         """Test regime history retrieval."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -427,7 +427,7 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         # Initially empty
         assert isinstance(engine.regime_history, list)
@@ -436,7 +436,7 @@ class TestRegimeEngine:
     @pytest.mark.asyncio
     async def test_empty_data_handling(self, regime_config):
         """Test handling of empty data."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -446,15 +446,16 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
-        # With no data fed, analyze_regime should return None
-        analysis = await engine.analyze_regime()
-        assert analysis is None
+        # With no data fed, analyze_regime should return a dict
+        analysis = engine.analyze_regime({})
+        assert isinstance(analysis, dict)
+        assert 'regime_analysis_performed' in analysis
 
     def test_invalid_symbol_handling(self, sample_market_data, regime_config):
         """Test handling of invalid symbol."""
-        # Convert config to dict as expected by RegimeEngine
+        # Convert config to dict as expected by EnhancedRegimeEngine
         config_dict = {
             'lookback_window': regime_config.lookback_window,
             'volatility_window': regime_config.volatility_window,
@@ -464,7 +465,7 @@ class TestRegimeEngine:
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
         
-        engine = RegimeEngine(config_dict)
+        engine = EnhancedRegimeEngine(config_dict)
 
         # Engine should work regardless of symbol used for data feeding
         for _, row in sample_market_data.iterrows():

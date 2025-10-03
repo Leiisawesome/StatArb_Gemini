@@ -20,9 +20,8 @@ Version: 1.0.0 (Clean Production - Multi-Broker)
 
 import asyncio
 import logging
-import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -34,7 +33,6 @@ from ..type_definitions.orders import (
 
 # Define missing broker types
 from abc import ABC, abstractmethod
-from typing import Protocol
 
 @dataclass
 class OrderResult:
@@ -52,17 +50,14 @@ class BaseBroker(ABC):
     @abstractmethod
     async def submit_order(self, order: Order) -> OrderResult:
         """Submit order to broker"""
-        pass
     
     @abstractmethod
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel order"""
-        pass
     
     @abstractmethod
     async def get_order_status(self, order_id: str) -> OrderStatus:
         """Get order status"""
-        pass
 
 @dataclass
 class ExecutionParameters:
@@ -181,11 +176,9 @@ class IBrokerSubscriber:
     
     async def on_connection_status_change(self, broker_id: str, status: ConnectionStatus) -> None:
         """Handle broker connection status changes"""
-        pass
     
     async def on_order_update(self, broker_id: str, order_update: Dict[str, Any]) -> None:
         """Handle order updates from broker"""
-        pass
 
 class BrokerManager:
     """

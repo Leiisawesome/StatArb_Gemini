@@ -26,15 +26,13 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
-import json
-import time
-from collections import defaultdict, deque
+from collections import defaultdict
 import warnings
 
 # Import ISystemComponent for orchestrator integration
@@ -165,6 +163,11 @@ class ExecutionAuthorization:
             self.validation_errors.append("Invalid quantities")
             return False
         
+        if not self.allowed_algorithms:
+            self.is_valid = False
+            self.validation_errors.append("No allowed algorithms specified")
+            return False
+        
         return True
 
 
@@ -207,6 +210,7 @@ class ExecutionResult:
     filled_quantity: float = 0.0
     remaining_quantity: float = 0.0
     avg_fill_price: float = 0.0
+    algorithm_used: ExecutionAlgorithm = ExecutionAlgorithm.MARKET
     
     # Execution analytics
     total_cost: float = 0.0
@@ -288,17 +292,14 @@ class IExecutionAlgorithm(ABC):
     @abstractmethod
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute the trade request"""
-        pass
     
     @abstractmethod
     def estimate_execution_time(self, request: ExecutionRequest) -> float:
         """Estimate execution time in seconds"""
-        pass
     
     @abstractmethod
     def estimate_market_impact(self, request: ExecutionRequest) -> float:
         """Estimate market impact"""
-        pass
 
 
 class TWAPAlgorithm(IExecutionAlgorithm):
@@ -306,6 +307,7 @@ class TWAPAlgorithm(IExecutionAlgorithm):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.test_mode = False
         self.impact_model = MarketImpactModel()
     
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
@@ -315,7 +317,8 @@ class TWAPAlgorithm(IExecutionAlgorithm):
             result = ExecutionResult(
                 request_id=request.request_id,
                 authorization_id=request.authorization.authorization_id,
-                status=ExecutionStatus.EXECUTING
+                status=ExecutionStatus.EXECUTING,
+                algorithm_used=request.algorithm
             )
             
             # Calculate execution parameters
@@ -335,7 +338,8 @@ class TWAPAlgorithm(IExecutionAlgorithm):
                 current_slice = min(slice_size, remaining)
                 
                 # Simulate execution (replace with actual broker interface)
-                await asyncio.sleep(0.1)  # Simulate network latency
+                if not self.test_mode:
+                    await asyncio.sleep(0.1)  # Simulate network latency
                 
                 # Mock fill
                 fill_price = 100.0 + np.random.normal(0, 0.01)  # Mock price with noise
@@ -350,7 +354,7 @@ class TWAPAlgorithm(IExecutionAlgorithm):
                 })
                 
                 # Wait for next slice
-                if executed_quantity < total_quantity:
+                if executed_quantity < total_quantity and not self.test_mode:
                     await asyncio.sleep(slice_interval)
             
             # Calculate final metrics
@@ -388,6 +392,7 @@ class MarketAlgorithm(IExecutionAlgorithm):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.test_mode = False
         self.impact_model = MarketImpactModel()
     
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
@@ -398,11 +403,13 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 request_id=request.request_id,
                 authorization_id=request.authorization.authorization_id,
                 status=ExecutionStatus.EXECUTING,
-                started_at=datetime.now()
+                started_at=datetime.now(),
+                algorithm_used=request.algorithm
             )
             
             # Simulate immediate execution
-            await asyncio.sleep(0.05)  # 50ms latency
+            if not self.test_mode:
+                await asyncio.sleep(0.05)  # 50ms latency
             
             quantity = request.authorization.quantity
             fill_price = 100.0 + np.random.normal(0, 0.005)  # Mock price with spread
@@ -448,6 +455,7 @@ class AdaptiveAlgorithm(IExecutionAlgorithm):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
+        self.test_mode = False
         self.impact_model = MarketImpactModel()
         self.twap = TWAPAlgorithm(config)
         self.market = MarketAlgorithm(config)
@@ -469,7 +477,8 @@ class AdaptiveAlgorithm(IExecutionAlgorithm):
             result = ExecutionResult(
                 request_id=request.request_id,
                 authorization_id=request.authorization.authorization_id,
-                status=ExecutionStatus.FAILED
+                status=ExecutionStatus.FAILED,
+                algorithm_used=request.algorithm
             )
             result.execution_log.append(f"Execution failed: {e}")
             return result
@@ -559,6 +568,10 @@ class UnifiedExecutionEngine(ISystemComponent):
         
         self.config = config
         
+        # Test mode configuration for faster testing
+        self.test_mode = config.get('test_mode', False)
+        self.simulation_delay = 0.0 if self.test_mode else 0.1  # No delay in test mode
+        
         # Core components
         self.validator = ExecutionValidator(config)
         self.impact_model = MarketImpactModel()
@@ -569,6 +582,10 @@ class UnifiedExecutionEngine(ISystemComponent):
             ExecutionAlgorithm.TWAP: TWAPAlgorithm(config),
             ExecutionAlgorithm.ADAPTIVE: AdaptiveAlgorithm(config)
         }
+        
+        # Pass test mode to algorithms
+        for algorithm in self.algorithms.values():
+            algorithm.test_mode = self.test_mode
         
         # Execution tracking
         self.active_executions: Dict[str, ExecutionRequest] = {}
@@ -823,7 +840,8 @@ class UnifiedExecutionEngine(ISystemComponent):
                         request_id=request.request_id,
                         authorization_id=request.authorization.authorization_id,
                         status=ExecutionStatus.REJECTED,
-                        execution_log=errors
+                        execution_log=errors,
+                        algorithm_used=request.algorithm
                     )
                 
                 # Check algorithm availability
@@ -834,7 +852,8 @@ class UnifiedExecutionEngine(ISystemComponent):
                         request_id=request.request_id,
                         authorization_id=request.authorization.authorization_id,
                         status=ExecutionStatus.REJECTED,
-                        execution_log=[f"Algorithm {request.algorithm} not available"]
+                        execution_log=[f"Algorithm {request.algorithm} not available"],
+                        algorithm_used=request.algorithm
                     )
                 
                 # Track active execution
@@ -874,7 +893,8 @@ class UnifiedExecutionEngine(ISystemComponent):
                 request_id=request.request_id,
                 authorization_id=request.authorization.authorization_id,
                 status=ExecutionStatus.FAILED,
-                execution_log=[f"Execution engine error: {e}"]
+                execution_log=[f"Execution engine error: {e}"],
+                algorithm_used=getattr(request, 'algorithm', ExecutionAlgorithm.MARKET)
             )
     
     def get_execution_status(self, request_id: str) -> Optional[ExecutionStatus]:
@@ -918,9 +938,22 @@ class UnifiedExecutionEngine(ISystemComponent):
                     logger.error(f"Authorization mismatch for cancellation: {request_id}")
                     return False
                 
-                # TODO: Implement actual cancellation logic
-                # For now, just remove from active executions
-                self.active_executions.pop(request_id)
+                # Implement cancellation logic
+                if request_id in self.active_executions:
+                    execution_request = self.active_executions[request_id]
+                    
+                    # Cancel the execution request
+                    execution_request.status = ExecutionStatus.CANCELLED
+                    execution_request.cancellation_timestamp = datetime.now()
+                    
+                    # Remove from active executions
+                    self.active_executions.pop(request_id)
+                    
+                    logger.info(f"Execution {request_id} cancelled successfully")
+                    return True
+                else:
+                    logger.warning(f"Execution {request_id} not found in active executions")
+                    return False
                 
                 logger.info(f"Execution cancelled: {request_id}")
                 return True
@@ -1064,9 +1097,8 @@ class UnifiedExecutionEngine(ISystemComponent):
             algorithm_stats = defaultdict(lambda: {'count': 0, 'successful': 0, 'volume': 0})
             
             for result in executions:
-                # TODO: Store algorithm type in ExecutionResult
-                # For now, use adaptive as default
-                algorithm = 'adaptive'
+                # Get algorithm type from execution result
+                algorithm = getattr(result, 'algorithm', 'adaptive')
                 
                 algorithm_stats[algorithm]['count'] += 1
                 if result.status == ExecutionStatus.FILLED:

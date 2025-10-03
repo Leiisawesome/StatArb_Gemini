@@ -15,7 +15,7 @@ from dataclasses import replace
 # Import processing component classes
 from core_engine.processing.features.engineer import (
     FeatureConfig,
-    FeatureEngineer
+    EnhancedFeatureEngineer
 )
 
 from core_engine.processing.indicators.engine import (
@@ -28,7 +28,7 @@ from core_engine.processing.signals.generator import (
     SignalType,
     SignalStrength,
     TradingSignal,
-    SignalGenerator,
+    EnhancedSignalGenerator,
     SignalConfig
 )
 
@@ -113,7 +113,7 @@ class TestFeatureConfig:
         assert config.max_features == 10
 
 
-class TestFeatureEngineer:
+class TestEnhancedFeatureEngineer:
     """Test FeatureEngineer class."""
 
     @pytest.fixture
@@ -144,14 +144,14 @@ class TestFeatureEngineer:
 
     def test_initialization(self, feature_config):
         """Test FeatureEngineer initialization."""
-        engineer = FeatureEngineer(feature_config)
+        engineer = EnhancedFeatureEngineer(feature_config)
 
         assert engineer.config == feature_config
         assert hasattr(engineer, 'create_features')
 
     def test_create_features(self, sample_market_data, feature_config):
         """Test feature creation."""
-        engineer = FeatureEngineer(feature_config)
+        engineer = EnhancedFeatureEngineer(feature_config)
 
         features = engineer.create_features(sample_market_data)
 
@@ -161,7 +161,7 @@ class TestFeatureEngineer:
 
     def test_generate_features(self, sample_market_data, feature_config):
         """Test feature generation."""
-        engineer = FeatureEngineer(feature_config)
+        engineer = EnhancedFeatureEngineer(feature_config)
 
         features = engineer.generate_features(sample_market_data)
 
@@ -172,7 +172,7 @@ class TestFeatureEngineer:
         """Test handling of empty data."""
         empty_data = pd.DataFrame()
 
-        engineer = FeatureEngineer(feature_config)
+        engineer = EnhancedFeatureEngineer(feature_config)
 
         result = engineer.create_features(empty_data)
 
@@ -187,7 +187,7 @@ class TestFeatureEngineer:
             'close': [100, 101, 102, 103, 104]
         })
 
-        engineer = FeatureEngineer(feature_config)
+        engineer = EnhancedFeatureEngineer(feature_config)
 
         result = engineer.create_features(insufficient_data)
 
@@ -427,8 +427,8 @@ class TestTradingSignal:
             )
 
 
-class TestSignalGenerator:
-    """Test SignalGenerator class."""
+class TestEnhancedSignalGenerator:
+    """Test EnhancedSignalGenerator class."""
 
     @pytest.fixture
     def sample_market_data(self):
@@ -465,15 +465,15 @@ class TestSignalGenerator:
         )
 
     def test_initialization(self, signal_config):
-        """Test SignalGenerator initialization."""
-        generator = SignalGenerator(signal_config)
+        """Test EnhancedSignalGenerator initialization."""
+        generator = EnhancedSignalGenerator(signal_config)
 
         assert generator.config is signal_config
         assert hasattr(generator, 'generate_signals')
 
     def test_generate_rsi_signals(self, sample_market_data, signal_config):
         """Test RSI-based signal generation."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_rsi_signals(sample_market_data, symbol="TEST")
 
@@ -485,7 +485,7 @@ class TestSignalGenerator:
 
     def test_generate_macd_signals(self, sample_market_data, signal_config):
         """Test MACD-based signal generation."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_macd_signals(sample_market_data, symbol="TEST")
 
@@ -496,7 +496,7 @@ class TestSignalGenerator:
 
     def test_generate_sma_crossover_signals(self, sample_market_data, signal_config):
         """Test SMA crossover signal generation."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_sma_crossover_signals(sample_market_data, symbol="TEST")
 
@@ -507,7 +507,7 @@ class TestSignalGenerator:
 
     def test_generate_volume_signals(self, sample_market_data, signal_config):
         """Test volume-based signal generation."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_volume_signals(sample_market_data, symbol="TEST")
 
@@ -518,7 +518,7 @@ class TestSignalGenerator:
 
     def test_generate_combined_signals(self, sample_market_data, signal_config):
         """Test combined signal generation from multiple indicators."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_combined_signals(sample_market_data, symbol="TEST")
 
@@ -535,7 +535,7 @@ class TestSignalGenerator:
             strong_signal_threshold=0.1,
             min_conditions_required=0
         )
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         all_signals = generator.generate_all_signals(sample_market_data, symbol="AAPL")
 
@@ -545,7 +545,7 @@ class TestSignalGenerator:
 
     def test_signal_filtering(self, sample_market_data, signal_config):
         """Test signal filtering by confidence and strength."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         # Generate signals with low confidence filter
         low_conf_signals = generator.generate_combined_signals(
@@ -560,14 +560,14 @@ class TestSignalGenerator:
         """Test handling of empty data."""
         empty_data = pd.DataFrame()
 
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         with pytest.raises(ValueError):
             generator.generate_all_signals(empty_data, symbol="TEST")
 
     def test_invalid_parameters(self, sample_market_data, signal_config):
         """Test handling of invalid parameters."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         # Test invalid confidence threshold
         with pytest.raises(ValueError):
@@ -577,7 +577,7 @@ class TestSignalGenerator:
 
     def test_signal_timestamp_assignment(self, sample_market_data, signal_config):
         """Test that signals get proper timestamps."""
-        generator = SignalGenerator(signal_config)
+        generator = EnhancedSignalGenerator(signal_config)
 
         signals = generator.generate_rsi_signals(sample_market_data, symbol="TEST")
 

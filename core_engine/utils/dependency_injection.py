@@ -8,7 +8,7 @@ Provides centralized component management and dependency resolution.
 
 import logging
 from typing import Dict, Type, Any, Optional, Callable, TypeVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)

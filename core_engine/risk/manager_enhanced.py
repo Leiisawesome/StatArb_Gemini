@@ -9,11 +9,10 @@ import asyncio
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Callable
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 import time
-from collections import defaultdict, deque
-import json
+from collections import deque
 
 # Import risk components
 from .exposure_calculator import ExposureCalculator, ExposureType, ExposureBreakdown

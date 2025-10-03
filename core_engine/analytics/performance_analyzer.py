@@ -5,17 +5,14 @@ Advanced performance analysis with comprehensive metrics and attribution
 
 import logging
 import threading
-import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from collections import defaultdict, deque
 from abc import ABC, abstractmethod
-import json
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
@@ -564,6 +561,7 @@ class PerformanceAnalyzer(ISystemComponent):
                 success = await self.risk_calculator.initialize()
                 if not success:
                     logger.error("❌ Failed to initialize risk calculator")
+                    self.last_error = "Failed to initialize risk calculator"
                     return False
             
             if hasattr(self.benchmark_analyzer, 'initialize'):
@@ -782,8 +780,16 @@ class PerformanceAnalyzer(ISystemComponent):
             metrics.downside_volatility = self.risk_calculator.calculate_downside_volatility(returns)
             
             # Risk metrics
-            metrics.maximum_drawdown, metrics.maximum_drawdown_duration = \
-                self.risk_calculator.calculate_maximum_drawdown(returns)
+            try:
+                metrics.maximum_drawdown, metrics.maximum_drawdown_duration = \
+                    self.risk_calculator.calculate_maximum_drawdown(returns)
+            except Exception as e:
+                # Fallback: calculate max drawdown directly
+                cumulative = (1 + returns).cumprod()
+                running_max = cumulative.expanding().max()
+                drawdown = (cumulative - running_max) / running_max
+                metrics.maximum_drawdown = drawdown.min()
+                metrics.maximum_drawdown_duration = 0
             
             # VaR metrics
             metrics.var_95 = self.risk_calculator.calculate_var(returns, self.config.confidence_level)
@@ -2449,6 +2455,71 @@ class PerformanceAnalyzer(ISystemComponent):
     # ========================================
     # ANALYTICS INTEGRATION METHODS
     # ========================================
+    
+    def calculate_total_return(self, returns: pd.Series) -> float:
+        """Calculate total return from returns series"""
+        if returns.empty:
+            return 0.0
+        
+        # Calculate cumulative return
+        cumulative_return = (1 + returns).prod() - 1
+        return float(cumulative_return)
+    
+    def calculate_volatility(self, returns: pd.Series) -> float:
+        """Calculate annualized volatility from returns series"""
+        if returns.empty or len(returns) < 2:
+            return 0.0
+        
+        # Calculate annualized volatility (assuming daily returns)
+        volatility = returns.std() * np.sqrt(252)
+        return float(volatility)
+    
+    def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+        """Calculate Sortino ratio (return vs downside deviation)"""
+        if returns.empty or len(returns) < 2:
+            return 0.0
+        
+        # Calculate excess returns
+        excess_returns = returns - risk_free_rate / 252  # Daily risk-free rate
+        
+        # Calculate downside deviation (only negative returns)
+        downside_returns = returns[returns < 0]
+        if len(downside_returns) == 0:
+            return float('inf') if excess_returns.mean() > 0 else 0.0
+        
+        downside_deviation = downside_returns.std() * np.sqrt(252)
+        
+        if downside_deviation == 0:
+            return 0.0
+        
+        # Calculate Sortino ratio
+        sortino_ratio = excess_returns.mean() * 252 / downside_deviation
+        return float(sortino_ratio)
+    
+    def calculate_calmar_ratio(self, returns: pd.Series) -> float:
+        """Calculate Calmar ratio (annual return / max drawdown)"""
+        if returns.empty:
+            return 0.0
+        
+        # Calculate annual return
+        annual_return = returns.mean() * 252
+        
+        # Calculate maximum drawdown using risk calculator
+        try:
+            max_drawdown, _ = self.risk_calculator.calculate_maximum_drawdown(returns)
+        except Exception as e:
+            # Fallback: calculate max drawdown directly
+            cumulative = (1 + returns).cumprod()
+            running_max = cumulative.expanding().max()
+            drawdown = (cumulative - running_max) / running_max
+            max_drawdown = drawdown.min()
+        
+        if max_drawdown == 0:
+            return float('inf') if annual_return > 0 else 0.0
+        
+        # Calculate Calmar ratio
+        calmar_ratio = annual_return / abs(max_drawdown)
+        return float(calmar_ratio)
     
     def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
         """

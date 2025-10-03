@@ -31,6 +31,7 @@ from core_engine.trading.strategies.manager import (
     StrategyAllocation,
     IStrategySubscriber
 )
+from core_engine.type_definitions.strategy import StrategyType
 
 
 @pytest.fixture
@@ -102,15 +103,21 @@ def sample_trading_signal():
     """Sample trading signal"""
     return TradingSignal(
         signal_id=str(uuid.uuid4()),
+        strategy_name="test_strategy",
+        strategy_type=StrategyType.MOMENTUM,
         symbol="AAPL",
         signal_type=SignalType.BUY,
         strength=SignalStrength.STRONG,
         confidence=0.85,
-        price=150.0,
+        expected_return=0.05,
+        risk_score=0.3,
         quantity=100.0,
-        timestamp=datetime.now(),
-        strategy_id="test_strategy",
-        metadata={'source': 'test'}
+        target_price=150.0,
+        stop_loss=None,
+        take_profit=None,
+        time_horizon=None,
+        metadata={'source': 'test'},
+        created_at=datetime.now()
     )
 
 
@@ -125,14 +132,21 @@ class MockStrategy:
         """Generate mock signals"""
         return [TradingSignal(
             signal_id=str(uuid.uuid4()),
+            strategy_name=self.strategy_id,
+            strategy_type=StrategyType.MOMENTUM,
             symbol="AAPL",
             signal_type=SignalType.BUY,
             strength=SignalStrength.MEDIUM,
             confidence=0.7,
-            price=150.0,
+            expected_return=0.05,
+            risk_score=0.3,
             quantity=100.0,
-            timestamp=datetime.now(),
-            strategy_id=self.strategy_id
+            target_price=150.0,
+            stop_loss=None,
+            take_profit=None,
+            time_horizon=None,
+            metadata={},
+            created_at=datetime.now()
         )]
     
     async def health_check(self):
@@ -251,6 +265,9 @@ class TestStrategyManagement:
         
         mock_strategy = MockStrategy("test_strategy_1")
         
+        # Clear existing strategies first
+        strategy_manager.active_strategies.clear()
+        
         # Register strategy
         strategy_manager.active_strategies["test_strategy_1"] = mock_strategy
         
@@ -263,16 +280,19 @@ class TestStrategyManagement:
         await strategy_manager.initialize()
         
         allocation = StrategyAllocation(
-            strategy_id="test_strategy",
-            allocation_percentage=0.2,
-            max_position_size=0.1,
-            risk_budget=10000.0
+            strategy_name="test_strategy",
+            strategy_type=StrategyType.MOMENTUM,
+            allocation_pct=0.2,
+            max_positions=10,
+            risk_limit=10000.0
         )
         
+        # Clear existing allocations first
+        strategy_manager.strategy_allocations.clear()
         strategy_manager.strategy_allocations["test_strategy"] = allocation
         
         assert len(strategy_manager.strategy_allocations) == 1
-        assert strategy_manager.strategy_allocations["test_strategy"].allocation_percentage == 0.2
+        assert strategy_manager.strategy_allocations["test_strategy"].allocation_pct == 0.2
     
     @pytest.mark.asyncio
     async def test_strategy_health_monitoring(self, strategy_manager):
@@ -317,26 +337,38 @@ class TestSignalProcessing:
         # Create multiple signals for same symbol
         signal1 = TradingSignal(
             signal_id=str(uuid.uuid4()),
+            strategy_name="test_strategy_1",
+            strategy_type=StrategyType.MOMENTUM,
             symbol="AAPL",
             signal_type=SignalType.BUY,
             strength=SignalStrength.MEDIUM,
             confidence=0.7,
-            price=150.0,
+            expected_return=0.05,
+            risk_score=0.3,
             quantity=100.0,
-            timestamp=datetime.now(),
-            strategy_id="strategy_1"
+            target_price=150.0,
+            stop_loss=None,
+            take_profit=None,
+            time_horizon=None,
+            metadata={}
         )
         
         signal2 = TradingSignal(
             signal_id=str(uuid.uuid4()),
+            strategy_name="test_strategy_2",
+            strategy_type=StrategyType.MOMENTUM,
             symbol="AAPL",
             signal_type=SignalType.BUY,
             strength=SignalStrength.STRONG,
             confidence=0.8,
-            price=151.0,
+            expected_return=0.06,
+            risk_score=0.4,
             quantity=150.0,
-            timestamp=datetime.now(),
-            strategy_id="strategy_2"
+            target_price=151.0,
+            stop_loss=None,
+            take_profit=None,
+            time_horizon=None,
+            metadata={}
         )
         
         strategy_manager.pending_signals[signal1.signal_id] = signal1
@@ -353,27 +385,41 @@ class TestSignalProcessing:
         # Low confidence signal (should be filtered)
         low_confidence_signal = TradingSignal(
             signal_id=str(uuid.uuid4()),
+            strategy_name="test_strategy",
+            strategy_type=StrategyType.MOMENTUM,
             symbol="AAPL",
             signal_type=SignalType.BUY,
             strength=SignalStrength.WEAK,
             confidence=0.4,  # Below threshold
-            price=150.0,
+            expected_return=0.05,
+            risk_score=0.3,
             quantity=100.0,
-            timestamp=datetime.now(),
-            strategy_id="test_strategy"
+            target_price=150.0,
+            stop_loss=None,
+            take_profit=None,
+            time_horizon=None,
+            metadata={},
+            created_at=datetime.now()
         )
         
         # High confidence signal (should pass)
         high_confidence_signal = TradingSignal(
             signal_id=str(uuid.uuid4()),
+            strategy_name="test_strategy",
+            strategy_type=StrategyType.MOMENTUM,
             symbol="AAPL",
             signal_type=SignalType.BUY,
             strength=SignalStrength.STRONG,
             confidence=0.8,  # Above threshold
-            price=150.0,
+            expected_return=0.05,
+            risk_score=0.3,
             quantity=100.0,
-            timestamp=datetime.now(),
-            strategy_id="test_strategy"
+            target_price=150.0,
+            stop_loss=None,
+            take_profit=None,
+            time_horizon=None,
+            metadata={},
+            created_at=datetime.now()
         )
         
         # Test filtering logic
@@ -486,7 +532,7 @@ class TestErrorHandling:
         """Test initialization error handling"""
         # Create manager with invalid config
         invalid_config = strategy_config.copy()
-        invalid_config['max_strategies'] = -1  # Invalid value
+        invalid_config['max_concurrent_strategies'] = -1  # Invalid value
         
         manager = StrategyManager(invalid_config)
         
@@ -562,16 +608,19 @@ class TestStrategyManagerIntegration:
         await strategy_manager.initialize()
         await strategy_manager.start()
         
-        # Add mock strategy
+        # Clear existing strategies and allocations, then add mock strategy
+        strategy_manager.active_strategies.clear()
+        strategy_manager.strategy_allocations.clear()
         mock_strategy = MockStrategy("test_strategy")
         strategy_manager.active_strategies["test_strategy"] = mock_strategy
         
         # Add allocation
         allocation = StrategyAllocation(
-            strategy_id="test_strategy",
-            allocation_percentage=0.1,
-            max_position_size=0.05,
-            risk_budget=5000.0
+            strategy_name="test_strategy",
+            strategy_type=StrategyType.MOMENTUM,
+            allocation_pct=0.1,
+            max_positions=5,
+            risk_limit=5000.0
         )
         strategy_manager.strategy_allocations["test_strategy"] = allocation
         

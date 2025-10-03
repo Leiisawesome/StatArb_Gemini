@@ -2,13 +2,12 @@
 Portfolio Rebalancer for Portfolio Component
 Handles portfolio rebalancing, drift management, and optimization
 """
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from enum import Enum
 import logging
-import math
 
 from .position_manager import Position, PositionType, PositionManager
 from .allocation_engine import AllocationEngine, AllocationRequest, AllocationResult

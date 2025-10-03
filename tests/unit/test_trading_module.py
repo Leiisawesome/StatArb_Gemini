@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import pytest_asyncio
 
 # Import actual classes
-from core_engine.trading.engine import TradingEngine, TradePlan, ExecutionStrategy, TradePriority
+from core_engine.trading.engine import EnhancedTradingEngine, TradePlan, ExecutionStrategy, TradePriority
 from core_engine.trading.order_manager import OrderManager, Order, OrderSide, OrderType, OrderStatus, OrderExecution
 from core_engine.trading.venue_router import VenueRouter, VenueProfile, VenueType, VenueStatus, RoutingStrategy
 from core_engine.trading.transaction_cost_analyzer import TransactionCostAnalyzer, BenchmarkType, TransactionCostBreakdown
@@ -25,7 +25,7 @@ def trading_engine():
         'max_slice_size': 1000.0,
         'enable_smart_routing': True
     }
-    return TradingEngine(config)
+    return EnhancedTradingEngine(config)
 
 
 @pytest_asyncio.fixture
@@ -169,12 +169,12 @@ def sample_market_data():
     }
 
 
-class TestTradingEngine:
+class TestEnhancedTradingEngine:
     """Test TradingEngine functionality"""
 
     def test_initialization(self, trading_engine):
         """Test TradingEngine initialization"""
-        assert isinstance(trading_engine, TradingEngine)
+        assert isinstance(trading_engine, EnhancedTradingEngine)
         assert trading_engine.config is not None
         assert hasattr(trading_engine, 'active_plans')
         assert hasattr(trading_engine, 'execution_slices')

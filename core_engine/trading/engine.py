@@ -21,13 +21,11 @@ Version: 1.0.0 (Clean Production - HOW Component)
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import threading
-import time
-from collections import defaultdict, deque
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -129,11 +127,9 @@ class ITradingSubscriber:
     
     async def on_execution_plan_created(self, plan: TradePlan) -> None:
         """Handle execution plan creation"""
-        pass
     
     async def on_slice_executed(self, slice_result: Dict[str, Any]) -> None:
         """Handle slice execution completion"""
-        pass
 
 class EnhancedTradingEngine(ISystemComponent):
     """

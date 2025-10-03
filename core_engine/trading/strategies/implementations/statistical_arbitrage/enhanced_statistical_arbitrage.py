@@ -32,11 +32,10 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -907,27 +906,22 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
     def _update_spread_calculations(self) -> None:
         """Update spread calculations"""
         # Placeholder for spread calculation updates
-        pass
     
     def _update_spread_metrics(self) -> None:
         """Update spread performance metrics"""
         # Placeholder for spread metrics updates
-        pass
     
     async def _check_stop_losses(self) -> None:
         """Check and execute stop losses"""
         # Placeholder for stop loss checking
-        pass
     
     def _update_kalman_filters(self) -> None:
         """Update Kalman filter estimates"""
         # Placeholder for Kalman filter updates
-        pass
     
     def _update_performance_tracking(self) -> None:
         """Update performance tracking"""
         # Placeholder for performance tracking updates
-        pass
     
     # ========================================
     # STRATEGY-SPECIFIC METHODS

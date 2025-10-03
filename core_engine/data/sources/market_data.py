@@ -9,12 +9,11 @@ import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-import json
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
@@ -161,27 +160,22 @@ class DataFeedAdapter(ABC):
     @abstractmethod
     async def connect(self) -> bool:
         """Connect to data feed"""
-        pass
     
     @abstractmethod
     async def disconnect(self) -> None:
         """Disconnect from data feed"""
-        pass
     
     @abstractmethod
     async def subscribe(self, symbols: List[str], data_types: List[DataType]) -> bool:
         """Subscribe to data"""
-        pass
     
     @abstractmethod
     async def unsubscribe(self, symbols: List[str], data_types: List[DataType]) -> bool:
         """Unsubscribe from data"""
-        pass
     
     @abstractmethod
     def is_connected(self) -> bool:
         """Check connection status"""
-        pass
 
 
 @dataclass

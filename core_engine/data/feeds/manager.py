@@ -8,8 +8,8 @@ import threading
 import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import time
@@ -21,8 +21,6 @@ except ImportError:
     websocket = None
 import requests
 from abc import ABC, abstractmethod
-import queue
-import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -221,27 +219,22 @@ class DataFeed(ABC):
     @abstractmethod
     async def connect(self) -> bool:
         """Connect to data feed"""
-        pass
     
     @abstractmethod
     async def disconnect(self) -> bool:
         """Disconnect from data feed"""
-        pass
     
     @abstractmethod
     async def subscribe(self, symbols: List[str], fields: List[str] = None) -> bool:
         """Subscribe to data"""
-        pass
     
     @abstractmethod
     async def unsubscribe(self, symbols: List[str] = None) -> bool:
         """Unsubscribe from data"""
-        pass
     
     @abstractmethod
     async def is_connected(self) -> bool:
         """Check if feed is connected"""
-        pass
     
     def add_message_handler(self, handler: Callable[[FeedMessage], None]) -> None:
         """Add message handler"""

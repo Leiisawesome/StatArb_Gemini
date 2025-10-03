@@ -29,11 +29,10 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -400,36 +399,28 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                 # Sell Asset1, Buy Asset2
                 
                 signal1 = StrategySignal(
+                    signal_id=f"arbitrage_signal_1_{datetime.now().timestamp()}",
                     strategy_id=self.strategy_id,
                     symbol=asset1,
                     signal_type=SignalType.SELL,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    quantity=self.config.max_position_pct,
-                    timestamp=datetime.now(),
-                    metadata={
-                        'arbitrage_type': opportunity['opportunity_type'].value,
-                        'pair_asset': asset2,
-                        'discrepancy': opportunity['discrepancy'],
-                        'expected_convergence': 'sell_overvalued'
-                    }
+                    target_quantity=self.config.max_position_pct,
+                    timestamp=datetime.now()
                 )
+                signals.append(signal1)
                 
                 signal2 = StrategySignal(
+                    signal_id=f"arbitrage_signal_2_{datetime.now().timestamp()}",
                     strategy_id=self.strategy_id,
                     symbol=asset2,
                     signal_type=SignalType.BUY,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    quantity=self.config.max_position_pct,
-                    timestamp=datetime.now(),
-                    metadata={
-                        'arbitrage_type': opportunity['opportunity_type'].value,
-                        'pair_asset': asset1,
-                        'discrepancy': opportunity['discrepancy'],
-                        'expected_convergence': 'buy_undervalued'
-                    }
+                    target_quantity=self.config.max_position_pct,
+                    timestamp=datetime.now()
                 )
+                signals.append(signal2)
                 
             else:
                 # Asset1 is undervalued relative to Asset2
@@ -450,6 +441,7 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                         'expected_convergence': 'buy_undervalued'
                     }
                 )
+                signals.append(signal1)
                 
                 signal2 = StrategySignal(
                     strategy_id=self.strategy_id,
@@ -466,8 +458,7 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                         'expected_convergence': 'sell_overvalued'
                     }
                 )
-            
-            signals.extend([signal1, signal2])
+                signals.append(signal2)
             
             return signals
             

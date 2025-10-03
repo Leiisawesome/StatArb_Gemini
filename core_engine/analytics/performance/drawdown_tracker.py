@@ -6,8 +6,8 @@ Advanced drawdown analysis and underwater equity tracking
 import logging
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Set
+from datetime import datetime
+from typing import Dict, List, Optional, Union, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings

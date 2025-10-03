@@ -21,8 +21,8 @@ Version: 1.0.0 (Clean Production - Portfolio)
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
@@ -117,15 +117,12 @@ class IPortfolioSubscriber:
     
     async def on_position_update(self, position: Position) -> None:
         """Handle position updates"""
-        pass
     
     async def on_pnl_update(self, pnl_data: Dict[str, Any]) -> None:
         """Handle P&L updates"""
-        pass
     
     async def on_portfolio_alert(self, alert: Dict[str, Any]) -> None:
         """Handle portfolio alerts"""
-        pass
 
 class PortfolioManager:
     """

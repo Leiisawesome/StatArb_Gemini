@@ -5,16 +5,14 @@ Advanced stress testing framework with scenario analysis and portfolio impact as
 
 import logging
 import threading
-import asyncio
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-import json
 from scipy import stats
 from scipy.optimize import minimize
 

@@ -5,19 +5,17 @@ Advanced correlation analysis with dynamic correlation estimation, regime detect
 
 import logging
 import threading
-import asyncio
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from collections import defaultdict, deque
+from collections import deque
 from scipy import stats
 from scipy.optimize import minimize
 from scipy.stats import kendalltau, spearmanr
-import warnings
 
 logger = logging.getLogger(__name__)
 

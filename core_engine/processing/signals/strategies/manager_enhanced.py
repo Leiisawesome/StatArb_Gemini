@@ -9,13 +9,11 @@ import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-from abc import ABC, abstractmethod
-import json
 import warnings
 
 from .signal_generator import SignalGenerator, SignalGenerationConfig, SignalType

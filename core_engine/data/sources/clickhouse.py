@@ -8,14 +8,12 @@ import threading
 import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable, Set
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from collections import defaultdict, deque
-import json
-from abc import ABC, abstractmethod
+from collections import deque
 
 # Import our data components
 from .market_data import MarketDataHandler, MarketDataRequest, MarketDataResponse

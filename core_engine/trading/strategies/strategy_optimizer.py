@@ -6,18 +6,15 @@ Advanced parameter optimization and strategy tuning system
 import logging
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
-from collections import defaultdict
 import copy
 import random
-import json
 from abc import ABC, abstractmethod
 import scipy.optimize as opt
 from scipy.stats import norm
@@ -203,7 +200,6 @@ class BaseOptimizer(ABC):
     @abstractmethod
     def optimize(self, objective_function: Callable[[Dict[str, Any]], float]) -> OptimizationResult:
         """Perform optimization - must be implemented by subclasses"""
-        pass
     
     def _is_maximization(self) -> bool:
         """Check if objective should be maximized"""

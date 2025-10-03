@@ -14,7 +14,7 @@ import numpy as np
 
 # Import analytics classes
 from core_engine.analytics.manager_enhanced import (
-    AnalyticsManager,
+    EnhancedAnalyticsManager,
     AnalyticsMode,
     AnalyticsPriority,
     AnalyticsStatus,
@@ -29,7 +29,7 @@ from core_engine.analytics.performance_analyzer import (
 )
 
 from core_engine.analytics.metrics_calculator import (
-    MetricsCalculator,
+    EnhancedMetricsCalculator,
     MetricConfig,
     MetricCategory,
     MetricFrequency
@@ -63,7 +63,7 @@ class TestEnhancedAnalyticsManager:
         """Create test analytics manager."""
         config = AnalyticsConfig()
         config.mode = AnalyticsMode.ON_DEMAND  # Use ON_DEMAND to avoid background processing
-        return AnalyticsManager(config)
+        return EnhancedAnalyticsManager(config)
 
     def test_initialization(self, analytics_manager):
         """Test analytics manager initialization."""
@@ -153,14 +153,14 @@ class TestPerformanceAnalyzer:
         assert result is not None
 
 
-class TestMetricsCalculator:
+class TestEnhancedMetricsCalculator:
     """Test suite for MetricsCalculator class."""
 
     @pytest.fixture
     def metrics_calculator(self):
         """Create test metrics calculator."""
         config = MetricConfig()
-        return MetricsCalculator(config)
+        return EnhancedMetricsCalculator(config)
 
     def test_initialization(self, metrics_calculator):
         """Test metrics calculator initialization."""
@@ -169,6 +169,9 @@ class TestMetricsCalculator:
 
     def test_calculate_return_metrics(self, metrics_calculator):
         """Test return metrics calculation."""
+        # Initialize the calculator first
+        asyncio.run(metrics_calculator.initialize())
+        
         # Create sample return data with datetime index
         dates = pd.date_range('2023-01-01', periods=5, freq='D')
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012], index=dates)
@@ -179,6 +182,9 @@ class TestMetricsCalculator:
 
     def test_calculate_risk_metrics(self, metrics_calculator):
         """Test risk metrics calculation."""
+        # Initialize the calculator first
+        asyncio.run(metrics_calculator.initialize())
+        
         # Create sample return data
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012])
 
@@ -188,6 +194,9 @@ class TestMetricsCalculator:
 
     def test_calculate_risk_adjusted_metrics(self, metrics_calculator):
         """Test risk-adjusted metrics calculation."""
+        # Initialize the calculator first
+        asyncio.run(metrics_calculator.initialize())
+        
         # Create sample return data
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012])
 

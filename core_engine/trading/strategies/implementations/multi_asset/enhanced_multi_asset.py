@@ -16,13 +16,11 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import asyncio
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from enum import Enum
 import logging
 
 # Import enhanced base strategy
@@ -386,8 +384,11 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         signals = []
         
         try:
+            # Create a copy of current weights to avoid modifying during iteration
+            current_weights_copy = self.current_weights.copy()
+            
             for symbol, target_weight in self.target_weights.items():
-                current_weight = self.current_weights.get(symbol, 0.0)
+                current_weight = current_weights_copy.get(symbol, 0.0)
                 weight_diff = target_weight - current_weight
                 
                 # Generate signal if significant weight difference
@@ -401,10 +402,10 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
                         signal_type=signal_type,
                         strength=min(abs(weight_diff) * 10, 1.0),
                         confidence=0.8,
-                        quantity=abs(weight_diff),
+                        target_quantity=abs(weight_diff),
                         timestamp=datetime.now(),
-                        metadata={
-                            'signal_reason': 'portfolio_rebalancing',
+                        signal_reason='portfolio_rebalancing',
+                        additional_data={
                             'current_weight': current_weight,
                             'target_weight': target_weight,
                             'weight_difference': weight_diff

@@ -256,7 +256,7 @@ class TestHierarchicalSystemOrchestrator:
         assert orchestrator.system_status == SystemStatus.SHUTDOWN
 
         # Verify component was stopped
-        mock_component.shutdown.assert_called_once()
+        mock_component.stop.assert_called_once()
 
     def test_get_system_status(self, orchestrator_config):
         """Test system status retrieval."""

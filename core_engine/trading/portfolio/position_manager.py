@@ -2,7 +2,7 @@
 Position Manager for Portfolio Component
 Handles position tracking, lifecycle management, and position-level operations
 """
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal

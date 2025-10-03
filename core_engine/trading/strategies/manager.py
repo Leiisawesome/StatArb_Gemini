@@ -260,11 +260,9 @@ class IStrategySubscriber:
     
     async def on_signal_generated(self, signal: TradingSignal) -> None:
         """Handle signal generation"""
-        pass
     
     async def on_strategy_status_change(self, strategy_event: Dict[str, Any]) -> None:
         """Handle strategy status changes"""
-        pass
 
 class StrategyManager(ISystemComponent):
     """

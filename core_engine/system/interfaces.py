@@ -18,24 +18,19 @@ class ISystemComponent(ABC):
     @abstractmethod
     async def initialize(self) -> bool:
         """Initialize component"""
-        pass
     
     @abstractmethod
     async def start(self) -> bool:
         """Start component operations"""
-        pass
     
     @abstractmethod
     async def stop(self) -> bool:
         """Stop component operations"""
-        pass
     
     @abstractmethod
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check"""
-        pass
     
     @abstractmethod
     def get_status(self) -> Dict[str, Any]:
         """Get component status"""
-        pass

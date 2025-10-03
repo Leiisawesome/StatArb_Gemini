@@ -12,7 +12,6 @@ Author: StatArb_Gemini Core Engine Migration
 Version: 1.0.0 (Clean Production)
 """
 
-import asyncio
 import logging
 import pandas as pd
 import numpy as np
@@ -25,9 +24,7 @@ from sklearn.metrics import accuracy_score
 from dataclasses import dataclass
 from enum import Enum
 import threading
-import time
 import uuid
-from collections import defaultdict, deque
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -199,7 +196,6 @@ class IRegimeSubscriber:
     
     async def on_regime_change(self, regime_analysis: RegimeAnalysis) -> None:
         """Handle regime change notification"""
-        pass
 
 class EnhancedRegimeEngine(ISystemComponent):
     """

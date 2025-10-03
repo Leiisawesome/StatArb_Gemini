@@ -10,8 +10,8 @@ Author: StatArb_Gemini System Integration Team
 Version: 1.0.0 (Configuration Compatibility)
 """
 
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any
+from dataclasses import dataclass
 
 
 @dataclass

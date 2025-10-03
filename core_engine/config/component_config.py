@@ -2,7 +2,7 @@
 Component-specific configurations
 """
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import List
 
 @dataclass
 class DataConfig:

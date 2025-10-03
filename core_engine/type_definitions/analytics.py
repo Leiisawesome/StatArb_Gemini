@@ -4,7 +4,7 @@ Core Engine Analytics Types
 Lightweight analytics for standalone core_engine.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd

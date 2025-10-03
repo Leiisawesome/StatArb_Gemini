@@ -5,11 +5,9 @@ Advanced report generation with customizable layouts and export formats
 
 import logging
 import threading
-import asyncio
-import os
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+from typing import Dict, List, Optional, Union, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
