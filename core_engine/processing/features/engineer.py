@@ -407,13 +407,21 @@ class EnhancedFeatureEngineer(ISystemComponent):
         if df.empty:
             return df
         
-        self.logger.info(f"Creating features for {len(df['symbol'].unique())} symbols")
+        # Ensure timestamp column exists (handle both column and index formats)
+        df_copy = df.copy()
+        if 'timestamp' not in df_copy.columns and df_copy.index.name == 'timestamp':
+            df_copy = df_copy.reset_index()
+        elif 'timestamp' not in df_copy.columns:
+            self.logger.error("DataFrame must have 'timestamp' column or index")
+            return df
+        
+        self.logger.info(f"Creating features for {len(df_copy['symbol'].unique())} symbols")
         
         # Process each symbol separately, then combine
         result_dfs = []
         
-        for symbol in df['symbol'].unique():
-            symbol_df = df[df['symbol'] == symbol].copy().sort_values('timestamp')
+        for symbol in df_copy['symbol'].unique():
+            symbol_df = df_copy[df_copy['symbol'] == symbol].copy().sort_values('timestamp')
             
             if len(symbol_df) < 10:  # Need minimum data for feature engineering
                 self.logger.warning(f"Insufficient data for {symbol}, skipping feature engineering")

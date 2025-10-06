@@ -405,9 +405,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.BUY,
                         strength=min(abs(zscore) / self.config.zscore_entry_threshold, 1.0),
                         confidence=confidence,
-                        quantity=self.config.base_position_pct,
+                        target_quantity=self.config.base_position_pct,
                         timestamp=datetime.now(),
-                        metadata={
+                        additional_data={
                             'signal_reason': 'oversold_mean_reversion',
                             'zscore': zscore,
                             'rsi': rsi,
@@ -434,9 +434,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.SELL,
                         strength=min(abs(zscore) / self.config.zscore_entry_threshold, 1.0),
                         confidence=confidence,
-                        quantity=self.config.base_position_pct,
+                        target_quantity=self.config.base_position_pct,
                         timestamp=datetime.now(),
-                        metadata={
+                        additional_data={
                             'signal_reason': 'overbought_mean_reversion',
                             'zscore': zscore,
                             'rsi': rsi,

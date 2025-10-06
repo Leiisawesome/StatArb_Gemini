@@ -1,0 +1,54 @@
+Universe: 74 unique symbols across 8 categories
+
+====================================================================================================
+COMPREHENSIVE PAIRS SELECTION - Phase 3.6
+====================================================================================================
+
+Testing pairs from 74 symbols...
+Period: 2024-01-01 to 2024-12-31
+Maximum possible pairs: 2701
+
+Filtering criteria:
+  • Correlation: 0.60 - 0.95 (not too low, not identical)
+  • Cointegration p-value: < 0.05 (statistically significant)
+  • Half-life: 0.5 - 60 days (reasonable mean reversion)
+  • Spread std: > 0.01 (meaningful arbitrage opportunity)
+
+⚠️  Using basic data manager config: 'SystemConfig' object has no attribute 'data_config'
+Traceback (most recent call last):
+  File "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/tests/strategy_assessment/batch_test_pairs.py", line 105, in find_all_cointegrated_pairs
+    data_manager = ClickHouseDataManager(config.data_config)
+                                         ^^^^^^^^^^^^^^^^^^
+AttributeError: 'SystemConfig' object has no attribute 'data_config'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/tests/strategy_assessment/batch_test_pairs.py", line 429, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/tests/strategy_assessment/batch_test_pairs.py", line 411, in main
+    results = await selector.find_all_cointegrated_pairs(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+    )
+    ^
+  File "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/tests/strategy_assessment/batch_test_pairs.py", line 109, in find_all_cointegrated_pairs
+    data_manager = ClickHouseDataManager({
+        'host': 'localhost',
+        'port': 8123,
+        'database': 'market_data'
+    })
+  File "/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/core_engine/data/manager.py", line 236, in __init__
+    update_frequency=self.enhanced_config.interval,
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'dict' object has no attribute 'interval'

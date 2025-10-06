@@ -1,0 +1,60 @@
+================================================================================
+COINTEGRATED PAIRS SELECTION REPORT
+================================================================================
+Total Pairs Found: 2
+Selection Timestamp: 2025-10-05 13:32:54
+
+
+================================================================================
+Pair #1: SPY / IVV
+================================================================================
+Quality Score:        88.0/100
+
+Cointegration:
+  P-value:            0.0000
+  Statistic:          -6.3924
+  Correlation:        1.000
+
+Mean Reversion:
+  Half-life:          1.43 days
+  Reversion Speed:    0.4847
+  ADF P-value:        0.0000
+
+Trading Metrics:
+  Hedge Ratio:        1.0027
+  Spread Mean:        1.3074
+  Spread Std:         0.6073
+  Z-score Range:      [-3.44, 3.88]
+
+Component Scores:
+  Stationarity:       100.0/100
+  Correlation:        100.0/100
+  Mean Reversion:     60.0/100
+
+================================================================================
+Pair #2: SPY / VOO
+================================================================================
+Quality Score:        88.0/100
+
+Cointegration:
+  P-value:            0.0000
+  Statistic:          -6.5618
+  Correlation:        1.000
+
+Mean Reversion:
+  Half-life:          2.02 days
+  Reversion Speed:    0.3436
+  ADF P-value:        0.0000
+
+Trading Metrics:
+  Hedge Ratio:        0.9199
+  Spread Mean:        -0.2253
+  Spread Std:         0.4731
+  Z-score Range:      [-1.40, 4.56]
+
+Component Scores:
+  Stationarity:       100.0/100
+  Correlation:        100.0/100
+  Mean Reversion:     60.0/100
+
+================================================================================

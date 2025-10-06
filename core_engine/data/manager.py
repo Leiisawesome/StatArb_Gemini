@@ -847,9 +847,12 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if symbol_df.empty:
                 return None
             
-            # Set timestamp as index (core_engine standard)
-            symbol_df = symbol_df.set_index('timestamp')
-            symbol_df = symbol_df[['open', 'high', 'low', 'close', 'volume']]
+            # Keep timestamp as column for feature engineering compatibility
+            # Don't set as index to avoid ambiguity errors
+            symbol_df = symbol_df[['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']]
+            
+            # Sort by timestamp for time-series operations
+            symbol_df = symbol_df.sort_values('timestamp').reset_index(drop=True)
             
             # Notify subscribers asynchronously
             if not symbol_df.empty:

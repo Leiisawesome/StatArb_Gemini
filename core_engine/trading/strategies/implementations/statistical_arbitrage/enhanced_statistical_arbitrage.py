@@ -75,6 +75,11 @@ class StatisticalArbitrageConfig(StrategyConfig):
     min_cointegration_pvalue: float = 0.05  # 5% significance level
     min_correlation: float = 0.7  # Minimum correlation for pair selection
     
+    # PRE-LOADED PAIRS: Professional backtesting approach
+    # Pairs should be selected offline using daily data, then pre-loaded for backtesting
+    preloaded_pairs: Optional[List[Dict[str, Any]]] = None  # Pre-selected cointegrated pairs
+    use_preloaded_pairs: bool = False  # If True, skip live cointegration testing
+    
     # Spread trading parameters
     entry_zscore_threshold: float = 2.0  # Z-score for entry
     exit_zscore_threshold: float = 0.5   # Z-score for exit
@@ -429,6 +434,17 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
         """Update cointegration analysis for asset pairs"""
         
         try:
+            # PROFESSIONAL APPROACH: Use pre-loaded pairs for backtesting
+            if self.config.use_preloaded_pairs and self.config.preloaded_pairs:
+                # Load pre-selected pairs (cointegration tested offline on daily data)
+                for pair_info in self.config.preloaded_pairs:
+                    pair = tuple(pair_info['pair'])
+                    self.cointegrated_pairs[pair] = pair_info
+                
+                logger.info(f"📈 Loaded {len(self.cointegrated_pairs)} pre-selected cointegrated pairs")
+                return
+            
+            # FALLBACK: Live cointegration testing (not recommended for intraday data)
             assets = self.config.asset_universe
             
             # Test all possible pairs
@@ -553,63 +569,67 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                     # Calculate confidence based on Z-score magnitude
                     confidence = min(0.95, abs(zscore) / self.config.stop_loss_zscore)
                     
-                    # Create signals for both assets
-                    hedge_ratio = coint_data['hedge_ratio']
-                    
-                    # Signal for asset2 (primary)
-                    signal2 = StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=asset2,
-                        signal_type=signal_type,
-                        strength=abs(zscore) / self.config.entry_zscore_threshold,
-                        confidence=confidence,
-                        quantity=self.config.base_position_size,  # Will be adjusted by position sizing
-                        timestamp=datetime.now(),
-                        metadata={
-                            'spread_id': spread_id,
-                            'pair': pair,
-                            'hedge_ratio': hedge_ratio,
-                            'zscore': zscore,
-                            'spread_direction': spread_direction,
-                            'asset_role': 'primary'
-                        }
-                    )
-                    
-                    # Signal for asset1 (hedge)
-                    hedge_signal_type = SignalType.BUY if signal_type == SignalType.SELL else SignalType.SELL
-                    signal1 = StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=asset1,
-                        signal_type=hedge_signal_type,
-                        strength=abs(zscore) / self.config.entry_zscore_threshold,
-                        confidence=confidence,
-                        quantity=self.config.base_position_size * abs(hedge_ratio),
-                        timestamp=datetime.now(),
-                        metadata={
-                            'spread_id': spread_id,
-                            'pair': pair,
-                            'hedge_ratio': hedge_ratio,
-                            'zscore': zscore,
-                            'spread_direction': spread_direction,
-                            'asset_role': 'hedge'
-                        }
-                    )
-                    
-                    signals.extend([signal2, signal1])
-                    
-                    # Track spread entry
-                    self.active_spreads[spread_id] = SpreadMetrics(
-                        spread_id=spread_id,
-                        asset1=asset1,
-                        asset2=asset2,
-                        hedge_ratio=hedge_ratio,
-                        entry_zscore=zscore,
-                        current_zscore=zscore
-                    )
-                    
-                    self.entry_times[spread_id] = datetime.now()
-                    
-                    logger.info(f"📈 Entry signal generated for spread {spread_id}: Z-score={zscore:.2f}, Direction={spread_direction}")
+                    try:
+                        # Create signals for both assets
+                        hedge_ratio = coint_data['hedge_ratio']
+                        
+                        # Signal for asset2 (primary)
+                        signal2 = StrategySignal(
+                            strategy_id=self.strategy_id,
+                            symbol=asset2,
+                            signal_type=signal_type,
+                            strength=abs(zscore) / self.config.entry_zscore_threshold,
+                            confidence=confidence,
+                            target_quantity=self.config.base_position_size,
+                            timestamp=datetime.now(),
+                            additional_data={
+                                'spread_id': spread_id,
+                                'pair': pair,
+                                'hedge_ratio': hedge_ratio,
+                                'zscore': zscore,
+                                'spread_direction': spread_direction,
+                                'asset_role': 'primary'
+                            }
+                        )
+                        
+                        # Signal for asset1 (hedge)
+                        hedge_signal_type = SignalType.BUY if signal_type == SignalType.SELL else SignalType.SELL
+                        signal1 = StrategySignal(
+                            strategy_id=self.strategy_id,
+                            symbol=asset1,
+                            signal_type=hedge_signal_type,
+                            strength=abs(zscore) / self.config.entry_zscore_threshold,
+                            confidence=confidence,
+                            target_quantity=self.config.base_position_size * abs(hedge_ratio),
+                            timestamp=datetime.now(),
+                            additional_data={
+                                'spread_id': spread_id,
+                                'pair': pair,
+                                'hedge_ratio': hedge_ratio,
+                                'zscore': zscore,
+                                'spread_direction': spread_direction,
+                                'asset_role': 'hedge'
+                            }
+                        )
+                        
+                        signals.extend([signal2, signal1])
+                        
+                        # Track spread entry
+                        self.active_spreads[spread_id] = SpreadMetrics(
+                            spread_id=spread_id,
+                            asset1=asset1,
+                            asset2=asset2,
+                            hedge_ratio=hedge_ratio,
+                            entry_zscore=zscore,
+                            current_zscore=zscore
+                        )
+                        
+                        self.entry_times[spread_id] = datetime.now()
+                        
+                        logger.info(f"📈 Entry signal generated for spread {spread_id}: Z-score={zscore:.2f}, Direction={spread_direction}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create signals for {asset1}/{asset2}: {e}", exc_info=True)
             
             return signals
             
@@ -705,7 +725,14 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                     self.returns_data[symbol] = data['close'].pct_change().dropna()
     
     def _calculate_current_spread_zscore(self, pair: Tuple[str, str], coint_data: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-        """Calculate current spread and Z-score"""
+        """
+        Calculate current spread and Z-score using INTRADAY statistics
+        
+        PROFESSIONAL APPROACH for live trading simulation:
+        - Use pre-loaded hedge ratio from daily cointegration analysis
+        - Calculate spread mean/std from INTRADAY rolling window
+        - This captures intraday mean reversion behavior
+        """
         
         try:
             asset1, asset2 = pair
@@ -713,19 +740,47 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             if asset1 not in self.price_data or asset2 not in self.price_data:
                 return None, None
             
-            # Get latest prices
-            price1 = self.price_data[asset1]['close'].iloc[-1]
-            price2 = self.price_data[asset2]['close'].iloc[-1]
-            
-            # Calculate spread
+            # Get hedge ratio from offline daily analysis (stable over time)
             hedge_ratio = coint_data['hedge_ratio']
-            current_spread = price2 - hedge_ratio * price1
             
-            # Calculate Z-score
-            spread_mean = coint_data['spread_mean']
-            spread_std = coint_data['spread_std']
+            # Get price series for both assets
+            prices1 = self.price_data[asset1]['close']
+            prices2 = self.price_data[asset2]['close']
             
-            if spread_std == 0:
+            # Minimum data requirement for intraday statistics
+            # For 1-minute data: need at least 20 bars (20 minutes) for meaningful statistics
+            min_bars_required = 20
+            
+            if len(prices1) < min_bars_required or len(prices2) < min_bars_required:
+                return None, None
+            
+            # CRITICAL: Align the two price series first (pandas index alignment)
+            # The two assets might have different timestamps, so we need to align them
+            aligned_prices = pd.DataFrame({
+                asset1: prices1,
+                asset2: prices2
+            }).dropna()  # Remove any timestamps where either asset is missing
+            
+            if len(aligned_prices) < min_bars_required:
+                return None, None
+            
+            # Calculate spread series using aligned data
+            spread_series = aligned_prices[asset2] - hedge_ratio * aligned_prices[asset1]
+            
+            # Use lookback window for intraday statistics
+            # For 1-minute data: 390 bars = 1 day, 780 bars = 2 days
+            lookback_window = min(780, len(spread_series))  # Use 2 days or available
+            spread_window = spread_series.iloc[-lookback_window:]
+            
+            # Calculate INTRADAY spread statistics
+            spread_mean = spread_window.mean()
+            spread_std = spread_window.std()
+            
+            # Get current spread
+            current_spread = spread_series.iloc[-1]
+            
+            # Calculate Z-score using INTRADAY statistics
+            if spread_std == 0 or pd.isna(spread_std):
                 return current_spread, None
             
             zscore = (current_spread - spread_mean) / spread_std
@@ -752,9 +807,9 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                 signal_type=SignalType.SELL,  # Simplified - should be opposite of entry
                 strength=1.0,
                 confidence=0.9,
-                quantity=self.config.base_position_size,
+                target_quantity=self.config.base_position_size,  # FIXED: quantity -> target_quantity
                 timestamp=datetime.now(),
-                metadata={
+                additional_data={  # FIXED: metadata -> additional_data
                     'spread_id': spread_id,
                     'exit_reason': exit_reason,
                     'asset_role': 'primary',
@@ -769,9 +824,9 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                 signal_type=SignalType.BUY,  # Simplified - should be opposite of entry
                 strength=1.0,
                 confidence=0.9,
-                quantity=self.config.base_position_size * abs(spread_metrics.hedge_ratio),
+                target_quantity=self.config.base_position_size * abs(spread_metrics.hedge_ratio),  # FIXED: quantity -> target_quantity
                 timestamp=datetime.now(),
-                metadata={
+                additional_data={  # FIXED: metadata -> additional_data
                     'spread_id': spread_id,
                     'exit_reason': exit_reason,
                     'asset_role': 'hedge',

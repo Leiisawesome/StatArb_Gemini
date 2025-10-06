@@ -407,16 +407,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if breakout_confirmed:
                     confidence = self._calculate_signal_confidence(symbol, MomentumSignal.BULLISH_MOMENTUM)
                     
-                    if confidence > 0.6:  # Minimum confidence threshold
+                    if confidence > 0.5:  # Minimum confidence threshold (lowered for 1-min data)
                         signal = StrategySignal(
                             strategy_id=self.strategy_id,
                             symbol=symbol,
                             signal_type=SignalType.BUY,
                             strength=min(momentum_strength / self.config.momentum_threshold, 1.0),
                             confidence=confidence,
-                            quantity=self.config.base_position_pct,
+                            target_quantity=self.config.base_position_pct,
                             timestamp=datetime.now(),
-                            metadata={
+                            additional_data={
                                 'signal_reason': 'bullish_momentum',
                                 'short_momentum': short_momentum,
                                 'medium_momentum': medium_momentum,
@@ -446,16 +446,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if breakout_confirmed:
                     confidence = self._calculate_signal_confidence(symbol, MomentumSignal.BEARISH_MOMENTUM)
                     
-                    if confidence > 0.6:  # Minimum confidence threshold
+                    if confidence > 0.5:  # Minimum confidence threshold (lowered for 1-min data)
                         signal = StrategySignal(
                             strategy_id=self.strategy_id,
                             symbol=symbol,
                             signal_type=SignalType.SELL,
                             strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
                             confidence=confidence,
-                            quantity=self.config.base_position_pct,
+                            target_quantity=self.config.base_position_pct,
                             timestamp=datetime.now(),
-                            metadata={
+                            additional_data={
                                 'signal_reason': 'bearish_momentum',
                                 'short_momentum': short_momentum,
                                 'medium_momentum': medium_momentum,
