@@ -342,9 +342,9 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=0.7,
                     confidence=0.75,
-                    quantity=self.config.base_position_pct,
+                    target_quantity=self.config.base_position_pct,
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={
                         'signal_reason': 'low_volatility_expansion',
                         'realized_volatility': realized_vol,
                         'volatility_ratio': vol_ratio,
@@ -363,9 +363,9 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=0.6,
                     confidence=0.7,
-                    quantity=self.config.base_position_pct,
+                    target_quantity=self.config.base_position_pct,
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={
                         'signal_reason': 'high_volatility_contraction',
                         'realized_volatility': realized_vol,
                         'volatility_ratio': vol_ratio,

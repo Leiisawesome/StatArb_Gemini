@@ -335,23 +335,33 @@ class StrategyConfigFactory:
             'strategy_id': kwargs.get('strategy_id', 'pairs_trading_v1'),
             'strategy_name': kwargs.get('strategy_name', 'Enhanced Pairs Trading'),
             'strategy_type': StrategyType.PAIRS_TRADING,
-            'symbols': symbols,
             
-            # Pairs parameters
-            'min_correlation': kwargs.get('min_correlation', 0.75),
+            # Pair selection parameters
+            'min_correlation': kwargs.get('min_correlation', 0.7),
+            'cointegration_pvalue': kwargs.get('cointegration_pvalue', 0.05),
+            'lookback_period': kwargs.get('lookback_period', 60),  # Shorter for 1-min data
+            
+            # Spread trading parameters
             'entry_zscore': kwargs.get('entry_zscore', 2.0),
             'exit_zscore': kwargs.get('exit_zscore', 0.5),
+            'stop_loss_zscore': kwargs.get('stop_loss_zscore', 3.5),
             
             # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.02),
-            'max_position_size': kwargs.get('max_position_size', 0.08),
+            'max_pairs': kwargs.get('max_pairs', 3),  # Fewer pairs for 1-min data
+            'position_size_pct': kwargs.get('position_size_pct', 0.03),
             
-            # Base parameters
-            'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
+            # Risk management
+            'max_holding_period': kwargs.get('max_holding_period', 20),  # Shorter for 1-min
+            'correlation_threshold': kwargs.get('correlation_threshold', 0.5),
+            
+            # Asset universe
+            'asset_universe': kwargs.get('asset_universe', symbols),
         }
         
         logger.info(f"👥 Created Pairs Trading config with {len(symbols)} symbols")
+        logger.info(f"  Min Correlation: {config_params['min_correlation']}")
+        logger.info(f"  Entry Z-Score: {config_params['entry_zscore']}")
+        logger.info(f"  Max Pairs: {config_params['max_pairs']}")
         
         return PairsTradingConfig(**config_params)
     
@@ -368,21 +378,53 @@ class StrategyConfigFactory:
             'strategy_type': StrategyType.TREND_FOLLOWING,
             'symbols': symbols,
             
-            # Trend parameters
-            'fast_period': kwargs.get('fast_period', 20),
-            'slow_period': kwargs.get('slow_period', 50),
-            'trend_threshold': kwargs.get('trend_threshold', 0.01),
+            # Moving average parameters
+            'fast_ma_period': kwargs.get('fast_ma_period', 12),
+            'slow_ma_period': kwargs.get('slow_ma_period', 26),
+            'signal_ma_period': kwargs.get('signal_ma_period', 9),
+            'ma_type': kwargs.get('ma_type', 'EMA'),
+            
+            # MACD parameters
+            'macd_fast': kwargs.get('macd_fast', 12),
+            'macd_slow': kwargs.get('macd_slow', 26),
+            'macd_signal': kwargs.get('macd_signal', 9),
+            
+            # Trend strength indicators
+            'adx_period': kwargs.get('adx_period', 14),
+            'adx_threshold': kwargs.get('adx_threshold', 25.0),
+            
+            # Multi-timeframe analysis
+            'primary_timeframe': kwargs.get('primary_timeframe', '1min'),
+            'enable_multi_timeframe': kwargs.get('enable_multi_timeframe', False),  # Disabled for 1-min testing
             
             # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.03),
-            'max_position_size': kwargs.get('max_position_size', 0.10),
+            'base_position_pct': kwargs.get('base_position_pct', 0.04),
+            'max_position_pct': kwargs.get('max_position_pct', 0.10),
+            'trend_scaling': kwargs.get('trend_scaling', True),
             
-            # Base parameters
-            'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
+            # Risk management
+            'atr_period': kwargs.get('atr_period', 14),
+            'atr_stop_multiplier': kwargs.get('atr_stop_multiplier', 2.0),
+            'trailing_stop_pct': kwargs.get('trailing_stop_pct', 0.02),
+            'profit_target_ratio': kwargs.get('profit_target_ratio', 3.0),
+            'max_holding_period': kwargs.get('max_holding_period', 50),
+            
+            # Trend filtering
+            'enable_trend_filter': kwargs.get('enable_trend_filter', True),
+            'min_trend_duration': kwargs.get('min_trend_duration', 5),
+            'trend_reversal_threshold': kwargs.get('trend_reversal_threshold', 0.02),
+            
+            # Volatility filtering
+            'enable_volatility_filter': kwargs.get('enable_volatility_filter', True),
+            'volatility_lookback': kwargs.get('volatility_lookback', 20),
+            'max_volatility_percentile': kwargs.get('max_volatility_percentile', 0.8),
         }
         
         logger.info(f"📊 Created Trend Following config with {len(symbols)} symbols")
+        logger.info(f"  MA Periods: {config_params['fast_ma_period']}/{config_params['slow_ma_period']} ({config_params['ma_type']})")
+        logger.info(f"  ADX Threshold: {config_params['adx_threshold']}")
+        logger.info(f"  Filters: Trend={'ENABLED' if config_params['enable_trend_filter'] else 'DISABLED'}, "
+                   f"Vol={'ENABLED' if config_params['enable_volatility_filter'] else 'DISABLED'}")
         
         return TrendFollowingConfig(**config_params)
     
@@ -399,20 +441,28 @@ class StrategyConfigFactory:
             'strategy_type': StrategyType.BREAKOUT,
             'symbols': symbols,
             
-            # Breakout parameters
+            # Breakout detection parameters (using actual BreakoutConfig field names)
             'lookback_period': kwargs.get('lookback_period', 20),
-            'breakout_threshold': kwargs.get('breakout_threshold', 0.02),
+            'breakout_threshold': kwargs.get('breakout_threshold', 0.02),  # 2% breakout
+            'volume_confirmation': kwargs.get('volume_confirmation', 1.5),  # 50% above average volume
             
             # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.03),
-            'max_position_size': kwargs.get('max_position_size', 0.10),
+            'base_position_pct': kwargs.get('base_position_pct', 0.04),
+            'max_position_pct': kwargs.get('max_position_pct', 0.10),
+            
+            # Risk management
+            'stop_loss_pct': kwargs.get('stop_loss_pct', 0.03),
+            'profit_target_ratio': kwargs.get('profit_target_ratio', 2.0),
             
             # Base parameters
             'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
         }
         
         logger.info(f"🚀 Created Breakout config with {len(symbols)} symbols")
+        logger.info(f"  Lookback Period: {config_params['lookback_period']}")
+        logger.info(f"  Breakout Threshold: {config_params['breakout_threshold']*100:.1f}%")
+        logger.info(f"  Volume Confirmation: {config_params['volume_confirmation']:.1f}x")
+        logger.info(f"  Position Size: {config_params['base_position_pct']*100:.1f}% base, {config_params['max_position_pct']*100:.1f}% max")
         
         return BreakoutConfig(**config_params)
     
@@ -427,19 +477,19 @@ class StrategyConfigFactory:
             'strategy_id': kwargs.get('strategy_id', 'volatility_v1'),
             'strategy_name': kwargs.get('strategy_name', 'Enhanced Volatility'),
             'strategy_type': StrategyType.VOLATILITY,
-            'symbols': symbols,
             
             # Volatility parameters
-            'vol_lookback': kwargs.get('vol_lookback', 20),
-            'vol_threshold': kwargs.get('vol_threshold', 0.02),
+            'volatility_lookback': kwargs.get('volatility_lookback', 20),
+            'volatility_threshold': kwargs.get('volatility_threshold', 0.02),
+            'regime_detection': kwargs.get('regime_detection', True),
             
             # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.02),
-            'max_position_size': kwargs.get('max_position_size', 0.08),
+            'base_position_pct': kwargs.get('base_position_pct', 0.025),
+            'max_position_pct': kwargs.get('max_position_pct', 0.07),
+            'volatility_scaling': kwargs.get('volatility_scaling', True),
             
             # Base parameters
             'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
         }
         
         logger.info(f"📊 Created Volatility config with {len(symbols)} symbols")
@@ -457,19 +507,19 @@ class StrategyConfigFactory:
             'strategy_id': kwargs.get('strategy_id', 'arbitrage_v1'),
             'strategy_name': kwargs.get('strategy_name', 'Enhanced Arbitrage'),
             'strategy_type': StrategyType.ARBITRAGE,
-            'symbols': symbols,
             
             # Arbitrage parameters
-            'min_spread': kwargs.get('min_spread', 0.001),
-            'max_execution_time': kwargs.get('max_execution_time', 5),
+            'min_price_discrepancy': kwargs.get('min_spread', 0.001),
+            'max_execution_time': kwargs.get('max_execution_time', 5.0),
+            'confidence_threshold': kwargs.get('confidence_threshold', 0.8),
             
-            # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.05),
-            'max_position_size': kwargs.get('max_position_size', 0.15),
+            # Risk management
+            'max_position_pct': kwargs.get('base_position_size', 0.05),
+            'transaction_cost_threshold': kwargs.get('transaction_cost_threshold', 0.0005),
             
-            # Base parameters
-            'min_signal_confidence': kwargs.get('min_signal_confidence', 0.7),
-            'risk_limit': kwargs.get('risk_limit', 0.03),
+            # Timing parameters
+            'opportunity_timeout': kwargs.get('opportunity_timeout', 10.0),
+            'price_update_frequency': kwargs.get('price_update_frequency', 1.0),
         }
         
         logger.info(f"⚡ Created Arbitrage config with {len(symbols)} symbols")
@@ -491,15 +541,15 @@ class StrategyConfigFactory:
             
             # Factor parameters
             'factors': kwargs.get('factors', ['momentum', 'value', 'quality']),
-            'rebalance_frequency': kwargs.get('rebalance_frequency', 'monthly'),
+            'rebalance_frequency': kwargs.get('rebalance_frequency', 20),
+            'factor_lookback': kwargs.get('factor_lookback', 60),
             
             # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.03),
-            'max_position_size': kwargs.get('max_position_size', 0.10),
+            'base_position_pct': kwargs.get('base_position_pct', 0.02),
+            'max_position_pct': kwargs.get('max_position_pct', 0.06),
             
             # Base parameters
             'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
         }
         
         logger.info(f"🔢 Created Factor config with {len(symbols)} symbols")
@@ -517,19 +567,19 @@ class StrategyConfigFactory:
             'strategy_id': kwargs.get('strategy_id', 'multi_asset_v1'),
             'strategy_name': kwargs.get('strategy_name', 'Enhanced Multi-Asset'),
             'strategy_type': StrategyType.MULTI_ASSET,
-            'symbols': symbols,
             
             # Multi-asset parameters
-            'correlation_threshold': kwargs.get('correlation_threshold', 0.5),
-            'rebalance_frequency': kwargs.get('rebalance_frequency', 'weekly'),
+            'rebalance_frequency': kwargs.get('rebalance_frequency', 10),
+            'correlation_lookback': kwargs.get('correlation_lookback', 60),
+            'max_correlation': kwargs.get('max_correlation', 0.8),
             
-            # Position sizing
-            'base_position_size': kwargs.get('base_position_size', 0.02),
-            'max_position_size': kwargs.get('max_position_size', 0.08),
+            # Risk management
+            'portfolio_vol_target': kwargs.get('portfolio_vol_target', 0.12),
+            'max_asset_weight': kwargs.get('max_asset_weight', 0.3),
+            'min_asset_weight': kwargs.get('min_asset_weight', 0.05),
             
             # Base parameters
             'min_signal_confidence': kwargs.get('min_signal_confidence', 0.6),
-            'risk_limit': kwargs.get('risk_limit', 0.05),
         }
         
         logger.info(f"🌐 Created Multi-Asset config with {len(symbols)} symbols")

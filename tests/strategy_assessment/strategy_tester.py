@@ -579,10 +579,18 @@ class ComprehensiveStrategyTester:
             logger.info(f"   🔧 Creating {config.strategy_type}-specific configuration...")
             
             # Prepare config overrides (avoid duplicate keys)
-            config_overrides = {**config.strategy_config}
+            if hasattr(config.strategy_config, '__dict__'):
+                # Convert dataclass/object to dictionary
+                config_overrides = {k: v for k, v in config.strategy_config.__dict__.items() 
+                                  if not k.startswith('_')}
+            else:
+                # Assume it's already a dictionary
+                config_overrides = {**config.strategy_config}
+            
             config_overrides.pop('symbols', None)  # Remove symbols from overrides since we pass it explicitly
             config_overrides.pop('strategy_id', None)  # Remove if present
             config_overrides.pop('strategy_name', None)  # Remove if present
+            config_overrides.pop('strategy_type', None)  # Remove if present to avoid duplicate argument
             
             # PROFESSIONAL MODE: Enable pre-loaded pairs for Statistical Arbitrage
             # Note: config.strategy_type might be string or enum, so check both
