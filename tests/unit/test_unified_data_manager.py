@@ -347,12 +347,18 @@ class TestClickHouseDataManager:
         result = data_manager.get_market_data('AAPL')
         
         if result is not None:
-            # Should return DataFrame with timestamp as index
-            assert isinstance(result.index, pd.DatetimeIndex)
+            # Should return DataFrame with timestamp as column (not index)
+            assert 'timestamp' in result.columns
             
             # Should have OHLCV columns
-            expected_columns = ['open', 'high', 'low', 'close', 'volume']
+            expected_columns = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
             assert all(col in result.columns for col in expected_columns)
+            
+            # Should have data
+            assert len(result) > 0
+            
+            # Timestamp column should be datetime
+            assert pd.api.types.is_datetime64_any_dtype(result['timestamp'])
         
         logger.info("✅ Core engine interface test passed")
     

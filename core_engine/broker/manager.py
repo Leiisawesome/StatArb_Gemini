@@ -381,8 +381,13 @@ class BrokerManager:
         except Exception as e:
             logger.error(f"❌ Order execution failed: {e}")
             return ExecutionResult(
-                success=False,
                 order_id=order.order_id,
+                symbol=order.symbol,
+                side=order.side,
+                quantity=0.0,
+                price=0.0,
+                commission=0.0,
+                success=False,
                 error_message=str(e)
             )
     
@@ -654,13 +659,16 @@ class BrokerManager:
             
             # Create execution result
             execution_result = ExecutionResult(
-                success=result.success,
                 order_id=order.order_id,
-                executed_quantity=result.filled_quantity if result.success else 0,
-                average_price=result.average_price if result.success else 0,
+                symbol=order.symbol,
+                side=order.side,
+                quantity=result.filled_quantity if result.success else 0,
+                price=result.average_price if result.success else 0,
                 commission=result.filled_quantity * 0.001 if result.success else 0,  # Mock commission
-                execution_time=execution_time,
-                broker_id=broker_id
+                success=result.success,
+                error_message=result.error_message if not result.success else None,
+                broker_order_id=result.order_id,
+                metadata={'broker_id': broker_id, 'execution_time': execution_time}
             )
             
             # Clean up active order tracking
