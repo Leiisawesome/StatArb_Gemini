@@ -200,6 +200,16 @@ logs/
 backtest_results/
 performance_reports/
 
+# Test and analysis artifacts (obsolete directories)
+analytics_output/
+archived_logs/
+archived_test_results/
+benchmark_results/
+load_test_results/
+reports/
+scripts/
+tools/
+
 # Configuration files with sensitive data
 config/secrets.py
 config/api_keys.py

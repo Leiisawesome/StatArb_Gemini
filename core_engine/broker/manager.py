@@ -700,11 +700,12 @@ class BrokerManager:
             performance.successful_orders += 1
             
             # Update average fill time
+            execution_time = result.metadata.get('execution_time', 0)
             if performance.average_fill_time == 0:
-                performance.average_fill_time = result.execution_time
+                performance.average_fill_time = execution_time
             else:
                 performance.average_fill_time = (
-                    performance.average_fill_time * 0.9 + result.execution_time * 0.1
+                    performance.average_fill_time * 0.9 + execution_time * 0.1
                 )
         else:
             performance.failed_orders += 1

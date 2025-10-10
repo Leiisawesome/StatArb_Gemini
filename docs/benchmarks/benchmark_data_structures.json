@@ -1,0 +1,76 @@
+{
+  "name": "Data Structure Performance",
+  "timestamp": "2025-10-09T18:28:45.792255",
+  "results": [
+    {
+      "name": "dict_lookup",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0004,
+        "median_ms": 0.0004,
+        "std_dev_ms": 0.0,
+        "min_ms": 0.0003,
+        "max_ms": 0.001,
+        "p95_ms": 0.0005,
+        "p99_ms": 0.0005
+      },
+      "comparison": null
+    },
+    {
+      "name": "list_append",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.1274,
+        "median_ms": 0.1274,
+        "std_dev_ms": 0.0041,
+        "min_ms": 0.1131,
+        "max_ms": 0.1837,
+        "p95_ms": 0.1294,
+        "p99_ms": 0.1413
+      },
+      "comparison": null
+    },
+    {
+      "name": "list_comprehension",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.1249,
+        "median_ms": 0.1246,
+        "std_dev_ms": 0.0043,
+        "min_ms": 0.1119,
+        "max_ms": 0.1587,
+        "p95_ms": 0.131,
+        "p99_ms": 0.1427
+      },
+      "comparison": null
+    },
+    {
+      "name": "set_intersection",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0367,
+        "median_ms": 0.0365,
+        "std_dev_ms": 0.0053,
+        "min_ms": 0.0327,
+        "max_ms": 0.2011,
+        "p95_ms": 0.037,
+        "p99_ms": 0.0409
+      },
+      "comparison": null
+    },
+    {
+      "name": "set_union",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0575,
+        "median_ms": 0.0577,
+        "std_dev_ms": 0.0032,
+        "min_ms": 0.0517,
+        "max_ms": 0.1135,
+        "p95_ms": 0.0598,
+        "p99_ms": 0.0668
+      },
+      "comparison": null
+    }
+  ]
+}

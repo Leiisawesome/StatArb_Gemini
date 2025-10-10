@@ -1067,7 +1067,8 @@ class CentralRiskManager(ISystemComponent):
             
             # CRITICAL FIX: Position-aware SELL order capping with exact precision
             elif request.side.lower() == 'sell':
-                current_position = self.current_positions.get(request.symbol, 0.0)
+                # Use current_position from request if provided, otherwise check internal state
+                current_position = request.current_position if request.current_position is not None else self.current_positions.get(request.symbol, 0.0)
                 
                 if current_position <= 0:
                     # No position to sell

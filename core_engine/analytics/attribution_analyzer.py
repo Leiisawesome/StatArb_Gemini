@@ -14,9 +14,7 @@ from enum import Enum
 import time
 from collections import defaultdict, deque
 from scipy import stats
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.decomposition import PCA
 import warnings
 
 warnings.filterwarnings('ignore')

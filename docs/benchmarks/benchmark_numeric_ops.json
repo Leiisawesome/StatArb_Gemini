@@ -1,0 +1,104 @@
+{
+  "name": "Numeric Operations Performance",
+  "timestamp": "2025-10-09T18:28:45.977756",
+  "results": [
+    {
+      "name": "python_sum",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0288,
+        "median_ms": 0.0287,
+        "std_dev_ms": 0.0012,
+        "min_ms": 0.0253,
+        "max_ms": 0.0373,
+        "p95_ms": 0.0303,
+        "p99_ms": 0.034
+      },
+      "comparison": null
+    },
+    {
+      "name": "python_mean",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0289,
+        "median_ms": 0.0288,
+        "std_dev_ms": 0.0011,
+        "min_ms": 0.0257,
+        "max_ms": 0.0377,
+        "p95_ms": 0.0302,
+        "p99_ms": 0.034
+      },
+      "comparison": null
+    },
+    {
+      "name": "numpy_sum",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0045,
+        "median_ms": 0.0046,
+        "std_dev_ms": 0.0004,
+        "min_ms": 0.0039,
+        "max_ms": 0.0163,
+        "p95_ms": 0.0047,
+        "p99_ms": 0.0048
+      },
+      "comparison": null
+    },
+    {
+      "name": "numpy_mean",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0127,
+        "median_ms": 0.0128,
+        "std_dev_ms": 0.0011,
+        "min_ms": 0.0113,
+        "max_ms": 0.0282,
+        "p95_ms": 0.0133,
+        "p99_ms": 0.0171
+      },
+      "comparison": null
+    },
+    {
+      "name": "numpy_std",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0543,
+        "median_ms": 0.0436,
+        "std_dev_ms": 0.0194,
+        "min_ms": 0.0381,
+        "max_ms": 0.223,
+        "p95_ms": 0.0845,
+        "p99_ms": 0.1051
+      },
+      "comparison": null
+    },
+    {
+      "name": "numpy_matmul",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.0122,
+        "median_ms": 0.0123,
+        "std_dev_ms": 0.0006,
+        "min_ms": 0.0108,
+        "max_ms": 0.0186,
+        "p95_ms": 0.0126,
+        "p99_ms": 0.0135
+      },
+      "comparison": null
+    },
+    {
+      "name": "numpy_dot",
+      "iterations": 1000,
+      "stats": {
+        "mean_ms": 0.009,
+        "median_ms": 0.009,
+        "std_dev_ms": 0.0005,
+        "min_ms": 0.0081,
+        "max_ms": 0.0165,
+        "p95_ms": 0.0093,
+        "p99_ms": 0.0094
+      },
+      "comparison": null
+    }
+  ]
+}

@@ -122,23 +122,33 @@ class RiskManager:
                                    prices: Dict[str, float],
                                    returns_data: Optional[Dict[str, List[float]]] = None) -> RiskMetrics:
         """Calculate portfolio risk metrics"""
+        import numpy as np
+        
         metrics = RiskMetrics()
         
         if not positions or not prices:
             return metrics
         
+        # Vectorized portfolio calculations: 6x faster
+        symbols = list(positions.keys())
+        quantities = np.array([positions[symbol] for symbol in symbols])
+        symbol_prices = np.array([prices.get(symbol, 0) for symbol in symbols])
+        
+        # Calculate position values
+        position_values = quantities * symbol_prices
+        abs_position_values = np.abs(position_values)
+        
+        # Calculate total value
+        total_value = abs_position_values.sum()
+        
         # Calculate concentrations
-        total_value = sum(abs(qty * prices.get(symbol, 0)) for symbol, qty in positions.items())
-        
         if total_value > 0:
-            for symbol, qty in positions.items():
-                price = prices.get(symbol, 0)
-                position_value = abs(qty * price)
-                metrics.position_concentrations[symbol] = position_value / total_value
+            concentrations = abs_position_values / total_value
+            metrics.position_concentrations = dict(zip(symbols, concentrations))
         
-        # Calculate exposure
-        metrics.gross_exposure = sum(abs(qty * prices.get(symbol, 0)) for symbol, qty in positions.items())
-        metrics.net_exposure = sum(qty * prices.get(symbol, 0) for symbol, qty in positions.items())
+        # Calculate exposures
+        metrics.gross_exposure = abs_position_values.sum()
+        metrics.net_exposure = position_values.sum()
         
         return metrics
     

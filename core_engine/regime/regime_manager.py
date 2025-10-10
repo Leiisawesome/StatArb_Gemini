@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
@@ -17,13 +17,17 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import json
 
+# Lazy import for heavy classifier module (33.85MB sklearn dependency)
+if TYPE_CHECKING:
+    from .regime_classifier import (RegimeClassifier, RegimeClassification, 
+                                  ClassificationConfig, ModelPerformance)
+
 # Import all regime components
 from .regime_detector import (RegimeDetector, RegimeType, RegimeDetection, 
                              DetectionMethod, RegimeDetectionConfig)
 from .market_regime_analyzer import (MarketRegimeAnalyzer, CrossAssetRegime, 
                                    RegimeAnalysisConfig, AssetRegimeProfile)
-from .regime_classifier import (RegimeClassifier, RegimeClassification, 
-                              ClassificationConfig, ModelPerformance)
+# Lazy import: regime_classifier (33.85MB sklearn dependency) - import only when needed
 from .regime_indicators import (RegimeIndicatorEngine, RegimeIndicator, 
                               TransitionSignal, RegimeStrengthMeasure, IndicatorConfig)
 from .regime_transition_manager import (RegimeTransitionManager, TransitionPrediction, 
@@ -61,7 +65,7 @@ class RegimeManagerConfig:
     # Component configurations
     detection_config: RegimeDetectionConfig = field(default_factory=RegimeDetectionConfig)
     analysis_config: RegimeAnalysisConfig = field(default_factory=RegimeAnalysisConfig)
-    classification_config: ClassificationConfig = field(default_factory=ClassificationConfig)
+    classification_config: Optional['ClassificationConfig'] = None  # Lazy-loaded
     indicator_config: IndicatorConfig = field(default_factory=IndicatorConfig)
     transition_config: TransitionPredictionConfig = field(default_factory=TransitionPredictionConfig)
     
@@ -115,7 +119,7 @@ class RegimeState:
     
     # Secondary regime assessments
     cross_asset_regime: Optional[CrossAssetRegime] = None
-    classification_result: Optional[RegimeClassification] = None
+    classification_result: Optional['RegimeClassification'] = None  # Lazy-loaded type
     
     # Indicators and signals
     active_indicators: Dict[str, RegimeIndicator] = field(default_factory=dict)
@@ -578,7 +582,14 @@ class RegimeManager:
     def __init__(self, config: Optional[RegimeManagerConfig] = None):
         """Initialize regime manager"""
         
+        # Lazy import regime_classifier (33.85MB sklearn dependency)
+        from .regime_classifier import RegimeClassifier, ClassificationConfig
+        
         self.config = config or RegimeManagerConfig()
+        
+        # Create classification config if not provided (lazy loading)
+        if self.config.classification_config is None:
+            self.config.classification_config = ClassificationConfig()
         
         # Initialize all components
         self.regime_detector = RegimeDetector(self.config.detection_config)

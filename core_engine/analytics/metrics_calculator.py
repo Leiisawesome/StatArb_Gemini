@@ -16,7 +16,6 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 from scipy import stats
 from scipy.optimize import minimize
-from sklearn.preprocessing import StandardScaler
 import warnings
 
 # Import ISystemComponent for orchestrator integration

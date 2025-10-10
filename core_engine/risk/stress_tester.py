@@ -318,6 +318,9 @@ class StressTester:
         start_time = time.time()
         
         try:
+            # Defensive type conversion for portfolio_value
+            portfolio_value = float(portfolio_value) if portfolio_value is not None else 0.0
+            
             # Get scenario
             scenario = self._get_scenario(scenario_name)
             if not scenario:

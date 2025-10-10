@@ -14,7 +14,6 @@ from enum import Enum
 import warnings
 from scipy import stats
 from scipy.optimize import minimize
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import r2_score
 

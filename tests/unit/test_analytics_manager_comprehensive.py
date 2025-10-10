@@ -13,13 +13,16 @@ from typing import Dict, Any, List
 import numpy as np
 import pandas as pd
 
-from core_engine.analytics.manager_enhanced import AnalyticsManagerEnhanced
-from core_engine.analytics.metrics_calculator import MetricsCalculator
+# Configure pytest-asyncio to use function scope and auto mode
+pytestmark = pytest.mark.asyncio(scope="function")
+
+from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager, AnalyticsConfig
+from core_engine.analytics.metrics_calculator import EnhancedMetricsCalculator
 from core_engine.analytics.performance_analyzer import PerformanceAnalyzer
 from core_engine.analytics.attribution_analyzer import AttributionAnalyzer
 from core_engine.analytics.benchmark_analyzer import BenchmarkAnalyzer
 from core_engine.analytics.report_generator import ReportGenerator
-from core_engine.type_definitions.analytics import PerformanceMetrics, AttributionMetrics, BenchmarkMetrics
+from core_engine.type_definitions.analytics import PerformanceMetrics
 from core_engine.type_definitions.portfolio import Position, Portfolio
 from core_engine.type_definitions.orders import Order, OrderSide, OrderType
 from core_engine.system.interfaces import ISystemComponent
@@ -30,35 +33,51 @@ class TestAnalyticsManagerEnhanced:
     
     def setup_method(self):
         """Setup for each test method"""
-        self.config = {
-            'enable_real_time_analytics': True,
-            'enable_batch_analytics': True,
-            'enable_performance_attribution': True,
-            'enable_benchmark_analysis': True,
-            'analytics_update_frequency': 60,  # seconds
-            'performance_metrics': {
-                'sharpe_ratio': True,
-                'sortino_ratio': True,
-                'calmar_ratio': True,
-                'max_drawdown': True,
-                'var_95': True,
-                'var_99': True
-            },
-            'attribution_metrics': {
-                'strategy_attribution': True,
-                'factor_attribution': True,
-                'sector_attribution': True,
-                'time_attribution': True
-            }
-        }
-        self.analytics_manager = AnalyticsManagerEnhanced(self.config)
+        # Use default config (None) or create an AnalyticsConfig object
+        self.config = AnalyticsConfig()
+        self.analytics_manager = EnhancedAnalyticsManager(self.config)
+    
+    def teardown_method(self):
+        """Cleanup after each test method - ensures async resources are cleaned up"""
+        try:
+            # Force shutdown of ThreadPoolExecutor if it exists
+            if hasattr(self.analytics_manager, '_executor') and self.analytics_manager._executor:
+                self.analytics_manager._executor.shutdown(wait=False, cancel_futures=True)
+            
+            # Set shutdown event
+            if hasattr(self.analytics_manager, '_shutdown_event'):
+                self.analytics_manager._shutdown_event.set()
+            
+            # Stop the analytics manager if it was started
+            if hasattr(self.analytics_manager, 'is_running') and self.analytics_manager.is_running:
+                try:
+                    # Get or create event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    # Run stop coroutine
+                    if not loop.is_running():
+                        loop.run_until_complete(asyncio.wait_for(
+                            self.analytics_manager.stop(),
+                            timeout=1.0
+                        ))
+                except (asyncio.TimeoutError, Exception):
+                    pass  # Ignore cleanup timeouts/errors
+        except Exception:
+            pass  # Ignore all cleanup errors
+        finally:
+            # Force cleanup of the object
+            self.analytics_manager = None
     
     def test_initialization(self):
         """Test analytics manager initialization"""
         assert self.analytics_manager is not None
-        assert self.analytics_manager.config['enable_real_time_analytics'] is True
-        assert self.analytics_manager.config['enable_batch_analytics'] is True
-        assert self.analytics_manager.config['enable_performance_attribution'] is True
+        assert self.analytics_manager.config.enable_performance_analysis is True
+        assert self.analytics_manager.config.enable_attribution_analysis is True
+        assert self.analytics_manager.config.enable_benchmark_analysis is True
     
     @pytest.mark.asyncio
     async def test_initialize(self):
@@ -73,33 +92,40 @@ class TestAnalyticsManagerEnhanced:
     @pytest.mark.asyncio
     async def test_start(self):
         """Test analytics manager start process"""
-        with patch.object(self.analytics_manager, '_start_real_time_analytics', new_callable=AsyncMock) as mock_realtime:
-            with patch.object(self.analytics_manager, '_start_batch_analytics', new_callable=AsyncMock) as mock_batch:
-                mock_realtime.return_value = None
-                mock_batch.return_value = None
+        # Initialize first
+        await self.analytics_manager.initialize()
+        
+        with patch.object(self.analytics_manager, '_start_analytics_components', new_callable=AsyncMock) as mock_components:
+            with patch.object(self.analytics_manager, '_start_monitoring', new_callable=AsyncMock) as mock_monitoring:
+                mock_components.return_value = None
+                mock_monitoring.return_value = None
                 
                 result = await self.analytics_manager.start()
                 assert result is True
-                mock_realtime.assert_called_once()
-                mock_batch.assert_called_once()
+                mock_components.assert_called_once()
+                mock_monitoring.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_stop(self):
         """Test analytics manager stop process"""
-        with patch.object(self.analytics_manager, '_stop_real_time_analytics', new_callable=AsyncMock) as mock_stop_realtime:
-            with patch.object(self.analytics_manager, '_stop_batch_analytics', new_callable=AsyncMock) as mock_stop_batch:
-                mock_stop_realtime.return_value = None
-                mock_stop_batch.return_value = None
+        # Initialize and start first
+        await self.analytics_manager.initialize()
+        await self.analytics_manager.start()
+        
+        with patch.object(self.analytics_manager, '_stop_analytics_components', new_callable=AsyncMock) as mock_stop_components:
+            with patch.object(self.analytics_manager, '_stop_monitoring', new_callable=AsyncMock) as mock_stop_monitoring:
+                mock_stop_components.return_value = None
+                mock_stop_monitoring.return_value = None
                 
                 result = await self.analytics_manager.stop()
                 assert result is True
-                mock_stop_realtime.assert_called_once()
-                mock_stop_batch.assert_called_once()
+                mock_stop_components.assert_called_once()
+                mock_stop_monitoring.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_process_real_time_data(self):
-        """Test real-time data processing"""
-        market_data = {
+    async def test_process_analytics(self):
+        """Test analytics data processing"""
+        test_data = {
             'symbol': 'AAPL',
             'price': 150.0,
             'volume': 1000000,
@@ -107,74 +133,52 @@ class TestAnalyticsManagerEnhanced:
             'type': 'market_data'
         }
         
-        with patch.object(self.analytics_manager, '_update_real_time_metrics', new_callable=AsyncMock) as mock_update:
-            mock_update.return_value = {
-                'price_change': 0.02,
-                'volume_change': 0.15,
-                'volatility': 0.12
-            }
-            
-            result = await self.analytics_manager.process_real_time_data(market_data)
-            assert isinstance(result, dict)
-            assert 'price_change' in result
-            assert 'volume_change' in result
-            assert 'volatility' in result
+        result = self.analytics_manager.process_analytics(test_data)
+        assert isinstance(result, dict)
+        assert result['analytics_processed'] is True
+        assert 'processing_timestamp' in result
+        assert 'processing_component' in result
     
     @pytest.mark.asyncio
-    async def test_process_batch_data(self):
-        """Test batch data processing"""
-        start_time = datetime.now() - timedelta(days=30)
-        end_time = datetime.now()
+    async def test_calculate_metrics(self):
+        """Test metrics calculation"""
+        test_data = {
+            'returns': [0.01, 0.02, -0.01, 0.03],
+            'volatility': 0.15,
+            'sharpe_ratio': 1.2
+        }
         
-        # Mock historical data
-        historical_data = pd.DataFrame({
-            'timestamp': pd.date_range(start_time, end_time, freq='1H'),
-            'AAPL': np.random.normal(150, 5, 720),  # 30 days * 24 hours
-            'GOOGL': np.random.normal(2800, 50, 720),
-            'MSFT': np.random.normal(300, 10, 720)
-        })
-        
-        with patch.object(self.analytics_manager, '_calculate_batch_metrics', new_callable=AsyncMock) as mock_calculate:
-            mock_calculate.return_value = {
-                'total_return': 0.05,
-                'volatility': 0.15,
-                'sharpe_ratio': 1.2,
-                'max_drawdown': -0.08
-            }
-            
-            result = await self.analytics_manager.process_batch_data(historical_data, start_time, end_time)
-            assert isinstance(result, dict)
-            assert 'total_return' in result
-            assert 'volatility' in result
-            assert 'sharpe_ratio' in result
-            assert 'max_drawdown' in result
+        result = self.analytics_manager.calculate_metrics(test_data)
+        assert isinstance(result, dict)
+        assert result['metrics_calculated'] is True
+        assert 'processing_timestamp' in result
+        assert 'processing_component' in result
     
     @pytest.mark.asyncio
-    async def test_get_analytics_summary(self):
-        """Test analytics summary generation"""
-        with patch.object(self.analytics_manager, '_generate_analytics_summary', new_callable=AsyncMock) as mock_summary:
-            mock_summary.return_value = {
-                'performance_metrics': {
-                    'total_return': 0.12,
-                    'sharpe_ratio': 1.5,
-                    'max_drawdown': -0.06
-                },
-                'risk_metrics': {
-                    'var_95': 0.03,
-                    'var_99': 0.05,
-                    'volatility': 0.15
-                },
-                'attribution_metrics': {
-                    'strategy_attribution': {'momentum': 0.4, 'mean_reversion': 0.6},
-                    'factor_attribution': {'market': 0.7, 'size': 0.2, 'value': 0.1}
-                }
+    async def test_generate_analytics_summary(self):
+        """Test analytics summary generation using generate_analytics"""
+        test_data = {
+            'performance_metrics': {
+                'total_return': 0.12,
+                'sharpe_ratio': 1.5,
+                'max_drawdown': -0.06
+            },
+            'risk_metrics': {
+                'var_95': 0.03,
+                'var_99': 0.05,
+                'volatility': 0.15
+            },
+            'attribution_metrics': {
+                'strategy_attribution': {'momentum': 0.4, 'mean_reversion': 0.6},
+                'factor_attribution': {'market': 0.7, 'size': 0.2, 'value': 0.1}
             }
-            
-            summary = await self.analytics_manager.get_analytics_summary(timeframe='1D')
-            assert isinstance(summary, dict)
-            assert 'performance_metrics' in summary
-            assert 'risk_metrics' in summary
-            assert 'attribution_metrics' in summary
+        }
+        
+        result = self.analytics_manager.generate_analytics(test_data)
+        assert isinstance(result, dict)
+        assert result['analytics_processed'] is True
+        assert 'processing_timestamp' in result
+        assert 'processing_component' in result
     
     @pytest.mark.asyncio
     async def test_get_regime_aware_metrics(self):
@@ -371,7 +375,7 @@ class TestMetricsCalculator:
     
     def setup_method(self):
         """Setup for each test method"""
-        self.metrics_calculator = MetricsCalculator()
+        self.metrics_calculator = EnhancedMetricsCalculator()
     
     def test_calculate_performance_metrics(self):
         """Test performance metrics calculation"""
@@ -682,15 +686,17 @@ class TestAnalyticsManagerIntegration:
     
     def setup_method(self):
         """Setup for integration tests"""
-        self.analytics_manager = AnalyticsManagerEnhanced({
-            'enable_real_time_analytics': True,
-            'enable_batch_analytics': True,
-            'enable_performance_attribution': True
-        })
+        # Use AnalyticsConfig object instead of dict
+        config = AnalyticsConfig()
+        self.analytics_manager = EnhancedAnalyticsManager(config)
     
     @pytest.mark.asyncio
     async def test_end_to_end_analytics_pipeline(self):
         """Test end-to-end analytics pipeline"""
+        # Initialize and start analytics manager
+        await self.analytics_manager.initialize()
+        await self.analytics_manager.start()
+        
         # Mock market data
         market_data = {
             'symbol': 'AAPL',
@@ -700,55 +706,29 @@ class TestAnalyticsManagerIntegration:
             'type': 'market_data'
         }
         
-        # Test real-time processing
-        with patch.object(self.analytics_manager, '_update_real_time_metrics', new_callable=AsyncMock) as mock_realtime:
-            mock_realtime.return_value = {'price_change': 0.02, 'volatility': 0.12}
-            
-            realtime_result = await self.analytics_manager.process_real_time_data(market_data)
-            assert isinstance(realtime_result, dict)
-        
-        # Test batch processing
-        historical_data = pd.DataFrame({
-            'timestamp': pd.date_range('2024-01-01', periods=100, freq='1H'),
-            'AAPL': np.random.normal(150, 5, 100),
-            'GOOGL': np.random.normal(2800, 50, 100)
-        })
-        
-        with patch.object(self.analytics_manager, '_calculate_batch_metrics', new_callable=AsyncMock) as mock_batch:
-            mock_batch.return_value = {'total_return': 0.05, 'volatility': 0.15}
-            
-            batch_result = await self.analytics_manager.process_batch_data(
-                historical_data, datetime.now() - timedelta(days=1), datetime.now()
-            )
-            assert isinstance(batch_result, dict)
+        # Test analytics processing (using the actual method that exists)
+        result = self.analytics_manager.process_analytics(market_data)
+        assert isinstance(result, dict)
+        assert 'analytics_processed' in result
     
     @pytest.mark.asyncio
     async def test_analytics_component_coordination(self):
         """Test coordination between analytics components"""
-        with patch.object(self.analytics_manager, '_coordinate_analytics_components', new_callable=AsyncMock) as mock_coordinate:
-            mock_coordinate.return_value = {
-                'metrics_calculator': 'operational',
-                'performance_analyzer': 'operational',
-                'attribution_analyzer': 'operational',
-                'benchmark_analyzer': 'operational'
-            }
-            
-            coordination_status = await self.analytics_manager._coordinate_analytics_components()
-            assert isinstance(coordination_status, dict)
-            assert 'metrics_calculator' in coordination_status
-            assert 'performance_analyzer' in coordination_status
+        # Initialize to create all components
+        await self.analytics_manager.initialize()
+        
+        # Verify components are created
+        assert hasattr(self.analytics_manager, 'metrics_calculator')
+        assert hasattr(self.analytics_manager, 'performance_analyzer')
+        assert hasattr(self.analytics_manager, 'attribution_analyzer')
+        assert hasattr(self.analytics_manager, 'benchmark_analyzer')
     
     @pytest.mark.asyncio
     async def test_analytics_error_handling(self):
-        """Test analytics error handling"""
-        with patch.object(self.analytics_manager, '_handle_analytics_error', new_callable=AsyncMock) as mock_error:
-            mock_error.return_value = {
-                'error_handled': True,
-                'error_type': 'calculation_error',
-                'recovery_action': 'fallback_calculation'
-            }
-            
-            error_result = await self.analytics_manager._handle_analytics_error(Exception("Test error"))
-            assert isinstance(error_result, dict)
-            assert 'error_handled' in error_result
-            assert 'recovery_action' in error_result
+        """Test analytics manager handles invalid data gracefully"""
+        # Test with invalid market data
+        invalid_data = None
+        
+        # Should not raise exception
+        result = self.analytics_manager.process_analytics(invalid_data)
+        assert isinstance(result, dict)

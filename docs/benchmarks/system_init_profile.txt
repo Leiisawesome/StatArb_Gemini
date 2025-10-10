@@ -1,0 +1,86 @@
+{
+  "timestamp": 1760005722.851934,
+  "results": {
+    "imports": {
+      "function_name": "imports",
+      "total_time_seconds": 4.7242,
+      "num_calls": 1,
+      "time_per_call_ms": 4724.1991,
+      "cumulative_time_seconds": 4.7242,
+      "hotspots": [
+        {
+          "function": "('<frozen importlib._bootstrap>', 1349, '_find_and_load')",
+          "calls": 1544,
+          "total_time": 0.013,
+          "cumulative_time": 3.5691,
+          "time_per_call": 8e-06
+        },
+        {
+          "function": "('<frozen importlib._bootstrap>', 480, '_call_with_frames_removed')",
+          "calls": 3534,
+          "total_time": 0.0034,
+          "cumulative_time": 3.569,
+          "time_per_call": 1e-06
+        },
+        {
+          "function": "('~', 0, '<built-in method builtins.__import__>')",
+          "calls": 707,
+          "total_time": 0.0011,
+          "cumulative_time": 3.569,
+          "time_per_call": 2e-06
+        },
+        {
+          "function": "('<frozen importlib._bootstrap>', 1304, '_find_and_load_unlocked')",
+          "calls": 1515,
+          "total_time": 0.0138,
+          "cumulative_time": 3.569,
+          "time_per_call": 9e-06
+        },
+        {
+          "function": "('<frozen importlib._bootstrap>', 911, '_load_unlocked')",
+          "calls": 1462,
+          "total_time": 0.008,
+          "cumulative_time": 3.5687,
+          "time_per_call": 5e-06
+        },
+        {
+          "function": "('<frozen importlib._bootstrap_external>', 1020, 'exec_module')",
+          "calls": 1239,
+          "total_time": 0.0027,
+          "cumulative_time": 3.5686,
+          "time_per_call": 2e-06
+        },
+        {
+          "function": "('~', 0, '<built-in method builtins.exec>')",
+          "calls": 1557,
+          "total_time": 0.2009,
+          "cumulative_time": 3.5683,
+          "time_per_call": 0.000129
+        },
+        {
+          "function": "('/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/core_engine/__init__.py', 1, '<module>')",
+          "calls": 1,
+          "total_time": 0.0,
+          "cumulative_time": 3.3106,
+          "time_per_call": 3.5e-05
+        },
+        {
+          "function": "('/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/core_engine/regime/engine.py', 1, '<module>')",
+          "calls": 1,
+          "total_time": 0.0001,
+          "cumulative_time": 2.4604,
+          "time_per_call": 5.2e-05
+        },
+        {
+          "function": "('/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/ai_integration_env/lib/python3.13/site-packages/sklearn/__init__.py', 1, '<module>')",
+          "calls": 1,
+          "total_time": 0.0,
+          "cumulative_time": 2.0,
+          "time_per_call": 2.6e-05
+        }
+      ],
+      "memory_peak_mb": null,
+      "memory_delta_mb": null
+    }
+  }
+}
