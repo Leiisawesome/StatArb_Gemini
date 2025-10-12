@@ -97,6 +97,12 @@ class ComponentManager:
         """Register component with hierarchical control"""
         
         try:
+            # Check if this component instance is already registered
+            for reg_id, registration in self.component_registry.items():
+                if registration.component_instance is component:
+                    logger.warning(f"⚠️ Component {name} already registered with id {reg_id}, skipping duplicate registration")
+                    return reg_id
+            
             registration = ComponentRegistration(
                 name=name,
                 layer=layer,

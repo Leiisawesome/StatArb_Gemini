@@ -782,7 +782,7 @@ class PerformanceAnalyzer(ISystemComponent):
             try:
                 metrics.maximum_drawdown, metrics.maximum_drawdown_duration = \
                     self.risk_calculator.calculate_maximum_drawdown(returns)
-            except Exception as e:
+            except Exception:
                 # Fallback: calculate max drawdown directly
                 cumulative = (1 + returns).cumprod()
                 running_max = cumulative.expanding().max()
@@ -1742,7 +1742,7 @@ class PerformanceAnalyzer(ISystemComponent):
                 model.fit(X, port_returns)
 
                 # Extract timing coefficients
-                benchmark_beta = model.coef_[0]
+                model.coef_[0]
                 up_market_timing = model.coef_[1]
                 down_market_timing = model.coef_[2]
 
@@ -2506,7 +2506,7 @@ class PerformanceAnalyzer(ISystemComponent):
         # Calculate maximum drawdown using risk calculator
         try:
             max_drawdown, _ = self.risk_calculator.calculate_maximum_drawdown(returns)
-        except Exception as e:
+        except Exception:
             # Fallback: calculate max drawdown directly
             cumulative = (1 + returns).cumprod()
             running_max = cumulative.expanding().max()

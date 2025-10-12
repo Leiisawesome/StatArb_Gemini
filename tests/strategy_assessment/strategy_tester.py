@@ -22,12 +22,11 @@ Date: October 2025
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
-import asyncio
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 # Ensure pd is available globally
 pd.options.mode.chained_assignment = None  # Suppress warnings
@@ -53,7 +52,6 @@ try:
     from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
     from core_engine.processing.features.engineer import EnhancedFeatureEngineer
     from core_engine.type_definitions.strategy import StrategyType
-    from core_engine.trading.strategies.strategy_engine import StrategyConfig
 except ImportError as e:
     logging.error(f"Failed to import core engine components: {e}")
     logging.error("Make sure core_engine package is in PYTHONPATH")

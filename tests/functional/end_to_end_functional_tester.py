@@ -8,24 +8,13 @@ flow using real market data through all integrated core engine components.
 import asyncio
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Dict, List, Any
+from dataclasses import dataclass
 import logging
-from pathlib import Path
-import json
 
 # Core engine imports
 from core_engine.system.integration_manager import SystemIntegrationManager, SystemConfiguration
-from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.data.manager import ClickHouseDataManager
-from core_engine.regime.engine import EnhancedRegimeEngine
-from core_engine.trading.strategies.manager import StrategyManager
-from core_engine.trading.engine import EnhancedTradingEngine
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
-from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager
-from core_engine.config.system_config import SystemConfig
 
 logger = logging.getLogger(__name__)
 

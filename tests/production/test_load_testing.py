@@ -10,7 +10,7 @@ Tests system performance under production-scale loads:
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import pytest
@@ -19,8 +19,7 @@ import statistics
 
 from core_engine.system.central_risk_manager import CentralRiskManager
 from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.trading.strategies.strategy_manager import StrategyManager
-from core_engine.trading.order_manager import OrderSide, OrderType
+from core_engine.trading.order_manager import OrderSide
 
 
 @dataclass
@@ -258,7 +257,7 @@ class LoadTestHarness:
             
             return True
             
-        except Exception as e:
+        except Exception:
             latency_ms = (time.time() - start_time) * 1000
             self.metrics.latencies.append(latency_ms)
             raise

@@ -6,18 +6,14 @@ Advanced signal combination and ensemble methods for enhanced signal quality
 import logging
 import threading
 import numpy as np
-import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-from scipy import stats
-from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.linear_model import Ridge
 import warnings
 
 # Import signal types

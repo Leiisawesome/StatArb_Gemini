@@ -14,7 +14,6 @@ from enum import Enum
 import time
 from collections import deque
 from scipy import stats
-from scipy.optimize import minimize
 from scipy.stats import kendalltau, spearmanr
 
 logger = logging.getLogger(__name__)
@@ -320,7 +319,7 @@ class CorrelationAnalyzer:
         try:
             # Calculate average pairwise correlation (excluding diagonal)
             corr_values = correlation_matrix.values
-            n_assets = len(corr_values)
+            len(corr_values)
             
             # Get upper triangle excluding diagonal
             upper_triangle = np.triu(corr_values, k=1)
@@ -589,7 +588,7 @@ class CorrelationAnalyzer:
         try:
             # Get upper triangle excluding diagonal
             corr_values = correlation_matrix.values
-            n = len(corr_values)
+            len(corr_values)
             upper_triangle = np.triu(corr_values, k=1)
             correlations = upper_triangle[upper_triangle != 0]
             

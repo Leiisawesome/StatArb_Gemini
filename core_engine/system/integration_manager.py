@@ -39,7 +39,7 @@ from .config_adapter import safe_component_init
 # Import ISystemComponent for orchestrator integration
 try:
     from .interfaces import ISystemComponent
-    from .hierarchical_orchestrator import HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
+    from .hierarchical_orchestrator import HierarchicalSystemOrchestrator
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -67,9 +67,7 @@ except ImportError:
 # Import all enhanced components
 try:
     # Phase 1: Core System Components
-    from .central_risk_manager import CentralRiskManager
-    from .unified_execution_engine import UnifiedExecutionEngine
-    from ..data.manager import ClickHouseDataManager
+    pass
     
     # Production monitoring components
     from .production_monitoring import (
@@ -78,24 +76,12 @@ try:
     )
     
     # Phase 2: Analytics & Strategy Layer
-    from ..analytics.manager_enhanced import EnhancedAnalyticsManager
-    from ..analytics.metrics_calculator import EnhancedMetricsCalculator
-    from ..trading.strategies.manager import StrategyManager
-    from ..trading.strategies.strategy_engine import StrategyExecutionEngine
-    from ..trading.strategies.strategy_registry import EnhancedStrategyRegistry
-    from ..trading.strategies.strategy_validator import EnhancedStrategyValidator
     
     # Phase 3: Processing Pipeline
-    from ..processing.indicators.engine import EnhancedTechnicalIndicators
-    from ..processing.features.engineer import EnhancedFeatureEngineer
-    from ..processing.signals.generator import EnhancedSignalGenerator
     
     # Phase 4: Data & Risk Management
-    from ..regime.engine import EnhancedRegimeEngine
     
     # Phase 5: Trading & Execution
-    from ..trading.engine import EnhancedTradingEngine
-    from ..trading.portfolio.manager_enhanced import EnhancedPortfolioManager
     
 except ImportError as e:
     logging.warning(f"Some enhanced components not available: {e}")

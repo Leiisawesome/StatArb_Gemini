@@ -12,7 +12,7 @@ Continuous operation test to validate:
 import asyncio
 import time
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from pathlib import Path

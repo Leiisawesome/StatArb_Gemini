@@ -16,7 +16,6 @@ import warnings
 import copy
 import random
 from abc import ABC, abstractmethod
-import scipy.optimize as opt
 from scipy.stats import norm
 import itertools
 
@@ -305,9 +304,9 @@ class GridSearchOptimizer(BaseOptimizer):
             
             # Evaluate all combinations
             if self.config.parallel_evaluation:
-                scores = self._evaluate_parallel(parameter_grid, objective_function)
+                self._evaluate_parallel(parameter_grid, objective_function)
             else:
-                scores = self._evaluate_sequential(parameter_grid, objective_function)
+                self._evaluate_sequential(parameter_grid, objective_function)
             
             # Create optimization result
             optimization_time = (datetime.now() - start_time).total_seconds()
@@ -998,7 +997,7 @@ class StrategyOptimizer:
                 current_data = {"default": data.iloc[:i+1]}
                 
                 # Update strategy
-                signals = strategy.update(current_data)
+                strategy.update(current_data)
                 
                 # In a real implementation, this would execute trades
                 # and update positions based on signals

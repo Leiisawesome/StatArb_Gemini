@@ -59,7 +59,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from ..type_definitions import OrderType, OrderStatus, Order, ExecutionResult
+from ..type_definitions import OrderType, Order
 
 logger = logging.getLogger(__name__)
 
@@ -730,8 +730,8 @@ class EnhancedTradingEngine(ISystemComponent):
         # Execute slices with volume participation rate
         for slice_obj in slices:
             # Get current volume data for VWAP calculation
-            current_market = await self._get_current_market_data(slice_obj.symbol)
-            participation_rate = self.config.vwap_participation_rate
+            await self._get_current_market_data(slice_obj.symbol)
+            self.config.vwap_participation_rate
             
             if self.execution_engine:
                 order = Order(
@@ -822,7 +822,7 @@ class EnhancedTradingEngine(ISystemComponent):
         """Determine optimal execution strategy"""
         try:
             volatility = market_analysis.get('volatility', 0.02)
-            liquidity = market_analysis.get('liquidity', 'medium')
+            market_analysis.get('liquidity', 'medium')
             spread = market_analysis.get('spread', 0.01)
             
             # Large orders need slicing

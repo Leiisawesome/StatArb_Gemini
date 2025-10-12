@@ -13,8 +13,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tests.strategy_assessment.strategy_tester import ComprehensiveStrategyTester
-from tests.strategy_assessment.strategy_config_factory import StrategyConfigFactory
-from core_engine.data.manager import ClickHouseDataConfig
 
 # Configure logging
 logging.basicConfig(
@@ -65,52 +63,47 @@ async def test_volatility_config(tester, config_name, strategy_config, base_para
         # Parse results - handle both dict and StrategyTestResult types
         if isinstance(result, dict):
             # Handle dict results
-            total_return = result.get('total_return_pct', 0.0)
+            result.get('total_return_pct', 0.0)
             sharpe_ratio = result.get('sharpe_ratio', 0.0)
-            max_drawdown = result.get('max_drawdown_pct', 0.0)
-            win_rate = result.get('win_rate_pct', 0.0)
-            profit_factor = result.get('profit_factor', 0.0)
-            total_trades = result.get('total_trades', 0)
+            result.get('max_drawdown_pct', 0.0)
+            result.get('win_rate_pct', 0.0)
+            result.get('profit_factor', 0.0)
+            result.get('total_trades', 0)
         elif hasattr(result, 'performance_metrics') and result.performance_metrics:
             # Handle StrategyTestResult with performance_metrics (could be dict or object)
             if isinstance(result.performance_metrics, dict):
-                total_return = result.performance_metrics.get('total_return_pct', 0.0)
+                result.performance_metrics.get('total_return_pct', 0.0)
                 sharpe_ratio = result.performance_metrics.get('sharpe_ratio', 0.0)
-                max_drawdown = result.performance_metrics.get('max_drawdown_pct', 0.0)
-                win_rate = result.performance_metrics.get('win_rate_pct', 0.0)
-                profit_factor = result.performance_metrics.get('profit_factor', 0.0)
-                total_trades = result.performance_metrics.get('total_trades', 0)
+                result.performance_metrics.get('max_drawdown_pct', 0.0)
+                result.performance_metrics.get('win_rate_pct', 0.0)
+                result.performance_metrics.get('profit_factor', 0.0)
+                result.performance_metrics.get('total_trades', 0)
             else:
-                total_return = result.performance_metrics.total_return_pct
+                result.performance_metrics.total_return_pct
                 sharpe_ratio = result.performance_metrics.sharpe_ratio
-                max_drawdown = result.performance_metrics.max_drawdown_pct
-                win_rate = result.performance_metrics.win_rate_pct
-                profit_factor = result.performance_metrics.profit_factor
-                total_trades = result.performance_metrics.total_trades
+                result.performance_metrics.max_drawdown_pct
+                result.performance_metrics.win_rate_pct
+                result.performance_metrics.profit_factor
+                result.performance_metrics.total_trades
         elif hasattr(result, 'trading_stats') and result.trading_stats:
             # Handle StrategyTestResult with trading_stats (could be dict or object)
             if isinstance(result.trading_stats, dict):
-                total_return = result.trading_stats.get('total_return_pct', 0.0)
+                result.trading_stats.get('total_return_pct', 0.0)
                 sharpe_ratio = result.trading_stats.get('sharpe_ratio', 0.0)
-                max_drawdown = result.trading_stats.get('max_drawdown_pct', 0.0)
-                win_rate = result.trading_stats.get('win_rate_pct', 0.0)
-                profit_factor = result.trading_stats.get('profit_factor', 0.0)
-                total_trades = result.trading_stats.get('total_trades', 0)
+                result.trading_stats.get('max_drawdown_pct', 0.0)
+                result.trading_stats.get('win_rate_pct', 0.0)
+                result.trading_stats.get('profit_factor', 0.0)
+                result.trading_stats.get('total_trades', 0)
             else:
-                total_return = result.trading_stats.total_return_pct
+                result.trading_stats.total_return_pct
                 sharpe_ratio = result.trading_stats.sharpe_ratio
-                max_drawdown = result.trading_stats.max_drawdown_pct
-                win_rate = result.trading_stats.win_rate_pct
-                profit_factor = result.trading_stats.profit_factor
-                total_trades = result.trading_stats.total_trades
+                result.trading_stats.max_drawdown_pct
+                result.trading_stats.win_rate_pct
+                result.trading_stats.profit_factor
+                result.trading_stats.total_trades
         else:
             # Fallback for unknown types
-            total_return = 0.0
             sharpe_ratio = 0.0
-            max_drawdown = 0.0
-            win_rate = 0.0
-            profit_factor = 0.0
-            total_trades = 0
         
         # Grade the result
         if sharpe_ratio > 1.0:

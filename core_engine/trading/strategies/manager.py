@@ -1218,7 +1218,7 @@ class StrategyManager(ISystemComponent):
             zscore = market_data.get('zscore', 0)
             bb_position = market_data.get('bb_position', 0.5)
             price = market_data.get('close', market_data.get('price', 0))
-            volume_ratio = market_data.get('volume_ratio', 1.0)
+            market_data.get('volume_ratio', 1.0)
             
             # Position awareness
             has_position = current_position.get('shares', 0) != 0
@@ -1699,7 +1699,7 @@ class StrategyManager(ISystemComponent):
             self.logger.info(f"📡 Signal generated: {signal_data.get('symbol', 'unknown')}")
             
             # Process signal data
-            result = self.process_signals([signal_data])
+            self.process_signals([signal_data])
             
             # Notify registered callbacks
             if hasattr(self, 'signal_callbacks'):

@@ -266,7 +266,7 @@ class AnalyticsEngine:
         
         # Group trades into round trips (simplified)
         # For now, just calculate basic trade stats
-        trade_values = [t['value'] for t in trades]
+        [t['value'] for t in trades]
         buy_trades = [t for t in trades if t['side'].upper() == 'BUY']
         sell_trades = [t for t in trades if t['side'].upper() == 'SELL']
         

@@ -12,8 +12,7 @@ Version: 1.0.0
 """
 
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+from typing import List
 
 # Import strategy-specific configs
 from core_engine.trading.strategies.implementations.statistical_arbitrage.enhanced_statistical_arbitrage import (

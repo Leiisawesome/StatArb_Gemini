@@ -13,8 +13,6 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tests.strategy_assessment.strategy_tester import ComprehensiveStrategyTester
-from tests.strategy_assessment.strategy_config_factory import StrategyConfigFactory
-from core_engine.data.manager import ClickHouseDataConfig
 
 # Configure logging
 logging.basicConfig(

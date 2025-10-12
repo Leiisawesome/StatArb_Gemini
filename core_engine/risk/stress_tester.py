@@ -5,7 +5,6 @@ Advanced stress testing framework with scenario analysis and portfolio impact as
 
 import logging
 import threading
-import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -13,8 +12,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
-from scipy import stats
-from scipy.optimize import minimize
 
 logger = logging.getLogger(__name__)
 
@@ -385,10 +382,10 @@ class StressTester:
         original_value = position.get('market_value', 0)
         
         # Get position characteristics
-        asset_type = position.get('asset_type', 'EQUITY')
-        sector = position.get('sector', '')
-        region = position.get('region', '')
-        currency = position.get('currency', 'USD')
+        position.get('asset_type', 'EQUITY')
+        position.get('sector', '')
+        position.get('region', '')
+        position.get('currency', 'USD')
         
         # Calculate aggregate shock for this position
         total_shock = 0.0

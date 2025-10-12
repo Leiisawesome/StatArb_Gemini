@@ -22,7 +22,7 @@ import warnings
 from collections import deque
 
 # Import strategy components
-from .strategy_engine import BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition, StrategyMetrics
+from .strategy_engine import BaseStrategy, StrategyConfig
 try:
     from .strategy_manager import StrategyTemplate, StrategyDeployment
 except ImportError:

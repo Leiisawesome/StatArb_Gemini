@@ -28,10 +28,11 @@ from enum import Enum
 
 # Leverage existing high-quality execution components
 # Import core_engine types instead of core_structure
-from .type_definitions.orders import Order, OrderType, OrderStatus, OrderSide
-from .type_definitions.broker import (
-    AdvancedOrderManager, ExecutionResult, ExecutionParameters
-)
+from core_engine.type_definitions.orders import Order, OrderType, OrderSide
+# Note: Advanced components to be integrated later
+# from core_engine.type_definitions.broker import (
+#     AdvancedOrderManager, ExecutionResult, ExecutionParameters
+# )
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ class ExecutionEngine:
         self.monitoring_task: Optional[asyncio.Task] = None
         
         # Leverage existing advanced order manager
-        self.advanced_order_manager: Optional[AdvancedOrderManager] = None
+        self.advanced_order_manager: Optional[Any] = None
         
         logger.info("⚡ Execution Engine (ACTION) initialized")
     
@@ -161,9 +162,9 @@ class ExecutionEngine:
         try:
             logger.info("🔄 Initializing Execution Engine (ACTION)...")
             
-            # Initialize advanced order manager
-            self.advanced_order_manager = AdvancedOrderManager()
-            await self.advanced_order_manager.initialize()
+            # Initialize advanced order manager (to be implemented)
+            # self.advanced_order_manager = AdvancedOrderManager()
+            # await self.advanced_order_manager.initialize()
             
             # Initialize broker connections
             await self._initialize_broker_connections()
@@ -265,15 +266,19 @@ class ExecutionEngine:
             # Determine broker
             broker = await self._determine_broker(execution_request)
             
+            # Convert side string to OrderSide enum if needed
+            order_side = execution_request.side
+            if isinstance(order_side, str):
+                order_side = OrderSide[order_side.upper()]
+            
             # Create order
             order = Order(
                 order_id=execution_id,
                 symbol=execution_request.symbol,
                 quantity=execution_request.quantity,
                 order_type=execution_request.order_type,
-                side=execution_request.side,
-                price=execution_request.price,
-                time_in_force=execution_request.time_in_force
+                side=order_side,
+                price=execution_request.price
             )
             
             # Execute through broker
@@ -391,27 +396,28 @@ class ExecutionEngine:
     async def _execute_through_broker(self, order: Order, broker: str) -> Dict[str, Any]:
         """Execute order through specified broker"""
         try:
-            # Use advanced order manager for execution
+            # Use advanced order manager for execution (to be implemented)
             if self.advanced_order_manager:
-                execution_params = ExecutionParameters(
-                    symbol=order.symbol,
-                    quantity=order.quantity,
-                    side=order.side,
-                    order_type=order.order_type,
-                    price=order.price,
-                    time_in_force=order.time_in_force
-                )
-                
-                result = await self.advanced_order_manager.execute_order(execution_params)
-                
-                return {
-                    'status': 'filled' if result.success else 'failed',
-                    'executed_quantity': result.executed_quantity if result.success else 0,
-                    'average_price': result.average_price if result.success else 0,
-                    'commission': result.commission if result.success else 0,
-                    'fills': result.fills if result.success else [],
-                    'error_message': result.error_message if not result.success else None
-                }
+                # execution_params = ExecutionParameters(
+                #     symbol=order.symbol,
+                #     quantity=order.quantity,
+                #     side=order.side,
+                #     order_type=order.order_type,
+                #     price=order.price,
+                #     time_in_force=order.time_in_force
+                # )
+                # 
+                # result = await self.advanced_order_manager.execute_order(execution_params)
+                # 
+                # return {
+                #     'status': 'filled' if result.success else 'failed',
+                #     'executed_quantity': result.executed_quantity if result.success else 0,
+                #     'average_price': result.average_price if result.success else 0,
+                #     'commission': result.commission if result.success else 0,
+                #     'fills': result.fills if result.success else [],
+                #     'error_message': result.error_message if not result.success else None
+                # }
+                pass
             
             # Fallback mock execution
             return await self._mock_execution(order)

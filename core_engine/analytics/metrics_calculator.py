@@ -15,7 +15,6 @@ from enum import Enum
 from collections import defaultdict
 from abc import ABC, abstractmethod
 from scipy import stats
-from scipy.optimize import minimize
 import warnings
 
 # Import ISystemComponent for orchestrator integration

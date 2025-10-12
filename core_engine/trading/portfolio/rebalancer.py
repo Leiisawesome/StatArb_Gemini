@@ -9,8 +9,8 @@ from decimal import Decimal
 from enum import Enum
 import logging
 
-from .position_manager import Position, PositionType, PositionManager
-from .allocation_engine import AllocationEngine, AllocationRequest, AllocationResult
+from .position_manager import PositionManager
+from .allocation_engine import AllocationEngine
 
 class RebalanceFrequency(Enum):
     """Rebalancing frequency"""
@@ -352,7 +352,7 @@ class PortfolioRebalancer:
         actions = []
         
         for target in targets:
-            allocation_diff = target.target_allocation - target.current_allocation
+            target.target_allocation - target.current_allocation
             
             # Get current position
             positions = self.position_manager.get_positions_by_symbol(target.symbol)

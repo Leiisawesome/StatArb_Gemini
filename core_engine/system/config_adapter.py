@@ -79,15 +79,15 @@ def safe_component_init(component_class, config_dict: Dict[str, Any]):
             try:
                 adapted_config = adapt_config(config_dict)
                 return component_class(adapted_config)
-            except Exception as e2:
+            except Exception:
                 # Try with None (many components accept None and use defaults)
                 try:
                     return component_class(None)
-                except Exception as e3:
+                except Exception:
                     # Try with empty config
                     try:
                         return component_class({})
-                    except Exception as e4:
+                    except Exception:
                         # Last resort - try with GenericConfig
                         return component_class(GenericConfig())
         else:

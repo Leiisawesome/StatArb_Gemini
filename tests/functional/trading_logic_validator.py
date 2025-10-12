@@ -5,11 +5,9 @@ This module validates the business logic and trading strategies using real marke
 to ensure the trading algorithms work as intended.
 """
 
-import asyncio
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Any
 from dataclasses import dataclass
 import logging
 

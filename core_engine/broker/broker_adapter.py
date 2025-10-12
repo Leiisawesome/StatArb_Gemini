@@ -9,8 +9,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import pandas as pd
-import numpy as np
 import time
 from collections import defaultdict
 from abc import ABC, abstractmethod
@@ -334,10 +332,10 @@ class InteractiveBrokersAdapter(BrokerAdapterInterface):
         """Submit order to Interactive Brokers"""
         try:
             # Convert to IB order format
-            ib_order = self._convert_to_ib_order(order)
+            self._convert_to_ib_order(order)
             
             # Generate IB contract
-            ib_contract = self._create_ib_contract(order.symbol)
+            self._create_ib_contract(order.symbol)
             
             # Submit order (mock implementation)
             request_id = self._get_next_request_id()
@@ -367,7 +365,7 @@ class InteractiveBrokersAdapter(BrokerAdapterInterface):
                 logger.warning(f"Order {order_id} not found")
                 return False
             
-            ib_order_id = self._orders[order_id]['ib_order_id']
+            self._orders[order_id]['ib_order_id']
             
             # In real implementation:
             # self._client.cancelOrder(ib_order_id)
@@ -397,9 +395,9 @@ class InteractiveBrokersAdapter(BrokerAdapterInterface):
                     setattr(standard_order, key, value)
             
             # Convert to IB order format
-            ib_order = self._convert_to_ib_order(standard_order)
-            ib_contract = self._create_ib_contract(standard_order.symbol)
-            ib_order_id = order_data['ib_order_id']
+            self._convert_to_ib_order(standard_order)
+            self._create_ib_contract(standard_order.symbol)
+            order_data['ib_order_id']
             
             # In real implementation:
             # self._client.placeOrder(ib_order_id, ib_contract, ib_order)
@@ -629,7 +627,7 @@ class AlpacaAdapter(BrokerAdapterInterface):
         """Submit order to Alpaca"""
         try:
             # Convert to Alpaca order format
-            alpaca_order = self._convert_to_alpaca_order(order)
+            self._convert_to_alpaca_order(order)
             
             # Mock submission
             order_response = {

@@ -20,14 +20,11 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from datetime import datetime
 from typing import Dict, Any
 import logging
 
 # Import testing framework
 from tests.strategy_assessment.strategy_tester import ComprehensiveStrategyTester, StrategyTestConfig
-from tests.strategy_assessment.strategy_config_factory import StrategyConfigFactory
-from core_engine.type_definitions.strategy import StrategyType
 
 # Configure logging
 logging.basicConfig(

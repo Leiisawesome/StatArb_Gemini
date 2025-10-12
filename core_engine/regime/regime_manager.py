@@ -19,20 +19,18 @@ import json
 
 # Lazy import for heavy classifier module (33.85MB sklearn dependency)
 if TYPE_CHECKING:
-    from .regime_classifier import (RegimeClassifier, RegimeClassification, 
-                                  ClassificationConfig, ModelPerformance)
+    from .regime_classifier import (RegimeClassification, ClassificationConfig)
 
 # Import all regime components
 from .regime_detector import (RegimeDetector, RegimeType, RegimeDetection, 
-                             DetectionMethod, RegimeDetectionConfig)
+                             RegimeDetectionConfig)
 from .market_regime_analyzer import (MarketRegimeAnalyzer, CrossAssetRegime, 
-                                   RegimeAnalysisConfig, AssetRegimeProfile)
+                                   RegimeAnalysisConfig)
 # Lazy import: regime_classifier (33.85MB sklearn dependency) - import only when needed
 from .regime_indicators import (RegimeIndicatorEngine, RegimeIndicator, 
                               TransitionSignal, RegimeStrengthMeasure, IndicatorConfig)
 from .regime_transition_manager import (RegimeTransitionManager, TransitionPrediction, 
-                                      RebalancingRecommendation, TransitionMonitoring,
-                                      TransitionPredictionConfig)
+                                      RebalancingRecommendation, TransitionPredictionConfig)
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -1019,7 +1017,7 @@ class RegimeManager:
         try:
             adjustments = {}
             regime = regime_state.current_regime
-            risk_factor = regime_state.risk_adjustment_factor
+            regime_state.risk_adjustment_factor
             
             # Risk adjustments by regime
             if regime in [RegimeType.CRISIS, RegimeType.HIGH_VOLATILITY]:

@@ -7,7 +7,6 @@ import logging
 import threading
 import asyncio
 import numpy as np
-import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -966,7 +965,6 @@ class DataValidator:
         """Generate validation summary message"""
         
         failed_checks = []
-        warning_checks = []
         
         for check, result in validation_results.items():
             if not result.get('passed', True):

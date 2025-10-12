@@ -30,7 +30,6 @@ from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
-import pandas as pd
 import numpy as np
 from collections import defaultdict
 import warnings
@@ -455,10 +454,22 @@ class AdaptiveAlgorithm(IExecutionAlgorithm):
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.test_mode = False
+        self._test_mode = False
         self.impact_model = MarketImpactModel()
         self.twap = TWAPAlgorithm(config)
         self.market = MarketAlgorithm(config)
+    
+    @property
+    def test_mode(self) -> bool:
+        """Get test mode"""
+        return self._test_mode
+    
+    @test_mode.setter
+    def test_mode(self, value: bool):
+        """Set test mode and propagate to sub-algorithms"""
+        self._test_mode = value
+        self.twap.test_mode = value
+        self.market.test_mode = value
     
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute adaptive strategy"""

@@ -20,9 +20,6 @@ import warnings
 # Import plotting libraries with fallbacks
 try:
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    from matplotlib.backends.backend_pdf import PdfPages
-    import seaborn as sns
     PLOTTING_AVAILABLE = True
 except ImportError:
     PLOTTING_AVAILABLE = False
@@ -31,8 +28,6 @@ except ImportError:
 try:
     import plotly.graph_objects as go
     import plotly.express as px
-    from plotly.subplots import make_subplots
-    import plotly.offline as pyo
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False

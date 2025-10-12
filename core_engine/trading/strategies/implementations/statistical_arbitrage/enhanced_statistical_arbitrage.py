@@ -39,18 +39,14 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-from scipy import stats
 from statsmodels.tsa.stattools import coint, adfuller
-from statsmodels.tsa.vector_ar.vecm import VECM
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
 import warnings
 
 # Import enhanced base strategy
-from ...base_strategy_enhanced import EnhancedBaseStrategy, StrategyPerformanceMetrics
+from ...base_strategy_enhanced import EnhancedBaseStrategy
 from ...strategy_engine import (
-    StrategyConfig, StrategySignal, StrategyPosition,
-    SignalType, StrategyType, StrategyState
+    StrategyConfig, StrategySignal, SignalType
 )
 
 warnings.filterwarnings('ignore')

@@ -14,11 +14,9 @@ from enum import Enum
 import time
 from collections import defaultdict, deque
 from abc import ABC, abstractmethod
-from scipy import stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -797,7 +795,7 @@ class AlphaResearcher:
             try:
                 # Prepare training data
                 train_start_idx = max(0, i - training_period)
-                train_end_idx = i + training_period
+                i + training_period
                 
                 train_data = {}
                 train_returns = {}

@@ -13,14 +13,10 @@ Tests the trading and execution components:
 """
 
 import asyncio
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 
@@ -30,7 +26,7 @@ sys.path.insert(0, str(project_root))
 
 # Core engine imports
 from core_engine.trading.engine import EnhancedTradingEngine
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine, ExecutionRequest, ExecutionAlgorithm, ExecutionUrgency
+from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
 from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
 from core_engine.trading.order_manager import OrderManager
 # Simplified imports - using available components
@@ -45,7 +41,7 @@ from core_engine.trading.order_manager import OrderManager
 # from core_engine.trading.execution.execution_auditor import ExecutionAuditor
 # from core_engine.trading.execution.execution_controller import ExecutionController
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
-from core_engine.system.central_risk_manager import CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
+from core_engine.system.central_risk_manager import CentralRiskManager
 
 logger = logging.getLogger(__name__)
 

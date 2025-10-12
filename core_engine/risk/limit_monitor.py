@@ -6,7 +6,6 @@ Real-time risk limit monitoring and alerting system with comprehensive limit typ
 import logging
 import threading
 import asyncio
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union, Any, Callable, Tuple
 from dataclasses import dataclass, field

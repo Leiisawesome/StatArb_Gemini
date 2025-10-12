@@ -10,21 +10,18 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union, Any, Tuple, Set, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import pandas as pd
-import numpy as np
 from collections import defaultdict
 import uuid
 import warnings
 
 from .broker_adapter import (
-    BrokerAdapter, BrokerCredentials, BrokerType, ConnectionStatus,
-    StandardOrder, StandardExecution, StandardPosition, StandardAccount,
+    BrokerAdapter, BrokerCredentials, BrokerType, StandardOrder,
     OrderAction, OrderType, TimeInForce
 )
 from .connection_manager import ConnectionManager, ConnectionConfig, ConnectionPriority
-from .protocol_handler import ProtocolHandler, ProtocolConfig, ProtocolType, MessageType
-from .message_processor import MessageProcessor, ProcessingConfig, ProcessingPriority
-from .session_manager import SessionManager, SessionConfig, SessionType, AuthenticationRequest
+from .protocol_handler import ProtocolHandler
+from .message_processor import MessageProcessor, ProcessingConfig
+from .session_manager import SessionManager, SessionConfig
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -780,7 +777,7 @@ class BrokerManager:
                 logger.warning(f"Order {request_id} not found in pending orders")
                 return False
             
-            order_request = self._pending_orders[request_id]
+            self._pending_orders[request_id]
             
             # Find and cancel with all relevant brokers
             success_count = 0

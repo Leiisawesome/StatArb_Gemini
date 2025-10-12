@@ -30,7 +30,7 @@ Usage:
     results = await stress_suite.run_comprehensive_stress_test(target_system, config)
 """
 
-from .latency_testing import (
+from .benchmarks.latency_testing import (
     LatencyProfiler,
     ComponentLatencyTester,
     LatencyMeasurement,
@@ -39,7 +39,7 @@ from .latency_testing import (
     measure_latency
 )
 
-from .memory_profiling import (
+from .profiling.memory_profiling import (
     MemoryProfiler,
     ComponentMemoryTester,
     MemorySnapshot,
@@ -48,7 +48,7 @@ from .memory_profiling import (
     MemoryMonitoringContext
 )
 
-from .throughput_benchmarking import (
+from .benchmarks.throughput_benchmarking import (
     ThroughputBenchmarker,
     ComponentThroughputTester,
     ThroughputMeasurement,
@@ -56,13 +56,13 @@ from .throughput_benchmarking import (
     LoadTestConfiguration
 )
 
-from .performance_test_suite import (
+from .tests.test_performance_suite import (
     PerformanceTestSuite,
     run_performance_tests
 )
 
 # Phase 2: Stress Testing & Failure Scenarios Framework
-from .stress_testing import (
+from .stress_tests.stress_testing import (
     StressTestSuite,
     StressTestConfiguration,
     StressTestResult,
@@ -74,25 +74,25 @@ from .stress_testing import (
     FailureMode
 )
 
-from .network_failure_testing import (
+from .stress_tests.network_failure_testing import (
     NetworkFailureTester,
     ConnectionResilienceTester,
     LatencySpikeTester
 )
 
-from .data_corruption_testing import (
+from .stress_tests.data_corruption_testing import (
     DataCorruptionTester,
     DataValidationTester,
     RecoveryMechanismTester
 )
 
-from .memory_pressure_testing import (
+from .stress_tests.memory_pressure_testing import (
     MemoryPressureTester,
     ResourceExhaustionTester,
     GarbageCollectionTester
 )
 
-from .phase2_stress_test_suite import (
+from .tests.test_stress_suite import (
     Phase2StressTestSuite,
     Phase2TestConfiguration,
     Phase2TestResults

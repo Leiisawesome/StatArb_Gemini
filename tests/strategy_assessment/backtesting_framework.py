@@ -20,11 +20,10 @@ Date: October 2025
 """
 
 import logging
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from enum import Enum
 import warnings
 from pathlib import Path
@@ -462,13 +461,13 @@ class ProfessionalBacktester:
                 if position['side'] == 'LONG':
                     # Long positions: value increases when price goes up
                     position_value = current_price * position['quantity']
-                    unrealized_pnl = (current_price - position['entry_price']) * position['quantity']
+                    (current_price - position['entry_price']) * position['quantity']
                     mtm_value += position_value
                 elif position['side'] == 'SHORT':
                     # Short positions: we owe the current value, gain when price goes down
                     # The liability is the current market value we'd need to buy back
                     position_liability = current_price * position['quantity']
-                    unrealized_pnl = (position['entry_price'] - current_price) * position['quantity']
+                    (position['entry_price'] - current_price) * position['quantity']
                     # For shorts: subtract the liability from capital (we owe this)
                     mtm_value -= position_liability
         
@@ -538,7 +537,6 @@ class ProfessionalBacktester:
         # Calculate annualized return
         if len(self.timestamps) >= 2:
             # Convert timestamps to datetime if needed
-            from datetime import datetime
             import pandas as pd
             
             start_ts = self.timestamps[0]
@@ -580,7 +578,7 @@ class ProfessionalBacktester:
         
         # Risk-adjusted metrics
         risk_free_rate = 0.02  # 2% annual
-        excess_returns = returns - (risk_free_rate / 252)
+        returns - (risk_free_rate / 252)
         
         if metrics.volatility > 0:
             metrics.sharpe_ratio = (metrics.annualized_return - risk_free_rate) / metrics.volatility

@@ -57,7 +57,7 @@ except ImportError:
 # Import existing strategy types
 from .strategy_engine import (
     StrategyConfig, StrategySignal, StrategyPosition,
-    StrategyMetrics, SignalType, StrategyType, StrategyState
+    SignalType, StrategyType, StrategyState
 )
 
 logger = logging.getLogger(__name__)

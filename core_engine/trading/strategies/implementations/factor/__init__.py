@@ -3,7 +3,7 @@ Factor Trading Strategies
 Advanced factor-based strategy implementations.
 """
 
-from .enhanced_factor import EnhancedFactorStrategy, FactorConfig
+from .enhanced_factor import FactorConfig
 
 __all__ = [
     'AdvancedFactorStrategy',

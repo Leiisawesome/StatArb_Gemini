@@ -7,7 +7,7 @@ import pytest
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, Generator, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator
 from unittest.mock import Mock, AsyncMock
 
 # Core engine imports
@@ -18,10 +18,19 @@ from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.system.central_risk_manager import CentralRiskManager
 
 # Performance testing imports
-from tests.performance.latency_testing import LatencyProfiler
-from tests.performance.memory_profiling import MemoryProfiler
-from tests.performance.throughput_benchmarking import ThroughputBenchmarker
-from tests.performance.performance_test_suite import PerformanceTestSuite
+from tests.performance.benchmarks.latency_testing import LatencyProfiler
+from tests.performance.profiling.memory_profiling import MemoryProfiler
+from tests.performance.benchmarks.throughput_benchmarking import ThroughputBenchmarker
+from tests.performance.tests.test_performance_suite import PerformanceTestSuite
+
+# Import centralized fixtures
+# Note: Only import fixtures that don't have dependency issues
+pytest_plugins = [
+    'tests.fixtures.core_fixtures',
+    'tests.fixtures.data_fixtures',
+    # 'tests.fixtures.integration_fixtures',  # Has import dependencies
+    # 'tests.fixtures.strategy_fixtures',  # Has import dependencies
+]
 
 # Configure logging for tests
 logging.basicConfig(level=logging.INFO)
@@ -186,7 +195,7 @@ def test_components(test_system, test_orchestrator, mock_data_manager, mock_regi
 @pytest.fixture(scope="function")
 def performance_test_runner(test_configuration):
     """Performance test runner for comprehensive testing"""
-    from tests.performance.test_runner import PerformanceTestRunner
+    from tests.performance.runners.test_runner import PerformanceTestRunner
     return PerformanceTestRunner(test_configuration)
 
 # Test data generators
@@ -297,30 +306,30 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.slow)
 
 # Test reporting configuration (optional - requires pytest-html plugin)
-try:
-    import pytest_html
-    def pytest_html_report_title(report):
-        """Customize HTML report title"""
-        report.title = "StatArb_Gemini Core Engine Test Report"
+# Commented out because pytest-html is not installed
+# try:
+#     def pytest_html_report_title(report):
+#         """Customize HTML report title"""
+#         report.title = "StatArb_Gemini Core Engine Test Report"
 
-    def pytest_html_results_table_header(cells):
-        """Customize HTML report table header"""
-        from pytest_html import html
-        cells.pop()  # Remove the default 'Links' column
-        cells.insert(0, html.th('Test Name'))
-        cells.insert(1, html.th('Duration'))
-        cells.insert(2, html.th('Status'))
+#     def pytest_html_results_table_header(cells):
+#         """Customize HTML report table header"""
+#         from pytest_html import html
+#         cells.pop()  # Remove the default 'Links' column
+#         cells.insert(0, html.th('Test Name'))
+#         cells.insert(1, html.th('Duration'))
+#         cells.insert(2, html.th('Status'))
 
-    def pytest_html_results_table_row(report, cells):
-        """Customize HTML report table rows"""
-        from pytest_html import html
-        cells.pop()  # Remove the default 'Links' column
-        cells.insert(0, html.td(report.test_name))
-        cells.insert(1, html.td(f"{report.duration:.2f}s"))
-        cells.insert(2, html.td('PASS' if report.passed else 'FAIL'))
-except ImportError:
-    # pytest-html not installed, skip HTML report customization
-    pass
+#     def pytest_html_results_table_row(report, cells):
+#         """Customize HTML report table rows"""
+#         from pytest_html import html
+#         cells.pop()  # Remove the default 'Links' column
+#         cells.insert(0, html.td(report.test_name))
+#         cells.insert(1, html.td(f"{report.duration:.2f}s"))
+#         cells.insert(2, html.td('PASS' if report.passed else 'FAIL'))
+# except ImportError:
+#     # pytest-html not installed, skip HTML report customization
+#     pass
 
 # Test session configuration
 @pytest.fixture(scope="session", autouse=True)

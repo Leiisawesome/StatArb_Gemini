@@ -240,7 +240,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Initialize base data manager (for interface compatibility)
         try:
             super().__init__(base_config)
-        except Exception as e:
+        except Exception:
             # If inheritance fails, just set up our own attributes
             self.provider = None
             self._data_cache = {}
@@ -858,7 +858,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if not symbol_df.empty:
                 # Use asyncio.create_task only if there's a running event loop
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()
                     asyncio.create_task(self._notify_latest_data_point(symbol, symbol_df))
                 except RuntimeError:
                     # No event loop running, skip async notification

@@ -23,25 +23,15 @@ compliance across all trading operations and regulatory requirements.
 
 import asyncio
 import logging
-import numpy as np
-import pandas as pd
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional
 from enum import Enum
 import json
-import hashlib
 import uuid
-from pathlib import Path
 
 # Core engine imports
 from core_engine.system.integration_manager import SystemIntegrationManager
-from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.data.manager import ClickHouseDataManager
-from core_engine.trading.strategies.manager import StrategyManager
-from core_engine.trading.engine import EnhancedTradingEngine
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
 
 
 class ComplianceRegime(Enum):
@@ -513,8 +503,8 @@ class RegulatoryComplianceEngine:
         
         try:
             # Get trading components
-            trading_engine = target_system.get_component("trading_engine")
-            execution_engine = target_system.get_component("execution_engine")
+            target_system.get_component("trading_engine")
+            target_system.get_component("execution_engine")
             
             # In real implementation, would halt trading
             self.logger.critical("Trading halt would be executed here")

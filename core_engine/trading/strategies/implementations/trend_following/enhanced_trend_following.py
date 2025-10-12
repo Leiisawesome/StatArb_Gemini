@@ -39,10 +39,9 @@ from enum import Enum
 import logging
 
 # Import enhanced base strategy
-from ...base_strategy_enhanced import EnhancedBaseStrategy, StrategyPerformanceMetrics
+from ...base_strategy_enhanced import EnhancedBaseStrategy
 from ...strategy_engine import (
-    StrategyConfig, StrategySignal, StrategyPosition,
-    SignalType, StrategyType, StrategyState
+    StrategyConfig, StrategySignal, SignalType
 )
 
 logger = logging.getLogger(__name__)

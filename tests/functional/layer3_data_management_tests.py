@@ -10,14 +10,12 @@ Tests the data management and processing components:
 """
 
 import asyncio
-import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 

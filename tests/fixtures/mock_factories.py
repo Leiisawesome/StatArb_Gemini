@@ -6,7 +6,7 @@ Factories for creating mock objects and test doubles for all core components.
 """
 
 import asyncio
-from unittest.mock import Mock, AsyncMock, MagicMock
+from unittest.mock import Mock, AsyncMock
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 

@@ -25,16 +25,14 @@ for regulatory and internal risk management requirements.
 
 import asyncio
 import logging
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple, Union, Callable
+from typing import Dict, List, Any, Optional, Callable
 from enum import Enum
 import json
 import uuid
 from collections import defaultdict, deque
-import math
 
 
 class RiskLimitType(Enum):
@@ -631,8 +629,8 @@ class RiskComplianceMonitor:
         self.logger.critical(f"🛑 EXECUTING TRADING HALT for violation: {violation.violation_id}")
         
         if target_system:
-            trading_engine = target_system.get_component("trading_engine")
-            execution_engine = target_system.get_component("execution_engine")
+            target_system.get_component("trading_engine")
+            target_system.get_component("execution_engine")
             
             # In real implementation, would halt trading
             self.logger.critical("Trading halt would be executed here")

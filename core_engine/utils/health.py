@@ -14,7 +14,6 @@ from datetime import datetime
 from enum import Enum
 
 from .logging import get_logger
-from .exceptions import ErrorContext, handle_error
 
 logger = get_logger("health")
 

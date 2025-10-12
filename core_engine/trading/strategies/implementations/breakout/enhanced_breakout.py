@@ -16,7 +16,6 @@ Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Phase 2.3 Enhancement)
 """
 
-import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any
@@ -24,10 +23,9 @@ from dataclasses import dataclass, field
 import logging
 
 # Import enhanced base strategy
-from ...base_strategy_enhanced import EnhancedBaseStrategy, StrategyPerformanceMetrics
+from ...base_strategy_enhanced import EnhancedBaseStrategy
 from ...strategy_engine import (
-    StrategyConfig, StrategySignal, StrategyPosition,
-    SignalType, StrategyType, StrategyState
+    StrategyConfig, StrategySignal, SignalType
 )
 
 logger = logging.getLogger(__name__)

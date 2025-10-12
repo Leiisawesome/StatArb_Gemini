@@ -208,7 +208,7 @@ class PaperBroker(BrokerInterface):
             
             return True
             
-        except Exception as e:
+        except Exception:
             order.status = OrderStatus.REJECTED
             return False
     

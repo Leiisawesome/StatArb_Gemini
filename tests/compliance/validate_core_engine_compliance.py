@@ -25,20 +25,12 @@ standards and is ready for production deployment in regulated environments.
 import asyncio
 import logging
 import json
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 
 # Core engine imports
 from core_engine.system.integration_manager import SystemIntegrationManager, SystemConfiguration
-from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.data.manager import ClickHouseDataManager
-from core_engine.trading.strategies.manager import StrategyManager
-from core_engine.trading.engine import EnhancedTradingEngine
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
 
 # Phase 4 compliance modules
 from tests.compliance.phase4_compliance_framework import ComplianceTestSuite, RegulatoryComplianceEngine

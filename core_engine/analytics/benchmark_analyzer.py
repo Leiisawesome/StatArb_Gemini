@@ -13,8 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 from scipy import stats
-from scipy.optimize import minimize
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 
 warnings.filterwarnings('ignore')

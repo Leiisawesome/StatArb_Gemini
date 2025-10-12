@@ -14,7 +14,6 @@ from enum import Enum
 import time
 from collections import deque
 from scipy import stats
-from scipy.optimize import minimize
 
 logger = logging.getLogger(__name__)
 

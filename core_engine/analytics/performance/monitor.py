@@ -366,7 +366,6 @@ class PerformanceMonitor:
     
     async def get_component_metrics(self, component: str, metric_type: Optional[MetricType] = None) -> List[PerformanceMetric]:
         """Get metrics for specific component"""
-        all_metrics = []
         
         if metric_type:
             metrics_list = self.metrics.get(metric_type.value, [])

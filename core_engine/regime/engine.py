@@ -14,13 +14,10 @@ Version: 1.0.0 (Clean Production)
 
 import logging
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
 from dataclasses import dataclass
 from enum import Enum
 import threading

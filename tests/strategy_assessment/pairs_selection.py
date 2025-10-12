@@ -17,11 +17,10 @@ Version: 1.0.0
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import logging
-from scipy import stats
 from statsmodels.tsa.stattools import coint, adfuller
 from sklearn.linear_model import LinearRegression
 import warnings
@@ -421,7 +420,6 @@ class PairsSelector:
         """Load pairs from JSON file"""
         
         import json
-        from pathlib import Path
         
         with open(filename, 'r') as f:
             data = json.load(f)

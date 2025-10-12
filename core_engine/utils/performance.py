@@ -21,7 +21,6 @@ import pstats
 import io
 
 from .logging import get_logger, log_performance_metric
-from .exceptions import ErrorContext
 
 logger = get_logger("performance")
 

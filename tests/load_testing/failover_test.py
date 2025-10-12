@@ -20,7 +20,7 @@ Target:
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 import random

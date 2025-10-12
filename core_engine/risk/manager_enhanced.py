@@ -7,7 +7,6 @@ import logging
 import threading
 import asyncio
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
@@ -16,10 +15,10 @@ from collections import deque
 
 # Import risk components
 from .exposure_calculator import ExposureCalculator, ExposureType, ExposureBreakdown
-from .var_calculator import VarCalculator, VarMethod, RiskMetrics
-from .stress_tester import StressTester, StressTestType, PortfolioStressResult
+from .var_calculator import VarCalculator, RiskMetrics
+from .stress_tester import StressTester, PortfolioStressResult
 from .limit_monitor import LimitMonitor, RiskLimit, LimitBreach, AlertSeverity
-from .correlation_analyzer import CorrelationAnalyzer, CorrelationMethod, CorrelationMatrix
+from .correlation_analyzer import CorrelationAnalyzer, CorrelationMatrix
 
 logger = logging.getLogger(__name__)
 

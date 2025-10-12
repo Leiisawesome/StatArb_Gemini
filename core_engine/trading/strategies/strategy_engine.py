@@ -493,7 +493,7 @@ class BaseStrategy(ABC):
                 self._metrics.last_signal_time = max(s.timestamp for s in self._signals)
             
             if self._start_time:
-                uptime = (datetime.now() - self._start_time).total_seconds()
+                (datetime.now() - self._start_time).total_seconds()
                 if self.state == StrategyState.ACTIVE:
                     self._metrics.strategy_uptime = 100.0
                 else:

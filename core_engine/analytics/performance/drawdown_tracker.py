@@ -479,7 +479,7 @@ class UnderwaterAnalyzer:
             if underwater_periods:
                 metrics.underwater_periods = underwater_periods
                 
-                underwater_days = [period[1] - period[0] for period in underwater_periods]
+                [period[1] - period[0] for period in underwater_periods]
                 underwater_depths = [abs(period[2]) for period in underwater_periods]
                 
                 metrics.total_underwater_days = sum([p[1] - p[0] for p in underwater_periods])

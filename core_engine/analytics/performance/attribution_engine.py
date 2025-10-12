@@ -463,7 +463,7 @@ class RiskAttributionEngine:
             factor_risk_contrib = {}
             
             # Factor contribution to portfolio variance
-            factor_variance = portfolio_exposures @ factor_covariance @ portfolio_exposures.T
+            portfolio_exposures @ factor_covariance @ portfolio_exposures.T
             
             # Individual factor contributions
             for i, factor_name in enumerate([f"factor_{j}" for j in range(len(portfolio_exposures))]):

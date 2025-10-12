@@ -6,15 +6,13 @@ Unified imports and component registry for the analytics engine
 from .performance_analyzer import (
     PerformanceAnalyzer,
     PerformanceConfig,
-    PerformanceMetrics,
-    RiskMetricsCalculator
+    PerformanceMetrics
 )
 
 from .attribution_analyzer import (
     AttributionAnalyzer,
     AttributionConfig,
-    AttributionResult,
-    SectorAttributionAnalyzer
+    AttributionResult
 )
 
 from .metrics_calculator import (
@@ -31,7 +29,6 @@ from .report_generator import (
     ReportConfig,
     ReportData,
     ReportFormat,
-    ChartConfig,
     ChartType
 )
 

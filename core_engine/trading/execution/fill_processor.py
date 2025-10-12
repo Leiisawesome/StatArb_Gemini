@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
-import numpy as np
 from collections import defaultdict
 import warnings
 
@@ -602,7 +601,7 @@ class PositionManager:
                         closing_quantity,
                         execution.price
                     )
-                    remaining_quantity = quantity_change + closing_quantity
+                    quantity_change + closing_quantity
                     new_avg_cost = execution.price  # New position starts with execution price
             
             # Update positions

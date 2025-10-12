@@ -10,14 +10,12 @@ Tests the core processing components:
 """
 
 import asyncio
-import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 
@@ -31,7 +29,6 @@ from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
-from core_engine.type_definitions.regime import RegimeState, RegimeConfig, RegimeSignal
 
 logger = logging.getLogger(__name__)
 

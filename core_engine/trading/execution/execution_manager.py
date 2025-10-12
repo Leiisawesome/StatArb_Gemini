@@ -10,18 +10,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import pandas as pd
 import numpy as np
 import time
 from collections import defaultdict, deque
 import warnings
 
 # Import execution components
-from .execution_engine import ExecutionEngine, ExecutionRequest, ExecutionSlice, ExecutionResult
-from .order_executor import OrderExecutor, OrderRequest, OrderStatus
-from .trade_executor import TradeExecutor, TradeExecutionRequest, TradeStatus
-from .fill_processor import FillProcessor, TradeExecution, FillStatus
-from .execution_validator import ExecutionValidator, ExecutionContext, ValidationResult
+from .execution_engine import ExecutionEngine
+from .order_executor import OrderExecutor, OrderRequest
+from .trade_executor import TradeExecutor, TradeExecutionRequest
+from .fill_processor import FillProcessor, TradeExecution
+from .execution_validator import ExecutionValidator, ExecutionContext
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -772,7 +771,7 @@ class ExecutionManager:
                 return
             
             status = execution_data['status']
-            context = execution_data['context']
+            execution_data['context']
             
             # Update status to active
             status.overall_status = "ACTIVE"

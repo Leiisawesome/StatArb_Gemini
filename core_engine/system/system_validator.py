@@ -601,8 +601,8 @@ class SystemValidator:
             system_manager = SystemIntegrationManager(invalid_config)
             
             # This should handle errors gracefully
-            init_result = await system_manager.initialize()
-            health = await system_manager.health_check()
+            await system_manager.initialize()
+            await system_manager.health_check()
             await system_manager.stop()
             
             duration = time.time() - start_time
@@ -891,7 +891,7 @@ async def _validate_basic_system(self, config: SystemConfiguration) -> None:
         
         # Test 4: System Status Reporting
         start_time = time.time()
-        status = manager.get_status()
+        manager.get_status()
         duration = time.time() - start_time
         
         component_count = len(manager.components)
@@ -953,8 +953,8 @@ async def _validate_component_integration(self, config: SystemConfiguration) -> 
                 # Test lifecycle
                 await component.initialize()
                 await component.start()
-                health = await component.health_check()
-                status = component.get_status()
+                await component.health_check()
+                component.get_status()
                 await component.stop()
                 
                 duration = time.time() - start_time

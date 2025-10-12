@@ -23,7 +23,7 @@ import argparse
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tests.load_testing.order_generator import (
-    OrderGenerator, OrderGeneratorConfig, OrderPattern, generate_test_orders
+    OrderGenerator, OrderGeneratorConfig, OrderPattern
 )
 from tests.load_testing.performance_monitor import (
     PerformanceMonitor, PerformanceMonitorConfig

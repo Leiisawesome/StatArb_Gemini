@@ -6,14 +6,13 @@ Intelligent routing across multiple execution venues with cost optimization and 
 import logging
 import threading
 import asyncio
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict, deque
 
-from .order_manager import Order, OrderSide, OrderType, OrderStatus
+from .order_manager import Order, OrderType, OrderStatus
 
 logger = logging.getLogger(__name__)
 

@@ -37,14 +37,12 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-from scipy import stats
 from statsmodels.tsa.stattools import coint
 
 # Import enhanced base strategy
-from ...base_strategy_enhanced import EnhancedBaseStrategy, StrategyPerformanceMetrics
+from ...base_strategy_enhanced import EnhancedBaseStrategy
 from ...strategy_engine import (
-    StrategyConfig, StrategySignal, StrategyPosition,
-    SignalType, StrategyType, StrategyState
+    StrategyConfig, StrategySignal, SignalType
 )
 
 logger = logging.getLogger(__name__)

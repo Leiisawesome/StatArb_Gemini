@@ -14,9 +14,7 @@ import warnings
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
-import statsmodels.api as sm
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
-from statsmodels.tsa.stattools import adfuller
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

@@ -15,8 +15,6 @@ import time
 from collections import defaultdict, deque
 from abc import ABC, abstractmethod
 from scipy import stats
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 import warnings
 
 warnings.filterwarnings('ignore')

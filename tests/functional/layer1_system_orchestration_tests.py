@@ -9,14 +9,9 @@ Tests the highest level system orchestration components:
 """
 
 import asyncio
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 
@@ -29,15 +24,8 @@ from core_engine.system.hierarchical_orchestrator import (
     HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
 )
 from core_engine.system.integration_manager import SystemIntegrationManager, SystemConfiguration
-from core_engine.system.interfaces import ISystemComponent
 from core_engine.data.manager import ClickHouseDataManager
 from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.regime.engine import EnhancedRegimeEngine
-from core_engine.trading.strategies.manager import StrategyManager
-from core_engine.trading.engine import EnhancedTradingEngine
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
-from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +195,7 @@ class Layer1SystemOrchestrationTester:
                     })
             
             # Verify all components registered using available methods
-            component_registry = self.orchestrator.component_registry
+            self.orchestrator.component_registry
             successful_registrations = sum(1 for r in registration_results if r['success'])
             
             return successful_registrations == len(components_to_register)

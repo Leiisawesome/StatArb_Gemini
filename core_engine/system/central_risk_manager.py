@@ -24,8 +24,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import pandas as pd
-import numpy as np
 
 # Import the UnifiedExecutionEngine and ISystemComponent
 from .unified_execution_engine import (
@@ -755,6 +753,15 @@ class CentralRiskManager(ISystemComponent):
         """
         
         try:
+            # Check if component is initialized
+            if hasattr(self, '_initialized') and not self._initialized:
+                logger.error(f"🚨 Authorization rejected - Component not initialized: {request.request_id}")
+                return TradingAuthorization(
+                    request_id=request.request_id,
+                    authorization_level=AuthorizationLevel.REJECTED,
+                    rejection_reason="Risk manager not initialized - component in crashed state"
+                )
+            
             # Check emergency mode first
             if self.emergency_mode:
                 logger.warning(f"🚨 Authorization rejected - Emergency mode active: {request.request_id}")
@@ -801,6 +808,14 @@ class CentralRiskManager(ISystemComponent):
         
         try:
             authorization = TradingAuthorization(request_id=request.request_id)
+            
+            # Input validation - reject invalid requests early
+            validation_error = self._validate_request_inputs(request)
+            if validation_error:
+                authorization.authorization_level = AuthorizationLevel.REJECTED
+                authorization.rejection_reason = validation_error
+                logger.warning(f"Request rejected due to invalid input: {validation_error}")
+                return authorization
             
             # Risk impact assessment
             risk_impact = self._calculate_risk_impact(request)
@@ -883,12 +898,27 @@ class CentralRiskManager(ISystemComponent):
                     execution_log=["Authorization validation failed"]
                 )
             
+            # Get original request details for execution
+            original_request = None
+            for req_id, req in self.pending_requests.items():
+                if req.request_id == authorization.request_id:
+                    original_request = req
+                    break
+            
+            if not original_request:
+                logger.error(f"Original request not found for authorization {authorization.authorization_id}")
+                return ExecutionResult(
+                    authorization_id=authorization.authorization_id,
+                    status="rejected",
+                    execution_log=["Original request not found"]
+                )
+            
             # Create execution authorization for UnifiedExecutionEngine
             execution_auth = ExecutionAuthorization(
                 authorization_id=authorization.authorization_id,
                 risk_manager_id="central_risk_manager",
-                symbol=request.symbol,  # Extract from original request
-                side=request.side,  # Extract from original request
+                symbol=original_request.symbol,
+                side=original_request.side,
                 quantity=authorization.authorized_quantity,
                 max_quantity=authorization.max_quantity,
                 max_market_impact=authorization.max_market_impact,
@@ -971,6 +1001,34 @@ class CentralRiskManager(ISystemComponent):
         except Exception as e:
             logger.error(f"Error checking concentration limits: {e}")
             return False
+    
+    def _validate_request_inputs(self, request: TradingDecisionRequest) -> Optional[str]:
+        """
+        Validate trading request inputs
+        Returns error message if validation fails, None if valid
+        """
+        
+        # Validate quantity
+        if request.quantity <= 0:
+            return f"Invalid quantity: {request.quantity} (must be positive)"
+        
+        # Validate confidence
+        if request.confidence < 0.0 or request.confidence > 1.0:
+            return f"Invalid confidence: {request.confidence} (must be between 0 and 1)"
+        
+        # Validate expected return (should be reasonable)
+        if abs(request.expected_return) > 1.0:  # More than 100% return is suspicious
+            return f"Invalid expected return: {request.expected_return} (must be between -1 and 1)"
+        
+        # Validate risk score
+        if request.risk_score < 0.0:
+            return f"Invalid risk score: {request.risk_score} (must be non-negative)"
+        
+        # Validate regime confidence
+        if request.regime_confidence < 0.0 or request.regime_confidence > 1.0:
+            return f"Invalid regime confidence: {request.regime_confidence} (must be between 0 and 1)"
+        
+        return None  # All validations passed
     
     def _check_strategy_limits(self, request: TradingDecisionRequest) -> bool:
         """Check strategy allocation limits"""
@@ -1886,7 +1944,7 @@ class CentralRiskManager(ISystemComponent):
         """
         try:
             value = position_request.get('value', 0)
-            quantity = position_request.get('quantity', 0)
+            position_request.get('quantity', 0)
             
             # Simple risk scoring based on position size
             risk_score = min(value / 1000000.0, 1.0)  # Scale to 0-1

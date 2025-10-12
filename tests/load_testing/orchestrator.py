@@ -13,11 +13,11 @@ import logging
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 import json
 
 from order_generator import OrderGenerator, OrderGeneratorConfig, OrderPattern
-from performance_monitor import PerformanceMonitor, PerformanceMonitorConfig
+from performance_monitor import PerformanceMonitor
 from mock_trading_system import MockTradingSystem
 
 logging.basicConfig(

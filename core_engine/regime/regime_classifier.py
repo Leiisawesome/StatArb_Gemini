@@ -13,29 +13,22 @@ from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier, 
-                            VotingClassifier, AdaBoostClassifier)
+                            VotingClassifier)
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import (train_test_split, cross_val_score, 
-                                   GridSearchCV, TimeSeriesSplit)
-from sklearn.preprocessing import StandardScaler, LabelEncoder, RobustScaler
-from sklearn.metrics import (classification_report, confusion_matrix, 
-                           accuracy_score, precision_recall_fscore_support,
-                           roc_auc_score, log_loss)
-from sklearn.decomposition import PCA
+                                   TimeSeriesSplit)
+from sklearn.preprocessing import LabelEncoder, RobustScaler
+from sklearn.metrics import (confusion_matrix, accuracy_score, 
+                           precision_recall_fscore_support)
 from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classif
 from sklearn.calibration import CalibratedClassifierCV
 import joblib
-from scipy import stats
-from scipy.signal import savgol_filter
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Import regime components
-from .regime_detector import RegimeType, RegimeDetection, DetectionMethod
+from .regime_detector import RegimeType
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -805,7 +798,7 @@ class RegimeModelTrainer:
         try:
             # Predictions
             y_pred = model.predict(X_test)
-            y_pred_proba = model.predict_proba(X_test) if hasattr(model, "predict_proba") else None
+            model.predict_proba(X_test) if hasattr(model, "predict_proba") else None
             
             # Basic metrics
             accuracy = accuracy_score(y_test, y_pred)

@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-import pandas as pd
 import numpy as np
 from collections import defaultdict
 import warnings
@@ -810,12 +809,10 @@ class ExecutionEngine:
             
             if all_slices:
                 avg_slippage = np.mean([s.slippage for s in all_slices if s.slippage is not None])
-                avg_market_impact = np.mean([s.market_impact for s in all_slices if s.market_impact is not None])
-                fill_rate = np.mean([s.filled_quantity / s.quantity for s in all_slices if s.quantity > 0])
+                np.mean([s.market_impact for s in all_slices if s.market_impact is not None])
+                np.mean([s.filled_quantity / s.quantity for s in all_slices if s.quantity > 0])
             else:
                 avg_slippage = 0
-                avg_market_impact = 0
-                fill_rate = 0
         
         return ExecutionMetrics(
             total_executions=total_requests,

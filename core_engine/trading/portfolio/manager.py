@@ -29,8 +29,8 @@ import numpy as np
 
 # Use internal core_engine types for independence
 from ...type_definitions import (
-    Portfolio, PortfolioManager as BasePortfolioManager, PortfolioConfig,
-    PortfolioSnapshot, AnalyticsEngine
+    PortfolioManager as BasePortfolioManager, PortfolioConfig, PortfolioSnapshot,
+    AnalyticsEngine
 )
 
 logger = logging.getLogger(__name__)

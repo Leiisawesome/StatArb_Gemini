@@ -13,8 +13,6 @@ import logging
 import asyncio
 import sys
 import os
-from datetime import datetime
-from pathlib import Path
 
 # Add project root to path
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -10,14 +10,9 @@ Tests the central governance and risk management components:
 """
 
 import asyncio
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 
@@ -28,12 +23,10 @@ sys.path.insert(0, str(project_root))
 # Core engine imports
 from core_engine.system.central_risk_manager import (
     CentralRiskManager, TradingDecisionRequest, TradingDecisionType, 
-    AuthorizationLevel, TradingAuthorization
+    AuthorizationLevel
 )
 from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
-from core_engine.type_definitions.strategy import StrategyType
-from core_engine.type_definitions.risk import RiskLevel
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +309,7 @@ class Layer2GovernanceTester:
         
         try:
             # Test 1: Position tracking
-            initial_positions = self.risk_manager.get_all_positions()
+            self.risk_manager.get_all_positions()
             
             # Test 2: Position updates
             position_update = self.risk_manager.update_position(

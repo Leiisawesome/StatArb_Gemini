@@ -21,7 +21,7 @@ import logging
 import signal
 import sys
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field

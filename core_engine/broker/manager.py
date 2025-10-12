@@ -28,7 +28,7 @@ from enum import Enum
 # Leverage existing high-quality broker components
 # Import core_engine types instead of core_structure
 from ..type_definitions.orders import (
-    Order, ExecutionResult, OrderStatus, OrderType, OrderSide
+    Order, ExecutionResult, OrderStatus
 )
 
 # Define missing broker types

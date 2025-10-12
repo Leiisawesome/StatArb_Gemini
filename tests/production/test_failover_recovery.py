@@ -9,11 +9,7 @@ Tests system resilience:
 - State recovery after crashes
 """
 
-import asyncio
 import pytest
-from typing import Optional
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
 
 
 @pytest.mark.production

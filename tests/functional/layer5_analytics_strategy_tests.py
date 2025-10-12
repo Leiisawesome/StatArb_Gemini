@@ -14,14 +14,10 @@ Tests the analytics and strategy components:
 """
 
 import asyncio
-import pytest
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Any
 from dataclasses import dataclass
 import logging
-import json
 import sys
 from pathlib import Path
 
@@ -40,7 +36,6 @@ from core_engine.trading.strategies.strategy_registry import StrategyRegistry
 from core_engine.trading.strategies.multi_strategy_coordinator import MultiStrategySignalAggregator, SignalConflictResolver
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
 from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.type_definitions.strategy import StrategyType
 
 logger = logging.getLogger(__name__)
 
