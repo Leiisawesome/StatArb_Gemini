@@ -1,27 +1,39 @@
 # StatArb_Gemini Documentation
 
-**Last Updated**: October 3, 2024  
-**Version**: Phase 2 Complete  
-**Status**: Production Ready ✅  
+**Last Updated**: October 14, 2025  
+**Current Phase**: Phase 9 - IBKR Integration  
+**Status**: IBKR Order Placement Complete ✅  
 
 ---
 
-## 📚 **DOCUMENTATION INDEX**
+## 📚 **DOCUMENTATION STRUCTURE**
 
-### **Core Documentation**
-- **[Testing Framework Comprehensive](TESTING_FRAMEWORK_COMPREHENSIVE.md)** - Complete testing framework documentation
-- **[Core Engine Analysis](CORE_ENGINE_LEGO_BRICKS_ANALYSIS.md)** - Core engine architecture analysis
+Documentation is now organized by category for easier navigation:
 
-### **Phase Documentation**
-- **[Phase 1 Completion Summary](phase1_completion_summary.md)** - Phase 1 critical fixes completion
-- **[Phase 2 Completion Summary](phase2_completion_summary.md)** - Phase 2 statistical enhancement completion
-- **[Phase 2 Improvements Summary](phase2_improvements_summary.md)** - Phase 2 improvements implementation
+### **📊 Current Work - IBKR Integration**
+- **[/ibkr/](ibkr/)** - Interactive Brokers adapter documentation
+  - `IBKR_ORDER_PLACEMENT_COMPLETE.md` - ✅ Order testing complete (4/4 passing)
+  - `IBKR_CONNECTION_SUCCESS.md` - Connection validation
+  - `IBKR_MARKET_DATA_SUBSCRIPTION.md` - Market data setup
+  - `IBKR_QUICK_START.md` - Quick reference guide
 
-### **Testing Documentation**
-- **[Testing Assessment Report](testing_assessment_report.md)** - Initial testing assessment
-- **[Testing Improvement Action Plan](testing_improvement_action_plan.md)** - 4-phase testing improvement plan
-- **[Testing Improvement TODOs](testing_improvement_todos.md)** - Actionable testing improvement tasks
-- **[Comprehensive Layer Test Report](comprehensive_layer_test_report.md)** - Layer testing results
+### **📁 Phase Documentation**
+- **[/phase_7/](phase_7/)** - Phase 7 implementation reports
+- **[/phase_8/](phase_8/)** - Phase 8 integration & E2E testing
+- **[/phase_9/](phase_9/)** - Phase 9 broker integration planning
+
+### **📦 Archived Documentation**
+- **[/archived/](archived/)** - Completed features & historical docs
+  - Alpaca integration
+  - Historical data implementation
+  - Market hours validation
+  - Phase 6 reports
+
+### **Core Documentation (Root)**
+- `*_api_notes.md` - API reference for core components
+- `RISK_STRATEGY_INTEGRATION_GUIDE.md` - Risk management integration
+- `NAMING_CONVENTION_*.md` - Code standards
+- `PRODUCTION_BUGS_FIXED.md` - Bug tracking
 
 ---
 
