@@ -219,50 +219,73 @@ backtest_risk_config = RiskManagerConfig(
 async def initialize_backtest_system():
     """Initialize all components for backtesting"""
     
-    # 1. Create orchestrator
+    # 1. Create orchestrator and system integration manager
     orchestrator = HierarchicalSystemOrchestrator()
+    system_integration_manager = SystemIntegrationManager()
     
-    # 2. Register data management layer
+    # Register system integration manager (very early)
+    orchestrator.register_component(
+        name="SystemIntegrationManager",
+        component=system_integration_manager,
+        layer=ComponentLayer.SYSTEM_CONTROL,
+        authority_level=AuthorityLevel.SYSTEM_CONTROL,
+        initialization_order=1  # Very early initialization
+    )
+    
+    # 2. Register governance layer (EARLY - Rule 4)
+    risk_manager = CentralRiskManager(backtest_risk_config)
+    orchestrator.register_component(
+        name="CentralRiskManager",
+        component=risk_manager,
+        layer=ComponentLayer.GOVERNANCE,
+        authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
+        initialization_order=5  # Early governance
+    )
+    
+    # 3. Register data management layer
     data_manager = ClickHouseDataManager(backtest_data_config)
     orchestrator.register_component(
         name="DataManager",
         component=data_manager,
         layer=ComponentLayer.SUPPORT,
         authority_level=AuthorityLevel.OPERATIONAL,
-        initialization_order=1
+        initialization_order=10  # Data foundation
     )
     
-    # 3. Register regime analysis
+    # 4. Register regime analysis (BEFORE signal processing - Rule 12)
     regime_engine = RegimeEngine(regime_config)
     orchestrator.register_component(
         name="RegimeEngine", 
         component=regime_engine,
         layer=ComponentLayer.SUPPORT,
-        initialization_order=2
+        initialization_order=15  # Early regime detection
     )
     
-    # 4. Register processing pipeline
+    # 5. Register processing pipeline (with regime context)
     indicators_engine = EnhancedTechnicalIndicators()
     feature_engineer = FeatureEngineer()
     signal_generator = SignalGenerator()
     
-    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=3)
-    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=4)
-    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=5)
+    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=20)
+    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=22)
+    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=24)
     
-    # 5. Register governance layer
-    risk_manager = CentralRiskManager(backtest_risk_config)
-    orchestrator.register_component(
-        name="RiskManager",
-        component=risk_manager,
-        layer=ComponentLayer.GOVERNANCE,
-        authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
-        initialization_order=6
-    )
+    # Register strategy registry (before strategy validation)
+    strategy_registry = StrategyRegistry()
+    orchestrator.register_component("StrategyRegistry", strategy_registry, ComponentLayer.EXECUTION, initialization_order=24)
     
-    # 6. Register execution layer
-    # Initialize enhanced strategy manager
+    # 6. Register strategy layer (after processing pipeline)
     strategy_manager = StrategyManager(enhanced_strategy_config)
+    strategy_validator = StrategyValidator()
+    strategy_engine = StrategyExecutionEngine()
+    
+    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=25)
+    orchestrator.register_component("StrategyValidator", strategy_validator, ComponentLayer.EXECUTION, initialization_order=26)
+    orchestrator.register_component("StrategyEngine", strategy_engine, ComponentLayer.EXECUTION, initialization_order=28)
+    
+    # Register trading engine (after strategy components)
+    trading_engine = TradingEngine()
+    orchestrator.register_component("TradingEngine", trading_engine, ComponentLayer.EXECUTION, initialization_order=30)
     
     # Register enhanced strategies
     for strategy_info in enhanced_strategies_config:
@@ -271,15 +294,27 @@ async def initialize_backtest_system():
             strategy_info['config']
         )
     
-    # Use existing enhanced components for backtesting
-    enhanced_analytics = EnhancedAnalyticsManager(analytics_config)
+    # 7. Register analytics layer (after core components)
+    metrics_calculator = MetricsCalculator()
     performance_analyzer = PerformanceAnalyzer()
+    enhanced_analytics = EnhancedAnalyticsManager(analytics_config)
     
-    orchestrator.register_component("EnhancedStrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=7)
-    orchestrator.register_component("EnhancedAnalyticsManager", enhanced_analytics, ComponentLayer.EXECUTION, initialization_order=8)
-    orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, initialization_order=9)
+    orchestrator.register_component("MetricsCalculator", metrics_calculator, ComponentLayer.EXECUTION, initialization_order=32)
+    orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, initialization_order=33)
+    orchestrator.register_component("EnhancedAnalyticsManager", enhanced_analytics, ComponentLayer.EXECUTION, initialization_order=35)
     
-    # 7. Initialize all components in dependency order
+    # 8. Register execution and portfolio management (late initialization)
+    portfolio_manager = EnhancedPortfolioManager()
+    unified_execution_engine = UnifiedExecutionEngine()
+    
+    orchestrator.register_component("PortfolioManager", portfolio_manager, ComponentLayer.EXECUTION, initialization_order=38)
+    orchestrator.register_component("UnifiedExecutionEngine", unified_execution_engine, ComponentLayer.EXECUTION, initialization_order=40)
+    
+    # 9. Register strategy implementations (after all core components)
+    base_strategy_enhanced = BaseStrategyEnhanced()
+    orchestrator.register_component("BaseStrategyEnhanced", base_strategy_enhanced, ComponentLayer.EXECUTION, initialization_order=50)
+    
+    # 10. Initialize all components in dependency order
     await orchestrator.initialize_all_components()
     await orchestrator.start_all_components()
     
