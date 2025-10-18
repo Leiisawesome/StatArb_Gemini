@@ -76,8 +76,8 @@ class BacktestOptimizerInterface:
             'backtest_name': 'optimization_run',
             'backtest_mode': 'historical',
             'data': {
-                'start_date': '2024-10-01',  # 3 months (Oct-Dec 2024)
-                'end_date': '2024-12-31',
+                'start_date': '2024-07-01',  # Q3 2024 - Strong trending period
+                'end_date': '2024-09-30',
                 'interval': '1min'
             },
             'risk': {
@@ -181,12 +181,16 @@ class BacktestOptimizerInterface:
         config_dict['data']['symbols'] = symbols
         
         # Build strategy config
+        # Extract parameters from nested 'parameters' dict if present
+        strategy_params_with_symbols = strategy_params.copy()
+        strategy_params_with_symbols['symbols'] = symbols
+        
         strategy_config = {
             'strategy_type': strategy_type,
             'strategy_name': f"{strategy_type}_{self.backtest_count}",
             'allocation_pct': 1.0,
             'max_position_size': config_dict['risk']['max_position_size'],
-            'parameters': strategy_params
+            'parameters': strategy_params_with_symbols
         }
         
         # Create BacktestConfiguration

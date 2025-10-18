@@ -95,6 +95,7 @@ class EnhancedIndicatorConfig:
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    adx_period: int = 14  # ADX period for trend strength
     
     # Volatility indicators (risk management focused)
     bb_period: int = 20
@@ -669,7 +670,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         return df
     
     def _calculate_momentum_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate momentum indicators (RSI, MACD, Stochastic)"""
+        """Calculate momentum indicators (RSI, MACD, Stochastic, ADX)"""
         # RSI (Relative Strength Index)
         if len(df) >= self.config.rsi_period:
             df['rsi'] = self._calculate_rsi(df['close'], self.config.rsi_period)
@@ -688,6 +689,13 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
             df['stoch_k'], df['stoch_d'] = self._calculate_stochastic(
                 df['high'], df['low'], df['close'],
                 self.config.stoch_k_period, self.config.stoch_d_period
+            )
+        
+        # ADX (Average Directional Index) - NEWLY ADDED
+        adx_period = getattr(self.config, 'adx_period', 14)
+        if len(df) >= adx_period * 2:  # Need enough data for smoothing
+            df['adx'], df['plus_di'], df['minus_di'] = self._calculate_adx(
+                df['high'], df['low'], df['close'], adx_period
             )
         
         # Rate of Change
@@ -813,6 +821,75 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         atr = true_range.rolling(window=period).mean()
         
         return atr
+    
+    def _calculate_adx(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Calculate ADX (Average Directional Index), +DI, and -DI
+        
+        ADX measures trend strength regardless of direction (0-100 scale):
+        - ADX < 20: Weak/No trend
+        - ADX 20-40: Strong trend
+        - ADX > 40: Very strong trend
+        
+        +DI and -DI indicate trend direction
+        
+        Args:
+            high: High prices
+            low: Low prices  
+            close: Close prices
+            period: ADX period (default 14)
+            
+        Returns:
+            Tuple of (adx, plus_di, minus_di) Series
+        """
+        # Calculate True Range
+        high_low = high - low
+        high_close = np.abs(high - close.shift())
+        low_close = np.abs(low - close.shift())
+        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+        
+        # Calculate Directional Movement
+        plus_dm = pd.Series(0.0, index=high.index)
+        minus_dm = pd.Series(0.0, index=high.index)
+        
+        high_diff = high.diff()
+        low_diff = -low.diff()
+        
+        # +DM when high diff > low diff and > 0
+        plus_dm_mask = (high_diff > low_diff) & (high_diff > 0)
+        plus_dm[plus_dm_mask] = high_diff[plus_dm_mask]
+        
+        # -DM when low diff > high diff and > 0
+        minus_dm_mask = (low_diff > high_diff) & (low_diff > 0)
+        minus_dm[minus_dm_mask] = low_diff[minus_dm_mask]
+        
+        # Smooth the values using Wilder's smoothing (exponential moving average)
+        alpha = 1.0 / period
+        
+        # Smoothed True Range
+        atr_smooth = true_range.ewm(alpha=alpha, adjust=False).mean()
+        
+        # Smoothed Directional Movements
+        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+        
+        # Calculate Directional Indicators
+        plus_di = 100 * plus_dm_smooth / atr_smooth
+        minus_di = 100 * minus_dm_smooth / atr_smooth
+        
+        # Calculate DX (Directional Index)
+        di_sum = plus_di + minus_di
+        di_diff = np.abs(plus_di - minus_di)
+        
+        # Avoid division by zero
+        dx = pd.Series(0.0, index=high.index)
+        mask = di_sum > 0.01
+        dx[mask] = 100 * di_diff[mask] / di_sum[mask]
+        
+        # Calculate ADX (smoothed DX)
+        adx = dx.ewm(alpha=alpha, adjust=False).mean()
+        
+        return adx, plus_di, minus_di
     
     def get_indicator_summary(self, df: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """Get summary of indicators for a specific symbol"""

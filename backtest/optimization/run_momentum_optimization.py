@@ -67,22 +67,22 @@ class MomentumOptimizer:
         logger.info("🚀 Momentum Strategy Optimizer initialized")
     
     def get_default_parameters(self) -> Dict[str, Any]:
-        """Get default Momentum strategy parameters"""
+        """Get RELAXED Momentum strategy parameters for initial testing"""
         
         return {
             # Momentum parameters
             'short_period': 10,
             'medium_period': 20,
             'long_period': 50,
-            'momentum_threshold': 0.02,
+            'momentum_threshold': 0.01,  # RELAXED: 1% instead of 2%
             
             # Trend quality
             'adx_period': 14,
-            'adx_threshold': 25.0,
+            'adx_threshold': 20.0,       # RELAXED: Moderate trend vs strong (was 25.0)
             
             # Volume confirmation
             'volume_ma_period': 20,
-            'volume_threshold': 1.2,
+            'volume_threshold': 1.0,     # RELAXED: Any volume confirms (was 1.2)
             
             # Position sizing
             'base_position_pct': 0.03,
@@ -170,11 +170,11 @@ class MomentumOptimizer:
         """
         
         if optimization_level == 'quick':
-            # Quick search: 3x3x2 = 18 combinations
+            # Quick search: 3x3x3 = 27 combinations (RELAXED thresholds)
             return {
-                'momentum_threshold': [0.015, 0.02, 0.025],
-                'adx_threshold': [20.0, 25.0, 30.0],
-                'volume_threshold': [1.0, 1.2]
+                'momentum_threshold': [0.008, 0.01, 0.012],  # RELAXED: 0.8%-1.2%
+                'adx_threshold': [18.0, 20.0, 22.0],         # RELAXED: Moderate trends
+                'volume_threshold': [0.9, 1.0, 1.1]          # RELAXED: Easier volume confirmation
             }
         
         elif optimization_level == 'moderate':
@@ -541,7 +541,7 @@ async def async_main():
     optimizer = MomentumOptimizer()
     
     # Define test symbols (liquid, high-momentum candidates)
-    symbols = ['NVDA', 'TSLA']  # Tech momentum leaders
+    symbols = ['AAPL', 'MSFT', 'AMZN']  # Stable mega-cap stocks with consistent momentum
     
     # Step 1: Run baseline
     print("\n🎯 STEP 1: Baseline Backtest")

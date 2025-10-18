@@ -543,6 +543,32 @@ class EnhancedFeatureEngineer(ISystemComponent):
     
     def _create_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create momentum-based features"""
+        # Price momentum features (percentage change over different periods)
+        # These are CRITICAL for momentum strategies
+        for period in [10, 20, 50]:
+            if len(df) > period:
+                df[f'momentum_{period}'] = df['close'].pct_change(period)
+        
+        # Trend strength (based on price consistency)
+        # Measures how consistently price moves in one direction
+        if len(df) >= 20:
+            # Calculate trend strength as the ratio of cumulative return to cumulative absolute return
+            returns_20 = df['close'].pct_change().rolling(20)
+            cumulative_return = returns_20.sum()
+            cumulative_abs_return = returns_20.apply(lambda x: x.abs().sum())
+            
+            # Avoid division by zero
+            df['trend_strength'] = 0.0
+            mask = cumulative_abs_return > 0.001
+            df.loc[mask, 'trend_strength'] = (cumulative_return[mask] / cumulative_abs_return[mask]).abs()
+        
+        # ADX-based trend strength (if ADX available)
+        if 'adx' in df.columns:
+            # Normalize ADX to 0-1 scale
+            df['adx_normalized'] = df['adx'] / 100.0
+            # ADX trend signal: >25 indicates trending market
+            df['adx_trending'] = (df['adx'] > 25).astype(int)
+        
         # RSI-based features
         if 'rsi' in df.columns:
             df['rsi_normalized'] = (df['rsi'] - 50) / 50  # Center at 0

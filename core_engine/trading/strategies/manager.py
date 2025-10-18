@@ -224,13 +224,20 @@ class EnhancedStrategyFactory:
             import inspect
             sig = inspect.signature(config_class.__init__)
             
+            # Extract parameters from nested 'parameters' dict if present
+            flat_config = config_dict.copy()
+            if 'parameters' in flat_config and isinstance(flat_config['parameters'], dict):
+                # Merge parameters into flat config
+                parameters = flat_config.pop('parameters')
+                flat_config.update(parameters)
+            
             # Filter config_dict to only include valid parameters
             valid_params = {}
             for param_name, param in sig.parameters.items():
                 if param_name == 'self':
                     continue
-                if param_name in config_dict:
-                    valid_params[param_name] = config_dict[param_name]
+                if param_name in flat_config:
+                    valid_params[param_name] = flat_config[param_name]
                 elif hasattr(param, 'default') and param.default != inspect.Parameter.empty:
                     # Use default value if available
                     continue
@@ -424,8 +431,14 @@ class StrategyManager(ISystemComponent):
             if self.config.auto_discover_strategies:
                 await self._discover_enhanced_strategies()
             
-            # Initialize default strategy allocations with enhanced strategies
-            await self._initialize_default_strategies()
+            # Only initialize default strategies if auto-discovery is enabled
+            # In backtest mode (auto_discover_strategies=False), strategies are registered manually
+            if self.config.auto_discover_strategies:
+                # Initialize default strategy allocations with enhanced strategies
+                await self._initialize_default_strategies()
+                logger.info("📊 Default strategies initialized (auto-discovery mode)")
+            else:
+                logger.info("📊 Skipping default strategies (manual registration mode)")
             
             # Initialize strategy performance tracking
             await self._initialize_performance_tracking()

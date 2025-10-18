@@ -1812,6 +1812,55 @@ class InstitutionalBacktestEngine:
             logger.info(f"   End: {self.historical_data.index[-1]}")
             logger.info("")
             
+            # 🚀 OPTION B: Pre-calculate all indicators/features for entire dataset
+            # This enables momentum strategies by providing historical context
+            logger.info("🔧 Pre-calculating indicators and features for entire dataset...")
+            pre_calc_start = datetime.now()
+            
+            try:
+                # Ensure timestamp is a column for processing
+                data_for_processing = self.historical_data.copy()
+                if 'timestamp' not in data_for_processing.columns:
+                    data_for_processing = data_for_processing.reset_index()
+                
+                # Step 1: Calculate all indicators
+                self.pre_calculated_indicators = None
+                if self.indicators_engine:
+                    self.pre_calculated_indicators = self.indicators_engine.calculate_indicators(data_for_processing)
+                    logger.info(f"   ✅ Indicators calculated: {len(self.pre_calculated_indicators)} bars")
+                
+                # Step 2: Engineer all features
+                self.pre_calculated_features = None
+                if self.feature_engineer and self.pre_calculated_indicators is not None:
+                    self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
+                    logger.info(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
+                
+                # Step 3: Generate all signals (optional - strategy can also generate on-the-fly)
+                self.pre_calculated_signals = None
+                if self.signal_generator and self.pre_calculated_features is not None:
+                    signals_result = self.signal_generator.generate_signals(self.pre_calculated_features)
+                    # Signal generator may return List[Signal] or DataFrame
+                    if signals_result is not None:
+                        if isinstance(signals_result, list):
+                            # Convert list of signals to DataFrame
+                            if len(signals_result) > 0:
+                                self.pre_calculated_signals = pd.DataFrame([s.__dict__ for s in signals_result])
+                                logger.info(f"   ✅ Signals generated: {len(signals_result)} signals")
+                        elif isinstance(signals_result, pd.DataFrame):
+                            self.pre_calculated_signals = signals_result
+                            logger.info(f"   ✅ Signals generated: {len(signals_result)} signals")
+                
+                pre_calc_duration = (datetime.now() - pre_calc_start).total_seconds()
+                logger.info(f"   ⏱️  Pre-calculation completed in {pre_calc_duration:.2f} seconds")
+                logger.info("")
+                
+            except Exception as e:
+                logger.error(f"❌ Pre-calculation failed: {e}")
+                logger.warning("⚠️  Falling back to on-the-fly calculation")
+                self.pre_calculated_indicators = None
+                self.pre_calculated_features = None
+                self.pre_calculated_signals = None
+            
             # Bar-by-bar processing
             bars_processed = 0
             bars_with_signals = 0
@@ -1945,36 +1994,121 @@ class InstitutionalBacktestEngine:
                     else:
                         bar_results['regime'] = str(regime_analysis)
             
-            # Step 2: Process through complete pipeline: indicators → features → signals
-            # Create DataFrame for current bar (processing components expect DataFrames)
-            bar_df = pd.DataFrame([bar.to_dict()], index=[timestamp])
-            bar_df.index.name = 'timestamp'
+            # Step 2: 🚀 OPTION B: Use pre-calculated indicators/features/signals
+            # Much faster than rolling window, enables momentum strategies
             
-            # Step 2a: Technical Indicators (BRICK #4)
-            indicators_df = None
-            if self.indicators_engine:
-                try:
-                    indicators_df = self.indicators_engine.calculate_indicators(bar_df)
-                except Exception as e:
-                    logger.debug(f"Indicators calculation skipped (insufficient data): {e}")
+            # Check if we have pre-calculated data
+            use_pre_calculated = (
+                hasattr(self, 'pre_calculated_features') and 
+                self.pre_calculated_features is not None and 
+                not self.pre_calculated_features.empty
+            )
             
-            # Step 2b: Feature Engineering (BRICK #5)
-            features_df = None
-            if self.feature_engineer and indicators_df is not None and not indicators_df.empty:
-                try:
-                    features_df = self.feature_engineer.create_features(indicators_df)
-                except Exception as e:
-                    logger.debug(f"Feature engineering skipped: {e}")
-            
-            # Step 2c: Signal Generation (BRICK #6)
             signals_df = None
-            if self.signal_generator and features_df is not None and not features_df.empty:
+            bar_df = None
+            
+            if use_pre_calculated:
+                # Get pre-calculated features for current bar
+                # Pre-calculated data has been calculated with full historical context
                 try:
-                    signals_df = self.signal_generator.generate_signals(features_df)
-                    if signals_df is not None and not signals_df.empty:
-                        bar_results['signals_generated'] = len(signals_df)
+                    # Get the row corresponding to current bar index
+                    if bar_index < len(self.pre_calculated_features):
+                        features_row = self.pre_calculated_features.iloc[bar_index:bar_index+1]
+                        
+                        # ✅ FIX: Pass HISTORICAL CONTEXT to strategy (not just current bar)
+                        # Strategy needs historical data to check momentum trends
+                        signals_df = None
+                        if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
+                            # Get first active strategy (for single-strategy backtest)
+                            try:
+                                strategy = list(self.strategy_manager.active_strategies.values())[0]
+                                symbol = self.config.data.symbols[0]
+                                
+                                # ✅ FIX: Pass RAW HISTORICAL DATA (not features) to strategy
+                                # Strategy expects OHLCV data so it can calculate its own indicators
+                                # Get raw market data up to and including current bar
+                                raw_historical_data = self.market_data[symbol].iloc[:bar_index+1].copy()
+                                
+                                # Log on first bar to confirm strategy is being called
+                                if bar_index < 3:
+                                    logger.info(f"📊 Bar {bar_index}: Calling strategy {strategy.__class__.__name__} for {symbol}")
+                                    logger.info(f"   Historical context: {len(raw_historical_data)} bars of raw OHLCV data")
+                                
+                                # Call strategy's generate_signals with Dict[symbol, DataFrame of raw OHLCV]
+                                strategy_signals = await strategy.generate_signals({symbol: raw_historical_data})
+                                
+                                if bar_index < 3:
+                                    logger.info(f"   Strategy returned: {len(strategy_signals) if strategy_signals else 0} signals")
+                                
+                                # Strategy returns List[StrategySignal], convert to DataFrame
+                                if strategy_signals is not None and len(strategy_signals) > 0:
+                                    # Convert list of Signal objects to DataFrame
+                                    signals_df = pd.DataFrame([{
+                                        'symbol': s.symbol,
+                                        'signal': s.signal_type.value,
+                                        'confidence': s.confidence,
+                                        'strength': s.strength if hasattr(s, 'strength') else 0.5
+                                    } for s in strategy_signals])
+                                    bar_results['signals_generated'] = len(signals_df)
+                                    if bar_index < 10:
+                                        logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals!")
+                            except Exception as e:
+                                logger.error(f"Strategy signal generation failed at bar {bar_index}: {e}", exc_info=True)
+                                # Fallback to pipeline signal generator
+                                signals_df = self.signal_generator.generate_signals(features_row) if self.signal_generator else None
+                        else:
+                            # No strategy manager, use pipeline signal generator as fallback
+                            if bar_index < 3:
+                                logger.warning(f"⚠️  No strategy manager available, using pipeline signal generator")
+                            signals_df = self.signal_generator.generate_signals(features_row) if self.signal_generator else None
+                        
+                        if signals_df is not None and not signals_df.empty:
+                            bar_results['signals_generated'] = len(signals_df)
+                        
+                        # Create bar DataFrame for compatibility
+                        bar_df = features_row
+                        
                 except Exception as e:
-                    logger.debug(f"Signal generation skipped: {e}")
+                    logger.debug(f"Pre-calculated data access failed at bar {bar_index}: {e}")
+                    use_pre_calculated = False
+            
+            # Fallback to on-the-fly calculation if pre-calculated data not available
+            if not use_pre_calculated:
+                # Create DataFrame for current bar
+                bar_dict = bar.to_dict()
+                if 'timestamp' in bar_dict:
+                    bar_dict.pop('timestamp')
+                bar_df = pd.DataFrame([bar_dict], index=[timestamp])
+                bar_df.index.name = 'timestamp'
+                bar_df = bar_df.reset_index()
+                
+                # Calculate on-the-fly (slower but works)
+                indicators_df = self.indicators_engine.calculate_indicators(bar_df) if self.indicators_engine else bar_df
+                features_df = self.feature_engineer.create_features(indicators_df) if self.feature_engineer and indicators_df is not None else indicators_df
+                
+                # ✅ FIX: Pass features to STRATEGY for signal generation (not pipeline)
+                signals_df = None
+                if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
+                    # STRATEGY generates signals based on its custom logic
+                    try:
+                        strategy_signals = await self.strategy_manager.generate_signals(features_df)
+                        # Strategy returns List[Signal], convert to DataFrame
+                        if strategy_signals is not None:
+                            if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
+                                # Convert list of Signal objects to DataFrame
+                                signals_df = pd.DataFrame([s.__dict__ for s in strategy_signals])
+                            elif isinstance(strategy_signals, pd.DataFrame) and not strategy_signals.empty:
+                                signals_df = strategy_signals
+                    except Exception as e:
+                        logger.debug(f"Strategy signal generation failed: {e}")
+                        # Fallback to pipeline signal generator
+                        signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                else:
+                    # No strategy manager, use pipeline signal generator as fallback
+                    signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                
+                if signals_df is not None and not signals_df.empty:
+                    bar_results['signals_generated'] = len(signals_df)
             
             # Step 3: Strategy signal generation and aggregation (BRICK #7)
             authorized_trades = []

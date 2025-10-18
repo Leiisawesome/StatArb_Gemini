@@ -46,6 +46,11 @@ from ...strategy_engine import (
 
 logger = logging.getLogger(__name__)
 
+# 🔍 DEBUG: Print actual logger name to verify
+print(f"🔍 Momentum strategy logger name: {__name__}")
+print(f"🔍 Logger level: {logger.level}, Effective level: {logger.getEffectiveLevel()}")
+
+
 
 class MomentumSignal(Enum):
     """Momentum signal types"""
@@ -292,15 +297,24 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             
             # Generate signals for each symbol
             for symbol in self.config.symbols:
+                logger.debug(f"🔍 Evaluating {symbol}: data length = {len(self.market_data.get(symbol, []))}, required > {self.config.long_period}")
                 if symbol in self.market_data and len(self.market_data[symbol]) > self.config.long_period:
+                    logger.debug(f"✅ {symbol} has enough data, generating signals...")
                     symbol_signals = await self._generate_symbol_signals(symbol)
                     signals.extend(symbol_signals)
+                else:
+                    logger.debug(f"⏭️  {symbol} skipped (insufficient data)")
             
             # Update performance metrics
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} Momentum signals in {generation_time:.3f}s")
+            # 🔍 DEBUG: Enhanced logging
+            symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
+            logger.info(f"📊 Momentum Strategy Summary:")
+            logger.info(f"   Symbols checked: {len(symbols_checked)} {symbols_checked}")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -371,10 +385,19 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         try:
             # Skip if already have position
             if symbol in self.active_positions:
+                logger.debug(f"⏭️  [{symbol}] Skipping - already have position")
                 return signals
             
             # Get current indicators and momentum data
-            if symbol not in self.indicators or symbol not in self.momentum_data:
+            logger.debug(f"🔍 [{symbol}] Checking data availability:")
+            logger.debug(f"   symbol in self.indicators: {symbol in self.indicators}")
+            logger.debug(f"   symbol in self.momentum_data: {symbol in self.momentum_data}")
+            
+            if symbol not in self.indicators:
+                logger.warning(f"❌ [{symbol}] Missing indicators - cannot generate signals")
+                return signals
+            if symbol not in self.momentum_data:
+                logger.warning(f"❌ [{symbol}] Missing momentum_data - cannot generate signals")
                 return signals
             
             indicators = self.indicators[symbol]
@@ -390,13 +413,41 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Get trend quality indicators
             adx = indicators['adx'].iloc[-1] if len(indicators['adx']) > 0 else 0
             volume_ratio = indicators['volume_ratio'].iloc[-1] if len(indicators['volume_ratio']) > 0 else 1
+            trend_strength = indicators['trend_strength'].iloc[-1] if 'trend_strength' in indicators.columns and len(indicators['trend_strength']) > 0 else 0
             
-            # Check for bullish momentum
-            if (short_momentum > self.config.momentum_threshold and
-                medium_momentum > 0 and
-                long_momentum > 0 and
-                adx > self.config.adx_threshold and
-                volume_ratio > self.config.volume_threshold):
+            # 🔍 DEBUG: Log condition values BEFORE checking
+            logger.debug(f"🔍 [{symbol}] Checking bullish conditions:")
+            logger.debug(f"   short_momentum: {short_momentum:.6f} (threshold: {self.config.momentum_threshold})")
+            logger.debug(f"   medium_momentum: {medium_momentum:.6f} (threshold: > 0)")
+            logger.debug(f"   long_momentum: {long_momentum:.6f} (threshold: > 0)")
+            logger.debug(f"   adx: {adx:.2f} (threshold: {self.config.adx_threshold})")
+            logger.debug(f"   volume_ratio: {volume_ratio:.2f} (threshold: {self.config.volume_threshold})")
+            logger.debug(f"   trend_strength: {trend_strength:.6f} (threshold: > 0)")
+            
+            # ✅ RELAXED LOGIC: Check for bullish momentum (at least 4 of 6 conditions)
+            bullish_condition_1 = short_momentum > self.config.momentum_threshold
+            bullish_condition_2 = medium_momentum > 0
+            bullish_condition_3 = long_momentum > 0
+            bullish_condition_4 = adx > self.config.adx_threshold
+            bullish_condition_5 = volume_ratio > self.config.volume_threshold
+            bullish_condition_6 = trend_strength > 0
+            
+            # Count how many conditions are met
+            bullish_conditions_met = sum([
+                bullish_condition_1,
+                bullish_condition_2,
+                bullish_condition_3,
+                bullish_condition_4,
+                bullish_condition_5,
+                bullish_condition_6
+            ])
+            
+            logger.debug(f"   ✓ Condition checks: 1:{bullish_condition_1} 2:{bullish_condition_2} 3:{bullish_condition_3} "
+                        f"4:{bullish_condition_4} 5:{bullish_condition_5} 6:{bullish_condition_6}")
+            logger.debug(f"   ✓ Conditions met: {bullish_conditions_met}/6 (need >= 4)")
+            
+            # ✅ NEW: Generate signal if at least 4 of 6 conditions are met (was: ALL 6)
+            if bullish_conditions_met >= 4:
                 
                 # Check for breakout if enabled
                 breakout_confirmed = True
@@ -430,12 +481,28 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         # Track position entry
                         self._track_position_entry(symbol, signal)
             
-            # Check for bearish momentum
-            elif (short_momentum < -self.config.momentum_threshold and
-                  medium_momentum < 0 and
-                  long_momentum < 0 and
-                  adx > self.config.adx_threshold and
-                  volume_ratio > self.config.volume_threshold):
+            # ✅ RELAXED LOGIC: Check for bearish momentum (at least 4 of 6 conditions)
+            bearish_condition_1 = short_momentum < -self.config.momentum_threshold
+            bearish_condition_2 = medium_momentum < 0
+            bearish_condition_3 = long_momentum < 0
+            bearish_condition_4 = adx > self.config.adx_threshold
+            bearish_condition_5 = volume_ratio > self.config.volume_threshold
+            bearish_condition_6 = trend_strength < 0
+            
+            # Count how many conditions are met
+            bearish_conditions_met = sum([
+                bearish_condition_1,
+                bearish_condition_2,
+                bearish_condition_3,
+                bearish_condition_4,
+                bearish_condition_5,
+                bearish_condition_6
+            ])
+            
+            logger.debug(f"🔍 [{symbol}] Checking bearish conditions: {bearish_conditions_met}/6 met")
+            
+            # ✅ NEW: Generate signal if at least 4 of 6 conditions are met (was: ALL 6)
+            if bearish_conditions_met >= 4:
                 
                 # Check for breakout if enabled
                 breakout_confirmed = True
@@ -484,7 +551,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         for symbol in self.config.symbols:
             if symbol in self.market_data:
+                logger.debug(f"🔧 Calculating indicators for {symbol} ({len(self.market_data[symbol])} bars)")
                 self.indicators[symbol] = self._calculate_symbol_indicators(symbol)
+                logger.debug(f"✅ Indicators calculated for {symbol}: {list(self.indicators[symbol].keys()) if symbol in self.indicators else 'FAILED'}")
+            else:
+                logger.warning(f"⚠️  {symbol} not in market_data, skipping indicators calculation")
     
     def _calculate_symbol_indicators(self, symbol: str) -> Dict[str, pd.Series]:
         """Calculate indicators for a specific symbol"""
@@ -578,7 +649,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         for symbol in self.config.symbols:
             if symbol in self.indicators:
+                logger.debug(f"📈 Updating momentum analysis for {symbol}")
                 self.momentum_data[symbol] = self._analyze_symbol_momentum(symbol)
+                logger.debug(f"✅ Momentum data updated for {symbol}: {list(self.momentum_data[symbol].keys()) if symbol in self.momentum_data else 'FAILED'}")
+            else:
+                logger.warning(f"⚠️  Cannot update momentum for {symbol} - missing indicators")
     
     def _analyze_symbol_momentum(self, symbol: str) -> Dict[str, float]:
         """Analyze momentum for a specific symbol"""
@@ -706,6 +781,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         for symbol, data in market_data.items():
             if symbol in self.config.symbols:
                 self.market_data[symbol] = data
+                # 🔍 DEBUG: Log data update
+                logger.debug(f"🔍 Updated market_data[{symbol}]: {len(data)} bars, columns: {list(data.columns[:5])}")
     
     def _initialize_data_structures(self) -> None:
         """Initialize strategy data structures"""
