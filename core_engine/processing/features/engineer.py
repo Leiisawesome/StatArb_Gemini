@@ -109,6 +109,10 @@ class EnhancedFeatureEngineer(ISystemComponent):
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.start_time = None
         
+        # PHASE 3: Regime awareness (Rule 13)
+        self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
+        self.current_regime: Optional[Any] = None  # Current regime context
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedFeatureEngineer',
@@ -152,11 +156,38 @@ class EnhancedFeatureEngineer(ISystemComponent):
             component=self,
             layer=ComponentLayer.SUPPORT,
             authority_level=AuthorityLevel.OPERATIONAL,
-            initialization_order=22  # After indicators
+            initialization_order=16  # PHASE 3: After Indicators(15), before Signals(17)
         )
         
         self.logger.info(f"✅ EnhancedFeatureEngineer registered with orchestrator: {self.component_id}")
         return self.component_id
+    
+    # ========================================
+    # PHASE 3: REGIME AWARENESS (RULE 13)
+    # ========================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine reference for regime-aware feature engineering (Rule 13)
+        """
+        self.regime_engine = regime_engine
+        self.logger.info(f"✅ RegimeEngine injected into FeatureEngineer (Regime-First Principle)")
+    
+    def on_regime_change(self, new_regime: Any) -> None:
+        """
+        Callback for regime changes from the EnhancedRegimeEngine
+        Adapt feature engineering to new market regime
+        """
+        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
+        self.current_regime = new_regime
+        
+        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        self.logger.info(f"🔄 Features adapting to regime change: {previous_regime} → {regime_name}")
+        
+        # Store regime context for feature creation
+        self.health_metrics['current_regime'] = regime_name
+        if hasattr(new_regime, 'volatility_regime'):
+            self.health_metrics['volatility_regime'] = new_regime.volatility_regime
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

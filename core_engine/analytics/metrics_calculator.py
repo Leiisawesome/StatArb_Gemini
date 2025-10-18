@@ -17,9 +17,9 @@ from abc import ABC, abstractmethod
 from scipy import stats
 import warnings
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent and IRegimeAware for orchestrator integration
 try:
-    from ..system.interfaces import ISystemComponent
+    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -43,6 +43,18 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
             pass
+    
+    class IRegimeAware(ABC):
+        pass
+    
+    # Minimal RegimeContext for fallback
+    from dataclasses import dataclass
+    @dataclass
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+        regime_start_time: datetime = None
+        regime_duration_minutes: float = 0.0
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

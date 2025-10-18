@@ -14,6 +14,7 @@ Version: 1.0.0 (Clean Production)
 
 import logging
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 import threading
 import uuid
+import asyncio
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -293,7 +295,7 @@ class EnhancedRegimeEngine(ISystemComponent):
             component=self,
             layer=ComponentLayer.SUPPORT,
             authority_level=AuthorityLevel.OPERATIONAL,
-            initialization_order=15  # Early initialization for regime analysis
+            initialization_order=5  # Layer 0: REGIME-FIRST - Foundation for all components
         )
         
         self.logger.info(f"✅ EnhancedRegimeEngine registered with orchestrator: {self.component_id}")
@@ -580,9 +582,17 @@ class EnhancedRegimeEngine(ISystemComponent):
     
     async def notify_regime_change(self, regime_analysis):
         """Notify all subscribers of regime changes"""
+        import inspect
         for subscriber in self.subscribers:
             try:
-                await subscriber.on_regime_change(regime_analysis)
+                # Check if on_regime_change is async or sync
+                callback = subscriber.on_regime_change
+                if inspect.iscoroutinefunction(callback):
+                    # Async callback - await it
+                    await callback(regime_analysis)
+                else:
+                    # Sync callback - call directly
+                    callback(regime_analysis)
             except Exception as e:
                 self.logger.error(f"Failed to notify subscriber {type(subscriber).__name__}: {e}")
     
@@ -591,13 +601,243 @@ class EnhancedRegimeEngine(ISystemComponent):
     # ========================================
     
     def process_market_data(self, market_data: Any) -> Dict[str, Any]:
-        """Standardized method for processing market data for regime analysis"""
+        """
+        Process market data for regime analysis
+        
+        Args:
+            market_data: Dict with keys: symbol, timestamp, open, high, low, close, volume
+        
+        Returns:
+            Dict with processing results
+        """
+        try:
+            # Extract data from market update
+            if isinstance(market_data, dict):
+                symbol = market_data.get('symbol', 'UNKNOWN')
+                timestamp = market_data.get('timestamp', datetime.now())
+                close = market_data.get('close', 0.0)
+                high = market_data.get('high', close)
+                low = market_data.get('low', close)
+                volume = market_data.get('volume', 0)
+                
+                # Initialize symbol buffer if needed
+                if symbol not in self.market_data_buffer:
+                    self.market_data_buffer[symbol] = {
+                        'close': [],
+                        'high': [],
+                        'low': [],
+                        'volume': [],
+                        'timestamp': []
+                    }
+                
+                # Add data to buffer
+                buffer = self.market_data_buffer[symbol]
+                buffer['close'].append(close)
+                buffer['high'].append(high)
+                buffer['low'].append(low)
+                buffer['volume'].append(volume)
+                buffer['timestamp'].append(timestamp)
+                
+                # Keep buffer size manageable (last N points)
+                max_buffer_size = self.config.lookback_window * 2  # Keep 2x lookback for safety
+                if len(buffer['close']) > max_buffer_size:
+                    for key in buffer:
+                        buffer[key] = buffer[key][-max_buffer_size:]
+                
+                # Only analyze if we have enough data
+                if len(buffer['close']) >= self.config.lookback_window:
+                    # Calculate regime indicators
+                    regime_indicators = self._calculate_regime_indicators(symbol)
+                    
+                    # Classify regime
+                    new_regime = self._classify_regime(symbol, regime_indicators)
+                    
+                    # Check for regime change
+                    regime_changed = False
+                    if self.current_regime is None:
+                        regime_changed = True
+                    elif new_regime.primary_regime != self.current_regime.primary_regime:
+                        regime_changed = True
+                    
+                    # Update current regime
+                    self.current_regime = new_regime
+                    self.regime_history.append(new_regime)
+                    
+                    # Keep regime history manageable
+                    if len(self.regime_history) > 1000:
+                        self.regime_history = self.regime_history[-1000:]
+                    
+                    # Notify subscribers on regime change
+                    if regime_changed and len(self.subscribers) > 0:
+                        asyncio.create_task(self.notify_regime_change(new_regime))
+                    
+                    # Update metrics
+                    self.health_metrics['performance_metrics']['total_regime_analyses'] += 1
+                    self.health_metrics['performance_metrics']['successful_regime_analyses'] += 1
+                    if regime_changed:
+                        self.health_metrics['performance_metrics']['regime_changes_detected'] += 1
+                    
+                    return {
+                        'market_data_processed': True,
+                        'symbol': symbol,
+                        'regime_detected': new_regime.primary_regime.value if new_regime else None,
+                        'regime_changed': regime_changed,
+                        'confidence': new_regime.confidence if new_regime else 0.0,
+                        'buffer_size': len(buffer['close']),
+                        'processing_timestamp': datetime.now()
+                    }
+                else:
+                    # Not enough data yet
+                    return {
+                        'market_data_processed': True,
+                        'symbol': symbol,
+                        'regime_detected': None,
+                        'regime_changed': False,
+                        'buffer_size': len(buffer['close']),
+                        'required_size': self.config.lookback_window,
+                        'processing_timestamp': datetime.now()
+                    }
+            
+            else:
+                self.logger.warning(f"Unexpected market_data type: {type(market_data)}")
+                return {
+                    'market_data_processed': False,
+                    'error': 'Invalid market_data format',
+                    'processing_timestamp': datetime.now()
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error processing market data: {e}")
+            self.health_metrics['performance_metrics']['failed_regime_analyses'] += 1
+            return {
+                'market_data_processed': False,
+                'error': str(e),
+                'processing_timestamp': datetime.now()
+            }
+    
+    def _calculate_regime_indicators(self, symbol: str) -> Dict[str, float]:
+        """Calculate technical indicators for regime classification"""
+        buffer = self.market_data_buffer[symbol]
+        closes = np.array(buffer['close'])
+        highs = np.array(buffer['high'])
+        lows = np.array(buffer['low'])
+        volumes = np.array(buffer['volume'])
+        
+        # Calculate returns
+        returns = np.diff(closes) / closes[:-1]
+        
+        # Calculate volatility (rolling std of returns, annualized)
+        vol_window = min(self.config.volatility_window, len(returns))
+        if vol_window > 1:
+            volatility = np.std(returns[-vol_window:]) * np.sqrt(252 * 390)  # Annualized intraday vol
+        else:
+            volatility = 0.0
+        
+        # Calculate trend (simple moving average slope)
+        sma_window = min(self.config.lookback_window, len(closes))
+        sma = np.mean(closes[-sma_window:])
+        price = closes[-1]
+        trend = (price - sma) / sma if sma > 0 else 0.0
+        
+        # Calculate momentum (rate of change)
+        momentum_window = min(20, len(closes))
+        if momentum_window > 1:
+            momentum = (closes[-1] - closes[-momentum_window]) / closes[-momentum_window]
+        else:
+            momentum = 0.0
+        
+        # Calculate trend strength (ADX-like)
+        if len(closes) >= 14:
+            # Simplified trend strength
+            up_moves = np.maximum(highs[1:] - highs[:-1], 0)
+            down_moves = np.maximum(lows[:-1] - lows[1:], 0)
+            trend_strength = np.mean(up_moves[-14:]) / (np.mean(up_moves[-14:]) + np.mean(down_moves[-14:]) + 1e-10)
+        else:
+            trend_strength = 0.5
+        
+        # Volume analysis
+        avg_volume = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
+        volume_ratio = volumes[-1] / avg_volume if avg_volume > 0 else 1.0
+        
         return {
-            'market_data_processed': True,
-            'data_type': type(market_data).__name__,
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'EnhancedRegimeEngine'
+            'volatility': volatility,
+            'trend': trend,
+            'momentum': momentum,
+            'trend_strength': trend_strength,
+            'volume_ratio': volume_ratio,
+            'price': price
         }
+    
+    def _classify_regime(self, symbol: str, indicators: Dict[str, float]) -> RegimeAnalysis:
+        """Classify market regime based on indicators"""
+        
+        volatility = indicators['volatility']
+        trend = indicators['trend']
+        momentum = indicators['momentum']
+        trend_strength = indicators['trend_strength']
+        
+        # Classify volatility regime
+        if volatility < 0.15:
+            vol_regime = "low_volatility"
+        elif volatility < 0.25:
+            vol_regime = "normal_volatility"
+        elif volatility < 0.40:
+            vol_regime = "high_volatility"
+        else:
+            vol_regime = "extreme_volatility"
+        
+        # Classify directional regime
+        if trend > self.config.trend_threshold:
+            directional = "bull"
+        elif trend < -self.config.trend_threshold:
+            directional = "bear"
+        else:
+            directional = "sideways"
+        
+        # Combine into primary regime
+        if directional == "bull" and vol_regime in ["low_volatility", "normal_volatility"]:
+            primary_regime = MarketRegime.BULL_LOW_VOL
+            confidence = 0.8
+        elif directional == "bull" and vol_regime in ["high_volatility", "extreme_volatility"]:
+            primary_regime = MarketRegime.BULL_HIGH_VOL
+            confidence = 0.7
+        elif directional == "bear" and vol_regime in ["low_volatility", "normal_volatility"]:
+            primary_regime = MarketRegime.BEAR_LOW_VOL
+            confidence = 0.8
+        elif directional == "bear" and vol_regime in ["high_volatility", "extreme_volatility"]:
+            primary_regime = MarketRegime.BEAR_HIGH_VOL
+            confidence = 0.7
+        elif abs(trend) < self.config.trend_threshold / 2:
+            primary_regime = MarketRegime.RANGE_BOUND
+            confidence = 0.75
+        elif vol_regime == "extreme_volatility":
+            primary_regime = MarketRegime.CHOPPY
+            confidence = 0.65
+        else:
+            # Default to appropriate trending regime
+            if trend_strength > 0.6:
+                primary_regime = MarketRegime.STRONG_TRENDING
+            else:
+                primary_regime = MarketRegime.WEAK_TRENDING
+            confidence = 0.6
+        
+        # Create regime analysis
+        regime_analysis = RegimeAnalysis(
+            primary_regime=primary_regime,
+            confidence=confidence,
+            regime_duration=0,  # Would need to track this over time
+            timestamp=datetime.now(),
+            directional_regime=directional,
+            volatility_regime=vol_regime,
+            trend_strength=trend_strength,
+            stress_level=min(volatility / 0.5, 1.0),  # Normalize to 0-1
+            liquidity_regime="normal",  # Would need more data for this
+            regime_stability=confidence,  # Simplified
+            transition_probability=1.0 - confidence,  # Inverse of confidence
+            regime_maturity=0.5  # Would need historical tracking
+        )
+        
+        return regime_analysis
     
     def analyze_data(self, data: Any) -> Dict[str, Any]:
         """Standardized method for analyzing data (alias for process_market_data)"""

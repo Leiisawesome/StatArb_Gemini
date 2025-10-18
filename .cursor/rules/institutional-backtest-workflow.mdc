@@ -7,42 +7,48 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Component Assembly for Backtesting
 
-### Enhanced Core Brick Stack (6-Layer Architecture)
+### Enhanced Core Brick Stack (7-Layer Architecture) - UPDATED for Rules 12-13
 ```
 ┌─────────────────────────────────────┐
-│ Layer 1: System Orchestration      │
-│ HierarchicalSystemOrchestrator      │ ← System Control & Lifecycle
-│ SystemIntegrationManager            │ ← Multi-Phase Initialization
+│ Layer 0: Regime Detection (Rule 13)│  ← NEW: Foundation Layer
+│ EnhancedRegimeEngine (order=5)      │  ← Initializes FIRST
+│ RegimeContext Distribution          │  ← Provides context to ALL
+├─────────────────────────────────────┤
+│ Layer 1: System Orchestration       │
+│ HierarchicalSystemOrchestrator      │  ← order=10
+│ SystemIntegrationManager            │  ← Multi-Phase Initialization
 ├─────────────────────────────────────┤
 │ Layer 2: Governance                 │
-│ CentralRiskManager                  │ ← Risk Governance & Authorization
+│ CentralRiskManager                  │  ← order=25 (regime-aware)
 ├─────────────────────────────────────┤
 │ Layer 3: Data Management            │
-│ ClickHouseDataManager               │ ← Historical Data Authority
+│ ClickHouseDataManager               │  ← order=10 (regime-aware)
 ├─────────────────────────────────────┤
 │ Layer 4: Core Processing            │
-│ EnhancedRegimeEngine                │ ← Market Condition Analysis
-│ EnhancedTechnicalIndicators         │ ← Signal Processing Pipeline
-│ EnhancedFeatureEngineer             │ ← ML Feature Creation
-│ EnhancedSignalGenerator             │ ← Multi-Strategy Signal Generation
+│ EnhancedTechnicalIndicators         │  ← order=15 (regime-aware)
+│ EnhancedFeatureEngineer             │  ← Regime-adaptive features
+│ EnhancedSignalGenerator             │  ← Regime-aware signal filtering
 ├─────────────────────────────────────┤
 │ Layer 5: Analytics & Strategy       │
-│ EnhancedAnalyticsManager            │ ← Analytics Orchestration
-│ EnhancedMetricsCalculator           │ ← Performance Metrics
-│ PerformanceAnalyzer                 │ ← Performance Analysis
-│ StrategyManager                     │ ← Multi-Strategy Coordination
-│ StrategyExecutionEngine             │ ← Strategy Execution
-│ EnhancedStrategyValidator           │ ← Strategy Validation
-│ StrategyRegistry                    │ ← Strategy Discovery
+│ EnhancedAnalyticsManager            │  ← order=20 (regime-aware)
+│ PerformanceAnalyzer                 │  ← Performance Analysis with TCA
+│ StrategyManager                     │  ← Regime-based strategy weighting
+│ StrategyExecutionEngine             │  ← Regime-optimized execution
+│ EnhancedStrategyValidator           │  ← Strategy Validation
 ├─────────────────────────────────────┤
 │ Layer 6: Trading & Execution        │
-│ EnhancedTradingEngine               │ ← Execution Planning
-│ UnifiedExecutionEngine              │ ← Historical Execution Simulation
-│ EnhancedPortfolioManager            │ ← Position Management
+│ EnhancedTradingEngine               │  ← order=30 (regime-aware)
+│ UnifiedExecutionEngine              │  ← Historical Execution Simulation
+│ EnhancedPortfolioManager            │  ← Position Management
+├─────────────────────────────────────┤
+│ Liquidity Management (Rule 12)      │  ← NEW: Liquidity Layer
+│ LiquidityAssessmentEngine           │  ← Historical liquidity scoring
+│ MarketImpactModel                   │  ← Realistic execution costs
+│ ExecutionQualityAnalyzer            │  ← TCA for strategy validation
 ├─────────────────────────────────────┤
 │ Production Components (Rule 10)     │
-│ ProductionHealthMonitor             │ ← Health Monitoring
-│ AuditTrailManager                   │ ← Audit Logging
+│ ProductionHealthMonitor             │  ← Health Monitoring
+│ AuditTrailManager                   │  ← Audit Logging
 └─────────────────────────────────────┘
 ```
 
@@ -167,7 +173,139 @@ analytics_config = EnhancedAnalyticsConfig(
 )
 ```
 
-### 2.3. Production Configuration (Rule 10)
+### 2.3. Market Impact & Liquidity Configuration (Rule 12)
+```python
+from core_engine.liquidity.assessment import LiquidityAssessmentEngine, HistoricalLiquidityConfig
+from core_engine.liquidity.impact import MarketImpactModel, BacktestImpactConfig
+from core_engine.liquidity.quality import ExecutionQualityAnalyzer, BacktestTCAConfig
+
+# Historical liquidity assessment for realistic backtesting
+historical_liquidity_config = HistoricalLiquidityConfig(
+    enable_historical_liquidity=True,
+    enable_liquidity_filtering=True,  # Skip trades in illiquid conditions
+    
+    # Historical liquidity thresholds
+    liquidity_thresholds={
+        'min_daily_volume': 100_000,      # Min $100K daily volume
+        'max_spread_bps': 25,              # Max 25 bps spread
+        'min_depth': 50_000,               # Min $50K market depth
+        'max_impact_bps': 30               # Max 30 bps estimated impact
+    },
+    
+    # Liquidity data sources
+    use_historical_spreads=True,          # Use historical bid-ask spreads
+    use_historical_volumes=True,          # Use historical volumes
+    use_historical_depth=False,           # Order book depth not available historically
+    
+    # Filtering behavior
+    skip_illiquid_trades=True,            # Skip trades in illiquid conditions
+    reduce_size_on_low_liquidity=True,   # Reduce size if liquidity marginal
+    liquidity_reduction_factor=0.5        # Reduce to 50% if low liquidity
+)
+
+liquidity_engine = LiquidityAssessmentEngine(historical_liquidity_config)
+
+# Market impact modeling for realistic execution costs (Rule 12)
+backtest_impact_config = BacktestImpactConfig(
+    # Primary model: Almgren-Chriss for most stocks
+    model_type='almgren_chriss',
+    
+    # Model parameters (calibrated from historical data)
+    linear_coefficient=0.1,               # Linear impact component
+    sqrt_coefficient=0.5,                 # Square-root impact component
+    permanent_impact_factor=0.3,          # 30% permanent impact
+    temporary_impact_factor=0.7,          # 70% temporary impact
+    
+    # Historical calibration
+    enable_historical_calibration=True,   # Calibrate from historical data
+    calibration_window=252,               # 1 year calibration period
+    recalibration_frequency='monthly',    # Recalibrate monthly
+    
+    # Alternative models for different conditions
+    alternative_models={
+        'low_liquidity': 'kyle_lambda',   # Kyle's model for illiquid stocks
+        'high_volatility': 'simple_sqrt', # Simpler model for volatile periods
+        'small_cap': 'kyle_lambda'        # Kyle's model for small caps
+    },
+    
+    # Apply impact to backtest
+    apply_to_entry=True,                  # Apply impact on entry
+    apply_to_exit=True,                   # Apply impact on exit
+    apply_spread_cost=True,               # Apply bid-ask spread cost
+    
+    # Spread modeling
+    spread_model='historical',            # Use historical spreads
+    spread_fallback_bps=10,               # Fallback 10 bps if no data
+    
+    # Slippage assumptions
+    base_slippage_bps=2,                  # Base 2 bps slippage
+    volatility_slippage_multiplier=1.5    # 1.5x in high volatility
+)
+
+impact_model = MarketImpactModel(backtest_impact_config)
+
+# Transaction cost analysis for strategy validation (Rule 12)
+backtest_tca_config = BacktestTCAConfig(
+    enable_post_trade_analysis=True,
+    enable_execution_quality_scoring=True,
+    
+    # Benchmarks for backtesting
+    benchmarks=['vwap', 'twap', 'arrival_price'],
+    primary_benchmark='vwap',
+    
+    # TCA metrics to calculate
+    metrics=[
+        'implementation_shortfall',       # Actual vs decision price
+        'vwap_slippage_bps',             # Slippage vs VWAP
+        'twap_slippage_bps',             # Slippage vs TWAP
+        'realized_slippage_bps',         # Total slippage
+        'market_impact_bps',             # Estimated market impact
+        'spread_cost_bps',               # Bid-ask spread cost
+        'total_execution_cost_bps'       # Total transaction cost
+    ],
+    
+    # Quality scoring for strategy validation
+    quality_thresholds={
+        'excellent': 90,                  # < 5 bps total cost
+        'good': 80,                       # < 10 bps total cost
+        'acceptable': 70,                 # < 15 bps total cost
+        'poor': 60,                       # < 20 bps total cost
+        'unacceptable': 0                 # >= 20 bps total cost
+    },
+    
+    # Aggregate TCA over backtest period
+    calculate_aggregate_tca=True,
+    aggregate_by=['strategy', 'symbol', 'regime', 'month'],
+    
+    # Export TCA results
+    export_tca_report=True,
+    export_format='csv',                  # Export as CSV for analysis
+    export_path='backtest_results/tca/'
+)
+
+tca_analyzer = ExecutionQualityAnalyzer(backtest_tca_config)
+
+# Enhanced execution config with liquidity & impact (Rule 12)
+backtest_execution_config = {
+    'enable_market_impact': True,         # Apply market impact
+    'enable_liquidity_filtering': True,   # Filter illiquid trades
+    'enable_realistic_fills': True,       # Use realistic fill prices
+    'enable_spread_costs': True,          # Apply bid-ask spreads
+    'enable_slippage': True,              # Apply slippage modeling
+    
+    # Execution realism settings
+    'fill_price_model': 'midpoint_plus_spread',  # Mid + half spread
+    'partial_fills_enabled': False,       # Full fills assumed in backtest
+    'execution_delay_ms': 0,              # No execution delay in backtest
+    
+    # Market impact application
+    'impact_model': impact_model,
+    'liquidity_engine': liquidity_engine,
+    'tca_analyzer': tca_analyzer
+}
+```
+
+### 2.4. Production Configuration (Rule 10)
 ```python
 from core_engine.system.integration_manager import ProductionConfig
 
@@ -214,10 +352,14 @@ backtest_risk_config = RiskManagerConfig(
 
 ## Backtest Orchestration Workflow
 
-### Phase 1: System Initialization
+### Phase 1: System Initialization - UPDATED for Rule 13 (Regime-First)
 ```python
 async def initialize_backtest_system():
-    """Initialize all components for backtesting"""
+    """
+    Initialize all components for backtesting with REGIME-FIRST PRINCIPLE (Rule 13)
+    
+    CRITICAL: EnhancedRegimeEngine MUST initialize BEFORE all other operational components
+    """
     
     # 1. Create orchestrator and system integration manager
     orchestrator = HierarchicalSystemOrchestrator()
@@ -232,59 +374,125 @@ async def initialize_backtest_system():
         initialization_order=1  # Very early initialization
     )
     
-    # 2. Register governance layer (EARLY - Rule 4)
+    # ═══════════════════════════════════════════════════════════════════
+    # 🔥 REGIME-FIRST PRINCIPLE (Rule 13): Initialize Regime Engine FIRST
+    # ═══════════════════════════════════════════════════════════════════
+    
+    # 2. LAYER 0: Regime Detection - Foundation Layer (Rule 13)
+    regime_engine = EnhancedRegimeEngine(backtest_regime_config)
+    orchestrator.register_component(
+        name="EnhancedRegimeEngine",
+        component=regime_engine,
+        layer=ComponentLayer.SUPPORT,  # Actually Layer 0, but uses SUPPORT enum
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=5  # 🔥 LOWEST ORDER = FIRST TO INITIALIZE
+    )
+    
+    await regime_engine.initialize()
+    await regime_engine.start()
+    
+    print("✅ REGIME ENGINE INITIALIZED - Foundation layer ready")
+    
+    # 3. Register governance layer (Rule 4) - REGIME-AWARE
     risk_manager = CentralRiskManager(backtest_risk_config)
+    risk_manager.set_regime_engine(regime_engine)  # Inject regime awareness
     orchestrator.register_component(
         name="CentralRiskManager",
         component=risk_manager,
         layer=ComponentLayer.GOVERNANCE,
         authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
-        initialization_order=5  # Early governance
+        initialization_order=25  # After regime (order=5), data (order=10), processing (order=15)
     )
     
-    # 3. Register data management layer
+    # 4. Register data management layer - REGIME-AWARE
     data_manager = ClickHouseDataManager(backtest_data_config)
+    data_manager.set_regime_engine(regime_engine)  # Inject regime awareness
+    
+    # Subscribe to regime changes for regime-tagged data
+    regime_engine.subscribe_to_regime_changes(
+        data_manager.on_regime_change
+    )
+    
     orchestrator.register_component(
         name="DataManager",
         component=data_manager,
         layer=ComponentLayer.SUPPORT,
         authority_level=AuthorityLevel.OPERATIONAL,
-        initialization_order=10  # Data foundation
+        initialization_order=10  # Data foundation after regime
     )
     
-    # 4. Register regime analysis (BEFORE signal processing - Rule 12)
-    regime_engine = RegimeEngine(regime_config)
+    # 5. Register liquidity management layer (Rule 12) - REGIME-AWARE
+    liquidity_engine.set_regime_engine(regime_engine)  # Inject regime awareness
+    impact_model.set_regime_engine(regime_engine)
+    
     orchestrator.register_component(
-        name="RegimeEngine", 
-        component=regime_engine,
+        name="LiquidityAssessmentEngine",
+        component=liquidity_engine,
         layer=ComponentLayer.SUPPORT,
-        initialization_order=15  # Early regime detection
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=12  # After data, before processing
     )
     
-    # 5. Register processing pipeline (with regime context)
-    indicators_engine = EnhancedTechnicalIndicators()
-    feature_engineer = FeatureEngineer()
-    signal_generator = SignalGenerator()
+    orchestrator.register_component(
+        name="MarketImpactModel",
+        component=impact_model,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=12
+    )
     
-    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=20)
-    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=22)
-    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=24)
+    orchestrator.register_component(
+        name="ExecutionQualityAnalyzer",
+        component=tca_analyzer,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=12
+    )
+    
+    # 6. Register processing pipeline - REGIME-AWARE (Rule 13)
+    indicators_engine = EnhancedTechnicalIndicators()
+    indicators_engine.set_regime_engine(regime_engine)  # Inject regime awareness
+    
+    feature_engineer = FeatureEngineer()
+    feature_engineer.set_regime_engine(regime_engine)
+    
+    signal_generator = SignalGenerator()
+    signal_generator.set_regime_engine(regime_engine)
+    
+    # Subscribe processing components to regime changes
+    regime_engine.subscribe_to_regime_changes(indicators_engine.on_regime_change)
+    regime_engine.subscribe_to_regime_changes(feature_engineer.on_regime_change)
+    regime_engine.subscribe_to_regime_changes(signal_generator.on_regime_change)
+    
+    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=15)
+    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=16)
+    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=17)
     
     # Register strategy registry (before strategy validation)
     strategy_registry = StrategyRegistry()
-    orchestrator.register_component("StrategyRegistry", strategy_registry, ComponentLayer.EXECUTION, initialization_order=24)
+    orchestrator.register_component("StrategyRegistry", strategy_registry, ComponentLayer.EXECUTION, initialization_order=19)
     
-    # 6. Register strategy layer (after processing pipeline)
+    # 7. Register strategy layer - REGIME-AWARE (Rule 13)
     strategy_manager = StrategyManager(enhanced_strategy_config)
+    strategy_manager.set_regime_engine(regime_engine)  # Inject regime awareness
+    
     strategy_validator = StrategyValidator()
     strategy_engine = StrategyExecutionEngine()
+    strategy_engine.set_regime_engine(regime_engine)  # Regime-optimized execution
     
-    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=25)
-    orchestrator.register_component("StrategyValidator", strategy_validator, ComponentLayer.EXECUTION, initialization_order=26)
-    orchestrator.register_component("StrategyEngine", strategy_engine, ComponentLayer.EXECUTION, initialization_order=28)
+    # Subscribe to regime changes for dynamic strategy weighting
+    regime_engine.subscribe_to_regime_changes(strategy_manager.on_regime_change)
+    regime_engine.subscribe_to_regime_changes(strategy_engine.on_regime_change)
     
-    # Register trading engine (after strategy components)
+    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=20)
+    orchestrator.register_component("StrategyValidator", strategy_validator, ComponentLayer.EXECUTION, initialization_order=21)
+    orchestrator.register_component("StrategyEngine", strategy_engine, ComponentLayer.EXECUTION, initialization_order=22)
+    
+    # Register trading engine - REGIME-AWARE (Rule 13)
     trading_engine = TradingEngine()
+    trading_engine.set_regime_engine(regime_engine)  # Regime-optimized order planning
+    regime_engine.subscribe_to_regime_changes(trading_engine.on_regime_change)
+    
     orchestrator.register_component("TradingEngine", trading_engine, ComponentLayer.EXECUTION, initialization_order=30)
     
     # Register enhanced strategies
@@ -294,10 +502,19 @@ async def initialize_backtest_system():
             strategy_info['config']
         )
     
-    # 7. Register analytics layer (after core components)
+    # 8. Register analytics layer - REGIME-AWARE (Rules 9, 13)
     metrics_calculator = MetricsCalculator()
+    metrics_calculator.set_regime_engine(regime_engine)  # Regime-adjusted metrics
+    
     performance_analyzer = PerformanceAnalyzer()
+    performance_analyzer.set_regime_engine(regime_engine)  # Regime attribution
+    performance_analyzer.set_tca_analyzer(tca_analyzer)  # Execution quality analysis
+    
     enhanced_analytics = EnhancedAnalyticsManager(analytics_config)
+    enhanced_analytics.set_regime_engine(regime_engine)  # Regime-aware analytics
+    
+    # Subscribe analytics to regime changes
+    regime_engine.subscribe_to_regime_changes(enhanced_analytics.on_regime_change)
     
     orchestrator.register_component("MetricsCalculator", metrics_calculator, ComponentLayer.EXECUTION, initialization_order=32)
     orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, initialization_order=33)
@@ -321,18 +538,26 @@ async def initialize_backtest_system():
     return orchestrator
 ```
 
-### Phase 2: Historical Data Processing
+### Phase 2: Historical Data Processing - UPDATED for Rules 12-13
 ```python
 async def process_historical_data(orchestrator, symbols, start_date, end_date):
-    """Process historical data through the pipeline"""
+    """
+    Process historical data with REGIME-FIRST and LIQUIDITY-AWARE pipeline (Rules 12-13)
     
+    Flow: Regime Detection → Liquidity Assessment → Signal Generation → Execution Simulation
+    """
+    
+    # Get all components
     data_manager = orchestrator.get_component("DataManager")
-    regime_engine = orchestrator.get_component("RegimeEngine")
+    regime_engine = orchestrator.get_component("EnhancedRegimeEngine")  # Layer 0 - Foundation
+    liquidity_engine = orchestrator.get_component("LiquidityAssessmentEngine")  # Rule 12
+    impact_model = orchestrator.get_component("MarketImpactModel")  # Rule 12
     indicators_engine = orchestrator.get_component("IndicatorsEngine")
     feature_engineer = orchestrator.get_component("FeatureEngineer")
     signal_generator = orchestrator.get_component("SignalGenerator")
     
     # Load historical market data
+    logger.info(f"Loading historical data for {symbols} from {start_date} to {end_date}")
     market_data = data_manager.load_market_data(
         symbols=symbols,
         start_time=datetime.strptime(start_date, "%Y-%m-%d"),
@@ -340,28 +565,119 @@ async def process_historical_data(orchestrator, symbols, start_date, end_date):
         interval="1min"
     )
     
-    # Process through pipeline
-    logger.info("Processing historical data through pipeline...")
+    # ═══════════════════════════════════════════════════════════════════
+    # 🔥 REGIME-FIRST: Feed data to regime engine BEFORE any processing
+    # ═══════════════════════════════════════════════════════════════════
+    logger.info("STEP 1: Historical regime classification (Rule 13)...")
+    regime_history = []
     
-    # 1. Calculate technical indicators
+    for _, row in market_data.iterrows():
+        regime_context = await regime_engine.on_market_data(row)
+        regime_history.append({
+            'timestamp': row['timestamp'],
+            'regime': regime_context.primary_regime,
+            'confidence': regime_context.regime_confidence,
+            'volatility_regime': regime_context.volatility_regime,
+            'liquidity_regime': regime_context.liquidity_regime
+        })
+    
+    logger.info(f"✅ Classified {len(regime_history)} historical regime periods")
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 📊 LIQUIDITY ASSESSMENT: Evaluate historical liquidity (Rule 12)
+    # ═══════════════════════════════════════════════════════════════════
+    logger.info("STEP 2: Historical liquidity assessment (Rule 12)...")
+    liquidity_history = {}
+    
+    for symbol in symbols:
+        symbol_data = market_data[market_data['symbol'] == symbol]
+        liquidity_scores = []
+        
+        for _, row in symbol_data.iterrows():
+            # Assess liquidity for each historical period
+            liquidity_score = await liquidity_engine.assess_liquidity_score(
+                symbol=symbol,
+                quantity=10000,  # Standard reference quantity
+                historical_data=row
+            )
+            liquidity_scores.append({
+                'timestamp': row['timestamp'],
+                'liquidity_score': liquidity_score.overall_score,
+                'liquidity_regime': liquidity_score.liquidity_regime.value,
+                'avg_daily_volume': liquidity_score.avg_daily_volume,
+                'bid_ask_spread_bps': liquidity_score.bid_ask_spread_bps
+            })
+        
+        liquidity_history[symbol] = liquidity_scores
+        logger.info(f"  {symbol}: Avg liquidity score = {np.mean([s['liquidity_score'] for s in liquidity_scores]):.2f}")
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 🔄 REGIME-AWARE SIGNAL PROCESSING: Process with regime context
+    # ═══════════════════════════════════════════════════════════════════
+    logger.info("STEP 3: Regime-aware signal processing...")
+    
+    # 3.1. Calculate technical indicators (regime-adaptive)
     indicators_df = indicators_engine.calculate_indicators(market_data)
     
-    # 2. Engineer features for ML
+    # 3.2. Engineer features for ML (regime-aware)
     features_df = feature_engineer.create_features(indicators_df)
     
-    # 3. Generate trading signals
+    # 3.3. Generate trading signals (regime-filtered and liquidity-constrained)
     signals_df = signal_generator.generate_signals(features_df)
     
-    # 4. Feed data to regime engine for historical regime classification
-    for _, row in market_data.iterrows():
-        await regime_engine.on_market_data(row)
+    logger.info(f"✅ Generated {len(signals_df)} raw signals")
+    
+    # 3.4. Filter signals by liquidity (Rule 12)
+    liquidity_filtered_signals = []
+    filtered_out_count = 0
+    
+    for _, signal in signals_df.iterrows():
+        symbol = signal['symbol']
+        timestamp = signal['timestamp']
+        
+        # Get liquidity score for this period
+        period_liquidity = next(
+            (l for l in liquidity_history[symbol] if l['timestamp'] == timestamp),
+            None
+        )
+        
+        if period_liquidity and period_liquidity['liquidity_score'] >= 60:  # Min threshold
+            # Estimate market impact
+            impact_estimate = await impact_model.estimate_market_impact(
+                symbol=symbol,
+                quantity=signal['quantity'],
+                side=signal['side'],
+                urgency='normal'
+            )
+            
+            # Accept signal if impact is acceptable
+            if impact_estimate.total_impact_bps < 30:  # Max 30 bps impact
+                signal['liquidity_score'] = period_liquidity['liquidity_score']
+                signal['estimated_impact_bps'] = impact_estimate.total_impact_bps
+                signal['spread_cost_bps'] = impact_estimate.execution_cost_bps
+                liquidity_filtered_signals.append(signal)
+            else:
+                filtered_out_count += 1
+        else:
+            filtered_out_count += 1
+    
+    logger.info(f"✅ Liquidity filtering: {len(signals_df)} → {len(liquidity_filtered_signals)} signals "
+               f"({filtered_out_count} filtered due to liquidity/impact)")
     
     return {
         'market_data': market_data,
         'indicators': indicators_df,
         'features': features_df,
-        'signals': signals_df,
-        'regime_history': regime_engine.get_regime_history()
+        'raw_signals': signals_df,
+        'liquidity_filtered_signals': pd.DataFrame(liquidity_filtered_signals),
+        'regime_history': regime_history,
+        'liquidity_history': liquidity_history,
+        'processing_stats': {
+            'total_periods': len(market_data),
+            'raw_signals': len(signals_df),
+            'liquidity_filtered_signals': len(liquidity_filtered_signals),
+            'filter_rate': filtered_out_count / len(signals_df) if len(signals_df) > 0 else 0
+        }
     }
 ```
 
@@ -593,4 +909,80 @@ def validate_backtest_risk_compliance(backtest_results: List, risk_config: Dict)
     }
 ```
 
-This instruction map provides a complete blueprint for assembling core_engine components into an institutional-grade backtesting system. The modular design allows you to swap components, adjust configurations, and extend functionality while maintaining the architectural integrity and risk management standards.
+## Complete Integration Summary - Rules 12-13
+
+### Regime-First Architecture (Rule 13)
+This backtest workflow implements **complete regime-first compliance**:
+
+1. **Layer 0 Foundation**: `EnhancedRegimeEngine` initializes **FIRST** (order=5) before all operational components
+2. **Regime Context Distribution**: All 15+ components receive regime updates via subscription callbacks
+3. **Regime-Aware Processing**: Every stage (indicators, features, signals, strategies, risk, execution) adapts to regime
+4. **Dynamic Adaptation**: Strategy weights, risk limits, liquidity thresholds automatically adjust per regime
+5. **Historical Regime Classification**: Complete regime history tracked for attribution analysis
+
+### Liquidity Management Integration (Rule 12)
+This backtest workflow implements **realistic liquidity modeling**:
+
+1. **Historical Liquidity Assessment**: `LiquidityAssessmentEngine` evaluates liquidity for every historical period
+2. **Market Impact Modeling**: Almgren-Chriss, Kyle's Lambda models estimate realistic execution costs
+3. **Liquidity Filtering**: Signals filtered by liquidity scores and estimated market impact (max 30 bps)
+4. **Execution Cost Analysis**: Spread costs, slippage, temporary/permanent impact applied to all trades
+5. **Transaction Cost Analysis (TCA)**: Post-trade analysis validates strategy execution quality
+
+### Data Flow with Full Compliance
+```
+Historical Data Load
+    ↓
+🔥 REGIME CLASSIFICATION (Rule 13 - Layer 0)
+    ├→ Regime context distributed to ALL components
+    ├→ Dynamic strategy weighting per regime
+    ├→ Risk limits adjusted per regime
+    └→ Liquidity thresholds adapted per regime
+    ↓
+📊 LIQUIDITY ASSESSMENT (Rule 12)
+    ├→ Historical liquidity scores calculated
+    ├→ Market impact estimated (Almgren-Chriss/Kyle)
+    ├→ Signals filtered by liquidity (min 60 score)
+    └→ Execution costs modeled (spread + impact)
+    ↓
+🔄 REGIME-AWARE SIGNAL PROCESSING
+    ├→ Technical indicators (regime-adaptive)
+    ├→ Feature engineering (regime-aware)
+    ├→ Signal generation (regime-filtered)
+    └→ Liquidity filtering (max 30 bps impact)
+    ↓
+⚖️ REGIME-ADJUSTED RISK AUTHORIZATION
+    ├→ Risk limits scaled by regime multiplier
+    ├→ Position sizing adapted to regime
+    └→ Leverage adjusted per volatility regime
+    ↓
+⚡ REALISTIC EXECUTION SIMULATION
+    ├→ Spread costs applied (historical or modeled)
+    ├→ Market impact applied (permanent + temporary)
+    ├→ Slippage modeling (volatility-adjusted)
+    └→ Fill price = midpoint + spread/2 + impact
+    ↓
+📈 COMPREHENSIVE TCA & ATTRIBUTION
+    ├→ Implementation shortfall calculated
+    ├→ VWAP/TWAP slippage measured
+    ├→ Execution quality scored
+    └→ Regime-based performance attribution
+```
+
+### Key Metrics Tracked
+- **Regime Metrics**: Regime distribution, transition frequency, regime-specific returns
+- **Liquidity Metrics**: Avg liquidity score, filter rate, volume participation
+- **Execution Metrics**: Total cost (bps), spread cost, market impact, slippage
+- **Quality Scores**: Execution quality (0-100), liquidity efficiency, regime adaptation
+
+### Production-Ready Validation
+All backtests using this workflow automatically validate:
+- ✅ Regime-first initialization compliance (Rule 13)
+- ✅ Liquidity filtering and impact modeling (Rule 12)
+- ✅ Realistic execution costs applied
+- ✅ Multi-strategy regime-based attribution
+- ✅ Comprehensive TCA for strategy validation
+- ✅ Regime-adjusted risk management
+- ✅ Production-grade monitoring and audit trails
+
+This instruction map provides a complete blueprint for assembling core_engine components into an institutional-grade backtesting system with **full compliance to Rules 12-13**. The modular design allows you to swap components, adjust configurations, and extend functionality while maintaining **regime-first principles**, **realistic liquidity modeling**, and institutional risk management standards.

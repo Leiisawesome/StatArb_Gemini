@@ -391,7 +391,7 @@ class StrategyManager(ISystemComponent):
             component=self,
             layer=ComponentLayer.EXECUTION,
             authority_level=AuthorityLevel.OPERATIONAL,
-            initialization_order=25  # After data and regime components
+            initialization_order=20  # PHASE 4: After processing (order=17), before risk (order=25)
         )
         
         logger.info(f"✅ StrategyManager registered with orchestrator: {self.component_id}")
@@ -633,6 +633,25 @@ class StrategyManager(ISystemComponent):
         """Set regime engine reference"""
         self.regime_engine = regime_engine
         logger.info("🔗 Regime Engine linked to Strategy Manager")
+    
+    def on_regime_change(self, new_regime: Any) -> None:
+        """
+        Callback for regime changes from RegimeEngine (PHASE 4)
+        Adjust strategy weights based on regime appropriateness
+        """
+        if not new_regime:
+            return
+        
+        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        logger.info(f"🔄 StrategyManager adapting to regime change: {regime_name}")
+        
+        # Update current regime
+        self.current_regime = regime_name
+        
+        # Adjust strategy weights based on regime (will be used in signal aggregation)
+        # Strategy weights are dynamically calculated in _get_strategy_regime_weight()
+        
+        logger.info(f"✅ Strategy weights updated for regime: {regime_name}")
     
     def subscribe(self, subscriber: IStrategySubscriber):
         """Subscribe to strategy events"""

@@ -218,6 +218,13 @@ class EnhancedSignalGenerator(ISystemComponent):
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
+        # PHASE 3: Regime awareness (Rule 13)
+        self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
+        self.current_regime: Optional[Any] = None  # Current regime context
+        
+        # PHASE 3: Liquidity awareness (Rule 12)
+        self.liquidity_engine: Optional[Any] = None  # LiquidityAssessmentEngine reference
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedSignalGenerator',
@@ -257,11 +264,45 @@ class EnhancedSignalGenerator(ISystemComponent):
             component=self,
             layer=ComponentLayer.SUPPORT,
             authority_level=AuthorityLevel.OPERATIONAL,
-            initialization_order=24  # After features
+            initialization_order=17  # PHASE 3: After Features(16), before Strategy(20)
         )
         
         self.logger.info(f"✅ EnhancedSignalGenerator registered with orchestrator: {self.component_id}")
         return self.component_id
+    
+    # ========================================
+    # PHASE 3: REGIME & LIQUIDITY AWARENESS (RULES 12 & 13)
+    # ========================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine reference for regime-aware signal generation (Rule 13)
+        """
+        self.regime_engine = regime_engine
+        self.logger.info(f"✅ RegimeEngine injected into SignalGenerator (Regime-First Principle)")
+    
+    def set_liquidity_engine(self, liquidity_engine: Any) -> None:
+        """
+        Inject liquidity engine reference for liquidity-aware signal filtering (Rule 12)
+        """
+        self.liquidity_engine = liquidity_engine
+        self.logger.info(f"✅ LiquidityEngine injected into SignalGenerator (Liquidity Management)")
+    
+    def on_regime_change(self, new_regime: Any) -> None:
+        """
+        Callback for regime changes from the EnhancedRegimeEngine
+        Adapt signal generation to new market regime
+        """
+        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
+        self.current_regime = new_regime
+        
+        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        self.logger.info(f"🔄 Signals adapting to regime change: {previous_regime} → {regime_name}")
+        
+        # Store regime context for signal filtering
+        self.health_metrics['current_regime'] = regime_name
+        if hasattr(new_regime, 'volatility_regime'):
+            self.health_metrics['volatility_regime'] = new_regime.volatility_regime
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

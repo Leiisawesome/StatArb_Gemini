@@ -222,6 +222,10 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
+        # PHASE 3: Regime awareness (Rule 13)
+        self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
+        self.current_regime: Optional[Any] = None  # Current regime context
+        
         # Health and performance tracking
         self.health_metrics = {
             'component_type': 'EnhancedTechnicalIndicators',
@@ -294,11 +298,78 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
             component=self,
             layer=ComponentLayer.SUPPORT,
             authority_level=AuthorityLevel.OPERATIONAL,
-            initialization_order=20  # After data components
+            initialization_order=15  # PHASE 3: After DataManager(10), before Features(16)
         )
         
         self.logger.info(f"✅ EnhancedTechnicalIndicators registered with orchestrator: {self.component_id}")
         return self.component_id
+    
+    # ========================================
+    # PHASE 3: REGIME AWARENESS (RULE 13)
+    # ========================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine reference for regime-aware indicator calculation (Rule 13)
+        """
+        self.regime_engine = regime_engine
+        self.logger.info(f"✅ RegimeEngine injected into TechnicalIndicators (Regime-First Principle)")
+    
+    def on_regime_change(self, new_regime: Any) -> None:
+        """
+        Callback for regime changes from the EnhancedRegimeEngine
+        Adapt indicator parameters based on new market regime
+        """
+        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
+        self.current_regime = new_regime
+        
+        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        self.logger.info(f"🔄 Indicators adapting to regime change: {previous_regime} → {regime_name}")
+        
+        # Adapt indicator parameters based on regime
+        self._adapt_to_regime(new_regime)
+    
+    def _adapt_to_regime(self, regime: Any) -> None:
+        """
+        Adapt indicator parameters to current regime
+        
+        Adaptation strategy:
+        - High volatility → Wider Bollinger Bands, longer periods
+        - Low volatility → Tighter bands, shorter periods
+        - Trending → Prioritize trend indicators (MACD, ADX)
+        - Range-bound → Prioritize oscillators (RSI, Stochastic)
+        """
+        try:
+            regime_name = regime.primary_regime.value if hasattr(regime, 'primary_regime') else str(regime)
+            volatility_regime = regime.volatility_regime if hasattr(regime, 'volatility_regime') else 'normal_volatility'
+            
+            # Adapt Bollinger Bands based on volatility
+            if volatility_regime == 'high_volatility':
+                self.config.bb_std = 2.5  # Wider bands in high vol
+                self.config.bb_period = 25  # Longer period
+                self.logger.info(f"📊 BB adapted for high volatility: std=2.5, period=25")
+            elif volatility_regime == 'low_volatility':
+                self.config.bb_std = 1.5  # Tighter bands in low vol
+                self.config.bb_period = 15  # Shorter period
+                self.logger.info(f"📊 BB adapted for low volatility: std=1.5, period=15")
+            else:
+                self.config.bb_std = 2.0  # Normal bands
+                self.config.bb_period = 20  # Normal period
+            
+            # Adapt RSI period based on regime
+            if 'trending' in regime_name:
+                self.config.rsi_period = 21  # Longer RSI for trending
+                self.logger.info(f"📊 RSI adapted for trending: period=21")
+            elif 'range' in regime_name:
+                self.config.rsi_period = 14  # Standard RSI for range-bound
+                self.logger.info(f"📊 RSI adapted for range-bound: period=14")
+            
+            # Store regime context in health metrics
+            self.health_metrics['current_regime'] = regime_name
+            self.health_metrics['volatility_regime'] = volatility_regime
+            
+        except Exception as e:
+            self.logger.warning(f"Regime adaptation failed: {e}")
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

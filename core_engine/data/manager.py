@@ -265,6 +265,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
+        # Regime-aware integration (Rule 13: Regime-First Principle)
+        self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
+        
         # Determine whether we can reach ClickHouse
         self._connection_available = False
         self._use_synthetic_data = bool(int(os.getenv("STATARB_USE_SYNTHETIC_DATA", "0")))
@@ -312,6 +315,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         return await self.orchestrator.request_system_authorization(
             operation, self.component_id, details
         )
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine reference for regime-aware data processing (Rule 13)
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
+        """
+        self.regime_engine = regime_engine
+        self.logger.info(f"✅ RegimeEngine injected into DataManager (Regime-First Principle)")
+    
+    def get_current_regime(self) -> Optional[Any]:
+        """Get current market regime from regime engine"""
+        if self.regime_engine and hasattr(self.regime_engine, 'current_regime'):
+            return self.regime_engine.current_regime
+        return None
     
     # ========================================
     # ISystemComponent Interface Implementation
@@ -588,7 +607,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         end_time: datetime,
         interval: str,
     ) -> pd.DataFrame:
-        """Generate deterministic synthetic OHLCV data for offline testing."""
+        """
+        Generate deterministic synthetic OHLCV data for offline testing.
+        
+        ENHANCED: Intelligently handles same-day date ranges by generating
+        a full trading day of data (09:30 - 16:00) when start and end are
+        the same day with no time component.
+        """
 
         freq_map = {
             "1min": "1min",
@@ -600,10 +625,35 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         if interval not in freq_map:
             raise ValueError(f"Unsupported interval for synthetic data: {interval}")
 
+        # ENHANCEMENT: Handle same-day ranges intelligently
+        # If start and end are the same day (both at 00:00:00), generate a full trading day
+        if start_time.date() == end_time.date() and start_time.time().hour == 0 and end_time.time().hour == 0:
+            self.logger.info(
+                "Detected same-day range with no time - generating full trading day (09:30-16:00)"
+            )
+            # Standard US market hours: 9:30 AM - 4:00 PM ET
+            start_time = start_time.replace(hour=9, minute=30, second=0)
+            end_time = end_time.replace(hour=16, minute=0, second=0)
+            self.logger.info(f"Adjusted time range: {start_time} to {end_time}")
+
         index = pd.date_range(start=start_time, end=end_time, freq=freq_map[interval])
 
-        if index.empty:
-            index = pd.date_range(start=start_time, periods=120, freq=freq_map[interval])
+        # ENHANCEMENT: Improved fallback logic for insufficient data
+        # If we have too few bars, generate a reasonable amount based on interval
+        min_bars_map = {
+            "1min": 120,   # 2 hours minimum
+            "5min": 80,    # ~6.5 hours (full trading day)
+            "15min": 30,   # ~7.5 hours
+            "1h": 7,       # Full trading day
+        }
+        min_bars = min_bars_map.get(interval, 50)
+        
+        if len(index) < min_bars:
+            self.logger.warning(
+                f"Only {len(index)} bars generated for {interval} interval. "
+                f"Generating {min_bars} bars for meaningful analysis."
+            )
+            index = pd.date_range(start=start_time, periods=min_bars, freq=freq_map[interval])
 
         max_points = 1000 if interval in ("1min", "5min") else 500
         if len(index) > max_points:

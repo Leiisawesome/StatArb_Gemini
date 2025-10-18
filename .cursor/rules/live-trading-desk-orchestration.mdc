@@ -7,42 +7,50 @@ This instruction map shows how to compose core_engine components into a real-tim
 
 ## Live Trading Desk Component Stack
 
-### Enhanced Real-Time Brick Assembly (6-Layer + Production)
+### Enhanced Real-Time Brick Assembly (7-Layer + Production) - UPDATED for Rules 12-13
 ```
 ┌─────────────────────────────────────┐
-│ Layer 1: System Orchestration      │
-│ HierarchicalSystemOrchestrator      │ ← System Control & Monitoring
-│ SystemIntegrationManager            │ ← Multi-Phase Live Initialization
+│ Layer 0: Regime Detection (Rule 13)│  ← NEW: Foundation Layer
+│ EnhancedRegimeEngine (order=5)      │  ← Initializes FIRST
+│ RegimeContext Distribution          │  ← Provides context to ALL
+├─────────────────────────────────────┤
+│ Layer 1: System Orchestration       │
+│ HierarchicalSystemOrchestrator      │  ← order=10
+│ SystemIntegrationManager            │  ← Multi-Phase Live Initialization
 ├─────────────────────────────────────┤
 │ Layer 2: Governance                 │
-│ CentralRiskManager (Live)           │ ← Real-Time Risk Governance
+│ CentralRiskManager (Live)           │  ← order=25 (regime-aware)
 ├─────────────────────────────────────┤
 │ Layer 3: Data Management            │
-│ ClickHouseDataManager (Live)        │ ← Real-Time Market Data Authority
+│ ClickHouseDataManager (Live)        │  ← order=10 (regime-aware)
 ├─────────────────────────────────────┤
 │ Layer 4: Core Processing            │
-│ EnhancedRegimeEngine (Real-Time)    │ ← Live Market Condition Analysis
-│ EnhancedTechnicalIndicators (Live)  │ ← Real-Time Signal Processing
-│ EnhancedFeatureEngineer (Adaptive)  │ ← Dynamic Feature Engineering
-│ EnhancedSignalGenerator (Live)      │ ← Multi-Strategy Signal Generation
+│ EnhancedTechnicalIndicators (Live)  │  ← order=15 (regime-aware)
+│ EnhancedFeatureEngineer (Adaptive)  │  ← Regime-adaptive features
+│ EnhancedSignalGenerator (Live)      │  ← Regime-aware signal filtering
 ├─────────────────────────────────────┤
 │ Layer 5: Analytics & Strategy       │
-│ EnhancedAnalyticsManager (Live)     │ ← Real-Time Analytics
-│ EnhancedMetricsCalculator (Live)    │ ← Live Performance Metrics
-│ PerformanceAnalyzer (Real-Time)     │ ← Live Performance Analysis
-│ StrategyManager (Multi-Strategy)    │ ← Active Strategy Coordination
-│ StrategyExecutionEngine (Live)      │ ← Live Strategy Execution
+│ EnhancedAnalyticsManager (Live)     │  ← order=20 (regime-aware)
+│ StrategyManager (Multi-Strategy)    │  ← Regime-based strategy weighting
+│ StrategyExecutionEngine (Live)      │  ← Regime-optimized execution
 ├─────────────────────────────────────┤
 │ Layer 6: Trading & Execution        │
-│ EnhancedTradingEngine (Live)        │ ← Live Execution Planning
-│ UnifiedExecutionEngine (Live)       │ ← Live Order Execution
-│ EnhancedPortfolioManager (Live)     │ ← Real-Time Position Tracking
+│ EnhancedTradingEngine (Live)        │  ← order=30 (regime-aware)
+│ UnifiedExecutionEngine (Live)       │  ← Regime-optimized execution
+│ EnhancedPortfolioManager (Live)     │  ← Real-Time Position Tracking
+├─────────────────────────────────────┤
+│ Liquidity Management (Rule 12)      │  ← NEW: Liquidity Layer
+│ LiquidityAssessmentEngine           │  ← Real-time liquidity scoring
+│ MarketImpactModel                   │  ← Almgren-Chriss, Kyle models
+│ OrderBookAnalyzer                   │  ← Live order book analytics
+│ SmartOrderRouter                    │  ← Multi-venue optimization
+│ ExecutionQualityAnalyzer            │  ← Real-time TCA
 ├─────────────────────────────────────┤
 │ Production Components (Rule 10)     │
-│ ProductionHealthMonitor             │ ← Real-Time Health Monitoring
-│ GracefulDegradationManager          │ ← Service Degradation Control
-│ AuditTrailManager                   │ ← Live Audit Logging
-│ DisasterRecoveryManager             │ ← Live Disaster Recovery
+│ ProductionHealthMonitor             │  ← Real-Time Health Monitoring
+│ GracefulDegradationManager          │  ← Service Degradation Control
+│ AuditTrailManager                   │  ← Live Audit Logging
+│ DisasterRecoveryManager             │  ← Live Disaster Recovery
 └─────────────────────────────────────┘
 ```
 
@@ -111,7 +119,215 @@ live_risk_config = LiveRiskConfig(
 )
 ```
 
-### 3. Live Execution Configuration
+### 3. Real-Time Liquidity Management Configuration (Rule 12)
+```python
+from core_engine.liquidity.assessment import LiquidityAssessmentEngine, LiquidityConfig
+from core_engine.liquidity.impact import MarketImpactModel, ImpactConfig
+from core_engine.liquidity.orderbook import OrderBookAnalyzer, OrderBookConfig
+from core_engine.liquidity.routing import SmartOrderRouter, RoutingConfig
+from core_engine.liquidity.quality import ExecutionQualityAnalyzer, TCAConfig
+
+# Real-time liquidity assessment configuration
+liquidity_config = LiquidityConfig(
+    update_frequency=60,  # Update every minute
+    enable_real_time_scoring=True,
+    enable_predictive_liquidity=True,
+    
+    # Liquidity regime thresholds
+    liquidity_thresholds={
+        'high_liquidity': {
+            'min_adv': 1_000_000,      # $1M+ average daily volume
+            'max_spread_bps': 5,        # Max 5 bps spread
+            'min_depth': 500_000,       # $500K min market depth
+            'max_impact_100k_bps': 5    # Max 5 bps impact for $100K
+        },
+        'normal_liquidity': {
+            'min_adv': 250_000,
+            'max_spread_bps': 10,
+            'min_depth': 100_000,
+            'max_impact_100k_bps': 15
+        },
+        'low_liquidity': {
+            'min_adv': 50_000,
+            'max_spread_bps': 25,
+            'min_depth': 20_000,
+            'max_impact_100k_bps': 50
+        },
+        'crisis_liquidity': {
+            'min_adv': 10_000,
+            'max_spread_bps': 100,
+            'min_depth': 5_000,
+            'max_impact_100k_bps': 200
+        }
+    },
+    
+    # Alert thresholds
+    alert_thresholds={
+        'low_liquidity_warning': 50,    # Score < 50 triggers warning
+        'illiquid_alert': 30,           # Score < 30 triggers alert
+        'spread_spike': 50,             # Spread > 50 bps triggers alert
+        'depth_depletion': 0.3          # Depth < 30% normal triggers alert
+    }
+)
+
+liquidity_engine = LiquidityAssessmentEngine(liquidity_config)
+
+# Market impact modeling configuration
+impact_config = ImpactConfig(
+    # Primary model: Almgren-Chriss for high-frequency stocks
+    model_type='almgren_chriss',
+    linear_coefficient=0.1,
+    sqrt_coefficient=0.5,
+    permanent_impact_factor=0.3,
+    temporary_impact_factor=0.7,
+    
+    # Alternative models for different conditions
+    alternative_models={
+        'low_liquidity': 'kyle_lambda',      # Kyle's lambda for illiquid stocks
+        'high_volatility': 'simple_sqrt',    # Simpler model for volatile conditions
+        'large_orders': 'almgren_chriss'     # Almgren-Chriss for large orders
+    },
+    
+    # Risk-adjusted parameters
+    risk_aversion=0.5,                       # Risk aversion parameter
+    urgency_premium={
+        'low': 0.7,
+        'normal': 1.0,
+        'high': 1.5,
+        'urgent': 2.0,
+        'emergency': 3.0
+    }
+)
+
+impact_model = MarketImpactModel(impact_config)
+
+# Order book analytics configuration (Rule 12)
+orderbook_config = OrderBookConfig(
+    enable_order_book_analysis=True,
+    depth_levels=10,                         # Analyze top 10 price levels
+    analysis_frequency=1,                    # Real-time (1 second)
+    enable_level2_data=True,
+    
+    # Microstructure metrics
+    microstructure_metrics=[
+        'imbalance_ratio',                   # Bid/ask volume ratio
+        'weighted_imbalance',                # Price-weighted imbalance
+        'depth_imbalance',                   # Cumulative depth imbalance
+        'buy_pressure_score',                # Buy pressure indicator
+        'sell_pressure_score',               # Sell pressure indicator
+        'order_flow_toxicity',               # Informed trading indicator
+        'market_maker_activity'              # MM participation score
+    ],
+    
+    # Liquidity metrics
+    liquidity_metrics=[
+        'total_bid_liquidity',
+        'total_ask_liquidity',
+        'liquidity_at_touch',
+        'bid_ask_spread_bps',
+        'effective_spread_bps',
+        'micro_price',                       # Liquidity-weighted mid
+        'quote_stability'                    # Quote stability score
+    ],
+    
+    # Alert thresholds
+    alert_thresholds={
+        'high_imbalance': 2.0,               # Imbalance > 2.0 triggers alert
+        'high_toxicity': 0.7,                # Toxicity > 0.7 indicates informed flow
+        'low_liquidity_at_touch': 10000,     # < $10K at touch triggers alert
+        'wide_spread': 25                    # Spread > 25 bps triggers alert
+    }
+)
+
+orderbook_analyzer = OrderBookAnalyzer(orderbook_config)
+
+# Smart order routing configuration (Rule 12)
+routing_config = RoutingConfig(
+    enable_multi_venue=True,
+    enable_smart_routing=True,
+    enable_dark_pools=True,
+    
+    # Venue configuration
+    venues={
+        'NYSE': {'priority': 1, 'max_allocation': 0.4, 'fee_per_share': 0.0003},
+        'NASDAQ': {'priority': 1, 'max_allocation': 0.4, 'fee_per_share': 0.0003},
+        'ARCA': {'priority': 2, 'max_allocation': 0.3, 'fee_per_share': 0.0002},
+        'BATS': {'priority': 2, 'max_allocation': 0.3, 'fee_per_share': 0.0002},
+        'IEX': {'priority': 3, 'max_allocation': 0.2, 'fee_per_share': 0.0000},
+        'EDGX': {'priority': 2, 'max_allocation': 0.3, 'fee_per_share': 0.0002}
+    },
+    
+    # Dark pool configuration
+    dark_pool_venues={
+        'IEX_DARK': {'min_size': 5000, 'max_allocation': 0.3},
+        'SIGMA_X': {'min_size': 10000, 'max_allocation': 0.2},
+        'CROSSFINDER': {'min_size': 10000, 'max_allocation': 0.2}
+    },
+    
+    # Routing criteria (weighted scoring)
+    venue_selection_criteria={
+        'liquidity': 0.30,                   # 30% weight on liquidity
+        'cost': 0.30,                        # 30% weight on cost
+        'latency': 0.20,                     # 20% weight on latency
+        'fill_rate': 0.20                    # 20% weight on fill rate
+    },
+    
+    # Allocation strategy
+    allocation_strategy='liquidity_weighted',  # or 'cost_optimized', 'speed_optimized'
+    max_venues_per_order=3,                   # Max 3 venues per order
+    min_size_per_venue=100,                   # Min 100 shares per venue
+    
+    # Dynamic adjustments
+    enable_adaptive_routing=True,
+    routing_adaptation_interval=300           # Adjust routing every 5 minutes
+)
+
+smart_router = SmartOrderRouter(routing_config)
+
+# Execution quality monitoring (TCA) configuration (Rule 12)
+tca_config = TCAConfig(
+    enable_real_time_tca=True,
+    enable_post_trade_analysis=True,
+    
+    # Benchmarks
+    benchmarks=['arrival_price', 'vwap', 'twap', 'close', 'open'],
+    primary_benchmark='vwap',
+    
+    # Metrics
+    metrics=[
+        'implementation_shortfall',          # Actual vs decision cost
+        'arrival_cost_bps',                  # Cost vs arrival price
+        'vwap_slippage_bps',                 # Slippage vs VWAP
+        'twap_slippage_bps',                 # Slippage vs TWAP
+        'realized_slippage_bps',             # Total realized slippage
+        'market_impact_bps',                 # Market impact cost
+        'timing_cost_bps',                   # Timing cost
+        'opportunity_cost_bps',              # Opportunity cost
+        'spread_cost_bps',                   # Spread crossing cost
+        'commission_cost_bps'                # Commission cost
+    ],
+    
+    # Quality scoring
+    quality_thresholds={
+        'excellent': 90,                     # Score >= 90: Excellent
+        'good': 80,                          # Score >= 80: Good
+        'fair': 70,                          # Score >= 70: Fair
+        'poor': 60,                          # Score >= 60: Poor
+        'unacceptable': 0                    # Score < 60: Unacceptable
+    },
+    
+    # Alerting
+    enable_quality_alerts=True,
+    alert_threshold=70,                      # Alert if quality < 70
+    alert_on_poor_execution=True,
+    alert_on_high_costs=True,
+    high_cost_threshold_bps=20               # Alert if total cost > 20 bps
+)
+
+execution_quality_analyzer = ExecutionQualityAnalyzer(tca_config)
+```
+
+### 4. Live Execution Configuration
 ```python
 from core_engine.system.unified_execution_engine import LiveExecutionConfig
 
@@ -145,10 +361,15 @@ live_execution_config = LiveExecutionConfig(
 
 ## Live Trading Orchestration Workflow
 
-### Phase 1: Live System Initialization
+### Phase 1: Live System Initialization (Regime-First - Rule 13)
 ```python
 async def initialize_live_trading_system():
-    """Initialize live trading desk with all components"""
+    """
+    Initialize live trading desk with REGIME-FIRST principle (Rule 13)
+    
+    CRITICAL: RegimeEngine MUST initialize FIRST (order=5) to provide
+    foundational market context to all other components.
+    """
     
     # 1. Create orchestrator with live monitoring
     orchestrator = HierarchicalSystemOrchestrator(
@@ -157,28 +378,52 @@ async def initialize_live_trading_system():
         enable_real_time_alerts=True
     )
     
-    # 2. Register live data management
-    live_data_manager = LiveDataManager(live_data_config)
+    # STEP 1: Register Regime Engine FIRST (order=5) - Rule 13
+    # This is the foundational Layer 0 component
+    live_regime_engine = EnhancedRegimeEngine({
+        **regime_config,
+        'real_time_mode': True,
+        'update_frequency': 60,              # Update every minute
+        'enable_regime_distribution': True,  # Enable context distribution
+        'enable_ml_prediction': True,        # ML-based regime prediction
+        'enable_transition_detection': True  # Detect regime transitions
+    })
+    
+    orchestrator.register_component(
+        name="EnhancedRegimeEngine",
+        component=live_regime_engine,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=5,  # CRITICAL: First to initialize (Layer 0)
+        critical=True
+    )
+    
+    # Initialize regime engine immediately
+    await live_regime_engine.initialize()
+    await live_regime_engine.start()
+    
+    logger.info("✅ Regime Engine initialized (Layer 0 - Foundation)")
+    
+    # 2. Register live data management (order=10) with regime context
+    live_data_manager = ClickHouseDataManager(live_data_config)
+    live_data_manager.set_regime_engine(live_regime_engine)  # Inject regime context
+    
+    # Subscribe to regime changes
+    await live_regime_engine.subscribe_component(
+        live_data_manager,
+        callback=live_data_manager.on_regime_change
+    )
+    
     orchestrator.register_component(
         name="LiveDataManager",
         component=live_data_manager,
         layer=ComponentLayer.SUPPORT,
         authority_level=AuthorityLevel.OPERATIONAL,
-        initialization_order=1,
+        initialization_order=10,  # After regime engine
         critical=True  # Critical for live trading
     )
     
-    # 3. Register real-time regime analysis
-    live_regime_engine = RegimeEngine(
-        config={**regime_config, 'real_time_mode': True, 'update_frequency': 60}
-    )
-    orchestrator.register_component(
-        name="LiveRegimeEngine",
-        component=live_regime_engine,
-        layer=ComponentLayer.SUPPORT,
-        initialization_order=2,
-        critical=True
-    )
+    logger.info("✅ Data Manager registered with regime awareness")
     
     # 4. Register streaming processing pipeline
     streaming_indicators = StreamingTechnicalIndicators(
@@ -594,4 +839,314 @@ async def validate_data_connectivity(orchestrator) -> Dict:
     }
 ```
 
-This instruction map provides a complete blueprint for assembling core_engine components into a real-time institutional trading desk. The architecture emphasizes **real-time processing**, **continuous risk monitoring**, and **automated execution** while maintaining the same governance and risk management standards as the backtesting system.
+## Enhanced: Complete Liquidity-Aware & Regime-First Trading Loop (Rules 12-13)
+
+### Master Trading Loop with Full Integration
+```python
+async def enhanced_live_trading_loop_with_liquidity_and_regime():
+    """
+    Complete live trading loop integrating:
+    - Rule 12: Liquidity Management (assessment, impact, routing, TCA)
+    - Rule 13: Regime-First Principle (regime as foundation)
+    """
+    
+    # Initialize all components (regime-first)
+    orchestrator = await initialize_live_trading_system()
+    
+    # Get components
+    regime_engine = orchestrator.get_component("EnhancedRegimeEngine")
+    data_manager = orchestrator.get_component("LiveDataManager")
+    strategy_manager = orchestrator.get_component("LiveStrategyManager")
+    risk_manager = orchestrator.get_component("LiveRiskManager")
+    execution_engine = orchestrator.get_component("UnifiedExecutionEngine")
+    
+    # Liquidity components (Rule 12)
+    liquidity_engine = orchestrator.get_component("LiquidityAssessmentEngine")
+    impact_model = orchestrator.get_component("MarketImpactModel")
+    orderbook_analyzer = orchestrator.get_component("OrderBookAnalyzer")
+    smart_router = orchestrator.get_component("SmartOrderRouter")
+    tca_analyzer = orchestrator.get_component("ExecutionQualityAnalyzer")
+    
+    logger.info("🚀 Enhanced live trading loop starting...")
+    
+    while orchestrator.is_operational:
+        try:
+            # ═══════════════════════════════════════════════════════
+            # STEP 1: Check Regime Context FIRST (Rule 13)
+            # ═══════════════════════════════════════════════════════
+            regime_context = await regime_engine.get_current_regime_context()
+            
+            if regime_context.regime_changed:
+                logger.info(f"🔄 Regime changed: {regime_context.previous_regime} → "
+                           f"{regime_context.primary_regime} (confidence: {regime_context.regime_confidence:.2f})")
+                
+                # Distribute regime change to all components
+                await regime_engine.distribute_regime_context(regime_context)
+                
+                # Adjust risk limits for new regime
+                await risk_manager.adjust_limits_for_regime(regime_context)
+                
+                # Rebalance strategy weights
+                await strategy_manager.rebalance_for_regime(regime_context)
+                
+                # Adjust liquidity thresholds
+                await liquidity_engine.adjust_for_regime(regime_context)
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 2: Get Market Data with Regime Context
+            # ═══════════════════════════════════════════════════════
+            market_data = await data_manager.get_real_time_data()
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 3: Assess Real-Time Liquidity (Rule 12)
+            # ═══════════════════════════════════════════════════════
+            liquidity_scores = {}
+            orderbook_analyses = {}
+            
+            for symbol in market_data.symbols:
+                # Assess liquidity
+                liquidity_score = await liquidity_engine.assess_liquidity_score(
+                    symbol, 
+                    quantity=None  # General assessment
+                )
+                liquidity_scores[symbol] = liquidity_score
+                
+                # Analyze order book
+                orderbook_analysis = await orderbook_analyzer.analyze_order_book(
+                    symbol,
+                    depth=10
+                )
+                orderbook_analyses[symbol] = orderbook_analysis
+                
+                # Log liquidity alerts
+                if liquidity_score.overall_score < 50:
+                    logger.warning(f"⚠️ Low liquidity for {symbol}: "
+                                 f"score={liquidity_score.overall_score:.1f}, "
+                                 f"regime={liquidity_score.liquidity_regime}")
+                
+                # Log order book imbalances
+                if abs(orderbook_analysis.imbalance_ratio - 1.0) > 0.5:
+                    logger.info(f"📊 Order book imbalance for {symbol}: "
+                              f"ratio={orderbook_analysis.imbalance_ratio:.2f}")
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 4: Generate Regime-Aware Signals (Rules 12 & 13)
+            # ═══════════════════════════════════════════════════════
+            raw_signals = await strategy_manager.generate_signals(
+                market_data,
+                regime_context=regime_context  # Pass regime context
+            )
+            
+            # Filter signals by regime appropriateness and liquidity
+            regime_filtered_signals = []
+            for signal in raw_signals:
+                # Check regime appropriateness
+                strategy_weight = regime_context.get_strategy_weight(signal.strategy_type)
+                if strategy_weight < 0.3:
+                    logger.debug(f"⚠️ Signal filtered: {signal.strategy_type} "
+                               f"not suitable for regime {regime_context.primary_regime}")
+                    continue
+                
+                # Check liquidity
+                liquidity_score = liquidity_scores.get(signal.symbol)
+                if liquidity_score and liquidity_score.overall_score < 30:
+                    logger.warning(f"⚠️ Signal filtered: {signal.symbol} "
+                                 f"insufficient liquidity (score: {liquidity_score.overall_score:.1f})")
+                    continue
+                
+                regime_filtered_signals.append(signal)
+            
+            logger.info(f"📊 Signals: {len(raw_signals)} generated, "
+                       f"{len(regime_filtered_signals)} passed regime/liquidity filter")
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 5: Liquidity-Aware Position Sizing (Rule 12)
+            # ═══════════════════════════════════════════════════════
+            for signal in regime_filtered_signals:
+                liquidity_score = liquidity_scores[signal.symbol]
+                orderbook = orderbook_analyses[signal.symbol]
+                
+                # Estimate market impact
+                impact_estimate = await impact_model.estimate_market_impact(
+                    signal.symbol,
+                    signal.quantity,
+                    signal.side,
+                    urgency='normal'
+                )
+                
+                # Adjust quantity if impact too high
+                if impact_estimate.total_impact_bps > 15:
+                    original_qty = signal.quantity
+                    
+                    # Optimize size for acceptable impact
+                    optimized = await impact_model.optimize_execution_size(
+                        signal.symbol,
+                        signal.quantity,
+                        max_impact_bps=15
+                    )
+                    
+                    signal.quantity = optimized['recommended_quantity']
+                    logger.info(f"📉 Reduced order size for {signal.symbol}: "
+                              f"{original_qty:.0f} → {signal.quantity:.0f} "
+                              f"(impact: {impact_estimate.total_impact_bps:.1f} bps)")
+                
+                # Add liquidity metadata to signal
+                signal.metadata['liquidity_score'] = liquidity_score.overall_score
+                signal.metadata['liquidity_regime'] = liquidity_score.liquidity_regime
+                signal.metadata['estimated_impact_bps'] = impact_estimate.total_impact_bps
+                signal.metadata['orderbook_imbalance'] = orderbook.imbalance_ratio
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 6: Regime-Adjusted Risk Authorization (Rule 13)
+            # ═══════════════════════════════════════════════════════
+            authorized_trades = []
+            
+            for signal in regime_filtered_signals:
+                # Create authorization request with regime context
+                request = TradingDecisionRequest(
+                    decision_type=TradingDecisionType.POSITION_ENTRY,
+                    symbol=signal.symbol,
+                    side=signal.side,
+                    quantity=signal.quantity,
+                    strategy_id=signal.strategy_id,
+                    confidence=signal.confidence,
+                    market_regime=regime_context.primary_regime,
+                    regime_confidence=regime_context.regime_confidence,
+                    metadata=signal.metadata
+                )
+                
+                # Risk manager uses regime-adjusted limits
+                authorization = await risk_manager.authorize_trading_decision(request)
+                
+                if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                    authorized_trades.append((signal, authorization))
+                    logger.info(f"✅ Trade authorized: {signal.symbol} {signal.side} "
+                              f"{authorization.quantity:.0f} @ confidence {signal.confidence:.2f}")
+                else:
+                    logger.warning(f"❌ Trade rejected: {signal.symbol} - "
+                                 f"{authorization.rejection_reason}")
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 7: Smart Order Routing & Execution (Rule 12)
+            # ═══════════════════════════════════════════════════════
+            execution_results = []
+            
+            for signal, authorization in authorized_trades:
+                # Determine optimal routing
+                routing_plan = await smart_router.route_order(
+                    signal.symbol,
+                    authorization.quantity,
+                    signal.side,
+                    urgency='normal'
+                )
+                
+                logger.info(f"🎯 Routing {signal.symbol}: {len(routing_plan['routing_plan'])} venues")
+                
+                # Execute with routing plan
+                execution_result = await execution_engine.execute_with_routing(
+                    authorization,
+                    routing_plan,
+                    regime_context=regime_context  # Pass regime context
+                )
+                
+                execution_results.append((signal, execution_result))
+                
+                logger.info(f"✅ Executed: {signal.symbol} {signal.side} "
+                          f"{execution_result.filled_quantity:.0f} @ "
+                          f"${execution_result.avg_fill_price:.2f}")
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 8: Real-Time Execution Quality Analysis (Rule 12)
+            # ═══════════════════════════════════════════════════════
+            for signal, execution_result in execution_results:
+                # Analyze execution quality (TCA)
+                tca_analysis = await tca_analyzer.analyze_execution_quality(
+                    execution_result,
+                    market_data[signal.symbol]
+                )
+                
+                # Log quality metrics
+                logger.info(f"📊 TCA {signal.symbol}: "
+                          f"quality={tca_analysis.overall_quality_score:.1f}, "
+                          f"grade={tca_analysis.performance_grade}, "
+                          f"slippage={tca_analysis.realized_slippage_bps:.2f} bps, "
+                          f"impact={tca_analysis.market_impact_bps:.2f} bps")
+                
+                # Alert on poor execution
+                if tca_analysis.overall_quality_score < 70:
+                    logger.warning(f"⚠️ Poor execution quality for {signal.symbol}: "
+                                 f"{tca_analysis.overall_quality_score:.1f}/100")
+                    
+                    # Send alert
+                    await send_execution_quality_alert(signal, tca_analysis)
+            
+            # ═══════════════════════════════════════════════════════
+            # STEP 9: Update Regime-Aware Analytics
+            # ═══════════════════════════════════════════════════════
+            if execution_results:
+                await update_regime_aware_analytics(
+                    regime_context,
+                    execution_results,
+                    liquidity_scores
+                )
+            
+            # Brief pause before next iteration
+            await asyncio.sleep(1)  # 1-second trading loop
+            
+        except Exception as e:
+            logger.error(f"❌ Error in enhanced trading loop: {e}", exc_info=True)
+            await asyncio.sleep(5)  # Brief pause on error
+
+
+async def send_execution_quality_alert(signal, tca_analysis):
+    """Send alert for poor execution quality"""
+    alert_message = {
+        'symbol': signal.symbol,
+        'quality_score': tca_analysis.overall_quality_score,
+        'grade': tca_analysis.performance_grade,
+        'slippage_bps': tca_analysis.realized_slippage_bps,
+        'impact_bps': tca_analysis.market_impact_bps,
+        'recommendations': tca_analysis.recommendations,
+        'timestamp': datetime.now()
+    }
+    
+    # Send to monitoring system
+    logger.critical(f"🚨 EXECUTION QUALITY ALERT: {alert_message}")
+    # Additional alerting logic (Slack, email, etc.)
+
+
+async def update_regime_aware_analytics(regime_context, execution_results, liquidity_scores):
+    """Update analytics with regime awareness"""
+    analytics_update = {
+        'regime': regime_context.primary_regime,
+        'regime_confidence': regime_context.regime_confidence,
+        'trades_executed': len(execution_results),
+        'avg_liquidity_score': np.mean([score.overall_score for score in liquidity_scores.values()]),
+        'timestamp': datetime.now()
+    }
+    
+    logger.info(f"📈 Analytics updated for regime {regime_context.primary_regime}")
+```
+
+## Summary: Rules 12 & 13 Integration
+
+This enhanced live trading desk orchestration now fully integrates:
+
+### **Rule 12: Market Microstructure & Liquidity Management** ✅
+- ✅ Real-time liquidity assessment before every trade
+- ✅ Market impact modeling (Almgren-Chriss, Kyle)
+- ✅ Order book analytics for microstructure insights
+- ✅ Smart order routing across multiple venues
+- ✅ Transaction cost analysis (TCA) for execution quality
+- ✅ Liquidity-aware position sizing
+
+### **Rule 13: Regime-First Principle** ✅
+- ✅ Regime engine initializes FIRST (order=5, Layer 0)
+- ✅ All components implement IRegimeAware interface
+- ✅ Regime context distributed to all components
+- ✅ Regime-aware signal filtering
+- ✅ Regime-adjusted risk limits
+- ✅ Regime-optimized execution strategies
+- ✅ Regime-based strategy weighting
+
+This instruction map provides a complete blueprint for assembling core_engine components into a real-time institutional trading desk with **full liquidity management** and **regime-first architecture**. The enhanced system emphasizes **real-time liquidity assessment**, **market impact optimization**, **smart order routing**, **execution quality measurement**, **regime-aware operations**, and **continuous risk monitoring** while maintaining institutional-grade governance standards.

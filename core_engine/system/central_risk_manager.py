@@ -231,6 +231,9 @@ class CentralRiskManager(ISystemComponent):
             'regime_risk_adjustment': 1.0
         }
         
+        # PHASE 4: Regime-based risk adjustment
+        self.risk_multiplier: float = 1.0  # Dynamic risk multiplier based on regime
+        
         # Control state
         self.is_initialized = False
         self.is_operational = False
@@ -286,6 +289,34 @@ class CentralRiskManager(ISystemComponent):
             self.regime_engine = regime_engine
             logger.info("✅ RegimeEngine registered with Central Risk Manager")
     
+    def on_regime_change(self, new_regime: Any) -> None:
+        """
+        Callback for regime changes from RegimeEngine (PHASE 4)
+        Adjust risk limits based on market regime
+        """
+        if not new_regime:
+            return
+        
+        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        volatility_regime = new_regime.volatility_regime if hasattr(new_regime, 'volatility_regime') else 'normal_volatility'
+        
+        logger.info(f"🔄 CentralRiskManager adapting to regime change: {regime_name} (vol: {volatility_regime})")
+        
+        # Adjust risk limits based on regime
+        # High volatility → tighter limits
+        # Low volatility → can afford slightly looser limits
+        if volatility_regime in ['high_volatility', 'extreme_volatility']:
+            self.risk_multiplier = 0.7  # Reduce risk by 30%
+            logger.info(f"  📉 Risk limits tightened (multiplier: 0.7) due to {volatility_regime}")
+        elif volatility_regime == 'low_volatility':
+            self.risk_multiplier = 1.2  # Can increase risk by 20%
+            logger.info(f"  📈 Risk limits relaxed (multiplier: 1.2) due to {volatility_regime}")
+        else:
+            self.risk_multiplier = 1.0  # Normal risk
+            logger.info(f"  ➡️  Normal risk limits (multiplier: 1.0)")
+        
+        logger.info(f"✅ Risk limits updated for regime: {regime_name}")
+    
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
@@ -300,7 +331,7 @@ class CentralRiskManager(ISystemComponent):
             component=self,
             layer=ComponentLayer.GOVERNANCE,
             authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
-            initialization_order=5  # Very early initialization for governance
+            initialization_order=25  # PHASE 4: GOVERNANCE layer - after strategies (order=20)
         )
         
         logger.info(f"✅ CentralRiskManager registered with orchestrator: {self.component_id}")

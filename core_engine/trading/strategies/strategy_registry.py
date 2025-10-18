@@ -493,6 +493,9 @@ class EnhancedStrategyRegistry(ISystemComponent):
         # Configuration
         self.config = config or {}
         registry_path = self.config.get('registry_path', 'strategy_registry')
+        # Handle None or empty string gracefully
+        if not registry_path:
+            registry_path = 'strategy_registry'
         self.registry_path = Path(registry_path)
         self.registry_path.mkdir(exist_ok=True)
         

@@ -1,0 +1,918 @@
+---
+alwaysApply: true
+description: "Regime-First Principle: Foundational Market Regime Detection"
+---
+
+# Rule 13: Regime-First Principle - Foundational Market Regime Detection
+
+All core_engine operations MUST follow the **Regime-First Principle**: market regime detection is the **foundational layer** that precedes and informs ALL downstream operations including signal generation, risk management, execution, and analytics.
+
+## 1. Regime-First Architecture Hierarchy
+
+The EnhancedRegimeEngine operates as the **PRIMARY CONTEXT PROVIDER** for all system components:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   REGIME DETECTION LAYER                     │
+│              (EnhancedRegimeEngine - Layer 0)                │
+│   Market Regime Classification → Context Distribution        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   DATA MANAGEMENT LAYER                      │
+│         (UnifiedDataManager - Layer 1 - Support)             │
+│          Regime-Tagged Data Access & Distribution            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   PROCESSING LAYER                           │
+│  Technical Indicators → Features → Signals (Layer 2)         │
+│     ALL Processing Uses Regime Context for Adaptation        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│               STRATEGY & ANALYTICS LAYER                     │
+│  Strategy Selection → Signal Aggregation (Layer 3)           │
+│    Regime-Aware Strategy Weighting & Signal Filtering        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   GOVERNANCE LAYER                           │
+│         (CentralRiskManager - Layer 4 - Governance)          │
+│       Regime-Adjusted Risk Limits & Authorization            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   EXECUTION LAYER                            │
+│    Trading Engine → Execution Engine (Layer 5)               │
+│   Regime-Optimized Execution Strategies & Market Impact      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 2. Regime Engine Priority Requirements
+
+### Initialization Priority
+The EnhancedRegimeEngine MUST be initialized BEFORE all other operational components:
+
+```python
+from core_engine.regime.engine import EnhancedRegimeEngine
+from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+
+class SystemInitialization:
+    """MANDATORY: Regime-First initialization sequence"""
+    
+    async def initialize_system_with_regime_first(self, orchestrator):
+        """Initialize system with regime detection as foundation"""
+        
+        # STEP 1: Initialize Regime Engine FIRST (initialization_order=5)
+        regime_engine = EnhancedRegimeEngine(config)
+        regime_component_id = orchestrator.register_component(
+            name="EnhancedRegimeEngine",
+            component=regime_engine,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=5  # CRITICAL: Lowest order number = first to initialize
+        )
+        
+        await regime_engine.initialize()
+        await regime_engine.start()
+        
+        # STEP 2: Initialize Data Manager with regime context (initialization_order=10)
+        data_manager = ClickHouseDataManager(config)
+        data_manager.set_regime_engine(regime_engine)  # Inject regime context
+        data_component_id = orchestrator.register_component(
+            name="UnifiedDataManager",
+            component=data_manager,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=10
+        )
+        
+        await data_manager.initialize()
+        await data_manager.start()
+        
+        # STEP 3: Initialize Processing Components with regime awareness (initialization_order=15)
+        indicators_engine = EnhancedTechnicalIndicators(config, regime_engine)
+        signal_generator = EnhancedSignalGenerator(config, regime_engine)
+        
+        # STEP 4: Initialize Strategy Manager with regime-aware coordination (initialization_order=20)
+        strategy_manager = StrategyManager(config, regime_engine)
+        
+        # STEP 5: Initialize Risk Manager with regime-adjusted limits (initialization_order=25)
+        risk_manager = CentralRiskManager(config, regime_engine)
+        
+        # STEP 6: Initialize Execution with regime-optimized strategies (initialization_order=30)
+        execution_engine = UnifiedExecutionEngine(config, regime_engine)
+        
+        return {
+            'regime_engine': regime_engine,
+            'initialization_order': 'regime_first_compliant'
+        }
+```
+
+### Component Initialization Order Table
+
+| Priority | Order | Component | Layer | Regime Dependency |
+|----------|-------|-----------|-------|-------------------|
+| **1** | **5** | **EnhancedRegimeEngine** | **SUPPORT** | **NONE (Foundation)** |
+| 2 | 10 | UnifiedDataManager | SUPPORT | Uses regime context |
+| 3 | 15 | ProcessingComponents | OPERATIONAL | Adapts to regime |
+| 4 | 20 | StrategyManager | OPERATIONAL | Regime-aware strategy selection |
+| 5 | 25 | CentralRiskManager | GOVERNANCE | Regime-adjusted risk limits |
+| 6 | 30 | UnifiedExecutionEngine | OPERATIONAL | Regime-optimized execution |
+| 7 | 35 | AnalyticsManager | OPERATIONAL | Regime attribution |
+
+## 3. Regime Context Distribution Pattern
+
+### Regime Context Interface
+ALL components that depend on market regime MUST implement the `IRegimeAware` interface:
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+from datetime import datetime
+from dataclasses import dataclass
+from enum import Enum
+
+@dataclass
+class RegimeContext:
+    """Comprehensive regime context for system-wide distribution"""
+    
+    # Primary Regime Classification
+    primary_regime: str  # Current market regime
+    regime_confidence: float  # Confidence in classification (0-1)
+    regime_start_time: datetime  # When current regime began
+    regime_duration_minutes: float  # How long in current regime
+    
+    # Multi-Timeframe Regime Analysis
+    timeframe_regimes: Dict[str, str]  # {'5min': 'bull_low_vol', '1H': 'trending', ...}
+    timeframe_confidences: Dict[str, float]  # Confidence per timeframe
+    regime_alignment_score: float  # Cross-timeframe regime consistency (0-1)
+    
+    # Market Conditions
+    volatility_regime: str  # 'low_vol', 'normal_vol', 'high_vol', 'extreme_vol'
+    liquidity_regime: str  # 'high_liquidity', 'normal', 'low_liquidity', 'crisis'
+    trend_regime: str  # 'strong_up', 'weak_up', 'sideways', 'weak_down', 'strong_down'
+    
+    # Predictive Indicators
+    regime_transition_probability: float  # Probability of regime change (0-1)
+    expected_next_regime: Optional[str]  # Most likely next regime
+    transition_timeframe: Optional[str]  # Expected time to transition
+    
+    # Strategy Implications
+    optimal_strategies: Dict[str, float]  # {'momentum': 0.8, 'mean_reversion': 0.3, ...}
+    strategy_adjustments: Dict[str, Dict[str, Any]]  # Strategy-specific parameters
+    
+    # Risk Implications
+    risk_multiplier: float  # Risk scaling factor for current regime
+    max_position_size_adjustment: float  # Position size adjustment (0.5 = 50% of normal)
+    leverage_adjustment: float  # Leverage adjustment factor
+    
+    # Execution Implications
+    execution_urgency: str  # 'low', 'normal', 'high', 'urgent'
+    recommended_execution_style: str  # 'TWAP', 'VWAP', 'ADAPTIVE', etc.
+    market_impact_multiplier: float  # Expected impact vs normal conditions
+    
+    # Metadata
+    last_update: datetime
+    analysis_version: str
+    
+    def is_high_confidence(self, threshold: float = 0.7) -> bool:
+        """Check if regime classification is high confidence"""
+        return self.regime_confidence >= threshold
+    
+    def is_stable_regime(self, max_transition_prob: float = 0.3) -> bool:
+        """Check if regime is stable (low transition probability)"""
+        return self.regime_transition_probability <= max_transition_prob
+    
+    def get_strategy_weight(self, strategy_type: str) -> float:
+        """Get optimal weight for strategy type in current regime"""
+        return self.optimal_strategies.get(strategy_type, 0.5)
+
+class IRegimeAware(ABC):
+    """Interface for components that require regime awareness"""
+    
+    @abstractmethod
+    def set_regime_engine(self, regime_engine: 'EnhancedRegimeEngine') -> None:
+        """Inject regime engine dependency"""
+        pass
+    
+    @abstractmethod
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change event"""
+        pass
+    
+    @abstractmethod
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        pass
+    
+    @abstractmethod
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Adapt component behavior to current regime"""
+        pass
+    
+    @abstractmethod
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        pass
+```
+
+### Regime Context Distribution
+The EnhancedRegimeEngine distributes regime context to all subscribers:
+
+```python
+from typing import List, Callable, Awaitable
+import asyncio
+
+class RegimeContextDistributor:
+    """Distributes regime context updates to all system components"""
+    
+    def __init__(self, regime_engine: EnhancedRegimeEngine):
+        self.regime_engine = regime_engine
+        self.subscribers: List[IRegimeAware] = []
+        self.callback_subscribers: List[Callable[[RegimeContext], Awaitable[None]]] = []
+        self.distribution_history: List[Dict[str, Any]] = []
+        
+    def subscribe(self, component: IRegimeAware) -> str:
+        """Subscribe component to regime context updates"""
+        if component not in self.subscribers:
+            self.subscribers.append(component)
+            logger.info(f"✅ Component {component.__class__.__name__} subscribed to regime updates")
+        
+        return f"subscription_{len(self.subscribers)}"
+    
+    def subscribe_callback(self, callback: Callable[[RegimeContext], Awaitable[None]]) -> str:
+        """Subscribe callback function to regime updates"""
+        if callback not in self.callback_subscribers:
+            self.callback_subscribers.append(callback)
+            logger.info(f"✅ Callback subscribed to regime updates")
+        
+        return f"callback_{len(self.callback_subscribers)}"
+    
+    async def distribute_regime_context(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Distribute regime context to all subscribers"""
+        
+        distribution_start = datetime.now()
+        distribution_results = {
+            'timestamp': distribution_start,
+            'regime': regime_context.primary_regime,
+            'subscriber_count': len(self.subscribers) + len(self.callback_subscribers),
+            'successful_distributions': 0,
+            'failed_distributions': 0,
+            'distribution_errors': []
+        }
+        
+        # Distribute to component subscribers
+        for subscriber in self.subscribers:
+            try:
+                await subscriber.on_regime_change(regime_context)
+                distribution_results['successful_distributions'] += 1
+                
+            except Exception as e:
+                logger.error(f"❌ Regime distribution failed for {subscriber.__class__.__name__}: {e}")
+                distribution_results['failed_distributions'] += 1
+                distribution_results['distribution_errors'].append({
+                    'component': subscriber.__class__.__name__,
+                    'error': str(e)
+                })
+        
+        # Distribute to callback subscribers
+        for callback in self.callback_subscribers:
+            try:
+                await callback(regime_context)
+                distribution_results['successful_distributions'] += 1
+                
+            except Exception as e:
+                logger.error(f"❌ Regime distribution failed for callback: {e}")
+                distribution_results['failed_distributions'] += 1
+                distribution_results['distribution_errors'].append({
+                    'component': 'callback',
+                    'error': str(e)
+                })
+        
+        distribution_duration = (datetime.now() - distribution_start).total_seconds()
+        distribution_results['distribution_duration_ms'] = distribution_duration * 1000
+        
+        # Record distribution history
+        self.distribution_history.append(distribution_results)
+        
+        logger.info(f"📡 Regime context distributed to {distribution_results['successful_distributions']} subscribers "
+                   f"in {distribution_results['distribution_duration_ms']:.2f}ms")
+        
+        return distribution_results
+```
+
+## 4. Regime-Aware Signal Processing
+
+### Signal Generation with Regime Context
+ALL signal generation MUST incorporate regime context BEFORE generating signals:
+
+```python
+from core_engine.processing.signals.generator import EnhancedSignalGenerator
+from core_engine.regime.engine import EnhancedRegimeEngine, RegimeContext
+
+class RegimeAwareSignalGenerator(EnhancedSignalGenerator, IRegimeAware):
+    """Signal generator with mandatory regime awareness"""
+    
+    def __init__(self, config: Dict[str, Any], regime_engine: EnhancedRegimeEngine):
+        super().__init__(config)
+        self.regime_engine = regime_engine
+        self.current_regime_context: Optional[RegimeContext] = None
+        self.regime_signal_cache: Dict[str, List[Any]] = {}
+        
+    def set_regime_engine(self, regime_engine: EnhancedRegimeEngine) -> None:
+        """Inject regime engine dependency"""
+        self.regime_engine = regime_engine
+        logger.info("✅ Regime engine injected into signal generator")
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change event"""
+        previous_regime = self.current_regime_context.primary_regime if self.current_regime_context else None
+        self.current_regime_context = new_regime_context
+        
+        logger.info(f"🔄 Signal generator adapting to regime change: {previous_regime} → {new_regime_context.primary_regime}")
+        
+        # Clear signal cache on regime change
+        self.regime_signal_cache.clear()
+        
+        # Adapt signal generation parameters
+        await self.adapt_to_regime(new_regime_context)
+    
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Adapt signal generation parameters to current regime"""
+        
+        adaptations = {
+            'regime': regime_context.primary_regime,
+            'signal_threshold_adjustment': self._calculate_threshold_adjustment(regime_context),
+            'confidence_multiplier': regime_context.regime_confidence,
+            'timeframe_weights': self._calculate_timeframe_weights(regime_context)
+        }
+        
+        # Adjust signal generation parameters based on regime
+        if regime_context.volatility_regime == 'high_vol':
+            adaptations['signal_threshold_adjustment'] *= 1.3  # Higher threshold in volatile conditions
+        
+        if regime_context.liquidity_regime == 'low_liquidity':
+            adaptations['signal_threshold_adjustment'] *= 1.2  # Higher threshold in illiquid conditions
+        
+        logger.info(f"📊 Signal generation adapted to regime: {adaptations}")
+        return adaptations
+    
+    async def generate_signals(self, market_data: pd.DataFrame) -> List[Signal]:
+        """
+        Generate signals with MANDATORY regime context
+        
+        CRITICAL: This method MUST retrieve current regime context BEFORE generating signals
+        """
+        
+        # STEP 1: Retrieve current regime context (MANDATORY)
+        if not self.regime_engine:
+            raise RuntimeError("❌ REGIME-FIRST VIOLATION: Regime engine not configured")
+        
+        regime_context = await self.regime_engine.get_current_regime_context()
+        
+        if not regime_context:
+            logger.warning("⚠️ No regime context available - using default parameters")
+            regime_context = self._get_default_regime_context()
+        
+        # Update current context
+        self.current_regime_context = regime_context
+        
+        # STEP 2: Validate regime confidence
+        if not regime_context.is_high_confidence(threshold=0.6):
+            logger.warning(f"⚠️ Low regime confidence ({regime_context.regime_confidence:.2f}) - applying conservative signal filtering")
+        
+        # STEP 3: Adapt signal generation to regime
+        await self.adapt_to_regime(regime_context)
+        
+        # STEP 4: Generate raw signals using regime-adjusted parameters
+        raw_signals = await self._generate_raw_signals(market_data)
+        
+        # STEP 5: Filter signals based on regime appropriateness
+        regime_filtered_signals = await self._filter_signals_by_regime(raw_signals, regime_context)
+        
+        # STEP 6: Adjust signal confidence based on regime
+        regime_adjusted_signals = await self._adjust_signal_confidence(regime_filtered_signals, regime_context)
+        
+        # STEP 7: Tag signals with regime context
+        tagged_signals = self._tag_signals_with_regime(regime_adjusted_signals, regime_context)
+        
+        logger.info(f"✅ Generated {len(tagged_signals)} regime-aware signals "
+                   f"(regime: {regime_context.primary_regime}, confidence: {regime_context.regime_confidence:.2f})")
+        
+        return tagged_signals
+    
+    async def _filter_signals_by_regime(self, signals: List[Signal], 
+                                       regime_context: RegimeContext) -> List[Signal]:
+        """Filter signals based on regime appropriateness"""
+        
+        filtered_signals = []
+        
+        for signal in signals:
+            # Get signal's strategy type
+            strategy_type = signal.metadata.get('strategy_type', 'unknown')
+            
+            # Get optimal weight for this strategy in current regime
+            regime_weight = regime_context.get_strategy_weight(strategy_type)
+            
+            # Filter out signals from strategies inappropriate for current regime
+            if regime_weight >= 0.3:  # Minimum threshold
+                filtered_signals.append(signal)
+            else:
+                logger.debug(f"⚠️ Signal filtered: {strategy_type} not suitable for regime {regime_context.primary_regime} "
+                           f"(weight: {regime_weight:.2f})")
+        
+        logger.info(f"📊 Regime filtering: {len(signals)} → {len(filtered_signals)} signals "
+                   f"(regime: {regime_context.primary_regime})")
+        
+        return filtered_signals
+    
+    async def _adjust_signal_confidence(self, signals: List[Signal], 
+                                       regime_context: RegimeContext) -> List[Signal]:
+        """Adjust signal confidence based on regime conditions"""
+        
+        adjusted_signals = []
+        
+        for signal in signals:
+            # Create adjusted signal
+            adjusted_signal = signal.copy()
+            
+            # Base adjustment from regime confidence
+            confidence_adjustment = regime_context.regime_confidence
+            
+            # Additional adjustments for stability
+            if not regime_context.is_stable_regime():
+                confidence_adjustment *= 0.9  # Reduce confidence during regime transitions
+            
+            # Adjust for regime alignment across timeframes
+            if regime_context.regime_alignment_score < 0.7:
+                confidence_adjustment *= 0.95  # Reduce confidence with conflicting timeframes
+            
+            # Apply adjustment
+            adjusted_signal.confidence *= confidence_adjustment
+            adjusted_signal.metadata['regime_adjustment_factor'] = confidence_adjustment
+            adjusted_signal.metadata['original_confidence'] = signal.confidence
+            
+            adjusted_signals.append(adjusted_signal)
+        
+        return adjusted_signals
+    
+    def _tag_signals_with_regime(self, signals: List[Signal], 
+                                regime_context: RegimeContext) -> List[Signal]:
+        """Tag signals with comprehensive regime context"""
+        
+        for signal in signals:
+            signal.metadata.update({
+                'regime': regime_context.primary_regime,
+                'regime_confidence': regime_context.regime_confidence,
+                'volatility_regime': regime_context.volatility_regime,
+                'liquidity_regime': regime_context.liquidity_regime,
+                'trend_regime': regime_context.trend_regime,
+                'regime_timestamp': regime_context.last_update.isoformat(),
+                'regime_stable': regime_context.is_stable_regime(),
+                'regime_alignment_score': regime_context.regime_alignment_score
+            })
+        
+        return signals
+    
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        if not self.regime_engine:
+            logger.error("❌ REGIME-FIRST VIOLATION: Regime engine not configured")
+            return False
+        
+        if not self.current_regime_context:
+            logger.warning("⚠️ No current regime context - signals may not be regime-aware")
+            return False
+        
+        return True
+```
+
+## 5. Regime-Aware Strategy Selection
+
+### Strategy Manager with Regime-First Priority
+The StrategyManager MUST consult regime context BEFORE executing strategies:
+
+```python
+from core_engine.trading.strategies.manager import StrategyManager
+from core_engine.regime.engine import EnhancedRegimeEngine, RegimeContext
+
+class RegimeAwareStrategyManager(StrategyManager, IRegimeAware):
+    """Strategy manager with regime-first priority"""
+    
+    def __init__(self, config: Dict[str, Any], regime_engine: EnhancedRegimeEngine):
+        super().__init__(config)
+        self.regime_engine = regime_engine
+        self.current_regime_context: Optional[RegimeContext] = None
+        
+        # Regime-specific strategy weights
+        self.regime_strategy_weights: Dict[str, Dict[str, float]] = {
+            'bull_low_volatility': {
+                'momentum': 0.8,
+                'trend_following': 0.7,
+                'breakout': 0.6,
+                'mean_reversion': 0.3,
+                'pairs_trading': 0.2
+            },
+            'bear_high_volatility': {
+                'mean_reversion': 0.7,
+                'pairs_trading': 0.8,
+                'volatility': 0.9,
+                'momentum': 0.2,
+                'trend_following': 0.3
+            },
+            'range_bound': {
+                'mean_reversion': 0.9,
+                'pairs_trading': 0.8,
+                'statistical_arbitrage': 0.85,
+                'momentum': 0.2,
+                'breakout': 0.3
+            },
+            'crisis_mode': {
+                'pairs_trading': 0.9,
+                'statistical_arbitrage': 0.8,
+                'volatility': 0.7,
+                'momentum': 0.1,
+                'trend_following': 0.2
+            }
+        }
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change - rebalance strategy allocations"""
+        
+        previous_regime = self.current_regime_context.primary_regime if self.current_regime_context else None
+        self.current_regime_context = new_regime_context
+        
+        logger.info(f"🔄 Strategy manager adapting to regime change: {previous_regime} → {new_regime_context.primary_regime}")
+        
+        # Rebalance strategy weights
+        await self._rebalance_strategies_for_regime(new_regime_context)
+        
+        # Notify active strategies of regime change
+        await self._notify_strategies_of_regime_change(new_regime_context)
+    
+    async def _rebalance_strategies_for_regime(self, regime_context: RegimeContext) -> None:
+        """Rebalance strategy allocations based on regime"""
+        
+        regime_weights = self.regime_strategy_weights.get(
+            regime_context.primary_regime,
+            self._get_default_strategy_weights()
+        )
+        
+        # Update strategy weights
+        for strategy_id, strategy in self.active_strategies.items():
+            strategy_type = strategy.config.strategy_type
+            new_weight = regime_weights.get(strategy_type.value, 0.5)
+            
+            # Apply regime confidence adjustment
+            adjusted_weight = new_weight * regime_context.regime_confidence
+            
+            # Update strategy weight
+            self.strategy_weights[strategy_id] = adjusted_weight
+            
+            logger.info(f"📊 Strategy {strategy_type.value} weight adjusted to {adjusted_weight:.2f} "
+                       f"for regime {regime_context.primary_regime}")
+    
+    async def execute_strategies(self, market_data: pd.DataFrame) -> Dict[str, List[Signal]]:
+        """
+        Execute strategies with MANDATORY regime-first priority
+        
+        CRITICAL: Regime context MUST be retrieved and applied BEFORE strategy execution
+        """
+        
+        # STEP 1: Retrieve current regime context (MANDATORY)
+        if not self.regime_engine:
+            raise RuntimeError("❌ REGIME-FIRST VIOLATION: Regime engine not configured")
+        
+        regime_context = await self.regime_engine.get_current_regime_context()
+        
+        if not regime_context:
+            logger.error("❌ Cannot execute strategies without regime context")
+            return {}
+        
+        # Update current context
+        self.current_regime_context = regime_context
+        
+        # STEP 2: Rebalance strategies for current regime
+        await self._rebalance_strategies_for_regime(regime_context)
+        
+        # STEP 3: Filter strategies appropriate for current regime
+        active_strategies = self._get_regime_appropriate_strategies(regime_context)
+        
+        # STEP 4: Execute regime-appropriate strategies
+        strategy_signals = {}
+        
+        for strategy_id, strategy in active_strategies.items():
+            # Pass regime context to strategy
+            strategy_signals[strategy_id] = await strategy.generate_signals(
+                market_data, 
+                regime_context=regime_context
+            )
+        
+        logger.info(f"✅ Executed {len(active_strategies)} regime-appropriate strategies "
+                   f"(regime: {regime_context.primary_regime})")
+        
+        return strategy_signals
+    
+    def _get_regime_appropriate_strategies(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Filter strategies appropriate for current regime"""
+        
+        appropriate_strategies = {}
+        
+        for strategy_id, strategy in self.active_strategies.items():
+            strategy_weight = self.strategy_weights.get(strategy_id, 0.0)
+            
+            # Only include strategies with sufficient weight for current regime
+            if strategy_weight >= 0.3:  # Minimum threshold
+                appropriate_strategies[strategy_id] = strategy
+        
+        logger.info(f"📊 Regime filtering: {len(self.active_strategies)} → {len(appropriate_strategies)} active strategies")
+        
+        return appropriate_strategies
+```
+
+## 6. Regime-Aware Risk Management
+
+### Risk Manager with Regime-Adjusted Limits
+The CentralRiskManager MUST apply regime-adjusted risk limits:
+
+```python
+from core_engine.system.central_risk_manager import CentralRiskManager, TradingDecisionRequest
+from core_engine.regime.engine import EnhancedRegimeEngine, RegimeContext
+
+class RegimeAwareRiskManager(CentralRiskManager, IRegimeAware):
+    """Risk manager with regime-adjusted risk limits"""
+    
+    def __init__(self, config: Dict[str, Any], regime_engine: EnhancedRegimeEngine):
+        super().__init__(config)
+        self.regime_engine = regime_engine
+        self.current_regime_context: Optional[RegimeContext] = None
+        
+        # Base risk limits
+        self.base_risk_limits = {
+            'max_position_size': 0.10,  # 10% of portfolio
+            'max_daily_var': 0.05,      # 5% VaR
+            'max_concentration': 0.15,   # 15% per position
+            'max_leverage': 2.0          # 2x leverage
+        }
+        
+        # Current regime-adjusted limits
+        self.current_risk_limits = self.base_risk_limits.copy()
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change - adjust risk limits"""
+        
+        previous_regime = self.current_regime_context.primary_regime if self.current_regime_context else None
+        self.current_regime_context = new_regime_context
+        
+        logger.info(f"🔄 Risk manager adapting to regime change: {previous_regime} → {new_regime_context.primary_regime}")
+        
+        # Adjust risk limits for new regime
+        await self._adjust_risk_limits_for_regime(new_regime_context)
+    
+    async def _adjust_risk_limits_for_regime(self, regime_context: RegimeContext) -> None:
+        """Adjust risk limits based on current regime"""
+        
+        # Get regime-specific risk multiplier
+        risk_multiplier = regime_context.risk_multiplier
+        position_adjustment = regime_context.max_position_size_adjustment
+        leverage_adjustment = regime_context.leverage_adjustment
+        
+        # Apply regime adjustments to base limits
+        self.current_risk_limits = {
+            'max_position_size': self.base_risk_limits['max_position_size'] * position_adjustment,
+            'max_daily_var': self.base_risk_limits['max_daily_var'] * risk_multiplier,
+            'max_concentration': self.base_risk_limits['max_concentration'] * position_adjustment,
+            'max_leverage': self.base_risk_limits['max_leverage'] * leverage_adjustment
+        }
+        
+        logger.info(f"📊 Risk limits adjusted for regime {regime_context.primary_regime}:")
+        logger.info(f"  - Max position size: {self.current_risk_limits['max_position_size']:.2%}")
+        logger.info(f"  - Max daily VaR: {self.current_risk_limits['max_daily_var']:.2%}")
+        logger.info(f"  - Max concentration: {self.current_risk_limits['max_concentration']:.2%}")
+        logger.info(f"  - Max leverage: {self.current_risk_limits['max_leverage']:.2f}x")
+    
+    async def authorize_trading_decision(self, request: TradingDecisionRequest) -> TradingDecisionAuthorization:
+        """
+        Authorize trading decision with MANDATORY regime-adjusted risk limits
+        
+        CRITICAL: Risk limits MUST be adjusted for current regime BEFORE authorization
+        """
+        
+        # STEP 1: Retrieve current regime context (MANDATORY)
+        if not self.regime_engine:
+            raise RuntimeError("❌ REGIME-FIRST VIOLATION: Regime engine not configured")
+        
+        regime_context = await self.regime_engine.get_current_regime_context()
+        
+        if not regime_context:
+            logger.error("❌ Cannot authorize trade without regime context")
+            return self._reject_authorization(request, "No regime context available")
+        
+        # Update current context
+        self.current_regime_context = regime_context
+        
+        # STEP 2: Ensure risk limits are current for regime
+        await self._adjust_risk_limits_for_regime(regime_context)
+        
+        # STEP 3: Validate trade against regime-adjusted limits
+        validation_result = await self._validate_trade_with_regime_limits(request, regime_context)
+        
+        if not validation_result['valid']:
+            return self._reject_authorization(request, validation_result['reason'])
+        
+        # STEP 4: Apply regime-specific risk adjustments to authorized quantity
+        authorized_quantity = self._calculate_regime_adjusted_quantity(
+            request.quantity, 
+            regime_context
+        )
+        
+        # STEP 5: Create authorization with regime context
+        authorization = TradingDecisionAuthorization(
+            authorization_level=AuthorizationLevel.STANDARD,
+            quantity=authorized_quantity,
+            risk_budget=self._calculate_risk_budget(authorized_quantity, regime_context),
+            metadata={
+                'regime': regime_context.primary_regime,
+                'regime_confidence': regime_context.regime_confidence,
+                'risk_multiplier': regime_context.risk_multiplier,
+                'regime_adjusted_limits': self.current_risk_limits
+            }
+        )
+        
+        logger.info(f"✅ Trade authorized with regime-adjusted limits "
+                   f"(regime: {regime_context.primary_regime}, qty: {authorized_quantity})")
+        
+        return authorization
+```
+
+## 7. Regime-Aware Execution Optimization
+
+### Execution Engine with Regime-Optimized Strategies
+The UnifiedExecutionEngine MUST optimize execution based on regime:
+
+```python
+from core_engine.system.unified_execution_engine import UnifiedExecutionEngine, ExecutionRequest
+from core_engine.regime.engine import EnhancedRegimeEngine, RegimeContext
+
+class RegimeAwareExecutionEngine(UnifiedExecutionEngine, IRegimeAware):
+    """Execution engine with regime-optimized execution strategies"""
+    
+    def __init__(self, config: Dict[str, Any], regime_engine: EnhancedRegimeEngine):
+        super().__init__(config)
+        self.regime_engine = regime_engine
+        self.current_regime_context: Optional[RegimeContext] = None
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change - adjust execution strategies"""
+        
+        previous_regime = self.current_regime_context.primary_regime if self.current_regime_context else None
+        self.current_regime_context = new_regime_context
+        
+        logger.info(f"🔄 Execution engine adapting to regime change: {previous_regime} → {new_regime_context.primary_regime}")
+    
+    async def execute_authorized_trade(self, execution_request: ExecutionRequest) -> ExecutionResult:
+        """
+        Execute trade with MANDATORY regime-optimized execution strategy
+        
+        CRITICAL: Execution strategy MUST be selected based on current regime
+        """
+        
+        # STEP 1: Retrieve current regime context (MANDATORY)
+        if not self.regime_engine:
+            raise RuntimeError("❌ REGIME-FIRST VIOLATION: Regime engine not configured")
+        
+        regime_context = await self.regime_engine.get_current_regime_context()
+        
+        if not regime_context:
+            logger.error("❌ Cannot execute trade without regime context")
+            return self._create_error_result("No regime context available")
+        
+        # Update current context
+        self.current_regime_context = regime_context
+        
+        # STEP 2: Select regime-optimized execution strategy
+        execution_strategy = self._select_execution_strategy_for_regime(
+            execution_request, 
+            regime_context
+        )
+        
+        # STEP 3: Apply regime-specific execution parameters
+        execution_params = self._get_regime_execution_parameters(regime_context)
+        
+        # STEP 4: Execute with regime-optimized strategy
+        execution_result = await self._execute_with_strategy(
+            execution_request,
+            execution_strategy,
+            execution_params,
+            regime_context
+        )
+        
+        # STEP 5: Tag result with regime context
+        execution_result.metadata.update({
+            'regime': regime_context.primary_regime,
+            'execution_strategy': execution_strategy,
+            'regime_optimized': True
+        })
+        
+        logger.info(f"✅ Trade executed with regime-optimized strategy {execution_strategy} "
+                   f"(regime: {regime_context.primary_regime})")
+        
+        return execution_result
+    
+    def _select_execution_strategy_for_regime(self, request: ExecutionRequest,
+                                             regime_context: RegimeContext) -> str:
+        """Select optimal execution strategy based on regime"""
+        
+        # Use regime's recommended execution style
+        recommended_style = regime_context.recommended_execution_style
+        
+        # Override based on urgency from regime
+        if regime_context.execution_urgency == 'urgent':
+            return 'MARKET'
+        elif regime_context.execution_urgency == 'high':
+            return 'ADAPTIVE'
+        
+        # Use recommended style or default to ADAPTIVE
+        return recommended_style if recommended_style else 'ADAPTIVE'
+```
+
+## 8. PROHIBITED Regime-Awareness Violations
+
+❌ **Signal Generation Before Regime Detection**: Cannot generate signals without regime context  
+❌ **Strategy Execution Without Regime Check**: Must validate regime before strategy execution  
+❌ **Risk Authorization Ignoring Regime**: Risk limits must be regime-adjusted  
+❌ **Direct Regime Engine Bypass**: All components must use regime context distribution  
+❌ **Stale Regime Context**: Must use current regime context, not cached/outdated data  
+❌ **Missing Regime Dependency**: All operational components must inject regime engine  
+❌ **Regime-Unaware Execution**: Execution strategies must adapt to regime conditions  
+
+## 9. MANDATORY Regime-First Requirements
+
+1. **Initialization Priority**: EnhancedRegimeEngine MUST initialize first (order=5)
+2. **Component Integration**: All operational components MUST implement IRegimeAware
+3. **Regime Context Distribution**: EnhancedRegimeEngine MUST distribute context to all subscribers
+4. **Signal Generation**: ALL signals MUST be generated with current regime context
+5. **Strategy Selection**: Strategy weights MUST be adjusted for current regime
+6. **Risk Management**: Risk limits MUST be regime-adjusted before authorization
+7. **Execution Optimization**: Execution strategies MUST be regime-optimized
+8. **Context Validation**: Components MUST validate regime dependency before operations
+9. **Regime Tagging**: All trading decisions, signals, and executions MUST be tagged with regime
+10. **Real-Time Adaptation**: Components MUST adapt to regime changes via on_regime_change callback
+
+## 10. Regime-First Validation Framework
+
+### System-Wide Regime Compliance Checker
+```python
+class RegimeFirstComplianceChecker:
+    """Validate system-wide compliance with Regime-First Principle"""
+    
+    async def validate_regime_first_compliance(self, orchestrator) -> Dict[str, Any]:
+        """Comprehensive regime-first compliance validation"""
+        
+        validation_results = {
+            'compliant': True,
+            'violations': [],
+            'warnings': [],
+            'component_checks': {}
+        }
+        
+        # Check 1: Regime Engine initialized first
+        regime_component = orchestrator.get_component("EnhancedRegimeEngine")
+        if not regime_component or regime_component.initialization_order != 5:
+            validation_results['violations'].append(
+                "Regime Engine not initialized with priority order 5"
+            )
+            validation_results['compliant'] = False
+        
+        # Check 2: All operational components implement IRegimeAware
+        operational_components = orchestrator.get_components_by_layer(ComponentLayer.OPERATIONAL)
+        for component_id, component in operational_components.items():
+            if not isinstance(component, IRegimeAware):
+                validation_results['violations'].append(
+                    f"Component {component.__class__.__name__} does not implement IRegimeAware"
+                )
+                validation_results['compliant'] = False
+        
+        # Check 3: Components have regime engine injected
+        for component_id, component in operational_components.items():
+            if isinstance(component, IRegimeAware):
+                if not component.validate_regime_dependency():
+                    validation_results['warnings'].append(
+                        f"Component {component.__class__.__name__} has invalid regime dependency"
+                    )
+        
+        # Check 4: Regime context distribution is active
+        if regime_component:
+            distributor = getattr(regime_component, 'context_distributor', None)
+            if not distributor or len(distributor.subscribers) == 0:
+                validation_results['violations'].append(
+                    "No components subscribed to regime context distribution"
+                )
+                validation_results['compliant'] = False
+        
+        return validation_results
+```
+
+This Regime-First Principle ensures that **market regime detection is the foundational context** for ALL system operations, providing **regime-aware signal generation**, **adaptive risk management**, and **optimized execution** across all market conditions.
