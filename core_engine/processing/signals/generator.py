@@ -930,7 +930,7 @@ class EnhancedSignalGenerator(ISystemComponent):
         return ml_score
     
     def _filter_signals(self, signals: List[TradingSignal], df: pd.DataFrame) -> List[TradingSignal]:
-        """Filter signals based on risk and quality criteria"""
+        """Filter signals based on risk, quality, and regime criteria (Rule 13: Regime-First Principle)"""
         filtered = []
         
         for signal in signals:
@@ -953,19 +953,170 @@ class EnhancedSignalGenerator(ISystemComponent):
                 if row['atr_percentile'] > self.config.max_volatility_percentile:
                     continue
             
-            # Confidence threshold
-            if signal.confidence < self.config.signal_threshold:
+            # REGIME-AWARE FILTERING (Rule 13: Regime-First Principle)
+            adjusted_confidence = signal.confidence
+            regime_adjustment_factor = 1.0
+            
+            if self.current_regime and hasattr(self.current_regime, 'primary_regime'):
+                regime_name = self.current_regime.primary_regime.value
+                volatility_regime = getattr(self.current_regime, 'volatility_regime', 'normal_volatility')
+                regime_confidence = getattr(self.current_regime, 'regime_confidence', 0.5)
+                
+                # Adjust signal confidence based on regime confidence
+                regime_adjustment_factor *= regime_confidence
+                
+                # Volatility-based threshold adjustments
+                if volatility_regime == 'high_volatility' or volatility_regime == 'extreme_volatility':
+                    # Stricter filtering in high/extreme volatility regimes
+                    regime_adjustment_factor *= 0.8
+                    self.logger.debug(f"High volatility regime: reducing signal confidence by 20%")
+                elif volatility_regime == 'low_volatility':
+                    # Relaxed filtering in low volatility regimes
+                    regime_adjustment_factor *= 1.1
+                    self.logger.debug(f"Low volatility regime: increasing signal confidence by 10%")
+                
+                # Strategy appropriateness for current regime
+                strategy_appropriateness = self._get_strategy_regime_appropriateness(
+                    signal.strategy, regime_name, volatility_regime
+                )
+                regime_adjustment_factor *= strategy_appropriateness
+                
+                # Apply regime adjustments to confidence
+                adjusted_confidence = signal.confidence * regime_adjustment_factor
+                
+                self.logger.debug(f"Regime adjustment: {signal.strategy} in {regime_name} "
+                                f"(vol: {volatility_regime}) -> factor: {regime_adjustment_factor:.2f}, "
+                                f"confidence: {signal.confidence:.2f} -> {adjusted_confidence:.2f}")
+            
+            # Apply adjusted confidence threshold
+            if adjusted_confidence < self.config.signal_threshold:
+                self.logger.debug(f"Signal filtered: confidence {adjusted_confidence:.2f} < threshold {self.config.signal_threshold}")
                 continue
             
             # ML confidence filter (if enabled)
-            if self.config.enable_ml_signals and signal.confidence < self.config.ml_confidence_threshold:
+            if self.config.enable_ml_signals and adjusted_confidence < self.config.ml_confidence_threshold:
                 # Only apply strict ML filter for weak signals
                 if signal.strength == SignalStrength.WEAK:
+                    self.logger.debug(f"Signal filtered: ML confidence {adjusted_confidence:.2f} < threshold {self.config.ml_confidence_threshold}")
                     continue
+            
+            # Update signal with adjusted confidence
+            signal.confidence = adjusted_confidence
+            signal.metadata['regime_adjustment_factor'] = regime_adjustment_factor
+            if self.current_regime:
+                signal.metadata['regime'] = regime_name
+                signal.metadata['volatility_regime'] = volatility_regime
+                signal.metadata['regime_confidence'] = regime_confidence
             
             filtered.append(signal)
         
+        self.logger.info(f"Regime-aware filtering: {len(signals)} raw signals -> {len(filtered)} final signals")
         return filtered
+    
+    def _get_strategy_regime_appropriateness(self, strategy: str, regime_name: str, volatility_regime: str) -> float:
+        """
+        Determine strategy appropriateness for current market regime (Rule 13: Regime-First Principle)
+        
+        Args:
+            strategy: Strategy name (e.g., 'momentum', 'mean_reversion', 'rsi', 'macd')
+            regime_name: Current market regime (e.g., 'bull_market', 'bear_market', 'sideways')
+            volatility_regime: Current volatility regime (e.g., 'low_volatility', 'high_volatility')
+            
+        Returns:
+            float: Appropriateness factor (0.0-1.0, where 1.0 = fully appropriate)
+        """
+        
+        # Strategy-regime appropriateness matrix
+        strategy_regime_matrix = {
+            # Mean Reversion Strategies
+            'rsi': {
+                'bull_market': 0.6,      # RSI works in bull markets but less effective
+                'bear_market': 0.8,      # RSI effective in bear markets (oversold bounces)
+                'sideways': 0.9,         # RSI excellent in sideways markets
+                'trending': 0.4,         # RSI poor in strong trending markets
+                'volatile': 0.3,         # RSI poor in volatile markets
+                'crisis': 0.2            # RSI very poor in crisis markets
+            },
+            'mean_reversion': {
+                'bull_market': 0.6,
+                'bear_market': 0.8,
+                'sideways': 0.95,        # Mean reversion excels in sideways markets
+                'trending': 0.3,
+                'volatile': 0.2,
+                'crisis': 0.1
+            },
+            
+            # Momentum Strategies  
+            'momentum': {
+                'bull_market': 0.9,      # Momentum excellent in bull markets
+                'bear_market': 0.7,      # Momentum good in bear markets (downward momentum)
+                'sideways': 0.3,         # Momentum poor in sideways markets
+                'trending': 0.95,        # Momentum excellent in trending markets
+                'volatile': 0.6,         # Momentum moderate in volatile markets
+                'crisis': 0.4
+            },
+            'macd': {
+                'bull_market': 0.9,
+                'bear_market': 0.8,
+                'sideways': 0.4,
+                'trending': 0.95,
+                'volatile': 0.5,
+                'crisis': 0.3
+            },
+            'sma_crossover': {
+                'bull_market': 0.9,
+                'bear_market': 0.8,
+                'sideways': 0.3,
+                'trending': 0.95,
+                'volatile': 0.4,
+                'crisis': 0.2
+            },
+            
+            # Volume Strategies
+            'volume': {
+                'bull_market': 0.8,      # Volume confirmation good in bull markets
+                'bear_market': 0.8,      # Volume confirmation good in bear markets
+                'sideways': 0.7,         # Volume moderate in sideways markets
+                'trending': 0.9,         # Volume excellent for trend confirmation
+                'volatile': 0.6,         # Volume moderate in volatile markets
+                'crisis': 0.5            # Volume mixed in crisis markets
+            },
+            
+            # Multi-factor strategies
+            'combined': {
+                'bull_market': 0.8,      # Combined strategies generally robust
+                'bear_market': 0.8,
+                'sideways': 0.8,
+                'trending': 0.8,
+                'volatile': 0.6,         # Combined strategies less effective in extreme volatility
+                'crisis': 0.4
+            }
+        }
+        
+        # Get base appropriateness for strategy-regime combination
+        base_appropriateness = strategy_regime_matrix.get(strategy, {}).get(regime_name, 0.5)
+        
+        # Volatility regime adjustments
+        volatility_adjustments = {
+            'low_volatility': 1.1,       # Strategies generally more effective in low vol
+            'normal_volatility': 1.0,    # Normal effectiveness
+            'high_volatility': 0.8,      # Strategies less effective in high vol
+            'extreme_volatility': 0.6,   # Strategies much less effective in extreme vol
+            'crisis_liquidity': 0.4      # Strategies very poor in crisis
+        }
+        
+        volatility_factor = volatility_adjustments.get(volatility_regime, 1.0)
+        
+        # Calculate final appropriateness
+        final_appropriateness = base_appropriateness * volatility_factor
+        
+        # Ensure appropriateness is within valid range
+        final_appropriateness = max(0.1, min(1.0, final_appropriateness))
+        
+        self.logger.debug(f"Strategy appropriateness: {strategy} in {regime_name} "
+                         f"(vol: {volatility_regime}) -> {base_appropriateness:.2f} * {volatility_factor:.2f} = {final_appropriateness:.2f}")
+        
+        return final_appropriateness
     
     def generate_all_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate all types of signals for a symbol"""

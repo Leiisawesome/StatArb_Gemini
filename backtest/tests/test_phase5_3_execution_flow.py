@@ -121,20 +121,20 @@ def sample_bar():
 def mock_authorized_trades():
     """Create mock authorized trades"""
     return [
-        MockAuthorization(
-            authorization_id='auth_001',
-            symbol='NVDA',
-            side='buy',
-            quantity=100,
-            strategy_id='momentum_test'
-        ),
-        MockAuthorization(
-            authorization_id='auth_002',
-            symbol='NVDA',
-            side='sell',
-            quantity=50,
-            strategy_id='momentum_test'
-        )
+        {
+            'authorization_id': 'auth_001',
+            'symbol': 'NVDA',
+            'side': 'buy',
+            'quantity': 100,
+            'strategy_id': 'momentum_test'
+        },
+        {
+            'authorization_id': 'auth_002',
+            'symbol': 'NVDA',
+            'side': 'sell',
+            'quantity': 50,
+            'strategy_id': 'momentum_test'
+        }
     ]
 
 
@@ -479,13 +479,13 @@ async def test_phase5_3_summary(backtest_engine):
         'volatility': 0.02
     })
     
-    mock_trade = MockAuthorization(
-        authorization_id='test',
-        symbol='NVDA',
-        side='buy',
-        quantity=100,
-        strategy_id='test'
-    )
+    mock_trade = {
+        'authorization_id': 'test',
+        'symbol': 'NVDA',
+        'side': 'buy',
+        'quantity': 100,
+        'strategy_id': 'test'
+    }
     
     executed = await backtest_engine.simulate_execution(
         [mock_trade], sample_bar, datetime.now()

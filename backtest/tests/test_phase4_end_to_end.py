@@ -234,7 +234,8 @@ async def test_end_to_end_data_to_authorization(real_data_config):
                 confidence=signal.confidence,
                 strategy_id="test_momentum",
                 market_regime=regime_context.primary_regime if regime_context else "unknown",
-                timestamp=datetime.now()
+                regime_confidence=getattr(regime_context, 'regime_confidence', 0.5) if regime_context else 0.5,
+                volatility_estimate=getattr(regime_context, 'volatility_estimate', 0.02) if regime_context else 0.02
             )
             
             # Request authorization

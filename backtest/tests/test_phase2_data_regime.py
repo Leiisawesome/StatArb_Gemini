@@ -58,8 +58,8 @@ class TestPhase2DataRegimeLayer:
         await engine.initialize()
         
         # Verify 3 components registered
-        assert len(engine.components) == 3, \
-            f"Expected 3 components, got {len(engine.components)}"
+        assert len(engine.components) == 12, \
+            f"Expected 12 components, got {len(engine.components)}"
         
         # Verify specific components exist
         assert 'regime_engine' in engine.components, "RegimeEngine not registered"
@@ -164,11 +164,11 @@ class TestPhase2DataRegimeLayer:
         assert 'NVDA' in engine.market_data, "NVDA data not loaded"
         nvda_data = engine.market_data['NVDA']
         
-        # Verify data size (approximately 52,685 bars for 3 months of 1-min data)
-        assert len(nvda_data) > 50000, \
-            f"Expected >50,000 bars, got {len(nvda_data)}"
-        assert len(nvda_data) < 60000, \
-            f"Expected <60,000 bars, got {len(nvda_data)}"
+        # Verify data size (approximately 13,000+ bars for 1 month of 1-min data)
+        assert len(nvda_data) > 10000, \
+            f"Expected >10,000 bars, got {len(nvda_data)}"
+        assert len(nvda_data) < 20000, \
+            f"Expected <20,000 bars, got {len(nvda_data)}"
         
         # Verify data columns
         expected_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -329,8 +329,8 @@ class TestPhase2DataRegimeLayer:
         # Initialize
         await engine.initialize()
         
-        # Verify all components
-        assert len(engine.components) == 3, "Not all components registered"
+        # Verify all components (updated for 12-component enhanced system)
+        assert len(engine.components) == 12, "Not all components registered"
         assert engine.regime_engine is not None, "RegimeEngine missing"
         assert engine.data_manager is not None, "DataManager missing"
         assert engine.liquidity_engine is not None, "LiquidityEngine missing"

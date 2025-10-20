@@ -175,6 +175,9 @@ class ExecutionConfig:
     enable_liquidity_filtering: bool = True
     enable_cost_modeling: bool = True
     
+    # Commission costs
+    commission_per_trade: float = 0.005  # $0.005 per trade
+    
     # Liquidity filtering (Rule 12 - BRICK #3)
     min_liquidity_score: float = 60.0  # Minimum 60/100
     max_spread_bps: float = 25.0       # Max 25 bps spread

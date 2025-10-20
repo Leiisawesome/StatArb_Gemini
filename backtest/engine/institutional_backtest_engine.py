@@ -798,28 +798,36 @@ class InstitutionalBacktestEngine:
             # Create risk manager config dict (CentralRiskManager creates RiskManagerConfig internally)
             risk_manager_config_dict = {
                 # Position limits (regime-adjusted)
-                'max_position_size': risk_config.max_position_size if risk_config else 0.10,  # 10% max
-                'max_daily_var': risk_config.max_daily_var if risk_config else 0.05,  # 5% VaR
+                'max_position_size': risk_config.get('max_position_size', 0.10) if isinstance(risk_config, dict) else (risk_config.max_position_size if risk_config else 0.10),  # 10% max
+                'max_daily_var': risk_config.get('max_daily_var', 0.05) if isinstance(risk_config, dict) else (risk_config.max_daily_var if risk_config else 0.05),  # 5% VaR
                 'max_total_risk': 0.20,  # 20% total
-                'position_concentration_limit': risk_config.max_concentration if risk_config else 0.15,  # 15%
+                'position_concentration_limit': risk_config.get('max_concentration', 0.15) if isinstance(risk_config, dict) else (risk_config.max_concentration if risk_config else 0.15),  # 15%
                 'strategy_allocation_limit': 0.33,  # 33%
                 
                 # Signal confidence requirements
-                'min_signal_confidence': risk_config.min_signal_confidence if risk_config else 0.6,  # 60% min
+                'min_signal_confidence': risk_config.get('min_signal_confidence', 0.6) if isinstance(risk_config, dict) else (risk_config.min_signal_confidence if risk_config else 0.6),  # 60% min
                 'high_confidence_threshold': 0.8,  # 80% for automatic approval
                 'extreme_confidence_threshold': 0.9,  # 90% for priority
                 
                 # Regime-aware adjustments (Rule 13)
                 'regime_risk_multipliers': (
-                    risk_config.regime_risk_multipliers 
-                    if risk_config and risk_config.regime_risk_multipliers 
-                    else {
+                    risk_config.get('regime_risk_multipliers', {
                         'low_volatility': 1.2,  # Increase risk in stable markets
                         'normal_volatility': 1.0,  # Normal risk
                         'high_volatility': 0.7,  # Reduce risk in volatile markets
                         'extreme_volatility': 0.4,  # Significantly reduce in extreme vol
                         'crisis': 0.2  # Minimal risk in crisis
-                    }
+                    }) if isinstance(risk_config, dict) else (
+                        risk_config.regime_risk_multipliers 
+                        if risk_config and hasattr(risk_config, 'regime_risk_multipliers') 
+                        else {
+                            'low_volatility': 1.2,  # Increase risk in stable markets
+                            'normal_volatility': 1.0,  # Normal risk
+                            'high_volatility': 0.7,  # Reduce risk in volatile markets
+                            'extreme_volatility': 0.4,  # Significantly reduce in extreme vol
+                            'crisis': 0.2  # Minimal risk in crisis
+                        }
+                    )
                 ),
                 
                 # Monitoring
@@ -899,12 +907,17 @@ class InstitutionalBacktestEngine:
         try:
             from backtest.engine.position_tracker import PositionTracker
             
-            # Get initial capital from risk manager config (dataclass)
-            initial_capital = self.config.risk.initial_capital if self.config.risk else 1_000_000
+            # Get initial capital from risk manager config (handles both dict and dataclass)
+            initial_capital = (
+                self.config.risk.get('initial_capital', 1_000_000) if isinstance(self.config.risk, dict) 
+                else (self.config.risk.initial_capital if self.config.risk else 1_000_000)
+            )
             
-            # Get commission settings (dataclass) - commission rate is a percentage, convert to per-share
-            # For simplicity, assume $0.005 per share which is typical for institutional trading
-            commission_per_trade = 0.005  # $0.005 per share
+            # Get commission settings from config (handles both dict and dataclass)
+            commission_per_trade = (
+                self.config.execution.get('commission_per_trade', 0.005) if isinstance(self.config.execution, dict)
+                else (getattr(self.config.execution, 'commission_per_trade', 0.005) if self.config.execution else 0.005)
+            )
             
             # Create position tracker
             self.position_tracker = PositionTracker(
@@ -2096,7 +2109,16 @@ class InstitutionalBacktestEngine:
                         if strategy_signals is not None:
                             if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
                                 # Convert list of Signal objects to DataFrame
-                                signals_df = pd.DataFrame([s.__dict__ for s in strategy_signals])
+                                # CRITICAL FIX: Convert signal_type enum to .value string
+                                signals_df = pd.DataFrame([{
+                                    'symbol': s.symbol,
+                                    'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+                                    'confidence': s.confidence,
+                                    'strength': getattr(s, 'strength', 0.5),
+                                    'timestamp': getattr(s, 'timestamp', None),
+                                    'target_quantity': getattr(s, 'target_quantity', 0),
+                                    'additional_data': getattr(s, 'additional_data', {})
+                                } for s in strategy_signals])
                             elif isinstance(strategy_signals, pd.DataFrame) and not strategy_signals.empty:
                                 signals_df = strategy_signals
                     except Exception as e:
@@ -2225,13 +2247,13 @@ class InstitutionalBacktestEngine:
                             authorized_trades.append({
                                 'symbol': symbol,
                                 'side': side,
-                                'quantity': authorization.quantity,
+                                'quantity': authorization.authorized_quantity,
                                 'confidence': confidence,
                                 'signal_type': signal_type,
                                 'authorization': authorization,
                                 'timestamp': timestamp
                             })
-                            logger.debug(f"✅ Trade authorized: {signal_type} {authorization.quantity} {symbol}")
+                            logger.debug(f"✅ Trade authorized: {signal_type} {authorization.authorized_quantity} {symbol}")
                         else:
                             logger.debug(f"⚠️ Trade rejected: {authorization.rejection_reason}")
         
@@ -2293,10 +2315,10 @@ class InstitutionalBacktestEngine:
             
             for auth_trade in authorized_trades:
                 try:
-                    # Extract trade details from authorization
-                    symbol = auth_trade.symbol
-                    side = auth_trade.side
-                    quantity = auth_trade.quantity
+                    # Extract trade details from authorization dict
+                    symbol = auth_trade['symbol']
+                    side = auth_trade['side']
+                    quantity = auth_trade['quantity']
                     
                     # Get regime context (Rule 13)
                     regime_context = None
