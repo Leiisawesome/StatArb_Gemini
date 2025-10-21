@@ -420,54 +420,366 @@ class SignalConfig:
 @dataclass
 class RegimeConfig:
     """
-    Regime detection configuration
+    Consolidated Regime Detection Configuration (Rule 1, Section 7)
     
-    Consolidated from 7 regime configs:
-    - RegimeEngineConfig
-    - RegimeAnalysisConfig
-    - RegimeDetectionConfig
-    - RegimeManagerConfig
-    - ClassificationConfig
-    - IndicatorConfig (regime)
-    - TransitionPredictionConfig
+    Single source of truth for ALL regime-related configuration parameters.
+    Consolidates parameters from 7 previously scattered configs:
+    - RegimeEngineConfig (engine.py)
+    - RegimeAnalysisConfig (internal)
+    - RegimeDetectionConfig (internal)
+    - RegimeManagerConfig (regime_manager.py)
+    - ClassificationConfig (regime_classifier.py)
+    - IndicatorConfig (regime_indicators.py)
+    - TransitionPredictionConfig (regime_transition_manager.py)
+    
+    Migration Note: Eliminates ~220 lines of duplicate configuration.
     """
-    # Detection parameters
+    
+    # ========================================================================
+    # DETECTION PARAMETERS
+    # ========================================================================
+    
     lookback_window: int = 60
-    """Lookback window for regime detection. Default: 60 periods"""
+    """
+    Lookback window for regime detection.
+    Range: [20, 252]
+    Default: 60 periods (3 months of daily data)
+    Rationale: Balance between responsiveness and stability
+    Migration: Was 'lookback_period' in some configs
+    """
+    
+    lookback_period: int = 252
+    """
+    Long-term lookback period for historical analysis.
+    Range: [60, 1260]
+    Default: 252 (1 year of trading days)
+    Rationale: Capture full market cycles
+    Migration: Used in RegimeManagerConfig, RegimeDetectorConfig
+    """
+    
+    detection_window: int = 60
+    """
+    Detection window for regime identification.
+    Range: [20, 120]
+    Default: 60 periods
+    Rationale: Short-term regime changes
+    """
     
     volatility_window: int = 20
-    """Volatility calculation window. Default: 20 periods"""
+    """
+    Volatility calculation window.
+    Range: [10, 60]
+    Default: 20 periods
+    Rationale: Standard volatility measurement period
+    """
     
     trend_threshold: float = 0.02
-    """Trend detection threshold. Default: 2%"""
+    """
+    Trend detection threshold.
+    Range: [0.01, 0.05]
+    Default: 0.02 (2%)
+    Rationale: Minimum trend strength to be considered significant
+    Migration: Was 'min_trend_threshold' in ClassificationConfig
+    """
     
     regime_change_threshold: float = 0.7
-    """Regime change confidence threshold. Default: 70%"""
+    """
+    Regime change confidence threshold.
+    Range: [0.5, 0.9]
+    Default: 0.7 (70%)
+    Rationale: High confidence required for regime transitions
+    """
     
     confidence_threshold: float = 0.6
-    """Minimum confidence for regime classification. Default: 60%"""
+    """
+    Minimum confidence for regime classification.
+    Range: [0.5, 0.9]
+    Default: 0.6 (60%)
+    Rationale: Acceptable confidence level for classification
+    Migration: Was 'min_confidence_threshold' in various configs
+    """
     
-    # Update frequency
-    update_frequency: str = 'daily'
-    """Regime update frequency ('daily', 'hourly', 'realtime'). Default: 'daily'"""
+    # ========================================================================
+    # UPDATE & TIMING PARAMETERS
+    # ========================================================================
     
-    # Persistence
+    update_frequency: int = 300
+    """
+    Regime update frequency in seconds.
+    Range: [60, 3600]
+    Default: 300 (5 minutes)
+    Rationale: Balance between real-time and computational cost
+    Migration: Was string 'daily'/'hourly' in old config, now int seconds
+    """
+    
+    update_frequency_hours: int = 1
+    """
+    Update frequency in hours for manager-level operations.
+    Range: [1, 24]
+    Default: 1 hour
+    Rationale: Manager coordination frequency
+    Migration: From RegimeManagerConfig
+    """
+    
+    # ========================================================================
+    # PERSISTENCE & STABILITY PARAMETERS
+    # ========================================================================
+    
     regime_persistence: float = 0.8
-    """Regime persistence threshold. Default: 0.8"""
+    """
+    Regime persistence threshold (stability indicator).
+    Range: [0.5, 0.95]
+    Default: 0.8
+    Rationale: High persistence indicates stable regime
+    """
+    
+    regime_persistence_threshold: int = 3
+    """
+    Minimum days a regime must persist to be considered stable.
+    Range: [1, 10]
+    Default: 3 days
+    Rationale: Filter out noise and false signals
+    Migration: From RegimeManagerConfig
+    """
     
     min_regime_duration: int = 5
-    """Minimum regime duration in periods. Default: 5"""
+    """
+    Minimum regime duration in periods.
+    Range: [3, 20]
+    Default: 5 periods
+    Rationale: Avoid frequent regime switching
+    """
     
-    # Correlation analysis
+    min_samples: int = 30
+    """
+    Minimum samples required for reliable regime detection.
+    Range: [20, 60]
+    Default: 30
+    Rationale: Statistical significance
+    """
+    
+    # ========================================================================
+    # CORRELATION & THRESHOLDS
+    # ========================================================================
+    
     correlation_threshold: float = 0.7
-    """Correlation threshold for regime analysis. Default: 0.7"""
+    """
+    Correlation threshold for regime analysis.
+    Range: [0.5, 0.9]
+    Default: 0.7
+    Rationale: Strong correlation indicator
+    """
     
-    # Enhanced detection
+    volatility_threshold: float = 0.015
+    """
+    Volatility threshold for regime classification.
+    Range: [0.01, 0.05]
+    Default: 0.015 (1.5%)
+    Rationale: Distinguishes low/normal/high vol regimes
+    Migration: From multiple configs with conflicts resolved
+    """
+    
+    vol_percentile_threshold: float = 0.75
+    """
+    Volatility percentile threshold for regime categorization.
+    Range: [0.6, 0.9]
+    Default: 0.75 (75th percentile)
+    Rationale: High volatility definition
+    Migration: From IndicatorConfig
+    """
+    
+    # ========================================================================
+    # ML & CLASSIFICATION PARAMETERS
+    # ========================================================================
+    
     enable_enhanced_detection: bool = True
-    """Enable enhanced multi-factor regime detection. Default: True"""
+    """
+    Enable enhanced multi-factor regime detection.
+    Default: True
+    Rationale: Improves detection accuracy
+    """
     
     enable_transition_prediction: bool = True
-    """Enable regime transition prediction. Default: True"""
+    """
+    Enable ML-based regime transition prediction.
+    Default: True
+    Rationale: Provides forward-looking regime insights
+    """
+    
+    enable_ml_predictions: bool = True
+    """
+    Enable ML model predictions for regime classification.
+    Default: True
+    Rationale: Enhances classification with machine learning
+    """
+    
+    model_retrain_frequency: int = 30
+    """
+    Model retraining frequency in days.
+    Range: [7, 90]
+    Default: 30 days
+    Rationale: Monthly model updates to adapt to market changes
+    Migration: From ClassificationConfig
+    """
+    
+    ensemble_voting: str = "soft"
+    """
+    Ensemble model voting strategy.
+    Options: 'soft', 'hard'
+    Default: 'soft'
+    Rationale: Weighted probabilities provide nuanced predictions
+    Migration: From ClassificationConfig
+    """
+    
+    # ========================================================================
+    # INDICATOR CONFIGURATION
+    # ========================================================================
+    
+    rsi_period: int = 14
+    """
+    RSI indicator period.
+    Range: [10, 30]
+    Default: 14
+    Rationale: Standard RSI period
+    """
+    
+    atr_period: int = 14
+    """
+    ATR indicator period.
+    Range: [10, 30]
+    Default: 14
+    Rationale: Standard ATR period
+    """
+    
+    momentum_periods: List[int] = field(default_factory=lambda: [5, 10, 20, 60])
+    """
+    Momentum calculation periods for multi-timeframe analysis.
+    Default: [5, 10, 20, 60] periods
+    Rationale: Cover short to medium-term momentum
+    Migration: From IndicatorConfig
+    """
+    
+    vol_lookback_periods: List[int] = field(default_factory=lambda: [10, 20, 60, 252])
+    """
+    Volatility lookback periods for regime indicators.
+    Default: [10, 20, 60, 252] periods
+    Rationale: Multi-timeframe volatility analysis
+    Migration: From IndicatorConfig
+    """
+    
+    # ========================================================================
+    # TRANSITION PREDICTION CONFIGURATION
+    # ========================================================================
+    
+    prediction_horizon_days: List[int] = field(default_factory=lambda: [5, 10, 20, 60])
+    """
+    Prediction horizons for regime transitions.
+    Default: [5, 10, 20, 60] days
+    Rationale: Multiple forward-looking timeframes
+    Migration: From TransitionPredictionConfig
+    """
+    
+    feature_lookback_periods: List[int] = field(default_factory=lambda: [5, 10, 20, 60, 252])
+    """
+    Feature engineering lookback periods.
+    Default: [5, 10, 20, 60, 252] periods
+    Rationale: Capture features across multiple timeframes
+    Migration: From TransitionPredictionConfig
+    """
+    
+    # ========================================================================
+    # ADAPTATION & RISK PARAMETERS
+    # ========================================================================
+    
+    max_portfolio_change: float = 0.25
+    """
+    Maximum portfolio change on regime transition.
+    Range: [0.1, 0.5]
+    Default: 0.25 (25%)
+    Rationale: Limit drastic portfolio changes
+    Migration: From RegimeManagerConfig
+    """
+    
+    adaptation_speed: float = 0.5
+    """
+    Adaptation speed on regime changes (0-1 scale).
+    Range: [0.1, 1.0]
+    Default: 0.5
+    Rationale: Moderate adaptation speed
+    Migration: From RegimeManagerConfig
+    """
+    
+    max_regime_risk_multiplier: float = 2.0
+    """
+    Maximum risk multiplier based on regime.
+    Range: [1.0, 3.0]
+    Default: 2.0
+    Rationale: Allow risk increase in favorable regimes
+    Migration: From RegimeManagerConfig
+    """
+    
+    # ========================================================================
+    # PERFORMANCE & MONITORING
+    # ========================================================================
+    
+    performance_attribution_window: int = 252
+    """
+    Performance attribution window in days.
+    Range: [60, 504]
+    Default: 252 (1 year)
+    Rationale: Full year performance tracking
+    Migration: From RegimeManagerConfig
+    """
+    
+    max_history_length: int = 1000
+    """
+    Maximum regime history to maintain (days).
+    Range: [252, 2520]
+    Default: 1000 days (~4 years)
+    Rationale: Sufficient historical context
+    Migration: From RegimeManagerConfig
+    """
+    
+    # ========================================================================
+    # PROCESSING CONFIGURATION
+    # ========================================================================
+    
+    max_workers: int = 4
+    """
+    Maximum worker threads for parallel processing.
+    Range: [1, 16]
+    Default: 4
+    Rationale: Balance parallelism and resource usage
+    Migration: From RegimeManagerConfig
+    """
+    
+    async_processing: bool = True
+    """
+    Enable asynchronous processing.
+    Default: True
+    Rationale: Non-blocking regime updates
+    Migration: From RegimeManagerConfig
+    """
+    
+    def __post_init__(self):
+        """Validate configuration parameters"""
+        if not 20 <= self.lookback_window <= 252:
+            raise ValueError(f"lookback_window must be [20, 252], got {self.lookback_window}")
+        
+        if not 0.5 <= self.confidence_threshold <= 0.9:
+            raise ValueError(f"confidence_threshold must be [0.5, 0.9], got {self.confidence_threshold}")
+        
+        if not 0.01 <= self.trend_threshold <= 0.05:
+            raise ValueError(f"trend_threshold must be [0.01, 0.05], got {self.trend_threshold}")
+        
+        if not 60 <= self.update_frequency <= 3600:
+            raise ValueError(f"update_frequency must be [60, 3600] seconds, got {self.update_frequency}")
+        
+        if not 0.1 <= self.max_portfolio_change <= 0.5:
+            raise ValueError(f"max_portfolio_change must be [0.1, 0.5], got {self.max_portfolio_change}")
+        
+        if not 1 <= self.max_workers <= 16:
+            raise ValueError(f"max_workers must be [1, 16], got {self.max_workers}")
 
 
 @dataclass

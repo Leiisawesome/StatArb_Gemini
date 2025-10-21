@@ -17,6 +17,12 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import json
 
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    RegimeConfig = None
+
 # Lazy import for heavy classifier module (33.85MB sklearn dependency)
 if TYPE_CHECKING:
     from .regime_classifier import (RegimeClassification, ClassificationConfig)
@@ -54,54 +60,6 @@ class AdaptationMode(Enum):
     MODERATE = "moderate"
     AGGRESSIVE = "aggressive"
     CUSTOM = "custom"
-
-
-@dataclass
-class RegimeManagerConfig:
-    """Configuration for regime manager"""
-    
-    # Component configurations
-    detection_config: RegimeDetectionConfig = field(default_factory=RegimeDetectionConfig)
-    analysis_config: RegimeAnalysisConfig = field(default_factory=RegimeAnalysisConfig)
-    classification_config: Optional['ClassificationConfig'] = None  # Lazy-loaded
-    indicator_config: IndicatorConfig = field(default_factory=IndicatorConfig)
-    transition_config: TransitionPredictionConfig = field(default_factory=TransitionPredictionConfig)
-    
-    # Manager-specific settings
-    update_frequency: int = 1  # Hours
-    min_confidence_threshold: float = 0.6
-    regime_persistence_threshold: int = 3  # Days
-    
-    # Adaptation settings
-    adaptation_mode: AdaptationMode = AdaptationMode.MODERATE
-    max_portfolio_change: float = 0.25  # Maximum 25% change
-    adaptation_speed: float = 0.5  # 0-1 scale, higher = faster adaptation
-    
-    # Risk management
-    max_regime_risk_multiplier: float = 2.0
-    emergency_stop_loss: float = -0.10  # 10% emergency stop
-    max_drawdown_threshold: float = -0.15  # 15% max drawdown
-    
-    # Performance monitoring
-    performance_attribution_window: int = 252  # Days
-    benchmark_tracking: bool = True
-    regime_specific_benchmarks: Dict[RegimeType, str] = field(default_factory=dict)
-    
-    # Alerts and notifications
-    alert_thresholds: Dict[str, float] = field(default_factory=lambda: {
-        'regime_change_probability': 0.8,
-        'volatility_spike': 0.3,
-        'correlation_breakdown': 0.7,
-        'performance_deviation': 0.05
-    })
-    
-    # Data management
-    max_history_length: int = 1000  # Days
-    backup_frequency: int = 24  # Hours
-    
-    # Threading and async
-    max_workers: int = 4
-    async_processing: bool = True
 
 
 @dataclass
@@ -577,24 +535,54 @@ class RegimeManager:
     comprehensive regime-aware trading and portfolio management.
     """
     
-    def __init__(self, config: Optional[RegimeManagerConfig] = None):
-        """Initialize regime manager"""
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize regime manager with centralized configuration
+        
+        Args:
+            config: RegimeConfig or dict (for backward compatibility)
+        """
+        
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback for testing
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                update_frequency_hours: int = 1
+                confidence_threshold: float = 0.6
+                regime_persistence_threshold: int = 3
+                max_portfolio_change: float = 0.25
+                adaptation_speed: float = 0.5
+                max_regime_risk_multiplier: float = 2.0
+                performance_attribution_window: int = 252
+                max_history_length: int = 1000
+                max_workers: int = 4
+                async_processing: bool = True
+        
+        # Handle different config input types
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            # Try to use as-is (for backward compat with old RegimeManagerConfig)
+            self.config = config if hasattr(config, 'update_frequency_hours') else RegimeConfig()
+        
+        logger.info("✅ RegimeManager using centralized RegimeConfig (Rule 1, Section 7)")
         
         # Lazy import regime_classifier (33.85MB sklearn dependency)
-        from .regime_classifier import RegimeClassifier, ClassificationConfig
+        from .regime_classifier import RegimeClassifier
         
-        self.config = config or RegimeManagerConfig()
-        
-        # Create classification config if not provided (lazy loading)
-        if self.config.classification_config is None:
-            self.config.classification_config = ClassificationConfig()
-        
-        # Initialize all components
-        self.regime_detector = RegimeDetector(self.config.detection_config)
-        self.market_analyzer = MarketRegimeAnalyzer(self.config.analysis_config)
-        self.regime_classifier = RegimeClassifier(self.config.classification_config)
-        self.indicator_engine = RegimeIndicatorEngine(self.config.indicator_config)
-        self.transition_manager = RegimeTransitionManager(self.config.transition_config)
+        # Initialize all components with centralized config
+        # Note: Sub-components will also be updated to use centralized config
+        self.regime_detector = RegimeDetector(self.config)
+        self.market_analyzer = MarketRegimeAnalyzer(self.config)
+        self.regime_classifier = RegimeClassifier(self.config)
+        self.indicator_engine = RegimeIndicatorEngine(self.config)
+        self.transition_manager = RegimeTransitionManager(self.config)
         
         # Initialize managers
         self.portfolio_manager = RegimeAwarePortfolioManager(self.config)

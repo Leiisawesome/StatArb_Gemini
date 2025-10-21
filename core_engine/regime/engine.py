@@ -25,7 +25,7 @@ import threading
 import uuid
 import asyncio
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ..system.interfaces import ISystemComponent
 except ImportError:
@@ -52,9 +52,12 @@ except ImportError:
         def get_status(self) -> Dict[str, Any]:
             pass
 
-# Leverage existing high-quality regime components
-# Import regime types from core_engine
-# from ..type_definitions.regime import RegimeState, RegimeConfig
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    # Fallback for testing - will create inline
+    RegimeConfig = None
 
 logger = logging.getLogger(__name__)
 
@@ -180,16 +183,6 @@ class RegimeAnalysis:
         if self.transition_predictions is None:
             self.transition_predictions = {}
 
-@dataclass
-class RegimeEngineConfig:
-    """Regime engine configuration"""
-    lookback_window: int = 60
-    volatility_window: int = 20
-    trend_threshold: float = 0.02
-    regime_change_threshold: float = 0.7
-    update_frequency: int = 300  # seconds (5 minutes)
-    enable_enhanced_detection: bool = True
-
 class IRegimeSubscriber:
     """Interface for regime change subscribers"""
     
@@ -210,8 +203,31 @@ class EnhancedRegimeEngine(ISystemComponent):
     """
     
     def __init__(self, config: Dict[str, Any]):
-        self.config = RegimeEngineConfig(**config) if config else RegimeEngineConfig()
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback if import failed (testing scenario)
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                lookback_window: int = 60
+                volatility_window: int = 20
+                trend_threshold: float = 0.02
+                regime_change_threshold: float = 0.7
+                update_frequency: int = 300
+                enable_enhanced_detection: bool = True
+        
+        # Initialize with centralized config
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            self.config = RegimeConfig()
+        
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.info("✅ Using centralized RegimeConfig (Rule 1, Section 7)")
         
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
