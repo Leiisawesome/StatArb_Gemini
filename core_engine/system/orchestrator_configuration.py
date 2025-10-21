@@ -5,6 +5,27 @@ Configuration Management Module for HierarchicalSystemOrchestrator
 Handles system configuration, validation, and management.
 Extracted from the main orchestrator for better maintainability.
 
+CONFIGURATION ARCHITECTURE NOTES (Rule 1, Section 7):
+-----------------------------------------------------
+This file contains ORCHESTRATOR-SPECIFIC configurations that are:
+1. Used ONLY by HierarchicalSystemOrchestrator (not shared)
+2. Tightly coupled with ConfigurationManager (runtime validation)
+3. Implementation details (not domain configurations)
+
+These configs are DISTINCT from:
+- core_engine/config/system_config.py (system-wide settings)
+- core_engine/config/component_config.py (domain configs: data, risk, strategies)
+
+Why configs remain here (NOT consolidated):
+✅ Orchestrator-internal implementation details
+✅ Not shared across multiple components
+✅ Include complex runtime validation logic
+✅ Encapsulated with ConfigurationManager
+
+This follows Rule 1, Section 7 principle:
+"Centralized config for SHARED domain configurations"
+Component-internal configs can remain with the component.
+
 Author: StatArb_Gemini Architecture Compliance
 Version: 1.0.0 (Modular Architecture)
 """

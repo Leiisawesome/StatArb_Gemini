@@ -32,6 +32,9 @@ from .unified_execution_engine import (
 )
 from .interfaces import ISystemComponent
 
+# PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
+from ..config.component_config import RiskConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,55 +133,9 @@ class TradingAuthorization:
     rejection_reason: str = ""
 
 
-@dataclass
-class RiskManagerConfig:
-    """
-    Configuration for the central risk manager
-    Enhanced with proper signal confidence requirements from test findings
-    """
-    
-    # Risk limits
-    max_position_size: float = 0.10  # 10% max position
-    max_daily_var: float = 0.05      # 5% daily VaR
-    max_total_risk: float = 0.20     # 20% total portfolio risk
-    position_concentration_limit: float = 0.15  # 15% per position
-    strategy_allocation_limit: float = 0.33     # 33% per strategy
-    
-    # Signal confidence requirements (from test findings)
-    min_signal_confidence: float = 0.6  # Minimum confidence for authorization
-    high_confidence_threshold: float = 0.8  # High confidence for automatic approval
-    extreme_confidence_threshold: float = 0.9  # Extreme confidence signals
-    
-    # Authorization settings
-    auto_approval_threshold: float = 0.01  # 1% auto-approve threshold
-    elevated_review_threshold: float = 0.05  # 5% elevated review
-    emergency_threshold: float = 0.10      # 10% emergency threshold
-    
-    # Execution settings
-    default_execution_algorithm: ExecutionAlgorithm = ExecutionAlgorithm.ADAPTIVE
-    max_execution_time: int = 3600  # 1 hour
-    
-    # Monitoring
-    real_time_monitoring: bool = True
-    monitoring_frequency: int = 1  # seconds
-    alert_thresholds: Dict[str, float] = field(default_factory=lambda: {
-        'position_limit_breach': 0.95,
-        'var_limit_breach': 0.90,
-        'concentration_breach': 0.90
-    })
-    
-    # Regime integration
-    regime_risk_multipliers: Dict[str, float] = field(default_factory=lambda: {
-        'bull_market': 0.8,
-        'bear_market': 1.3,
-        'high_volatility': 1.5,
-        'low_volatility': 0.7,
-        'crisis': 2.0,
-        'sideways': 1.0
-    })
-    
-    # Short selling configuration
-    allow_shorts: bool = False
+# RiskManagerConfig removed - using centralized RiskConfig from core_engine.config
+# See: core_engine/config/component_config.py → RiskConfig
+# Rationale: Eliminates 60 lines of duplicate configuration (Rule 1, Section 7)
 
 
 class CentralRiskManager(ISystemComponent):
@@ -196,9 +153,48 @@ class CentralRiskManager(ISystemComponent):
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize central risk manager"""
+        """
+        Initialize central risk manager
         
-        self.config = RiskManagerConfig(**(config or {}))
+        Args:
+            config: Configuration dictionary (backward compatible)
+                   Can be RiskConfig, dict, or None (uses defaults)
+        """
+        
+        # PHASE 6: Use centralized RiskConfig (Rule 1, Section 7)
+        if config is None:
+            self.config = RiskConfig()
+        elif isinstance(config, RiskConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            # Backward compatibility - map old keys to new structure
+            from ..config.component_config import PositionLimits, RiskLimits
+            
+            position_limits = PositionLimits(
+                max_position_size=config.get('max_position_size', 0.10),
+                max_position_pct=config.get('max_position_pct', 0.05),
+                base_position_pct=config.get('base_position_pct', 0.02),
+                max_positions=config.get('max_positions', 5),
+                max_position_concentration=config.get('position_concentration_limit', 0.15)
+            )
+            
+            risk_limits = RiskLimits(
+                confidence_level=config.get('confidence_level', 0.95),
+                max_daily_var=config.get('max_daily_var', 0.05),
+                stop_loss_pct=config.get('stop_loss_pct', 0.02),
+                confidence_threshold=config.get('min_signal_confidence', 0.6),
+                max_drawdown=config.get('max_drawdown', 0.10)
+            )
+            
+            self.config = RiskConfig(
+                position_limits=position_limits,
+                risk_limits=risk_limits,
+                auto_approval_threshold=config.get('auto_approval_threshold', 0.01),
+                elevated_review_threshold=config.get('elevated_review_threshold', 0.05),
+                emergency_threshold=config.get('emergency_threshold', 0.10)
+            )
+        else:
+            raise TypeError(f"Config must be RiskConfig, dict, or None, got {type(config)}")
         
         # Core components under RiskManager control
         self.unified_execution_engine: Optional[UnifiedExecutionEngine] = None
@@ -251,7 +247,97 @@ class CentralRiskManager(ISystemComponent):
         self.authorization_lock = threading.Lock()
         self.monitoring_task: Optional[asyncio.Task] = None
         
-        logger.info("Central Risk Manager initialized - Governance Hub Ready")
+        logger.info("Central Risk Manager initialized - Governance Hub Ready (using centralized RiskConfig)")
+    
+    # ========================================================================
+    # CONFIGURATION HELPER PROPERTIES (backward compatibility)
+    # ========================================================================
+    
+    @property
+    def max_position_size(self) -> float:
+        """Max position size from centralized config"""
+        return self.config.position_limits.max_position_size
+    
+    @property
+    def max_daily_var(self) -> float:
+        """Max daily VaR from centralized config"""
+        return self.config.risk_limits.max_daily_var
+    
+    @property
+    def position_concentration_limit(self) -> float:
+        """Position concentration limit from centralized config"""
+        return self.config.position_limits.max_position_concentration
+    
+    @property
+    def min_signal_confidence(self) -> float:
+        """Min signal confidence from centralized config"""
+        return self.config.risk_limits.confidence_threshold
+    
+    @property
+    def auto_approval_threshold(self) -> float:
+        """Auto-approval threshold from centralized config"""
+        return self.config.auto_approval_threshold
+    
+    @property
+    def elevated_review_threshold(self) -> float:
+        """Elevated review threshold from centralized config"""
+        return self.config.elevated_review_threshold
+    
+    @property
+    def emergency_threshold(self) -> float:
+        """Emergency threshold from centralized config"""
+        return self.config.emergency_threshold
+    
+    @property
+    def strategy_allocation_limit(self) -> float:
+        """Strategy allocation limit (default 33%)"""
+        return 0.33  # Not in RiskConfig, using default
+    
+    @property
+    def real_time_monitoring(self) -> bool:
+        """Real-time monitoring flag (default True)"""
+        return True  # Always enabled
+    
+    @property
+    def monitoring_frequency(self) -> int:
+        """Monitoring frequency in seconds (default 1)"""
+        return 1  # 1 second monitoring
+    
+    @property
+    def max_execution_time(self) -> int:
+        """Max execution time in seconds (default 3600)"""
+        return 3600  # 1 hour
+    
+    @property
+    def default_execution_algorithm(self):
+        """Default execution algorithm"""
+        return ExecutionAlgorithm.ADAPTIVE
+    
+    @property
+    def high_confidence_threshold(self) -> float:
+        """High confidence threshold (default 0.8)"""
+        return 0.8
+    
+    @property
+    def extreme_confidence_threshold(self) -> float:
+        """Extreme confidence threshold (default 0.9)"""
+        return 0.9
+    
+    @property
+    def regime_risk_multipliers(self) -> Dict[str, float]:
+        """Regime-based risk multipliers"""
+        return {
+            'bull_market': 0.8,
+            'bear_market': 1.3,
+            'high_volatility': 1.5,
+            'low_volatility': 0.7,
+            'crisis': 2.0,
+            'sideways': 1.0
+        }
+    
+    # ========================================================================
+    # ISystemComponent Interface Implementation
+    # ========================================================================
     
     async def initialize(self, execution_config: Optional[Dict[str, Any]] = None) -> bool:
         """Initialize the central risk manager and all controlled components"""

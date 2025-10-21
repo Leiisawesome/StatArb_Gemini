@@ -10,7 +10,8 @@ import asyncio
 from typing import Dict, Any
 from unittest.mock import Mock, AsyncMock
 
-from core_engine.system.central_risk_manager import CentralRiskManager, RiskManagerConfig
+from core_engine.system.central_risk_manager import CentralRiskManager
+from core_engine.config.component_config import RiskConfig  # Updated: use centralized config
 from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
 from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
 from core_engine.trading.strategies.manager import StrategyManager
@@ -56,7 +57,7 @@ async def risk_manager_fixture(risk_manager_config):
 def mock_risk_manager():
     """Mock CentralRiskManager for isolated testing"""
     mock = Mock(spec=CentralRiskManager)
-    mock.config = Mock(spec=RiskManagerConfig)
+    mock.config = Mock(spec=RiskConfig)  # Updated: use centralized RiskConfig
     mock.config.min_signal_confidence = 0.6
     mock.config.max_position_size = 0.10
     mock.is_initialized = True

@@ -82,6 +82,18 @@ except ImportError:
         def get_status(self) -> Dict[str, Any]:
             pass
 
+# PHASE 6: Import centralized configs (Rule 1, Section 7)
+from ..config.component_config import (
+    DataConfig, RiskConfig, ProcessingConfig, 
+    IndicatorConfig, FeatureConfig, SignalConfig,
+    RegimeConfig, AnalyticsConfig, ExecutionConfig, PortfolioConfig
+)
+from ..config.strategies import (
+    MomentumConfig, MeanReversionConfig, BreakoutConfig,
+    FactorConfig, MultiAssetConfig, PairsConfig
+)
+from ..config.system_config import SystemConfig
+
 # Import all enhanced components
 try:
     # Phase 1: Core System Components
@@ -130,38 +142,43 @@ class ComponentStatus(Enum):
 
 @dataclass
 class SystemConfiguration:
-    """Complete system configuration"""
-    # Core System
-    orchestrator_config: Dict[str, Any] = field(default_factory=dict)
-    risk_manager_config: Dict[str, Any] = field(default_factory=dict)
-    data_manager_config: Dict[str, Any] = field(default_factory=dict)
-    execution_engine_config: Dict[str, Any] = field(default_factory=dict)
+    """
+    Complete system configuration with type-safe configs (ENHANCED Phase 6)
     
-    # Analytics & Strategy
-    analytics_manager_config: Dict[str, Any] = field(default_factory=dict)
-    metrics_calculator_config: Dict[str, Any] = field(default_factory=dict)
-    strategy_manager_config: Dict[str, Any] = field(default_factory=dict)
-    strategy_engine_config: Dict[str, Any] = field(default_factory=dict)
-    strategy_registry_config: Dict[str, Any] = field(default_factory=dict)
-    strategy_validator_config: Dict[str, Any] = field(default_factory=dict)
+    Replaces untyped Dict[str, Any] with proper typed configuration objects
+    from core_engine.config/ (Rule 1, Section 7)
+    """
+    # Core System (using typed configs)
+    orchestrator_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # Orchestrator-specific (stays dict)
+    risk_manager_config: Optional[RiskConfig] = None
+    data_manager_config: Optional[DataConfig] = None
+    execution_engine_config: Optional[ExecutionConfig] = None
     
-    # Processing Pipeline
-    indicators_config: Dict[str, Any] = field(default_factory=dict)
-    features_config: Dict[str, Any] = field(default_factory=dict)
-    signals_config: Dict[str, Any] = field(default_factory=dict)
+    # Analytics & Strategy (using typed configs)
+    analytics_manager_config: Optional[AnalyticsConfig] = None
+    metrics_calculator_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create MetricsConfig
+    strategy_manager_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create StrategyManagerConfig
+    strategy_engine_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create StrategyEngineConfig
+    strategy_registry_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # Strategy-specific
+    strategy_validator_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # Validator-specific
     
-    # Data & Risk Management
-    regime_engine_config: Dict[str, Any] = field(default_factory=dict)
+    # Processing Pipeline (using typed configs)
+    indicators_config: Optional[IndicatorConfig] = None
+    features_config: Optional[FeatureConfig] = None
+    signals_config: Optional[SignalConfig] = None
     
-    # Trading & Execution
-    trading_engine_config: Dict[str, Any] = field(default_factory=dict)
-    portfolio_manager_config: Dict[str, Any] = field(default_factory=dict)
+    # Data & Risk Management (using typed configs)
+    regime_engine_config: Optional[RegimeConfig] = None
     
-    # Production Monitoring
-    production_health_monitor_config: Dict[str, Any] = field(default_factory=dict)
-    graceful_degradation_config: Dict[str, Any] = field(default_factory=dict)
-    audit_trail_config: Dict[str, Any] = field(default_factory=dict)
-    disaster_recovery_config: Dict[str, Any] = field(default_factory=dict)
+    # Trading & Execution (using typed configs)
+    trading_engine_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create TradingEngineConfig
+    portfolio_manager_config: Optional[PortfolioConfig] = None
+    
+    # Production Monitoring (component-specific)
+    production_health_monitor_config: Optional[Dict[str, Any]] = field(default_factory=dict)
+    graceful_degradation_config: Optional[Dict[str, Any]] = field(default_factory=dict)
+    audit_trail_config: Optional[Dict[str, Any]] = field(default_factory=dict)
+    disaster_recovery_config: Optional[Dict[str, Any]] = field(default_factory=dict)
     
     # System Settings
     enable_performance_monitoring: bool = True
@@ -173,6 +190,54 @@ class SystemConfiguration:
     performance_report_interval: int = 300  # seconds
     max_initialization_time: int = 120  # seconds
     max_startup_time: int = 60  # seconds
+    
+    def __post_init__(self):
+        """Initialize None configs with defaults"""
+        if self.risk_manager_config is None:
+            self.risk_manager_config = RiskConfig()
+        if self.data_manager_config is None:
+            self.data_manager_config = DataConfig()
+        if self.execution_engine_config is None:
+            self.execution_engine_config = ExecutionConfig()
+        if self.analytics_manager_config is None:
+            self.analytics_manager_config = AnalyticsConfig()
+        if self.indicators_config is None:
+            self.indicators_config = IndicatorConfig()
+        if self.features_config is None:
+            self.features_config = FeatureConfig()
+        if self.signals_config is None:
+            self.signals_config = SignalConfig()
+        if self.regime_engine_config is None:
+            self.regime_engine_config = RegimeConfig()
+        if self.portfolio_manager_config is None:
+            self.portfolio_manager_config = PortfolioConfig()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (backward compatibility)"""
+        # For backward compatibility with dict-based initialization
+        return {
+            'risk_manager_config': self.risk_manager_config.__dict__ if self.risk_manager_config else {},
+            'data_manager_config': self.data_manager_config.__dict__ if self.data_manager_config else {},
+            'execution_engine_config': self.execution_engine_config.__dict__ if self.execution_engine_config else {},
+            'analytics_manager_config': self.analytics_manager_config.__dict__ if self.analytics_manager_config else {},
+            'indicators_config': self.indicators_config.__dict__ if self.indicators_config else {},
+            'features_config': self.features_config.__dict__ if self.features_config else {},
+            'signals_config': self.signals_config.__dict__ if self.signals_config else {},
+            'regime_engine_config': self.regime_engine_config.__dict__ if self.regime_engine_config else {},
+            'portfolio_manager_config': self.portfolio_manager_config.__dict__ if self.portfolio_manager_config else {},
+            # Untyped configs as-is
+            'orchestrator_config': self.orchestrator_config,
+            'metrics_calculator_config': self.metrics_calculator_config,
+            'strategy_manager_config': self.strategy_manager_config,
+            'strategy_engine_config': self.strategy_engine_config,
+            'strategy_registry_config': self.strategy_registry_config,
+            'strategy_validator_config': self.strategy_validator_config,
+            'trading_engine_config': self.trading_engine_config,
+            'production_health_monitor_config': self.production_health_monitor_config,
+            'graceful_degradation_config': self.graceful_degradation_config,
+            'audit_trail_config': self.audit_trail_config,
+            'disaster_recovery_config': self.disaster_recovery_config,
+        }
 
 
 @dataclass

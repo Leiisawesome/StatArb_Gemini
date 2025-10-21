@@ -32,6 +32,9 @@ from .integration_manager import (
     create_development_config, create_production_config
 )
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+from .interfaces import ISystemComponent
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,7 +95,7 @@ class SystemValidationReport:
     recommendations: List[str] = field(default_factory=list)
 
 
-class SystemValidator:
+class SystemValidator(ISystemComponent):
     """
     System Validator - Complete Core Engine Validation
     
@@ -101,6 +104,8 @@ class SystemValidator:
     - Performance benchmarking and profiling
     - Production readiness assessment
     - System health and compatibility verification
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, validation_level: ValidationLevel = ValidationLevel.STANDARD):
@@ -114,6 +119,13 @@ class SystemValidator:
         
         # System monitoring
         self.process = psutil.Process()
+        
+        # ISystemComponent state
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.validation_count = 0
+        self.last_validation_time: Optional[datetime] = None
         
         self.logger.info(f"🔍 System Validator initialized with level: {validation_level.value}")
     
@@ -756,6 +768,69 @@ class SystemValidator:
             recommendations.append("System validation completed successfully - ready for deployment")
         
         return recommendations
+    
+    # ========================================================================
+    # ISystemComponent Interface Implementation (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the system validator"""
+        try:
+            self.logger.info("🔍 Initializing System Validator...")
+            self.is_initialized = True
+            self.logger.info("✅ System Validator initialized successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ System Validator initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the system validator"""
+        try:
+            if not self.is_initialized:
+                self.logger.warning("⚠️ Cannot start System Validator - not initialized")
+                return False
+            
+            self.is_operational = True
+            self.logger.info("✅ System Validator started successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ System Validator start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the system validator"""
+        try:
+            self.is_operational = False
+            self.logger.info("✅ System Validator stopped successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ System Validator stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on system validator"""
+        return {
+            'healthy': self.is_operational,
+            'initialized': self.is_initialized,
+            'component_type': 'SystemValidator',
+            'validation_level': self.validation_level.value,
+            'validation_count': self.validation_count,
+            'last_validation': self.last_validation_time.isoformat() if self.last_validation_time else None,
+            'status': 'operational' if self.is_operational else 'stopped'
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of system validator"""
+        return {
+            'component_type': 'SystemValidator',
+            'operational': self.is_operational,
+            'initialized': self.is_initialized,
+            'validation_level': self.validation_level.value,
+            'validation_count': self.validation_count,
+            'last_validation_time': self.last_validation_time.isoformat() if self.last_validation_time else None,
+            'total_validations': self.validation_count
+        }
 
 
 # Utility functions for easy validation
@@ -834,241 +909,3 @@ def print_validation_report(report: SystemValidationReport) -> None:
     print("="*80)
 
 
-# Add missing validation methods to SystemValidator class
-async def _validate_basic_system(self, config: SystemConfiguration) -> None:
-    """Validate basic system functionality"""
-    try:
-        # Test 1: System Manager Creation
-        start_time = time.time()
-        manager = SystemIntegrationManager(config)
-        duration = time.time() - start_time
-        self._add_validation_result(
-            "system_manager_creation",
-            ValidationStatus.PASSED,
-            "System Integration Manager created successfully",
-            duration
-        )
-        
-        # Test 2: System Initialization
-        start_time = time.time()
-        init_result = await manager.initialize()
-        duration = time.time() - start_time
-        
-        if init_result:
-            self._add_validation_result(
-                "system_initialization",
-                ValidationStatus.PASSED,
-                "System initialized successfully",
-                duration
-            )
-        else:
-            self._add_validation_result(
-                "system_initialization",
-                ValidationStatus.WARNING,
-                "System initialization returned False (some components may be unavailable)",
-                duration
-            )
-        
-        # Test 3: System Health Check
-        start_time = time.time()
-        health = await manager.health_check()
-        duration = time.time() - start_time
-        
-        if health.get('healthy', False):
-            self._add_validation_result(
-                "system_health_check",
-                ValidationStatus.PASSED,
-                "System health check passed",
-                duration
-            )
-        else:
-            self._add_validation_result(
-                "system_health_check",
-                ValidationStatus.WARNING,
-                "System health check returned unhealthy status",
-                duration
-            )
-        
-        # Test 4: System Status Reporting
-        start_time = time.time()
-        manager.get_status()
-        duration = time.time() - start_time
-        
-        component_count = len(manager.components)
-        self._add_validation_result(
-            "system_status_reporting",
-            ValidationStatus.PASSED,
-            f"System status reporting complete ({component_count} components)",
-            duration
-        )
-        
-        # Test 5: System Shutdown
-        start_time = time.time()
-        shutdown_result = await manager.stop()
-        duration = time.time() - start_time
-        
-        if shutdown_result:
-            self._add_validation_result(
-                "system_shutdown",
-                ValidationStatus.PASSED,
-                "System shutdown completed successfully",
-                duration
-            )
-        else:
-            self._add_validation_result(
-                "system_shutdown",
-                ValidationStatus.WARNING,
-                "System shutdown returned False",
-                duration
-            )
-            
-    except Exception as e:
-        self._add_validation_result(
-            "basic_system_validation",
-            ValidationStatus.FAILED,
-            f"Basic system validation failed: {str(e)}",
-            0.0,
-            str(e)
-        )
-
-async def _validate_component_integration(self, config: SystemConfiguration) -> None:
-    """Validate component integration"""
-    try:
-        # Test individual enhanced components
-        enhanced_components = [
-            ("EnhancedTradingEngine", "core_engine.trading.engine", "EnhancedTradingEngine"),
-            ("EnhancedPortfolioManager", "core_engine.trading.portfolio.manager_enhanced", "EnhancedPortfolioManager"),
-            ("EnhancedRegimeEngine", "core_engine.regime.engine", "EnhancedRegimeEngine"),
-        ]
-        
-        for comp_name, module_path, class_name in enhanced_components:
-            try:
-                start_time = time.time()
-                
-                # Import and create component
-                module = __import__(module_path, fromlist=[class_name])
-                component_class = getattr(module, class_name)
-                component = component_class({})
-                
-                # Test lifecycle
-                await component.initialize()
-                await component.start()
-                await component.health_check()
-                component.get_status()
-                await component.stop()
-                
-                duration = time.time() - start_time
-                self._add_validation_result(
-                    f"{comp_name}_lifecycle",
-                    ValidationStatus.PASSED,
-                    f"{comp_name} lifecycle validation completed successfully",
-                    duration
-                )
-                
-            except Exception as e:
-                duration = time.time() - start_time
-                self._add_validation_result(
-                    f"{comp_name}_lifecycle",
-                    ValidationStatus.WARNING,
-                    f"{comp_name} lifecycle validation failed: {str(e)}",
-                    duration,
-                    str(e)
-                )
-                
-    except Exception as e:
-        self._add_validation_result(
-            "component_integration",
-            ValidationStatus.FAILED,
-            f"Component integration validation failed: {str(e)}",
-            0.0,
-            str(e)
-        )
-
-async def _perform_performance_benchmarks(self, config: SystemConfiguration) -> None:
-    """Perform performance benchmarks"""
-    # Placeholder for performance benchmarks
-    self._add_validation_result(
-        "performance_benchmarks",
-        ValidationStatus.SKIPPED,
-        "Performance benchmarks not implemented",
-        0.0
-    )
-
-async def _assess_production_readiness(self, config: SystemConfiguration) -> None:
-    """Assess production readiness"""
-    # Placeholder for production readiness assessment
-    self._add_validation_result(
-        "production_readiness",
-        ValidationStatus.SKIPPED,
-        "Production readiness assessment not implemented",
-        0.0
-    )
-
-# Add missing helper method
-def _add_validation_result(self, test_name: str, status: ValidationStatus, 
-                          message: str, duration: float, error: str = None) -> None:
-    """Add a validation result"""
-    result = ValidationResult(
-        test_name=test_name,
-        status=status,
-        duration=duration,
-        message=message,
-        error=error
-    )
-    self.validation_results.append(result)
-
-def _generate_validation_report(self) -> SystemValidationReport:
-    """Generate final validation report"""
-    end_time = datetime.now()
-    total_duration = (end_time - self.start_time).total_seconds() if self.start_time else 0.0
-    
-    # Count results by status
-    passed_tests = len([r for r in self.validation_results if r.status == ValidationStatus.PASSED])
-    failed_tests = len([r for r in self.validation_results if r.status == ValidationStatus.FAILED])
-    warning_tests = len([r for r in self.validation_results if r.status == ValidationStatus.WARNING])
-    skipped_tests = len([r for r in self.validation_results if r.status == ValidationStatus.SKIPPED])
-    
-    # Determine overall status
-    if failed_tests > 0:
-        overall_status = ValidationStatus.FAILED
-    elif warning_tests > 0:
-        overall_status = ValidationStatus.WARNING
-    else:
-        overall_status = ValidationStatus.PASSED
-    
-    # Generate recommendations
-    recommendations = []
-    if failed_tests > 0:
-        recommendations.append(f"Address {failed_tests} failed validation tests")
-    if warning_tests > 0:
-        recommendations.append(f"Review {warning_tests} validation warnings for potential improvements")
-    
-    total_tests = len(self.validation_results)
-    
-    return SystemValidationReport(
-        validation_timestamp=end_time,
-        validation_level=self.validation_level,
-        overall_status=overall_status,
-        total_tests=total_tests,
-        passed_tests=passed_tests,
-        failed_tests=failed_tests,
-        warning_tests=warning_tests,
-        skipped_tests=skipped_tests,
-        total_duration=total_duration,
-        validation_results=self.validation_results,
-        benchmark_results=self.benchmark_results,
-        system_metrics={
-            'total_components': 14,  # Default value
-            'memory_usage': self.process.memory_info().rss / 1024 / 1024,  # MB
-            'cpu_usage': self.process.cpu_percent()
-        },
-        recommendations=recommendations
-    )
-
-# Monkey patch the missing methods into SystemValidator class
-SystemValidator._add_validation_result = _add_validation_result
-SystemValidator._generate_validation_report = _generate_validation_report
-SystemValidator._validate_basic_system = _validate_basic_system
-SystemValidator._validate_component_integration = _validate_component_integration
-SystemValidator._perform_performance_benchmarks = _perform_performance_benchmarks
-SystemValidator._assess_production_readiness = _assess_production_readiness

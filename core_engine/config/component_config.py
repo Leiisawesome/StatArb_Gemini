@@ -228,6 +228,9 @@ class RiskConfig:
     elevated_review_threshold: float = 0.05
     """Elevated review threshold for high-risk trades. Default: 5%"""
     
+    emergency_threshold: float = 0.10
+    """Emergency threshold for critical risk situations. Default: 10%"""
+    
     # Additional risk parameters from consolidation
     enable_real_time_risk: bool = True
     """Enable real-time risk monitoring. Default: True"""

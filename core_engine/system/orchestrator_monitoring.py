@@ -15,6 +15,9 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+from .interfaces import ISystemComponent
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,8 +35,12 @@ class SystemMetrics:
     throughput: float
 
 
-class SystemMonitor:
-    """Handles system monitoring, metrics collection, and performance tracking"""
+class SystemMonitor(ISystemComponent):
+    """
+    Handles system monitoring, metrics collection, and performance tracking
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
+    """
     
     def __init__(self):
         self.system_metrics: Dict[str, Any] = {}
@@ -41,6 +48,11 @@ class SystemMonitor:
         self.monitoring_task: Optional[asyncio.Task] = None
         self.started_at: Optional[datetime] = None
         self.is_monitoring: bool = False
+        
+        # ISystemComponent state
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
         
     async def start_monitoring(self) -> None:
         """Start continuous system monitoring"""
@@ -207,3 +219,66 @@ class SystemMonitor:
                 error_rate=1.0,
                 throughput=0.0
             )
+    
+    # ========================================================================
+    # ISystemComponent Interface Implementation (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the system monitor"""
+        try:
+            logger.info("📊 Initializing System Monitor...")
+            self.is_initialized = True
+            logger.info("✅ System Monitor initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ System Monitor initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the system monitor"""
+        try:
+            if not self.is_initialized:
+                logger.warning("⚠️ Cannot start System Monitor - not initialized")
+                return False
+            
+            await self.start_monitoring()
+            self.is_operational = True
+            logger.info("✅ System Monitor started successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ System Monitor start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the system monitor"""
+        try:
+            await self.stop_monitoring()
+            self.is_operational = False
+            logger.info("✅ System Monitor stopped successfully")
+            return True
+        except Exception as e:
+            logger.error(f"❌ System Monitor stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on system monitor"""
+        return {
+            'healthy': self.is_operational and self.is_monitoring,
+            'initialized': self.is_initialized,
+            'component_type': 'SystemMonitor',
+            'monitoring_active': self.is_monitoring,
+            'uptime_seconds': (datetime.now() - self.started_at).total_seconds() if self.started_at else 0,
+            'status': 'operational' if self.is_operational else 'stopped'
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of system monitor"""
+        return {
+            'component_type': 'SystemMonitor',
+            'operational': self.is_operational,
+            'initialized': self.is_initialized,
+            'monitoring_active': self.is_monitoring,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'uptime_seconds': (datetime.now() - self.started_at).total_seconds() if self.started_at else 0
+        }
