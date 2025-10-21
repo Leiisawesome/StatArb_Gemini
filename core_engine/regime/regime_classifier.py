@@ -27,6 +27,12 @@ from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classi
 from sklearn.calibration import CalibratedClassifierCV
 import joblib
 
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    RegimeConfig = None
+
 # Import regime components
 from .regime_detector import RegimeType
 
