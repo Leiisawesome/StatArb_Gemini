@@ -27,6 +27,23 @@ from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classi
 from sklearn.calibration import CalibratedClassifierCV
 import joblib
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool: pass
+        @abstractmethod
+        async def start(self) -> bool: pass
+        @abstractmethod
+        async def stop(self) -> bool: pass
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from ..config.component_config import RegimeConfig
@@ -992,12 +1009,14 @@ class RegimeModelTrainer:
             return False
 
 
-class RegimeClassifier:
+class RegimeClassifier(ISystemComponent):
     """
     Advanced Regime Classifier
     
     Integrates feature engineering, model training, and prediction
     to provide comprehensive regime classification capabilities.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Any] = None):
@@ -1030,6 +1049,13 @@ class RegimeClassifier:
             self.config = config if hasattr(config, 'confidence_threshold') else RegimeConfig()
         
         logger.info("✅ RegimeClassifier using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.initialization_time: Optional[datetime] = None
+        self.classification_count = 0
         
         # Initialize components (simplified - uses centralized config)
         # Note: Sub-components will be updated to use centralized config
@@ -1265,4 +1291,70 @@ class RegimeClassifier:
             
         except Exception as e:
             logger.error(f"Error loading classifier: {e}")
+            return False    
+    # ========================================================================
+    # ISystemComponent Implementation (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the regime classifier (ISystemComponent)"""
+        try:
+            if self.is_initialized:
+                return True
+            logger.info("�� Initializing RegimeClassifier...")
+            self.is_initialized = True
+            self.initialization_time = datetime.now()
+            logger.info("✅ RegimeClassifier initialized")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeClassifier initialization failed: {e}")
             return False
+    
+    async def start(self) -> bool:
+        """Start the regime classifier (ISystemComponent)"""
+        try:
+            if not self.is_initialized or self.is_operational:
+                return self.is_operational
+            logger.info("🚀 Starting RegimeClassifier...")
+            self.is_operational = True
+            logger.info("✅ RegimeClassifier started")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeClassifier start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the regime classifier (ISystemComponent)"""
+        try:
+            logger.info("🛑 Stopping RegimeClassifier...")
+            self.is_operational = False
+            logger.info("✅ RegimeClassifier stopped")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeClassifier stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Health check for regime classifier (ISystemComponent)"""
+        try:
+            return {
+                'healthy': self.is_initialized and self.is_operational,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'classification_count': self.classification_count,
+                'uptime_seconds': (datetime.now() - self.initialization_time).total_seconds() if self.initialization_time else 0,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {'healthy': False, 'error': str(e)}
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get status of regime classifier (ISystemComponent)"""
+        return {
+            'component_type': 'RegimeClassifier',
+            'component_id': self.component_id,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'classification_count': self.classification_count,
+            'history_size': len(self.classification_history)
+        }

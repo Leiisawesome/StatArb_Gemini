@@ -16,6 +16,23 @@ from sklearn.preprocessing import StandardScaler
 from scipy import stats
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool: pass
+        @abstractmethod
+        async def start(self) -> bool: pass
+        @abstractmethod
+        async def stop(self) -> bool: pass
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from ..config.component_config import RegimeConfig
@@ -642,13 +659,15 @@ class ThresholdBasedDetector:
             return 0.0
 
 
-class RegimeDetector:
+class RegimeDetector(ISystemComponent):
     """
     Comprehensive Market Regime Detector
     
     Combines multiple detection methods to identify market regimes with high confidence.
     Supports Markov switching, Gaussian mixture models, volatility-based detection,
     and threshold-based classification.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Any] = None):
@@ -683,6 +702,13 @@ class RegimeDetector:
             self.config = config if hasattr(config, 'lookback_window') else RegimeConfig()
         
         logger.info("✅ RegimeDetector using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.initialization_time: Optional[datetime] = None
+        self.detection_count = 0
         
         # Initialize detectors (simplified - uses centralized config)
         self.detectors = {}
@@ -1122,4 +1148,70 @@ class RegimeDetector:
             
         except Exception as e:
             logger.error(f"Error calculating regime performance: {e}")
-            return {}
+            return {}    
+    # ========================================================================
+    # ISystemComponent Implementation (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize the regime detector (ISystemComponent)"""
+        try:
+            if self.is_initialized:
+                return True
+            logger.info("🔧 Initializing RegimeDetector...")
+            self.is_initialized = True
+            self.initialization_time = datetime.now()
+            logger.info("✅ RegimeDetector initialized")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeDetector initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start the regime detector (ISystemComponent)"""
+        try:
+            if not self.is_initialized or self.is_operational:
+                return self.is_operational
+            logger.info("🚀 Starting RegimeDetector...")
+            self.is_operational = True
+            logger.info("✅ RegimeDetector started")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeDetector start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop the regime detector (ISystemComponent)"""
+        try:
+            logger.info("🛑 Stopping RegimeDetector...")
+            self.is_operational = False
+            logger.info("✅ RegimeDetector stopped")
+            return True
+        except Exception as e:
+            logger.error(f"❌ RegimeDetector stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Health check for regime detector (ISystemComponent)"""
+        try:
+            return {
+                'healthy': self.is_initialized and self.is_operational,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'detection_count': self.detection_count,
+                'uptime_seconds': (datetime.now() - self.initialization_time).total_seconds() if self.initialization_time else 0,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {'healthy': False, 'error': str(e)}
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get status of regime detector (ISystemComponent)"""
+        return {
+            'component_type': 'RegimeDetector',
+            'component_id': self.component_id,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'detection_count': self.detection_count,
+            'history_size': len(self.detection_history)
+        }

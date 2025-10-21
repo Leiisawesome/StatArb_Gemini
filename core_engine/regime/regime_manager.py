@@ -17,6 +17,24 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import json
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback definition for testing
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool: pass
+        @abstractmethod
+        async def start(self) -> bool: pass
+        @abstractmethod
+        async def stop(self) -> bool: pass
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from ..config.component_config import RegimeConfig
@@ -527,12 +545,14 @@ class RegimePerformanceAttribution:
             logger.error(f"Error updating regime performance history: {e}")
 
 
-class RegimeManager:
+class RegimeManager(ISystemComponent):
     """
     Central Regime Manager
     
     Integrates all regime detection and analysis components to provide
     comprehensive regime-aware trading and portfolio management.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Any] = None):
@@ -572,6 +592,13 @@ class RegimeManager:
             self.config = config if hasattr(config, 'update_frequency_hours') else RegimeConfig()
         
         logger.info("✅ RegimeManager using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.initialization_time: Optional[datetime] = None
+        self.analysis_count = 0
         
         # Lazy import regime_classifier (33.85MB sklearn dependency)
         from .regime_classifier import RegimeClassifier
@@ -1210,3 +1237,191 @@ class RegimeManager:
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
+    
+    # ========================================================================
+    # ISystemComponent Implementation (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """
+        Initialize the regime manager
+        
+        Implements ISystemComponent.initialize() for orchestrator integration.
+        
+        Returns:
+            bool: True if initialization successful
+        """
+        try:
+            if self.is_initialized:
+                logger.warning("RegimeManager already initialized")
+                return True
+            
+            logger.info("🔧 Initializing RegimeManager...")
+            
+            # Initialize sub-components (already done in __init__)
+            # Mark as initialized
+            self.is_initialized = True
+            self.initialization_time = datetime.now()
+            self.status = RegimeManagerStatus.READY
+            
+            logger.info("✅ RegimeManager initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ RegimeManager initialization failed: {e}")
+            self.status = RegimeManagerStatus.ERROR
+            return False
+    
+    async def start(self) -> bool:
+        """
+        Start the regime manager operations
+        
+        Implements ISystemComponent.start() for orchestrator integration.
+        
+        Returns:
+            bool: True if start successful
+        """
+        try:
+            if not self.is_initialized:
+                logger.error("Cannot start RegimeManager: not initialized")
+                return False
+            
+            if self.is_operational:
+                logger.warning("RegimeManager already operational")
+                return True
+            
+            logger.info("🚀 Starting RegimeManager...")
+            
+            # Mark as operational
+            self.is_operational = True
+            self.status = RegimeManagerStatus.READY
+            
+            logger.info("✅ RegimeManager started successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ RegimeManager start failed: {e}")
+            self.status = RegimeManagerStatus.ERROR
+            return False
+    
+    async def stop(self) -> bool:
+        """
+        Stop the regime manager operations
+        
+        Implements ISystemComponent.stop() for orchestrator integration.
+        
+        Returns:
+            bool: True if stop successful
+        """
+        try:
+            if not self.is_operational:
+                logger.warning("RegimeManager not operational")
+                return True
+            
+            logger.info("🛑 Stopping RegimeManager...")
+            
+            # Stop operations
+            self.is_operational = False
+            self.status = RegimeManagerStatus.MAINTENANCE
+            
+            # Shutdown executor (call existing method)
+            self.shutdown()
+            
+            logger.info("✅ RegimeManager stopped successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ RegimeManager stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on regime manager
+        
+        Implements ISystemComponent.health_check() for orchestrator integration.
+        
+        Returns:
+            Dict[str, Any]: Health check results
+        """
+        try:
+            # Basic health metrics
+            is_healthy = (
+                self.is_initialized and 
+                self.is_operational and 
+                self.status not in [RegimeManagerStatus.ERROR]
+            )
+            
+            # Component health
+            components_healthy = {
+                'regime_detector': hasattr(self, 'regime_detector'),
+                'market_analyzer': hasattr(self, 'market_analyzer'),
+                'regime_classifier': hasattr(self, 'regime_classifier'),
+                'indicator_engine': hasattr(self, 'indicator_engine'),
+                'transition_manager': hasattr(self, 'transition_manager')
+            }
+            
+            # Performance metrics
+            uptime = (datetime.now() - self.initialization_time).total_seconds() if self.initialization_time else 0
+            
+            health_report = {
+                'healthy': is_healthy,
+                'status': self.status.value,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'uptime_seconds': uptime,
+                'analysis_count': self.analysis_count,
+                'components': components_healthy,
+                'all_components_healthy': all(components_healthy.values()),
+                'current_state_available': self.current_state is not None,
+                'state_history_size': len(self.state_history),
+                'last_update': self.last_update.isoformat() if self.last_update else None,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            return health_report
+            
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {
+                'healthy': False,
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get current status of regime manager
+        
+        Implements ISystemComponent.get_status() for orchestrator integration.
+        
+        Returns:
+            Dict[str, Any]: Current status information
+        """
+        try:
+            status_info = {
+                'component_type': 'RegimeManager',
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'status': self.status.value,
+                'initialization_time': self.initialization_time.isoformat() if self.initialization_time else None,
+                'analysis_count': self.analysis_count,
+                'state_history_size': len(self.state_history),
+                'adaptation_history_size': len(self.adaptation_history),
+                'current_regime': self.current_state.current_regime.value if self.current_state else None,
+                'regime_confidence': self.current_state.regime_confidence if self.current_state else 0.0,
+                'last_update': self.last_update.isoformat() if self.last_update else None,
+                'config': {
+                    'update_frequency_hours': self.config.update_frequency_hours if hasattr(self.config, 'update_frequency_hours') else None,
+                    'confidence_threshold': self.config.confidence_threshold if hasattr(self.config, 'confidence_threshold') else None
+                }
+            }
+            
+            return status_info
+            
+        except Exception as e:
+            logger.error(f"Get status failed: {e}")
+            return {
+                'component_type': 'RegimeManager',
+                'error': str(e)
+            }
