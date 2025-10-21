@@ -183,25 +183,188 @@ class MyTradingComponent:
             raise
 ```
 
-## 7. Configuration Management
+## 7. Configuration Management ⭐
 
-Use standardized configuration patterns:
+### MANDATORY: Centralized Configuration Architecture
+
+**ALL configuration MUST be defined in `core_engine/config/` - Single Source of Truth**
+
+#### Configuration Brick Structure
+
+```
+core_engine/config/
+├── __init__.py              # Export all configs
+├── unified_config.py        # Unified config loader (YAML/JSON/ENV)
+├── system_config.py         # System-wide configuration
+├── component_config.py      # Component-specific configs (14 configs)
+├── strategies.py            # Strategy configurations (11 configs)
+└── broker_config.py         # Broker credentials (secure)
+```
+
+#### CORRECT Pattern: Import from Centralized Location
 
 ```python
-from dataclasses import dataclass
-from typing import Dict, Any
+# ✅ CORRECT: Import from core_engine.config
+from core_engine.config import (
+    DataConfig, RiskConfig, IndicatorConfig, FeatureConfig,
+    SignalConfig, RegimeConfig, AnalyticsConfig, ExecutionConfig,
+    PortfolioConfig, MomentumConfig, MeanReversionConfig
+)
+
+# Create config instances
+data_config = DataConfig(enable_caching=True, cache_ttl=3600)
+strategy_config = MomentumConfig(lookback_period=60, momentum_threshold=0.02)
+```
+
+#### PROHIBITED Pattern: Scattered Configuration Definitions
+
+```python
+# ❌ PROHIBITED: Don't define configs in component files
+@dataclass
+class MyComponentConfig:
+    """This should be in core_engine/config/component_config.py"""
+    some_param: int = 10
+    # Scattered configs lead to duplication and inconsistency
+
+# ❌ PROHIBITED: Don't use hardcoded defaults
+class MyComponent:
+    def __init__(self):
+        self.timeout = 30  # Should come from config
+        self.max_retries = 5  # Should come from config
+```
+
+#### Configuration Composition Pattern
+
+**Use composition to eliminate duplication (DRY principle):**
+
+```python
+from dataclasses import dataclass, field
+from typing import List
+
+# Reusable sub-configs
+@dataclass
+class PositionLimits:
+    """Reusable position management config"""
+    max_position_size: float = 0.10
+    max_positions: int = 5
+    
+    def __post_init__(self):
+        if not 0.0 < self.max_position_size <= 1.0:
+            raise ValueError(f"max_position_size must be (0, 1.0], got {self.max_position_size}")
 
 @dataclass
-class ComponentConfig:
-    """Standardized component configuration"""
-    component_name: str
-    initialization_timeout: int = 60
-    health_check_interval: int = 30
-    max_error_count: int = 5
+class RiskLimits:
+    """Reusable risk management config"""
+    confidence_level: float = 0.95
+    var_percentile: float = 95.0
     
-    # Component-specific config
-    custom_settings: Dict[str, Any] = None
+    def __post_init__(self):
+        if not 0.0 < self.confidence_level <= 1.0:
+            raise ValueError(f"confidence_level must be (0, 1.0], got {self.confidence_level}")
+
+# Compose into domain config
+@dataclass
+class RiskConfig:
+    """Risk configuration using composition"""
+    position_limits: PositionLimits = field(default_factory=PositionLimits)
+    risk_limits: RiskLimits = field(default_factory=RiskLimits)
+    max_daily_var: float = 0.05
+    stop_loss_pct: float = 0.02
 ```
+
+#### Built-In Validation
+
+**All configs MUST implement validation via `__post_init__`:**
+
+```python
+@dataclass
+class MomentumConfig:
+    """Momentum strategy configuration with validation"""
+    lookback_period: int = 60
+    momentum_threshold: float = 0.02
+    
+    def __post_init__(self):
+        """Validate configuration parameters"""
+        if self.lookback_period <= 0:
+            raise ValueError(f"lookback_period must be positive, got {self.lookback_period}")
+        if not 0.0 < self.momentum_threshold <= 1.0:
+            raise ValueError(f"momentum_threshold must be (0, 1.0], got {self.momentum_threshold}")
+```
+
+#### Factory Pattern for Strategy Configs
+
+```python
+from core_engine.config.strategies import create_strategy_config, StrategyType
+
+# Factory creates properly configured strategies
+momentum_config = create_strategy_config(StrategyType.MOMENTUM, 
+    lookback_period=60,
+    momentum_threshold=0.02
+)
+
+stat_arb_config = create_strategy_config(StrategyType.STATISTICAL_ARBITRAGE,
+    cointegration_lookback=252,
+    entry_zscore_threshold=2.0
+)
+```
+
+#### Configuration Loading Priority
+
+**Unified config loader supports layered configuration:**
+
+```
+Priority (highest to lowest):
+1. Environment variables (ENV)
+2. Environment-specific files (config/production.yaml)
+3. Base configuration files (config/base.yaml)
+4. Dataclass defaults (in code)
+```
+
+```python
+from core_engine.config.unified_config import UnifiedConfig
+
+# Load with automatic priority-based merging
+config = UnifiedConfig.load(
+    base_config_path='config/base.yaml',
+    env_config_path='config/production.yaml',
+    env_file='.env'
+)
+
+# Access configuration
+data_config = config.get_data_config()
+risk_config = config.get_risk_config()
+```
+
+#### Configuration Benefits
+
+**Centralized configuration provides:**
+
+1. **Single Source of Truth**: All configs in one location (`core_engine/config/`)
+2. **Zero Duplication**: Composition pattern eliminates duplicate parameters
+3. **Type Safety**: Dataclass-based configs with IDE autocomplete
+4. **Built-in Validation**: `__post_init__` validates all parameters
+5. **Easy Discovery**: `from core_engine.config import *` shows all available configs
+6. **Consistent Defaults**: No more conflicting default values
+7. **Professional Documentation**: Every parameter documented with rationale
+8. **Backward Compatible**: Dict input supported for legacy code
+
+#### PROHIBITED Configuration Patterns
+
+❌ **Scattered Configs**: Don't define configs outside `core_engine/config/`
+❌ **Hardcoded Defaults**: Don't embed config values in component code
+❌ **Duplicate Parameters**: Don't redefine same parameter in multiple places
+❌ **No Validation**: Don't skip `__post_init__` validation
+❌ **Generic Configs**: Don't use `Dict[str, Any]` - use typed dataclasses
+
+#### Configuration Compliance
+
+**All components MUST:**
+1. Import configs from `core_engine.config/`
+2. Use dataclass-based configurations
+3. Implement `__post_init__` validation
+4. Use composition for shared parameters
+5. Document all configuration parameters
+6. Provide sensible defaults with rationale
 
 ## 8. Inter-Component Communication
 

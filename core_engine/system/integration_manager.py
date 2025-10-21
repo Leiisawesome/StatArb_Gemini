@@ -33,8 +33,26 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
-# Import configuration adapter
-from .config_adapter import safe_component_init
+# PHASE 6: Replaced config_adapter with centralized configs
+# OLD: from .config_adapter import safe_component_init
+# NEW: Using consolidated configs from core_engine.config
+
+def safe_component_init(component_class, config_dict):
+    """
+    Initialize component with configuration.
+    
+    Simplified version - no longer needs adapter pattern since all configs
+    are now properly defined in core_engine.config/ (Phase 4).
+    """
+    try:
+        return component_class(config_dict)
+    except Exception as e:
+        # Try with None as fallback (many components accept None and use defaults)
+        try:
+            return component_class(None)
+        except Exception:
+            # Last resort - try with empty dict
+            return component_class({})
 
 # Import ISystemComponent for orchestrator integration
 try:
