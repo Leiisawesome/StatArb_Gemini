@@ -148,7 +148,7 @@ class CrossAssetRegime:
 class FactorAnalyzer:
     """Analyze market factors and their regime implications"""
     
-    def __init__(self, config: RegimeAnalysisConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.pca = PCA(n_components=self.config.n_components_pca)
         self.scaler = StandardScaler()
@@ -273,7 +273,7 @@ class FactorAnalyzer:
 class CrossAssetAnalyzer:
     """Analyze cross-asset relationships and regimes"""
     
-    def __init__(self, config: RegimeAnalysisConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Cross-asset analyzer initialized")
@@ -890,7 +890,7 @@ class CrossAssetAnalyzer:
 class SectorRotationAnalyzer:
     """Analyze sector rotation patterns and regime implications"""
     
-    def __init__(self, config: RegimeAnalysisConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         # Standard sector ETFs

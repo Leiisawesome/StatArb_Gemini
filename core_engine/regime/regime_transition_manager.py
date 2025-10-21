@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
@@ -173,7 +173,7 @@ class TransitionMonitoring:
 class TransitionPredictor:
     """Predict regime transitions using machine learning"""
     
-    def __init__(self, config: TransitionPredictionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.models = {}
         self.scalers = {}
@@ -678,7 +678,7 @@ class TransitionPredictor:
 class RebalancingManager:
     """Manage portfolio rebalancing during regime transitions"""
     
-    def __init__(self, config: TransitionPredictionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Rebalancing manager initialized")
@@ -912,7 +912,7 @@ class RebalancingManager:
 class TransitionMonitor:
     """Monitor ongoing regime transitions"""
     
-    def __init__(self, config: TransitionPredictionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.active_transitions: Dict[str, TransitionMonitoring] = {}
         

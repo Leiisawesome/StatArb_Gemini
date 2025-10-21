@@ -95,8 +95,7 @@ from .regime_manager import (
     RegimeManagerStatus,
     AdaptationMode,
     RegimeState,
-    RegimeAdaptation,
-    RegimePortfolioImplications
+    RegimeAdaptation
 )
 
 from .regime_detector import (
@@ -116,10 +115,7 @@ from .regime_classifier import (
     ModelPerformance
 )
 
-from .engine import (
-    EnhancedRegimeEngine,
-    RegimeEngineStatus
-)
+from .engine import EnhancedRegimeEngine
 
 from .regime_indicators import (
     RegimeIndicatorEngine,
@@ -165,7 +161,6 @@ __all__ = [
     'AdaptationMode',
     'RegimeState',
     'RegimeAdaptation',
-    'RegimePortfolioImplications',
     
     # RegimeDetector Types
     'RegimeType',
@@ -181,7 +176,6 @@ __all__ = [
     'ModelPerformance',
     
     # Engine Types
-    'RegimeEngineStatus',
     
     # Indicator Types
     'RegimeIndicator',

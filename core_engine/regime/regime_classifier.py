@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
@@ -161,7 +161,7 @@ class RegimeClassification:
 class FeatureEngineer:
     """Advanced feature engineering for regime classification"""
     
-    def __init__(self, config: ClassificationConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Feature engineer initialized")
@@ -545,7 +545,7 @@ class FeatureEngineer:
 class RegimeModelTrainer:
     """Train and validate regime classification models"""
     
-    def __init__(self, config: ClassificationConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.models = {}
         self.scalers = {}
@@ -1028,25 +1028,18 @@ class RegimeClassifier(ISystemComponent):
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                confidence_threshold: float = 0.7
-                model_retrain_frequency: int = 60
-                enable_ml_predictions: bool = True
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
-            # Backward compat for old ClassificationConfig
-            self.config = config if hasattr(config, 'confidence_threshold') else RegimeConfig()
+            # Backward compat
+            self.config = config
         
         logger.info("✅ RegimeClassifier using centralized RegimeConfig (Rule 1, Section 7)")
         

@@ -138,7 +138,7 @@ class RegimeStrengthMeasure:
 class VolatilityRegimeIndicators:
     """Volatility regime specific indicators"""
     
-    def __init__(self, config: IndicatorConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Volatility regime indicators initialized")
@@ -469,7 +469,7 @@ class VolatilityRegimeIndicators:
 class MomentumRegimeIndicators:
     """Momentum regime specific indicators"""
     
-    def __init__(self, config: IndicatorConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Momentum regime indicators initialized")
@@ -724,7 +724,7 @@ class MomentumRegimeIndicators:
 class MeanReversionIndicators:
     """Mean reversion regime indicators"""
     
-    def __init__(self, config: IndicatorConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Mean reversion indicators initialized")
@@ -996,7 +996,7 @@ class MeanReversionIndicators:
 class TransitionSignalDetector:
     """Detect regime transition signals"""
     
-    def __init__(self, config: IndicatorConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Transition signal detector initialized")
@@ -1226,7 +1226,7 @@ class TransitionSignalDetector:
 class RegimeStrengthCalculator:
     """Calculate regime strength measures"""
     
-    def __init__(self, config: IndicatorConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Regime strength calculator initialized")

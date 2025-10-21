@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
@@ -43,18 +43,16 @@ except ImportError:
 
 # Lazy import for heavy classifier module (33.85MB sklearn dependency)
 if TYPE_CHECKING:
-    from .regime_classifier import (RegimeClassification, ClassificationConfig)
+    from .regime_classifier import RegimeClassification
 
 # Import all regime components
-from .regime_detector import (RegimeDetector, RegimeType, RegimeDetection, 
-                             RegimeDetectionConfig)
-from .market_regime_analyzer import (MarketRegimeAnalyzer, CrossAssetRegime, 
-                                   RegimeAnalysisConfig)
+from .regime_detector import RegimeDetector, RegimeType, RegimeDetection
+from .market_regime_analyzer import MarketRegimeAnalyzer, CrossAssetRegime
 # Lazy import: regime_classifier (33.85MB sklearn dependency) - import only when needed
 from .regime_indicators import (RegimeIndicatorEngine, RegimeIndicator, 
-                              TransitionSignal, RegimeStrengthMeasure, IndicatorConfig)
+                              TransitionSignal, RegimeStrengthMeasure)
 from .regime_transition_manager import (RegimeTransitionManager, TransitionPrediction, 
-                                      RebalancingRecommendation, TransitionPredictionConfig)
+                                      RebalancingRecommendation)
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -161,7 +159,7 @@ class RegimeAdaptation:
 class RegimeAwarePortfolioManager:
     """Regime-aware portfolio management"""
     
-    def __init__(self, config: RegimeManagerConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         
         logger.info("Regime-aware portfolio manager initialized")
@@ -415,7 +413,7 @@ class RegimeAwarePortfolioManager:
 class RegimePerformanceAttribution:
     """Regime-based performance attribution"""
     
-    def __init__(self, config: RegimeManagerConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.regime_performance_history: Dict[RegimeType, List[float]] = {}
         
@@ -564,32 +562,19 @@ class RegimeManager(ISystemComponent):
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                update_frequency_hours: int = 1
-                confidence_threshold: float = 0.6
-                regime_persistence_threshold: int = 3
-                max_portfolio_change: float = 0.25
-                adaptation_speed: float = 0.5
-                max_regime_risk_multiplier: float = 2.0
-                performance_attribution_window: int = 252
-                max_history_length: int = 1000
-                max_workers: int = 4
-                async_processing: bool = True
+        # Import at module level handles None gracefully
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
             # Try to use as-is (for backward compat with old RegimeManagerConfig)
-            self.config = config if hasattr(config, 'update_frequency_hours') else RegimeConfig()
+            self.config = config if hasattr(config, 'update_frequency_hours') else CentralizedRegimeConfig()
         
         logger.info("✅ RegimeManager using centralized RegimeConfig (Rule 1, Section 7)")
         

@@ -143,7 +143,7 @@ class RegimeTransition:
 class MarkovSwitchingDetector:
     """Markov switching model for regime detection"""
     
-    def __init__(self, config: RegimeDetectionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.model = None
         self.fitted = False
@@ -301,7 +301,7 @@ class MarkovSwitchingDetector:
 class GaussianMixtureDetector:
     """Gaussian mixture model for regime detection"""
     
-    def __init__(self, config: RegimeDetectionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         self.model = None
         self.scaler = StandardScaler()
@@ -434,7 +434,7 @@ class GaussianMixtureDetector:
 class VolatilityBasedDetector:
     """Volatility-based regime detection"""
     
-    def __init__(self, config: RegimeDetectionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         logger.info("Volatility-based detector initialized")
     
@@ -544,7 +544,7 @@ class VolatilityBasedDetector:
 class ThresholdBasedDetector:
     """Threshold-based regime detection"""
     
-    def __init__(self, config: RegimeDetectionConfig):
+    def __init__(self, config: Any = None):
         self.config = config
         logger.info("Threshold-based detector initialized")
     
@@ -679,27 +679,18 @@ class RegimeDetector(ISystemComponent):
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                lookback_window: int = 60
-                volatility_window: int = 20
-                confidence_threshold: float = 0.75
-                min_regime_duration: int = 10
-                regime_persistence: float = 0.8
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
-            # Backward compat for old RegimeDetectionConfig
-            self.config = config if hasattr(config, 'lookback_window') else RegimeConfig()
+            # Backward compat
+            self.config = config
         
         logger.info("✅ RegimeDetector using centralized RegimeConfig (Rule 1, Section 7)")
         
