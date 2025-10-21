@@ -175,6 +175,12 @@ class TransitionPredictor:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.models = {}
         self.scalers = {}
         self.is_trained = False
@@ -213,7 +219,7 @@ class TransitionPredictor:
                 X = features.loc[common_index]
                 y = horizon_labels.loc[common_index]
                 
-                if len(X) < self.config.min_training_samples:
+                if len(X) < self._get_config_attr("min_training_samples", 100):
                     logger.warning(f"Insufficient data for {horizon}-day horizon")
                     continue
                 
@@ -363,7 +369,7 @@ class TransitionPredictor:
             
             # Train-test split
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=self.config.test_size, random_state=42
+                X, y, test_size=self._get_config_attr("test_size", 0.2), random_state=42
             )
             
             # Scale features
@@ -680,6 +686,12 @@ class RebalancingManager:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Rebalancing manager initialized")
     
@@ -724,7 +736,7 @@ class RebalancingManager:
             
             elif trigger == RebalancingTrigger.TRANSITION_PROBABILITY_HIGH:
                 if (transition_prediction.transition_probability > threshold and 
-                    transition_prediction.prediction_confidence > self.config.confidence_threshold):
+                    transition_prediction.prediction_confidence > self._get_config_attr("confidence_threshold", 0.7)):
                     return self._create_probability_based_recommendation(transition_prediction, current_portfolio)
             
             elif trigger == RebalancingTrigger.RISK_THRESHOLD_EXCEEDED:
@@ -914,6 +926,12 @@ class TransitionMonitor:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.active_transitions: Dict[str, TransitionMonitoring] = {}
         
         logger.info("Transition monitor initialized")
@@ -1081,25 +1099,17 @@ class RegimeTransitionManager:
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                transition_probability_threshold: float = 0.7
-                max_portfolio_adjustment: float = 0.3
-                confidence_threshold: float = 0.6
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
-            # Backward compat for old TransitionPredictionConfig
-            self.config = config if hasattr(config, 'transition_probability_threshold') else RegimeConfig()
+            self.config = config
         
         logger.info("✅ RegimeTransitionManager using centralized RegimeConfig (Rule 1, Section 7)")
         

@@ -150,6 +150,12 @@ class FactorAnalyzer:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.pca = PCA(n_components=self.config.n_components_pca)
         self.scaler = StandardScaler()
         self.fitted = False
@@ -160,7 +166,7 @@ class FactorAnalyzer:
         """Analyze underlying market factors"""
         
         try:
-            if len(returns_data) < self.config.factor_analysis_window:
+            if len(returns_data) < self._get_config_attr("factor_analysis_window", 252):
                 logger.warning("Insufficient data for factor analysis")
                 return {}
             
@@ -275,6 +281,12 @@ class CrossAssetAnalyzer:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Cross-asset analyzer initialized")
     
@@ -583,7 +595,7 @@ class CrossAssetAnalyzer:
         
         try:
             # Rolling correlation matrix
-            correlation_window = min(self.config.correlation_window, len(returns_data))
+            correlation_window = min(self._get_config_attr("correlation_window", 60), len(returns_data))
             correlations = returns_data.tail(correlation_window).corr()
             
             return correlations
@@ -892,6 +904,12 @@ class SectorRotationAnalyzer:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         # Standard sector ETFs
         self.sector_etfs = {
@@ -1151,24 +1169,17 @@ class MarketRegimeAnalyzer:
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                correlation_window: int = 60
-                lookback_window: int = 60
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
-            # Backward compat for old RegimeAnalysisConfig
-            self.config = config if hasattr(config, 'correlation_window') else RegimeConfig()
+            self.config = config
         
         logger.info("✅ MarketRegimeAnalyzer using centralized RegimeConfig (Rule 1, Section 7)")
         

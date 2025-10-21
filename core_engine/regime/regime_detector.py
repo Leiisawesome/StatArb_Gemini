@@ -145,6 +145,12 @@ class MarkovSwitchingDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.model = None
         self.fitted = False
         
@@ -164,14 +170,14 @@ class MarkovSwitchingDetector:
             # Fit Markov regression model
             self.model = MarkovRegression(
                 returns_clean.values,
-                k_regimes=self.config.n_regimes,
-                switching_variance=self.config.switching_variance
+                k_regimes=self._get_config_attr("n_regimes", 3),
+                switching_variance=self._get_config_attr("switching_variance", True)
             )
             
             self.fitted_model = self.model.fit()
             self.fitted = True
             
-            logger.info(f"Markov switching model fitted with {self.config.n_regimes} regimes")
+            logger.info(f"Markov switching model fitted with {self._get_config_attr("n_regimes", 3)} regimes")
             return True
             
         except Exception as e:
@@ -277,18 +283,18 @@ class MarkovSwitchingDetector:
             annualized_return = regime_means * 252
             annualized_volatility = np.sqrt(regime_variance * 252)
             
-            if annualized_return > self.config.bull_threshold:
-                if annualized_volatility > self.config.volatility_threshold_high:
+            if annualized_return > self._get_config_attr("bull_threshold", 0.15):
+                if annualized_volatility > self._get_config_attr("volatility_threshold_high", 0.25):
                     return RegimeType.HIGH_VOLATILITY
                 else:
                     return RegimeType.BULL_MARKET
-            elif annualized_return < self.config.bear_threshold:
-                if annualized_volatility > self.config.volatility_threshold_high:
+            elif annualized_return < self._get_config_attr("bear_threshold", -0.10):
+                if annualized_volatility > self._get_config_attr("volatility_threshold_high", 0.25):
                     return RegimeType.CRISIS
                 else:
                     return RegimeType.BEAR_MARKET
             else:
-                if annualized_volatility > self.config.volatility_threshold_high:
+                if annualized_volatility > self._get_config_attr("volatility_threshold_high", 0.25):
                     return RegimeType.HIGH_VOLATILITY
                 else:
                     return RegimeType.SIDEWAYS
@@ -303,6 +309,12 @@ class GaussianMixtureDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.model = None
         self.scaler = StandardScaler()
         self.fitted = False
@@ -325,15 +337,15 @@ class GaussianMixtureDetector:
             
             # Fit Gaussian mixture model
             self.model = GaussianMixture(
-                n_components=self.config.n_clusters,
-                random_state=self.config.random_state,
+                n_components=self._get_config_attr("n_clusters", 3),
+                random_state=self._get_config_attr("random_state", 42),
                 covariance_type='full'
             )
             
             self.model.fit(features_scaled)
             self.fitted = True
             
-            logger.info(f"Gaussian mixture model fitted with {self.config.n_clusters} components")
+            logger.info(f"Gaussian mixture model fitted with {self._get_config_attr("n_clusters", 3)} components")
             return True
             
         except Exception as e:
@@ -436,25 +448,31 @@ class VolatilityBasedDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         logger.info("Volatility-based detector initialized")
     
     def detect_regime(self, returns: pd.Series, timestamp: datetime) -> Optional[RegimeDetection]:
         """Detect regime based on volatility patterns"""
         
         try:
-            if len(returns) < self.config.volatility_window:
+            if len(returns) < self._get_config_attr("volatility_window", 20):
                 return None
             
             # Calculate rolling volatility
             rolling_vol = returns.rolling(
-                window=self.config.volatility_window
+                window=self._get_config_attr("volatility_window", 20)
             ).std() * np.sqrt(252)  # Annualized
             
             current_vol = rolling_vol.iloc[-1]
             
             # Calculate returns for additional context
             rolling_returns = returns.rolling(
-                window=self.config.volatility_window
+                window=self._get_config_attr("volatility_window", 20)
             ).mean() * 252  # Annualized
             
             current_return = rolling_returns.iloc[-1]
@@ -463,16 +481,16 @@ class VolatilityBasedDetector:
             regime_type = self._classify_volatility_regime(current_vol, current_return)
             
             # Calculate confidence based on volatility persistence
-            vol_history = rolling_vol.tail(self.config.short_lookback)
+            vol_history = rolling_vol.tail(self._get_config_attr("short_lookback", 20))
             if regime_type == RegimeType.HIGH_VOLATILITY:
-                confidence = (vol_history > self.config.volatility_threshold_high).mean()
+                confidence = (vol_history > self._get_config_attr("volatility_threshold_high", 0.25)).mean()
             elif regime_type == RegimeType.LOW_VOLATILITY:
-                confidence = (vol_history < self.config.volatility_threshold_low).mean()
+                confidence = (vol_history < self._get_config_attr("volatility_threshold_low", 0.10)).mean()
             else:
                 confidence = 0.75  # Default confidence for other regimes
             
             # Calculate additional statistics
-            recent_returns = returns.tail(self.config.volatility_window)
+            recent_returns = returns.tail(self._get_config_attr("volatility_window", 20))
             
             detection = RegimeDetection(
                 timestamp=timestamp,
@@ -502,23 +520,23 @@ class VolatilityBasedDetector:
         """Classify regime based on volatility and returns"""
         
         try:
-            if volatility > self.config.volatility_threshold_high:
-                if returns < self.config.bear_threshold:
+            if volatility > self._get_config_attr("volatility_threshold_high", 0.25):
+                if returns < self._get_config_attr("bear_threshold", -0.10):
                     return RegimeType.CRISIS
                 else:
                     return RegimeType.HIGH_VOLATILITY
-            elif volatility < self.config.volatility_threshold_low:
-                if returns > self.config.bull_threshold:
+            elif volatility < self._get_config_attr("volatility_threshold_low", 0.10):
+                if returns > self._get_config_attr("bull_threshold", 0.15):
                     return RegimeType.BULL_MARKET
-                elif returns < self.config.bear_threshold:
+                elif returns < self._get_config_attr("bear_threshold", -0.10):
                     return RegimeType.BEAR_MARKET
                 else:
                     return RegimeType.LOW_VOLATILITY
             else:
                 # Medium volatility
-                if returns > self.config.bull_threshold:
+                if returns > self._get_config_attr("bull_threshold", 0.15):
                     return RegimeType.BULL_MARKET
-                elif returns < self.config.bear_threshold:
+                elif returns < self._get_config_attr("bear_threshold", -0.10):
                     return RegimeType.BEAR_MARKET
                 else:
                     return RegimeType.SIDEWAYS
@@ -546,20 +564,26 @@ class ThresholdBasedDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         logger.info("Threshold-based detector initialized")
     
     def detect_regime(self, returns: pd.Series, timestamp: datetime) -> Optional[RegimeDetection]:
         """Detect regime based on return thresholds"""
         
         try:
-            if len(returns) < self.config.short_lookback:
+            if len(returns) < self._get_config_attr("short_lookback", 20):
                 return None
             
             # Calculate metrics for different lookback periods
-            short_return = returns.tail(self.config.short_lookback).mean() * 252
+            short_return = returns.tail(self._get_config_attr("short_lookback", 20)).mean() * 252
             medium_return = returns.tail(self.config.medium_lookback).mean() * 252 if len(returns) >= self.config.medium_lookback else short_return
             
-            short_vol = returns.tail(self.config.short_lookback).std() * np.sqrt(252)
+            short_vol = returns.tail(self._get_config_attr("short_lookback", 20)).std() * np.sqrt(252)
             
             # Determine regime
             regime_type = self._classify_threshold_regime(short_return, medium_return, short_vol)
@@ -593,13 +617,13 @@ class ThresholdBasedDetector:
         
         try:
             # Primary classification based on returns
-            if short_return > self.config.bull_threshold and medium_return > self.config.bull_threshold * 0.5:
+            if short_return > self._get_config_attr("bull_threshold", 0.15) and medium_return > self._get_config_attr("bull_threshold", 0.15) * 0.5:
                 return RegimeType.BULL_MARKET
-            elif short_return < self.config.bear_threshold and medium_return < self.config.bear_threshold * 0.5:
+            elif short_return < self._get_config_attr("bear_threshold", -0.10) and medium_return < self._get_config_attr("bear_threshold", -0.10) * 0.5:
                 return RegimeType.BEAR_MARKET
-            elif volatility > self.config.volatility_threshold_high:
+            elif volatility > self._get_config_attr("volatility_threshold_high", 0.25):
                 return RegimeType.HIGH_VOLATILITY
-            elif volatility < self.config.volatility_threshold_low:
+            elif volatility < self._get_config_attr("volatility_threshold_low", 0.10):
                 return RegimeType.LOW_VOLATILITY
             else:
                 return RegimeType.SIDEWAYS
@@ -707,7 +731,7 @@ class RegimeDetector(ISystemComponent):
         # Note: Detector initialization simplified for centralized config
         # Individual detector classes will be updated separately if needed
         
-        if DetectionMethod.THRESHOLD_BASED in self.config.methods:
+        if DetectionMethod.THRESHOLD_BASED in self._get_config_attr("methods", []):
             self.detectors[DetectionMethod.THRESHOLD_BASED] = ThresholdBasedDetector(self.config)
         
         # Detection history
@@ -716,6 +740,12 @@ class RegimeDetector(ISystemComponent):
         self.regime_transitions: List[RegimeTransition] = []
         
         logger.info(f"Regime detector initialized with {len(self.detectors)} methods")
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
     
     def detect_current_regime(self, market_data: pd.DataFrame, 
                             timestamp: Optional[datetime] = None) -> Optional[RegimeDetection]:
@@ -735,7 +765,7 @@ class RegimeDetector(ISystemComponent):
                 price_col = market_data.select_dtypes(include=[np.number]).columns[0]
                 returns = market_data[price_col].pct_change().dropna()
             
-            if len(returns) < self.config.short_lookback:
+            if len(returns) < self._get_config_attr("short_lookback", 20):
                 logger.warning("Insufficient data for regime detection")
                 return None
             

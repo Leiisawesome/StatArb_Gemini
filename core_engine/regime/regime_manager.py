@@ -611,10 +611,16 @@ class RegimeManager(ISystemComponent):
         self.update_lock = threading.Lock()
         
         # Async support
-        self.executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
+        self.executor = ThreadPoolExecutor(max_workers=self._get_config_attr("max_workers", 4))
         
         logger.info("Regime manager initialized")
         self.status = RegimeManagerStatus.READY
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
     
     async def update_regime_analysis(self, market_data: Dict[str, pd.DataFrame],
                                    portfolio_data: Optional[Dict[str, Any]] = None) -> RegimeState:
@@ -626,7 +632,7 @@ class RegimeManager(ISystemComponent):
                 logger.info("Updating regime analysis")
                 
                 # Run all analyses
-                if self.config.async_processing:
+                if self._get_config_attr("async_processing", True):
                     # Async analysis
                     regime_state = await self._async_update_analysis(market_data, portfolio_data)
                 else:
@@ -638,8 +644,8 @@ class RegimeManager(ISystemComponent):
                 self.state_history.append(regime_state)
                 
                 # Limit history
-                if len(self.state_history) > self.config.max_history_length:
-                    self.state_history = self.state_history[-self.config.max_history_length//2:]
+                if len(self.state_history) > self._get_config_attr("max_history_length", 1000):
+                    self.state_history = self.state_history[-self._get_config_attr("max_history_length", 1000)//2:]
                 
                 self.last_update = datetime.now()
                 self.status = RegimeManagerStatus.READY
@@ -929,12 +935,12 @@ class RegimeManager(ISystemComponent):
             # Check regime change
             if (len(self.state_history) > 1 and 
                 self.state_history[-2].current_regime != regime_state.current_regime and
-                regime_state.regime_confidence > self.config.min_confidence_threshold):
+                regime_state.regime_confidence > self._get_config_attr("min_confidence_threshold", 0.6)):
                 return True
             
             # Check high transition probability
-            if (regime_state.transition_probability > self.config.alert_thresholds.get('regime_change_probability', 0.8) and
-                regime_state.confidence_in_state > self.config.min_confidence_threshold):
+            if (regime_state.transition_probability > self._get_config_attr("alert_thresholds", {}).get('regime_change_probability', 0.8) and
+                regime_state.confidence_in_state > self._get_config_attr("min_confidence_threshold", 0.6)):
                 return True
             
             # Check significant portfolio adjustments needed
@@ -996,10 +1002,10 @@ class RegimeManager(ISystemComponent):
                 preferred_weight = preferred_weights.get(strategy, current_weight)
                 
                 # Adjust based on confidence
-                adjustment = (preferred_weight - current_weight) * confidence * self.config.adaptation_speed
+                adjustment = (preferred_weight - current_weight) * confidence * self._get_config_attr("adaptation_speed", 0.5)
                 
                 # Limit adjustment magnitude
-                max_adjustment = self.config.max_portfolio_change * current_weight
+                max_adjustment = self._get_config_attr("max_portfolio_change", 0.25) * current_weight
                 adjustment = np.clip(adjustment, -max_adjustment, max_adjustment)
                 
                 if abs(adjustment) > 0.01:  # 1% threshold
@@ -1062,7 +1068,7 @@ class RegimeManager(ISystemComponent):
             
             # Phased implementation for large changes
             total_change = sum(abs(change) for change in adaptation.asset_allocation_changes.values())
-            if total_change > self.config.max_portfolio_change:
+            if total_change > self._get_config_attr("max_portfolio_change", 0.25):
                 adaptation.phased_implementation = True
                 adaptation.expected_implementation_time *= 2
             
@@ -1397,8 +1403,8 @@ class RegimeManager(ISystemComponent):
                 'regime_confidence': self.current_state.regime_confidence if self.current_state else 0.0,
                 'last_update': self.last_update.isoformat() if self.last_update else None,
                 'config': {
-                    'update_frequency_hours': self.config.update_frequency_hours if hasattr(self.config, 'update_frequency_hours') else None,
-                    'confidence_threshold': self.config.confidence_threshold if hasattr(self.config, 'confidence_threshold') else None
+                    'update_frequency_hours': self._get_config_attr("update_frequency_hours", 1) if hasattr(self.config, 'update_frequency_hours') else None,
+                    'confidence_threshold': self._get_config_attr("confidence_threshold", 0.6) if hasattr(self.config, 'confidence_threshold') else None
                 }
             }
             

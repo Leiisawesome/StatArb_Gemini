@@ -140,6 +140,12 @@ class VolatilityRegimeIndicators:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Volatility regime indicators initialized")
     
@@ -471,6 +477,12 @@ class MomentumRegimeIndicators:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Momentum regime indicators initialized")
     
@@ -726,6 +738,12 @@ class MeanReversionIndicators:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Mean reversion indicators initialized")
     
@@ -998,6 +1016,12 @@ class TransitionSignalDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Transition signal detector initialized")
     
@@ -1228,6 +1252,12 @@ class RegimeStrengthCalculator:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Regime strength calculator initialized")
     
@@ -1326,24 +1356,17 @@ class RegimeIndicatorEngine:
         """
         
         # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback for testing
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfig:
-                confidence_threshold: float = 0.6
-                regime_persistence_threshold: int = 10
+        from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
         
         # Handle different config input types
-        if isinstance(config, RegimeConfig):
+        if isinstance(config, CentralizedRegimeConfig):
             self.config = config
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
+            self.config = CentralizedRegimeConfig(**config) if config else CentralizedRegimeConfig()
         elif config is None:
-            self.config = RegimeConfig()
+            self.config = CentralizedRegimeConfig()
         else:
-            # Backward compat for old IndicatorConfig
-            self.config = config if hasattr(config, 'confidence_threshold') else RegimeConfig()
+            self.config = config
         
         logger.info("✅ RegimeIndicatorEngine using centralized RegimeConfig (Rule 1, Section 7)")
         

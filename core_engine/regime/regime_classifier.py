@@ -163,6 +163,12 @@ class FeatureEngineer:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         
         logger.info("Feature engineer initialized")
     
@@ -232,7 +238,7 @@ class FeatureEngineer:
             # Calculate returns
             returns = price_data.pct_change()
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(price_data) < window:
                     continue
                 
@@ -268,7 +274,7 @@ class FeatureEngineer:
             features = {}
             returns = price_data.pct_change()
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(returns) < window:
                     continue
                 
@@ -310,7 +316,7 @@ class FeatureEngineer:
             features = {}
             returns = price_data.pct_change()
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(returns) < window:
                     continue
                 
@@ -357,7 +363,7 @@ class FeatureEngineer:
             
             returns = price_data.pct_change()
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(returns) < window:
                     continue
                 
@@ -442,7 +448,7 @@ class FeatureEngineer:
             features = {}
             returns = price_data.pct_change()
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(volume_data) < window:
                     continue
                 
@@ -480,7 +486,7 @@ class FeatureEngineer:
             else:
                 price_series = price_data.iloc[:, 0]
             
-            for window in self.config.lookback_windows:
+            for window in self._get_config_attr("lookback_windows", [5, 10, 20, 60, 252]):
                 if len(price_series) < window:
                     continue
                 
@@ -547,6 +553,12 @@ class RegimeModelTrainer:
     
     def __init__(self, config: Any = None):
         self.config = config
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
         self.models = {}
         self.scalers = {}
         self.label_encoder = LabelEncoder()
@@ -561,7 +573,7 @@ class RegimeModelTrainer:
         """Train multiple regime classification models"""
         
         try:
-            if len(features) < self.config.min_training_samples:
+            if len(features) < self._get_config_attr("min_training_samples", 100):
                 logger.warning(f"Insufficient training samples: {len(features)}")
                 return {}
             
@@ -575,7 +587,7 @@ class RegimeModelTrainer:
             X = X[valid_mask]
             y = y[valid_mask]
             
-            if len(X) < self.config.min_training_samples:
+            if len(X) < self._get_config_attr("min_training_samples", 100):
                 logger.warning("Insufficient valid training samples")
                 return {}
             
@@ -591,12 +603,12 @@ class RegimeModelTrainer:
             # Train-test split
             if self.config.cross_validation_method == "time_series":
                 # Time series split (no shuffling)
-                split_idx = int(len(X_selected) * (1 - self.config.test_size))
+                split_idx = int(len(X_selected) * (1 - self._get_config_attr("test_size", 0.2)))
                 X_train, X_test = X_selected.iloc[:split_idx], X_selected.iloc[split_idx:]
                 y_train, y_test = y_encoded[:split_idx], y_encoded[split_idx:]
             else:
                 X_train, X_test, y_train, y_test = train_test_split(
-                    X_selected, y_encoded, test_size=self.config.test_size, 
+                    X_selected, y_encoded, test_size=self._get_config_attr("test_size", 0.2), 
                     stratify=y_encoded, random_state=42
                 )
             
@@ -1061,6 +1073,12 @@ class RegimeClassifier(ISystemComponent):
         self.last_training_date: Optional[datetime] = None
         
         logger.info("Regime classifier initialized")
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
     
     def train(self, price_data: pd.DataFrame, regime_labels: pd.Series,
              volume_data: Optional[pd.DataFrame] = None,
