@@ -29,9 +29,9 @@ import uuid
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
 try:
-    from ...system.interfaces import ISystemComponent
+    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -54,6 +54,18 @@ except ImportError:
         
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
+            pass
+    
+    # Fallback RegimeContext
+    from dataclasses import dataclass
+    @dataclass
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+    
+    class IRegimeAware(ABC):
+        @abstractmethod
+        def set_regime_engine(self, regime_engine: Any) -> None:
             pass
 
 # Core engine architectural compliance
@@ -184,12 +196,13 @@ class MacroRegimeIndicators:
     macro_regime_score: float = 0.0  # -1 to 1 (bearish to bullish)
     regime_confidence: float = 0.0  # 0-1 confidence in macro assessment
 
-class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
+class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegimeAware):
     """
-    Enhanced Technical Indicators Engine with ISystemComponent Integration
+    Enhanced Technical Indicators Engine with ISystemComponent & IRegimeAware Integration
     
     Institutional-grade technical indicators engine with orchestrator integration:
-    - Implements ISystemComponent for lifecycle management
+    - Implements ISystemComponent for lifecycle management (Rule 1)
+    - Implements IRegimeAware for regime adaptation (Rule 2)
     - Configuration-driven initialization 
     - Performance-optimized calculations
     - Integration with signal generation pipeline
@@ -203,6 +216,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
     - Caching and optimization support
     - Compatible with existing core_engine components
     - Orchestrator integration and lifecycle management
+    - Regime-aware indicator parameter adaptation
     """
     
     def __init__(self, config: Optional[EnhancedIndicatorConfig] = None):
@@ -306,71 +320,130 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         return self.component_id
     
     # ========================================
-    # PHASE 3: REGIME AWARENESS (RULE 13)
+    # PHASE 3: REGIME AWARENESS (RULE 2 - IRegimeAware Interface)
     # ========================================
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Inject regime engine reference for regime-aware indicator calculation (Rule 2 Regime-First)
+        Part of IRegimeAware interface implementation.
         """
         self.regime_engine = regime_engine
-        self.logger.info(f"✅ RegimeEngine injected into TechnicalIndicators (Regime-First Principle)")
+        self.logger.info(f"✅ RegimeEngine injected into TechnicalIndicators (IRegimeAware, Rule 2)")
     
-    def on_regime_change(self, new_regime: Any) -> None:
+    async def on_regime_change(self, new_regime_context: Any) -> None:
         """
-        Callback for regime changes from the EnhancedRegimeEngine
-        Adapt indicator parameters based on new market regime
-        """
-        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
-        self.current_regime = new_regime
+        Handle regime change event - IRegimeAware interface method
+        Callback for regime changes from the EnhancedRegimeEngine.
+        Adapt indicator parameters based on new market regime.
         
-        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        Args:
+            new_regime_context: New regime context with updated information (RegimeContext or compatible object)
+        """
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        self.current_regime = new_regime_context
+        
+        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
         self.logger.info(f"🔄 Indicators adapting to regime change: {previous_regime} → {regime_name}")
         
         # Adapt indicator parameters based on regime
-        self._adapt_to_regime(new_regime)
+        await self.adapt_to_regime(new_regime_context)
     
-    def _adapt_to_regime(self, regime: Any) -> None:
+    def get_current_regime_context(self) -> Optional[Any]:
         """
-        Adapt indicator parameters to current regime
+        Get current regime context - IRegimeAware interface method
+        
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        return self.current_regime
+    
+    async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime - IRegimeAware interface method
         
         Adaptation strategy:
         - High volatility → Wider Bollinger Bands, longer periods
         - Low volatility → Tighter bands, shorter periods
         - Trending → Prioritize trend indicators (MACD, ADX)
         - Range-bound → Prioritize oscillators (RSI, Stochastic)
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dictionary with adaptation details and adjustments made
         """
+        adaptations = {
+            'timestamp': datetime.now().isoformat(),
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
+            'new_regime': str(regime_context.primary_regime.value) if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else 'unknown',
+            'adjustments': [],
+            'success': True
+        }
+        
         try:
-            regime_name = regime.primary_regime.value if hasattr(regime, 'primary_regime') else str(regime)
-            volatility_regime = regime.volatility_regime if hasattr(regime, 'volatility_regime') else 'normal_volatility'
+            regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else str(regime_context)
+            volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
             
             # Adapt Bollinger Bands based on volatility
             if volatility_regime == 'high_volatility':
                 self.config.bb_std = 2.5  # Wider bands in high vol
                 self.config.bb_period = 25  # Longer period
+                adaptations['adjustments'].append({'indicator': 'BB', 'std': 2.5, 'period': 25, 'reason': 'high_volatility'})
                 self.logger.info(f"📊 BB adapted for high volatility: std=2.5, period=25")
             elif volatility_regime == 'low_volatility':
                 self.config.bb_std = 1.5  # Tighter bands in low vol
                 self.config.bb_period = 15  # Shorter period
+                adaptations['adjustments'].append({'indicator': 'BB', 'std': 1.5, 'period': 15, 'reason': 'low_volatility'})
                 self.logger.info(f"📊 BB adapted for low volatility: std=1.5, period=15")
             else:
                 self.config.bb_std = 2.0  # Normal bands
                 self.config.bb_period = 20  # Normal period
+                adaptations['adjustments'].append({'indicator': 'BB', 'std': 2.0, 'period': 20, 'reason': 'normal_volatility'})
             
             # Adapt RSI period based on regime
             if 'trending' in regime_name:
                 self.config.rsi_period = 21  # Longer RSI for trending
+                adaptations['adjustments'].append({'indicator': 'RSI', 'period': 21, 'reason': 'trending_regime'})
                 self.logger.info(f"📊 RSI adapted for trending: period=21")
             elif 'range' in regime_name:
                 self.config.rsi_period = 14  # Standard RSI for range-bound
+                adaptations['adjustments'].append({'indicator': 'RSI', 'period': 14, 'reason': 'range_bound_regime'})
                 self.logger.info(f"📊 RSI adapted for range-bound: period=14")
+            
+            # Clear cache when regime changes (force recalculation with new parameters)
+            if self.config.enable_caching and self._indicator_cache:
+                cache_size = len(self._indicator_cache)
+                self._indicator_cache.clear()
+                adaptations['cache_cleared'] = True
+                adaptations['cache_entries_cleared'] = cache_size
+                self.logger.info(f"🗑️ Indicator cache cleared ({cache_size} entries) for regime adaptation")
             
             # Store regime context in health metrics
             self.health_metrics['current_regime'] = regime_name
             self.health_metrics['volatility_regime'] = volatility_regime
             
         except Exception as e:
-            self.logger.warning(f"Regime adaptation failed: {e}")
+            self.logger.error(f"❌ Regime adaptation failed: {e}")
+            adaptations['success'] = False
+            adaptations['error'] = str(e)
+        
+        return adaptations
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured - IRegimeAware interface method
+        
+        Returns:
+            True if regime engine is properly configured, False otherwise
+        """
+        is_valid = hasattr(self, 'regime_engine') and self.regime_engine is not None
+        if not is_valid:
+            self.logger.warning("⚠️ Regime engine not configured for TechnicalIndicators")
+        else:
+            self.logger.debug("✅ Regime engine properly configured")
+        return is_valid
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

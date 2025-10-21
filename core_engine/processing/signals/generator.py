@@ -25,12 +25,13 @@ import threading
 import uuid
 warnings.filterwarnings('ignore')
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
 try:
-    from ...system.interfaces import ISystemComponent
+    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
+    from dataclasses import dataclass as dc
     class ISystemComponent(ABC):
         @abstractmethod
         async def initialize(self) -> bool:
@@ -50,6 +51,16 @@ except ImportError:
         
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
+            pass
+    
+    @dc
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+    
+    class IRegimeAware(ABC):
+        @abstractmethod
+        def set_regime_engine(self, regime_engine: Any) -> None:
             pass
 
 logger = logging.getLogger(__name__)
@@ -186,17 +197,19 @@ class SignalConfig:
     enable_ml_signals: bool = True
     ml_confidence_threshold: float = 0.65
 
-class EnhancedSignalGenerator(ISystemComponent):
+class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
     """
-    Enhanced Signal Generator with ISystemComponent Integration
+    Enhanced Signal Generator with ISystemComponent & IRegimeAware Integration
     
     Institutional-grade signal generation with orchestrator integration:
-    - Implements ISystemComponent for lifecycle management
+    - Implements ISystemComponent for lifecycle management (Rule 1)
+    - Implements IRegimeAware for regime adaptation (Rule 2)
     - Multi-strategy signal generation with professional standards
     - Mean Reversion: RSI, Bollinger Bands, oversold/overbought conditions
     - Momentum: MACD, price momentum, trend following
     - Volume: Volume breakouts, volume-price relationships
     - Multi-factor: Combination of all signals with ML enhancement
+    - Regime-aware signal filtering and confidence adjustment
     - Health monitoring and performance tracking
     """
     
@@ -271,15 +284,16 @@ class EnhancedSignalGenerator(ISystemComponent):
         return self.component_id
     
     # ========================================
-    # PHASE 3: REGIME & LIQUIDITY AWARENESS (RULES 12 & 13)
+    # PHASE 3: REGIME & LIQUIDITY AWARENESS (RULE 2 - IRegimeAware Interface)
     # ========================================
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Inject regime engine reference for regime-aware signal generation (Rule 2 Regime-First)
+        Part of IRegimeAware interface implementation.
         """
         self.regime_engine = regime_engine
-        self.logger.info(f"✅ RegimeEngine injected into SignalGenerator (Regime-First Principle)")
+        self.logger.info(f"✅ RegimeEngine injected into SignalGenerator (IRegimeAware, Rule 2)")
     
     def set_liquidity_engine(self, liquidity_engine: Any) -> None:
         """
@@ -288,21 +302,139 @@ class EnhancedSignalGenerator(ISystemComponent):
         self.liquidity_engine = liquidity_engine
         self.logger.info(f"✅ LiquidityEngine injected into SignalGenerator (Liquidity Management)")
     
-    def on_regime_change(self, new_regime: Any) -> None:
+    async def on_regime_change(self, new_regime_context: Any) -> None:
         """
-        Callback for regime changes from the EnhancedRegimeEngine
-        Adapt signal generation to new market regime
-        """
-        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
-        self.current_regime = new_regime
+        Handle regime change event - IRegimeAware interface method
+        Callback for regime changes from the EnhancedRegimeEngine.
+        Adapt signal generation to new market regime.
         
-        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        Args:
+            new_regime_context: New regime context with updated information
+        """
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        self.current_regime = new_regime_context
+        
+        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
         self.logger.info(f"🔄 Signals adapting to regime change: {previous_regime} → {regime_name}")
         
-        # Store regime context for signal filtering
-        self.health_metrics['current_regime'] = regime_name
-        if hasattr(new_regime, 'volatility_regime'):
-            self.health_metrics['volatility_regime'] = new_regime.volatility_regime
+        # Adapt signal generation to regime
+        await self.adapt_to_regime(new_regime_context)
+    
+    def get_current_regime_context(self) -> Optional[Any]:
+        """
+        Get current regime context - IRegimeAware interface method
+        
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        return self.current_regime
+    
+    async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime - IRegimeAware interface method
+        
+        Adaptation strategy:
+        - High volatility → Higher confidence thresholds, more conservative signals
+        - Low volatility → Lower thresholds, more aggressive signals
+        - Trending → Prioritize momentum signals
+        - Range-bound → Prioritize mean-reversion signals
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dictionary with adaptation details and adjustments made
+        """
+        adaptations = {
+            'timestamp': datetime.now().isoformat(),
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
+            'new_regime': str(regime_context.primary_regime.value) if hasattr(regime_context, 'primary_regime') else 'unknown',
+            'adjustments': [],
+            'success': True
+        }
+        
+        try:
+            regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
+            volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
+            
+            # Adapt signal thresholds based on volatility
+            if volatility_regime == 'high_volatility':
+                self.config.signal_threshold = 0.5  # Higher threshold
+                self.config.strong_signal_threshold = 0.85  # More conservative
+                self.config.zscore_threshold = 2.0  # Higher z-score
+                adaptations['adjustments'].append({
+                    'signal_threshold': 0.5,
+                    'strong_signal_threshold': 0.85,
+                    'zscore_threshold': 2.0,
+                    'reason': 'high_volatility'
+                })
+                self.logger.info(f"📊 Signals adapted for high volatility: higher thresholds")
+            elif volatility_regime == 'low_volatility':
+                self.config.signal_threshold = 0.35  # Lower threshold
+                self.config.strong_signal_threshold = 0.75  # More aggressive
+                self.config.zscore_threshold = 1.5  # Lower z-score
+                adaptations['adjustments'].append({
+                    'signal_threshold': 0.35,
+                    'strong_signal_threshold': 0.75,
+                    'zscore_threshold': 1.5,
+                    'reason': 'low_volatility'
+                })
+                self.logger.info(f"📊 Signals adapted for low volatility: lower thresholds")
+            else:
+                self.config.signal_threshold = 0.4  # Normal threshold
+                self.config.strong_signal_threshold = 0.8  # Normal
+                self.config.zscore_threshold = 1.8  # Normal z-score
+                adaptations['adjustments'].append({
+                    'signal_threshold': 0.4,
+                    'strong_signal_threshold': 0.8,
+                    'zscore_threshold': 1.8,
+                    'reason': 'normal_volatility'
+                })
+            
+            # Adapt strategy weights based on regime
+            if 'trending' in regime_name.lower():
+                self.config.momentum_weight = 0.5  # Prioritize momentum
+                self.config.mean_reversion_weight = 0.3
+                adaptations['adjustments'].append({
+                    'momentum_weight': 0.5,
+                    'mean_reversion_weight': 0.3,
+                    'reason': 'trending_regime'
+                })
+                self.logger.info(f"📊 Signals adapted for trending: prioritize momentum")
+            elif 'range' in regime_name.lower():
+                self.config.momentum_weight = 0.3
+                self.config.mean_reversion_weight = 0.5  # Prioritize mean-reversion
+                adaptations['adjustments'].append({
+                    'momentum_weight': 0.3,
+                    'mean_reversion_weight': 0.5,
+                    'reason': 'range_bound_regime'
+                })
+                self.logger.info(f"📊 Signals adapted for range-bound: prioritize mean-reversion")
+            
+            # Store regime context in health metrics
+            self.health_metrics['current_regime'] = regime_name
+            self.health_metrics['volatility_regime'] = volatility_regime
+            
+        except Exception as e:
+            self.logger.error(f"❌ Regime adaptation failed: {e}")
+            adaptations['success'] = False
+            adaptations['error'] = str(e)
+        
+        return adaptations
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured - IRegimeAware interface method
+        
+        Returns:
+            True if regime engine is properly configured, False otherwise
+        """
+        is_valid = hasattr(self, 'regime_engine') and self.regime_engine is not None
+        if not is_valid:
+            self.logger.warning("⚠️ Regime engine not configured for SignalGenerator")
+        else:
+            self.logger.debug("✅ Regime engine properly configured")
+        return is_valid
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

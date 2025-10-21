@@ -58,12 +58,13 @@ from .multi_strategy_coordinator import (
     EnhancedSignal, StrategyRegistration
 )
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
 try:
-    from ...system.interfaces import ISystemComponent
+    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
+    from dataclasses import dataclass as dc
     class ISystemComponent(ABC):
         @abstractmethod
         async def initialize(self) -> bool:
@@ -83,6 +84,16 @@ except ImportError:
         
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
+            pass
+    
+    @dc
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+    
+    class IRegimeAware(ABC):
+        @abstractmethod
+        def set_regime_engine(self, regime_engine: Any) -> None:
             pass
 
 logger = logging.getLogger(__name__)
@@ -272,9 +283,9 @@ class IStrategySubscriber:
     async def on_strategy_status_change(self, strategy_event: Dict[str, Any]) -> None:
         """Handle strategy status changes"""
 
-class StrategyManager(ISystemComponent):
+class StrategyManager(ISystemComponent, IRegimeAware):
     """
-    Core Engine Strategy Manager - WHAT Component
+    Core Engine Strategy Manager - WHAT Component with IRegimeAware
     
     This component sits within the Risk Manager (Central Hub) and determines
     WHAT trades should be made:
@@ -287,9 +298,13 @@ class StrategyManager(ISystemComponent):
     
     The WHAT methodology includes:
     - Multi-strategy signal generation
-    - Regime-aware strategy activation
+    - Regime-aware strategy activation (IRegimeAware)
     - Signal quality filtering and aggregation
     - Portfolio-level signal coordination
+    
+    Implements:
+    - ISystemComponent for lifecycle management (Rule 1)
+    - IRegimeAware for regime adaptation (Rule 2)
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -643,29 +658,150 @@ class StrategyManager(ISystemComponent):
         self.data_manager = data_manager
         logger.info("🔗 Data Manager linked to Strategy Manager")
     
-    def set_regime_engine(self, regime_engine: Any):
-        """Set regime engine reference"""
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Set regime engine reference - IRegimeAware interface method
+        Part of IRegimeAware interface implementation (Rule 2).
+        """
         self.regime_engine = regime_engine
-        logger.info("🔗 Regime Engine linked to Strategy Manager")
+        logger.info("✅ Regime Engine linked to Strategy Manager (IRegimeAware, Rule 2)")
     
-    def on_regime_change(self, new_regime: Any) -> None:
+    async def on_regime_change(self, new_regime_context: Any) -> None:
         """
-        Callback for regime changes from RegimeEngine (PHASE 4)
-        Adjust strategy weights based on regime appropriateness
+        Callback for regime changes - IRegimeAware interface method
+        Adjust strategy weights based on regime appropriateness.
+        
+        Args:
+            new_regime_context: New regime context with updated information
         """
-        if not new_regime:
+        if not new_regime_context:
             return
         
-        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
-        logger.info(f"🔄 StrategyManager adapting to regime change: {regime_name}")
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        self.current_regime = new_regime_context
         
-        # Update current regime
-        self.current_regime = regime_name
+        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
+        logger.info(f"🔄 Strategy Manager adapting to regime change: {previous_regime} → {regime_name}")
         
-        # Adjust strategy weights based on regime (will be used in signal aggregation)
-        # Strategy weights are dynamically calculated in _get_strategy_regime_weight()
+        # Adapt strategies to new regime
+        await self.adapt_to_regime(new_regime_context)
+    
+    def get_current_regime_context(self) -> Optional[Any]:
+        """
+        Get current regime context - IRegimeAware interface method
         
-        logger.info(f"✅ Strategy weights updated for regime: {regime_name}")
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        return self.current_regime if hasattr(self, 'current_regime') else None
+    
+    async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime - IRegimeAware interface method
+        
+        Adaptation strategy:
+        - Trending regimes → Prioritize momentum/trend strategies
+        - Range-bound regimes → Prioritize mean-reversion/pairs strategies
+        - High volatility → Reduce position sizes, increase quality thresholds
+        - Low volatility → Increase position sizes, relax thresholds
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dictionary with adaptation details and adjustments made
+        """
+        adaptations = {
+            'timestamp': datetime.now().isoformat(),
+            'previous_regime': str(self.current_regime.primary_regime.value) if (hasattr(self, 'current_regime') and self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
+            'new_regime': str(regime_context.primary_regime.value) if hasattr(regime_context, 'primary_regime') else 'unknown',
+            'adjustments': [],
+            'success': True
+        }
+        
+        try:
+            regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
+            volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
+            
+            # Update current regime
+            if not hasattr(self, 'current_regime'):
+                self.current_regime = regime_context
+            else:
+                self.current_regime = regime_context
+            
+            # Adjust strategy weights based on regime
+            if 'trending' in regime_name.lower():
+                # Prioritize momentum and trend-following strategies
+                adaptations['adjustments'].append({
+                    'strategy_preferences': ['momentum', 'trend_following', 'breakout'],
+                    'reason': 'trending_regime'
+                })
+                logger.info(f"📊 Strategies adapted for trending: prioritize momentum/trend-following")
+            
+            elif 'range' in regime_name.lower() or 'mean_reversion' in regime_name.lower():
+                # Prioritize mean-reversion and pairs strategies
+                adaptations['adjustments'].append({
+                    'strategy_preferences': ['mean_reversion', 'pairs_trading', 'statistical_arbitrage'],
+                    'reason': 'range_bound_regime'
+                })
+                logger.info(f"📊 Strategies adapted for range-bound: prioritize mean-reversion/pairs")
+            
+            # Adjust risk parameters based on volatility
+            if volatility_regime == 'high_volatility':
+                self.config.min_confidence_threshold = 0.7  # Higher threshold
+                self.config.max_strategy_allocation = 0.25  # More conservative
+                adaptations['adjustments'].append({
+                    'min_confidence': 0.7,
+                    'max_allocation': 0.25,
+                    'reason': 'high_volatility'
+                })
+                logger.info(f"📊 Risk parameters adapted for high volatility")
+            elif volatility_regime == 'low_volatility':
+                self.config.min_confidence_threshold = 0.5  # Lower threshold
+                self.config.max_strategy_allocation = 0.35  # More aggressive
+                adaptations['adjustments'].append({
+                    'min_confidence': 0.5,
+                    'max_allocation': 0.35,
+                    'reason': 'low_volatility'
+                })
+                logger.info(f"📊 Risk parameters adapted for low volatility")
+            else:
+                self.config.min_confidence_threshold = 0.6  # Normal
+                self.config.max_strategy_allocation = 0.33  # Normal
+                adaptations['adjustments'].append({
+                    'min_confidence': 0.6,
+                    'max_allocation': 0.33,
+                    'reason': 'normal_volatility'
+                })
+            
+            # Notify all active strategies of regime change
+            if hasattr(self, 'active_strategies'):
+                for strategy_name, strategy in self.active_strategies.items():
+                    if hasattr(strategy, 'on_regime_change'):
+                        await strategy.on_regime_change(regime_context)
+            
+            logger.info(f"✅ Strategy Manager adapted to regime: {regime_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Regime adaptation failed: {e}")
+            adaptations['success'] = False
+            adaptations['error'] = str(e)
+        
+        return adaptations
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured - IRegimeAware interface method
+        
+        Returns:
+            True if regime engine is properly configured, False otherwise
+        """
+        is_valid = hasattr(self, 'regime_engine') and self.regime_engine is not None
+        if not is_valid:
+            logger.warning("⚠️ Regime engine not configured for StrategyManager")
+        else:
+            logger.debug("✅ Regime engine properly configured")
+        return is_valid
     
     def subscribe(self, subscriber: IStrategySubscriber):
         """Subscribe to strategy events"""
@@ -1713,9 +1849,10 @@ class StrategyManager(ISystemComponent):
         """Standardized method for handling regime changes"""
         return self.process_regime(regime_analysis)
     
-    def adapt_to_regime(self, regime_data: Any) -> Dict[str, Any]:
-        """Standardized method for adapting to regime changes"""
-        return self.process_regime(regime_data)
+    # NOTE: adapt_to_regime is now async (IRegimeAware interface) - see line ~698
+    # def adapt_to_regime(self, regime_data: Any) -> Dict[str, Any]:
+    #     """Deprecated: Use async version (IRegimeAware)"""
+    #     return self.process_regime(regime_data)
     
     # ========================================
     # REGIME-ADJUSTED RISK PRODUCTION METHODS

@@ -22,12 +22,13 @@ import uuid
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# Import ISystemComponent for orchestrator integration
+# Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
 try:
-    from ...system.interfaces import ISystemComponent
+    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
+    from dataclasses import dataclass as dc
     class ISystemComponent(ABC):
         @abstractmethod
         async def initialize(self) -> bool:
@@ -47,6 +48,16 @@ except ImportError:
         
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
+            pass
+    
+    @dc
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+    
+    class IRegimeAware(ABC):
+        @abstractmethod
+        def set_regime_engine(self, regime_engine: Any) -> None:
             pass
 
 logger = logging.getLogger(__name__)
@@ -78,17 +89,19 @@ class FeatureConfig:
         if self.cross_sectional_universe is None:
             self.cross_sectional_universe = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
 
-class EnhancedFeatureEngineer(ISystemComponent):
+class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     """
-    Enhanced Feature Engineering with ISystemComponent Integration
+    Enhanced Feature Engineering with ISystemComponent & IRegimeAware Integration
     
     Institutional-grade feature engineering with orchestrator integration:
-    - Implements ISystemComponent for lifecycle management
+    - Implements ISystemComponent for lifecycle management (Rule 1)
+    - Implements IRegimeAware for regime adaptation (Rule 2)
     - Normalization and scaling with professional standards
     - Lag features for temporal patterns
     - Cross-sectional features for relative analysis
     - Rolling statistics and momentum features
     - Health monitoring and performance tracking
+    - Regime-aware feature engineering
     """
     
     def __init__(self, config: Optional[FeatureConfig] = None):
@@ -163,31 +176,132 @@ class EnhancedFeatureEngineer(ISystemComponent):
         return self.component_id
     
     # ========================================
-    # PHASE 3: REGIME AWARENESS (RULE 13)
+    # PHASE 3: REGIME AWARENESS (RULE 2 - IRegimeAware Interface)
     # ========================================
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Inject regime engine reference for regime-aware feature engineering (Rule 2 Regime-First)
+        Part of IRegimeAware interface implementation.
         """
         self.regime_engine = regime_engine
-        self.logger.info(f"✅ RegimeEngine injected into FeatureEngineer (Regime-First Principle)")
+        self.logger.info(f"✅ RegimeEngine injected into FeatureEngineer (IRegimeAware, Rule 2)")
     
-    def on_regime_change(self, new_regime: Any) -> None:
+    async def on_regime_change(self, new_regime_context: Any) -> None:
         """
-        Callback for regime changes from the EnhancedRegimeEngine
-        Adapt feature engineering to new market regime
-        """
-        previous_regime = self.current_regime.primary_regime.value if self.current_regime else None
-        self.current_regime = new_regime
+        Handle regime change event - IRegimeAware interface method
+        Callback for regime changes from the EnhancedRegimeEngine.
+        Adapt feature engineering to new market regime.
         
-        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
+        Args:
+            new_regime_context: New regime context with updated information
+        """
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        self.current_regime = new_regime_context
+        
+        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
         self.logger.info(f"🔄 Features adapting to regime change: {previous_regime} → {regime_name}")
         
-        # Store regime context for feature creation
-        self.health_metrics['current_regime'] = regime_name
-        if hasattr(new_regime, 'volatility_regime'):
-            self.health_metrics['volatility_regime'] = new_regime.volatility_regime
+        # Adapt feature engineering to regime
+        await self.adapt_to_regime(new_regime_context)
+    
+    def get_current_regime_context(self) -> Optional[Any]:
+        """
+        Get current regime context - IRegimeAware interface method
+        
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        return self.current_regime
+    
+    async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime - IRegimeAware interface method
+        
+        Adaptation strategy:
+        - High volatility → More robust scaling, longer lookback periods
+        - Low volatility → Standard scaling, shorter lookback periods
+        - Trending → Momentum features prioritized
+        - Range-bound → Mean-reversion features prioritized
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dictionary with adaptation details and adjustments made
+        """
+        adaptations = {
+            'timestamp': datetime.now().isoformat(),
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
+            'new_regime': str(regime_context.primary_regime.value) if hasattr(regime_context, 'primary_regime') else 'unknown',
+            'adjustments': [],
+            'success': True
+        }
+        
+        try:
+            regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
+            volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
+            
+            # Adapt normalization method based on volatility
+            if volatility_regime == 'high_volatility':
+                self.config.normalization_method = 'robust'  # More robust to outliers
+                self.config.lookback_periods = [10, 20, 40]  # Longer periods
+                adaptations['adjustments'].append({
+                    'normalization': 'robust',
+                    'lookback_periods': [10, 20, 40],
+                    'reason': 'high_volatility'
+                })
+                self.logger.info(f"📊 Features adapted for high volatility: robust scaling, longer lookbacks")
+            elif volatility_regime == 'low_volatility':
+                self.config.normalization_method = 'standard'  # Standard scaling
+                self.config.lookback_periods = [5, 10, 20]  # Shorter periods
+                adaptations['adjustments'].append({
+                    'normalization': 'standard',
+                    'lookback_periods': [5, 10, 20],
+                    'reason': 'low_volatility'
+                })
+                self.logger.info(f"📊 Features adapted for low volatility: standard scaling, shorter lookbacks")
+            else:
+                self.config.normalization_method = 'robust'  # Default robust
+                self.config.lookback_periods = [5, 10, 20]  # Normal periods
+                adaptations['adjustments'].append({
+                    'normalization': 'robust',
+                    'lookback_periods': [5, 10, 20],
+                    'reason': 'normal_volatility'
+                })
+            
+            # Clear scalers when regime changes (force refitting)
+            if self.scalers:
+                scaler_count = len(self.scalers)
+                self.scalers.clear()
+                adaptations['scalers_cleared'] = True
+                adaptations['scaler_count_cleared'] = scaler_count
+                self.logger.info(f"🗑️ Feature scalers cleared ({scaler_count}) for regime adaptation")
+            
+            # Store regime context in health metrics
+            self.health_metrics['current_regime'] = regime_name
+            self.health_metrics['volatility_regime'] = volatility_regime
+            
+        except Exception as e:
+            self.logger.error(f"❌ Regime adaptation failed: {e}")
+            adaptations['success'] = False
+            adaptations['error'] = str(e)
+        
+        return adaptations
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured - IRegimeAware interface method
+        
+        Returns:
+            True if regime engine is properly configured, False otherwise
+        """
+        is_valid = hasattr(self, 'regime_engine') and self.regime_engine is not None
+        if not is_valid:
+            self.logger.warning("⚠️ Regime engine not configured for FeatureEngineer")
+        else:
+            self.logger.debug("✅ Regime engine properly configured")
+        return is_valid
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""
