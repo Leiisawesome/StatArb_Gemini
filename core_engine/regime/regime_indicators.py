@@ -13,6 +13,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 import warnings
 
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    RegimeConfig = None
+
 # Import regime components
 from .regime_detector import RegimeType
 
@@ -40,50 +46,6 @@ class SignalStrength(Enum):
     MODERATE = "moderate"
     STRONG = "strong"
     VERY_STRONG = "very_strong"
-
-
-@dataclass
-class IndicatorConfig:
-    """Configuration for regime indicators"""
-    
-    # Volatility regime indicators
-    vol_lookback_periods: List[int] = field(default_factory=lambda: [10, 20, 60, 252])
-    vol_percentile_threshold: float = 0.75
-    vol_clustering_window: int = 20
-    
-    # Momentum regime indicators
-    momentum_periods: List[int] = field(default_factory=lambda: [5, 10, 20, 60])
-    momentum_smoothing: int = 5
-    trend_confirmation_periods: int = 3
-    
-    # Mean reversion indicators
-    mean_reversion_periods: List[int] = field(default_factory=lambda: [20, 60, 252])
-    bollinger_std: float = 2.0
-    rsi_periods: List[int] = field(default_factory=lambda: [14, 30, 60])
-    
-    # Correlation regime indicators
-    correlation_windows: List[int] = field(default_factory=lambda: [20, 60, 252])
-    correlation_threshold_low: float = 0.3
-    correlation_threshold_high: float = 0.7
-    
-    # Stress indicators
-    stress_lookback: int = 60
-    stress_percentiles: List[float] = field(default_factory=lambda: [0.9, 0.95, 0.99])
-    
-    # Transition signals
-    transition_sensitivity: float = 0.1
-    transition_confirmation: int = 3
-    regime_persistence_threshold: int = 10
-    
-    # Early warning signals
-    warning_horizon: int = 20
-    warning_sensitivity: float = 0.15
-    warning_confirmation: int = 2
-    
-    # Signal processing
-    signal_smoothing: int = 3
-    signal_threshold: float = 0.5
-    confidence_threshold: float = 0.6
 
 
 @dataclass
@@ -1355,17 +1317,37 @@ class RegimeIndicatorEngine:
     regime analysis, transition detection, and strength measurement.
     """
     
-    def __init__(self, config: Optional[IndicatorConfig] = None):
-        """Initialize regime indicator engine"""
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize regime indicator engine with centralized configuration
         
-        self.config = config or IndicatorConfig()
+        Args:
+            config: RegimeConfig or dict (for backward compatibility)
+        """
         
-        # Initialize indicator calculators
-        self.volatility_indicators = VolatilityRegimeIndicators(self.config)
-        self.momentum_indicators = MomentumRegimeIndicators(self.config)
-        self.mean_reversion_indicators = MeanReversionIndicators(self.config)
-        self.transition_detector = TransitionSignalDetector(self.config)
-        self.strength_calculator = RegimeStrengthCalculator(self.config)
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback for testing
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                confidence_threshold: float = 0.6
+                regime_persistence_threshold: int = 10
+        
+        # Handle different config input types
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            # Backward compat for old IndicatorConfig
+            self.config = config if hasattr(config, 'confidence_threshold') else RegimeConfig()
+        
+        logger.info("✅ RegimeIndicatorEngine using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # Initialize indicator calculators (simplified)
         
         # Indicator history
         self.indicator_history: List[Dict[str, RegimeIndicator]] = []

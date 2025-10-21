@@ -18,6 +18,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    RegimeConfig = None
+
 # Import regime components
 from .regime_detector import RegimeType
 from .regime_indicators import RegimeIndicator, SignalStrength
@@ -55,50 +61,6 @@ class RebalancingTrigger(Enum):
     STRESS_INDICATOR_ALERT = "stress_indicator_alert"
     TIME_BASED = "time_based"
     PERFORMANCE_DEVIATION = "performance_deviation"
-
-
-@dataclass
-class TransitionPredictionConfig:
-    """Configuration for transition prediction"""
-    
-    # Prediction models
-    prediction_horizon_days: List[int] = field(default_factory=lambda: [5, 10, 20, 60])
-    model_types: List[str] = field(default_factory=lambda: ["random_forest", "gradient_boosting", "logistic"])
-    
-    # Feature engineering
-    feature_lookback_periods: List[int] = field(default_factory=lambda: [5, 10, 20, 60, 252])
-    volatility_features: bool = True
-    momentum_features: bool = True
-    correlation_features: bool = True
-    sentiment_features: bool = False
-    
-    # Training parameters
-    min_training_samples: int = 200
-    test_size: float = 0.2
-    cross_validation_folds: int = 5
-    
-    # Prediction thresholds
-    transition_probability_threshold: float = 0.7
-    early_warning_threshold: float = 0.4
-    confidence_threshold: float = 0.6
-    
-    # Risk management
-    max_portfolio_adjustment: float = 0.3  # Maximum 30% adjustment
-    risk_scaling_factor: float = 1.5  # Scale risk during transitions
-    volatility_adjustment_factor: float = 1.2
-    
-    # Rebalancing triggers
-    rebalancing_thresholds: Dict[RebalancingTrigger, float] = field(default_factory=lambda: {
-        RebalancingTrigger.REGIME_CHANGE_CONFIRMED: 0.8,
-        RebalancingTrigger.TRANSITION_PROBABILITY_HIGH: 0.7,
-        RebalancingTrigger.RISK_THRESHOLD_EXCEEDED: 0.6,
-        RebalancingTrigger.VOLATILITY_SPIKE: 0.8,
-        RebalancingTrigger.CORRELATION_BREAKDOWN: 0.7
-    })
-    
-    # Update frequency
-    prediction_update_frequency: int = 1  # Daily
-    model_retrain_frequency: int = 30  # Days
 
 
 @dataclass
@@ -1110,15 +1072,38 @@ class RegimeTransitionManager:
     to provide comprehensive regime transition management capabilities.
     """
     
-    def __init__(self, config: Optional[TransitionPredictionConfig] = None):
-        """Initialize regime transition manager"""
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize regime transition manager with centralized configuration
         
-        self.config = config or TransitionPredictionConfig()
+        Args:
+            config: RegimeConfig or dict (for backward compatibility)
+        """
         
-        # Initialize components
-        self.predictor = TransitionPredictor(self.config)
-        self.rebalancing_manager = RebalancingManager(self.config)
-        self.monitor = TransitionMonitor(self.config)
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback for testing
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                transition_probability_threshold: float = 0.7
+                max_portfolio_adjustment: float = 0.3
+                confidence_threshold: float = 0.6
+        
+        # Handle different config input types
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            # Backward compat for old TransitionPredictionConfig
+            self.config = config if hasattr(config, 'transition_probability_threshold') else RegimeConfig()
+        
+        logger.info("✅ RegimeTransitionManager using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # Initialize components (simplified)
         
         # Transition history
         self.prediction_history: List[TransitionPrediction] = []

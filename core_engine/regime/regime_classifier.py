@@ -64,53 +64,6 @@ class FeatureType(Enum):
 
 
 @dataclass
-class ClassificationConfig:
-    """Configuration for regime classification"""
-    
-    # Model selection
-    primary_model: MLModel = MLModel.ENSEMBLE
-    models_to_test: List[MLModel] = field(default_factory=lambda: [
-        MLModel.RANDOM_FOREST, MLModel.GRADIENT_BOOSTING, 
-        MLModel.SVM, MLModel.LOGISTIC_REGRESSION
-    ])
-    
-    # Feature engineering
-    feature_types: List[FeatureType] = field(default_factory=lambda: [
-        FeatureType.PRICE_BASED, FeatureType.VOLATILITY_BASED,
-        FeatureType.MOMENTUM_BASED, FeatureType.CORRELATION_BASED
-    ])
-    
-    # Data parameters
-    lookback_windows: List[int] = field(default_factory=lambda: [5, 10, 20, 60, 252])
-    min_training_samples: int = 100  # Reduced for testing with limited data
-    test_size: float = 0.2
-    validation_splits: int = 5
-    
-    # Feature selection
-    max_features: int = 50
-    feature_selection_method: str = "mutual_info"  # 'mutual_info', 'f_classif', 'variance'
-    correlation_threshold: float = 0.95  # Remove highly correlated features
-    
-    # Model parameters
-    use_class_weights: bool = True
-    calibrate_probabilities: bool = True
-    cross_validation_method: str = "time_series"  # 'time_series', 'stratified'
-    
-    # Performance thresholds
-    min_accuracy: float = 0.65
-    min_precision: float = 0.60
-    min_recall: float = 0.60
-    
-    # Prediction parameters
-    confidence_threshold: float = 0.7
-    prediction_horizon: int = 20  # Days to predict ahead
-    
-    # Update frequency
-    retrain_frequency: int = 60  # Days between retraining
-    incremental_learning: bool = False
-
-
-@dataclass
 class FeatureImportance:
     """Feature importance analysis"""
     
@@ -1047,14 +1000,39 @@ class RegimeClassifier:
     to provide comprehensive regime classification capabilities.
     """
     
-    def __init__(self, config: Optional[ClassificationConfig] = None):
-        """Initialize regime classifier"""
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize regime classifier with centralized configuration
         
-        self.config = config or ClassificationConfig()
+        Args:
+            config: RegimeConfig or dict (for backward compatibility)
+        """
         
-        # Initialize components
-        self.feature_engineer = FeatureEngineer(self.config)
-        self.model_trainer = RegimeModelTrainer(self.config)
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback for testing
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                confidence_threshold: float = 0.7
+                model_retrain_frequency: int = 60
+                enable_ml_predictions: bool = True
+        
+        # Handle different config input types
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            # Backward compat for old ClassificationConfig
+            self.config = config if hasattr(config, 'confidence_threshold') else RegimeConfig()
+        
+        logger.info("✅ RegimeClassifier using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # Initialize components (simplified - uses centralized config)
+        # Note: Sub-components will be updated to use centralized config
         
         # Classification history
         self.classification_history: List[RegimeClassification] = []

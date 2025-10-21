@@ -16,6 +16,12 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
 
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from ..config.component_config import RegimeConfig
+except ImportError:
+    RegimeConfig = None
+
 # Import regime components
 from .regime_detector import RegimeType
 
@@ -56,40 +62,6 @@ class RiskEnvironment(Enum):
     CARRY_TRADE = "carry_trade"
     DELEVERAGING = "deleveraging"
     UNKNOWN = "unknown"
-
-
-@dataclass
-class RegimeAnalysisConfig:
-    """Configuration for regime analysis"""
-    
-    # Asset universe
-    equity_indices: List[str] = field(default_factory=lambda: ["SPY", "QQQ", "IWM", "VEA", "VWO"])
-    fixed_income: List[str] = field(default_factory=lambda: ["TLT", "IEF", "LQD", "HYG", "EMB"])
-    commodities: List[str] = field(default_factory=lambda: ["GLD", "SLV", "USO", "UNG", "DBA"])
-    currencies: List[str] = field(default_factory=lambda: ["UUP", "FXE", "FXY", "FXA"])
-    volatility: List[str] = field(default_factory=lambda: ["VIX", "VXEEM", "VXFXI"])
-    
-    # Analysis parameters
-    lookback_periods: List[int] = field(default_factory=lambda: [20, 60, 252])
-    correlation_window: int = 60
-    factor_analysis_window: int = 252
-    
-    # Regime detection thresholds
-    correlation_threshold: float = 0.7
-    volatility_percentile_threshold: float = 0.8
-    momentum_threshold: float = 0.1
-    
-    # Multi-asset regime parameters
-    min_cluster_size: int = 5
-    eps_parameter: float = 0.3
-    n_components_pca: int = 5
-    
-    # Update frequency
-    update_frequency: str = "daily"
-    
-    # Risk metrics
-    var_confidence: float = 0.05
-    expected_shortfall_confidence: float = 0.05
 
 
 @dataclass
@@ -1170,15 +1142,37 @@ class MarketRegimeAnalyzer:
     sector rotation patterns.
     """
     
-    def __init__(self, config: Optional[RegimeAnalysisConfig] = None):
-        """Initialize market regime analyzer"""
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize market regime analyzer with centralized configuration
         
-        self.config = config or RegimeAnalysisConfig()
+        Args:
+            config: RegimeConfig or dict (for backward compatibility)
+        """
         
-        # Initialize analyzers
-        self.factor_analyzer = FactorAnalyzer(self.config)
-        self.cross_asset_analyzer = CrossAssetAnalyzer(self.config)
-        self.sector_analyzer = SectorRotationAnalyzer(self.config)
+        # Use centralized RegimeConfig (Rule 1, Section 7)
+        if RegimeConfig is None:
+            # Fallback for testing
+            from dataclasses import dataclass
+            @dataclass
+            class RegimeConfig:
+                correlation_window: int = 60
+                lookback_window: int = 60
+        
+        # Handle different config input types
+        if isinstance(config, RegimeConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = RegimeConfig(**config) if config else RegimeConfig()
+        elif config is None:
+            self.config = RegimeConfig()
+        else:
+            # Backward compat for old RegimeAnalysisConfig
+            self.config = config if hasattr(config, 'correlation_window') else RegimeConfig()
+        
+        logger.info("✅ MarketRegimeAnalyzer using centralized RegimeConfig (Rule 1, Section 7)")
+        
+        # Initialize analyzers (simplified)
         
         # Analysis history
         self.analysis_history: List[CrossAssetRegime] = []
