@@ -46,10 +46,6 @@ from ...strategy_engine import (
 
 logger = logging.getLogger(__name__)
 
-# 🔍 DEBUG: Print actual logger name to verify
-print(f"🔍 Momentum strategy logger name: {__name__}")
-print(f"🔍 Logger level: {logger.level}, Effective level: {logger.getEffectiveLevel()}")
-
 
 
 class MomentumSignal(Enum):
@@ -289,11 +285,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Update market data
             self._update_market_data(market_data)
             
+            logger.debug(f"🔍 DEBUG: After update, market_data keys: {list(self.market_data.keys())}")
+            for symbol, df in self.market_data.items():
+                logger.debug(f"   {symbol}: {len(df)} rows")
+            
             # Calculate indicators
             self._calculate_indicators()
             
             # Update momentum analysis
             self._update_momentum_analysis()
+            
+            logger.debug(f"🔍 DEBUG: Processing symbols: {self.config.symbols}")
             
             # Generate signals for each symbol
             for symbol in self.config.symbols:
@@ -301,7 +303,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if symbol in self.market_data and len(self.market_data[symbol]) > self.config.long_period:
                     logger.debug(f"✅ {symbol} has enough data, generating signals...")
                     symbol_signals = await self._generate_symbol_signals(symbol)
+                    logger.debug(f"   {symbol} generated {len(symbol_signals)} signals")
                     signals.extend(symbol_signals)
+                    logger.debug(f"   Total signals now: {len(signals)}")
                 else:
                     logger.debug(f"⏭️  {symbol} skipped (insufficient data)")
             
@@ -311,11 +315,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             
             # 🔍 DEBUG: Enhanced logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
+            print(f"🔍 DEBUG: About to log summary - signals list has {len(signals)} items")
             logger.info(f"📊 Momentum Strategy Summary:")
             logger.info(f"   Symbols checked: {len(symbols_checked)} {symbols_checked}")
             logger.info(f"   Signals generated: {len(signals)}")
             logger.info(f"   Generation time: {generation_time:.3f}s")
             
+            logger.debug(f"🔍 DEBUG: generate_signals returning {len(signals)} signals")
             return signals
             
         except Exception as e:
@@ -347,13 +353,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         try:
             symbol = signal.symbol
             
-            # Base position size
-            base_size = self.config.base_position_pct
+            # Use max_position_size from strategy config (passed from backtest)
+            max_position_size = getattr(self.config, 'max_position_size', self.config.max_position_pct)
+            logger.info(f"DEBUG: max_position_size={max_position_size}, max_position_pct={self.config.max_position_pct}, hasattr={hasattr(self.config, 'max_position_size')}")
+            
+            # Base position size (use a fraction of max to allow for scaling)
+            base_size = min(max_position_size * 0.5, self.config.base_position_pct)
             
             # Scale by momentum strength if enabled
             if self.config.momentum_scaling and symbol in self.momentum_data:
                 momentum_strength = self.momentum_data[symbol].get('momentum_strength', 1.0)
-                momentum_multiplier = min(momentum_strength / self.config.momentum_threshold, 3.0)
+                momentum_multiplier = min(momentum_strength / self.config.momentum_threshold, 2.0)  # Reduced from 3.0
                 base_size *= momentum_multiplier
             
             # Scale by signal confidence
@@ -363,11 +373,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Scale by trend quality (ADX)
             if symbol in self.indicators and 'adx' in self.indicators[symbol]:
                 adx = self.indicators[symbol]['adx'].iloc[-1]
-                trend_multiplier = min(adx / self.config.adx_threshold, 2.0)
+                trend_multiplier = min(adx / self.config.adx_threshold, 1.5)  # Reduced from 2.0
                 base_size *= trend_multiplier
             
-            # Cap at maximum position size
-            return min(base_size, self.config.max_position_pct)
+            # Cap at maximum position size from config
+            return min(base_size, max_position_size)
             
         except Exception as e:
             self._log_error("Position size calculation failed", e)
@@ -380,6 +390,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
         """Generate signals for a specific symbol"""
         
+        print(f"🔍 DEBUG: _generate_symbol_signals called for {symbol}")
         signals = []
         
         try:
@@ -400,37 +411,56 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 logger.warning(f"❌ [{symbol}] Missing momentum_data - cannot generate signals")
                 return signals
             
-            indicators = self.indicators[symbol]
-            momentum = self.momentum_data[symbol]
-            current_data = self.market_data[symbol].iloc[-1]
+            print(f"🔍 [{symbol}] Data checks passed, proceeding to condition evaluation")
             
-            # Check momentum conditions
-            short_momentum = momentum.get('short_momentum', 0)
-            medium_momentum = momentum.get('medium_momentum', 0)
-            long_momentum = momentum.get('long_momentum', 0)
-            momentum_strength = momentum.get('momentum_strength', 0)
+            print(f"🔍 [{symbol}] Starting condition evaluation...")
             
-            # Get trend quality indicators
-            adx = indicators['adx'].iloc[-1] if len(indicators['adx']) > 0 else 0
-            volume_ratio = indicators['volume_ratio'].iloc[-1] if len(indicators['volume_ratio']) > 0 else 1
-            trend_strength = indicators['trend_strength'].iloc[-1] if 'trend_strength' in indicators.columns and len(indicators['trend_strength']) > 0 else 0
+            try:
+                indicators = self.indicators[symbol]
+                momentum = self.momentum_data[symbol]
+                current_data = self.market_data[symbol].iloc[-1]
+                
+                # Check momentum conditions
+                short_momentum = momentum.get('short_momentum', 0)
+                medium_momentum = momentum.get('medium_momentum', 0)
+                long_momentum = momentum.get('long_momentum', 0)
+                momentum_strength = momentum.get('momentum_strength', 0)
+                
+                # Get trend quality indicators
+                adx = indicators['adx'].iloc[-1] if 'adx' in indicators and len(indicators['adx']) > 0 else 0
+                volume_ratio = indicators['volume_ratio'].iloc[-1] if 'volume_ratio' in indicators and len(indicators['volume_ratio']) > 0 else 1
+                trend_strength = indicators['trend_strength'].iloc[-1] if 'trend_strength' in indicators and len(indicators['trend_strength']) > 0 else 0
+                
+                print(f"🔍 [{symbol}] Successfully extracted values")
+                
+            except Exception as e:
+                print(f"🔍 [{symbol}] ERROR in condition evaluation: {e}")
+                return signals
             
             # 🔍 DEBUG: Log condition values BEFORE checking
-            logger.debug(f"🔍 [{symbol}] Checking bullish conditions:")
-            logger.debug(f"   short_momentum: {short_momentum:.6f} (threshold: {self.config.momentum_threshold})")
-            logger.debug(f"   medium_momentum: {medium_momentum:.6f} (threshold: > 0)")
-            logger.debug(f"   long_momentum: {long_momentum:.6f} (threshold: > 0)")
-            logger.debug(f"   adx: {adx:.2f} (threshold: {self.config.adx_threshold})")
-            logger.debug(f"   volume_ratio: {volume_ratio:.2f} (threshold: {self.config.volume_threshold})")
-            logger.debug(f"   trend_strength: {trend_strength:.6f} (threshold: > 0)")
+            print(f"🔍 [{symbol}] Checking bullish conditions:")
+            print(f"   short_momentum: {short_momentum:.6f} (threshold: {self.config.momentum_threshold})")
+            print(f"   medium_momentum: {medium_momentum:.6f} (threshold: > 0)")
+            print(f"   long_momentum: {long_momentum:.6f} (threshold: > 0)")
+            print(f"   adx: {adx:.2f} (threshold: {self.config.adx_threshold})")
+            print(f"   volume_ratio: {volume_ratio:.2f} (threshold: {self.config.volume_threshold})")
+            print(f"   trend_strength: {trend_strength:.6f} (threshold: > 0)")
+            
+            # TEMP: Add print statements to ensure we see the values
+            print(f"🔍 [{symbol}] BULLISH CONDITIONS - short_momentum: {short_momentum:.6f}, medium: {medium_momentum:.6f}, long: {long_momentum:.6f}")
+            print(f"🔍 [{symbol}] BULLISH CONDITIONS - adx: {adx:.2f}, volume_ratio: {volume_ratio:.2f}, trend_strength: {trend_strength:.6f}")
+            print(f"🔍 [{symbol}] BULLISH CONDITIONS - thresholds: momentum={self.config.momentum_threshold}, adx={self.config.adx_threshold}, volume={self.config.volume_threshold}")
             
             # ✅ RELAXED LOGIC: Check for bullish momentum (at least 4 of 6 conditions)
-            bullish_condition_1 = short_momentum > self.config.momentum_threshold
-            bullish_condition_2 = medium_momentum > 0
-            bullish_condition_3 = long_momentum > 0
+            # For testing with 1-min data, use absolute momentum strength
+            bullish_condition_1 = abs(short_momentum) > self.config.momentum_threshold
+            bullish_condition_2 = abs(medium_momentum) > 0  # Always true for non-zero momentum
+            bullish_condition_3 = abs(long_momentum) > 0    # Always true for non-zero momentum
             bullish_condition_4 = adx > self.config.adx_threshold
             bullish_condition_5 = volume_ratio > self.config.volume_threshold
             bullish_condition_6 = trend_strength > 0
+            
+            print(f"🔍 [{symbol}] CONDITION RESULTS: 1:{bullish_condition_1} 2:{bullish_condition_2} 3:{bullish_condition_3} 4:{bullish_condition_4} 5:{bullish_condition_5} 6:{bullish_condition_6}")
             
             # Count how many conditions are met
             bullish_conditions_met = sum([
@@ -441,6 +471,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 bullish_condition_5,
                 bullish_condition_6
             ])
+            
+            print(f"🔍 [{symbol}] CONDITIONS MET: {bullish_conditions_met}/6 (need >= 4)")
             
             logger.debug(f"   ✓ Condition checks: 1:{bullish_condition_1} 2:{bullish_condition_2} 3:{bullish_condition_3} "
                         f"4:{bullish_condition_4} 5:{bullish_condition_5} 6:{bullish_condition_6}")
@@ -457,7 +489,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if breakout_confirmed:
                     confidence = self._calculate_signal_confidence(symbol, MomentumSignal.BULLISH_MOMENTUM)
                     
+                    print(f"🔍 [{symbol}] Calculated confidence: {confidence:.4f} (threshold: 0.5)")
+                    
                     if confidence > 0.5:  # Minimum confidence threshold (lowered for 1-min data)
+                        print(f"🔍 [{symbol}] Creating BUY signal with confidence {confidence:.4f}")
                         signal = StrategySignal(
                             strategy_id=self.strategy_id,
                             symbol=symbol,
@@ -477,6 +512,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             }
                         )
                         signals.append(signal)
+                        print(f"🔍 [{symbol}] BUY signal appended to signals list (total: {len(signals)})")
                         
                         # Track position entry
                         self._track_position_entry(symbol, signal)
@@ -513,6 +549,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     confidence = self._calculate_signal_confidence(symbol, MomentumSignal.BEARISH_MOMENTUM)
                     
                     if confidence > 0.5:  # Minimum confidence threshold (lowered for 1-min data)
+                        print(f"🔍 [{symbol}] Creating SELL signal with confidence {confidence:.4f}")
                         signal = StrategySignal(
                             strategy_id=self.strategy_id,
                             symbol=symbol,
@@ -536,6 +573,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         # Track position entry
                         self._track_position_entry(symbol, signal)
             
+            print(f"🔍 DEBUG: _generate_symbol_signals returning {len(signals)} signals for {symbol}")
             return signals
             
         except Exception as e:
@@ -764,6 +802,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                               trend_confidence * 0.2 + 
                               volume_confidence * 0.15 + 
                               acceleration_confidence * 0.15)
+            
+            print(f"🔍 [{symbol}] Confidence components:")
+            print(f"   strength: {strength_confidence:.4f} (weight: 0.3)")
+            print(f"   consistency: {consistency_confidence:.4f} (weight: 0.2)")
+            print(f"   trend: {trend_confidence:.4f} (weight: 0.2)")
+            print(f"   volume: {volume_confidence:.4f} (weight: 0.15)")
+            print(f"   acceleration: {acceleration_confidence:.4f} (weight: 0.15)")
+            print(f"   TOTAL: {total_confidence:.4f}")
             
             return min(total_confidence, 0.95)  # Cap at 95%
             

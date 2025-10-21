@@ -109,7 +109,7 @@ class EnhancedFeatureEngineer(ISystemComponent):
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.start_time = None
         
-        # PHASE 3: Regime awareness (Rule 13)
+        # PHASE 3: Regime awareness (Rule 2 Regime-First)
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
         self.current_regime: Optional[Any] = None  # Current regime context
         
@@ -168,7 +168,7 @@ class EnhancedFeatureEngineer(ISystemComponent):
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
-        Inject regime engine reference for regime-aware feature engineering (Rule 13)
+        Inject regime engine reference for regime-aware feature engineering (Rule 2 Regime-First)
         """
         self.regime_engine = regime_engine
         self.logger.info(f"✅ RegimeEngine injected into FeatureEngineer (Regime-First Principle)")

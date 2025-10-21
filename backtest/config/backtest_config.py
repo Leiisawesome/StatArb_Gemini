@@ -130,6 +130,9 @@ class RiskConfig:
     max_total_exposure: float = 1.0   # 100% total exposure
     max_concentration: float = 0.15   # 15% per symbol
     
+    # Trading permissions
+    allow_shorts: bool = False        # Allow short selling
+    
     # Risk limits
     max_daily_var: float = 0.05       # 5% daily VaR
     max_drawdown: float = 0.20        # 20% max drawdown
@@ -138,7 +141,7 @@ class RiskConfig:
     max_strategies: int = 10
     min_signal_confidence: float = 0.6  # 60% min confidence
     
-    # Regime-adjusted multipliers (Rule 13 integration)
+    # Regime-adjusted multipliers (Rule 2 (Regime-First) integration)
     enable_regime_adjustments: bool = True
     regime_risk_multipliers: Dict[str, float] = field(default_factory=lambda: {
         'low_volatility': 1.2,
@@ -169,7 +172,7 @@ class ExecutionConfig:
     Execution simulation configuration
     
     Maps to: BRICK #9 (UnifiedExecutionEngine) + BRICK #3 (LiquidityEngine)
-    Implements: Rule 12 (Liquidity Management)
+    Implements: Rule 7 Section B (Liquidity Management)
     """
     enable_realistic_fills: bool = True
     enable_liquidity_filtering: bool = True
@@ -178,11 +181,11 @@ class ExecutionConfig:
     # Commission costs
     commission_per_trade: float = 0.005  # $0.005 per trade
     
-    # Liquidity filtering (Rule 12 - BRICK #3)
+    # Liquidity filtering (Rule 7 Section B - BRICK #3)
     min_liquidity_score: float = 60.0  # Minimum 60/100
     max_spread_bps: float = 25.0       # Max 25 bps spread
     
-    # Execution costs (Rule 12)
+    # Execution costs (Rule 7 Section B)
     apply_spread_cost: bool = True
     apply_market_impact: bool = True
     apply_slippage: bool = True
@@ -219,7 +222,7 @@ class AnalyticsConfig:
     Analytics and reporting configuration
     
     Maps to: BRICKS #10-12 (Analytics components)
-    Implements: Rule 9 (Advanced Analytics)
+    Implements: Rule 6 (Advanced Analytics)
     """
     enable_regime_attribution: bool = True
     enable_strategy_attribution: bool = True

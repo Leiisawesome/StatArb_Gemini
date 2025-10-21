@@ -250,7 +250,7 @@ async def test_phase6_analytics_reporting():
                                   f"{test_signal['signal_type']} {execution_result.filled_quantity:.0f} shares")
             
             except Exception as e:
-                logger.debug(f"Trade generation error: {e}")
+                pass
     
     logger.info(f"\n📊 Mini-Backtest Results:")
     logger.info(f"   Trades executed: {len(trades_executed)}")

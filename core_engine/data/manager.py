@@ -265,7 +265,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
-        # Regime-aware integration (Rule 13: Regime-First Principle)
+        # Regime-aware integration (Rule 2 (Regime-First Principle))
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
         
         # Determine whether we can reach ClickHouse
@@ -318,7 +318,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
-        Inject regime engine reference for regime-aware data processing (Rule 13)
+        Inject regime engine reference for regime-aware data processing (Rule 2 Regime-First)
         
         Args:
             regime_engine: EnhancedRegimeEngine instance

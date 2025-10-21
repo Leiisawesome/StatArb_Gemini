@@ -1,0 +1,546 @@
+---
+alwaysApply: true
+description: "Execution Management & Market Interaction (Consolidated Rules 6 & 12)"
+---
+
+# Rule 7: Execution Management & Market Interaction
+
+**Version:** 2.0 (Consolidated Rules 6 & 12)
+**Date:** October 21, 2025
+**Status:** ACTIVE
+
+---
+
+## Overview
+
+This rule provides **unified execution guidance** from basic execution patterns through advanced market microstructure optimization. It consolidates:
+- **Section A:** Execution Flow & Authorization (from previous Rule 6)
+- **Section B:** Liquidity Management & Market Impact (from previous Rule 12)
+- **Section C:** Smart Order Routing & TCA (from previous Rule 12)
+
+**Key Principle:** ALL execution operations are governed by **Rule 4 (Centralized Risk Governance)** and optimized for **institutional-grade transaction quality**.
+
+---
+
+## SECTION A: Execution Flow & Authorization
+
+### Core Execution Pattern
+
+The UnifiedExecutionEngine operates **exclusively under CentralRiskManager control** (per Rule 4) and implements the ACTION layer in the institutional hierarchy.
+
+### MANDATORY Execution Authorization Pattern
+
+```python
+from core_engine.system.unified_execution_engine import (
+    UnifiedExecutionEngine, ExecutionRequest, ExecutionAlgorithm
+)
+from core_engine.trading.engine import EnhancedTradingEngine
+
+# Step 1: Get authorization from RiskManager (REQUIRED per Rule 4)
+authorization = await risk_manager.authorize_trading_decision(request)
+
+# Step 2: Create execution plan via TradingEngine (HOW to execute)
+if authorization.authorization_level != AuthorizationLevel.REJECTED:
+    execution_plan = await trading_engine.create_execution_plan(authorization)
+    
+    # Step 3: Create execution request with plan
+    execution_request = ExecutionRequest(
+        authorization=authorization,
+        execution_plan=execution_plan,
+        algorithm=ExecutionAlgorithm.ADAPTIVE,
+        urgency=ExecutionUrgency.NORMAL,
+        time_horizon=300
+    )
+    
+    # Step 4: Execute via UnifiedExecutionEngine (ACTION)
+    result = await execution_engine.execute_authorized_trade(execution_request)
+```
+
+### Execution Algorithms
+
+Available execution algorithms with selection criteria:
+
+```python
+class ExecutionAlgorithm(Enum):
+    MARKET = "market"          # Immediate execution for urgent trades
+    TWAP = "twap"             # Time-Weighted Average Price for larger orders
+    VWAP = "vwap"             # Volume-Weighted Average Price optimization
+    ADAPTIVE = "adaptive"      # Intelligent algorithm selection
+    SMART_ROUTING = "smart"    # Venue optimization and routing
+
+def select_execution_algorithm(request: ExecutionRequest) -> ExecutionAlgorithm:
+    """Select optimal execution algorithm"""
+    
+    quantity = request.authorization.quantity
+    urgency = request.urgency
+    time_horizon = request.time_horizon
+    
+    # Emergency/urgent trades use market orders
+    if urgency in [ExecutionUrgency.URGENT, ExecutionUrgency.EMERGENCY]:
+        return ExecutionAlgorithm.MARKET
+    
+    # Small quantities use market orders
+    if quantity < 1000:
+        return ExecutionAlgorithm.MARKET
+    
+    # Large quantities with time flexibility use TWAP
+    if time_horizon > 300 and quantity > 5000:
+        return ExecutionAlgorithm.TWAP
+    
+    # Default to adaptive for optimization
+    return ExecutionAlgorithm.ADAPTIVE
+```
+
+### Position Tracking Integration
+
+**CRITICAL:** The execution engine CANNOT directly update positions. ALL position updates MUST flow through the CentralRiskManager (per Rule 4).
+
+```python
+async def _handle_position_updates(self, request: ExecutionRequest, result: ExecutionResult):
+    """Handle position updates after successful execution"""
+    
+    if result.status != ExecutionStatus.FILLED:
+        return
+    
+    # MANDATORY: Update position via Risk Manager ONLY (Rule 4)
+    if self.risk_manager_callback:
+        position_update = await self.risk_manager_callback.update_position(
+            symbol=request.authorization.symbol,
+            side=request.authorization.side.lower(),
+            quantity=result.filled_quantity,
+            price=result.avg_fill_price,
+            timestamp=result.execution_timestamp
+        )
+        
+        logger.info(f"📊 Position updated via RiskManager (Rule 4): {symbol}")
+        return position_update
+    else:
+        logger.error("❌ No RiskManager callback - violates Rule 4")
+        raise RuntimeError("Cannot update position without RiskManager callback")
+```
+
+### Execution Quality Metrics
+
+```python
+@dataclass
+class ExecutionQualityMetrics:
+    """Professional execution quality metrics"""
+    
+    # Benchmark Comparisons
+    arrival_cost_bps: float  # Cost vs arrival price
+    vwap_performance_bps: float  # Performance vs VWAP
+    twap_performance_bps: float  # Performance vs TWAP
+    
+    # Slippage Analysis
+    realized_slippage_bps: float  # Actual slippage
+    expected_slippage_bps: float  # Expected slippage
+    slippage_surprise_bps: float  # Difference
+    
+    # Market Impact Analysis
+    permanent_impact_bps: float  # Measured permanent impact
+    temporary_impact_bps: float  # Measured temporary impact
+    market_impact_score: float  # 0-100 (lower is better)
+```
+
+---
+
+## SECTION B: Liquidity Management & Market Impact
+
+### Real-Time Liquidity Assessment
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+
+class LiquidityRegime(Enum):
+    HIGH_LIQUIDITY = "high_liquidity"
+    NORMAL_LIQUIDITY = "normal_liquidity"
+    LOW_LIQUIDITY = "low_liquidity"
+    ILLIQUID = "illiquid"
+    CRISIS_LIQUIDITY = "crisis_liquidity"
+
+@dataclass
+class LiquidityScore:
+    """Comprehensive liquidity scoring metrics"""
+    
+    # Core Liquidity Metrics
+    overall_score: float  # 0-100 composite liquidity score
+    liquidity_regime: LiquidityRegime
+    confidence: float  # Confidence in assessment (0-1)
+    
+    # Volume-Based Metrics
+    avg_daily_volume: float  # Average daily volume
+    current_volume_ratio: float  # Current volume vs average
+    volume_percentile: float  # Percentile vs historical distribution
+    
+    # Spread Metrics
+    bid_ask_spread_bps: float  # Bid-ask spread in basis points
+    effective_spread_bps: float  # Effective spread (including fees)
+    spread_percentile: float  # Spread vs historical distribution
+    
+    # Depth Metrics
+    market_depth: float  # Total depth at top 10 levels
+    depth_imbalance: float  # Buy vs sell depth imbalance
+    order_book_resilience: float  # How quickly book recovers
+```
+
+### Market Impact Modeling
+
+#### Almgren-Chriss Optimal Execution Model
+
+```python
+def _almgren_chriss_model(self, quantity: float, market_data: Dict[str, Any],
+                         liquidity_score: LiquidityScore,
+                         participation_rate: float) -> Dict[str, Any]:
+    """Almgren-Chriss optimal execution model"""
+    
+    # Model parameters
+    volatility = market_data.get('volatility', 0.02)
+    price = market_data.get('price', 100.0)
+    
+    # Permanent impact (linear in quantity)
+    permanent_impact = self.linear_coefficient * participation_rate
+    
+    # Temporary impact (square root law)
+    temporary_impact = self.sqrt_coefficient * np.sqrt(participation_rate)
+    
+    # Total impact in basis points
+    total_impact_bps = (permanent_impact + temporary_impact) * 10000
+    permanent_impact_bps = permanent_impact * 10000
+    temporary_impact_bps = temporary_impact * 10000
+    
+    # Execution cost (spread + impact)
+    spread_cost_bps = liquidity_score.bid_ask_spread_bps / 2
+    execution_cost_bps = spread_cost_bps + total_impact_bps
+    
+    # Opportunity cost (risk of price moving against us)
+    execution_time_minutes = self._estimate_execution_time(participation_rate)
+    daily_volatility = volatility / np.sqrt(252)
+    time_fraction = execution_time_minutes / (6.5 * 60)
+    opportunity_cost_bps = daily_volatility * np.sqrt(time_fraction) * 10000
+    
+    return {
+        'permanent_impact_bps': permanent_impact_bps,
+        'temporary_impact_bps': temporary_impact_bps,
+        'total_impact_bps': total_impact_bps,
+        'execution_cost_bps': execution_cost_bps,
+        'opportunity_cost_bps': opportunity_cost_bps,
+        'total_cost_bps': execution_cost_bps + opportunity_cost_bps,
+        'model_type': 'almgren_chriss'
+    }
+```
+
+#### Kyle's Lambda Model
+
+```python
+def _kyle_model(self, quantity: float, market_data: Dict[str, Any],
+               liquidity_score: LiquidityScore,
+               participation_rate: float) -> Dict[str, Any]:
+    """Kyle's lambda model for market impact"""
+    
+    volatility = market_data.get('volatility', 0.02)
+    avg_volume = liquidity_score.avg_daily_volume
+    
+    # Kyle's lambda (price impact per unit volume)
+    kyle_lambda = volatility / np.sqrt(avg_volume) if avg_volume > 0 else 0.001
+    
+    # Impact calculation
+    total_impact = kyle_lambda * quantity
+    total_impact_bps = total_impact * 10000
+    
+    # Split into permanent and temporary
+    permanent_impact_bps = total_impact_bps * self.permanent_impact_factor
+    temporary_impact_bps = total_impact_bps * self.temporary_impact_factor
+    
+    return {
+        'permanent_impact_bps': permanent_impact_bps,
+        'temporary_impact_bps': temporary_impact_bps,
+        'total_impact_bps': total_impact_bps,
+        'model_type': 'kyle_lambda'
+    }
+```
+
+### Order Book Analytics
+
+```python
+@dataclass
+class OrderBookAnalysis:
+    """Comprehensive order book analytics"""
+    
+    # Book Imbalance Metrics
+    imbalance_ratio: float  # Bid/ask volume ratio
+    weighted_imbalance: float  # Price-weighted imbalance
+    depth_imbalance: float  # Cumulative depth imbalance
+    
+    # Liquidity Metrics
+    total_bid_liquidity: float  # Total $ on bid side
+    total_ask_liquidity: float  # Total $ on ask side
+    liquidity_at_touch: float  # Liquidity at best bid/ask
+    
+    # Pressure Metrics
+    buy_pressure_score: float  # 0-100 buy pressure
+    sell_pressure_score: float  # 0-100 sell pressure
+    order_flow_toxicity: float  # Informed trading indicator
+```
+
+---
+
+## SECTION C: Smart Order Routing & TCA
+
+### Venue Selection and Routing Optimization
+
+```python
+from enum import Enum
+
+class VenueType(Enum):
+    PRIMARY_EXCHANGE = "primary_exchange"
+    ALTERNATIVE_EXCHANGE = "alternative_exchange"
+    DARK_POOL = "dark_pool"
+    ELECTRONIC_BROKER = "electronic_broker"
+
+@dataclass
+class VenueMetrics:
+    """Venue performance metrics"""
+    
+    venue_name: str
+    venue_type: VenueType
+    
+    # Liquidity Metrics
+    available_liquidity: float  # $ available
+    fill_rate: float  # Historical fill rate
+    average_size: float  # Average trade size
+    
+    # Cost Metrics
+    fee_per_share: float  # Fee in cents per share
+    effective_spread_bps: float  # Effective spread
+    price_improvement_bps: float  # Average price improvement
+    
+    # Performance Metrics
+    latency_ms: float  # Average latency
+    reject_rate: float  # Order reject rate
+    market_impact_bps: float  # Historical impact
+    
+    # Quality Metrics
+    execution_quality_score: float  # 0-100 quality score
+    reliability_score: float  # 0-100 reliability
+```
+
+### Smart Order Router Implementation
+
+```python
+class SmartOrderRouter:
+    """Institutional smart order routing engine"""
+    
+    async def route_order(self, symbol: str, quantity: float, side: str,
+                         urgency: str = 'normal') -> Dict[str, Any]:
+        """Route order to optimal venues"""
+        
+        # Analyze all available venues
+        venue_analyses = await self._analyze_all_venues(symbol, quantity)
+        
+        # Filter available venues
+        available_venues = [
+            v for v in venue_analyses 
+            if v.is_available and v.congestion_level != 'high'
+        ]
+        
+        # Score and rank venues
+        venue_scores = self._score_venues(
+            available_venues, quantity, side, urgency
+        )
+        
+        # Optimize routing across venues
+        routing_plan = self._optimize_venue_allocation(
+            venue_scores, quantity, urgency
+        )
+        
+        return {
+            'routing_plan': routing_plan,
+            'primary_venue': routing_plan[0] if routing_plan else None,
+            'expected_fill_rate': self._calculate_expected_fill_rate(routing_plan),
+            'expected_cost_bps': self._calculate_expected_cost(routing_plan),
+            'estimated_latency_ms': self._calculate_expected_latency(routing_plan)
+        }
+```
+
+### Transaction Cost Analysis (TCA)
+
+```python
+@dataclass
+class ExecutionQualityMetrics:
+    """Comprehensive execution quality metrics for TCA"""
+    
+    # Benchmark Comparisons
+    arrival_cost_bps: float  # Cost vs arrival price
+    vwap_performance_bps: float  # Performance vs VWAP
+    twap_performance_bps: float  # Performance vs TWAP
+    
+    # Slippage Analysis
+    realized_slippage_bps: float  # Actual slippage
+    expected_slippage_bps: float  # Expected slippage
+    slippage_surprise_bps: float  # Difference
+    
+    # Market Impact Analysis
+    permanent_impact_bps: float  # Measured permanent impact
+    temporary_impact_bps: float  # Measured temporary impact
+    market_impact_score: float  # 0-100 (lower is better)
+    
+    # Execution Efficiency
+    implementation_shortfall_bps: float  # Implementation shortfall
+    opportunity_cost_bps: float  # Opportunity cost
+    timing_cost_bps: float  # Timing cost
+    
+    # Quality Scores
+    overall_quality_score: float  # 0-100 quality score
+    venue_selection_score: float  # Venue quality
+    timing_score: float  # Timing quality
+
+async def analyze_execution_quality(self, execution_data: Dict[str, Any],
+                                   market_data: Dict[str, Any]) -> ExecutionQualityMetrics:
+    """Analyze execution performance with TCA"""
+    
+    # Calculate benchmark prices
+    benchmarks = await self._calculate_benchmarks(
+        execution_data['symbol'], 
+        execution_data['fill_timestamps'], 
+        market_data
+    )
+    
+    # Calculate slippage metrics
+    slippage_metrics = self._calculate_slippage_metrics(
+        execution_data['avg_fill_price'], 
+        benchmarks, 
+        execution_data
+    )
+    
+    # Calculate market impact
+    impact_metrics = self._calculate_impact_metrics(
+        execution_data['symbol'], 
+        execution_data, 
+        market_data
+    )
+    
+    # Calculate implementation shortfall
+    is_metrics = self._calculate_implementation_shortfall(
+        execution_data, 
+        benchmarks, 
+        impact_metrics
+    )
+    
+    # Calculate quality scores
+    quality_scores = self._calculate_quality_scores(
+        slippage_metrics, 
+        impact_metrics, 
+        is_metrics
+    )
+    
+    return ExecutionQualityMetrics(...)
+```
+
+---
+
+## Integration with Rule 4 (Risk Governance)
+
+**ALL execution operations are governed by Rule 4:**
+
+```python
+# Rule 4 authorization is MANDATORY for ALL executions
+authorization = await risk_manager.authorize_trading_decision(request)  # Rule 4
+
+# Rule 7 executes ONLY with valid authorization
+if authorization.authorization_level != AuthorizationLevel.REJECTED:
+    # Proceed with execution per Rule 7
+    result = await execution_engine.execute_authorized_trade(authorization)
+```
+
+**Position updates MUST go through Rule 4 governance:**
+
+```python
+# Rule 7 execution completes
+result = await execution_engine.execute_authorized_trade(request)
+
+# Rule 4 governs position updates
+position_update = await risk_manager.update_position(
+    symbol=symbol, 
+    side=side, 
+    quantity=result.filled_quantity, 
+    price=result.avg_fill_price
+)
+```
+
+---
+
+## Integration with Rule 2 (Regime-First)
+
+**ALL execution operations are regime-aware:**
+
+```python
+# Get regime context (Rule 2)
+regime_context = await regime_engine.get_current_regime_context()
+
+# Select execution algorithm based on regime
+if regime_context.execution_urgency == 'urgent':
+    algorithm = ExecutionAlgorithm.MARKET
+elif regime_context.liquidity_regime == LiquidityRegime.LOW_LIQUIDITY:
+    algorithm = ExecutionAlgorithm.ADAPTIVE
+else:
+    algorithm = regime_context.recommended_execution_style
+
+# Adjust market impact for regime
+impact_multiplier = regime_context.market_impact_multiplier
+adjusted_impact = base_impact * impact_multiplier
+```
+
+---
+
+## PROHIBITED Execution Patterns
+
+❌ **Unauthorized Execution**: Cannot execute without valid RiskManager authorization (Rule 4)
+❌ **Direct Position Updates**: Must update positions through RiskManager callbacks (Rule 4)
+❌ **Algorithm Bypassing**: Cannot use algorithms not authorized by RiskManager
+❌ **Risk Limit Violations**: Cannot exceed authorized quantities or time limits
+❌ **Independent Operation**: Cannot operate without orchestrator registration (Rule 1)
+❌ **Regime-Unaware Execution**: Must adapt execution to regime conditions (Rule 2)
+
+---
+
+## MANDATORY Execution Requirements
+
+1. **Authorization**: ALL executions require valid RiskManager authorization (Rule 4)
+2. **Position Management**: Position updates ONLY through RiskManager callbacks (Rule 4)
+3. **Liquidity Assessment**: Assess liquidity before every trade
+4. **Market Impact**: Use appropriate impact model (Almgren-Chriss or Kyle)
+5. **Order Book Analytics**: Analyze microstructure for optimal execution
+6. **Smart Order Routing**: Consider multiple venues when available
+7. **Transaction Cost Analysis**: Measure and optimize execution quality
+8. **Regime Awareness**: Adapt execution strategies to regime conditions (Rule 2)
+9. **Execution Quality**: Maintain institutional-grade execution standards
+10. **Audit Compliance**: Log all execution decisions and outcomes
+
+---
+
+## Migration from v1.0
+
+### What Changed
+- **Previous Rule 6 (Execution Engine Integration)** → Section A
+- **Previous Rule 12 (Market Microstructure)** → Sections B & C
+- **Unified execution guidance** from basic to advanced
+
+### Code Updates Required
+```python
+# OLD: "Per Rule 6, execute with authorization"
+# NEW: "Per Rule 7, Section A, execute with authorization"
+
+# OLD: "Rule 12 market impact modeling"
+# NEW: "Rule 7, Section B, market impact modeling"
+
+# OLD: "Rule 12 smart order routing"
+# NEW: "Rule 7, Section C, smart order routing"
+```
+
+---
+
+**This unified rule provides complete execution guidance from basic patterns through advanced market microstructure optimization.**
+
+**Last Updated:** October 21, 2025
+**Status:** ACTIVE (v2.0 - Consolidated Rules 6 & 12)

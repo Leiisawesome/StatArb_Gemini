@@ -6,11 +6,11 @@ Production-grade backtesting system built using core_engine "Lego Bricks"
 following the 13 Rules and institutional-backtest-workflow.mdc.
 
 This application orchestrates all 9 core_engine components to provide:
-- Regime-First market analysis (Rule 13)
-- Liquidity-aware execution (Rule 12)
-- Multi-strategy coordination (Rule 8)
+- Regime-First market analysis (Rule 2 Regime-First)
+- Liquidity-aware execution (Rule 7 Section B)
+- Multi-strategy coordination (Rule 5)
 - Centralized risk management (Rule 4)
-- Comprehensive performance analytics (Rule 9)
+- Comprehensive performance analytics (Rule 6)
 
 Usage:
     from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine

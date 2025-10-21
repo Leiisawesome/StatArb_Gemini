@@ -9,8 +9,8 @@ This test suite validates the complete processing pipeline integration:
 
 Tests verify:
 - Component registration and initialization order
-- Regime-aware processing (Rule 13)
-- Liquidity-filtered signal generation (Rule 12)
+- Regime-aware processing (Rule 2 Regime-First)
+- Liquidity-filtered signal generation (Rule 7 Section B)
 - Pipeline integration (Indicators→Features→Signals)
 - Signal generation from market data
 """
@@ -227,25 +227,25 @@ class TestPhase3ProcessingPipeline:
         print("✅ Test 5 PASSED: SignalGenerator initialized correctly")
     
     # ============================================================
-    # Test 6: Rule 13 Compliance (Regime-Aware Processing)
+    # Test 6: Rule 2 (Regime-First) Compliance (Regime-Aware Processing)
     # ============================================================
     
     async def test_06_rule13_regime_aware_processing(self):
-        """Test 6: Verify Rule 13 (Regime-First) compliance for processing"""
+        """Test 6: Verify Rule 2 (Regime-First) (Regime-First) compliance for processing"""
         print("\n" + "-" * 80)
-        print("Test 6: Rule 13 - Regime-Aware Processing")
+        print("Test 6: Rule 2 (Regime-First) - Regime-Aware Processing")
         print("-" * 80)
         
         await self.engine.initialize()
         
         # Verify RegimeEngine exists (prerequisite)
         assert self.engine.regime_engine is not None, \
-            "RegimeEngine not initialized (Rule 13 violation)"
+            "RegimeEngine not initialized (Rule 2 (Regime-First) violation)"
         
         # Verify IndicatorsEngine has regime engine injected
         if hasattr(self.engine.indicators_engine, 'regime_engine'):
             assert self.engine.indicators_engine.regime_engine is not None, \
-                "IndicatorsEngine regime engine not injected (Rule 13 violation)"
+                "IndicatorsEngine regime engine not injected (Rule 2 (Regime-First) violation)"
             print("   ✅ IndicatorsEngine: Regime engine injected")
         else:
             print("   ⚠️  IndicatorsEngine: Regime injection not verified (may not have attribute)")
@@ -253,7 +253,7 @@ class TestPhase3ProcessingPipeline:
         # Verify FeatureEngineer has regime engine injected
         if hasattr(self.engine.feature_engineer, 'regime_engine'):
             assert self.engine.feature_engineer.regime_engine is not None, \
-                "FeatureEngineer regime engine not injected (Rule 13 violation)"
+                "FeatureEngineer regime engine not injected (Rule 2 (Regime-First) violation)"
             print("   ✅ FeatureEngineer: Regime engine injected")
         else:
             print("   ⚠️  FeatureEngineer: Regime injection not verified (may not have attribute)")
@@ -261,34 +261,34 @@ class TestPhase3ProcessingPipeline:
         # Verify SignalGenerator has regime engine injected
         if hasattr(self.engine.signal_generator, 'regime_engine'):
             assert self.engine.signal_generator.regime_engine is not None, \
-                "SignalGenerator regime engine not injected (Rule 13 violation)"
+                "SignalGenerator regime engine not injected (Rule 2 (Regime-First) violation)"
             print("   ✅ SignalGenerator: Regime engine injected")
         else:
             print("   ⚠️  SignalGenerator: Regime injection not verified (may not have attribute)")
         
         await self.engine.shutdown()
-        print("✅ Test 6 PASSED: Rule 13 (Regime-Aware Processing) compliance verified")
+        print("✅ Test 6 PASSED: Rule 2 (Regime-First Regime-Aware Processing) compliance verified")
     
     # ============================================================
-    # Test 7: Rule 12 Compliance (Liquidity-Filtered Signals)
+    # Test 7: Rule 7 Section B Compliance (Liquidity-Filtered Signals)
     # ============================================================
     
     async def test_07_rule12_liquidity_filtered_signals(self):
-        """Test 7: Verify Rule 12 (Liquidity Management) compliance"""
+        """Test 7: Verify Rule 7 Section B (Liquidity Management) compliance"""
         print("\n" + "-" * 80)
-        print("Test 7: Rule 12 - Liquidity-Filtered Signals")
+        print("Test 7: Rule 7 Section B - Liquidity-Filtered Signals")
         print("-" * 80)
         
         await self.engine.initialize()
         
         # Verify LiquidityEngine exists (prerequisite)
         assert self.engine.liquidity_engine is not None, \
-            "LiquidityEngine not initialized (Rule 12 violation)"
+            "LiquidityEngine not initialized (Rule 7 Section B violation)"
         
         # Verify SignalGenerator has liquidity engine injected
         if hasattr(self.engine.signal_generator, 'liquidity_engine'):
             assert self.engine.signal_generator.liquidity_engine is not None, \
-                "SignalGenerator liquidity engine not injected (Rule 12 violation)"
+                "SignalGenerator liquidity engine not injected (Rule 7 Section B violation)"
             print("   ✅ SignalGenerator: Liquidity engine injected")
         else:
             print("   ⚠️  SignalGenerator: Liquidity injection not verified (may not have attribute)")
@@ -299,7 +299,7 @@ class TestPhase3ProcessingPipeline:
             print("   ✅ SignalGenerator: Liquidity filtering capability verified")
         
         await self.engine.shutdown()
-        print("✅ Test 7 PASSED: Rule 12 (Liquidity-Filtered Signals) compliance verified")
+        print("✅ Test 7 PASSED: Rule 7 Section B (Liquidity-Filtered Signals) compliance verified")
     
     # ============================================================
     # Test 8: Component Lifecycle (Initialize, Start, Stop)
@@ -546,7 +546,7 @@ async def run_all_tests():
         print(f"\nPhase 3 Status: ✅ COMPLETE + TESTED")
         print(f"Components: 6/6 integrated")
         print(f"Pipeline: Indicators→Features→Signals ready")
-        print(f"Rules Compliance: Rule 13 ✅ | Rule 12 ✅")
+        print(f"Rules Compliance: Rule 2 (Regime-First) ✅ | Rule 7 Section B ✅")
         print("\nReady for Phase 4: Strategy & Risk! 🚀")
         return True
     else:

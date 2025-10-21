@@ -358,7 +358,7 @@ async def test_phase4_strategy_risk_management():
                     logger.info(f"   ❌ Trade rejected: {authorization.rejection_reason}")
                 
             except Exception as e:
-                logger.debug(f"   Signal processing error: {e}")
+                pass
     
     logger.info(f"\n📊 Processing Results:")
     logger.info(f"   Data points processed: {len(test_data):,}")

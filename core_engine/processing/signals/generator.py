@@ -218,11 +218,11 @@ class EnhancedSignalGenerator(ISystemComponent):
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
-        # PHASE 3: Regime awareness (Rule 13)
+        # PHASE 3: Regime awareness (Rule 2 Regime-First)
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
         self.current_regime: Optional[Any] = None  # Current regime context
         
-        # PHASE 3: Liquidity awareness (Rule 12)
+        # PHASE 3: Liquidity awareness (Rule 7 Section B)
         self.liquidity_engine: Optional[Any] = None  # LiquidityAssessmentEngine reference
         
         # Health and performance tracking
@@ -276,14 +276,14 @@ class EnhancedSignalGenerator(ISystemComponent):
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
-        Inject regime engine reference for regime-aware signal generation (Rule 13)
+        Inject regime engine reference for regime-aware signal generation (Rule 2 Regime-First)
         """
         self.regime_engine = regime_engine
         self.logger.info(f"✅ RegimeEngine injected into SignalGenerator (Regime-First Principle)")
     
     def set_liquidity_engine(self, liquidity_engine: Any) -> None:
         """
-        Inject liquidity engine reference for liquidity-aware signal filtering (Rule 12)
+        Inject liquidity engine reference for liquidity-aware signal filtering (Rule 7 Section B)
         """
         self.liquidity_engine = liquidity_engine
         self.logger.info(f"✅ LiquidityEngine injected into SignalGenerator (Liquidity Management)")
@@ -930,7 +930,7 @@ class EnhancedSignalGenerator(ISystemComponent):
         return ml_score
     
     def _filter_signals(self, signals: List[TradingSignal], df: pd.DataFrame) -> List[TradingSignal]:
-        """Filter signals based on risk, quality, and regime criteria (Rule 13: Regime-First Principle)"""
+        """Filter signals based on risk, quality, and regime criteria (Rule 2 (Regime-First Principle))"""
         filtered = []
         
         for signal in signals:
@@ -953,7 +953,7 @@ class EnhancedSignalGenerator(ISystemComponent):
                 if row['atr_percentile'] > self.config.max_volatility_percentile:
                     continue
             
-            # REGIME-AWARE FILTERING (Rule 13: Regime-First Principle)
+            # REGIME-AWARE FILTERING (Rule 2 (Regime-First Principle))
             adjusted_confidence = signal.confidence
             regime_adjustment_factor = 1.0
             
@@ -1015,7 +1015,7 @@ class EnhancedSignalGenerator(ISystemComponent):
     
     def _get_strategy_regime_appropriateness(self, strategy: str, regime_name: str, volatility_regime: str) -> float:
         """
-        Determine strategy appropriateness for current market regime (Rule 13: Regime-First Principle)
+        Determine strategy appropriateness for current market regime (Rule 2 (Regime-First Principle))
         
         Args:
             strategy: Strategy name (e.g., 'momentum', 'mean_reversion', 'rsi', 'macd')

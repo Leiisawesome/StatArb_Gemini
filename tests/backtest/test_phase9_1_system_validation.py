@@ -156,7 +156,7 @@ class TestPhase91SystemValidation:
         """
         
         print("\n" + "=" * 80)
-        print("🧪 TEST: Rule 13 - Regime-First Principle")
+        print("🧪 TEST: Rule 2 - Regime-First Principle")
         print("=" * 80 + "\n")
         
         # Verify regime engine exists
@@ -178,7 +178,7 @@ class TestPhase91SystemValidation:
             "Regime engine missing current_regime attribute"
         print("✅ Regime context available")
         
-        print("\n✅ Rule 13 (Regime-First Principle) COMPLIANT")
+        print("\n✅ Rule 2 (Regime-First Principle) COMPLIANT")
     
     @pytest.mark.asyncio
     async def test_rule_12_liquidity_management(self, validation_engine):
@@ -190,7 +190,7 @@ class TestPhase91SystemValidation:
         """
         
         print("\n" + "=" * 80)
-        print("🧪 TEST: Rule 12 - Liquidity Management")
+        print("🧪 TEST: Rule 7 Section B - Liquidity Management")
         print("=" * 80 + "\n")
         
         # Verify liquidity engine exists
@@ -215,7 +215,7 @@ class TestPhase91SystemValidation:
                 "Execution simulator missing realistic execution"
             print("✅ Transaction cost analysis present")
         
-        print("\n✅ Rule 12 (Liquidity Management) COMPLIANT")
+        print("\n✅ Rule 7 Section B (Liquidity Management) COMPLIANT")
     
     @pytest.mark.asyncio
     async def test_rule_4_central_risk_authority(self, validation_engine):

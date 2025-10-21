@@ -223,7 +223,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         
-        # PHASE 3: Regime awareness (Rule 13)
+        # PHASE 3: Regime awareness (Rule 2 Regime-First)
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
         self.current_regime: Optional[Any] = None  # Current regime context
         
@@ -311,7 +311,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent):
     
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
-        Inject regime engine reference for regime-aware indicator calculation (Rule 13)
+        Inject regime engine reference for regime-aware indicator calculation (Rule 2 Regime-First)
         """
         self.regime_engine = regime_engine
         self.logger.info(f"✅ RegimeEngine injected into TechnicalIndicators (Regime-First Principle)")

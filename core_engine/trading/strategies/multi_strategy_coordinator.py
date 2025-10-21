@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-Strategy Coordination Framework - Rule 8 Implementation
+Multi-Strategy Coordination Framework - Rule 5 Implementation
 ============================================================
 
 Advanced multi-strategy coordination with:

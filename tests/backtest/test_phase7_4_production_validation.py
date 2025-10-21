@@ -356,7 +356,7 @@ class TestPhase74ProductionValidation:
         assert regime_engine is not None, "Regime engine not initialized"
         
         print("   ✅ Regime engine operational throughout backtest")
-        print("   ✅ Regime-First Principle (Rule 13) validated")
+        print("   ✅ Regime-First Principle (Rule 2 Regime-First) validated")
         
         # Get final regime state
         if hasattr(regime_engine, 'current_regime') and regime_engine.current_regime:

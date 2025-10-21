@@ -377,7 +377,7 @@ class Rules13ComplianceValidator:
         }
     
     def _validate_rule_06_best_practices(self) -> Dict[str, Any]:
-        """Rule 6: Development Best Practices"""
+        """Standard A: Development & Code Quality"""
         logger.info("📋 RULE 6: Development Best Practices")
         
         checks = []
@@ -468,7 +468,7 @@ class Rules13ComplianceValidator:
         }
     
     def _validate_rule_08_multi_strategy(self) -> Dict[str, Any]:
-        """Rule 8: Multi-Strategy Coordination Standards"""
+        """Rule 5: Multi-Strategy Coordination Standards"""
         logger.info("📋 RULE 8: Multi-Strategy Coordination Standards")
         
         checks = []
@@ -517,7 +517,7 @@ class Rules13ComplianceValidator:
         }
     
     def _validate_rule_09_analytics(self) -> Dict[str, Any]:
-        """Rule 9: Advanced Analytics Integration Standards"""
+        """Rule 6: Advanced Analytics Integration Standards"""
         logger.info("📋 RULE 9: Advanced Analytics Integration Standards")
         
         checks = []
@@ -665,7 +665,7 @@ class Rules13ComplianceValidator:
         }
     
     def _validate_rule_12_liquidity(self) -> Dict[str, Any]:
-        """Rule 12: Market Microstructure and Liquidity Management"""
+        """Rule 7, Sections B & C: Market Microstructure and Liquidity Management"""
         logger.info("📋 RULE 12: Market Microstructure and Liquidity Management")
         
         checks = []
@@ -714,7 +714,7 @@ class Rules13ComplianceValidator:
         }
     
     def _validate_rule_13_regime_first(self) -> Dict[str, Any]:
-        """Rule 13: Regime-First Principle"""
+        """Rule 2 (Regime-First Principle)"""
         logger.info("📋 RULE 13: Regime-First Principle")
         
         checks = []

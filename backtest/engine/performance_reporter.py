@@ -211,9 +211,10 @@ class PerformanceReporter:
         logger.info("=" * 80)
         
         try:
-            # Calculate performance metrics from execution history
+            # Calculate performance metrics from execution history and position data
             metrics = self._calculate_metrics_from_trades(
                 execution_history,
+                position_history,
                 initial_capital,
                 final_capital
             )
@@ -250,6 +251,7 @@ class PerformanceReporter:
     
     def _calculate_metrics_from_trades(self,
                                       execution_history: List[Dict[str, Any]],
+                                      position_history: Optional[List[Dict[str, Any]]],
                                       initial_capital: float,
                                       final_capital: Optional[float]) -> PerformanceMetrics:
         """Calculate comprehensive metrics from execution history"""
@@ -263,13 +265,89 @@ class PerformanceReporter:
         # Convert to DataFrame for analysis
         trades_df = pd.DataFrame(execution_history)
         
-        # Calculate returns
-        if final_capital is None:
-            final_capital = self._calculate_final_capital(initial_capital, execution_history)
-        
-        total_return = final_capital - initial_capital
-        metrics.total_return = total_return
-        metrics.total_return_pct = (total_return / initial_capital) * 100
+        # Calculate returns using position history if available
+        if position_history and len(position_history) > 0:
+            # Use position history for accurate portfolio valuation
+            position_df = pd.DataFrame(position_history)
+            
+            if 'equity' in position_df.columns and len(position_df) > 0:
+                # Calculate returns from equity curve
+                initial_equity = position_df['equity'].iloc[0] if len(position_df) > 0 else initial_capital
+                final_equity = position_df['equity'].iloc[-1] if len(position_df) > 0 else initial_capital
+                
+                total_return = final_equity - initial_equity
+                metrics.total_return = total_return
+                metrics.total_return_pct = (total_return / initial_capital) * 100
+                
+                # Calculate daily returns for risk metrics
+                if 'timestamp' in position_df.columns and len(position_df) > 1:
+                    position_df['timestamp'] = pd.to_datetime(position_df['timestamp'])
+                    position_df = position_df.sort_values('timestamp')
+                    
+                    # Calculate daily returns
+                    position_df['daily_return'] = position_df['equity'].pct_change()
+                    daily_returns = position_df['daily_return'].dropna().values
+                    
+                    if len(daily_returns) > 0:
+                        metrics.volatility = np.std(daily_returns)
+                        metrics.annualized_volatility = metrics.volatility * np.sqrt(self.trading_days_per_year)
+                        
+                        # Sharpe ratio
+                        if metrics.annualized_volatility > 0:
+                            excess_return = metrics.annualized_return - self.risk_free_rate
+                            metrics.sharpe_ratio = excess_return / metrics.annualized_volatility
+                        
+                        # Calculate max drawdown
+                        equity_curve = position_df['equity'].values
+                        if len(equity_curve) > 1:
+                            peak = equity_curve[0]
+                            max_drawdown = 0.0
+                            max_drawdown_pct = 0.0
+                            current_drawdown_start = 0
+                            max_drawdown_duration = 0
+                            
+                            for i, equity in enumerate(equity_curve):
+                                if equity > peak:
+                                    peak = equity
+                                    current_drawdown_start = i
+                                else:
+                                    drawdown = peak - equity
+                                    drawdown_pct = (drawdown / peak) * 100
+                                    
+                                    if drawdown > max_drawdown:
+                                        max_drawdown = drawdown
+                                        max_drawdown_pct = drawdown_pct
+                                        max_drawdown_duration = i - current_drawdown_start
+                            
+                            metrics.max_drawdown = max_drawdown
+                            metrics.max_drawdown_pct = max_drawdown_pct
+                            metrics.max_drawdown_duration_days = max_drawdown_duration
+                        
+                        # Calculate annualized return
+                        if len(position_df) > 1:
+                            start_date = position_df['timestamp'].iloc[0]
+                            end_date = position_df['timestamp'].iloc[-1]
+                            days = (end_date - start_date).days
+                            if days > 0:
+                                years = days / 365.25
+                                metrics.annualized_return = ((final_equity / initial_equity) ** (1/years) - 1)
+                                metrics.backtest_duration_days = days
+                                
+                                # Recalculate Sharpe ratio with correct annualized return
+                                if metrics.annualized_volatility > 0:
+                                    excess_return = metrics.annualized_return - self.risk_free_rate
+                                    metrics.sharpe_ratio = excess_return / metrics.annualized_volatility
+            
+            else:
+                # Fallback to simple calculation
+                total_return = (final_capital or 0) - initial_capital
+                metrics.total_return = total_return
+                metrics.total_return_pct = (total_return / initial_capital) * 100 if initial_capital > 0 else 0
+        else:
+            # Fallback: simple calculation from final capital
+            total_return = (final_capital or 0) - initial_capital
+            metrics.total_return = total_return
+            metrics.total_return_pct = (total_return / initial_capital) * 100 if initial_capital > 0 else 0
         
         # Calculate annualized return
         if len(trades_df) > 0 and 'timestamp' in trades_df.columns:
@@ -284,15 +362,31 @@ class PerformanceReporter:
             metrics.backtest_start = start_date
             metrics.backtest_end = end_date
         
-        # Trade metrics
+        # Trade metrics - calculate win/loss from trade P&L
         metrics.total_trades = len(trades_df)
         
-        # Calculate trade P&L (simplified - would need position tracking for accurate P&L)
-        # For now, use transaction costs as a proxy
-        if 'total_cost_dollars' in trades_df.columns:
-            total_costs = trades_df['total_cost_dollars'].sum()
-            metrics.total_transaction_costs = abs(total_costs)
-            metrics.avg_cost_per_trade_bps = trades_df['total_cost_bps'].mean() if 'total_cost_bps' in trades_df.columns else 0
+        # Calculate trade P&L (use realized_pnl if available, otherwise estimate from costs)
+        if 'realized_pnl' in trades_df.columns:
+            # Use actual P&L from position tracker
+            trade_pnls = trades_df['realized_pnl'].dropna().values
+            winning_trades = (trade_pnls > 0).sum()
+            losing_trades = (trade_pnls < 0).sum()
+            
+            metrics.winning_trades = winning_trades
+            metrics.losing_trades = losing_trades
+            metrics.win_rate = winning_trades / metrics.total_trades if metrics.total_trades > 0 else 0
+            
+            if winning_trades > 0:
+                metrics.avg_win = trade_pnls[trade_pnls > 0].mean()
+            if losing_trades > 0:
+                metrics.avg_loss = trade_pnls[trade_pnls < 0].mean()
+                
+            # Profit factor
+            total_wins = trade_pnls[trade_pnls > 0].sum()
+            total_losses = abs(trade_pnls[trade_pnls < 0].sum())
+            metrics.profit_factor = total_wins / total_losses if total_losses > 0 else float('inf')
+            
+            metrics.avg_trade_return = trade_pnls.mean() if len(trade_pnls) > 0 else 0
         
         # Cost breakdown
         if 'spread_cost_bps' in trades_df.columns:
@@ -308,17 +402,25 @@ class PerformanceReporter:
             metrics.max_position_size = trades_df['quantity'].abs().max()
         
         # Risk metrics (simplified)
-        if metrics.total_trades > 1:
-            # Calculate daily returns (simplified)
-            if 'total_cost_bps' in trades_df.columns:
-                daily_returns = trades_df['total_cost_bps'].values / 10000
-                metrics.volatility = np.std(daily_returns)
-                metrics.annualized_volatility = metrics.volatility * np.sqrt(self.trading_days_per_year)
+        if metrics.total_trades > 1 and position_history and len(position_history) > 0:
+            # Use position history for accurate risk metrics
+            position_df = pd.DataFrame(position_history)
+            if 'equity' in position_df.columns and len(position_df) > 1:
+                position_df['timestamp'] = pd.to_datetime(position_df['timestamp'])
+                position_df = position_df.sort_values('timestamp')
                 
-                # Sharpe ratio
-                if metrics.annualized_volatility > 0:
-                    excess_return = metrics.annualized_return - self.risk_free_rate
-                    metrics.sharpe_ratio = excess_return / metrics.annualized_volatility
+                # Calculate daily returns
+                position_df['daily_return'] = position_df['equity'].pct_change()
+                daily_returns = position_df['daily_return'].dropna().values
+                
+                if len(daily_returns) > 0:
+                    metrics.volatility = np.std(daily_returns)
+                    metrics.annualized_volatility = metrics.volatility * np.sqrt(self.trading_days_per_year)
+                    
+                    # Sharpe ratio
+                    if metrics.annualized_volatility > 0:
+                        excess_return = metrics.annualized_return - self.risk_free_rate
+                        metrics.sharpe_ratio = excess_return / metrics.annualized_volatility
         
         return metrics
     

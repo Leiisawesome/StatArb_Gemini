@@ -8,8 +8,8 @@ Tests:
 1. Simulator initialization
 2. Basic fill simulation
 3. Cost calculations (spread, impact, slippage)
-4. Regime-aware cost adjustments (Rule 13)
-5. Liquidity-aware cost adjustments (Rule 12)
+4. Regime-aware cost adjustments (Rule 2 Regime-First)
+5. Liquidity-aware cost adjustments (Rule 7 Section B)
 6. Execution quality scoring
 7. Aggregate statistics
 
@@ -215,15 +215,15 @@ def test_basic_fill_simulation_sell(default_simulator, sample_market_data):
 
 
 # ============================================================
-# Test 5: Regime-Aware Cost Adjustments (Rule 13)
+# Test 5: Regime-Aware Cost Adjustments (Rule 2 Regime-First)
 # ============================================================
 
 def test_regime_aware_costs(default_simulator, sample_market_data, 
                            regime_context_normal, regime_context_high_vol):
-    """Test 5: Costs scale with volatility regime (Rule 13)"""
+    """Test 5: Costs scale with volatility regime (Rule 2 Regime-First)"""
     
     print("\n" + "=" * 80)
-    print("TEST 5: Regime-Aware Cost Adjustments (Rule 13)")
+    print("TEST 5: Regime-Aware Cost Adjustments (Rule 2 Regime-First)")
     print("=" * 80)
     
     # Fill in normal volatility
@@ -262,20 +262,20 @@ def test_regime_aware_costs(default_simulator, sample_market_data,
     assert fill_high_vol.costs.market_impact_bps > fill_normal.costs.market_impact_bps
     
     cost_increase_pct = ((fill_high_vol.costs.total_cost_bps / fill_normal.costs.total_cost_bps) - 1.0) * 100
-    print(f"\n✅ High vol costs are {cost_increase_pct:.1f}% higher (Rule 13 compliance)")
+    print(f"\n✅ High vol costs are {cost_increase_pct:.1f}% higher (Rule 2 (Regime-First) compliance)")
     
     print("✅ Test 5 PASSED\n")
 
 
 # ============================================================
-# Test 6: Liquidity-Aware Cost Adjustments (Rule 12)
+# Test 6: Liquidity-Aware Cost Adjustments (Rule 7 Section B)
 # ============================================================
 
 def test_liquidity_aware_costs(default_simulator, sample_market_data, regime_context_normal):
-    """Test 6: Costs scale with liquidity conditions (Rule 12)"""
+    """Test 6: Costs scale with liquidity conditions (Rule 7 Section B)"""
     
     print("\n" + "=" * 80)
-    print("TEST 6: Liquidity-Aware Cost Adjustments (Rule 12)")
+    print("TEST 6: Liquidity-Aware Cost Adjustments (Rule 7 Section B)")
     print("=" * 80)
     
     # Fill with high liquidity
@@ -314,7 +314,7 @@ def test_liquidity_aware_costs(default_simulator, sample_market_data, regime_con
     assert fill_low_liq.costs.total_cost_bps > fill_high_liq.costs.total_cost_bps
     
     cost_increase_pct = ((fill_low_liq.costs.total_cost_bps / fill_high_liq.costs.total_cost_bps) - 1.0) * 100
-    print(f"\n✅ Low liquidity costs are {cost_increase_pct:.1f}% higher (Rule 12 compliance)")
+    print(f"\n✅ Low liquidity costs are {cost_increase_pct:.1f}% higher (Rule 7 Section B compliance)")
     
     print("✅ Test 6 PASSED\n")
 
@@ -529,8 +529,8 @@ def test_simulator_summary(default_simulator):
     print(f"   Base Slippage: {default_simulator.base_slippage_bps} bps")
     print(f"   Commission: ${default_simulator.commission_per_share}/share")
     print(f"   Impact Model: Almgren-Chriss")
-    print(f"   Regime Aware: ✅ (Rule 13)")
-    print(f"   Liquidity Aware: ✅ (Rule 12)")
+    print(f"   Regime Aware: ✅ (Rule 2 Regime-First)")
+    print(f"   Liquidity Aware: ✅ (Rule 7 Section B)")
     
     print(f"\n✅ Features:")
     print(f"   - Realistic fill simulation")

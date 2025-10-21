@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Any, Callable, Type
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+import pandas as pd
 
 # Use internal core_engine types for independence
 from ...type_definitions.strategy import StrategyType, StrategyConfig
@@ -1201,6 +1202,56 @@ class StrategyManager(ISystemComponent):
                 logger.debug(f"Strategy {strategy_name} not supported in regime {regime_info.get('regime')}")
                 return signals
             
+            # For enhanced strategy instances, use their generate_signals method
+            if isinstance(strategy, EnhancedBaseStrategy):
+                try:
+                    # Convert market_data to Dict[str, pd.DataFrame] format expected by enhanced strategies
+                    if isinstance(market_data, dict):
+                        market_data_dict = market_data
+                    elif hasattr(market_data, 'to_dict') or isinstance(market_data, pd.DataFrame):
+                        # If market_data is a single DataFrame, assume it contains all symbols
+                        # For now, create a dict with available symbols
+                        market_data_dict = {}
+                        for symbol in symbols:
+                            if isinstance(market_data, pd.DataFrame) and symbol in market_data.columns:
+                                # Extract symbol-specific data from multi-symbol DataFrame
+                                market_data_dict[symbol] = market_data[[col for col in market_data.columns if col.startswith(f'{symbol}_') or col in ['timestamp', 'volume']]].copy()
+                            else:
+                                market_data_dict[symbol] = market_data
+                    else:
+                        market_data_dict = {symbol: market_data for symbol in symbols}
+                    
+                    # Call the enhanced strategy's generate_signals method
+                    raw_signals = await strategy.generate_signals(market_data_dict)
+                    logger.debug(f"📊 Enhanced strategy {strategy_name} generated {len(raw_signals)} signals")
+                    
+                    # Convert StrategySignal objects to TradingSignal objects
+                    for raw_signal in raw_signals:
+                        trading_signal = TradingSignal(
+                            signal_id=str(uuid.uuid4()),
+                            strategy_name=strategy_name,
+                            strategy_type=strategy_type,
+                            symbol=raw_signal.symbol,
+                            signal_type=SignalType(raw_signal.signal_type.lower()),
+                            strength=raw_signal.strength,
+                            confidence=getattr(raw_signal, 'confidence', 0.5),
+                            expected_return=getattr(raw_signal, 'expected_return', 0.0),
+                            risk_score=getattr(raw_signal, 'risk_score', 0.5),
+                            quantity=getattr(raw_signal, 'quantity', None),
+                            target_price=getattr(raw_signal, 'target_price', None),
+                            stop_loss=getattr(raw_signal, 'stop_loss', None),
+                            take_profit=getattr(raw_signal, 'take_profit', None),
+                            metadata=getattr(raw_signal, 'metadata', {})
+                        )
+                        signals.append(trading_signal)
+                    
+                    return signals
+                    
+                except Exception as e:
+                    logger.error(f"❌ Enhanced strategy {strategy_name} signal generation failed: {e}")
+                    return signals
+            
+            # Fallback to built-in signal generation logic for non-enhanced strategies
             # Generate signals for each symbol
             for symbol in symbols:
                 try:

@@ -80,6 +80,7 @@ class TradingDecisionRequest:
     market_regime: str = "unknown"
     regime_confidence: float = 0.0
     volatility_estimate: float = 0.0
+    current_price: float = 0.0  # Current market price for position calculations
     
     # Timing
     urgency: ExecutionUrgency = ExecutionUrgency.NORMAL
@@ -175,6 +176,9 @@ class RiskManagerConfig:
         'crisis': 2.0,
         'sideways': 1.0
     })
+    
+    # Short selling configuration
+    allow_shorts: bool = False
 
 
 class CentralRiskManager(ISystemComponent):
@@ -785,7 +789,7 @@ class CentralRiskManager(ISystemComponent):
         
         try:
             # Check if component is initialized
-            if hasattr(self, '_initialized') and not self._initialized:
+            if not self.is_initialized:
                 logger.error(f"🚨 Authorization rejected - Component not initialized: {request.request_id}")
                 return TradingAuthorization(
                     request_id=request.request_id,
@@ -987,8 +991,9 @@ class CentralRiskManager(ISystemComponent):
         """Calculate risk impact of trading request"""
         
         try:
-            # Position size as percentage of portfolio
-            position_impact = (request.quantity * 100.0) / self.portfolio_value  # Assuming $100/share
+            # Position size as percentage of portfolio using actual price
+            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            position_impact = (request.quantity * price) / self.portfolio_value
             
             # Adjust for volatility
             volatility_adjustment = max(1.0, request.volatility_estimate)
@@ -1011,8 +1016,13 @@ class CentralRiskManager(ISystemComponent):
         try:
             current_position = self.current_positions.get(request.symbol, 0.0)
             new_position = current_position + request.quantity
-            position_pct = abs(new_position * 100.0) / self.portfolio_value  # Assuming $100/share
             
+            # Use actual current price for position value calculation
+            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            position_value = abs(new_position * price)
+            position_pct = position_value / self.portfolio_value
+            
+            logger.warning(f"DEBUG: position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.config.max_position_size:.6f}")
             return position_pct <= self.config.max_position_size
             
         except Exception as e:
@@ -1025,7 +1035,11 @@ class CentralRiskManager(ISystemComponent):
         try:
             current_position = self.current_positions.get(request.symbol, 0.0)
             new_position = current_position + request.quantity
-            concentration = abs(new_position * 100.0) / self.portfolio_value
+            
+            # Use actual current price for position value calculation
+            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            position_value = abs(new_position * price)
+            concentration = position_value / self.portfolio_value
             
             return concentration <= self.config.position_concentration_limit
             
@@ -1159,11 +1173,11 @@ class CentralRiskManager(ISystemComponent):
                 # Use current_position from request if provided, otherwise check internal state
                 current_position = request.current_position if request.current_position is not None else self.current_positions.get(request.symbol, 0.0)
                 
-                if current_position <= 0:
-                    # No position to sell
-                    logger.warning(f"🔒 SELL rejected: No position in {request.symbol}")
+                if current_position <= 0 and not getattr(self.config, 'allow_shorts', False):
+                    # No position to sell and short selling not allowed
+                    logger.warning(f"🔒 SELL rejected: No position in {request.symbol} and short selling not allowed")
                     return 0.0
-                else:
+                elif current_position > 0:
                     # Cap SELL quantity by actual position with exact precision
                     max_sellable = abs(current_position)
                     if authorized_qty > max_sellable:
@@ -2085,52 +2099,3 @@ class CentralRiskManager(ISystemComponent):
             }
 
 
-# Example usage
-if __name__ == "__main__":
-    async def test_central_risk_manager():
-        """Test the central risk manager"""
-        
-        # Initialize risk manager
-        config = {
-            'max_position_size': 0.10,
-            'auto_approval_threshold': 0.01
-        }
-        
-        risk_manager = CentralRiskManager(config)
-        await risk_manager.initialize()
-        
-        # Create trading decision request
-        request = TradingDecisionRequest(
-            decision_type=TradingDecisionType.POSITION_ENTRY,
-            strategy_id="test_strategy",
-            symbol="AAPL",
-            side="buy",
-            quantity=1000.0,
-            expected_return=0.05,
-            confidence=0.8,
-            market_regime="bull_market",
-            regime_confidence=0.9,
-            urgency=ExecutionUrgency.NORMAL
-        )
-        
-        # Request authorization
-        print("Requesting trading authorization...")
-        authorization = await risk_manager.authorize_trading_decision(request)
-        
-        print(f"Authorization result: {authorization.authorization_level.value}")
-        print(f"Authorized quantity: {authorization.authorized_quantity}")
-        
-        if authorization.authorization_level != AuthorizationLevel.REJECTED:
-            # Execute authorized trade
-            result = await risk_manager.execute_authorized_trade(authorization)
-            print(f"Execution result: {result.status}")
-        
-        # Get risk status
-        status = risk_manager.get_risk_status()
-        print(f"Risk status: {status}")
-
-
-# Example usage
-if __name__ == "__main__":
-    # Run test
-    asyncio.run(test_central_risk_manager())

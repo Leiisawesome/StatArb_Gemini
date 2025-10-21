@@ -12,8 +12,8 @@ Tests verify:
 2. Regime engine injection across all components
 3. Historical data loading (52,685 bars for NVDA)
 4. Component lifecycle (initialize, start, stop)
-5. Rule 13 compliance (Regime-First Principle)
-6. Rule 12 compliance (Liquidity Management)
+5. Rule 2 (Regime-First) compliance (Regime-First Principle)
+6. Rule 7 Section B compliance (Liquidity Management)
 """
 
 import pytest
@@ -201,40 +201,40 @@ class TestPhase2DataRegimeLayer:
         print("✅ Test 6 PASSED: LiquidityEngine (BRICK #3) initialized correctly")
     
     # ============================================================
-    # Test 7: Rule 13 - Regime-First Principle
+    # Test 7: Rule 2 (Regime-First Principle)
     # ============================================================
     
     @pytest.mark.asyncio
     async def test_07_rule13_regime_first_compliance(self, config_path):
-        """Test Rule 13: Regime-First Principle compliance"""
+        """Test Rule 2 (Regime-First Principle) compliance"""
         config = BacktestConfiguration.from_json(config_path)
         engine = InstitutionalBacktestEngine(config)
         
         await engine.initialize()
         
         # Verify RegimeEngine exists and is first
-        assert engine.regime_engine is not None, "RegimeEngine not initialized (Rule 13 violation)"
+        assert engine.regime_engine is not None, "RegimeEngine not initialized (Rule 2 (Regime-First) violation)"
         
         # Verify DataManager has regime engine injected
         if hasattr(engine.data_manager, 'regime_engine'):
             assert engine.data_manager.regime_engine is not None, \
-                "RegimeEngine not injected into DataManager (Rule 13 violation)"
+                "RegimeEngine not injected into DataManager (Rule 2 (Regime-First) violation)"
         
         # Verify LiquidityEngine has regime engine injected (if supported)
         if hasattr(engine.liquidity_engine, 'regime_engine'):
             assert engine.liquidity_engine.regime_engine is not None, \
-                "RegimeEngine not injected into LiquidityEngine (Rule 13 violation)"
+                "RegimeEngine not injected into LiquidityEngine (Rule 2 (Regime-First) violation)"
         
         await engine.shutdown()
-        print("✅ Test 7 PASSED: Rule 13 (Regime-First Principle) compliance verified")
+        print("✅ Test 7 PASSED: Rule 2 (Regime-First Principle) compliance verified")
     
     # ============================================================
-    # Test 8: Rule 12 - Liquidity Management
+    # Test 8: Rule 7 Section B - Liquidity Management
     # ============================================================
     
     @pytest.mark.asyncio
     async def test_08_rule12_liquidity_management_compliance(self, config_path):
-        """Test Rule 12: Liquidity Management compliance"""
+        """Test Rule 7 Section B (Liquidity Management) compliance"""
         config = BacktestConfiguration.from_json(config_path)
         engine = InstitutionalBacktestEngine(config)
         
@@ -242,14 +242,14 @@ class TestPhase2DataRegimeLayer:
         
         # Verify LiquidityEngine exists
         assert engine.liquidity_engine is not None, \
-            "LiquidityEngine not initialized (Rule 12 violation)"
+            "LiquidityEngine not initialized (Rule 7 Section B violation)"
         
         # Verify liquidity assessment capability
         assert hasattr(engine.liquidity_engine, 'assess_liquidity_score'), \
-            "LiquidityEngine missing assess_liquidity_score (Rule 12 violation)"
+            "LiquidityEngine missing assess_liquidity_score (Rule 7 Section B violation)"
         
         await engine.shutdown()
-        print("✅ Test 8 PASSED: Rule 12 (Liquidity Management) compliance verified")
+        print("✅ Test 8 PASSED: Rule 7 Section B (Liquidity Management) compliance verified")
     
     # ============================================================
     # Test 9: Component Lifecycle
@@ -401,7 +401,7 @@ if __name__ == "__main__":
         print("Phase 2 Status: ✅ COMPLETE")
         print("Components: 3/3 integrated")
         print("Data Loaded: 52,685 bars")
-        print("Rules Compliance: Rule 13 ✅ | Rule 12 ✅")
+        print("Rules Compliance: Rule 2 (Regime-First) ✅ | Rule 7 Section B ✅")
         print()
         print("Ready for Phase 3: Processing Pipeline! 🚀")
     else:

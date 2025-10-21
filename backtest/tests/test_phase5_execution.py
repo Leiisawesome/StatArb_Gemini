@@ -196,7 +196,7 @@ class TestPhase51_ExecutionEngineIntegration:
     
     async def test_regime_engine_injection(self, backtest_engine):
         """
-        Test 3: Regime engine injected into execution engine (Rule 13)
+        Test 3: Regime engine injected into execution engine (Rule 2 Regime-First)
         
         Success Criteria:
         - Regime engine exists
@@ -204,7 +204,7 @@ class TestPhase51_ExecutionEngineIntegration:
         - Regime-first principle maintained
         """
         print("\n" + "=" * 80)
-        print("TEST 3: Regime Engine Injection (Rule 13)")
+        print("TEST 3: Regime Engine Injection (Rule 2 Regime-First)")
         print("=" * 80)
         
         # Check regime engine exists
@@ -237,17 +237,17 @@ class TestPhase51_ExecutionEngineIntegration:
             print(f"   Regime Engine Order: {regime_order}")
             print(f"   Execution Engine Order: {execution_order}")
             
-            # Rule 13: Regime-First - Regime must initialize before execution
+            # Rule 2 (Regime-First): Regime-First - Regime must initialize before execution
             assert regime_order < execution_order, \
                 f"Regime engine (order={regime_order}) must initialize before execution (order={execution_order})"
             
-            print(f"✅ Rule 13 Compliance: Regime-First principle maintained")
+            print(f"✅ Rule 2 (Regime-First) Compliance: Regime-First principle maintained")
         
         print("✅ Test 3 PASSED: Regime engine properly injected\n")
     
     async def test_liquidity_engine_injection(self, backtest_engine):
         """
-        Test 4: Liquidity engine injected into execution engine (Rule 12)
+        Test 4: Liquidity engine injected into execution engine (Rule 7 Section B)
         
         Success Criteria:
         - Liquidity engine exists
@@ -255,7 +255,7 @@ class TestPhase51_ExecutionEngineIntegration:
         - Liquidity management capability
         """
         print("\n" + "=" * 80)
-        print("TEST 4: Liquidity Engine Injection (Rule 12)")
+        print("TEST 4: Liquidity Engine Injection (Rule 7 Section B)")
         print("=" * 80)
         
         # Check liquidity engine exists

@@ -211,14 +211,14 @@ class TestPhase93ComplianceVerification:
             'Rule 3: Data Flow Pipeline': True,
             'Rule 4: Central Risk Authority': True,
             'Rule 5: Execution Integration': True,
-            'Rule 6: Prohibited Patterns': True,
+            'Rule 7, Section A: Prohibited Execution Patterns': True,
             'Rule 7: Development Standards': True,
-            'Rule 8: Multi-Strategy Coordination': True,
-            'Rule 9: Advanced Analytics': True,
+            'Rule 5: Multi-Strategy Coordination': True,
+            'Rule 6: Advanced Analytics': True,
             'Rule 10: Production Deployment': True,
             'Rule 11: Testing Standards': True,
-            'Rule 12: Liquidity Management': True,
-            'Rule 13: Regime-First Principle': True
+            'Rule 7 Section B (Liquidity Management)': True,
+            'Rule 2 (Regime-First Principle)': True
         }
         
         compliant_count = 0

@@ -21,6 +21,7 @@ import asyncio
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
+import logging
 
 from backtest.config.backtest_config import (
     BacktestConfiguration,
@@ -28,9 +29,12 @@ from backtest.config.backtest_config import (
     StrategyConfig,
     RiskConfig,
     ExecutionConfig,
-    AnalyticsConfig
+    AnalyticsConfig,
+    BacktestMode
 )
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
+
+
 
 
 class TestPhase73MiniBacktest:
@@ -44,7 +48,7 @@ class TestPhase73MiniBacktest:
         # Week of Jan 2-5, 2024 (first trading week of 2024)
         config = BacktestConfiguration(
             backtest_name="phase7_3_mini_backtest",
-            backtest_mode="historical",
+            backtest_mode=BacktestMode.SINGLE_STRATEGY,
             data=DataConfig(
                 symbols=['NVDA'],
                 start_date='2024-01-02',
@@ -56,13 +60,20 @@ class TestPhase73MiniBacktest:
                     strategy_type='momentum',
                     strategy_name='mini_backtest_momentum',
                     allocation_pct=0.5,
-                    max_position_size=0.10
+                    max_position_size=0.10,
+                    parameters={
+                        'momentum_threshold': 0.001,   # More reasonable threshold for 1-min data (0.1%)
+                        'adx_threshold': 20.0,         # Standard ADX threshold
+                        'volume_threshold': 1.0,       # More reasonable volume threshold
+                        'enable_breakout_detection': False  # Disable breakout for 1-min data testing
+                    }
                 )
             ],
             risk=RiskConfig(
                 max_position_size=0.10,
                 max_daily_var=0.05,
-                max_concentration=0.20
+                max_concentration=0.20,
+                allow_shorts=True
             ),
             execution=ExecutionConfig(
                 enable_realistic_fills=True,

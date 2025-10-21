@@ -6,8 +6,8 @@ Tests for the execution flow integration in the InstitutionalBacktestEngine.
 
 Tests:
 1. simulate_execution() method functionality
-2. Execution with regime awareness (Rule 13)
-3. Execution with liquidity awareness (Rule 12)
+2. Execution with regime awareness (Rule 2 Regime-First)
+3. Execution with liquidity awareness (Rule 7 Section B)
 4. Position updates after execution
 5. Execution history tracking
 6. Execution statistics calculation
@@ -209,7 +209,7 @@ class TestSimulateExecution:
 
 
 # ============================================================
-# Test 3: Regime-Aware Execution (Rule 13)
+# Test 3: Regime-Aware Execution (Rule 2 Regime-First)
 # ============================================================
 
 class TestRegimeAwareExecution:
@@ -219,7 +219,7 @@ class TestRegimeAwareExecution:
         """Test 3: Regime context is injected into execution"""
         
         print("\n" + "=" * 80)
-        print("TEST 3: Regime Context Injection (Rule 13)")
+        print("TEST 3: Regime Context Injection (Rule 2 Regime-First)")
         print("=" * 80)
         
         # Execute trades
@@ -237,11 +237,11 @@ class TestRegimeAwareExecution:
         
         print(f"✅ Regime context injected: {trade['regime']}")
         print(f"   Total Cost: {trade['total_cost_bps']:.2f} bps")
-        print("✅ Test 3 PASSED: Regime awareness working (Rule 13)\n")
+        print("✅ Test 3 PASSED: Regime awareness working (Rule 2 Regime-First)\n")
 
 
 # ============================================================
-# Test 4: Liquidity-Aware Execution (Rule 12)
+# Test 4: Liquidity-Aware Execution (Rule 7 Section B)
 # ============================================================
 
 class TestLiquidityAwareExecution:
@@ -251,7 +251,7 @@ class TestLiquidityAwareExecution:
         """Test 4: Liquidity score is injected into execution"""
         
         print("\n" + "=" * 80)
-        print("TEST 4: Liquidity Score Injection (Rule 12)")
+        print("TEST 4: Liquidity Score Injection (Rule 7 Section B)")
         print("=" * 80)
         
         # Execute trades
@@ -268,7 +268,7 @@ class TestLiquidityAwareExecution:
         # Note: May be None if liquidity engine doesn't have assess_liquidity_score method
         print(f"✅ Liquidity score: {trade.get('liquidity_score', 'N/A')}")
         print(f"   Impact Cost: {trade['market_impact_bps']:.2f} bps")
-        print("✅ Test 4 PASSED: Liquidity awareness working (Rule 12)\n")
+        print("✅ Test 4 PASSED: Liquidity awareness working (Rule 7 Section B)\n")
 
 
 # ============================================================
@@ -495,8 +495,8 @@ async def test_phase5_3_summary(backtest_engine):
     
     print(f"\n✅ Execution Flow Integration Complete:")
     print(f"   - simulate_execution() method: ✅")
-    print(f"   - Regime awareness (Rule 13): ✅")
-    print(f"   - Liquidity awareness (Rule 12): ✅")
+    print(f"   - Regime awareness (Rule 2 Regime-First): ✅")
+    print(f"   - Liquidity awareness (Rule 7 Section B): ✅")
     print(f"   - Position updates: ✅")
     print(f"   - Execution history: ✅")
     print(f"   - Execution statistics: ✅")

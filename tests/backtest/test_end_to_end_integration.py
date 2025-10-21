@@ -300,7 +300,7 @@ class EndToEndBacktestEngine:
                             self.daily_returns.append(trade_return)
                 
                 except Exception as e:
-                    logger.debug(f"Signal processing error: {e}")
+                    pass
             
             # Progress logging
             if bars_processed % 10000 == 0:

@@ -1,0 +1,161 @@
+# .cursor/rules/ Master Index
+
+**Version:** 2.0 (Optimized Structure)  
+**Last Updated:** October 21, 2025
+
+---
+
+## 🎯 Quick Navigation
+
+### **Active Rules (Use These)**
+- [Tier 1: Architectural Rules](#tier-1-architectural-rules) (7 rules)
+- [Tier 2: Operational Standards](#tier-2-operational-standards) (3 standards)
+- [Workflows & Instruction Maps](#workflows) (13 guides)
+
+### **Reference**
+- [Archived v1.0 Rules](#archive) (historical reference only)
+- [Optimization Overview](OPTIMIZED_RULES_STRUCTURE.md)
+
+---
+
+## 📚 TIER 1: ARCHITECTURAL RULES (7 Rules)
+
+**Location:** `TIER-1-ARCHITECTURAL-RULES/`
+
+### Rule 1: Component Integration & Lifecycle Standards
+**File:** `rule-1-component-integration.md`  
+**Purpose:** ISystemComponent interface, orchestrator integration, lifecycle management  
+**Status:** Active v2.0
+
+### Rule 2: Hierarchical Architecture with Regime-First ⭐
+**File:** `rule-2-hierarchical-architecture-regime-first.md`  
+**Purpose:** 6-layer hierarchy with Regime-First as architectural constraint  
+**Status:** Active v2.0 (Consolidated with v1.0 Rule 13)
+
+### Rule 3: Unified Data Flow & Processing Pipeline
+**File:** `rule-3-data-flow-pipeline.md`  
+**Purpose:** Single data authority, standardized processing sequence  
+**Status:** Active v2.0
+
+### Rule 4: Centralized Risk Governance
+**File:** `rule-4-risk-governance.md`  
+**Purpose:** Single point of authority for all trading decisions  
+**Status:** Active v2.0
+
+### Rule 5: Multi-Strategy Coordination
+**File:** `rule-5-multi-strategy-coordination.md`  
+**Purpose:** Signal aggregation, conflict resolution, strategy coordination  
+**Status:** Active v2.0 (Renumbered from v1.0 Rule 8)
+
+### Rule 6: Advanced Analytics Framework
+**File:** `rule-6-advanced-analytics.md`  
+**Purpose:** Real-time analytics, performance attribution, regime-aware metrics  
+**Status:** Active v2.0 (Renumbered from v1.0 Rule 9)
+
+### Rule 7: Execution Management & Market Interaction ⭐
+**File:** `rule-7-execution-management.md`  
+**Purpose:** Unified execution from basic flow to advanced market microstructure  
+**Status:** Active v2.0 (Consolidated v1.0 Rules 6 & 12)  
+**Sections:**
+- Section A: Execution Flow & Authorization
+- Section B: Liquidity Management & Market Impact
+- Section C: Smart Order Routing & TCA
+
+---
+
+## 🛠️ TIER 2: OPERATIONAL STANDARDS (3 Standards)
+
+**Location:** `TIER-2-OPERATIONAL-STANDARDS/`
+
+### Standard A: Development & Code Quality
+**File:** `standard-a-development-code-quality.md`  
+**Purpose:** Logging, error handling, testing standards  
+**Status:** Active v2.0 (Previously v1.0 Rule 5)
+
+### Standard B: Production Deployment & Monitoring
+**File:** `standard-b-production-deployment.md`  
+**Purpose:** Health monitoring, graceful degradation, audit trails  
+**Status:** Active v2.0 (Previously v1.0 Rule 10)
+
+### Standard C: Testing & Validation Framework
+**File:** `standard-c-testing-validation.md`  
+**Purpose:** Performance testing, stress testing, market condition validation  
+**Status:** Active v2.0 (Previously v1.0 Rule 11)
+
+---
+
+## 📋 WORKFLOWS & INSTRUCTION MAPS
+
+**Location:** `WORKFLOWS/`
+
+These are operational guides, not architectural rules:
+
+1. **Backtest Workflow** - `workflow-backtest.mdc`
+2. **Strategy Optimization** - `workflow-strategy-optimization.mdc`
+3. **Strategy Research** - `workflow-strategy-research.mdc`
+4. **Strategy Testing** - `workflow-strategy-testing.mdc`
+5. **Regulatory Compliance** - `workflow-compliance.mdc`
+6. **Live Trading Orchestration** - `workflow-live-trading.mdc`
+7. **Portfolio Analytics** - `workflow-analytics.mdc`
+8. **Regime Analysis** - `workflow-regime-analysis.mdc`
+9. **Risk Monitoring** - `workflow-risk-monitoring.mdc`
+10. **Symbol Selection** - `workflow-symbol-selection.mdc`
+11. **Testing & Validation** - `workflow-testing.mdc`
+12. **Instruction Maps Overview** - `00-workflow-index.mdc`
+
+---
+
+## 🗄️ ARCHIVE (v1.0 Historical Reference)
+
+**Location:** `ARCHIVE-V1.0/`
+
+These files are **archived for historical reference only**. Use the v2.0 rules above for current development.
+
+**Deprecated Rules:**
+- `v1.0-rule-6-execution.mdc` (→ now part of Rule 7)
+- `v1.0-rule-12-market-microstructure.mdc` (→ now part of Rule 7)
+- `v1.0-rule-13-regime-first.mdc` (→ now part of Rule 2)
+- `v1.0-core-engine-architecture.mdc` (→ superseded by Rule 2)
+- `v1.0-core-engine-comprehensive-guide.mdc` (→ merged into Rule 2)
+
+---
+
+## 🚀 How to Use This Structure
+
+### For New Development:
+1. Start with **Tier 1 Rules** (architectural requirements)
+2. Follow **Tier 2 Standards** (operational best practices)
+3. Use **Workflows** for specific operational tasks
+
+### For Questions:
+1. Check the relevant rule in **TIER-1** or **TIER-2**
+2. Consult [OPTIMIZED_RULES_STRUCTURE.md](OPTIMIZED_RULES_STRUCTURE.md) for overview
+3. See migration guide in `docs/02_architecture/` if needed
+
+### For Historical Context:
+1. Check **ARCHIVE-V1.0/** for old rule versions
+2. See project documentation for migration history
+
+---
+
+## 📖 Related Documentation
+
+- **Master Overview:** [OPTIMIZED_RULES_STRUCTURE.md](OPTIMIZED_RULES_STRUCTURE.md)
+- **Migration Guide:** `docs/02_architecture/RULE_OPTIMIZATION_MIGRATION_GUIDE.md`
+- **Quick Reference:** `docs/02_architecture/13_RULES_QUICK_REFERENCE.md`
+- **Project Summary:** `docs/02_architecture/PROJECT_COMPLETE_SUMMARY.md`
+
+---
+
+## 🔄 Version History
+
+- **v2.0** (October 21, 2025): Optimized structure with 10 guidelines
+- **v1.0** (Prior to October 2025): Original 13 rules
+
+---
+
+**Navigation Tip:** Use the file tree in your IDE to quickly browse rules by tier!
+
+Last Updated: October 21, 2025
+
+

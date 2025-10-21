@@ -12,7 +12,7 @@ This simulator applies realistic execution costs:
 - Execution delays
 - Partial fills (optional)
 
-Follows Rule 12 (Liquidity Management) and Rule 13 (Regime-First Principle).
+Follows Rule 7 Section B (Liquidity Management) and Rule 2 (Regime-First Principle).
 
 Author: StatArb_Gemini Backtest System
 Version: 1.0.0
@@ -112,11 +112,11 @@ class HistoricalExecutionSimulator:
     - Slippage: Volatility-adjusted random slippage
     - Commission: Fixed per-share or percentage
     
-    Regime Awareness (Rule 13):
+    Regime Awareness (Rule 2 Regime-First):
     - Execution costs scale with volatility regime
     - Impact multipliers: low_vol=0.8x, high_vol=1.3x, extreme=1.8x
     
-    Liquidity Management (Rule 12):
+    Liquidity Management (Rule 7 Section B):
     - Higher costs in low liquidity conditions
     - Liquidity score affects spread and impact
     """
@@ -143,7 +143,7 @@ class HistoricalExecutionSimulator:
         self.impact_sqrt_coeff = self.config.get('impact_sqrt_coeff', 0.5)
         self.permanent_impact_ratio = self.config.get('permanent_impact_ratio', 0.3)  # 30% permanent
         
-        # Regime multipliers (Rule 13)
+        # Regime multipliers (Rule 2 Regime-First)
         self.regime_multipliers = self.config.get('regime_multipliers', {
             'low_volatility': 0.8,
             'normal_volatility': 1.0,
@@ -152,7 +152,7 @@ class HistoricalExecutionSimulator:
             'crisis': 2.5
         })
         
-        # Liquidity adjustments (Rule 12)
+        # Liquidity adjustments (Rule 7 Section B)
         self.liquidity_cost_multipliers = self.config.get('liquidity_multipliers', {
             'high': 0.8,      # High liquidity = lower costs
             'normal': 1.0,    # Normal liquidity = base costs
@@ -196,19 +196,46 @@ class HistoricalExecutionSimulator:
             market_data: Current market data (price, volume, volatility, etc.)
             authorization_id: Risk authorization ID
             strategy_id: Strategy that generated the trade
-            regime_context: Market regime information (Rule 13)
-            liquidity_score: Liquidity score 0-100 (Rule 12)
+            regime_context: Market regime information (Rule 2 Regime-First)
+            liquidity_score: Liquidity score 0-100 (Rule 7 Section B)
         
         Returns:
             SimulatedFill with realistic execution costs
         """
         
         try:
-            # Extract market data
+            # Extract market data first
             market_price = market_data.get('close', decision_price)
             volume = market_data.get('volume', 1000000)
             volatility = market_data.get('volatility', 0.02)
             decision_time = market_data.get('timestamp', datetime.now())
+            
+            # Ensure decision_time is a datetime object
+            if isinstance(decision_time, (int, float)):
+                decision_time = datetime.fromtimestamp(decision_time)
+            elif isinstance(decision_time, str):
+                try:
+                    decision_time = datetime.fromisoformat(decision_time)
+                except ValueError:
+                    decision_time = datetime.now()
+            
+            # Skip simulation for zero quantity orders
+            if quantity <= 0:
+                logger.warning(f"⚠️ Skipping fill simulation for {symbol} {side} {quantity}: zero quantity")
+                zero_costs = ExecutionCosts()
+                return SimulatedFill(
+                    symbol=symbol,
+                    side=side,
+                    quantity=0,
+                    fill_price=market_price,
+                    decision_price=decision_price,
+                    market_price=market_price,
+                    decision_time=decision_time,
+                    execution_time=decision_time,
+                    costs=zero_costs,
+                    authorization_id=authorization_id,
+                    strategy_id=strategy_id
+                )
             
             # Calculate execution time (with optional delay)
             execution_time = decision_time + timedelta(seconds=self.execution_delay_seconds)
@@ -295,9 +322,6 @@ class HistoricalExecutionSimulator:
                 strategy_id=strategy_id
             )
             
-            logger.debug(f"Simulated {side.upper()} {quantity} {symbol} @ ${fill_price:.2f} "
-                        f"(cost: {total_cost_bps:.1f} bps)")
-            
             return fill
             
         except Exception as e:
@@ -318,20 +342,20 @@ class HistoricalExecutionSimulator:
         
         Spread cost is affected by:
         - Base spread (instrument specific)
-        - Volatility regime (Rule 13)
-        - Liquidity conditions (Rule 12)
+        - Volatility regime (Rule 2 Regime-First)
+        - Liquidity conditions (Rule 7 Section B)
         """
         
         # Start with base spread
         spread_bps = self.base_spread_bps
         
-        # Adjust for regime (Rule 13)
+        # Adjust for regime (Rule 2 Regime-First)
         if regime_context:
             volatility_regime = regime_context.get('volatility_regime', 'normal_volatility')
             regime_multiplier = self.regime_multipliers.get(volatility_regime, 1.0)
             spread_bps *= regime_multiplier
         
-        # Adjust for liquidity (Rule 12)
+        # Adjust for liquidity (Rule 7 Section B)
         if liquidity_score is not None:
             # Map liquidity score (0-100) to multiplier
             if liquidity_score >= 80:
@@ -369,8 +393,8 @@ class HistoricalExecutionSimulator:
         Impact is affected by:
         - Order size relative to volume
         - Volatility
-        - Regime conditions (Rule 13)
-        - Liquidity (Rule 12)
+        - Regime conditions (Rule 2 Regime-First)
+        - Liquidity (Rule 7 Section B)
         """
         
         # Calculate participation rate
@@ -388,13 +412,13 @@ class HistoricalExecutionSimulator:
         volatility_adjustment = max(0.5, min(volatility_adjustment, 2.0))  # Cap adjustment
         base_impact_bps *= volatility_adjustment
         
-        # Adjust for regime (Rule 13)
+        # Adjust for regime (Rule 2 Regime-First)
         if regime_context:
             volatility_regime = regime_context.get('volatility_regime', 'normal_volatility')
             regime_multiplier = self.regime_multipliers.get(volatility_regime, 1.0)
             base_impact_bps *= regime_multiplier
         
-        # Adjust for liquidity (Rule 12)
+        # Adjust for liquidity (Rule 7 Section B)
         if liquidity_score is not None:
             if liquidity_score >= 80:
                 liquidity_multiplier = 0.8

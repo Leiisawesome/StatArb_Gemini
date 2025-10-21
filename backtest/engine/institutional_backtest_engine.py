@@ -13,9 +13,9 @@ Architecture:
     - Phase 6: Analytics (Bricks #10-12)
 
 Follows:
-    - Rule 13: Regime-First Principle (RegimeEngine initializes first)
-    - Rule 12: Liquidity Management (Liquidity filtering enabled)
-    - Rule 8: Multi-Strategy Coordination (StrategyManager coordination)
+    - Rule 2 (Regime-First Principle) (RegimeEngine initializes first)
+    - Rule 7 Section B (Liquidity Management) (Liquidity filtering enabled)
+    - Rule 5: Multi-Strategy Coordination (StrategyManager coordination)
     - Rule 4: Central Risk Management (CentralRiskManager authorization)
     - Rule 10: Production Standards (Comprehensive monitoring)
 """
@@ -52,7 +52,7 @@ class InstitutionalBacktestEngine:
     backtesting with regime awareness, liquidity filtering, multi-strategy
     coordination, and centralized risk management.
     
-    Initialization Order (Rule 13 - Regime-First):
+    Initialization Order (Rule 2 - Regime-First):
         5  - EnhancedRegimeEngine (FIRST!)
         10 - ClickHouseDataManager
         12 - LiquidityAssessmentEngine
@@ -117,6 +117,9 @@ class InstitutionalBacktestEngine:
         self.performance_analyzer = None # BRICK #11 (order=33)
         self.analytics_manager = None  # BRICK #12 (order=35)
         self.performance_reporter = None  # Helper for report generation
+        
+        # Historical data for strategies
+        self.historical_market_data: Dict[str, pd.DataFrame] = {}
         
         # Backtest state
         self.is_initialized = False
@@ -218,18 +221,18 @@ class InstitutionalBacktestEngine:
         Phase 2: Initialize Data & Regime Layer
         
         Components initialized (in order):
-            5  - EnhancedRegimeEngine (FIRST! - Rule 13)
+            5  - EnhancedRegimeEngine (FIRST! - Rule 2 Regime-First)
             10 - ClickHouseDataManager
             12 - LiquidityAssessmentEngine
         
-        This implements the Regime-First Principle (Rule 13).
+        This implements the Regime-First Principle (Rule 2 Regime-First).
         """
         logger.info("\n" + "=" * 80)
         logger.info("📊 PHASE 2: Initializing Data & Regime Layer")
         logger.info("=" * 80)
         
         # Phase 2.2: Initialize BRICK #1 (EnhancedRegimeEngine - order=5)
-        # CRITICAL: This MUST be first per Rule 13 (Regime-First Principle)
+        # CRITICAL: This MUST be first per Rule 2 (Regime-First) (Regime-First Principle)
         await self._initialize_regime_engine()
         
         # Phase 2.3: Initialize BRICK #2 (ClickHouseDataManager - order=10)
@@ -248,12 +251,12 @@ class InstitutionalBacktestEngine:
         """
         Phase 2.2: Initialize EnhancedRegimeEngine (BRICK #1)
         
-        Order: 5 (FIRST! - Rule 13: Regime-First Principle)
+        Order: 5 (FIRST! - Rule 2 (Regime-First Principle))
         
         The regime engine provides market regime classification that all
         other components will use to adapt their behavior.
         
-        Implements Rule 13: Regime-First Principle
+        Implements Rule 2 (Regime-First Principle)
         """
         logger.info("\n" + "-" * 80)
         logger.info("🔴 BRICK #1: EnhancedRegimeEngine (order=5) - REGIME-FIRST!")
@@ -290,7 +293,7 @@ class InstitutionalBacktestEngine:
             
             logger.info(f"✅ EnhancedRegimeEngine registered (component_id: {component_id})")
             logger.info(f"   Initialization Order: 5 (FIRST!)")
-            logger.info(f"   Rule 13 Compliance: ✅ Regime-First Principle")
+            logger.info(f"   Rule 2 (Regime-First) Compliance: ✅ Regime-First Principle")
             logger.info(f"   Lookback Window: {regime_config['lookback_window']} bars")
             logger.info(f"   Volatility Window: {regime_config['volatility_window']} bars")
             logger.info(f"   Enhanced Detection: {regime_config['enable_enhanced_detection']}")
@@ -299,7 +302,7 @@ class InstitutionalBacktestEngine:
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize EnhancedRegimeEngine: {e}", exc_info=True)
-            raise RuntimeError(f"CRITICAL: Regime engine initialization failed (Rule 13 violation): {e}")
+            raise RuntimeError(f"CRITICAL: Regime engine initialization failed (Rule 2 Regime-First violation): {e}")
     
     async def _initialize_data_manager(self) -> None:
         """
@@ -313,7 +316,7 @@ class InstitutionalBacktestEngine:
         
         Implements:
         - Historical data loading from ClickHouse
-        - Regime engine injection (Rule 13)
+        - Regime engine injection (Rule 2 Regime-First)
         - Data validation and preprocessing
         """
         logger.info("\n" + "-" * 80)
@@ -338,10 +341,10 @@ class InstitutionalBacktestEngine:
             # Create data manager
             self.data_manager = ClickHouseDataManager(data_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.data_manager, 'set_regime_engine'):
                 self.data_manager.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into DataManager (Rule 13)")
+                logger.info("✅ Regime engine injected into DataManager (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=10)
             component_id = self.orchestrator.register_component(
@@ -459,7 +462,7 @@ class InstitutionalBacktestEngine:
         Order: 12 (after DataManager=10)
         
         The liquidity engine assesses market liquidity and filters trading
-        signals based on liquidity conditions. It helps implement Rule 12
+        signals based on liquidity conditions. It helps implement Rule 7 Section B
         (Market Microstructure & Liquidity Management).
         
         Implements:
@@ -489,10 +492,10 @@ class InstitutionalBacktestEngine:
             # Create liquidity engine
             self.liquidity_engine = LiquidityAssessmentEngine(liquidity_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.liquidity_engine, 'set_regime_engine'):
                 self.liquidity_engine.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into LiquidityEngine (Rule 13)")
+                logger.info("✅ Regime engine injected into LiquidityEngine (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=12)
             component_id = self.orchestrator.register_component(
@@ -511,8 +514,8 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Min Volume: {liquidity_config['min_volume']:,}")
             logger.info(f"   Min Liquidity Score: {liquidity_config['min_liquidity_score']}")
             logger.info(f"   Max Spread: {liquidity_config['max_spread_bps']} bps")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13)")
-            logger.info(f"   Rule 12 Compliance: ✅ Liquidity Management")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 Regime-First)")
+            logger.info(f"   Rule 7 Compliance (Liquidity Management): ✅ Liquidity Management")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize LiquidityAssessmentEngine: {e}", exc_info=True)
@@ -536,7 +539,7 @@ class InstitutionalBacktestEngine:
         
         Market Data → Technical Indicators → Feature Engineering → Signal Generation
         
-        All components are regime-aware (Rule 13) and integrate with the
+        All components are regime-aware (Rule 2 Regime-First) and integrate with the
         orchestrator for lifecycle management.
         """
         logger.info("\n" + "=" * 80)
@@ -570,9 +573,9 @@ class InstitutionalBacktestEngine:
         These components coordinate trading decisions and ensure risk compliance.
         
         Implements:
-        - Rule 8: Multi-Strategy Coordination
+        - Rule 5: Multi-Strategy Coordination
         - Rule 4: Central Risk Management (MANDATORY)
-        - Rule 13: Regime-Aware strategy weighting
+        - Rule 2: Regime-Aware strategy weighting
         """
         logger.info("\n" + "=" * 80)
         logger.info("PHASE 4: STRATEGY & RISK INTEGRATION")
@@ -604,8 +607,8 @@ class InstitutionalBacktestEngine:
         - Regime-aware strategy selection
         
         Implements:
-        - Rule 8: Multi-Strategy Coordination
-        - Rule 13: Regime-First (injects regime engine)
+        - Rule 5: Multi-Strategy Coordination
+        - Rule 2: Hierarchical Architecture with Regime-First (injects regime engine)
         
         This is a critical component that translates signals into actionable
         trading decisions through professional strategy coordination.
@@ -622,24 +625,24 @@ class InstitutionalBacktestEngine:
             # For backtesting, we enable multi-strategy coordination and
             # enhanced strategy support
             strategy_config = {
-                'enable_multi_strategy_coordination': True,  # Rule 8
+                'enable_multi_strategy_coordination': True,  # Rule 5
                 'enable_enhanced_strategies': True,
                 'auto_discover_strategies': False,  # Manual registration in backtest
                 'strategy_registry_path': 'strategy_registry.json',  # Registry path for strategy metadata
                 'max_concurrent_strategies': 10,
                 'signal_aggregation_method': 'weighted_average',
                 'conflict_resolution_method': 'confidence_weighted',
-                'enable_regime_awareness': True,  # Rule 13
+                'enable_regime_awareness': True,  # Rule 2 (Regime-First)
                 'enable_strategy_attribution': True  # Performance tracking
             }
             
             # Create strategy manager instance
             self.strategy_manager = StrategyManager(strategy_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.strategy_manager, 'set_regime_engine'):
                 self.strategy_manager.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into StrategyManager (Rule 13)")
+                logger.info("✅ Regime engine injected into StrategyManager (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=20)
             component_id = self.orchestrator.register_component(
@@ -655,8 +658,8 @@ class InstitutionalBacktestEngine:
             
             logger.info(f"✅ StrategyManager registered (component_id: {component_id})")
             logger.info(f"   Initialization Order: 20 (after SignalGenerator=17)")
-            logger.info(f"   Multi-Strategy Coordination: ✅ (Rule 8)")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13)")
+            logger.info(f"   Multi-Strategy Coordination: ✅ (Rule 5)")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 Regime-First)")
             logger.info(f"   Signal Aggregation: {strategy_config['signal_aggregation_method']}")
             logger.info(f"   Conflict Resolution: {strategy_config['conflict_resolution_method']}")
             logger.info(f"   Max Strategies: {strategy_config['max_concurrent_strategies']}")
@@ -679,7 +682,7 @@ class InstitutionalBacktestEngine:
         EnhancedMeanReversionStrategy) that will generate trading signals.
         
         Implements:
-        - Rule 8: Multi-Strategy Coordination
+        - Rule 5: Multi-Strategy Coordination
         - Professional strategy factory pattern
         """
         logger.info("\n📊 Registering strategies from configuration...")
@@ -730,7 +733,8 @@ class InstitutionalBacktestEngine:
                         'allocation_pct': strategy_config.allocation_pct,
                         'parameters': strategy_config.parameters,
                         'max_position_size': strategy_config.max_position_size,
-                        'max_concentration': strategy_config.max_concentration
+                        'max_concentration': strategy_config.max_concentration,
+                        'symbols': self.config.data.symbols  # Pass available symbols to strategy
                     }
                     
                     # Register with strategy manager
@@ -773,7 +777,7 @@ class InstitutionalBacktestEngine:
         
         Implements:
         - Rule 4: Central Risk Management (MANDATORY SINGLE AUTHORITY)
-        - Rule 13: Regime-First (regime-aware risk limits)
+        - Rule 2: Hierarchical Architecture with Regime-First (regime-aware risk limits)
         - Professional position tracking and cash management
         
         This is the governance layer that ensures institutional-grade
@@ -809,7 +813,7 @@ class InstitutionalBacktestEngine:
                 'high_confidence_threshold': 0.8,  # 80% for automatic approval
                 'extreme_confidence_threshold': 0.9,  # 90% for priority
                 
-                # Regime-aware adjustments (Rule 13)
+                # Regime-aware adjustments (Rule 2 Regime-First)
                 'regime_risk_multipliers': (
                     risk_config.get('regime_risk_multipliers', {
                         'low_volatility': 1.2,  # Increase risk in stable markets
@@ -831,7 +835,10 @@ class InstitutionalBacktestEngine:
                 ),
                 
                 # Monitoring
-                'real_time_monitoring': False  # Disabled for backtesting
+                'real_time_monitoring': False,  # Disabled for backtesting
+                
+                # Short selling configuration
+                'allow_shorts': risk_config.get('allow_shorts', False) if isinstance(risk_config, dict) else (risk_config.allow_shorts if risk_config else False)
             }
             
             # Create risk manager instance (it will create RiskManagerConfig internally)
@@ -842,12 +849,12 @@ class InstitutionalBacktestEngine:
             self.risk_manager.set_controlled_components(
                 strategy_manager=self.strategy_manager,
                 trading_engine=None,  # Will be set in Phase 5
-                regime_engine=self.regime_engine  # Rule 13
+                regime_engine=self.regime_engine  # Rule 2 (Regime-First)
             )
             
             logger.info("✅ Controlled components linked to RiskManager:")
             logger.info(f"   • StrategyManager: {self.strategy_manager is not None}")
-            logger.info(f"   • RegimeEngine: {self.regime_engine is not None} (Rule 13)")
+            logger.info(f"   • RegimeEngine: {self.regime_engine is not None} (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=25)
             component_id = self.orchestrator.register_component(
@@ -871,7 +878,7 @@ class InstitutionalBacktestEngine:
             logger.info(f"   • Position Concentration: {risk_manager_config_dict['position_concentration_limit']:.1%}")
             logger.info(f"   • Min Signal Confidence: {risk_manager_config_dict['min_signal_confidence']:.1%}")
             logger.info(f"\n   Regime-Aware Risk:")
-            logger.info(f"   • Regime Adjustments: ✅ Enabled (Rule 13)")
+            logger.info(f"   • Regime Adjustments: ✅ Enabled (Rule 2 Regime-First)")
             logger.info(f"   • Low Vol Multiplier: {risk_manager_config_dict['regime_risk_multipliers'].get('low_volatility', 1.0):.1f}x")
             logger.info(f"   • High Vol Multiplier: {risk_manager_config_dict['regime_risk_multipliers'].get('high_volatility', 1.0):.1f}x")
             logger.info(f"   • Crisis Multiplier: {risk_manager_config_dict['regime_risk_multipliers'].get('crisis', 1.0):.1f}x")
@@ -1018,10 +1025,10 @@ class InstitutionalBacktestEngine:
             # Create indicators engine
             self.indicators_engine = EnhancedTechnicalIndicators(indicators_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.indicators_engine, 'set_regime_engine'):
                 self.indicators_engine.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into IndicatorsEngine (Rule 13)")
+                logger.info("✅ Regime engine injected into IndicatorsEngine (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=15)
             component_id = self.orchestrator.register_component(
@@ -1044,7 +1051,7 @@ class InstitutionalBacktestEngine:
             logger.info(f"   MACD: {indicators_config.macd_fast}/{indicators_config.macd_slow}/{indicators_config.macd_signal}")
             logger.info(f"   Bollinger Bands: {indicators_config.bb_period} period, {indicators_config.bb_std} std")
             logger.info(f"   Caching: {'Enabled' if indicators_config.enable_caching else 'Disabled'}")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13)")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 Regime-First)")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize EnhancedTechnicalIndicators: {e}", exc_info=True)
@@ -1087,10 +1094,10 @@ class InstitutionalBacktestEngine:
             # Create feature engineer
             self.feature_engineer = EnhancedFeatureEngineer(feature_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.feature_engineer, 'set_regime_engine'):
                 self.feature_engineer.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into FeatureEngineer (Rule 13)")
+                logger.info("✅ Regime engine injected into FeatureEngineer (Rule 2 Regime-First)")
             
             # Register with orchestrator (order=16)
             component_id = self.orchestrator.register_component(
@@ -1110,7 +1117,7 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Interaction Features: {'Enabled' if feature_config['enable_interaction_features'] else 'Disabled'}")
             logger.info(f"   Normalization: {feature_config['normalization_method']}")
             logger.info(f"   Lookback Window: {feature_config['lookback_window']} bars")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13)")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 Regime-First)")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize EnhancedFeatureEngineer: {e}", exc_info=True)
@@ -1129,7 +1136,7 @@ class InstitutionalBacktestEngine:
         Implements:
         - Signal generation from features
         - Regime-aware signal filtering
-        - Liquidity-based signal filtering (Rule 12)
+        - Liquidity-based signal filtering (Rule 7 Section B)
         - Confidence scoring
         """
         logger.info("\n" + "-" * 80)
@@ -1144,7 +1151,7 @@ class InstitutionalBacktestEngine:
             signal_config = {
                 'min_confidence': 0.6,                 # Minimum 60% confidence
                 'enable_regime_filter': True,          # Filter by regime suitability
-                'enable_liquidity_filter': True,       # Filter by liquidity (Rule 12)
+                'enable_liquidity_filter': True,       # Filter by liquidity (Rule 7 Section B)
                 'signal_types': ['BUY', 'SELL', 'HOLD'],  # Signal types
                 'lookback_window': 20,                 # Signal lookback period
                 'enable_caching': True                 # Cache signal calculations
@@ -1153,15 +1160,15 @@ class InstitutionalBacktestEngine:
             # Create signal generator
             self.signal_generator = EnhancedSignalGenerator(signal_config)
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.signal_generator, 'set_regime_engine'):
                 self.signal_generator.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into SignalGenerator (Rule 13)")
+                logger.info("✅ Regime engine injected into SignalGenerator (Rule 2 Regime-First)")
             
-            # Inject liquidity engine for signal filtering (Rule 12)
+            # Inject liquidity engine for signal filtering (Rule 7 Section B)
             if hasattr(self.signal_generator, 'set_liquidity_engine'):
                 self.signal_generator.set_liquidity_engine(self.liquidity_engine)
-                logger.info("✅ Liquidity engine injected into SignalGenerator (Rule 12)")
+                logger.info("✅ Liquidity engine injected into SignalGenerator (Rule 7 Section B)")
             
             # Register with orchestrator (order=17)
             component_id = self.orchestrator.register_component(
@@ -1179,10 +1186,10 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Initialization Order: 17 (after FeatureEngineer=16)")
             logger.info(f"   Min Confidence: {signal_config['min_confidence']:.0%}")
             logger.info(f"   Regime Filter: {'Enabled' if signal_config['enable_regime_filter'] else 'Disabled'}")
-            logger.info(f"   Liquidity Filter: {'Enabled' if signal_config['enable_liquidity_filter'] else 'Disabled'} (Rule 12)")
+            logger.info(f"   Liquidity Filter: {'Enabled' if signal_config['enable_liquidity_filter'] else 'Disabled'} (Rule 7 Section B)")
             logger.info(f"   Signal Types: {', '.join(signal_config['signal_types'])}")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13)")
-            logger.info(f"   Rule 12 Compliance: ✅ Liquidity-Filtered Signals")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 Regime-First)")
+            logger.info(f"   Rule 7 Compliance (Liquidity Management): ✅ Liquidity-Filtered Signals")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize EnhancedSignalGenerator: {e}", exc_info=True)
@@ -1233,7 +1240,7 @@ class InstitutionalBacktestEngine:
         
         The execution engine simulates realistic trade execution in backtests:
         - Applies spread costs (bid-ask spread)
-        - Models market impact (Rule 12)
+        - Models market impact (Rule 7 Section B)
         - Simulates slippage
         - Records executed trades with full cost breakdown
         - Updates positions via PositionTracker
@@ -1245,7 +1252,7 @@ class InstitutionalBacktestEngine:
         - Historical execution simulation
         - Transaction cost analysis (TCA)
         - Position update callbacks
-        - Regime-aware execution (Rule 13)
+        - Regime-aware execution (Rule 2 Regime-First)
         """
         logger.info("\n" + "-" * 80)
         logger.info("⚡ BRICK #9: UnifiedExecutionEngine (order=40)")
@@ -1263,7 +1270,7 @@ class InstitutionalBacktestEngine:
                 'mode': 'backtest',
                 'enable_realistic_fills': True,        # Apply realistic fill models
                 'enable_spread_costs': True,           # Apply bid-ask spreads
-                'enable_market_impact': True,          # Apply market impact (Rule 12)
+                'enable_market_impact': True,          # Apply market impact (Rule 7 Section B)
                 'enable_slippage': True,               # Apply slippage modeling
                 
                 # Cost modeling
@@ -1280,7 +1287,7 @@ class InstitutionalBacktestEngine:
                 'enable_position_tracking': True,      # Track positions via callbacks
                 'validate_positions': True,            # Validate position updates
                 
-                # Regime awareness (Rule 13)
+                # Regime awareness (Rule 2 Regime-First)
                 'regime_aware': True,                  # Adjust execution costs by regime
                 'regime_impact_multipliers': {
                     'low_volatility': 0.8,             # Lower impact in calm markets
@@ -1303,15 +1310,15 @@ class InstitutionalBacktestEngine:
             else:
                 logger.warning("⚠️  No position tracker available - position updates may not work")
             
-            # CRITICAL: Inject regime engine (Rule 13 - Regime-First)
+            # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.execution_engine, 'set_regime_engine'):
                 self.execution_engine.set_regime_engine(self.regime_engine)
-                logger.info("✅ Regime engine injected into ExecutionEngine (Rule 13)")
+                logger.info("✅ Regime engine injected into ExecutionEngine (Rule 2 Regime-First)")
             
-            # Inject liquidity engine for impact modeling (Rule 12)
+            # Inject liquidity engine for impact modeling (Rule 7 Section B)
             if hasattr(self.execution_engine, 'set_liquidity_engine'):
                 self.execution_engine.set_liquidity_engine(self.liquidity_engine)
-                logger.info("✅ Liquidity engine injected for impact modeling (Rule 12)")
+                logger.info("✅ Liquidity engine injected for impact modeling (Rule 7 Section B)")
             
             # Register with orchestrator (order=40)
             component_id = self.orchestrator.register_component(
@@ -1330,11 +1337,11 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Mode: Backtest (Historical Simulation)")
             logger.info(f"   Realistic Fills: ✅ (spread + impact + slippage)")
             logger.info(f"   Spread Model: {execution_config['spread_model']} (fallback: {execution_config['spread_fallback_bps']} bps)")
-            logger.info(f"   Impact Model: {execution_config['impact_model']} (Rule 12)")
+            logger.info(f"   Impact Model: {execution_config['impact_model']} (Rule 7 Section B)")
             logger.info(f"   Base Slippage: {execution_config['base_slippage_bps']} bps")
             logger.info(f"   Position Tracking: ✅ (via PositionTracker)")
-            logger.info(f"   Regime-Aware: ✅ (Rule 13 - execution costs adapt to regime)")
-            logger.info(f"   Rule 12 Compliance: ✅ Liquidity-Aware Execution Costs")
+            logger.info(f"   Regime-Aware: ✅ (Rule 2 - execution costs adapt to regime)")
+            logger.info(f"   Rule 7 Compliance (Liquidity Management): ✅ Liquidity-Aware Execution Costs")
             logger.info(f"   Rule 4 Compliance: ✅ Executes ONLY authorized trades")
             
         except Exception as e:
@@ -1713,6 +1720,7 @@ class InstitutionalBacktestEngine:
             summary = self.performance_reporter.generate_performance_summary(
                 backtest_config=self.config,
                 execution_history=self.execution_history,
+                position_history=self.position_history,
                 initial_capital=initial_capital,
                 final_capital=final_capital
             )
@@ -1752,6 +1760,7 @@ class InstitutionalBacktestEngine:
             summary = self.performance_reporter.generate_performance_summary(
                 backtest_config=self.config,
                 execution_history=self.execution_history,
+                position_history=self.position_history,
                 initial_capital=initial_capital,
                 final_capital=final_capital
             )
@@ -1879,6 +1888,21 @@ class InstitutionalBacktestEngine:
             bars_with_signals = 0
             bars_with_trades = 0
             
+            # Record initial position state
+            if self.position_tracker:
+                initial_snapshot = {
+                    'timestamp': self.historical_data.index[0] if not self.historical_data.empty else datetime.now(),
+                    'equity': self.position_tracker.get_equity(),
+                    'cash': self.position_tracker.cash,
+                    'total_pnl': self.position_tracker.get_total_pnl(),
+                    'realized_pnl': self.position_tracker.total_realized_pnl,
+                    'unrealized_pnl': self.position_tracker.total_unrealized_pnl,
+                    'position_count': self.position_tracker.get_position_count(),
+                    'max_drawdown': self.position_tracker.max_drawdown,
+                    'max_drawdown_pct': self.position_tracker.max_drawdown_pct
+                }
+                self.position_history.append(initial_snapshot)
+            
             # Progress tracking
             progress_interval = max(1, total_bars // 20)  # Report every 5%
             
@@ -1930,6 +1954,8 @@ class InstitutionalBacktestEngine:
             results = {
                 'success': True,
                 'summary': summary,
+                'execution_history': self.execution_history,
+                'position_history': self.position_history,
                 'total_bars': bars_processed,
                 'bars_with_signals': bars_with_signals,
                 'bars_with_trades': bars_with_trades,
@@ -1963,7 +1989,7 @@ class InstitutionalBacktestEngine:
         Process a single bar of market data through the complete pipeline
         
         This method executes one iteration of the backtest loop:
-        1. Update regime engine with market data (Rule 13 - Regime-First)
+        1. Update regime engine with market data (Rule 2 - Regime-First)
         2. Process through indicators/features/signals pipeline
         3. Strategy signal generation ✅ Phase 7.2
         4. Risk authorization
@@ -1988,7 +2014,7 @@ class InstitutionalBacktestEngine:
         }
         
         try:
-            # Step 1: Update regime engine (Rule 13 - Regime-First)
+            # Step 1: Update regime engine (Rule 2 - Regime-First)
             if self.regime_engine:
                 # Convert bar to dict for regime engine
                 bar_dict = bar.to_dict()
@@ -2065,6 +2091,8 @@ class InstitutionalBacktestEngine:
                                     bar_results['signals_generated'] = len(signals_df)
                                     if bar_index < 10:
                                         logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals!")
+                                else:
+                                    pass
                             except Exception as e:
                                 logger.error(f"Strategy signal generation failed at bar {bar_index}: {e}", exc_info=True)
                                 # Fallback to pipeline signal generator
@@ -2082,7 +2110,6 @@ class InstitutionalBacktestEngine:
                         bar_df = features_row
                         
                 except Exception as e:
-                    logger.debug(f"Pre-calculated data access failed at bar {bar_index}: {e}")
                     use_pre_calculated = False
             
             # Fallback to on-the-fly calculation if pre-calculated data not available
@@ -2095,16 +2122,23 @@ class InstitutionalBacktestEngine:
                 bar_df.index.name = 'timestamp'
                 bar_df = bar_df.reset_index()
                 
+                # Accumulate historical market data for strategies
+                for symbol in self.config.data.symbols:
+                    if symbol not in self.historical_market_data:
+                        self.historical_market_data[symbol] = pd.DataFrame()
+                    # Append current bar to historical data
+                    self.historical_market_data[symbol] = pd.concat([self.historical_market_data[symbol], bar_df], ignore_index=True)
+                
                 # Calculate on-the-fly (slower but works)
                 indicators_df = self.indicators_engine.calculate_indicators(bar_df) if self.indicators_engine else bar_df
                 features_df = self.feature_engineer.create_features(indicators_df) if self.feature_engineer and indicators_df is not None else indicators_df
                 
-                # ✅ FIX: Pass features to STRATEGY for signal generation (not pipeline)
+                # ✅ FIX: Pass historical market data to STRATEGY for signal generation
                 signals_df = None
                 if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
                     # STRATEGY generates signals based on its custom logic
                     try:
-                        strategy_signals = await self.strategy_manager.generate_signals(features_df)
+                        strategy_signals = await self.strategy_manager.generate_signals(self.config.data.symbols, self.historical_market_data)
                         # Strategy returns List[Signal], convert to DataFrame
                         if strategy_signals is not None:
                             if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
@@ -2112,7 +2146,7 @@ class InstitutionalBacktestEngine:
                                 # CRITICAL FIX: Convert signal_type enum to .value string
                                 signals_df = pd.DataFrame([{
                                     'symbol': s.symbol,
-                                    'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+                                    'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
                                     'confidence': s.confidence,
                                     'strength': getattr(s, 'strength', 0.5),
                                     'timestamp': getattr(s, 'timestamp', None),
@@ -2122,7 +2156,6 @@ class InstitutionalBacktestEngine:
                             elif isinstance(strategy_signals, pd.DataFrame) and not strategy_signals.empty:
                                 signals_df = strategy_signals
                     except Exception as e:
-                        logger.debug(f"Strategy signal generation failed: {e}")
                         # Fallback to pipeline signal generator
                         signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
                 else:
@@ -2149,6 +2182,36 @@ class InstitutionalBacktestEngine:
                     timestamp
                 )
                 bar_results['trades_executed'] = len(executed_trades)
+            
+            # Update market prices for unrealized P&L calculation
+            if self.position_tracker and self.position_tracker.positions:
+                current_prices = {}
+                for symbol in self.position_tracker.positions.keys():
+                    if symbol in self.market_data and timestamp in self.market_data[symbol].index:
+                        current_prices[symbol] = self.market_data[symbol].loc[timestamp, 'close']
+                    elif symbol in self.market_data:
+                        # Fallback: use the most recent available price
+                        symbol_data = self.market_data[symbol]
+                        if not symbol_data.empty:
+                            current_prices[symbol] = symbol_data['close'].iloc[-1]
+                
+                if current_prices:
+                    self.position_tracker.update_market_prices(current_prices)
+            
+            # Record position history after execution
+            if self.position_tracker:
+                position_snapshot = {
+                    'timestamp': timestamp,
+                    'equity': self.position_tracker.get_equity(),
+                    'cash': self.position_tracker.cash,
+                    'total_pnl': self.position_tracker.get_total_pnl(),
+                    'realized_pnl': self.position_tracker.total_realized_pnl,
+                    'unrealized_pnl': self.position_tracker.total_unrealized_pnl,
+                    'position_count': self.position_tracker.get_position_count(),
+                    'max_drawdown': self.position_tracker.max_drawdown,
+                    'max_drawdown_pct': self.position_tracker.max_drawdown_pct
+                }
+                self.position_history.append(position_snapshot)
             
             return bar_results
             
@@ -2187,6 +2250,15 @@ class InstitutionalBacktestEngine:
         authorized_trades = []
         
         try:
+            
+            # Check if risk manager is available and initialized
+            if self.risk_manager is None:
+                logger.warning("⚠️  No risk manager available - signals cannot be authorized")
+                return authorized_trades
+            
+            if not hasattr(self.risk_manager, 'is_initialized') or not self.risk_manager.is_initialized:
+                logger.warning("⚠️  Risk manager not initialized - signals cannot be authorized")
+                return authorized_trades
             # Phase 7.2: Strategy manager processes signals
             # For now, we'll directly authorize signals from the pipeline
             # In future phases, this will involve multi-strategy coordination
@@ -2199,7 +2271,7 @@ class InstitutionalBacktestEngine:
                 confidence = signal_row.get('confidence', 0.5)
                 
                 # Only process BUY/SELL signals (skip HOLD)
-                if signal_type in ['BUY', 'SELL'] and confidence >= 0.6:
+                if signal_type in ['buy', 'sell'] and confidence >= 0.6:
                     
                     # Get current position
                     current_position = 0.0
@@ -2208,12 +2280,20 @@ class InstitutionalBacktestEngine:
                         if position_obj:
                             current_position = position_obj.quantity
                     
+                    # Get current price for position calculations
+                    current_price = bar_df[bar_df['symbol'] == symbol]['close'].iloc[-1] if not bar_df.empty and 'close' in bar_df.columns else 100.0
+                    
                     # Determine trade side and quantity
-                    if signal_type == 'BUY' and current_position <= 0:
+                    if signal_type == 'buy' and current_position <= 0:
                         # Enter long position
                         side = 'buy'
-                        quantity = 100  # Default position size
-                    elif signal_type == 'SELL' and current_position >= 0:
+                        # Calculate quantity based on position size percentage and current price
+                        position_size_pct = self.config.strategies[0].max_position_size
+                        portfolio_value = 1000000  # Should match risk manager default
+                        dollar_amount = position_size_pct * portfolio_value
+                        quantity = dollar_amount / current_price
+                        quantity = max(1, int(quantity))  # At least 1 share, round down
+                    elif signal_type == 'sell' and current_position >= 0:
                         # Enter short position or close long
                         side = 'sell'
                         quantity = max(100, abs(current_position))
@@ -2231,8 +2311,9 @@ class InstitutionalBacktestEngine:
                             quantity=quantity,
                             strategy_id='backtest_strategy',
                             confidence=confidence,
+                            current_price=current_price,
                             metadata={
-                                'timestamp': timestamp.isoformat(),
+                                'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
                                 'signal_type': signal_type,
                                 'bar_index': self.current_bar_index
                             }
@@ -2253,9 +2334,6 @@ class InstitutionalBacktestEngine:
                                 'authorization': authorization,
                                 'timestamp': timestamp
                             })
-                            logger.debug(f"✅ Trade authorized: {signal_type} {authorization.authorized_quantity} {symbol}")
-                        else:
-                            logger.debug(f"⚠️ Trade rejected: {authorization.rejection_reason}")
         
         except Exception as e:
             logger.error(f"❌ Error getting authorized trades: {e}")
@@ -2320,7 +2398,10 @@ class InstitutionalBacktestEngine:
                     side = auth_trade['side']
                     quantity = auth_trade['quantity']
                     
-                    # Get regime context (Rule 13)
+                    # Get current price from authorization (more reliable than potentially modified bar data)
+                    current_price = auth_trade.get('current_price', current_bar.get('close', 0))
+                    
+                    # Get regime context (Rule 2 Regime-First)
                     regime_context = None
                     if self.regime_engine:
                         # Try to get regime context if method exists
@@ -2330,32 +2411,32 @@ class InstitutionalBacktestEngine:
                             # Fallback: use current_regime attribute if available
                             regime_context = self.regime_engine.current_regime
                     
-                    # Get liquidity score (Rule 12)
+                    # Get liquidity score (Rule 7 Section B)
                     liquidity_score = None
                     if self.liquidity_engine and hasattr(self.liquidity_engine, 'assess_liquidity_score'):
                         try:
                             # Prepare market data dict for liquidity assessment
                             liquidity_market_data = {
                                 'timestamp': bar_timestamp,
-                                'close': current_bar.get('close', 0),
+                                'close': current_price,  # Use current_price
                                 'volume': current_bar.get('volume', 0),
-                                'high': current_bar.get('high', current_bar.get('close', 0)),
-                                'low': current_bar.get('low', current_bar.get('close', 0))
+                                'high': current_bar.get('high', current_price),
+                                'low': current_bar.get('low', current_price)
                             }
                             liquidity_assessment = self.liquidity_engine.assess_liquidity_score(
                                 symbol, liquidity_market_data, historical_data=None
                             )
                             liquidity_score = liquidity_assessment.overall_score if liquidity_assessment else None
                         except Exception as e:
-                            logger.debug(f"Could not get liquidity score for {symbol}: {e}")
+                            pass
                     
                     # Prepare market data for simulator
                     market_data = {
                         'timestamp': bar_timestamp,
-                        'open': current_bar.get('open', current_bar.get('close', 0)),
-                        'high': current_bar.get('high', current_bar.get('close', 0)),
-                        'low': current_bar.get('low', current_bar.get('close', 0)),
-                        'close': current_bar.get('close', 0),
+                        'open': current_bar.get('open', current_price),
+                        'high': current_bar.get('high', current_price),
+                        'low': current_bar.get('low', current_price),
+                        'close': current_price,  # Use current_price instead of potentially modified bar data
                         'volume': current_bar.get('volume', 0),
                         'volatility': current_bar.get('volatility', 0.02)  # 2% default
                     }
@@ -2373,10 +2454,10 @@ class InstitutionalBacktestEngine:
                         symbol=symbol,
                         side=side.lower(),
                         quantity=quantity,
-                        decision_price=market_data['close'],  # Use close as decision price
+                        decision_price=current_price,  # Use current_price from authorization
                         market_data=market_data,
-                        authorization_id=getattr(auth_trade, 'authorization_id', ''),
-                        strategy_id=getattr(auth_trade, 'strategy_id', ''),
+                        authorization_id=getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
+                        strategy_id=getattr(auth_trade.get('authorization', {}), 'request_id', ''),
                         regime_context=regime_dict,
                         liquidity_score=liquidity_score
                     )
@@ -2389,12 +2470,11 @@ class InstitutionalBacktestEngine:
                             quantity=quantity,
                             price=simulated_fill.fill_price,  # Use fill price (includes costs)
                             commission=simulated_fill.costs.commission_dollars,
-                            strategy_id=getattr(auth_trade, 'strategy_id', ''),
+                            strategy_id=getattr(auth_trade.get('authorization', {}), 'request_id', ''),
                             trade_id=simulated_fill.fill_id
                         )
                         
-                        logger.debug(f"Position updated: {symbol} {side} {quantity} @ ${simulated_fill.fill_price:.2f} "
-                                   f"(cost: {simulated_fill.costs.total_cost_bps:.1f} bps)")
+                        logger.debug(f"📈 Position updated: {position_update}")
                     
                     # Record executed trade
                     executed_trade = {
@@ -2422,9 +2502,12 @@ class InstitutionalBacktestEngine:
                         'implementation_shortfall_bps': simulated_fill.implementation_shortfall_bps,
                         'arrival_cost_bps': simulated_fill.arrival_cost_bps,
                         
+                        # P&L from position tracker
+                        'realized_pnl': position_update.get('realized_pnl', 0.0) if self.position_tracker else 0.0,
+                        
                         # Metadata
-                        'authorization_id': simulated_fill.authorization_id,
-                        'strategy_id': simulated_fill.strategy_id,
+                        'authorization_id': getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
+                        'strategy_id': getattr(auth_trade.get('authorization', {}), 'request_id', ''),
                         'fill_id': simulated_fill.fill_id,
                         'regime': simulated_fill.costs.regime,
                         'liquidity_score': simulated_fill.costs.liquidity_score
@@ -2435,8 +2518,13 @@ class InstitutionalBacktestEngine:
                     # Add to execution history
                     self.execution_history.append(executed_trade)
                     
+                    logger.info(f"✅ Trade executed and recorded: {symbol} {side} {quantity}")
+                    
                 except Exception as e:
-                    logger.error(f"❌ Failed to simulate execution for {auth_trade.symbol}: {e}")
+                    logger.error(f"❌ Failed to simulate execution for {auth_trade.get('symbol', 'unknown')}: {e}")
+                    logger.error(f"   Trade details: {auth_trade}")
+                    import traceback
+                    logger.error(f"   Traceback: {traceback.format_exc()}")
                     continue
             
             if executed_trades:
@@ -2483,7 +2571,7 @@ class InstitutionalBacktestEngine:
         }
         
         try:
-            # Step 1: Update regime engine (Rule 13 - Regime-First)
+            # Step 1: Update regime engine (Rule 2 - Regime-First)
             if self.regime_engine:
                 for _, row in bar_data.iterrows():
                     await self.regime_engine.on_market_data(row)
@@ -2678,67 +2766,4 @@ async def create_backtest_engine(config_path: Path) -> InstitutionalBacktestEngi
     return engine
 
 
-if __name__ == "__main__":
-    """
-    Test the backtest engine skeleton
-    """
-    import sys
-    
-    async def test_engine():
-        """Test backtest engine initialization"""
-        
-        print("\n" + "=" * 80)
-        print("INSTITUTIONAL BACKTEST ENGINE - SKELETON TEST")
-        print("=" * 80 + "\n")
-        
-        # Load example config
-        config_path = Path(__file__).parent.parent / "config/examples/single_strategy.json"
-        
-        if not config_path.exists():
-            print(f"❌ Config file not found: {config_path}")
-            sys.exit(1)
-        
-        print(f"📋 Loading config: {config_path.name}")
-        config = BacktestConfiguration.from_json(config_path)
-        print(f"✅ Config loaded: {config.backtest_name}\n")
-        
-        # Create engine
-        print("🏗️  Creating backtest engine...")
-        engine = InstitutionalBacktestEngine(config)
-        print(f"✅ Engine created\n")
-        
-        # Initialize
-        print("🚀 Initializing engine...")
-        init_success = await engine.initialize()
-        
-        if init_success:
-            print("\n✅ Initialization successful!")
-            
-            # Check status
-            status = engine.get_status()
-            print(f"\n📊 Engine Status:")
-            print(f"   Initialized: {status['is_initialized']}")
-            print(f"   Components: {status['components_registered']}")
-            print(f"   Phase 2: {status['phase_status']['phase2_data_regime']}")
-            
-            # Test run (skeleton)
-            print("\n🎬 Testing backtest run (skeleton)...")
-            results = await engine.run_backtest()
-            print(f"✅ Backtest completed: {results['status']}")
-            
-            # Shutdown
-            print("\n🛑 Shutting down...")
-            await engine.shutdown()
-            print("✅ Shutdown complete")
-            
-        else:
-            print("\n❌ Initialization failed")
-            sys.exit(1)
-        
-        print("\n" + "=" * 80)
-        print("✅ SKELETON TEST COMPLETE - READY FOR PHASE 2.2")
-        print("=" * 80 + "\n")
-    
-    # Run test
-    asyncio.run(test_engine())
 

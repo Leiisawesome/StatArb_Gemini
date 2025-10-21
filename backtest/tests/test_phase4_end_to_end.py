@@ -336,7 +336,7 @@ async def test_regime_awareness_in_pipeline(real_data_config):
     """
     Test that regime context flows through entire pipeline
     
-    Verifies Rule 13: Regime-First Principle
+    Verifies Rule 2 (Regime-First Principle)
     """
     logger.info("\n🧪 Testing Regime-First Principle in pipeline...")
     

@@ -322,7 +322,6 @@ async def test_phase5_execution_engine():
                         trades_failed += 1
                 
             except Exception as e:
-                logger.debug(f"   Execution error: {e}")
                 trades_failed += 1
     
     logger.info(f"\n📊 Execution Results:")
