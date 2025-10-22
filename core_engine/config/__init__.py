@@ -43,6 +43,13 @@ from .component_config import (
     TimingConfig,
     PerformanceConfig,
     
+    # Data brick sub-configs (Phase 1)
+    ConnectionConfig,
+    CachingConfig,
+    DataValidationConfig,
+    FeedManagementConfig,
+    DataPerformanceConfig,
+    
     # Domain configs
     DataConfig,
     RiskConfig,
@@ -100,6 +107,10 @@ __all__ = [
     
     # Sub-configs (reusable)
     'PositionLimits', 'RiskLimits', 'TimingConfig', 'PerformanceConfig',
+    
+    # Data brick sub-configs (Phase 1)
+    'ConnectionConfig', 'CachingConfig', 'DataValidationConfig',
+    'FeedManagementConfig', 'DataPerformanceConfig',
     
     # Component configs (consolidated)
     'DataConfig', 'RiskConfig', 'ProcessingConfig',

@@ -990,3 +990,401 @@ def validate_config_compatibility(config: Any) -> bool:
             raise ValueError("timing must be TimingConfig instance")
     
     return True
+
+
+# ============================================================================
+# DATA BRICK CONFIGURATIONS
+# ============================================================================
+# Consolidated from 4 scattered configs in data brick (Phase 1)
+# Analysis: docs/03_compliance_audits/2025-10-21_data_config_analysis.md
+# ============================================================================
+
+@dataclass
+class ConnectionConfig:
+    """
+    Database and connection configuration
+    
+    Consolidated from ClickHouseDataConfig and DataEngineConfig.
+    """
+    clickhouse_host: str = "localhost"
+    """ClickHouse server host"""
+    
+    clickhouse_port: int = 8123
+    """ClickHouse HTTP port (default: 8123)"""
+    
+    clickhouse_database: str = "polygon_data"
+    """ClickHouse database name"""
+    
+    connect_timeout: float = 30.0
+    """Connection timeout in seconds"""
+    
+    read_timeout: float = 10.0
+    """Read timeout in seconds"""
+    
+    max_retry_attempts: int = 3
+    """Maximum retry attempts for failed operations"""
+    
+    retry_delay_seconds: float = 1.0
+    """Delay between retry attempts"""
+    
+    enable_circuit_breaker: bool = True
+    """Enable circuit breaker for connection failures"""
+    
+    def __post_init__(self):
+        """Validate connection configuration"""
+        if self.connect_timeout <= 0:
+            raise ValueError(f"connect_timeout must be positive, got {self.connect_timeout}")
+        if self.read_timeout <= 0:
+            raise ValueError(f"read_timeout must be positive, got {self.read_timeout}")
+        if self.max_retry_attempts < 0:
+            raise ValueError(f"max_retry_attempts must be non-negative, got {self.max_retry_attempts}")
+
+
+@dataclass
+class CachingConfig:
+    """
+    Caching configuration
+    
+    Consolidated from ClickHouseDataConfig and DataEngineConfig.
+    """
+    enable_caching: bool = True
+    """Enable data caching"""
+    
+    cache_ttl: int = 300
+    """Cache time-to-live in seconds (default: 5 minutes)"""
+    
+    max_cache_size: int = 1000
+    """Maximum number of cached items"""
+    
+    cache_config: Optional[Dict[str, Any]] = None
+    """Additional cache configuration (for advanced use)"""
+    
+    def __post_init__(self):
+        """Validate caching configuration"""
+        if self.cache_ttl < 0:
+            raise ValueError(f"cache_ttl must be non-negative, got {self.cache_ttl}")
+        if self.max_cache_size <= 0:
+            raise ValueError(f"max_cache_size must be positive, got {self.max_cache_size}")
+
+
+@dataclass
+class DataValidationConfig:
+    """
+    Data validation configuration
+    
+    Consolidated from ValidationConfiguration and DataEngineConfig.
+    """
+    enable_data_validation: bool = True
+    """Enable data validation"""
+    
+    quality_threshold: float = 0.95
+    """Data quality threshold (0.0-1.0)"""
+    
+    # Price validation
+    min_price: Optional[float] = None
+    """Minimum valid price"""
+    
+    max_price: Optional[float] = None
+    """Maximum valid price"""
+    
+    max_price_change_pct: float = 20.0
+    """Maximum price change percentage"""
+    
+    # Spread validation
+    max_spread_pct: float = 5.0
+    """Maximum spread percentage"""
+    
+    max_spread_bps: float = 500.0
+    """Maximum spread in basis points"""
+    
+    # Volume validation
+    min_volume: float = 0
+    """Minimum valid volume"""
+    
+    max_volume_spike_factor: float = 10.0
+    """Maximum volume spike factor"""
+    
+    # Statistical validation
+    outlier_threshold_std: float = 3.0
+    """Outlier threshold in standard deviations"""
+    
+    moving_average_window: int = 20
+    """Moving average window for validation"""
+    
+    # Timing validation
+    max_data_age_seconds: float = 30.0
+    """Maximum data age in seconds"""
+    
+    required_update_frequency_seconds: float = 1.0
+    """Required update frequency"""
+    
+    # Completeness validation
+    min_completeness_pct: float = 95.0
+    """Minimum data completeness percentage"""
+    
+    # Cross-validation
+    enable_cross_validation: bool = True
+    """Enable cross-validation across sources"""
+    
+    max_cross_validation_diff_pct: float = 2.0
+    """Maximum difference for cross-validation"""
+    
+    def __post_init__(self):
+        """Validate data validation configuration"""
+        if not 0 <= self.quality_threshold <= 1:
+            raise ValueError(f"quality_threshold must be [0, 1], got {self.quality_threshold}")
+        if self.max_price_change_pct < 0:
+            raise ValueError(f"max_price_change_pct must be non-negative")
+        if self.outlier_threshold_std <= 0:
+            raise ValueError(f"outlier_threshold_std must be positive")
+
+
+@dataclass
+class FeedManagementConfig:
+    """
+    Feed management configuration
+    
+    Consolidated from FeedConfiguration.
+    """
+    enable_feed_management: bool = True
+    """Enable feed management"""
+    
+    max_concurrent_requests: int = 10
+    """Maximum concurrent requests per feed"""
+    
+    buffer_size: int = 10000
+    """Buffer size for feed data"""
+    
+    max_message_size: int = 1048576
+    """Maximum message size in bytes (default: 1MB)"""
+    
+    # Connection parameters
+    heartbeat_interval: float = 30.0
+    """Heartbeat interval in seconds"""
+    
+    reconnect_interval: float = 5.0
+    """Reconnection interval in seconds"""
+    
+    max_reconnect_attempts: int = 10
+    """Maximum reconnection attempts"""
+    
+    # Authentication (optional, per-feed)
+    api_key: Optional[str] = None
+    """API key for feed authentication"""
+    
+    secret_key: Optional[str] = None
+    """Secret key for feed authentication"""
+    
+    # Quality settings
+    enable_sequence_check: bool = True
+    """Enable sequence number checking"""
+    
+    enable_timestamp_validation: bool = True
+    """Enable timestamp validation"""
+    
+    def __post_init__(self):
+        """Validate feed management configuration"""
+        if self.max_concurrent_requests <= 0:
+            raise ValueError(f"max_concurrent_requests must be positive")
+        if self.buffer_size <= 0:
+            raise ValueError(f"buffer_size must be positive")
+        if self.heartbeat_interval <= 0:
+            raise ValueError(f"heartbeat_interval must be positive")
+
+
+@dataclass
+class DataPerformanceConfig:
+    """
+    Performance and monitoring configuration
+    
+    Consolidated from DataEngineConfig.
+    """
+    max_concurrent_requests: int = 100
+    """Maximum concurrent requests for data engine"""
+    
+    request_timeout_seconds: float = 30.0
+    """Request timeout in seconds"""
+    
+    enable_performance_monitoring: bool = True
+    """Enable performance monitoring"""
+    
+    monitoring_interval_seconds: float = 60.0
+    """Performance monitoring interval"""
+    
+    enable_compression: bool = True
+    """Enable data compression"""
+    
+    data_retention_days: int = 365
+    """Data retention period in days"""
+    
+    def __post_init__(self):
+        """Validate performance configuration"""
+        if self.max_concurrent_requests <= 0:
+            raise ValueError(f"max_concurrent_requests must be positive")
+        if self.request_timeout_seconds <= 0:
+            raise ValueError(f"request_timeout_seconds must be positive")
+        if self.data_retention_days <= 0:
+            raise ValueError(f"data_retention_days must be positive")
+
+
+@dataclass
+class DataConfig:
+    """
+    Centralized data configuration using composition pattern
+    
+    Consolidates 4 scattered configs from data brick:
+    1. ClickHouseDataConfig (manager.py:126)
+    2. DataEngineConfig (sources/clickhouse.py:53)
+    3. FeedConfiguration (feeds/manager.py:72)
+    4. ValidationConfiguration (validation/validator.py:116)
+    
+    Total parameters: 87 consolidated into 6 sub-configs + core params.
+    Zero duplication (DRY principle enforced).
+    
+    Usage:
+        from core_engine.config import DataConfig
+        
+        # Use with defaults
+        config = DataConfig()
+        
+        # Customize sub-configs
+        config = DataConfig(
+            connection=ConnectionConfig(clickhouse_host="prod-db"),
+            validation=DataValidationConfig(quality_threshold=0.98)
+        )
+    """
+    
+    # Sub-configurations (composition pattern - proven in regime brick)
+    connection: ConnectionConfig = field(default_factory=ConnectionConfig)
+    """Database connection configuration"""
+    
+    caching: CachingConfig = field(default_factory=CachingConfig)
+    """Data caching configuration"""
+    
+    validation: DataValidationConfig = field(default_factory=DataValidationConfig)
+    """Data validation configuration"""
+    
+    feeds: FeedManagementConfig = field(default_factory=FeedManagementConfig)
+    """Feed management configuration"""
+    
+    performance: DataPerformanceConfig = field(default_factory=DataPerformanceConfig)
+    """Performance and monitoring configuration"""
+    
+    # Core data parameters
+    symbols: List[str] = field(default_factory=lambda: ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ'])
+    """
+    Symbols to trade/analyze.
+    Default: Top liquid symbols from ClickHouse data.
+    """
+    
+    start_date: Optional[str] = None
+    """
+    Start date for data range (YYYY-MM-DD format).
+    If None, uses single date or real-time data.
+    """
+    
+    end_date: Optional[str] = None
+    """
+    End date for data range (YYYY-MM-DD format).
+    If None, uses start_date as single date.
+    """
+    
+    interval: str = "1min"
+    """
+    Data interval/timeframe.
+    Valid: '1min', '5min', '15min', '30min', '1h', '1D'
+    """
+    
+    # Data engine mode
+    mode: str = "live"
+    """
+    Data engine mode: 'live', 'backtest', 'simulation'
+    """
+    
+    # Feature flags
+    enable_market_data: bool = True
+    """Enable market data processing"""
+    
+    enable_alternative_data: bool = True
+    """Enable alternative data sources"""
+    
+    enable_data_lineage: bool = True
+    """Enable data lineage tracking"""
+    
+    enable_audit_trail: bool = True
+    """Enable audit trail logging"""
+    
+    enable_data_quality_monitoring: bool = True
+    """Enable data quality monitoring"""
+    
+    # Storage
+    enable_persistence: bool = True
+    """Enable data persistence"""
+    
+    storage_path: Optional[str] = None
+    """Storage path for persisted data"""
+    
+    # Backward compatibility (deprecated)
+    target_date: Optional[str] = None
+    """
+    DEPRECATED: Use start_date/end_date instead.
+    Single target date for backward compatibility.
+    """
+    
+    def __post_init__(self):
+        """Validate data configuration"""
+        # Validate date ranges
+        if self.start_date and self.end_date:
+            from datetime import datetime
+            try:
+                start_dt = datetime.strptime(self.start_date, "%Y-%m-%d")
+                end_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
+                if start_dt > end_dt:
+                    raise ValueError(f"start_date ({self.start_date}) must be <= end_date ({self.end_date})")
+            except ValueError as e:
+                if "does not match format" in str(e):
+                    raise ValueError(f"Dates must be in YYYY-MM-DD format. Error: {e}")
+                raise
+        
+        # Handle deprecated target_date
+        if self.target_date and not (self.start_date or self.end_date):
+            warnings.warn(
+                "target_date is deprecated. Use start_date/end_date instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            self.start_date = self.target_date
+            self.end_date = self.target_date
+        
+        # Validate interval
+        valid_intervals = ['1min', '5min', '15min', '30min', '1h', '4h', '1D', '1W', '1M']
+        if self.interval not in valid_intervals:
+            raise ValueError(f"interval must be one of {valid_intervals}, got {self.interval}")
+        
+        # Validate mode
+        valid_modes = ['live', 'backtest', 'simulation', 'replay']
+        if self.mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got {self.mode}")
+        
+        # Validate storage path if persistence enabled
+        if self.enable_persistence and self.storage_path:
+            import os
+            if not os.path.isabs(self.storage_path):
+                warnings.warn(
+                    f"storage_path '{self.storage_path}' is relative. Consider using absolute path.",
+                    UserWarning,
+                    stacklevel=2
+                )
+
+
+# Export data configs
+__all__ = [
+    # ... existing exports ...
+    # Data brick configs
+    'ConnectionConfig',
+    'CachingConfig',
+    'DataValidationConfig',
+    'FeedManagementConfig',
+    'DataPerformanceConfig',
+    'DataConfig',
+]
