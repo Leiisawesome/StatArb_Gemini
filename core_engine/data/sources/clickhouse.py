@@ -7,18 +7,58 @@ import logging
 import threading
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import deque
+import warnings
 
-# Import our data components
-from .market_data import MarketDataHandler, MarketDataRequest
-from ..alternative_data_handler import AlternativeDataHandler, AlternativeDataRequest
-from ..validation.validator import DataValidator, ValidationResult
-from ..cache.manager import CacheManager
-from ..feeds.manager import FeedManager, FeedMessage
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from core_engine.config import (
+        DataConfig as CentralizedDataConfig,
+        DataPerformanceConfig,
+        DataValidationConfig,
+        CachingConfig,
+        FeedManagementConfig
+    )
+except ImportError:
+    CentralizedDataConfig = None
+    DataPerformanceConfig = None
+    DataValidationConfig = None
+    CachingConfig = None
+    FeedManagementConfig = None
+
+# Import our data components (with graceful fallbacks)
+try:
+    from .market_data import MarketDataHandler, MarketDataRequest
+except ImportError:
+    MarketDataHandler = None
+    MarketDataRequest = None
+
+try:
+    from ..alternative_data_handler import AlternativeDataHandler, AlternativeDataRequest
+except ImportError:
+    AlternativeDataHandler = None
+    AlternativeDataRequest = None
+
+try:
+    from ..validation.validator import DataValidator, ValidationResult
+except ImportError:
+    DataValidator = None
+    ValidationResult = None
+
+try:
+    from ..cache.manager import CacheManager
+except ImportError:
+    CacheManager = None
+
+try:
+    from ..feeds.manager import FeedManager, FeedMessage
+except ImportError:
+    FeedManager = None
+    FeedMessage = None
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +91,14 @@ class DataSource(Enum):
 
 @dataclass
 class DataEngineConfig:
-    """Data engine configuration"""
+    """
+    DEPRECATED: Legacy data engine configuration
+    
+    This class provides backward compatibility. New code should use:
+        from core_engine.config import DataConfig
+    
+    Automatically converts to centralized DataConfig format.
+    """
     mode: DataEngineMode = DataEngineMode.LIVE
     
     # Component enablement
@@ -96,6 +143,48 @@ class DataEngineConfig:
     enable_data_lineage: bool = True
     enable_audit_trail: bool = True
     enable_compression: bool = True
+    
+    def __post_init__(self):
+        """Warn about deprecation"""
+        warnings.warn(
+            "DataEngineConfig is deprecated. Use DataConfig from core_engine.config",
+            DeprecationWarning,
+            stacklevel=2
+        )
+    
+    def to_centralized_config(self) -> 'CentralizedDataConfig':
+        """Convert to centralized DataConfig format"""
+        if CentralizedDataConfig is None:
+            raise ImportError("CentralizedDataConfig not available")
+        
+        return CentralizedDataConfig(
+            mode=self.mode.value if isinstance(self.mode, DataEngineMode) else self.mode,
+            enable_market_data=self.enable_market_data,
+            enable_alternative_data=self.enable_alternative_data,
+            enable_data_lineage=self.enable_data_lineage,
+            enable_audit_trail=self.enable_audit_trail,
+            enable_persistence=self.enable_persistence,
+            storage_path=self.storage_path,
+            performance=DataPerformanceConfig(
+                max_concurrent_requests=self.max_concurrent_requests,
+                request_timeout_seconds=self.request_timeout_seconds,
+                enable_performance_monitoring=self.enable_performance_monitoring,
+                monitoring_interval_seconds=self.monitoring_interval_seconds,
+                enable_compression=self.enable_compression,
+                data_retention_days=self.data_retention_days
+            ) if DataPerformanceConfig else None,
+            validation=DataValidationConfig(
+                enable_data_validation=self.enable_data_validation,
+                quality_threshold=self.quality_threshold
+            ) if DataValidationConfig else None,
+            caching=CachingConfig(
+                enable_caching=self.enable_caching,
+                cache_config=self.cache_config
+            ) if CachingConfig else None,
+            feeds=FeedManagementConfig(
+                enable_feed_management=self.enable_feed_management
+            ) if FeedManagementConfig else None
+        )
 
 
 @dataclass
