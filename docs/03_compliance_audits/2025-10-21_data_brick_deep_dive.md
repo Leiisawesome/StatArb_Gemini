@@ -70,12 +70,18 @@ core_engine/data/
 - `cache_data()` - Caching mechanism
 
 #### 2. Liquidity Engine (liquidity_engine.py)
-**Lines:** 133  
+**Lines:** 109 (stub implementation)  
 **Role:** Liquidity assessment and filtering
 
 **Status:**
-- ⚠️  No ISystemComponent implementation
-- ⚠️  May have scattered configuration
+- ✅ **Implements ISystemComponent** (lines 43-89)
+- ✅ **Lifecycle methods:** initialize(), start(), stop(), health_check(), get_status()
+- ✅ **Orchestrator registration:** register_with_orchestrator()
+- ✅ **No scattered config** - Uses simple dict config
+- ⚠️  **Stub implementation** - Returns mock liquidity scores
+
+**NOTE:** This file was previously IGNORED by git (`.gitignore` pattern `data/`).
+Fixed by force-adding with `git add -f`.
 
 #### 3. Alternative Data Handler (alternative_data_handler.py)
 **Lines:** 1,043  
@@ -119,12 +125,17 @@ core_engine/data/
    - Should export key classes for clean imports
    - Missing professional module documentation
 
-3. **Missing ISystemComponent**
-   - ⚠️  LiquidityEngine doesn't implement ISystemComponent
-   - ⚠️  AlternativeDataHandler doesn't implement ISystemComponent
-   - These should be orchestrator-integrated if they're services
+3. **Missing ISystemComponent (Partially Resolved)**
+   - ✅ LiquidityEngine DOES implement ISystemComponent (stub)
+   - ⚠️  AlternativeDataHandler needs audit (1,043 lines)
+   - Need to verify which components are services
 
-4. **Potential Direct Database Access**
+4. **Git Tracking Issue (RESOLVED)**
+   - ❌ liquidity_engine.py was ignored by `.gitignore` pattern `data/`
+   - ✅ Fixed by force-adding: `git add -f core_engine/data/liquidity_engine.py`
+   - ⚠️  Should update `.gitignore` to be more specific
+
+5. **Potential Direct Database Access**
    - Need to audit if any code bypasses ClickHouseDataManager
    - Check for direct clickhouse_connect usage
 
@@ -168,11 +179,12 @@ class ClickHouseDataConfig(DataConfig):
 
 **Already Done:**
 - ✅ ClickHouseDataManager implements ISystemComponent
+- ✅ LiquidityAssessmentEngine implements ISystemComponent (stub)
 
 **TODO:**
-- Add ISystemComponent to LiquidityEngine (if it's a service)
-- Add ISystemComponent to AlternativeDataHandler (if it's a service)
-- Or convert them to simple utilities if they're not services
+- Audit AlternativeDataHandler (1,043 lines) - is it a service?
+- If service → Add ISystemComponent
+- If utility → Document as utility class
 
 ### 4. Module Exports (__init__.py)
 
