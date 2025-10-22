@@ -21,7 +21,7 @@ import logging
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass
 import asyncio
 import time
@@ -63,6 +63,12 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
             pass
+
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from core_engine.config import DataConfig as CentralizedDataConfig
+except ImportError:
+    CentralizedDataConfig = None
 
 try:
     from core_engine.type_definitions.data import (
@@ -124,24 +130,36 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ClickHouseDataConfig(DataConfig):
-    """Enhanced data configuration for ClickHouse integration with date range support"""
-    # Inherit from core_engine DataConfig for architectural compliance
+    """
+    DEPRECATED: Legacy ClickHouse data configuration
+    
+    This class provides backward compatibility. New code should use:
+        from core_engine.config import DataConfig
+    
+    Automatically converts to centralized DataConfig format.
+    """
+    # Legacy parameters (for backward compatibility)
     symbols: List[str] = None
-    
-    # Date range configuration (replaces single target_date)
-    start_date: Optional[str] = None  # Format: "YYYY-MM-DD"
-    end_date: Optional[str] = None    # Format: "YYYY-MM-DD"
-    target_date: Optional[str] = "2024-12-20"  # Backward compatibility (deprecated)
-    
-    interval: str = "1min"  # 1min, 5min, 15min, 1h
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    target_date: Optional[str] = "2024-12-20"
+    interval: str = "1min"
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
     clickhouse_database: str = "polygon_data"
     enable_caching: bool = True
-    cache_ttl: int = 300  # 5 minutes
+    cache_ttl: int = 300
     
     def __post_init__(self):
-        # Initialize inherited DataConfig attributes
+        """Convert to centralized config format"""
+        import warnings
+        warnings.warn(
+            "ClickHouseDataConfig is deprecated. Use DataConfig from core_engine.config",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
+        # Initialize inherited DataConfig attributes for backward compatibility
         if not hasattr(self, 'provider'):
             self.provider = "clickhouse"
         if not hasattr(self, 'update_frequency'):
@@ -150,19 +168,16 @@ class ClickHouseDataConfig(DataConfig):
             self.cache_enabled = self.enable_caching
             
         if self.symbols is None:
-            # Top liquid symbols from our ClickHouse data
             self.symbols = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
         
-        # Date range validation and backward compatibility
+        # Date range validation
         self._validate_date_configuration()
     
     def _validate_date_configuration(self):
         """Validate and normalize date configuration"""
         from datetime import datetime
         
-        # If start_date and end_date are provided, use them (preferred)
         if self.start_date and self.end_date:
-            # Validate date format
             try:
                 start_dt = datetime.strptime(self.start_date, "%Y-%m-%d")
                 end_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
@@ -171,24 +186,44 @@ class ClickHouseDataConfig(DataConfig):
             except ValueError as e:
                 raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
         
-        # Backward compatibility: if only target_date is provided
         elif self.target_date and not (self.start_date or self.end_date):
-            logger.warning("Using deprecated target_date. Consider using start_date/end_date for date ranges.")
+            logger.warning("Using deprecated target_date. Consider using start_date/end_date.")
             self.start_date = self.target_date
             self.end_date = self.target_date
         
-        # If neither is provided, use default
         elif not (self.start_date or self.end_date or self.target_date):
-            logger.warning("No date configuration provided. Using default target_date.")
+            logger.warning("No date configuration provided. Using default.")
             self.target_date = "2024-12-20"
             self.start_date = self.target_date
             self.end_date = self.target_date
         
-        # Ensure we have both start_date and end_date for consistent behavior
         if not self.start_date:
             self.start_date = self.target_date
         if not self.end_date:
             self.end_date = self.target_date
+    
+    def to_centralized_config(self) -> 'CentralizedDataConfig':
+        """Convert to centralized DataConfig format"""
+        if CentralizedDataConfig is None:
+            raise ImportError("CentralizedDataConfig not available")
+        
+        from core_engine.config import ConnectionConfig, CachingConfig
+        
+        return CentralizedDataConfig(
+            connection=ConnectionConfig(
+                clickhouse_host=self.clickhouse_host,
+                clickhouse_port=self.clickhouse_port,
+                clickhouse_database=self.clickhouse_database
+            ),
+            caching=CachingConfig(
+                enable_caching=self.enable_caching,
+                cache_ttl=self.cache_ttl
+            ),
+            symbols=self.symbols,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            interval=self.interval
+        )
 
 @dataclass
 class EnhancedMarketData(MarketData):
@@ -226,9 +261,44 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     - Compatible with existing portfolio and risk managers
     """
     
-    def __init__(self, config: Optional[ClickHouseDataConfig] = None):
-        # Store our enhanced config first
-        self.enhanced_config = config or ClickHouseDataConfig()
+    def __init__(self, config: Optional[Union[ClickHouseDataConfig, 'CentralizedDataConfig', Dict[str, Any]]] = None):
+        """
+        Initialize ClickHouse Data Manager
+        
+        Args:
+            config: Configuration (supports multiple formats):
+                - CentralizedDataConfig (from core_engine.config) - RECOMMENDED
+                - ClickHouseDataConfig (legacy) - DEPRECATED
+                - Dict[str, Any] - For backward compatibility
+                - None - Uses defaults
+        """
+        # Handle different config input types (Phase 1: Centralized Config)
+        if config is None:
+            # Default: Use legacy for backward compatibility
+            self.enhanced_config = ClickHouseDataConfig()
+        elif isinstance(config, ClickHouseDataConfig):
+            # Legacy config
+            self.enhanced_config = config
+        elif CentralizedDataConfig and isinstance(config, CentralizedDataConfig):
+            # New centralized config - convert to legacy for internal use
+            logger.info("✅ Using centralized DataConfig (Rule 1, Section 7)")
+            self.enhanced_config = ClickHouseDataConfig(
+                symbols=config.symbols,
+                start_date=config.start_date,
+                end_date=config.end_date,
+                interval=config.interval,
+                clickhouse_host=config.connection.clickhouse_host,
+                clickhouse_port=config.connection.clickhouse_port,
+                clickhouse_database=config.connection.clickhouse_database,
+                enable_caching=config.caching.enable_caching,
+                cache_ttl=config.caching.cache_ttl
+            )
+        elif isinstance(config, dict):
+            # Dictionary config - convert to legacy
+            self.enhanced_config = ClickHouseDataConfig(**config)
+        else:
+            # Unknown type - try to use as-is
+            self.enhanced_config = config or ClickHouseDataConfig()
         
         # Create a compatible DataConfig for BaseDataManager with fallback provider
         base_config = DataConfig(
