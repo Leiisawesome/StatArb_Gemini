@@ -13,6 +13,15 @@ from enum import Enum
 import time
 from collections import defaultdict, deque
 import json
+import warnings
+
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from core_engine.config import DataConfig as CentralizedDataConfig, FeedManagementConfig
+except ImportError:
+    CentralizedDataConfig = None
+    FeedManagementConfig = None
+
 try:
     import websocket
 except ImportError:
@@ -70,7 +79,15 @@ class SubscriptionType(Enum):
 
 @dataclass
 class FeedConfiguration:
-    """Feed configuration"""
+    """
+    Feed configuration for individual data feeds
+    
+    NOTE: This is a per-feed configuration (not system-wide).
+    For system-wide feed management config, use:
+        from core_engine.config import FeedManagementConfig
+    
+    This class configures a specific feed connection/subscription.
+    """
     feed_id: str
     feed_type: FeedType
     name: str
