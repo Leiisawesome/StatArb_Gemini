@@ -16,6 +16,24 @@ from collections import defaultdict, deque
 import re
 import hashlib
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool: pass
+        @abstractmethod
+        async def start(self) -> bool: pass
+        @abstractmethod
+        async def stop(self) -> bool: pass
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -461,18 +479,26 @@ class WebScraper:
         return content
 
 
-class AlternativeDataHandler:
+class AlternativeDataHandler(ISystemComponent):
     """
     Advanced alternative data handler
     
     Processes alternative data from multiple sources including news, social media,
     satellite data, and web scraping with sentiment analysis and relevance scoring.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize alternative data handler"""
         self.config = config or {}
         self._lock = threading.Lock()
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         # Core components
         self.sentiment_analyzer = SentimentAnalyzer(self.config.get('sentiment', {}))
@@ -509,13 +535,116 @@ class AlternativeDataHandler:
         # Background processing
         self._processing_tasks = []
         
-        # Initialize default providers
-        asyncio.create_task(self._initialize_providers())
+        # Note: Background tasks will be started in start() method (ISystemComponent lifecycle)
+        self.logger.info("✅ AlternativeDataHandler created (call initialize() and start() for full activation)")
+    
+    # ========================================================================
+    # ISystemComponent Lifecycle Methods (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize alternative data handler"""
+        try:
+            self.logger.info("Initializing AlternativeDataHandler...")
+            
+            # Initialize default providers
+            await self._initialize_providers()
+            
+            self.is_initialized = True
+            self.logger.info("✅ AlternativeDataHandler initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ AlternativeDataHandler initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start alternative data handler operations"""
+        try:
+            if not self.is_initialized:
+                self.logger.error("Cannot start - not initialized. Call initialize() first.")
+                return False
+            
+            self.logger.info("Starting AlternativeDataHandler background processing...")
+            
+            # Start background processing tasks
+            await self._start_processing()
+            
+            self.is_operational = True
+            self.logger.info("✅ AlternativeDataHandler started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ AlternativeDataHandler start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop alternative data handler operations"""
+        try:
+            self.logger.info("Stopping AlternativeDataHandler...")
+            
+            # Cancel all background tasks
+            for task in self._processing_tasks:
+                if not task.done():
+                    task.cancel()
+            
+            # Wait for tasks to complete
+            if self._processing_tasks:
+                await asyncio.gather(*self._processing_tasks, return_exceptions=True)
+            
+            self.is_operational = False
+            self.logger.info("✅ AlternativeDataHandler stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ AlternativeDataHandler stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on alternative data handler"""
+        processing_stats = self.get_processing_stats()
         
-        # Start processing
-        asyncio.create_task(self._start_processing())
+        # Determine health status
+        error_rate = 0.0
+        if processing_stats['total_processed'] > 0:
+            error_rate = processing_stats['processing_errors'] / processing_stats['total_processed']
         
-        logger.info("AlternativeDataHandler initialized")
+        is_healthy = (
+            self.is_operational and 
+            self.is_initialized and
+            error_rate < 0.1 and  # Less than 10% error rate
+            len(self._processing_tasks) > 0  # Background tasks running
+        )
+        
+        return {
+            'healthy': is_healthy,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'AlternativeDataHandler',
+            'processing_stats': processing_stats,
+            'error_rate': error_rate,
+            'active_tasks': len([t for t in self._processing_tasks if not t.done()]),
+            'queue_size': self._processing_queue.qsize() if hasattr(self._processing_queue, 'qsize') else 0
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of alternative data handler"""
+        return {
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'AlternativeDataHandler',
+            'total_ingested': self._processing_stats.get('total_ingested', 0),
+            'total_processed': self._processing_stats.get('total_processed', 0),
+            'processing_errors': self._processing_stats.get('processing_errors', 0),
+            'active_subscriptions': len(self._subscriptions),
+            'data_callbacks': len(self._data_callbacks)
+        }
+    
+    # ========================================================================
+    # Original AlternativeDataHandler Methods
+    # ========================================================================
     
     async def _initialize_providers(self) -> None:
         """Initialize default data providers"""

@@ -14,6 +14,24 @@ import time
 from collections import deque
 import warnings
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import ABC, abstractmethod as abs_abstractmethod
+    class ISystemComponent(ABC):
+        @abs_abstractmethod
+        async def initialize(self) -> bool: pass
+        @abs_abstractmethod
+        async def start(self) -> bool: pass
+        @abs_abstractmethod
+        async def stop(self) -> bool: pass
+        @abs_abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abs_abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from core_engine.config import (
@@ -294,17 +312,25 @@ class DataEngineStatistics:
     last_update_time: datetime = field(default_factory=datetime.now)
 
 
-class DataEngine:
+class DataEngine(ISystemComponent):
     """
     Enhanced Data Management Engine
     
     Provides unified interface for all data operations with integrated
     market data, alternative data, validation, caching, and feed management.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[DataEngineConfig] = None):
         """Initialize data engine"""
         self.config = config or DataEngineConfig()
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         # Component initialization
         self.market_data_handler = None
@@ -344,11 +370,8 @@ class DataEngine:
         # Data lineage tracking
         self._data_lineage = {} if self.config.enable_data_lineage else None
         
-        # Start monitoring
-        if self.config.enable_performance_monitoring:
-            asyncio.create_task(self._start_monitoring())
-        
-        logger.info("DataEngine initialized")
+        # Note: Monitoring will be started in start() method (ISystemComponent lifecycle)
+        self.logger.info("✅ DataEngine created (call initialize() and start() for full activation)")
     
     def _initialize_components(self) -> None:
         """Initialize data engine components"""
@@ -923,7 +946,7 @@ class DataEngine:
     async def cleanup(self) -> None:
         """Cleanup data engine resources"""
         
-        logger.info("Cleaning up data engine...")
+        self.logger.info("Cleaning up data engine...")
         
         # Cancel monitoring tasks
         for task in self._monitoring_tasks:
@@ -936,4 +959,103 @@ class DataEngine:
         if self.feed_manager:
             await self.feed_manager.cleanup()
         
-        logger.info("Data engine cleanup completed")
+        self.logger.info("Data engine cleanup completed")
+    
+    # ========================================================================
+    # ISystemComponent Lifecycle Methods (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize data engine"""
+        try:
+            self.logger.info("Initializing DataEngine...")
+            self.is_initialized = True
+            self.logger.info("✅ DataEngine initialized successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataEngine initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start data engine operations"""
+        try:
+            if not self.is_initialized:
+                self.logger.error("Cannot start - not initialized. Call initialize() first.")
+                return False
+            
+            self.logger.info("Starting DataEngine...")
+            
+            # Start monitoring if configured
+            if self.config.enable_performance_monitoring:
+                await self._start_monitoring()
+            
+            self.is_operational = True
+            self.logger.info("✅ DataEngine started successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataEngine start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop data engine operations"""
+        try:
+            self.logger.info("Stopping DataEngine...")
+            await self.cleanup()
+            self.is_operational = False
+            self.logger.info("✅ DataEngine stopped successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataEngine stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on data engine"""
+        stats = self._statistics
+        
+        # Count active components
+        active_components = sum([
+            1 if self.market_data_handler else 0,
+            1 if self.alternative_data_handler else 0,
+            1 if self.data_validator else 0,
+            1 if self.cache_manager else 0,
+            1 if self.feed_manager else 0
+        ])
+        
+        # Determine health
+        is_healthy = (
+            self.is_operational and
+            self.is_initialized and
+            not self._circuit_breaker_open and
+            active_components > 0
+        )
+        
+        return {
+            'healthy': is_healthy,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'DataEngine',
+            'active_components': active_components,
+            'circuit_breaker_open': self._circuit_breaker_open,
+            'total_requests': stats.total_requests,
+            'successful_requests': stats.successful_requests,
+            'failed_requests': stats.failed_requests
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of data engine"""
+        return {
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'DataEngine',
+            'uptime_seconds': (datetime.now() - self._start_time).total_seconds(),
+            'circuit_breaker_open': self._circuit_breaker_open,
+            'statistics': {
+                'total_requests': self._statistics.total_requests,
+                'successful_requests': self._statistics.successful_requests,
+                'failed_requests': self._statistics.failed_requests,
+                'cache_hits': self._statistics.cache_hits,
+                'cache_misses': self._statistics.cache_misses
+            }
+        }

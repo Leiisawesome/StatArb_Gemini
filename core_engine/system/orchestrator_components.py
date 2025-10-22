@@ -116,6 +116,10 @@ class ComponentManager:
             self.component_registry[registration.component_id] = registration
             self.layer_components[layer].append(registration.component_id)
             
+            # Set component_id on the component instance (ISystemComponent integration)
+            if hasattr(component, 'component_id'):
+                component.component_id = registration.component_id
+            
             # Set allowed operations based on authority level
             registration.allowed_operations = self._get_allowed_operations(authority_level)
             

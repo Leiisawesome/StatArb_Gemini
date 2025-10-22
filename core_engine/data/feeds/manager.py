@@ -15,6 +15,24 @@ from collections import defaultdict, deque
 import json
 import warnings
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import ABC, abstractmethod as abs_abstractmethod
+    class ISystemComponent(ABC):
+        @abs_abstractmethod
+        async def initialize(self) -> bool: pass
+        @abs_abstractmethod
+        async def start(self) -> bool: pass
+        @abs_abstractmethod
+        async def stop(self) -> bool: pass
+        @abs_abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abs_abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from core_engine.config import DataConfig as CentralizedDataConfig, FeedManagementConfig
@@ -643,17 +661,25 @@ class HTTPFeed(DataFeed):
                 await asyncio.sleep(5.0)  # Wait before retry
 
 
-class FeedManager:
+class FeedManager(ISystemComponent):
     """
     Advanced data feed manager
     
     Orchestrates multiple data feeds with subscription management,
     fault tolerance, and performance monitoring.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize feed manager"""
         self.config = config or {}
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         # Feed management
         self._feeds = {}
@@ -685,7 +711,7 @@ class FeedManager:
         self._monitoring_task = None
         self._health_check_task = None
         
-        logger.info("FeedManager initialized")
+        self.logger.info("✅ FeedManager created (call initialize() and start() for full activation)")
     
     def register_feed(self, config: FeedConfiguration) -> bool:
         """Register a data feed"""
@@ -1034,4 +1060,111 @@ class FeedManager:
         for feed_id in list(self._feeds.keys()):
             await self.disconnect_feed(feed_id)
         
-        logger.info("FeedManager cleanup completed")
+        self.logger.info("FeedManager cleanup completed")
+    
+    # ========================================================================
+    # ISystemComponent Lifecycle Methods (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize feed manager"""
+        try:
+            self.logger.info("Initializing FeedManager...")
+            
+            # Initialize performance monitoring
+            self._performance_monitor = {}
+            
+            self.is_initialized = True
+            self.logger.info("✅ FeedManager initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ FeedManager initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start feed manager operations"""
+        try:
+            if not self.is_initialized:
+                self.logger.error("Cannot start - not initialized. Call initialize() first.")
+                return False
+            
+            self.logger.info("Starting FeedManager...")
+            
+            # Start monitoring if configured
+            if self.config.get('enable_monitoring', True):
+                await self.start_monitoring()
+            
+            self.is_operational = True
+            self.logger.info("✅ FeedManager started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ FeedManager start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop feed manager operations"""
+        try:
+            self.logger.info("Stopping FeedManager...")
+            
+            # Cleanup all resources
+            await self.cleanup()
+            
+            self.is_operational = False
+            self.logger.info("✅ FeedManager stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ FeedManager stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on feed manager"""
+        
+        # Count feed statuses
+        with self._lock:
+            total_feeds = len(self._feeds)
+            active_feeds = sum(1 for feed in self._feeds.values() 
+                             if feed.status == FeedStatus.ACTIVE)
+            error_feeds = sum(1 for feed in self._feeds.values() 
+                            if feed.status == FeedStatus.ERROR)
+        
+        # Determine health status
+        health_ratio = active_feeds / total_feeds if total_feeds > 0 else 1.0
+        is_healthy = (
+            self.is_operational and
+            self.is_initialized and
+            health_ratio >= 0.7  # At least 70% feeds active
+        )
+        
+        return {
+            'healthy': is_healthy,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'FeedManager',
+            'total_feeds': total_feeds,
+            'active_feeds': active_feeds,
+            'error_feeds': error_feeds,
+            'health_ratio': health_ratio,
+            'subscriptions': len(self._subscriptions),
+            'message_handlers': len(self._message_handlers)
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of feed manager"""
+        with self._lock:
+            feed_count = len(self._feeds)
+            active_count = sum(1 for feed in self._feeds.values() 
+                             if feed.status == FeedStatus.ACTIVE)
+        
+        return {
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'FeedManager',
+            'total_feeds': feed_count,
+            'active_feeds': active_count,
+            'total_subscriptions': len(self._subscriptions)
+        }

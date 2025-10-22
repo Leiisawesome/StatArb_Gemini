@@ -15,6 +15,24 @@ import time
 from collections import defaultdict, deque
 from abc import ABC, abstractmethod
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import abstractmethod as abs_abstractmethod
+    class ISystemComponent(ABC):
+        @abs_abstractmethod
+        async def initialize(self) -> bool: pass
+        @abs_abstractmethod
+        async def start(self) -> bool: pass
+        @abs_abstractmethod
+        async def stop(self) -> bool: pass
+        @abs_abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abs_abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -362,18 +380,26 @@ class SimulatedDataFeed(DataFeedAdapter):
             )
 
 
-class MarketDataHandler:
+class MarketDataHandler(ISystemComponent):
     """
     Advanced market data handler with multi-source aggregation
     
     Manages real-time and historical market data from multiple sources
     with quality monitoring, latency tracking, and intelligent routing.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize market data handler"""
         self.config = config or {}
         self._lock = threading.Lock()
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         # Data feeds and adapters
         self._data_feeds = {}
@@ -406,13 +432,8 @@ class MarketDataHandler:
         self.quality_threshold = self.config.get('quality_threshold', 0.95)
         self.latency_threshold_ms = self.config.get('latency_threshold_ms', 10.0)
         
-        # Initialize default feeds
-        asyncio.create_task(self._initialize_default_feeds())
-        
-        # Start monitoring
-        asyncio.create_task(self._start_monitoring())
-        
-        logger.info("MarketDataHandler initialized")
+        # Note: Background tasks will be started in initialize() method (ISystemComponent lifecycle)
+        self.logger.info("✅ MarketDataHandler created (call initialize() and start() for full activation)")
     
     async def _initialize_default_feeds(self) -> None:
         """Initialize default data feeds"""
@@ -985,4 +1006,105 @@ class MarketDataHandler:
         with self._lock:
             self._active_subscriptions.clear()
         
-        logger.info("MarketDataHandler cleanup completed")
+        self.logger.info("MarketDataHandler cleanup completed")
+    
+    # ========================================================================
+    # ISystemComponent Lifecycle Methods (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize market data handler"""
+        try:
+            self.logger.info("Initializing MarketDataHandler...")
+            
+            # Initialize default feeds
+            await self._initialize_default_feeds()
+            
+            # Initialize performance monitoring
+            await self._start_monitoring()
+            
+            self.is_initialized = True
+            self.logger.info("✅ MarketDataHandler initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ MarketDataHandler initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start market data handler operations"""
+        try:
+            if not self.is_initialized:
+                self.logger.error("Cannot start - not initialized. Call initialize() first.")
+                return False
+            
+            self.is_operational = True
+            self.logger.info("✅ MarketDataHandler started successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ MarketDataHandler start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop market data handler operations"""
+        try:
+            self.logger.info("Stopping MarketDataHandler...")
+            
+            # Cleanup all resources
+            await self.cleanup()
+            
+            self.is_operational = False
+            self.logger.info("✅ MarketDataHandler stopped successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ MarketDataHandler stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on market data handler"""
+        
+        # Calculate health metrics
+        with self._lock:
+            total_feeds = len(self._feed_adapters)
+            total_subs = len(self._active_subscriptions)
+            active_subs = sum(1 for s in self._active_subscriptions.values() if s.is_active)
+            
+            quality_score = self._performance_stats.get('data_quality_score', 0.0)
+            msg_rate = self._performance_stats.get('messages_per_second', 0.0)
+            total_messages = self._performance_stats.get('total_messages_received', 0)
+        
+        # Determine health (healthy if no data processed yet OR quality is good)
+        is_healthy = (
+            self.is_operational and
+            self.is_initialized and
+            (total_messages == 0 or quality_score >= 0.7) and  # Good quality data OR no data yet
+            (total_subs == 0 or active_subs / total_subs >= 0.5)  # At least 50% subs active OR no subs
+        )
+        
+        return {
+            'healthy': is_healthy,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'MarketDataHandler',
+            'total_feeds': total_feeds,
+            'total_subscriptions': total_subs,
+            'active_subscriptions': active_subs,
+            'data_quality_score': quality_score,
+            'messages_per_second': msg_rate
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of market data handler"""
+        with self._lock:
+            return {
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'component_id': self.component_id,
+                'component_type': 'MarketDataHandler',
+                'total_feeds': len(self._feed_adapters),
+                'total_subscriptions': len(self._active_subscriptions),
+                'performance_stats': dict(self._performance_stats)
+            }

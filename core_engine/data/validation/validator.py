@@ -13,6 +13,32 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 from collections import defaultdict, deque
+import warnings
+
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ...system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import ABC, abstractmethod as abs_abstractmethod
+    class ISystemComponent(ABC):
+        @abs_abstractmethod
+        async def initialize(self) -> bool: pass
+        @abs_abstractmethod
+        async def start(self) -> bool: pass
+        @abs_abstractmethod
+        async def stop(self) -> bool: pass
+        @abs_abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abs_abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
+# Import centralized configuration (Rule 1, Section 7)
+try:
+    from core_engine.config import DataConfig as CentralizedDataConfig, DataValidationConfig
+except ImportError:
+    CentralizedDataConfig = None
+    DataValidationConfig = None
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +140,14 @@ class DataQualityMetrics:
 
 @dataclass
 class ValidationConfiguration:
-    """Validation configuration for data types"""
+    """
+    DEPRECATED: Legacy validation configuration for data types
+    
+    This class provides backward compatibility. New code should use:
+        from core_engine.config import DataValidationConfig
+    
+    Automatically converts to centralized DataValidationConfig format.
+    """
     data_type: str
     symbol: Optional[str] = None
     
@@ -147,6 +180,38 @@ class ValidationConfiguration:
     enable_cross_validation: bool = True
     cross_validation_sources: List[str] = field(default_factory=list)
     max_cross_validation_diff_pct: float = 2.0
+    
+    def __post_init__(self):
+        """Warn about deprecation"""
+        warnings.warn(
+            "ValidationConfiguration is deprecated. Use DataValidationConfig from core_engine.config",
+            DeprecationWarning,
+            stacklevel=2
+        )
+    
+    def to_centralized_config(self) -> 'DataValidationConfig':
+        """Convert to centralized DataValidationConfig format"""
+        if DataValidationConfig is None:
+            raise ImportError("DataValidationConfig not available")
+        
+        return DataValidationConfig(
+            enable_data_validation=True,
+            quality_threshold=self.min_completeness_pct / 100.0,
+            min_price=self.min_price,
+            max_price=self.max_price,
+            max_price_change_pct=self.max_price_change_pct,
+            max_spread_pct=self.max_spread_pct,
+            max_spread_bps=self.max_spread_bps,
+            min_volume=self.min_volume,
+            max_volume_spike_factor=self.max_volume_spike_factor,
+            outlier_threshold_std=self.outlier_threshold_std,
+            moving_average_window=self.moving_average_window,
+            max_data_age_seconds=self.max_data_age_seconds,
+            required_update_frequency_seconds=self.required_update_frequency_seconds,
+            min_completeness_pct=self.min_completeness_pct,
+            enable_cross_validation=self.enable_cross_validation,
+            max_cross_validation_diff_pct=self.max_cross_validation_diff_pct
+        )
 
 
 class AnomalyDetector:
@@ -406,18 +471,26 @@ class AnomalyDetector:
         return anomalies
 
 
-class DataValidator:
+class DataValidator(ISystemComponent):
     """
     Advanced data validator with comprehensive quality scoring
     
     Provides data validation, anomaly detection, quality scoring,
     and integrity checking for market and alternative data.
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize data validator"""
         self.config = config or {}
         self._lock = threading.Lock()
+        
+        # ISystemComponent state (Rule 1)
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         # Validation components
         self.anomaly_detector = AnomalyDetector(self.config.get('anomaly_detection', {}))
@@ -451,10 +524,8 @@ class DataValidator:
         # Initialize default validation rules
         self._initialize_default_validations()
         
-        # Start monitoring
-        asyncio.create_task(self._start_monitoring())
-        
-        logger.info("DataValidator initialized")
+        # Note: Background monitoring will be started in start() method (ISystemComponent lifecycle)
+        self.logger.info("✅ DataValidator created (call initialize() and start() for full activation)")
     
     def _create_default_config(self) -> ValidationConfiguration:
         """Create default validation configuration"""
@@ -1308,4 +1379,89 @@ class DataValidator:
             self._validation_by_symbol.clear()
             self._cross_validation_data.clear()
         
-        logger.info("DataValidator cleanup completed")
+        self.logger.info("DataValidator cleanup completed")
+    
+    # ========================================================================
+    # ISystemComponent Lifecycle Methods (Rule 1)
+    # ========================================================================
+    
+    async def initialize(self) -> bool:
+        """Initialize data validator"""
+        try:
+            self.logger.info("Initializing DataValidator...")
+            self.is_initialized = True
+            self.logger.info("✅ DataValidator initialized successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataValidator initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start data validator operations"""
+        try:
+            if not self.is_initialized:
+                self.logger.error("Cannot start - not initialized. Call initialize() first.")
+                return False
+            
+            self.logger.info("Starting DataValidator...")
+            
+            # Start monitoring if configured
+            if self.config.get('enable_monitoring', True):
+                await self._start_monitoring()
+            
+            self.is_operational = True
+            self.logger.info("✅ DataValidator started successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataValidator start failed: {e}")
+            return False
+    
+    async def stop(self) -> bool:
+        """Stop data validator operations"""
+        try:
+            self.logger.info("Stopping DataValidator...")
+            await self.cleanup()
+            self.is_operational = False
+            self.logger.info("✅ DataValidator stopped successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ DataValidator stop failed: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on data validator"""
+        stats = self._validation_stats.copy()
+        
+        # Calculate health metrics
+        success_rate = 0.0
+        if stats['total_validations'] > 0:
+            success_rate = stats['passed_validations'] / stats['total_validations']
+        
+        # Healthy if operational and initialized, OR if we have good validation rate
+        is_healthy = (
+            self.is_operational and
+            self.is_initialized and
+            (stats['total_validations'] == 0 or success_rate >= 0.9)  # Healthy if no validations yet OR 90%+ success
+        )
+        
+        return {
+            'healthy': is_healthy,
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'DataValidator',
+            'total_validations': stats['total_validations'],
+            'success_rate': success_rate,
+            'quality_score_average': stats['quality_score_average'],
+            'anomalies_detected': stats['anomalies_detected']
+        }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current status of data validator"""
+        return {
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'DataValidator',
+            'validation_stats': dict(self._validation_stats)
+        }

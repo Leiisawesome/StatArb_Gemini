@@ -9,6 +9,24 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 
+# Import ISystemComponent for orchestrator integration (Rule 1)
+try:
+    from ..system.interfaces import ISystemComponent
+except ImportError:
+    # Fallback for testing
+    from abc import ABC, abstractmethod
+    class ISystemComponent(ABC):
+        @abstractmethod
+        async def initialize(self) -> bool: pass
+        @abstractmethod
+        async def start(self) -> bool: pass
+        @abstractmethod
+        async def stop(self) -> bool: pass
+        @abstractmethod
+        async def health_check(self) -> Dict[str, Any]: pass
+        @abstractmethod
+        def get_status(self) -> Dict[str, Any]: pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,8 +39,12 @@ class LiquidityRegime(Enum):
     CRISIS_LIQUIDITY = "crisis_liquidity"
 
 
-class LiquidityAssessmentEngine:
-    """Minimal liquidity assessment engine for backtesting"""
+class LiquidityAssessmentEngine(ISystemComponent):
+    """
+    Minimal liquidity assessment engine for backtesting
+    
+    Implements ISystemComponent for orchestrator integration (Rule 1).
+    """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
@@ -75,9 +97,11 @@ class LiquidityAssessmentEngine:
     async def health_check(self) -> Dict[str, Any]:
         """Health check"""
         return {
-            'healthy': self.is_operational,
+            'healthy': self.is_operational and self.is_initialized,
             'initialized': self.is_initialized,
-            'component_id': self.component_id
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'component_type': 'LiquidityAssessmentEngine'
         }
     
     def get_status(self) -> Dict[str, Any]:
