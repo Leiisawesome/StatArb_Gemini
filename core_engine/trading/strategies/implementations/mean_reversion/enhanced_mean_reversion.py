@@ -44,6 +44,40 @@ from ...strategy_engine import (
     StrategyConfig, StrategySignal, SignalType
 )
 
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import MeanReversionConfig
+except ImportError:
+    # Fallback for backward compatibility during migration
+    from dataclasses import dataclass, field
+    from typing import List
+    
+    @dataclass
+    class MeanReversionConfig(StrategyConfig):
+        """DEPRECATED: Use core_engine.config.MeanReversionConfig instead"""
+        lookback_period: int = 20
+        zscore_entry_threshold: float = 2.0
+        zscore_exit_threshold: float = 0.5
+        bollinger_period: int = 20
+        bollinger_std: float = 2.0
+        rsi_period: int = 14
+        rsi_oversold: float = 30.0
+        rsi_overbought: float = 70.0
+        primary_timeframe: str = "5min"
+        confirmation_timeframe: str = "15min"
+        enable_multi_timeframe: bool = True
+        atr_period: int = 14
+        base_position_pct: float = 0.02
+        max_position_pct: float = 0.05
+        volatility_target: float = 0.15
+        stop_loss_atr_multiple: float = 2.0
+        profit_target_ratio: float = 2.0
+        max_holding_period: int = 10
+        enable_regime_filter: bool = True
+        min_trend_strength: float = 0.3
+        volatility_regime_threshold: float = 0.02
+        symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,45 +88,8 @@ class MeanReversionSignal(Enum):
     NEUTRAL = "neutral"
 
 
-@dataclass
-class MeanReversionConfig(StrategyConfig):
-    """Enhanced Mean Reversion Configuration"""
-    
-    # Mean reversion parameters
-    lookback_period: int = 20           # Lookback for mean calculation
-    zscore_entry_threshold: float = 2.0  # Z-score for entry
-    zscore_exit_threshold: float = 0.5   # Z-score for exit
-    
-    # Technical indicators
-    bollinger_period: int = 20          # Bollinger Bands period
-    bollinger_std: float = 2.0          # Bollinger Bands standard deviations
-    rsi_period: int = 14                # RSI period
-    rsi_oversold: float = 30.0          # RSI oversold threshold
-    rsi_overbought: float = 70.0        # RSI overbought threshold
-    
-    # Multi-timeframe analysis
-    primary_timeframe: str = "5min"     # Primary analysis timeframe
-    confirmation_timeframe: str = "15min" # Confirmation timeframe
-    enable_multi_timeframe: bool = True
-    
-    # Position sizing
-    atr_period: int = 14                # ATR period for volatility
-    base_position_pct: float = 0.02     # Base position size (2%)
-    max_position_pct: float = 0.05      # Maximum position size (5%)
-    volatility_target: float = 0.15     # Target volatility (15%)
-    
-    # Risk management
-    stop_loss_atr_multiple: float = 2.0 # Stop loss as multiple of ATR
-    profit_target_ratio: float = 2.0    # Profit target vs stop loss ratio
-    max_holding_period: int = 10        # Maximum holding period (bars)
-    
-    # Regime filtering
-    enable_regime_filter: bool = True
-    min_trend_strength: float = 0.3     # Minimum trend strength for filtering
-    volatility_regime_threshold: float = 0.02  # Volatility threshold
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# Note: MeanReversionConfig now imported from core_engine.config (Rule 1 Section 7)
+# Local definition removed - use centralized configuration
 
 
 class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):

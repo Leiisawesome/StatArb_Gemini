@@ -198,6 +198,7 @@ class MeanReversionConfig(BaseStrategyConfig):
     Mean reversion strategy configuration
     
     Consolidated from: trading/strategies/implementations/mean_reversion/enhanced_mean_reversion.py
+    Enhanced with all parameters for institutional-grade mean reversion trading.
     """
     strategy_type: StrategyType = StrategyType.MEAN_REVERSION
     
@@ -205,17 +206,72 @@ class MeanReversionConfig(BaseStrategyConfig):
     lookback_period: int = 20
     """Lookback for mean calculation. Default: 20 bars"""
     
-    entry_zscore_threshold: float = 2.0
-    """Z-score threshold for entry. Default: 2.0 std devs"""
+    zscore_entry_threshold: float = 2.0
+    """Z-score for entry. Default: 2.0 std devs"""
     
-    exit_zscore_threshold: float = 0.5
-    """Z-score threshold for exit. Default: 0.5 std devs"""
+    zscore_exit_threshold: float = 0.5
+    """Z-score for exit. Default: 0.5 std devs"""
+    
+    # Technical indicators
+    bollinger_period: int = 20
+    """Bollinger Bands period. Default: 20"""
     
     bollinger_std: float = 2.0
     """Bollinger Bands standard deviation. Default: 2.0"""
     
+    rsi_period: int = 14
+    """RSI period. Default: 14"""
+    
+    rsi_oversold: float = 30.0
+    """RSI oversold threshold. Default: 30"""
+    
+    rsi_overbought: float = 70.0
+    """RSI overbought threshold. Default: 70"""
+    
+    # Multi-timeframe analysis
+    confirmation_timeframe: str = "15min"
+    """Confirmation timeframe. Default: '15min'"""
+    
+    # Position sizing
     atr_period: int = 14
     """ATR period for volatility. Default: 14"""
+    
+    base_position_pct: float = 0.02
+    """Base position size. Default: 2%"""
+    
+    max_position_pct: float = 0.05
+    """Maximum position size. Default: 5%"""
+    
+    volatility_target: float = 0.15
+    """Target volatility. Default: 15%"""
+    
+    # Risk management
+    stop_loss_atr_multiple: float = 2.0
+    """Stop loss as multiple of ATR. Default: 2.0"""
+    
+    max_holding_period: int = 10
+    """Maximum holding period in bars. Default: 10"""
+    
+    # Regime filtering
+    enable_regime_filter: bool = True
+    """Enable regime filtering. Default: True"""
+    
+    min_trend_strength: float = 0.3
+    """Minimum trend strength for filtering. Default: 0.3"""
+    
+    volatility_regime_threshold: float = 0.02
+    """Volatility threshold. Default: 0.02"""
+    
+    # Backward compatibility aliases
+    @property
+    def entry_zscore_threshold(self) -> float:
+        """Alias for zscore_entry_threshold"""
+        return self.zscore_entry_threshold
+    
+    @property
+    def exit_zscore_threshold(self) -> float:
+        """Alias for zscore_exit_threshold"""
+        return self.zscore_exit_threshold
 
 
 @dataclass

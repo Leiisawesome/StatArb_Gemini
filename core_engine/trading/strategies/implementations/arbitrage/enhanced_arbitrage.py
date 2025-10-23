@@ -42,6 +42,13 @@ from ...strategy_engine import (
     StrategyConfig, StrategySignal, SignalType
 )
 
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import ArbitrageConfig
+except ImportError:
+    # Fallback: local config will be used if centralized not available
+    pass
+
 logger = logging.getLogger(__name__)
 
 
