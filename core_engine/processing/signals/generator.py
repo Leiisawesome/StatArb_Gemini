@@ -65,6 +65,29 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import SignalConfig
+except ImportError:
+    # Fallback for backward compatibility during migration
+    @dataclass
+    class SignalConfig:
+        """DEPRECATED: Use core_engine.config.SignalConfig instead"""
+        # Signal generation thresholds
+        signal_threshold: float = 0.6
+        confidence_threshold: float = 0.6
+        
+        # Risk parameters
+        max_position_size: float = 0.10
+        stop_loss_pct: float = 0.02
+        
+        # Signal processing
+        enable_filtering: bool = True
+        aggregation_method: str = "weighted"
+        
+        # Performance
+        enable_caching: bool = True
+
 class SignalType(Enum):
     """Types of trading signals"""
     BUY = "buy"
@@ -215,9 +238,14 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
     
     def __init__(self, config: Optional[SignalConfig] = None):
         # Handle both SignalConfig objects and dictionaries
+        # Rule 1 Section 7: Use centralized configuration from core_engine.config
         if isinstance(config, dict):
-            # Convert dictionary to SignalConfig object
-            self.config = SignalConfig(**{k: v for k, v in config.items() if k in SignalConfig.__dataclass_fields__})
+            try:
+                from core_engine.config import SignalConfig as CentralizedSignalConfig
+                self.config = CentralizedSignalConfig(**{k: v for k, v in config.items() if hasattr(CentralizedSignalConfig, k)})
+            except ImportError:
+                # Fallback during migration
+                self.config = SignalConfig(**{k: v for k, v in config.items() if k in SignalConfig.__dataclass_fields__})
         else:
             self.config = config or SignalConfig()
         self.logger = logging.getLogger(self.__class__.__name__)

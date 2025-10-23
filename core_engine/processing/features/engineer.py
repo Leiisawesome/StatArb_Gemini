@@ -62,32 +62,37 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class FeatureConfig:
-    """Configuration for feature engineering"""
-    # Normalization
-    use_normalization: bool = True
-    normalization_method: str = "robust"  # "standard", "robust", "minmax"
-    lookback_periods: List[int] = None  # Periods for rolling statistics
-    
-    # Cross-sectional features
-    enable_cross_sectional: bool = True
-    cross_sectional_universe: List[str] = None  # Symbols for cross-sectional analysis
-    
-    # Feature selection
-    max_features: Optional[int] = None
-    feature_importance_threshold: float = 0.01
-    
-    # Lag features
-    lag_periods: List[int] = None
-    
-    def __post_init__(self):
-        if self.lookback_periods is None:
-            self.lookback_periods = [5, 10, 20]
-        if self.lag_periods is None:
-            self.lag_periods = [1, 2, 3]
-        if self.cross_sectional_universe is None:
-            self.cross_sectional_universe = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import FeatureConfig
+except ImportError:
+    # Fallback for backward compatibility during migration
+    @dataclass
+    class FeatureConfig:
+        """DEPRECATED: Use core_engine.config.FeatureConfig instead"""
+        # Normalization
+        use_normalization: bool = True
+        normalization_method: str = "robust"
+        lookback_periods: List[int] = None
+        
+        # Cross-sectional features
+        enable_cross_sectional: bool = True
+        cross_sectional_universe: List[str] = None
+        
+        # Feature selection
+        max_features: Optional[int] = None
+        feature_importance_threshold: float = 0.01
+        
+        # Lag features
+        lag_periods: List[int] = None
+        
+        def __post_init__(self):
+            if self.lookback_periods is None:
+                self.lookback_periods = [5, 10, 20]
+            if self.lag_periods is None:
+                self.lag_periods = [1, 2, 3]
+            if self.cross_sectional_universe is None:
+                self.cross_sectional_universe = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
 
 class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     """
@@ -106,9 +111,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     
     def __init__(self, config: Optional[FeatureConfig] = None):
         # Handle both FeatureConfig objects and dictionaries
+        # Rule 1 Section 7: Use centralized configuration from core_engine.config
         if isinstance(config, dict):
-            # Convert dictionary to FeatureConfig object
-            self.config = FeatureConfig(**{k: v for k, v in config.items() if k in FeatureConfig.__dataclass_fields__})
+            try:
+                from core_engine.config import FeatureConfig as CentralizedFeatureConfig
+                self.config = CentralizedFeatureConfig(**{k: v for k, v in config.items() if hasattr(CentralizedFeatureConfig, k)})
+            except ImportError:
+                # Fallback during migration
+                self.config = FeatureConfig(**{k: v for k, v in config.items() if k in FeatureConfig.__dataclass_fields__})
         else:
             self.config = config or FeatureConfig()
         self.logger = logging.getLogger(self.__class__.__name__)

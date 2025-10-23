@@ -95,63 +95,67 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class EnhancedIndicatorConfig:
-    """Enhanced configuration for technical indicators following core_engine patterns"""
-    # Moving averages (professional defaults)
-    sma_periods: List[int] = field(default_factory=lambda: [10, 20, 50, 200])
-    ema_periods: List[int] = field(default_factory=lambda: [9, 21, 50])
-    
-    # Momentum indicators (institutional standards)
-    rsi_period: int = 14
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
-    adx_period: int = 14  # ADX period for trend strength
-    
-    # Volatility indicators (risk management focused)
-    bb_period: int = 20
-    bb_std: float = 2.0
-    atr_period: int = 14
-    
-    # Volume indicators (liquidity analysis)
-    volume_sma_period: int = 20
-    
-    # Oscillators (market timing)
-    stoch_k_period: int = 14
-    stoch_d_period: int = 3
-    williams_r_period: int = 14
-    
-    # Advanced indicators (regime detection)
-    adx_period: int = 14
-    aroon_period: int = 25
-    
-    # Performance optimization
-    enable_caching: bool = True
-    parallel_processing: bool = False
-    
-    # Integration settings (core_engine compliance)
-    output_format: str = "enhanced"  # "basic", "enhanced", "comprehensive"
-    include_signals: bool = True
-    normalize_values: bool = False
-    
-    # Multi-timeframe settings (Tier 2 Enhancement #4)
-    enable_multi_timeframe: bool = True
-    timeframes: List[str] = field(default_factory=lambda: ["5min", "1H", "1D", "1W"])
-    
-    # Macro regime indicators (Tier 2 Enhancement #4)
-    enable_macro_indicators: bool = True
-    macro_symbols: List[str] = field(default_factory=lambda: [
-        "VIX", "DXY", "TNX", "TLT", "GLD", "USO", "HYG", "LQD", "EEM", "IWM"
-    ])
-    
-    # Multi-timeframe specific periods
-    timeframe_rsi_periods: Dict[str, int] = field(default_factory=lambda: {
-        "5min": 14, "1H": 14, "1D": 14, "1W": 14
-    })
-    timeframe_ma_periods: Dict[str, List[int]] = field(default_factory=lambda: {
-        "5min": [10, 20, 50], "1H": [20, 50, 100], "1D": [50, 100, 200], "1W": [10, 20, 50]
-    })
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import IndicatorConfig as EnhancedIndicatorConfig
+except ImportError:
+    # Fallback for backward compatibility during migration
+    @dataclass
+    class EnhancedIndicatorConfig:
+        """DEPRECATED: Use core_engine.config.IndicatorConfig instead"""
+        # Moving averages (professional defaults)
+        sma_periods: List[int] = field(default_factory=lambda: [10, 20, 50, 200])
+        ema_periods: List[int] = field(default_factory=lambda: [9, 21, 50])
+        
+        # Momentum indicators (institutional standards)
+        rsi_period: int = 14
+        macd_fast: int = 12
+        macd_slow: int = 26
+        macd_signal: int = 9
+        adx_period: int = 14
+        
+        # Volatility indicators
+        bb_period: int = 20
+        bb_std: float = 2.0
+        atr_period: int = 14
+        
+        # Volume indicators
+        volume_sma_period: int = 20
+        
+        # Oscillators
+        stoch_k_period: int = 14
+        stoch_d_period: int = 3
+        williams_r_period: int = 14
+        
+        # Advanced indicators
+        aroon_period: int = 25
+        
+        # Performance optimization
+        enable_caching: bool = True
+        parallel_processing: bool = False
+        
+        # Integration settings
+        output_format: str = "enhanced"
+        include_signals: bool = True
+        normalize_values: bool = False
+        
+        # Multi-timeframe settings
+        enable_multi_timeframe: bool = True
+        timeframes: List[str] = field(default_factory=lambda: ["5min", "1H", "1D", "1W"])
+        
+        # Macro regime indicators
+        enable_macro_indicators: bool = True
+        macro_symbols: List[str] = field(default_factory=lambda: [
+            "VIX", "DXY", "TNX", "TLT", "GLD", "USO", "HYG", "LQD", "EEM", "IWM"
+        ])
+        
+        # Multi-timeframe specific periods
+        timeframe_rsi_periods: Dict[str, int] = field(default_factory=lambda: {
+            "5min": 14, "1H": 14, "1D": 14, "1W": 14
+        })
+        timeframe_ma_periods: Dict[str, List[int]] = field(default_factory=lambda: {
+            "5min": [10, 20, 50], "1H": [20, 50, 100], "1D": [50, 100, 200], "1W": [10, 20, 50]
+        })
 
 @dataclass
 class IndicatorResult:
@@ -221,9 +225,15 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
     
     def __init__(self, config: Optional[EnhancedIndicatorConfig] = None):
         # Handle both EnhancedIndicatorConfig objects and dictionaries
+        # Rule 1 Section 7: Use centralized configuration from core_engine.config
         if isinstance(config, dict):
             # Convert dictionary to EnhancedIndicatorConfig object
-            self.config = EnhancedIndicatorConfig(**{k: v for k, v in config.items() if k in EnhancedIndicatorConfig.__dataclass_fields__})
+            try:
+                from core_engine.config import IndicatorConfig
+                self.config = IndicatorConfig(**{k: v for k, v in config.items() if hasattr(IndicatorConfig, k)})
+            except ImportError:
+                # Fallback during migration
+                self.config = EnhancedIndicatorConfig(**{k: v for k, v in config.items() if k in EnhancedIndicatorConfig.__dataclass_fields__})
         else:
             self.config = config or EnhancedIndicatorConfig()
         self.logger = logging.getLogger(self.__class__.__name__)

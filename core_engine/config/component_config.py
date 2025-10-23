@@ -338,6 +338,63 @@ class IndicatorConfig:
     
     adx_period: int = 14
     """ADX period. Default: 14"""
+    
+    stoch_k_period: int = 14
+    """Stochastic K period. Default: 14"""
+    
+    stoch_d_period: int = 3
+    """Stochastic D period. Default: 3"""
+    
+    williams_r_period: int = 14
+    """Williams %R period. Default: 14"""
+    
+    aroon_period: int = 25
+    """Aroon period. Default: 25"""
+    
+    volume_sma_period: int = 20
+    """Volume SMA period. Default: 20"""
+    
+    bb_period: int = 20
+    """Bollinger Bands period (alias). Default: 20"""
+    
+    bb_std: float = 2.0
+    """Bollinger Bands standard deviation (alias). Default: 2.0"""
+    
+    # Backward compatibility properties
+    @property
+    def enable_caching(self) -> bool:
+        """Backward compatibility: access performance.enable_caching"""
+        return self.performance.enable_caching if hasattr(self, 'performance') else True
+    
+    @property
+    def parallel_processing(self) -> bool:
+        """Backward compatibility: parallel processing support"""
+        return False  # Default value
+    
+    @property
+    def include_signals(self) -> bool:
+        """Backward compatibility: include signals in output"""
+        return True  # Default value
+    
+    @property
+    def normalize_values(self) -> bool:
+        """Backward compatibility: normalize indicator values"""
+        return False  # Default value
+    
+    @property
+    def timeframes(self) -> List[str]:
+        """Backward compatibility: multi-timeframe list"""
+        return ["5min", "1H", "1D", "1W"] if self.enable_multi_timeframe else []
+    
+    @property
+    def enable_macro_indicators(self) -> bool:
+        """Backward compatibility: enable macro indicators"""
+        return False  # Default value
+    
+    @property
+    def macro_symbols(self) -> List[str]:
+        """Backward compatibility: macro symbol list"""
+        return ["VIX", "DXY", "TNX", "TLT", "GLD", "USO", "HYG", "LQD", "EEM", "IWM"]
 
 
 @dataclass
