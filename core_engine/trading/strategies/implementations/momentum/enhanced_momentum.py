@@ -44,8 +44,41 @@ from ...strategy_engine import (
     StrategyConfig, StrategySignal, SignalType
 )
 
-logger = logging.getLogger(__name__)
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from core_engine.config import MomentumConfig
+except ImportError:
+    # Fallback for backward compatibility during migration
+    from dataclasses import dataclass, field
+    from typing import List
+    
+    @dataclass
+    class MomentumConfig(StrategyConfig):
+        """DEPRECATED: Use core_engine.config.MomentumConfig instead"""
+        short_period: int = 10
+        medium_period: int = 20
+        long_period: int = 50
+        momentum_threshold: float = 0.02
+        adx_period: int = 14
+        adx_threshold: float = 25.0
+        volume_ma_period: int = 20
+        volume_threshold: float = 1.2
+        primary_timeframe: str = "5min"
+        confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1h"])
+        enable_multi_timeframe: bool = True
+        base_position_pct: float = 0.03
+        max_position_pct: float = 0.08
+        momentum_scaling: bool = True
+        momentum_stop_pct: float = 0.03
+        trailing_stop_pct: float = 0.02
+        profit_target_ratio: float = 3.0
+        max_holding_period: int = 20
+        enable_breakout_detection: bool = True
+        breakout_lookback: int = 20
+        breakout_threshold: float = 0.02
+        symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
 
+logger = logging.getLogger(__name__)
 
 
 class MomentumSignal(Enum):
@@ -56,47 +89,8 @@ class MomentumSignal(Enum):
     MOMENTUM_EXHAUSTION = "momentum_exhaustion"
 
 
-@dataclass
-class MomentumConfig(StrategyConfig):
-    """Enhanced Momentum Configuration"""
-    
-    # Momentum parameters
-    short_period: int = 10              # Short-term momentum period
-    medium_period: int = 20             # Medium-term momentum period
-    long_period: int = 50               # Long-term momentum period
-    momentum_threshold: float = 0.02    # Minimum momentum for signal (2%)
-    
-    # Trend quality indicators
-    adx_period: int = 14                # ADX period for trend strength
-    adx_threshold: float = 25.0         # Minimum ADX for strong trend
-    
-    # Volume confirmation
-    volume_ma_period: int = 20          # Volume moving average period
-    volume_threshold: float = 1.2       # Volume confirmation threshold
-    
-    # Multi-timeframe analysis
-    primary_timeframe: str = "5min"     # Primary analysis timeframe
-    confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1h"])
-    enable_multi_timeframe: bool = True
-    
-    # Position sizing
-    base_position_pct: float = 0.03     # Base position size (3%)
-    max_position_pct: float = 0.08      # Maximum position size (8%)
-    momentum_scaling: bool = True       # Scale position by momentum strength
-    
-    # Risk management
-    momentum_stop_pct: float = 0.03     # Stop loss percentage (3%)
-    trailing_stop_pct: float = 0.02     # Trailing stop percentage (2%)
-    profit_target_ratio: float = 3.0    # Profit target vs stop loss ratio
-    max_holding_period: int = 20        # Maximum holding period (bars)
-    
-    # Breakout detection
-    enable_breakout_detection: bool = True
-    breakout_lookback: int = 20         # Lookback for breakout detection
-    breakout_threshold: float = 0.02    # Breakout threshold (2%)
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# Note: MomentumConfig now imported from core_engine.config (Rule 1 Section 7)
+# Local definition removed - use centralized configuration
 
 
 class EnhancedMomentumStrategy(EnhancedBaseStrategy):

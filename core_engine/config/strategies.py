@@ -55,6 +55,9 @@ class BaseStrategyConfig:
     name: str = "strategy"
     """Strategy name"""
     
+    strategy_id: Optional[str] = None
+    """Strategy unique identifier. Default: Auto-generated"""
+    
     strategy_type: Optional[StrategyType] = None
     """Strategy type"""
     
@@ -100,16 +103,27 @@ class MomentumConfig(BaseStrategyConfig):
     Momentum strategy configuration
     
     Consolidated from: trading/strategies/implementations/momentum/enhanced_momentum.py
+    Enhanced with all parameters for institutional-grade momentum trading.
     """
     strategy_type: StrategyType = StrategyType.MOMENTUM
     
-    # Momentum-specific parameters
+    # Core momentum parameters
     lookback_period: int = 60
     """Momentum lookback period. Default: 60 bars"""
+    
+    short_period: int = 10
+    """Short-term momentum period. Default: 10"""
+    
+    medium_period: int = 20
+    """Medium-term momentum period. Default: 20"""
+    
+    long_period: int = 50
+    """Long-term momentum period. Default: 50"""
     
     momentum_threshold: float = 0.02
     """Minimum momentum threshold. Default: 2%"""
     
+    # Trend quality indicators
     rsi_period: int = 14
     """RSI period for momentum confirmation. Default: 14"""
     
@@ -125,6 +139,47 @@ class MomentumConfig(BaseStrategyConfig):
     adx_threshold: float = 25.0
     """Minimum ADX for trend confirmation. Default: 25"""
     
+    # Volume confirmation
+    volume_ma_period: int = 20
+    """Volume moving average period. Default: 20"""
+    
+    volume_threshold: float = 1.2
+    """Volume confirmation threshold. Default: 1.2x average"""
+    
+    # Multi-timeframe analysis
+    confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1h"])
+    """Confirmation timeframes. Default: ['15min', '1h']"""
+    
+    # Position sizing (inherited from BaseStrategyConfig but can override)
+    base_position_pct: float = 0.03
+    """Base position size. Default: 3%"""
+    
+    max_position_pct: float = 0.08
+    """Maximum position size. Default: 8%"""
+    
+    momentum_scaling: bool = True
+    """Scale position by momentum strength. Default: True"""
+    
+    # Risk management
+    momentum_stop_pct: float = 0.03
+    """Stop loss percentage. Default: 3%"""
+    
+    trailing_stop_pct: float = 0.02
+    """Trailing stop percentage. Default: 2%"""
+    
+    max_holding_period: int = 20
+    """Maximum holding period in bars. Default: 20"""
+    
+    # Breakout detection
+    enable_breakout_detection: bool = True
+    """Enable breakout detection. Default: True"""
+    
+    breakout_lookback: int = 20
+    """Lookback for breakout detection. Default: 20"""
+    
+    breakout_threshold: float = 0.02
+    """Breakout threshold. Default: 2%"""
+    
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -133,6 +188,8 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"rsi_period must be positive, got {self.rsi_period}")
         if self.adx_period <= 0:
             raise ValueError(f"adx_period must be positive, got {self.adx_period}")
+        if not 0 < self.momentum_threshold <= 1.0:
+            raise ValueError(f"momentum_threshold must be (0, 1.0], got {self.momentum_threshold}")
 
 
 @dataclass

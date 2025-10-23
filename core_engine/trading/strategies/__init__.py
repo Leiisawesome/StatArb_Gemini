@@ -1,66 +1,62 @@
 """
-Trading Strategies Module
-=========================
+Strategy Layer - Professional API
+=================================
 
-Comprehensive trading strategy framework with implementations.
+Multi-strategy coordination and management components.
 
-This module provides:
-- Strategy execution engine and lifecycle management
-- Strategy validation and testing framework  
-- Strategy optimization and parameter tuning
-- Strategy registry and discovery
-- Concrete strategy implementations
-
-Components:
-- strategy_engine: Core execution framework
-- strategy_registry: Strategy catalog and metadata
-- strategy_manager: Lifecycle management with enhanced factory integration
-- strategy_validator: Quality assurance and validation
-- strategy_optimizer: Parameter optimization
-- implementations: 10 enhanced strategy implementations with ISystemComponent integration
+Author: StatArb_Gemini Architecture (Phase 4)
+Date: October 23, 2025
+Version: 2.0.0
 """
 
-# Core framework exports
-from .strategy_engine import (
-    BaseStrategy, StrategyConfig, StrategySignal, StrategyPosition, 
-    StrategyMetrics, StrategyState, StrategyType
+# Strategy Management
+from .manager import StrategyManager
+from .base_strategy_enhanced import EnhancedBaseStrategy
+from .strategy_registry import EnhancedStrategyRegistry
+from .strategy_validator import EnhancedStrategyValidator
+from .strategy_engine import StrategyExecutionEngine
+
+# Multi-Strategy Coordination
+from .multi_strategy_coordinator import (
+    MultiStrategySignalAggregator,
+    SignalConflictResolver
 )
 
-from .strategy_registry import StrategyRegistry, StrategyMetadata
-from .strategy_manager import StrategyManager
-from .strategy_validator import StrategyValidator
-from .strategy_optimizer import StrategyOptimizer
-
-# Strategy implementations
-from .implementations import (
-    EnhancedMomentumStrategy, MomentumConfig,
-    EnhancedMeanReversionStrategy, MeanReversionConfig,
-    EnhancedStatisticalArbitrageStrategy,
-    EnhancedFactorStrategy, FactorConfig,
-    EnhancedMultiAssetStrategy, MultiAssetConfig,
-    EnhancedTrendFollowingStrategy, TrendFollowingConfig,
-    EnhancedBreakoutStrategy, BreakoutConfig,
-    EnhancedPairsTradingStrategy, PairsConfig,
-    EnhancedVolatilityStrategy, VolatilityConfig,
-    EnhancedArbitrageStrategy, ArbitrageConfig
-)
+# Strategy Implementations (10 enhanced strategies)
+from .implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
+from .implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
+from .implementations.statistical_arbitrage.enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
+from .implementations.trend_following.enhanced_trend_following import EnhancedTrendFollowingStrategy
+from .implementations.pairs_trading.enhanced_pairs_trading import EnhancedPairsTradingStrategy
+from .implementations.factor.enhanced_factor import EnhancedFactorStrategy
+from .implementations.multi_asset.enhanced_multi_asset import EnhancedMultiAssetStrategy
+from .implementations.breakout.enhanced_breakout import EnhancedBreakoutStrategy
+from .implementations.volatility.enhanced_volatility import EnhancedVolatilityStrategy
+from .implementations.arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy
 
 __all__ = [
-    # Core framework
-    'BaseStrategy', 'StrategyConfig', 'StrategySignal', 'StrategyPosition',
-    'StrategyMetrics', 'StrategyState', 'StrategyType',
-    'StrategyRegistry', 'StrategyMetadata',
-    'StrategyManager', 'StrategyValidator', 'StrategyOptimizer',
+    # Core Management
+    'StrategyManager',
+    'EnhancedBaseStrategy',
+    'EnhancedStrategyRegistry',
+    'EnhancedStrategyValidator',
+    'StrategyExecutionEngine',
     
-    # Strategy implementations
-    'EnhancedMomentumStrategy', 'MomentumConfig',
-    'EnhancedMeanReversionStrategy', 'MeanReversionConfig',
+    # Multi-Strategy Coordination
+    'MultiStrategySignalAggregator',
+    'SignalConflictResolver',
+    
+    # Strategy Implementations
+    'EnhancedMomentumStrategy',
+    'EnhancedMeanReversionStrategy',
     'EnhancedStatisticalArbitrageStrategy',
-    'EnhancedFactorStrategy', 'FactorConfig',
-    'EnhancedMultiAssetStrategy', 'MultiAssetConfig',
-    'EnhancedTrendFollowingStrategy', 'TrendFollowingConfig',
-    'EnhancedBreakoutStrategy', 'BreakoutConfig',
-    'EnhancedPairsTradingStrategy', 'PairsConfig',
-    'EnhancedVolatilityStrategy', 'VolatilityConfig',
-    'EnhancedArbitrageStrategy', 'ArbitrageConfig'
+    'EnhancedTrendFollowingStrategy',
+    'EnhancedPairsTradingStrategy',
+    'EnhancedFactorStrategy',
+    'EnhancedMultiAssetStrategy',
+    'EnhancedBreakoutStrategy',
+    'EnhancedVolatilityStrategy',
+    'EnhancedArbitrageStrategy',
 ]
+
+__version__ = '2.0.0'
