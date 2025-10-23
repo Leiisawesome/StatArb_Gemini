@@ -11,13 +11,11 @@ Version: 2.0.0
 
 # Execution Components
 from .execution_engine import ExecutionEngine
-from .execution_manager import ExecutionManager
 from .fill_processor import FillProcessor
 from .execution_validator import ExecutionValidator
 
 __all__ = [
     'ExecutionEngine',
-    'ExecutionManager',
     'FillProcessor',
     'ExecutionValidator',
 ]
