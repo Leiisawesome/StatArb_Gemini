@@ -62,6 +62,25 @@ from .component_config import (
     ExecutionConfig,
     PortfolioConfig,
     
+    # Risk utility configs (Phase 5 - Risk Brick Enhancement)
+    ExposureConfig,
+    VarConfig,
+    StressTestConfig,
+    LimitConfig,
+    CorrelationConfig,
+    
+    # Analytics brick configs (Phase 5 - Analytics Enhancement)
+    PerformanceAnalyticsConfig,
+    MetricsCalculatorConfig,
+    AttributionAnalyticsConfig,
+    BenchmarkAnalyticsConfig,
+    ReportGenerationConfig,
+    
+    # Broker brick configs (Phase 6 - Broker Enhancement)
+    BrokerConnectionConfig,
+    BrokerSessionConfig,
+    BrokerConfig,
+    
     # Backward compatibility
     LegacyDataConfig,
     LegacyRiskConfig,
@@ -116,6 +135,16 @@ __all__ = [
     'DataConfig', 'RiskConfig', 'ProcessingConfig',
     'IndicatorConfig', 'FeatureConfig', 'SignalConfig',
     'RegimeConfig', 'AnalyticsConfig', 'ExecutionConfig', 'PortfolioConfig',
+    
+    # Risk utility configs (Phase 5 - Risk Brick Enhancement)
+    'ExposureConfig', 'VarConfig', 'StressTestConfig', 'LimitConfig', 'CorrelationConfig',
+    
+    # Analytics brick configs (Phase 5 - Analytics Enhancement)
+    'PerformanceAnalyticsConfig', 'MetricsCalculatorConfig', 'AttributionAnalyticsConfig',
+    'BenchmarkAnalyticsConfig', 'ReportGenerationConfig',
+    
+    # Broker brick configs (Phase 6 - Broker Enhancement)
+    'BrokerConnectionConfig', 'BrokerSessionConfig', 'BrokerConfig',
     
     # Backward compatibility
     'LegacyDataConfig', 'LegacyRiskConfig', 'LegacyProcessingConfig',

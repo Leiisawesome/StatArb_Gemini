@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-Risk Manager - Core Engine (Central Hub)
-========================================
+Risk Manager - Legacy/Deprecated
+=================================
 
-Clean implementation of the central risk governance hub for core_engine.
-This is the central control point that governs all trading decisions.
+⚠️  **DEPRECATED**: This module is kept for backward compatibility only.
 
-As shown in the institutional architecture diagram, the Risk Manager contains:
-- TradingEngine (HOW) - Trade execution planning
-- StrategyManager (WHAT) - Strategy decisions  
-- ExecutionEngine (ACTION) - Order execution
+**Use Instead:**
+- For production risk management: `core_engine.system.central_risk_manager.CentralRiskManager`
+- For type definitions: `core_engine.type_definitions.risk` (RiskManager, RiskMetrics, etc.)
 
-Migration: Direct implementation using proven risk management patterns.
+This legacy RiskManager implements basic risk checks but lacks the comprehensive
+governance features of CentralRiskManager (Rule 4 compliance).
+
+**Migration Path:**
+- New code should use `CentralRiskManager` from `core_engine.system`
+- This module remains for tests and backward compatibility
+- Type definitions have been moved to `core_engine.type_definitions.risk`
 
 Author: StatArb_Gemini Core Engine Migration  
-Version: 1.0.0 (Clean Production - Central Hub)
+Version: 1.0.0 (Legacy - Deprecated)
+Status: DEPRECATED - Use CentralRiskManager instead
 """
 
 import asyncio

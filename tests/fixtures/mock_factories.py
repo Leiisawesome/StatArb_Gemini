@@ -12,7 +12,7 @@ from datetime import datetime
 
 from core_engine.data.manager import ClickHouseDataManager
 from core_engine.regime.engine import EnhancedRegimeEngine
-from core_engine.trading.portfolio.manager import PortfolioManager
+from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
 
 
 # ========================================
@@ -94,7 +94,7 @@ def create_mock_portfolio_manager(
     current_positions: Optional[Dict[str, Any]] = None
 ) -> Mock:
     """Create mock portfolio manager"""
-    mock = Mock(spec=PortfolioManager)
+    mock = Mock(spec=EnhancedPortfolioManager)
     
     mock.is_initialized = True
     mock.total_capital = initial_capital

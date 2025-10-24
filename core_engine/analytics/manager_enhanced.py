@@ -17,9 +17,18 @@ from pathlib import Path
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 
-# Import ISystemComponent for orchestrator integration
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 try:
-    from ..system.interfaces import ISystemComponent
+    from ..config import AnalyticsConfig as CentralizedAnalyticsConfig
+    CENTRALIZED_CONFIG_AVAILABLE = True
+except ImportError:
+    CENTRALIZED_CONFIG_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Centralized AnalyticsConfig not available, using local config")
+
+# Import ISystemComponent and IRegimeAware for orchestrator integration
+try:
+    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -43,6 +52,18 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
             pass
+    
+    class IRegimeAware(ABC):
+        pass
+    
+    # Minimal RegimeContext for fallback
+    from dataclasses import dataclass
+    @dataclass
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+        regime_start_time: datetime = None
+        regime_duration_minutes: float = 0.0
 
 # Internal imports
 from .performance_analyzer import PerformanceAnalyzer, PerformanceConfig
@@ -454,18 +475,62 @@ class DataValidator:
         return max(quality_score, 0.0)
 
 
-class EnhancedAnalyticsManager(ISystemComponent):
+class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     """
-    Enhanced Analytics Manager with ISystemComponent Integration
+    Enhanced Analytics Manager with ISystemComponent and IRegimeAware Integration
     
     Unified orchestration of all analytics components with advanced
     coordination, task scheduling, integrated reporting, and orchestrator integration
     for institutional-grade analytics operations.
+    
+    **Enhanced Features:**
+    - ISystemComponent integration for orchestrator
+    - IRegimeAware integration for regime-based analytics
+    - Centralized configuration (Rule 1 Section 7)
     """
     
-    def __init__(self, config: Optional[AnalyticsConfig] = None):
-        """Initialize enhanced analytics manager"""
-        self.config = config or AnalyticsConfig()
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize enhanced analytics manager
+        
+        Args:
+            config: AnalyticsConfig or dict
+        """
+        # Handle centralized configuration (Rule 1 Section 7 - Configuration Management)
+        if CENTRALIZED_CONFIG_AVAILABLE and (config is None or isinstance(config, dict)):
+            # Use centralized config
+            if config is None:
+                self.centralized_config = CentralizedAnalyticsConfig()
+            elif isinstance(config, dict):
+                self.centralized_config = CentralizedAnalyticsConfig(**{
+                    k: v for k, v in config.items() 
+                    if hasattr(CentralizedAnalyticsConfig, k)
+                })
+            
+            # Map to local AnalyticsConfig for backward compatibility
+            self.config = AnalyticsConfig(
+                mode=AnalyticsMode(self.centralized_config.mode),
+                max_workers=self.centralized_config.max_workers,
+                enable_caching=self.centralized_config.enable_caching,
+                cache_ttl_hours=self.centralized_config.cache_ttl_hours,
+            )
+            logger.info("✅ Using centralized AnalyticsConfig (Rule 1 Section 7)")
+        elif isinstance(config, CentralizedAnalyticsConfig if CENTRALIZED_CONFIG_AVAILABLE else type(None)):
+            # Already centralized config
+            self.centralized_config = config
+            self.config = AnalyticsConfig(
+                mode=AnalyticsMode(config.mode),
+                max_workers=config.max_workers,
+                enable_caching=config.enable_caching,
+                cache_ttl_hours=config.cache_ttl_hours,
+            )
+            logger.info("✅ Using centralized AnalyticsConfig (Rule 1 Section 7)")
+        else:
+            # Fallback to local config
+            self.config = config if isinstance(config, AnalyticsConfig) else AnalyticsConfig()
+            self.centralized_config = None
+            if not CENTRALIZED_CONFIG_AVAILABLE:
+                logger.debug("Using local AnalyticsConfig (centralized config not available)")
         
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
@@ -475,6 +540,11 @@ class EnhancedAnalyticsManager(ISystemComponent):
         
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
+        # IRegimeAware state management
+        self.regime_engine: Optional[Any] = None
+        self.current_regime_context: Optional[RegimeContext] = None
+        logger.info("✅ EnhancedAnalyticsManager implements IRegimeAware (Rule 2 - Regime-First)")
         
         # Health and performance tracking
         self.health_metrics = {
@@ -705,6 +775,124 @@ class EnhancedAnalyticsManager(ISystemComponent):
             },
             'health_metrics': self.health_metrics
         }
+    
+    # ================================================================
+    # IRegimeAware Implementation (Rule 2 - Regime-First Principle)
+    # ================================================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine dependency
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
+        """
+        self.regime_engine = regime_engine
+        
+        # Propagate to regime-aware components
+        if hasattr(self.performance_analyzer, 'set_regime_engine'):
+            self.performance_analyzer.set_regime_engine(regime_engine)
+        if hasattr(self.metrics_calculator, 'set_regime_engine'):
+            self.metrics_calculator.set_regime_engine(regime_engine)
+        
+        logger.info("✅ RegimeEngine injected into EnhancedAnalyticsManager (IRegimeAware)")
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """
+        Handle regime change events
+        
+        Args:
+            new_regime_context: New regime context
+        """
+        try:
+            old_regime = self.current_regime_context.primary_regime if self.current_regime_context else "none"
+            self.current_regime_context = new_regime_context
+            
+            logger.info(
+                f"📊 AnalyticsManager regime change: {old_regime} → "
+                f"{new_regime_context.primary_regime} "
+                f"(confidence: {new_regime_context.regime_confidence:.2%})"
+            )
+            
+            # Propagate regime change to regime-aware components
+            if hasattr(self.performance_analyzer, 'on_regime_change'):
+                await self.performance_analyzer.on_regime_change(new_regime_context)
+            if hasattr(self.metrics_calculator, 'on_regime_change'):
+                await self.metrics_calculator.on_regime_change(new_regime_context)
+            
+            # Adapt analytics strategies to new regime
+            await self.adapt_to_regime(new_regime_context)
+            
+        except Exception as e:
+            logger.error(f"Error handling regime change in AnalyticsManager: {e}")
+    
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        return self.current_regime_context
+    
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """
+        Adapt analytics operations to current regime
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Adaptation results
+        """
+        try:
+            regime = regime_context.primary_regime
+            volatility_regime = getattr(regime_context, 'volatility_regime', 'normal')
+            
+            adaptations = {
+                'regime': regime,
+                'volatility_regime': volatility_regime,
+                'analytics_mode': self.config.mode.value,
+            }
+            
+            # Adjust analytics frequency based on regime
+            if volatility_regime == 'high_volatility' or volatility_regime == 'extreme_volatility':
+                # Increase analytics frequency in volatile conditions
+                adaptations['suggested_frequency'] = 'high'  # More frequent analytics
+                adaptations['priority_metrics'] = ['volatility', 'var', 'max_drawdown']
+            elif volatility_regime == 'low_volatility':
+                # Standard frequency in calm conditions
+                adaptations['suggested_frequency'] = 'normal'
+                adaptations['priority_metrics'] = ['sharpe_ratio', 'total_return']
+            else:
+                adaptations['suggested_frequency'] = 'normal'
+                adaptations['priority_metrics'] = ['all']
+            
+            # Adjust reporting emphasis
+            if regime == 'crisis':
+                adaptations['report_emphasis'] = 'risk_focused'
+                adaptations['alert_sensitivity'] = 'high'
+            else:
+                adaptations['report_emphasis'] = 'balanced'
+                adaptations['alert_sensitivity'] = 'normal'
+            
+            adaptations['adapted'] = True
+            
+            logger.debug(
+                f"📊 AnalyticsManager adapted to {regime} regime: "
+                f"frequency={adaptations['suggested_frequency']}, "
+                f"emphasis={adaptations['report_emphasis']}"
+            )
+            
+            return adaptations
+            
+        except Exception as e:
+            logger.error(f"Error adapting AnalyticsManager to regime: {e}")
+            return {'adapted': False, 'error': str(e)}
+    
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        has_regime_engine = self.regime_engine is not None
+        if has_regime_engine:
+            logger.debug("✅ AnalyticsManager regime dependency validated")
+        else:
+            logger.warning("⚠️  AnalyticsManager regime engine not configured")
+        return has_regime_engine
     
     # Enhanced Internal Methods
     

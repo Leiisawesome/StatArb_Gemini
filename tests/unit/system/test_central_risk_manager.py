@@ -23,7 +23,6 @@ from unittest.mock import Mock
 
 from core_engine.system.central_risk_manager import (
     CentralRiskManager,
-    RiskManagerConfig,
     TradingDecisionRequest,
     TradingAuthorization,
     TradingDecisionType,
@@ -32,6 +31,7 @@ from core_engine.system.central_risk_manager import (
 from core_engine.system.unified_execution_engine import (
     ExecutionUrgency
 )
+from core_engine.config import RiskConfig
 
 
 # ============================================================================
@@ -217,7 +217,7 @@ class TestInitialization:
         
         assert manager is not None
         assert manager.config is not None
-        assert isinstance(manager.config, RiskManagerConfig)
+        assert isinstance(manager.config, RiskConfig)
         assert manager.is_initialized is False
         assert manager.is_operational is False
         assert manager.emergency_mode is False
@@ -227,14 +227,14 @@ class TestInitialization:
     
     def test_custom_configuration(self, default_config):
         """Test initialization with custom config"""
-        custom_config = default_config.copy()
-        custom_config['max_position_size'] = 0.05
-        custom_config['min_signal_confidence'] = 0.7
+        # Create RiskConfig with nested structure
+        from core_engine.config import PositionLimits
+        custom_limits = PositionLimits(max_position_size=0.05)
+        custom_config = RiskConfig(position_limits=custom_limits)
         
         manager = CentralRiskManager(custom_config)
         
         assert manager.config.max_position_size == 0.05
-        assert manager.config.min_signal_confidence == 0.7
     
     @pytest.mark.asyncio
     async def test_full_initialization(self, risk_manager):

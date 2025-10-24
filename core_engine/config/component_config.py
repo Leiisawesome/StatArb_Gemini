@@ -82,6 +82,12 @@ class RiskLimits:
     risk_free_rate: float = 0.02
     """Risk-free rate for Sharpe ratio calculations. Default: 2% annual"""
     
+    position_concentration_limit: float = 0.15
+    """Maximum concentration per position. Default: 15%"""
+    
+    var_percentile: float = 95.0
+    """VaR percentile. Default: 95.0"""
+    
     def __post_init__(self):
         """Validate risk limits"""
         if not 0 < self.confidence_level < 1.0:
@@ -237,6 +243,263 @@ class RiskConfig:
     
     enable_pre_trade_risk: bool = True
     """Enable pre-trade risk checks. Default: True"""
+    
+    # Backward compatibility properties
+    @property
+    def max_position_size(self) -> float:
+        """Backward compatibility: access position_limits.max_position_size"""
+        return self.position_limits.max_position_size
+    
+    @property
+    def max_daily_var(self) -> float:
+        """Backward compatibility: access risk_limits.max_daily_var"""
+        return self.risk_limits.max_daily_var
+    
+    @property
+    def max_positions(self) -> int:
+        """Backward compatibility: access position_limits.max_positions"""
+        return self.position_limits.max_positions
+    
+    @property
+    def position_concentration_limit(self) -> float:
+        """Backward compatibility: access risk_limits.position_concentration_limit"""
+        return self.risk_limits.position_concentration_limit
+    
+    @property
+    def confidence_level(self) -> float:
+        """Backward compatibility: access risk_limits.confidence_level"""
+        return self.risk_limits.confidence_level
+    
+    @property
+    def var_percentile(self) -> float:
+        """Backward compatibility: access risk_limits.var_percentile"""
+        return self.risk_limits.var_percentile
+    
+    @property
+    def stop_loss_pct(self) -> float:
+        """Backward compatibility: access risk_limits.stop_loss_pct"""
+        return self.risk_limits.stop_loss_pct
+    
+    @property
+    def real_time_monitoring(self) -> bool:
+        """Backward compatibility: access enable_real_time_risk"""
+        return self.enable_real_time_risk
+    
+    @property
+    def monitoring_frequency(self) -> int:
+        """Backward compatibility: monitoring frequency in seconds. Default: 60"""
+        return 60  # Default monitoring frequency
+    
+    @property
+    def regime_risk_multipliers(self) -> dict:
+        """Backward compatibility: regime risk multipliers"""
+        return {
+            'low_volatility': 0.8,
+            'normal_volatility': 1.0,
+            'high_volatility': 1.3,
+            'extreme_volatility': 1.8
+        }
+    
+    @property
+    def strategy_allocation_limit(self) -> float:
+        """Backward compatibility: strategy allocation limit. Default: 0.33 (33%)"""
+        return 0.33
+
+
+@dataclass
+class ExposureConfig:
+    """
+    Exposure calculator configuration
+    
+    Centralized from core_engine/risk/exposure_calculator.py
+    Parameters for portfolio exposure tracking and limit monitoring.
+    """
+    cache_ttl_seconds: int = 300
+    """Cache time-to-live in seconds. Default: 300 (5 minutes)"""
+    
+    include_derivatives: bool = True
+    """Include derivatives in exposure calculations. Default: True"""
+    
+    include_cash: bool = True
+    """Include cash positions in exposure calculations. Default: True"""
+    
+    base_currency: str = 'USD'
+    """Base currency for exposure calculations. Default: 'USD'"""
+    
+    # Exposure limits
+    max_net_exposure: float = 1.0
+    """Maximum net exposure as % of portfolio. Default: 100%"""
+    
+    max_gross_exposure: float = 2.0
+    """Maximum gross exposure as % of portfolio. Default: 200%"""
+    
+    max_sector_exposure: float = 0.30
+    """Maximum sector exposure as % of portfolio. Default: 30%"""
+    
+    max_single_position: float = 0.15
+    """Maximum single position as % of portfolio. Default: 15%"""
+
+
+@dataclass
+class VarConfig:
+    """
+    VaR calculator configuration
+    
+    Centralized from core_engine/risk/var_calculator.py
+    Parameters for Value at Risk calculations.
+    """
+    default_confidence: float = 0.95
+    """Default confidence level for VaR. Default: 95%"""
+    
+    default_method: str = 'historical'
+    """Default VaR method ('historical', 'parametric', 'monte_carlo'). Default: 'historical'"""
+    
+    monte_carlo_simulations: int = 10000
+    """Number of Monte Carlo simulations. Default: 10,000"""
+    
+    historical_window: int = 252
+    """Historical lookback window in days. Default: 252 (1 year)"""
+    
+    parametric_distribution: str = 'normal'
+    """Distribution for parametric VaR ('normal', 'student_t'). Default: 'normal'"""
+    
+    enable_cvar: bool = True
+    """Enable Conditional VaR (Expected Shortfall) calculation. Default: True"""
+    
+    cache_results: bool = True
+    """Enable result caching. Default: True"""
+    
+    cache_ttl_seconds: int = 300
+    """Cache time-to-live in seconds. Default: 300 (5 minutes)"""
+
+
+@dataclass
+class StressTestConfig:
+    """
+    Stress tester configuration
+    
+    Centralized from core_engine/risk/stress_tester.py
+    Parameters for portfolio stress testing.
+    """
+    enable_market_crash: bool = True
+    """Enable market crash scenario. Default: True"""
+    
+    enable_volatility_spike: bool = True
+    """Enable volatility spike scenario. Default: True"""
+    
+    enable_correlation_breakdown: bool = True
+    """Enable correlation breakdown scenario. Default: True"""
+    
+    enable_liquidity_crisis: bool = True
+    """Enable liquidity crisis scenario. Default: True"""
+    
+    # Shock magnitudes (in standard deviations or percentage moves)
+    market_crash_shock: float = -0.20
+    """Market crash shock magnitude. Default: -20%"""
+    
+    volatility_spike_multiplier: float = 3.0
+    """Volatility spike multiplier. Default: 3x normal"""
+    
+    correlation_increase: float = 0.50
+    """Correlation increase in stress. Default: +50%"""
+    
+    liquidity_reduction: float = 0.70
+    """Liquidity reduction in crisis. Default: -70%"""
+    
+    # Execution
+    parallel_scenarios: bool = True
+    """Run scenarios in parallel. Default: True"""
+    
+    max_workers: int = 4
+    """Maximum parallel workers. Default: 4"""
+
+
+@dataclass
+class LimitConfig:
+    """
+    Limit monitor configuration
+    
+    Centralized from core_engine/risk/limit_monitor.py
+    Parameters for risk limit monitoring and alerting.
+    """
+    # Alert settings
+    enable_alerts: bool = True
+    """Enable alert notifications. Default: True"""
+    
+    alert_cooldown_seconds: int = 300
+    """Cooldown period between repeated alerts. Default: 300 (5 minutes)"""
+    
+    max_alerts_per_hour: int = 20
+    """Maximum alerts per hour to prevent spam. Default: 20"""
+    
+    # Monitoring frequency
+    check_frequency_seconds: int = 60
+    """Frequency of limit checks in seconds. Default: 60 (1 minute)"""
+    
+    enable_real_time_monitoring: bool = True
+    """Enable continuous real-time monitoring. Default: True"""
+    
+    # Limit breach thresholds
+    warning_threshold: float = 0.80
+    """Warning threshold (% of limit). Default: 80%"""
+    
+    critical_threshold: float = 0.95
+    """Critical threshold (% of limit). Default: 95%"""
+    
+    emergency_threshold: float = 1.00
+    """Emergency threshold (% of limit). Default: 100%"""
+    
+    # Breach tracking
+    track_breach_history: bool = True
+    """Track history of limit breaches. Default: True"""
+    
+    max_breach_history: int = 1000
+    """Maximum breach history records. Default: 1000"""
+
+
+@dataclass
+class CorrelationConfig:
+    """
+    Correlation analyzer configuration
+    
+    Centralized from core_engine/risk/correlation_analyzer.py
+    Parameters for correlation analysis and regime detection.
+    """
+    default_method: str = 'pearson'
+    """Default correlation method ('pearson', 'spearman', 'kendall'). Default: 'pearson'"""
+    
+    rolling_window: int = 60
+    """Rolling correlation window in periods. Default: 60"""
+    
+    min_periods: int = 30
+    """Minimum periods for valid correlation. Default: 30"""
+    
+    # Regime detection
+    enable_regime_detection: bool = True
+    """Enable correlation regime detection. Default: True"""
+    
+    regime_detection_method: str = 'hmm'
+    """Regime detection method ('hmm', 'clustering'). Default: 'hmm'"""
+    
+    n_regimes: int = 3
+    """Number of correlation regimes. Default: 3"""
+    
+    # Tail dependence
+    enable_tail_dependence: bool = True
+    """Enable tail dependence analysis. Default: True"""
+    
+    tail_threshold: float = 0.05
+    """Tail threshold for dependence analysis. Default: 5%"""
+    
+    # Performance
+    enable_caching: bool = True
+    """Enable correlation matrix caching. Default: True"""
+    
+    cache_ttl_seconds: int = 600
+    """Cache time-to-live in seconds. Default: 600 (10 minutes)"""
+    
+    parallel_computation: bool = True
+    """Enable parallel correlation computation. Default: True"""
 
 
 @dataclass
@@ -1434,6 +1697,609 @@ class DataConfig:
                 )
 
 
+# ============================================================================
+# ANALYTICS BRICK CONFIGURATIONS (Phase 5 - Analytics Enhancement)
+# ============================================================================
+
+@dataclass
+class PerformanceAnalyticsConfig:
+    """
+    Performance analytics configuration
+    
+    Consolidated from: analytics/performance_analyzer.py PerformanceConfig
+    Professional performance analysis with institutional metrics.
+    """
+    # Risk-free rate
+    risk_free_rate: float = 0.02
+    """Annual risk-free rate for Sharpe/Sortino calculations. Default: 2%"""
+    
+    # Calculation parameters
+    annualization_factor: int = 252
+    """Trading days per year for annualization. Default: 252"""
+    
+    var_confidence_level: float = 0.95
+    """Value at Risk confidence level. Default: 95%"""
+    
+    cvar_confidence_level: float = 0.95
+    """Conditional VaR confidence level. Default: 95%"""
+    
+    # Rolling window settings
+    rolling_window_days: int = 60
+    """Rolling window for metrics calculation (days). Default: 60"""
+    
+    min_periods: int = 30
+    """Minimum periods required for calculations. Default: 30"""
+    
+    # Analysis toggles
+    enable_risk_adjusted_metrics: bool = True
+    """Enable Sharpe, Sortino, Calmar calculations. Default: True"""
+    
+    enable_drawdown_analysis: bool = True
+    """Enable drawdown tracking and analysis. Default: True"""
+    
+    enable_tail_risk_analysis: bool = True
+    """Enable VaR, CVaR, tail risk metrics. Default: True"""
+    
+    enable_distribution_analysis: bool = True
+    """Enable skewness, kurtosis analysis. Default: True"""
+    
+    # Performance thresholds
+    min_sharpe_ratio: float = 0.5
+    """Minimum acceptable Sharpe ratio. Default: 0.5"""
+    
+    max_drawdown_tolerance: float = 0.20
+    """Maximum tolerable drawdown (%). Default: 20%"""
+    
+    def __post_init__(self):
+        """Validate performance analytics configuration"""
+        if not 0.0 <= self.risk_free_rate <= 0.10:
+            raise ValueError(f"risk_free_rate must be [0, 0.10], got {self.risk_free_rate}")
+        
+        if not 200 <= self.annualization_factor <= 365:
+            raise ValueError(f"annualization_factor must be [200, 365], got {self.annualization_factor}")
+        
+        if not 0.0 < self.var_confidence_level < 1.0:
+            raise ValueError(f"var_confidence_level must be (0, 1), got {self.var_confidence_level}")
+
+
+@dataclass
+class MetricsCalculatorConfig:
+    """
+    Metrics calculator configuration
+    
+    Consolidated from: analytics/metrics_calculator.py MetricConfig
+    Advanced metrics calculation with regime awareness.
+    """
+    # Risk-free rate
+    risk_free_rate: float = 0.02
+    """Annual risk-free rate. Default: 2%"""
+    
+    # Calculation parameters
+    var_confidence_level: float = 0.95
+    """VaR confidence level. Default: 95%"""
+    
+    var_method: str = "historical"
+    """VaR calculation method: 'historical', 'parametric', 'monte_carlo'. Default: historical"""
+    
+    rolling_window: int = 60
+    """Rolling window for calculations. Default: 60"""
+    
+    min_observations: int = 30
+    """Minimum observations required. Default: 30"""
+    
+    # Metric categories to enable
+    enable_return_metrics: bool = True
+    """Enable return-based metrics. Default: True"""
+    
+    enable_risk_metrics: bool = True
+    """Enable risk metrics. Default: True"""
+    
+    enable_risk_adjusted_metrics: bool = True
+    """Enable risk-adjusted metrics. Default: True"""
+    
+    enable_drawdown_metrics: bool = True
+    """Enable drawdown metrics. Default: True"""
+    
+    enable_distribution_metrics: bool = True
+    """Enable distribution metrics. Default: True"""
+    
+    enable_trading_metrics: bool = True
+    """Enable trading-specific metrics. Default: True"""
+    
+    # Performance settings
+    enable_caching: bool = True
+    """Enable metric caching. Default: True"""
+    
+    cache_ttl_seconds: int = 300
+    """Cache TTL in seconds. Default: 300 (5 minutes)"""
+    
+    parallel_calculation: bool = True
+    """Enable parallel metric calculation. Default: True"""
+    
+    max_workers: int = 4
+    """Max parallel workers. Default: 4"""
+    
+    def __post_init__(self):
+        """Validate metrics calculator configuration"""
+        valid_var_methods = ['historical', 'parametric', 'monte_carlo']
+        if self.var_method not in valid_var_methods:
+            raise ValueError(f"var_method must be one of {valid_var_methods}, got {self.var_method}")
+        
+        if not 0.0 < self.var_confidence_level < 1.0:
+            raise ValueError(f"var_confidence_level must be (0, 1), got {self.var_confidence_level}")
+
+
+@dataclass
+class AttributionAnalyticsConfig:
+    """
+    Attribution analytics configuration
+    
+    Consolidated from: analytics/attribution_analyzer.py AttributionConfig
+    Performance attribution analysis configuration.
+    """
+    # Attribution methods
+    enable_brinson_attribution: bool = True
+    """Enable Brinson attribution (allocation, selection, interaction). Default: True"""
+    
+    enable_factor_attribution: bool = True
+    """Enable factor-based attribution. Default: True"""
+    
+    enable_strategy_attribution: bool = True
+    """Enable strategy-level attribution. Default: True"""
+    
+    # Analysis settings
+    attribution_frequency: str = "daily"
+    """Attribution calculation frequency: 'daily', 'weekly', 'monthly'. Default: daily"""
+    
+    min_attribution_periods: int = 20
+    """Minimum periods for attribution. Default: 20"""
+    
+    # Factor settings
+    factor_model: str = "fama_french_3"
+    """Factor model: 'fama_french_3', 'fama_french_5', 'carhart_4'. Default: fama_french_3"""
+    
+    custom_factors: List[str] = field(default_factory=list)
+    """Custom factor names. Default: []"""
+    
+    def __post_init__(self):
+        """Validate attribution configuration"""
+        valid_frequencies = ['daily', 'weekly', 'monthly', 'quarterly']
+        if self.attribution_frequency not in valid_frequencies:
+            raise ValueError(f"attribution_frequency must be one of {valid_frequencies}")
+        
+        valid_factor_models = ['fama_french_3', 'fama_french_5', 'carhart_4', 'custom']
+        if self.factor_model not in valid_factor_models:
+            raise ValueError(f"factor_model must be one of {valid_factor_models}")
+
+
+@dataclass
+class BenchmarkAnalyticsConfig:
+    """
+    Benchmark analytics configuration
+    
+    Consolidated from: analytics/benchmark_analyzer.py BenchmarkConfig
+    Benchmark comparison and analysis configuration.
+    """
+    # Default benchmarks
+    default_benchmarks: List[str] = field(default_factory=lambda: ["SPY", "QQQ"])
+    """Default benchmark symbols. Default: ['SPY', 'QQQ']"""
+    
+    # Comparison settings
+    enable_tracking_error: bool = True
+    """Calculate tracking error. Default: True"""
+    
+    enable_information_ratio: bool = True
+    """Calculate information ratio. Default: True"""
+    
+    enable_beta_analysis: bool = True
+    """Calculate beta vs benchmarks. Default: True"""
+    
+    enable_correlation_analysis: bool = True
+    """Calculate correlation analysis. Default: True"""
+    
+    # Calculation parameters
+    rolling_window: int = 60
+    """Rolling window for calculations. Default: 60"""
+    
+    min_correlation_periods: int = 30
+    """Minimum periods for correlation. Default: 30"""
+    
+    def __post_init__(self):
+        """Validate benchmark configuration"""
+        if not self.default_benchmarks:
+            warnings.warn("No default benchmarks configured", UserWarning, stacklevel=2)
+
+
+@dataclass
+class ReportGenerationConfig:
+    """
+    Report generation configuration
+    
+    Consolidated from: analytics/report_generator.py ReportConfig
+    Analytics report generation and formatting.
+    """
+    # Report formats
+    default_format: str = "html"
+    """Default report format: 'html', 'pdf', 'json', 'excel'. Default: html"""
+    
+    enable_charts: bool = True
+    """Include charts in reports. Default: True"""
+    
+    enable_tables: bool = True
+    """Include tables in reports. Default: True"""
+    
+    # Report sections
+    include_executive_summary: bool = True
+    """Include executive summary. Default: True"""
+    
+    include_performance_metrics: bool = True
+    """Include performance metrics. Default: True"""
+    
+    include_risk_metrics: bool = True
+    """Include risk metrics. Default: True"""
+    
+    include_attribution_analysis: bool = True
+    """Include attribution analysis. Default: True"""
+    
+    include_benchmark_comparison: bool = True
+    """Include benchmark comparison. Default: True"""
+    
+    # Output settings
+    output_directory: str = "analytics_reports"
+    """Output directory for reports. Default: analytics_reports"""
+    
+    filename_template: str = "report_{timestamp}"
+    """Report filename template. Default: report_{timestamp}"""
+    
+    auto_archive: bool = True
+    """Auto-archive old reports. Default: True"""
+    
+    max_archive_days: int = 90
+    """Keep reports for N days. Default: 90"""
+    
+    def __post_init__(self):
+        """Validate report configuration"""
+        valid_formats = ['html', 'pdf', 'json', 'excel', 'csv']
+        if self.default_format not in valid_formats:
+            raise ValueError(f"default_format must be one of {valid_formats}")
+
+
+@dataclass
+class AnalyticsConfig:
+    """
+    Centralized analytics configuration
+    
+    Consolidated from: analytics/manager_enhanced.py AnalyticsConfig
+    Main configuration for the entire analytics system.
+    
+    **Rule 1 Section 7 Compliance:** Centralized analytics configuration.
+    """
+    # System settings
+    mode: str = "realtime"
+    """Analytics mode: 'realtime', 'batch', 'scheduled', 'on_demand'. Default: realtime"""
+    
+    max_workers: int = 4
+    """Maximum parallel workers. Default: 4"""
+    
+    enable_caching: bool = True
+    """Enable result caching. Default: True"""
+    
+    cache_ttl_hours: int = 24
+    """Cache TTL in hours. Default: 24"""
+    
+    # Component configurations (composition pattern)
+    performance: PerformanceAnalyticsConfig = field(default_factory=PerformanceAnalyticsConfig)
+    """Performance analytics configuration"""
+    
+    metrics: MetricsCalculatorConfig = field(default_factory=MetricsCalculatorConfig)
+    """Metrics calculator configuration"""
+    
+    attribution: AttributionAnalyticsConfig = field(default_factory=AttributionAnalyticsConfig)
+    """Attribution analytics configuration"""
+    
+    benchmark: BenchmarkAnalyticsConfig = field(default_factory=BenchmarkAnalyticsConfig)
+    """Benchmark analytics configuration"""
+    
+    reporting: ReportGenerationConfig = field(default_factory=ReportGenerationConfig)
+    """Report generation configuration"""
+    
+    # Data settings
+    min_data_points: int = 30
+    """Minimum data points for analysis. Default: 30"""
+    
+    max_data_points: int = 50000
+    """Maximum data points to process. Default: 50,000"""
+    
+    data_quality_threshold: float = 0.7
+    """Minimum data quality score. Default: 0.7"""
+    
+    # Analysis toggles
+    enable_performance_analysis: bool = True
+    """Enable performance analysis. Default: True"""
+    
+    enable_attribution_analysis: bool = True
+    """Enable attribution analysis. Default: True"""
+    
+    enable_benchmark_analysis: bool = True
+    """Enable benchmark analysis. Default: True"""
+    
+    enable_factor_analysis: bool = True
+    """Enable factor analysis. Default: True"""
+    
+    enable_risk_analysis: bool = True
+    """Enable risk analysis. Default: True"""
+    
+    # Reporting settings
+    auto_generate_reports: bool = True
+    """Auto-generate reports. Default: True"""
+    
+    report_frequency: str = "daily"
+    """Report frequency: 'daily', 'weekly', 'monthly'. Default: daily"""
+    
+    # Alert settings
+    enable_alerts: bool = True
+    """Enable performance alerts. Default: True"""
+    
+    performance_alert_threshold: float = -0.05
+    """Performance alert threshold (%). Default: -5%"""
+    
+    risk_alert_threshold: float = 0.25
+    """Risk alert threshold (VaR %). Default: 25%"""
+    
+    # Storage settings
+    output_directory: str = "analytics_output"
+    """Main output directory. Default: analytics_output"""
+    
+    archive_old_results: bool = True
+    """Archive old results. Default: True"""
+    
+    max_archive_days: int = 90
+    """Keep results for N days. Default: 90"""
+    
+    # Backward compatibility properties (for components expecting direct access)
+    @property
+    def risk_free_rate(self) -> float:
+        """Backward compatibility: access performance.risk_free_rate"""
+        return self.performance.risk_free_rate
+    
+    @property
+    def var_confidence_level(self) -> float:
+        """Backward compatibility: access metrics.var_confidence_level"""
+        return self.metrics.var_confidence_level
+    
+    @property
+    def rolling_window(self) -> int:
+        """Backward compatibility: access metrics.rolling_window"""
+        return self.metrics.rolling_window
+    
+    def __post_init__(self):
+        """Validate analytics configuration"""
+        valid_modes = ['realtime', 'batch', 'scheduled', 'on_demand']
+        if self.mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got {self.mode}")
+        
+        valid_frequencies = ['daily', 'weekly', 'monthly']
+        if self.report_frequency not in valid_frequencies:
+            raise ValueError(f"report_frequency must be one of {valid_frequencies}")
+        
+        if not 0.0 < self.data_quality_threshold <= 1.0:
+            raise ValueError(f"data_quality_threshold must be (0, 1.0], got {self.data_quality_threshold}")
+
+
+# ============================================================================
+# BROKER BRICK CONFIGURATIONS (Phase 6 - Broker Enhancement)
+# ============================================================================
+
+@dataclass
+class BrokerConnectionConfig:
+    """
+    Broker connection configuration
+    
+    Consolidated from: broker/connection_manager.py ConnectionConfig
+    Connection pooling and health management for broker connections.
+    """
+    # Connection parameters
+    max_connections: int = 10
+    """Maximum concurrent connections. Default: 10"""
+    
+    connection_timeout: float = 30.0
+    """Connection timeout in seconds. Default: 30"""
+    
+    heartbeat_interval: float = 30.0
+    """Heartbeat interval in seconds. Default: 30"""
+    
+    # Retry settings
+    max_retry_attempts: int = 3
+    """Maximum retry attempts. Default: 3"""
+    
+    retry_delay: float = 1.0
+    """Initial retry delay in seconds. Default: 1.0"""
+    
+    backoff_multiplier: float = 2.0
+    """Exponential backoff multiplier. Default: 2.0"""
+    
+    # Health check settings
+    health_check_interval: float = 60.0
+    """Health check interval in seconds. Default: 60"""
+    
+    health_timeout: float = 10.0
+    """Health check timeout in seconds. Default: 10"""
+    
+    # Pool settings
+    min_pool_size: int = 1
+    """Minimum connection pool size. Default: 1"""
+    
+    max_pool_size: int = 5
+    """Maximum connection pool size. Default: 5"""
+    
+    idle_timeout: float = 300.0
+    """Idle connection timeout in seconds. Default: 300 (5 minutes)"""
+    
+    # Monitoring
+    enable_monitoring: bool = True
+    """Enable connection monitoring. Default: True"""
+    
+    metric_window: int = 100
+    """Number of recent operations to track. Default: 100"""
+    
+    def __post_init__(self):
+        """Validate broker connection configuration"""
+        if self.max_connections < 1:
+            raise ValueError(f"max_connections must be >= 1, got {self.max_connections}")
+        
+        if self.connection_timeout <= 0:
+            raise ValueError(f"connection_timeout must be > 0, got {self.connection_timeout}")
+        
+        if self.min_pool_size > self.max_pool_size:
+            raise ValueError(f"min_pool_size ({self.min_pool_size}) > max_pool_size ({self.max_pool_size})")
+
+
+@dataclass
+class BrokerSessionConfig:
+    """
+    Broker session configuration
+    
+    Consolidated from: broker/session_manager.py SessionConfig
+    Session management and authentication configuration.
+    """
+    # Session settings
+    session_timeout: float = 3600.0
+    """Session timeout in seconds. Default: 3600 (1 hour)"""
+    
+    idle_timeout: float = 1800.0
+    """Idle session timeout in seconds. Default: 1800 (30 minutes)"""
+    
+    max_sessions_per_user: int = 5
+    """Maximum sessions per user. Default: 5"""
+    
+    # Security
+    encrypt_session_data: bool = True
+    """Encrypt session data. Default: True"""
+    
+    session_token_length: int = 32
+    """Session token length. Default: 32"""
+    
+    require_ssl: bool = True
+    """Require SSL/TLS. Default: True"""
+    
+    # Heartbeat
+    heartbeat_interval: float = 30.0
+    """Session heartbeat interval in seconds. Default: 30"""
+    
+    max_missed_heartbeats: int = 3
+    """Maximum missed heartbeats before timeout. Default: 3"""
+    
+    # Recovery
+    enable_session_recovery: bool = True
+    """Enable session recovery. Default: True"""
+    
+    recovery_timeout: float = 300.0
+    """Session recovery timeout in seconds. Default: 300 (5 minutes)"""
+    
+    # Monitoring
+    log_session_events: bool = True
+    """Log session events. Default: True"""
+    
+    track_session_metrics: bool = True
+    """Track session metrics. Default: True"""
+    
+    def __post_init__(self):
+        """Validate broker session configuration"""
+        if self.session_timeout <= 0:
+            raise ValueError(f"session_timeout must be > 0, got {self.session_timeout}")
+        
+        if self.idle_timeout > self.session_timeout:
+            raise ValueError(f"idle_timeout ({self.idle_timeout}) > session_timeout ({self.session_timeout})")
+
+
+@dataclass
+class BrokerConfig:
+    """
+    Centralized broker configuration
+    
+    Consolidated from: broker/broker_manager.py BrokerConfig
+    Main configuration for the entire broker system.
+    
+    **Rule 1 Section 7 Compliance:** Centralized broker configuration.
+    """
+    # Component configurations (composition pattern)
+    connection: BrokerConnectionConfig = field(default_factory=BrokerConnectionConfig)
+    """Broker connection configuration"""
+    
+    session: BrokerSessionConfig = field(default_factory=BrokerSessionConfig)
+    """Broker session configuration"""
+    
+    # Execution settings
+    default_venue: str = "smart_routing"
+    """Default execution venue. Default: smart_routing"""
+    
+    enable_smart_routing: bool = True
+    """Enable smart order routing. Default: True"""
+    
+    enable_order_aggregation: bool = True
+    """Enable order aggregation. Default: True"""
+    
+    # Risk settings
+    enable_pre_trade_risk: bool = True
+    """Enable pre-trade risk checks. Default: True"""
+    
+    enable_real_time_risk: bool = True
+    """Enable real-time risk monitoring. Default: True"""
+    
+    position_limit_check: bool = True
+    """Enable position limit checking. Default: True"""
+    
+    # Monitoring
+    enable_performance_monitoring: bool = True
+    """Enable performance monitoring. Default: True"""
+    
+    enable_latency_monitoring: bool = True
+    """Enable latency monitoring. Default: True"""
+    
+    metrics_collection_interval: float = 60.0
+    """Metrics collection interval in seconds. Default: 60"""
+    
+    # Failover
+    enable_automatic_failover: bool = True
+    """Enable automatic failover. Default: True"""
+    
+    failover_threshold: float = 0.1
+    """Failover error rate threshold. Default: 0.1 (10%)"""
+    
+    recovery_check_interval: float = 300.0
+    """Recovery check interval in seconds. Default: 300 (5 minutes)"""
+    
+    # Backward compatibility properties
+    @property
+    def connection_config(self) -> BrokerConnectionConfig:
+        """Backward compatibility: access connection sub-config"""
+        return self.connection
+    
+    @property
+    def session_config(self) -> BrokerSessionConfig:
+        """Backward compatibility: access session sub-config"""
+        return self.session
+    
+    @property
+    def max_connections(self) -> int:
+        """Backward compatibility: access connection.max_connections"""
+        return self.connection.max_connections
+    
+    @property
+    def connection_timeout(self) -> float:
+        """Backward compatibility: access connection.connection_timeout"""
+        return self.connection.connection_timeout
+    
+    def __post_init__(self):
+        """Validate broker configuration"""
+        valid_venues = ['smart_routing', 'primary', 'secondary', 'dark_pool', 'ecn']
+        if self.default_venue not in valid_venues:
+            raise ValueError(f"default_venue must be one of {valid_venues}, got {self.default_venue}")
+        
+        if not 0.0 < self.failover_threshold <= 1.0:
+            raise ValueError(f"failover_threshold must be (0, 1.0], got {self.failover_threshold}")
+
+
 # Export data configs
 __all__ = [
     # ... existing exports ...
@@ -1444,4 +2310,15 @@ __all__ = [
     'FeedManagementConfig',
     'DataPerformanceConfig',
     'DataConfig',
+    # Analytics brick configs (Phase 5 - Analytics Enhancement)
+    'PerformanceAnalyticsConfig',
+    'MetricsCalculatorConfig',
+    'AttributionAnalyticsConfig',
+    'BenchmarkAnalyticsConfig',
+    'ReportGenerationConfig',
+    'AnalyticsConfig',
+    # Broker brick configs (Phase 6 - Broker Enhancement)
+    'BrokerConnectionConfig',
+    'BrokerSessionConfig',
+    'BrokerConfig',
 ]

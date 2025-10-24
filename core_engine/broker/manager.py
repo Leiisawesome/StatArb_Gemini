@@ -1,29 +1,63 @@
 #!/usr/bin/env python3
 """
-Broker Manager - Core Engine
-============================
+Broker Manager - DEPRECATED/LEGACY
+===================================
 
-Clean implementation of the broker manager for core_engine.
-This component manages multi-broker connectivity and routing.
+⚠️  **DEPRECATED**: This module is kept for backward compatibility only.
 
-As a supporting component in the institutional architecture:
-- Manages connections to multiple brokers (IBKR, Alpaca, Polygon)
-- Provides unified broker interface for execution
-- Handles broker-specific order routing and management
-- Monitors broker connectivity and failover
+**Use Instead:**
+- For production broker management: `core_engine.broker.broker_manager.BrokerManager`
 
-Migration: Direct implementation using proven broker integration patterns.
+**Migration Path:**
+- New code should use `BrokerManager` from `broker_manager.py`
+- The `broker_manager.py` implementation includes:
+  - ISystemComponent integration for orchestrator compatibility
+  - IRegimeAware integration for regime-adaptive operations  
+  - Centralized configuration from `core_engine.config`
+  - Professional lifecycle management
+  - Comprehensive health monitoring
 
-Author: StatArb_Gemini Core Engine Migration  
-Version: 1.0.0 (Clean Production - Multi-Broker)
+**Deprecation Timeline:**
+- Phase 1 (Current): This module remains functional but deprecated
+- Phase 2 (Future): This module will be marked for removal
+- Phase 3 (Future): This module will be removed
+
+**Migration Example:**
+```python
+# OLD (Deprecated)
+from core_engine.broker.manager import BrokerManager
+
+# NEW (Recommended)
+from core_engine.broker.broker_manager import BrokerManager
+```
+
+**Why Migrate:**
+1. Enhanced ISystemComponent integration
+2. Regime-aware broker operations
+3. Centralized configuration management
+4. Better orchestrator integration
+5. Professional lifecycle management
+
+Author: StatArb_Gemini Core Engine  
+Version: 1.0.0 (Legacy - Deprecated)
+Status: DEPRECATED - Use broker_manager.BrokerManager instead
 """
 
+import warnings
 import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Issue deprecation warning
+warnings.warn(
+    "core_engine.broker.manager.BrokerManager is deprecated. "
+    "Use core_engine.broker.broker_manager.BrokerManager instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Leverage existing high-quality broker components
 # Import core_engine types instead of core_structure

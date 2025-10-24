@@ -262,7 +262,29 @@ class BrokerAdapterInterface(ABC):
 
 
 class InteractiveBrokersAdapter(BrokerAdapterInterface):
-    """Interactive Brokers adapter implementation"""
+    """
+    Interactive Brokers adapter implementation - DEPRECATED
+    
+    ⚠️  **DEPRECATED**: This implementation is kept for backward compatibility only.
+    
+    **Use Instead:**
+    - `core_engine.broker.adapters.ibkr_adapter.IBKRAdapter` (611 lines, production-ready)
+    
+    **Why Migrate:**
+    1. More comprehensive implementation (611 vs 299 lines)
+    2. Better error handling
+    3. Production-grade features
+    4. Active maintenance
+    
+    **Migration Example:**
+    ```python
+    # OLD (Deprecated)
+    from core_engine.broker.broker_adapter import InteractiveBrokersAdapter
+    
+    # NEW (Recommended)
+    from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
+    ```
+    """
     
     def __init__(self, credentials: BrokerCredentials):
         super().__init__(credentials)
@@ -270,6 +292,14 @@ class InteractiveBrokersAdapter(BrokerAdapterInterface):
         self._request_id_counter = 1000
         self._orders = {}
         self._positions = {}
+        
+        # Issue deprecation warning
+        warnings.warn(
+            "InteractiveBrokersAdapter from broker_adapter.py is deprecated. "
+            "Use IBKRAdapter from adapters.ibkr_adapter instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         
     async def connect(self) -> bool:
         """Connect to Interactive Brokers"""
@@ -561,12 +591,42 @@ class InteractiveBrokersAdapter(BrokerAdapterInterface):
 
 
 class AlpacaAdapter(BrokerAdapterInterface):
-    """Alpaca adapter implementation"""
+    """
+    Alpaca adapter implementation - DEPRECATED
+    
+    ⚠️  **DEPRECATED**: This implementation is kept for backward compatibility only.
+    
+    **Use Instead:**
+    - `core_engine.broker.adapters.alpaca_adapter.AlpacaAdapter` (1,080 lines, production-ready)
+    
+    **Why Migrate:**
+    1. Much more comprehensive implementation (1,080 vs 200 lines)
+    2. Better error handling and recovery
+    3. Production-grade WebSocket support
+    4. Active maintenance
+    
+    **Migration Example:**
+    ```python
+    # OLD (Deprecated)
+    from core_engine.broker.broker_adapter import AlpacaAdapter
+    
+    # NEW (Recommended)
+    from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+    ```
+    """
     
     def __init__(self, credentials: BrokerCredentials):
         super().__init__(credentials)
         self._session = None
         self._base_url = "https://paper-api.alpaca.markets" if credentials.paper_trading else "https://api.alpaca.markets"
+        
+        # Issue deprecation warning
+        warnings.warn(
+            "AlpacaAdapter from broker_adapter.py is deprecated. "
+            "Use AlpacaAdapter from adapters.alpaca_adapter instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         
     async def connect(self) -> bool:
         """Connect to Alpaca"""

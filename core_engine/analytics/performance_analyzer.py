@@ -17,9 +17,18 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 import warnings
 
-# Import ISystemComponent for orchestrator integration
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 try:
-    from ..system.interfaces import ISystemComponent
+    from ..config import PerformanceAnalyticsConfig as CentralizedPerformanceConfig
+    CENTRALIZED_CONFIG_AVAILABLE = True
+except ImportError:
+    CENTRALIZED_CONFIG_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Centralized PerformanceAnalyticsConfig not available, using local config")
+
+# Import ISystemComponent and IRegimeAware for orchestrator integration
+try:
+    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -43,6 +52,18 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
             pass
+    
+    class IRegimeAware(ABC):
+        pass
+    
+    # Minimal RegimeContext for fallback
+    from dataclasses import dataclass
+    @dataclass
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+        regime_start_time: datetime = None
+        regime_duration_minutes: float = 0.0
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -473,17 +494,57 @@ class TradingMetricsCalculator:
         return stats
 
 
-class PerformanceAnalyzer(ISystemComponent):
+class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     """
-    Advanced Performance Analyzer
+    Advanced Performance Analyzer with Regime Awareness
     
     Comprehensive performance analysis with risk-adjusted metrics,
-    benchmark comparison, and detailed attribution analysis.
+    benchmark comparison, detailed attribution analysis, and regime-aware analysis.
+    
+    **Enhanced Features:**
+    - ISystemComponent integration for orchestrator
+    - IRegimeAware integration for regime-based analysis
+    - Regime-specific performance attribution
     """
     
-    def __init__(self, config: Optional[PerformanceConfig] = None):
-        """Initialize performance analyzer"""
-        self.config = config or PerformanceConfig()
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize performance analyzer
+        
+        Args:
+            config: PerformanceConfig or PerformanceAnalyticsConfig or dict
+        """
+        # Handle centralized configuration (Rule 1 Section 7 - Configuration Management)
+        if CENTRALIZED_CONFIG_AVAILABLE and (config is None or isinstance(config, dict)):
+            # Use centralized config
+            if config is None:
+                self.centralized_config = CentralizedPerformanceConfig()
+            elif isinstance(config, dict):
+                self.centralized_config = CentralizedPerformanceConfig(**{
+                    k: v for k, v in config.items() 
+                    if hasattr(CentralizedPerformanceConfig, k)
+                })
+            
+            # Map to local PerformanceConfig for backward compatibility
+            self.config = PerformanceConfig(
+                risk_free_rate_source=RiskFreeRateSource.CUSTOM,
+                custom_risk_free_rate=self.centralized_config.risk_free_rate,
+            )
+            logger.info("✅ Using centralized PerformanceAnalyticsConfig (Rule 1 Section 7)")
+        elif isinstance(config, CentralizedPerformanceConfig if CENTRALIZED_CONFIG_AVAILABLE else type(None)):
+            # Already centralized config
+            self.centralized_config = config
+            self.config = PerformanceConfig(
+                risk_free_rate_source=RiskFreeRateSource.CUSTOM,
+                custom_risk_free_rate=config.risk_free_rate,
+            )
+            logger.info("✅ Using centralized PerformanceAnalyticsConfig (Rule 1 Section 7)")
+        else:
+            # Fallback to local config
+            self.config = config if isinstance(config, PerformanceConfig) else PerformanceConfig()
+            self.centralized_config = None
+            if not CENTRALIZED_CONFIG_AVAILABLE:
+                logger.debug("Using local PerformanceConfig (centralized config not available)")
         
         # Component calculators
         self.risk_calculator = RiskMetricsCalculator(self.config)
@@ -504,6 +565,12 @@ class PerformanceAnalyzer(ISystemComponent):
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
+        
+        # IRegimeAware state management
+        self.regime_engine: Optional[Any] = None
+        self.current_regime_context: Optional[RegimeContext] = None
+        self.regime_performance_history: Dict[str, List[float]] = {}
+        logger.info("✅ PerformanceAnalyzer implements IRegimeAware (Rule 2 - Regime-First)")
         
         # Initialize audit trail for institutional compliance
         self.initialize_audit_trail()
@@ -722,6 +789,122 @@ class PerformanceAnalyzer(ISystemComponent):
                 'cache_ttl': self.config.cache_ttl
             }
         }
+    
+    # ================================================================
+    # IRegimeAware Implementation (Rule 2 - Regime-First Principle)
+    # ================================================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine dependency
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
+        """
+        self.regime_engine = regime_engine
+        logger.info("✅ RegimeEngine injected into PerformanceAnalyzer (IRegimeAware)")
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """
+        Handle regime change events
+        
+        Args:
+            new_regime_context: New regime context
+        """
+        try:
+            old_regime = self.current_regime_context.primary_regime if self.current_regime_context else "none"
+            self.current_regime_context = new_regime_context
+            
+            logger.info(
+                f"📊 PerformanceAnalyzer regime change: {old_regime} → "
+                f"{new_regime_context.primary_regime} "
+                f"(confidence: {new_regime_context.regime_confidence:.2%})"
+            )
+            
+            # Track performance by regime
+            regime_name = new_regime_context.primary_regime
+            if regime_name not in self.regime_performance_history:
+                self.regime_performance_history[regime_name] = []
+            
+            # Adapt analysis parameters to new regime
+            await self.adapt_to_regime(new_regime_context)
+            
+        except Exception as e:
+            logger.error(f"Error handling regime change in PerformanceAnalyzer: {e}")
+    
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        return self.current_regime_context
+    
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """
+        Adapt performance analysis to current regime
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Adaptation results
+        """
+        try:
+            regime = regime_context.primary_regime
+            volatility_regime = getattr(regime_context, 'volatility_regime', 'normal')
+            
+            # Regime-specific adjustments
+            adaptations = {
+                'regime': regime,
+                'volatility_regime': volatility_regime,
+                'original_config': {
+                    'risk_free_rate': self.config.custom_risk_free_rate,
+                    'var_confidence': self.config.confidence_level,
+                }
+            }
+            
+            # Adjust risk-free rate for regime (if using dynamic rates)
+            if regime == 'high_volatility' or volatility_regime == 'high_volatility':
+                # In high vol, investors demand higher risk-free rate
+                adjusted_risk_free = self.config.custom_risk_free_rate * 1.2
+                adaptations['adjusted_risk_free_rate'] = adjusted_risk_free
+            elif regime == 'low_volatility' or volatility_regime == 'low_volatility':
+                # In low vol, risk-free rate tends lower
+                adjusted_risk_free = self.config.custom_risk_free_rate * 0.9
+                adaptations['adjusted_risk_free_rate'] = adjusted_risk_free
+            else:
+                adaptations['adjusted_risk_free_rate'] = self.config.custom_risk_free_rate
+            
+            # Adjust VaR confidence level for regime
+            if volatility_regime == 'extreme_volatility':
+                # Use higher confidence in extreme conditions
+                adaptations['adjusted_var_confidence'] = min(self.config.confidence_level * 1.05, 0.99)
+            else:
+                adaptations['adjusted_var_confidence'] = self.config.confidence_level
+            
+            adaptations['adapted'] = True
+            
+            logger.debug(
+                f"📊 PerformanceAnalyzer adapted to {regime} regime: "
+                f"risk_free_rate={adaptations['adjusted_risk_free_rate']:.4f}, "
+                f"var_confidence={adaptations['adjusted_var_confidence']:.4f}"
+            )
+            
+            return adaptations
+            
+        except Exception as e:
+            logger.error(f"Error adapting PerformanceAnalyzer to regime: {e}")
+            return {'adapted': False, 'error': str(e)}
+    
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        has_regime_engine = self.regime_engine is not None
+        if has_regime_engine:
+            logger.debug("✅ PerformanceAnalyzer regime dependency validated")
+        else:
+            logger.warning("⚠️  PerformanceAnalyzer regime engine not configured")
+        return has_regime_engine
+    
+    # ================================================================
+    # Performance Analysis Methods
+    # ================================================================
     
     async def analyze_performance(
         self,

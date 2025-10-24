@@ -19,7 +19,7 @@ from typing import Dict, List, Any
 import asyncio
 
 # Import core components
-from core_engine.risk.manager import CentralRiskManager
+from core_engine.system.central_risk_manager import CentralRiskManager
 from core_engine.trading.strategy_manager import StrategyManager
 from core_engine.trading.execution_engine import UnifiedExecutionEngine
 from core_engine.system.orchestrator import HierarchicalSystemOrchestrator

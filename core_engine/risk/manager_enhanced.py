@@ -8,10 +8,23 @@ import threading
 import asyncio
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any, Callable, Union
+from dataclasses import dataclass, field, asdict
 import time
 from collections import deque
+
+# Import centralized risk utility configs (Rule 1 Section 7)
+try:
+    from ..config import (
+        ExposureConfig, VarConfig, StressTestConfig, 
+        LimitConfig, CorrelationConfig
+    )
+    CENTRALIZED_CONFIGS_AVAILABLE = True
+except ImportError:
+    # Fallback for backward compatibility
+    CENTRALIZED_CONFIGS_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Centralized risk configs not available, using dict-based configs")
 
 # Import risk components
 from .exposure_calculator import ExposureCalculator, ExposureType, ExposureBreakdown
@@ -58,17 +71,74 @@ class EnhancedRiskManager:
     limit monitoring, and correlation analysis into a unified framework.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize enhanced risk manager"""
-        self.config = config or {}
+    def __init__(self, config: Optional[Union[Dict[str, Any], 'RiskManagerConfig']] = None):
+        """
+        Initialize enhanced risk manager
+        
+        Args:
+            config: Either dict-based config (legacy) or RiskManagerConfig dataclass
+        """
+        # Handle different config types
+        if config is None:
+            self.config = {}
+        elif isinstance(config, dict):
+            self.config = config
+        else:
+            # Assume it's a dataclass with sub-configs
+            self.config = asdict(config) if hasattr(config, '__dataclass_fields__') else config
+        
         self._lock = threading.Lock()
         
+        # Extract or create sub-configs for risk components
+        if CENTRALIZED_CONFIGS_AVAILABLE:
+            # Use centralized dataclass configs
+            exposure_cfg = self.config.get('exposure_config')
+            if exposure_cfg is None or isinstance(exposure_cfg, dict):
+                from ..config import ExposureConfig
+                exposure_cfg = ExposureConfig(**exposure_cfg) if isinstance(exposure_cfg, dict) else ExposureConfig()
+            
+            var_cfg = self.config.get('var_config')
+            if var_cfg is None or isinstance(var_cfg, dict):
+                from ..config import VarConfig
+                var_cfg = VarConfig(**var_cfg) if isinstance(var_cfg, dict) else VarConfig()
+            
+            stress_cfg = self.config.get('stress_config')
+            if stress_cfg is None or isinstance(stress_cfg, dict):
+                from ..config import StressTestConfig
+                stress_cfg = StressTestConfig(**stress_cfg) if isinstance(stress_cfg, dict) else StressTestConfig()
+            
+            limit_cfg = self.config.get('limit_config')
+            if limit_cfg is None or isinstance(limit_cfg, dict):
+                from ..config import LimitConfig
+                limit_cfg = LimitConfig(**limit_cfg) if isinstance(limit_cfg, dict) else LimitConfig()
+            
+            correlation_cfg = self.config.get('correlation_config')
+            if correlation_cfg is None or isinstance(correlation_cfg, dict):
+                from ..config import CorrelationConfig
+                correlation_cfg = CorrelationConfig(**correlation_cfg) if isinstance(correlation_cfg, dict) else CorrelationConfig()
+            
+            # Convert to dict for component initialization
+            exposure_config = asdict(exposure_cfg) if hasattr(exposure_cfg, '__dataclass_fields__') else exposure_cfg
+            var_config = asdict(var_cfg) if hasattr(var_cfg, '__dataclass_fields__') else var_cfg
+            stress_config = asdict(stress_cfg) if hasattr(stress_cfg, '__dataclass_fields__') else stress_cfg
+            limit_config = asdict(limit_cfg) if hasattr(limit_cfg, '__dataclass_fields__') else limit_cfg
+            correlation_config = asdict(correlation_cfg) if hasattr(correlation_cfg, '__dataclass_fields__') else correlation_cfg
+            
+            logger.info("✅ Using centralized risk utility configs (Rule 1 Section 7)")
+        else:
+            # Fallback to dict-based configs
+            exposure_config = self.config.get('exposure_config', {})
+            var_config = self.config.get('var_config', {})
+            stress_config = self.config.get('stress_config', {})
+            limit_config = self.config.get('limit_config', {})
+            correlation_config = self.config.get('correlation_config', {})
+        
         # Initialize risk components
-        self.exposure_calculator = ExposureCalculator(self.config.get('exposure_config', {}))
-        self.var_calculator = VarCalculator(self.config.get('var_config', {}))
-        self.stress_tester = StressTester(self.config.get('stress_config', {}))
-        self.limit_monitor = LimitMonitor(self.config.get('limit_config', {}))
-        self.correlation_analyzer = CorrelationAnalyzer(self.config.get('correlation_config', {}))
+        self.exposure_calculator = ExposureCalculator(exposure_config)
+        self.var_calculator = VarCalculator(var_config)
+        self.stress_tester = StressTester(stress_config)
+        self.limit_monitor = LimitMonitor(limit_config)
+        self.correlation_analyzer = CorrelationAnalyzer(correlation_config)
         
         # Risk snapshots and alerts
         self._risk_snapshots = deque(maxlen=1000)

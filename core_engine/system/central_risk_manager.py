@@ -30,7 +30,7 @@ from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
-from .interfaces import ISystemComponent
+from .interfaces import ISystemComponent, IRegimeAware
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
 from ..config.component_config import RiskConfig
@@ -138,7 +138,7 @@ class TradingAuthorization:
 # Rationale: Eliminates 60 lines of duplicate configuration (Rule 1, Section 7)
 
 
-class CentralRiskManager(ISystemComponent):
+class CentralRiskManager(ISystemComponent, IRegimeAware):
     """
     Central Risk Manager - Institutional Governance Hub
     
@@ -379,16 +379,37 @@ class CentralRiskManager(ISystemComponent):
             self.regime_engine = regime_engine
             logger.info("✅ RegimeEngine registered with Central Risk Manager")
     
-    def on_regime_change(self, new_regime: Any) -> None:
+    # ========================================
+    # IREGIMEAWARE INTERFACE IMPLEMENTATION
+    # ========================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
         """
-        Callback for regime changes from RegimeEngine (PHASE 4)
-        Adjust risk limits based on market regime
+        Inject regime engine dependency (IRegimeAware interface)
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
         """
-        if not new_regime:
+        self.regime_engine = regime_engine
+        logger.info("✅ RegimeEngine injected into CentralRiskManager (IRegimeAware)")
+    
+    async def on_regime_change(self, new_regime_context: 'RegimeContext') -> None:
+        """
+        Handle regime change event (IRegimeAware interface)
+        
+        Adjust risk limits based on market regime.
+        
+        Args:
+            new_regime_context: New regime context with updated information
+        """
+        if not new_regime_context:
             return
         
-        regime_name = new_regime.primary_regime.value if hasattr(new_regime, 'primary_regime') else str(new_regime)
-        volatility_regime = new_regime.volatility_regime if hasattr(new_regime, 'volatility_regime') else 'normal_volatility'
+        # Store current regime context
+        self.current_regime_context = new_regime_context
+        
+        regime_name = new_regime_context.primary_regime
+        volatility_regime = new_regime_context.volatility_regime
         
         logger.info(f"🔄 CentralRiskManager adapting to regime change: {regime_name} (vol: {volatility_regime})")
         
@@ -406,6 +427,52 @@ class CentralRiskManager(ISystemComponent):
             logger.info(f"  ➡️  Normal risk limits (multiplier: 1.0)")
         
         logger.info(f"✅ Risk limits updated for regime: {regime_name}")
+    
+    def get_current_regime_context(self) -> Optional['RegimeContext']:
+        """
+        Get current regime context (IRegimeAware interface)
+        
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        return getattr(self, 'current_regime_context', None)
+    
+    async def adapt_to_regime(self, regime_context: 'RegimeContext') -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime (IRegimeAware interface)
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dictionary with adaptation details and adjustments made
+        """
+        # Call on_regime_change to apply adjustments
+        await self.on_regime_change(regime_context)
+        
+        return {
+            'component': 'CentralRiskManager',
+            'regime': regime_context.primary_regime,
+            'volatility_regime': regime_context.volatility_regime,
+            'risk_multiplier': self.risk_multiplier,
+            'max_position_size_adjusted': self.config.max_position_size * self.risk_multiplier,
+            'max_daily_var_adjusted': self.config.max_daily_var * self.risk_multiplier,
+            'adapted': True
+        }
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured (IRegimeAware interface)
+        
+        Returns:
+            True if regime engine is properly configured, False otherwise
+        """
+        has_regime_engine = self.regime_engine is not None
+        if has_regime_engine:
+            logger.debug("✅ CentralRiskManager regime dependency validated")
+        else:
+            logger.warning("⚠️  CentralRiskManager regime engine not configured")
+        return has_regime_engine
     
     # ========================================
     # ORCHESTRATOR INTEGRATION

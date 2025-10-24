@@ -17,6 +17,15 @@ from abc import ABC, abstractmethod
 from scipy import stats
 import warnings
 
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from ..config import MetricsCalculatorConfig as CentralizedMetricConfig
+    CENTRALIZED_CONFIG_AVAILABLE = True
+except ImportError:
+    CENTRALIZED_CONFIG_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Centralized MetricsCalculatorConfig not available, using local config")
+
 # Import ISystemComponent and IRegimeAware for orchestrator integration
 try:
     from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
@@ -767,18 +776,58 @@ class DistributionMetricsCalculator:
         return metrics
 
 
-class EnhancedMetricsCalculator(ISystemComponent):
+class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     """
-    Enhanced Metrics Calculator with ISystemComponent Integration
+    Enhanced Metrics Calculator with ISystemComponent and IRegimeAware Integration
     
     Comprehensive calculation of performance, risk, and statistical metrics
-    with support for rolling calculations, comparative analysis, and orchestrator integration
-    for institutional-grade metrics computation.
+    with support for rolling calculations, comparative analysis, orchestrator integration,
+    and regime-aware metric calculation for institutional-grade metrics computation.
+    
+    **Enhanced Features:**
+    - ISystemComponent integration for orchestrator
+    - IRegimeAware integration for regime-based metrics
+    - Centralized configuration (Rule 1 Section 7)
     """
     
-    def __init__(self, config: Optional[MetricConfig] = None):
-        """Initialize enhanced metrics calculator"""
-        self.config = config or MetricConfig()
+    def __init__(self, config: Optional[Any] = None):
+        """
+        Initialize enhanced metrics calculator
+        
+        Args:
+            config: MetricConfig or MetricsCalculatorConfig or dict
+        """
+        # Handle centralized configuration (Rule 1 Section 7 - Configuration Management)
+        if CENTRALIZED_CONFIG_AVAILABLE and (config is None or isinstance(config, dict)):
+            # Use centralized config
+            if config is None:
+                self.centralized_config = CentralizedMetricConfig()
+            elif isinstance(config, dict):
+                self.centralized_config = CentralizedMetricConfig(**{
+                    k: v for k, v in config.items() 
+                    if hasattr(CentralizedMetricConfig, k)
+                })
+            
+            # Map to local MetricConfig for backward compatibility
+            self.config = MetricConfig(
+                risk_free_rate=self.centralized_config.risk_free_rate,
+                trading_days_per_year=252,  # Use standard value
+            )
+            logger.info("✅ Using centralized MetricsCalculatorConfig (Rule 1 Section 7)")
+        elif isinstance(config, CentralizedMetricConfig if CENTRALIZED_CONFIG_AVAILABLE else type(None)):
+            # Already centralized config
+            self.centralized_config = config
+            self.config = MetricConfig(
+                risk_free_rate=config.risk_free_rate,
+                trading_days_per_year=252,
+            )
+            logger.info("✅ Using centralized MetricsCalculatorConfig (Rule 1 Section 7)")
+        else:
+            # Fallback to local config
+            self.config = config if isinstance(config, MetricConfig) else MetricConfig()
+            self.centralized_config = None
+            if not CENTRALIZED_CONFIG_AVAILABLE:
+                logger.debug("Using local MetricConfig (centralized config not available)")
         
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
@@ -788,6 +837,11 @@ class EnhancedMetricsCalculator(ISystemComponent):
         
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
+        
+        # IRegimeAware state management
+        self.regime_engine: Optional[Any] = None
+        self.current_regime_context: Optional[RegimeContext] = None
+        logger.info("✅ EnhancedMetricsCalculator implements IRegimeAware (Rule 2 - Regime-First)")
         
         # Health and performance tracking
         self.health_metrics = {
@@ -984,6 +1038,64 @@ class EnhancedMetricsCalculator(ISystemComponent):
             },
             'health_metrics': self.health_metrics
         }
+    
+    # ================================================================
+    # IRegimeAware Implementation (Rule 2 - Regime-First Principle)
+    # ================================================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """Inject regime engine dependency"""
+        self.regime_engine = regime_engine
+        logger.info("✅ RegimeEngine injected into EnhancedMetricsCalculator (IRegimeAware)")
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change events"""
+        try:
+            old_regime = self.current_regime_context.primary_regime if self.current_regime_context else "none"
+            self.current_regime_context = new_regime_context
+            
+            logger.info(
+                f"📊 MetricsCalculator regime change: {old_regime} → "
+                f"{new_regime_context.primary_regime} "
+                f"(confidence: {new_regime_context.regime_confidence:.2%})"
+            )
+            
+            await self.adapt_to_regime(new_regime_context)
+            
+        except Exception as e:
+            logger.error(f"Error handling regime change in MetricsCalculator: {e}")
+    
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        return self.current_regime_context
+    
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Adapt metrics calculation to current regime"""
+        try:
+            regime = regime_context.primary_regime
+            volatility_regime = getattr(regime_context, 'volatility_regime', 'normal')
+            
+            adaptations = {
+                'regime': regime,
+                'volatility_regime': volatility_regime,
+                'adapted': True
+            }
+            
+            logger.debug(f"📊 MetricsCalculator adapted to {regime} regime")
+            return adaptations
+            
+        except Exception as e:
+            logger.error(f"Error adapting MetricsCalculator to regime: {e}")
+            return {'adapted': False, 'error': str(e)}
+    
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        has_regime_engine = self.regime_engine is not None
+        if has_regime_engine:
+            logger.debug("✅ MetricsCalculator regime dependency validated")
+        else:
+            logger.warning("⚠️  MetricsCalculator regime engine not configured")
+        return has_regime_engine
     
     # Enhanced Internal Methods
     

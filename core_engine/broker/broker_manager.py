@@ -1,6 +1,9 @@
 """
 Broker Engine - Broker Manager
 Unified broker management with multi-broker coordination and orchestration
+
+**Rule 1 Section 7:** Uses centralized BrokerConfig from core_engine.config
+**Rule 2:** Implements ISystemComponent and IRegimeAware for orchestrator integration
 """
 
 import logging
@@ -22,6 +25,45 @@ from .connection_manager import ConnectionManager, ConnectionConfig, ConnectionP
 from .protocol_handler import ProtocolHandler
 from .message_processor import MessageProcessor, ProcessingConfig
 from .session_manager import SessionManager, SessionConfig
+
+# Import ISystemComponent and IRegimeAware (Rule 2 - Hierarchical Architecture)
+try:
+    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+    INTERFACES_AVAILABLE = True
+except ImportError:
+    INTERFACES_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("ISystemComponent/IRegimeAware not available - using fallback")
+    
+    # Fallback definitions
+    class ISystemComponent:
+        async def initialize(self) -> bool: pass
+        async def start(self) -> bool: pass
+        async def stop(self) -> bool: pass
+        async def health_check(self) -> Dict[str, Any]: pass
+        def get_status(self) -> Dict[str, Any]: pass
+    
+    class IRegimeAware:
+        def set_regime_engine(self, regime_engine: Any) -> None: pass
+        async def on_regime_change(self, new_regime_context: Any) -> None: pass
+        def get_current_regime_context(self) -> Optional[Any]: pass
+        async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]: pass
+        def validate_regime_dependency(self) -> bool: pass
+    
+    from dataclasses import dataclass
+    @dataclass
+    class RegimeContext:
+        primary_regime: str = "unknown"
+        regime_confidence: float = 0.5
+
+# Import centralized configuration (Rule 1 Section 7 - Configuration Management)
+try:
+    from ..config import BrokerConfig as CentralizedBrokerConfig
+    CENTRALIZED_CONFIG_AVAILABLE = True
+except ImportError:
+    CENTRALIZED_CONFIG_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Centralized BrokerConfig not available, using local config")
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -438,18 +480,92 @@ class OrderRouter:
         }
 
 
-class BrokerManager:
+class BrokerManager(ISystemComponent, IRegimeAware):
     """
-    Unified Broker Manager
+    Unified Broker Manager with ISystemComponent and IRegimeAware Integration
     
     Orchestrates multi-broker operations with intelligent routing,
     session management, and comprehensive broker lifecycle management.
+    
+    **Rule 1 Section 7:** Uses centralized BrokerConfig from core_engine.config
+    **Rule 2:** Implements ISystemComponent for orchestrator integration
+    **Rule 2:** Implements IRegimeAware for regime-adaptive broker operations
     """
     
-    def __init__(self, config: Optional[BrokerConfig] = None):
-        """Initialize broker manager"""
+    def __init__(self, config: Optional[Union[BrokerConfig, CentralizedBrokerConfig if CENTRALIZED_CONFIG_AVAILABLE else type(None), Dict[str, Any]]] = None):
+        """
+        Initialize broker manager
         
-        self.config = config or BrokerConfig()
+        Args:
+            config: BrokerConfig instance, dict, or None (uses centralized config if available)
+        """
+        
+        # ================================================================
+        # Configuration Management (Rule 1 Section 7)
+        # ================================================================
+        
+        if CENTRALIZED_CONFIG_AVAILABLE and (config is None or isinstance(config, dict)):
+            # Use centralized configuration
+            if config is None:
+                self.centralized_config = CentralizedBrokerConfig()
+            elif isinstance(config, dict):
+                # Convert dict to centralized config
+                self.centralized_config = CentralizedBrokerConfig(**{
+                    k: v for k, v in config.items()
+                    if hasattr(CentralizedBrokerConfig, k)
+                })
+            
+            # Map centralized config to local BrokerConfig for backward compatibility
+            self.config = BrokerConfig(
+                connection_config=self.centralized_config.connection_config,
+                session_config=self.centralized_config.session_config,
+                # Map other fields...
+            )
+            logger.info("✅ Using centralized BrokerConfig (Rule 1 Section 7)")
+            
+        elif isinstance(config, CentralizedBrokerConfig if CENTRALIZED_CONFIG_AVAILABLE else type(None)):
+            # Direct centralized config instance
+            self.centralized_config = config
+            self.config = BrokerConfig(
+                connection_config=config.connection_config,
+                session_config=config.session_config,
+            )
+            logger.info("✅ Using centralized BrokerConfig (Rule 1 Section 7)")
+            
+        else:
+            # Fallback to local config
+            self.config = config if isinstance(config, BrokerConfig) else BrokerConfig()
+            self.centralized_config = None
+            if not CENTRALIZED_CONFIG_AVAILABLE:
+                logger.debug("Using local BrokerConfig (centralized config not available)")
+        
+        # ================================================================
+        # ISystemComponent State Management
+        # ================================================================
+        
+        self.is_initialized: bool = False
+        self.is_operational: bool = False
+        self.component_id: Optional[str] = None
+        self.component_name: str = "BrokerManager"
+        self.orchestrator: Optional[Any] = None
+        
+        # ================================================================
+        # IRegimeAware State Management (Rule 2 - Regime-First)
+        # ================================================================
+        
+        self.regime_engine: Optional[Any] = None
+        self.current_regime_context: Optional[RegimeContext] = None
+        self.regime_broker_preferences: Dict[str, List[BrokerType]] = {
+            'low_volatility': [BrokerType.INTERACTIVE_BROKERS, BrokerType.ALPACA],
+            'normal_volatility': [BrokerType.INTERACTIVE_BROKERS, BrokerType.ALPACA],
+            'high_volatility': [BrokerType.INTERACTIVE_BROKERS],  # Prefer more reliable brokers
+            'extreme_volatility': [BrokerType.INTERACTIVE_BROKERS],  # Only most reliable
+        }
+        logger.info("✅ BrokerManager implements ISystemComponent and IRegimeAware (Rule 2)")
+        
+        # ================================================================
+        # Core Broker Manager Components
+        # ================================================================
         
         # Core managers
         self._connection_manager = ConnectionManager(self.config.connection_config)
@@ -491,10 +607,54 @@ class BrokerManager:
         
         logger.info("Broker manager initialized")
     
-    async def start(self) -> None:
-        """Start broker manager"""
+    # ================================================================
+    # ISystemComponent Implementation (Rule 2 - Hierarchical Architecture)
+    # ================================================================
+    
+    async def initialize(self) -> bool:
+        """
+        Initialize broker manager component
         
+        Returns:
+            bool: True if initialization successful
+        """
         try:
+            if self.is_initialized:
+                logger.warning("BrokerManager already initialized")
+                return True
+            
+            logger.info("Initializing BrokerManager...")
+            
+            # Initialize core managers
+            # ConnectionManager, SessionManager, etc. initialization
+            # These are created in __init__ and start in start()
+            
+            self.is_initialized = True
+            logger.info("✅ BrokerManager initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ BrokerManager initialization failed: {e}")
+            self.is_initialized = False
+            return False
+    
+    async def start(self) -> bool:
+        """
+        Start broker manager operations (ISystemComponent)
+        
+        Returns:
+            bool: True if start successful
+        """
+        try:
+            if not self.is_initialized:
+                logger.warning("BrokerManager not initialized, initializing now...")
+                if not await self.initialize():
+                    return False
+            
+            if self.is_operational:
+                logger.warning("BrokerManager already operational")
+                return True
+            
             # Start core managers
             await self._connection_manager.start()
             await self._session_manager.start()
@@ -511,16 +671,27 @@ class BrokerManager:
                     asyncio.create_task(self._failover_monitor_loop())
                 )
             
-            logger.info("Broker manager started")
+            self.is_operational = True
+            logger.info("✅ BrokerManager started successfully")
+            return True
             
         except Exception as e:
-            logger.error(f"Failed to start broker manager: {e}")
-            raise
+            logger.error(f"❌ Failed to start BrokerManager: {e}")
+            self.is_operational = False
+            return False
     
-    async def stop(self) -> None:
-        """Stop broker manager"""
+    async def stop(self) -> bool:
+        """
+        Stop broker manager operations (ISystemComponent)
         
+        Returns:
+            bool: True if stop successful
+        """
         try:
+            if not self.is_operational:
+                logger.warning("BrokerManager not operational")
+                return True
+            
             # Signal background tasks to stop
             self._stop_background_tasks = True
             
@@ -539,10 +710,248 @@ class BrokerManager:
             await self._session_manager.stop()
             await self._connection_manager.stop()
             
-            logger.info("Broker manager stopped")
+            self.is_operational = False
+            logger.info("✅ BrokerManager stopped successfully")
+            return True
             
         except Exception as e:
-            logger.error(f"Error stopping broker manager: {e}")
+            logger.error(f"❌ Error stopping BrokerManager: {e}")
+            return False
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on broker manager
+        
+        Returns:
+            Dict with health check results
+        """
+        try:
+            health_status = {
+                'healthy': True,
+                'component': 'BrokerManager',
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'timestamp': datetime.now().isoformat(),
+                'checks': {}
+            }
+            
+            # Check brokers
+            if self._brokers:
+                online_brokers = sum(1 for b in self._brokers.values() if b.status == BrokerStatus.ONLINE)
+                health_status['checks']['brokers'] = {
+                    'total': len(self._brokers),
+                    'online': online_brokers,
+                    'healthy': online_brokers > 0
+                }
+                if online_brokers == 0:
+                    health_status['healthy'] = False
+            else:
+                health_status['checks']['brokers'] = {
+                    'total': 0,
+                    'online': 0,
+                    'healthy': False
+                }
+                health_status['healthy'] = False
+            
+            # Check performance metrics
+            health_status['checks']['performance'] = {
+                'total_orders': self._performance_metrics['total_orders'],
+                'successful_executions': self._performance_metrics['successful_executions'],
+                'success_rate': (
+                    self._performance_metrics['successful_executions'] / 
+                    max(1, self._performance_metrics['total_orders'])
+                ),
+                'healthy': True
+            }
+            
+            # Check background tasks
+            health_status['checks']['background_tasks'] = {
+                'count': len(self._background_tasks),
+                'healthy': len(self._background_tasks) > 0 if self.config.enable_performance_monitoring else True
+            }
+            
+            return health_status
+            
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return {
+                'healthy': False,
+                'component': 'BrokerManager',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get current broker manager status
+        
+        Returns:
+            Dict with status information
+        """
+        try:
+            return {
+                'component': 'BrokerManager',
+                'component_id': self.component_id,
+                'initialized': self.is_initialized,
+                'operational': self.is_operational,
+                'brokers': {
+                    'total': len(self._brokers),
+                    'by_status': {
+                        status.value: sum(1 for b in self._brokers.values() if b.status == status)
+                        for status in BrokerStatus
+                    }
+                },
+                'performance_metrics': self._performance_metrics.copy(),
+                'regime_aware': self.regime_engine is not None,
+                'current_regime': (
+                    self.current_regime_context.primary_regime 
+                    if self.current_regime_context else None
+                ),
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting status: {e}")
+            return {
+                'component': 'BrokerManager',
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    # ================================================================
+    # IRegimeAware Implementation (Rule 2 - Regime-First Principle)
+    # ================================================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine dependency
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
+        """
+        self.regime_engine = regime_engine
+        logger.info("✅ RegimeEngine injected into BrokerManager (IRegimeAware)")
+    
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """
+        Handle regime change events
+        
+        Args:
+            new_regime_context: New regime context
+        """
+        try:
+            old_regime = self.current_regime_context.primary_regime if self.current_regime_context else "none"
+            self.current_regime_context = new_regime_context
+            
+            logger.info(
+                f"🏦 BrokerManager regime change: {old_regime} → "
+                f"{new_regime_context.primary_regime} "
+                f"(confidence: {new_regime_context.regime_confidence:.2%})"
+            )
+            
+            # Adapt broker operations to new regime
+            await self.adapt_to_regime(new_regime_context)
+            
+        except Exception as e:
+            logger.error(f"Error handling regime change in BrokerManager: {e}")
+    
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """
+        Get current regime context
+        
+        Returns:
+            Current regime context or None
+        """
+        return self.current_regime_context
+    
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """
+        Adapt broker operations to current market regime
+        
+        Args:
+            regime_context: Current regime context
+            
+        Returns:
+            Dict with adaptation results
+        """
+        try:
+            regime = regime_context.primary_regime
+            volatility_regime = getattr(regime_context, 'volatility_regime', 'normal')
+            
+            adaptations = {
+                'regime': regime,
+                'volatility_regime': volatility_regime,
+                'adaptations_applied': []
+            }
+            
+            # 1. Adjust broker preferences based on regime
+            preferred_brokers = self.regime_broker_preferences.get(
+                volatility_regime,
+                self.regime_broker_preferences['normal_volatility']
+            )
+            adaptations['preferred_brokers'] = [b.value for b in preferred_brokers]
+            adaptations['adaptations_applied'].append('broker_preferences')
+            
+            # 2. Adjust connection timeouts based on volatility
+            if volatility_regime in ['high_volatility', 'extreme_volatility']:
+                # Increase timeouts during high volatility
+                adaptations['connection_timeout_multiplier'] = 1.5
+                adaptations['adaptations_applied'].append('timeout_increase')
+            elif volatility_regime == 'low_volatility':
+                # Can use tighter timeouts in low volatility
+                adaptations['connection_timeout_multiplier'] = 0.8
+                adaptations['adaptations_applied'].append('timeout_decrease')
+            else:
+                adaptations['connection_timeout_multiplier'] = 1.0
+            
+            # 3. Adjust failover thresholds
+            if volatility_regime == 'extreme_volatility':
+                # More aggressive failover in extreme conditions
+                adaptations['failover_threshold'] = self.config.failover_threshold * 0.5
+                adaptations['adaptations_applied'].append('aggressive_failover')
+            else:
+                adaptations['failover_threshold'] = self.config.failover_threshold
+            
+            # 4. Adjust monitoring frequency
+            if volatility_regime in ['high_volatility', 'extreme_volatility']:
+                adaptations['monitoring_frequency'] = 'high'
+                adaptations['metrics_interval'] = self.config.metrics_collection_interval * 0.5
+                adaptations['adaptations_applied'].append('monitoring_increase')
+            else:
+                adaptations['monitoring_frequency'] = 'normal'
+                adaptations['metrics_interval'] = self.config.metrics_collection_interval
+            
+            adaptations['adapted'] = True
+            
+            logger.debug(
+                f"🏦 BrokerManager adapted to {regime} regime: "
+                f"{len(adaptations['adaptations_applied'])} adaptations applied"
+            )
+            
+            return adaptations
+            
+        except Exception as e:
+            logger.error(f"Error adapting BrokerManager to regime: {e}")
+            return {'adapted': False, 'error': str(e)}
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured
+        
+        Returns:
+            bool: True if regime engine configured
+        """
+        has_regime_engine = self.regime_engine is not None
+        
+        if has_regime_engine:
+            logger.debug("✅ BrokerManager regime dependency validated")
+        else:
+            logger.warning("⚠️  BrokerManager regime engine not configured")
+        
+        return has_regime_engine
+    
+    # ================================================================
+    # Existing Broker Manager Methods
+    # ================================================================
     
     async def add_broker(self, broker_type: BrokerType, credentials: BrokerCredentials,
                         name: Optional[str] = None, priority: ConnectionPriority = ConnectionPriority.PRIMARY,
