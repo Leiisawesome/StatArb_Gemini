@@ -212,6 +212,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.strategy_allocations: Dict[str, float] = {}
         self.current_var: float = 0.0
         self.portfolio_value: float = 1000000.0  # $1M default
+        self.available_cash: float = 1000000.0   # Start with full cash
+        self.position_history: List[Dict[str, Any]] = []  # Track all position changes
         
         # Risk limits and audit trails (FIXED: Missing initialization)
         self.risk_limits: Dict[str, float] = {
@@ -1543,33 +1545,109 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"Post-execution risk check failed: {e}")
     
-    def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0):
+    def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None):
         """
-        Manual position update method for external position tracking
-        ENHANCED: Unified position tracking for all components
+        Update position with comprehensive cash tracking (Phase 10 per Rule 7.3)
+        
+        AUTHORITY: SINGLE SOURCE OF TRUTH for position updates (Rule 4)
+        
+        Args:
+            symbol: Trading symbol
+            side: 'buy' or 'sell'
+            quantity: Quantity traded
+            price: Execution price
+            timestamp: Trade timestamp (defaults to now)
+            
+        Returns:
+            Dict with position update details
         """
         
         try:
+            if timestamp is None:
+                timestamp = datetime.now()
+                
             current_position = self.current_positions.get(symbol, 0.0)
+            previous_cash = self.available_cash
             
+            # Calculate new position and cash impact
             if side.lower() == 'buy':
                 new_position = current_position + quantity
+                cash_change = -(quantity * price)  # Cash decreases
+                self.available_cash += cash_change
+                
+                logger.info(
+                    f"💰 BUY: {symbol} {quantity} @ ${price:.2f} | "
+                    f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
+                    f"(${cash_change:,.2f})"
+                )
+                
             elif side.lower() == 'sell':
                 new_position = current_position - quantity
+                cash_change = +(quantity * price)  # Cash increases
+                self.available_cash += cash_change
+                
+                logger.info(
+                    f"💰 SELL: {symbol} {quantity} @ ${price:.2f} | "
+                    f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
+                    f"(+${cash_change:,.2f})"
+                )
             else:
                 logger.warning(f"Unknown side: {side}")
-                return
+                return {
+                    'success': False,
+                    'error': f'Invalid side: {side}'
+                }
             
+            # Update position
             self.current_positions[symbol] = new_position
             
-            logger.info(f"📊 Manual position update: {symbol} {current_position} → {new_position} "
-                       f"({side.upper()} {quantity})")
+            # Calculate position value
+            position_value = new_position * price if price > 0 else 0.0
             
-            # Update risk metrics
-            self._update_risk_metrics()
+            # Record position change in history
+            position_change = {
+                'timestamp': timestamp,
+                'symbol': symbol,
+                'side': side,
+                'quantity': quantity,
+                'price': price,
+                'previous_position': current_position,
+                'new_position': new_position,
+                'position_value': position_value,
+                'cash_change': cash_change,
+                'previous_cash': previous_cash,
+                'new_cash': self.available_cash
+            }
+            self.position_history.append(position_change)
+            
+            # Update portfolio metrics
+            self._update_portfolio_metrics()
+            
+            logger.info(
+                f"📊 Position Update Complete (Rule 7.3, Phase 10): {symbol} "
+                f"{current_position} → {new_position} | "
+                f"Portfolio Value: ${self.portfolio_value:,.2f} | "
+                f"Cash: ${self.available_cash:,.2f}"
+            )
+            
+            return {
+                'success': True,
+                'symbol': symbol,
+                'previous_position': current_position,
+                'new_position': new_position,
+                'position_value': position_value,
+                'cash_change': cash_change,
+                'available_cash': self.available_cash,
+                'portfolio_value': self.portfolio_value,
+                'timestamp': timestamp
+            }
             
         except Exception as e:
-            logger.error(f"Manual position update failed: {e}")
+            logger.error(f"Position update failed: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     def get_current_position(self, symbol: str) -> float:
         """Get current position for symbol"""
@@ -1668,7 +1746,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         try:
             # Calculate total exposure
             total_exposure = sum(abs(pos * 100.0) for pos in self.current_positions.values())
-            self.risk_metrics['total_exposure'] = total_exposure / self.portfolio_value
+            self.risk_metrics['total_exposure'] = total_exposure / self.portfolio_value if self.portfolio_value > 0 else 0.0
             
             # Update other metrics
             # Calculate portfolio concentration
@@ -1685,6 +1763,34 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             
         except Exception as e:
             logger.error(f"Risk metrics update error: {e}")
+    
+    def _update_portfolio_metrics(self):
+        """
+        Update portfolio value based on positions + cash (Rule 7.3, Phase 10)
+        
+        Portfolio Value = Sum(Position Values) + Available Cash
+        """
+        try:
+            # Calculate total position value
+            # Note: This assumes $100/share as default if no price tracking
+            # In production, would use real-time prices
+            position_value = sum(abs(pos) * 100.0 for pos in self.current_positions.values())
+            
+            # Portfolio value = positions + cash
+            self.portfolio_value = position_value + self.available_cash
+            
+            # Update risk metrics after portfolio value changes
+            self._update_risk_metrics()
+            
+            logger.debug(
+                f"📊 Portfolio Metrics: "
+                f"Positions=${position_value:,.2f}, "
+                f"Cash=${self.available_cash:,.2f}, "
+                f"Total=${self.portfolio_value:,.2f}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Portfolio metrics update error: {e}")
     
     async def _trigger_risk_reduction(self, symbol: str, current_pct: float, limit_pct: float):
         """Trigger automatic risk reduction measures"""
