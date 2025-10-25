@@ -899,16 +899,758 @@ class SystemKillSwitch:
 
 ---
 
-## Next Steps
+## Rule 7 Enhancements: Real-Time P&L, Reconciliation & Execution Quality
 
-1. ✅ Document Rule 4 enhancements (compliance + circuit breakers)
-2. ⏳ Implement PreTradeComplianceChecker class
-3. ⏳ Implement TradingCircuitBreakers class
-4. ⏳ Update Rule 7 with remaining enhancements
-5. ⏳ Re-audit core_engine against enhanced rules
+### NEW SECTION: Phase 10A - Real-Time P&L Tracking (HIGH PRIORITY) 🟠
+
+**Insert After Phase 10, Before Phase 11**
+
+```markdown
+## Phase 10A: Real-Time P&L Tracking (HIGH PRIORITY) 🟠
+
+**Component:** RealTimePnLTracker (NEW)  
+**File:** `core_engine/system/pnl_tracker.py`  
+**Authority:** GOVERNANCE_CONTROL  
+**Responsibility:** Track mark-to-market P&L in real-time
+
+### Why Real-Time P&L is Critical
+
+**Institutional Requirements:**
+- Mark-to-market P&L updates every tick
+- Position-level P&L attribution  
+- Strategy-level P&L attribution
+- Intraday high-water mark tracking
+- Drawdown monitoring from high
+- Risk alerts on excessive losses
+
+**Failure Impact:**
+- Poor risk monitoring (don't know current losses)
+- Delayed response to losing positions
+- Inability to enforce intraday risk limits
+- Regulatory reporting issues
+- Trader dashboard shows stale data
+
+### Real-Time P&L Architecture
+
+```
+Market Data Tick
+         ↓
+┌────────────────────────────────────────────┐
+│ RealTimePnLTracker (NEW)                  │
+│                                            │
+│ Updates (EVERY TICK):                     │
+│ 1. Unrealized P&L (mark-to-market)        │
+│ 2. Realized P&L (closed positions)        │
+│ 3. Total P&L (realized + unrealized)      │
+│ 4. Intraday high-water mark              │
+│ 5. Drawdown from high                     │
+│ 6. Position-level P&L                     │
+│ 7. Strategy-level P&L                     │
+│                                            │
+│ Output: P&LSnapshot                        │
+│   - current_pnl: float                    │
+│   - daily_high: float                     │
+│   - drawdown_pct: float                   │
+│   - by_position: Dict[symbol, float]      │
+│   - by_strategy: Dict[strategy_id, float] │
+└────────────────────────────────────────────┘
+         ↓
+   Circuit Breakers (use for loss limits)
+   Risk Monitoring (use for alerts)
+   Trader Dashboard (use for display)
+```
+
+### Implementation: RealTimePnLTracker
+
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+from datetime import datetime
+
+@dataclass
+class PnLSnapshot:
+    """Real-time P&L snapshot"""
+    timestamp: datetime
+    
+    # Total P&L
+    realized_pnl: float          # Closed positions
+    unrealized_pnl: float        # Open positions (mark-to-market)
+    total_pnl: float             # Realized + Unrealized
+    
+    # Intraday Tracking
+    daily_high_pnl: float        # Highest total P&L today
+    drawdown_from_high: float    # $ drawdown from high
+    drawdown_pct: float          # % drawdown from high
+    
+    # Attribution
+    pnl_by_position: Dict[str, float]      # Symbol → P&L
+    pnl_by_strategy: Dict[str, float]      # Strategy → P&L
+    
+    # Position Details
+    position_count: int          # Number of open positions
+    largest_winner: tuple        # (symbol, pnl)
+    largest_loser: tuple         # (symbol, pnl)
+
+class RealTimePnLTracker:
+    """
+    Real-time P&L tracking (INSTITUTIONAL REQUIREMENT)
+    
+    Updates mark-to-market P&L on every price tick.
+    Required for:
+    - Circuit breaker loss limits
+    - Intraday risk monitoring
+    - Trader dashboards
+    - Regulatory reporting
+    """
+    
+    def __init__(self):
+        # Position Tracking
+        self.positions: Dict[str, float] = {}         # symbol → quantity
+        self.position_cost_basis: Dict[str, float] = {}  # symbol → avg entry price
+        self.position_strategies: Dict[str, str] = {}    # symbol → strategy_id
+        
+        # P&L Tracking
+        self.realized_pnl = 0.0         # Closed positions
+        self.unrealized_pnl = 0.0       # Open positions
+        self.daily_high_pnl = 0.0       # Intraday high
+        self.daily_start_pnl = 0.0      # Start of day P&L
+        
+        # Strategy Attribution
+        self.strategy_pnl: Dict[str, float] = {}
+        self.strategy_realized_pnl: Dict[str, float] = {}
+        
+        # History
+        self.pnl_history: List[PnLSnapshot] = []
+        
+        logger.info("✅ RealTimePnLTracker initialized")
+    
+    async def update_real_time_pnl(
+        self,
+        current_prices: Dict[str, float]
+    ) -> PnLSnapshot:
+        """
+        Update P&L based on current market prices
+        
+        MANDATORY: Called on every price tick for accurate mark-to-market
+        
+        Args:
+            current_prices: Dict[symbol → current price]
+            
+        Returns:
+            PnLSnapshot with complete P&L breakdown
+        """
+        # Calculate unrealized P&L (mark-to-market)
+        self.unrealized_pnl = 0.0
+        pnl_by_position = {}
+        
+        for symbol, position in self.positions.items():
+            if position == 0:
+                continue
+            
+            entry_price = self.position_cost_basis.get(symbol, 0.0)
+            current_price = current_prices.get(symbol, entry_price)
+            
+            # Position P&L = (current_price - entry_price) * quantity
+            position_pnl = (current_price - entry_price) * position
+            
+            self.unrealized_pnl += position_pnl
+            pnl_by_position[symbol] = position_pnl
+        
+        # Total P&L
+        total_pnl = self.realized_pnl + self.unrealized_pnl
+        
+        # Update intraday high
+        if total_pnl > self.daily_high_pnl:
+            self.daily_high_pnl = total_pnl
+        
+        # Calculate drawdown from high
+        if self.daily_high_pnl > 0:
+            drawdown = self.daily_high_pnl - total_pnl
+            drawdown_pct = drawdown / abs(self.daily_high_pnl)
+        else:
+            drawdown = 0.0
+            drawdown_pct = 0.0
+        
+        # Strategy attribution
+        pnl_by_strategy = self._calculate_strategy_pnl(pnl_by_position)
+        
+        # Find largest winner/loser
+        if pnl_by_position:
+            largest_winner = max(pnl_by_position.items(), key=lambda x: x[1])
+            largest_loser = min(pnl_by_position.items(), key=lambda x: x[1])
+        else:
+            largest_winner = ('N/A', 0.0)
+            largest_loser = ('N/A', 0.0)
+        
+        # Create snapshot
+        snapshot = PnLSnapshot(
+            timestamp=datetime.now(),
+            realized_pnl=self.realized_pnl,
+            unrealized_pnl=self.unrealized_pnl,
+            total_pnl=total_pnl,
+            daily_high_pnl=self.daily_high_pnl,
+            drawdown_from_high=drawdown,
+            drawdown_pct=drawdown_pct,
+            pnl_by_position=pnl_by_position,
+            pnl_by_strategy=pnl_by_strategy,
+            position_count=len([p for p in self.positions.values() if p != 0]),
+            largest_winner=largest_winner,
+            largest_loser=largest_loser
+        )
+        
+        # Store in history (keep last 1000 snapshots)
+        self.pnl_history.append(snapshot)
+        if len(self.pnl_history) > 1000:
+            self.pnl_history = self.pnl_history[-1000:]
+        
+        # Log significant events
+        if drawdown_pct > 0.03:  # 3% drawdown
+            logger.warning(
+                f"⚠️ Drawdown {drawdown_pct:.1%} from high "
+                f"(${drawdown:,.2f} from ${self.daily_high_pnl:,.2f})"
+            )
+        
+        return snapshot
+    
+    def on_position_entry(
+        self,
+        symbol: str,
+        quantity: float,
+        entry_price: float,
+        strategy_id: str
+    ):
+        """
+        Record position entry
+        
+        Updates cost basis for P&L calculation
+        """
+        current_position = self.positions.get(symbol, 0.0)
+        current_cost_basis = self.position_cost_basis.get(symbol, 0.0)
+        
+        # Update position
+        new_position = current_position + quantity
+        
+        # Update cost basis (weighted average)
+        if new_position != 0:
+            total_cost = (current_position * current_cost_basis) + (quantity * entry_price)
+            new_cost_basis = total_cost / new_position
+        else:
+            new_cost_basis = 0.0
+        
+        self.positions[symbol] = new_position
+        self.position_cost_basis[symbol] = new_cost_basis
+        self.position_strategies[symbol] = strategy_id
+        
+        logger.info(
+            f"📊 Position entry: {symbol} {quantity} @ ${entry_price:.2f} "
+            f"(new position: {new_position}, cost basis: ${new_cost_basis:.2f})"
+        )
+    
+    def on_position_exit(
+        self,
+        symbol: str,
+        quantity: float,
+        exit_price: float
+    ) -> float:
+        """
+        Record position exit and calculate realized P&L
+        
+        Returns: Realized P&L from this exit
+        """
+        entry_price = self.position_cost_basis.get(symbol, 0.0)
+        
+        # Calculate realized P&L
+        realized_pnl = (exit_price - entry_price) * quantity
+        
+        # Update realized P&L totals
+        self.realized_pnl += realized_pnl
+        
+        # Update strategy P&L
+        strategy_id = self.position_strategies.get(symbol, 'unknown')
+        if strategy_id not in self.strategy_realized_pnl:
+            self.strategy_realized_pnl[strategy_id] = 0.0
+        self.strategy_realized_pnl[strategy_id] += realized_pnl
+        
+        # Update position
+        current_position = self.positions.get(symbol, 0.0)
+        new_position = current_position - quantity
+        self.positions[symbol] = new_position
+        
+        # If position closed, remove cost basis
+        if abs(new_position) < 0.01:
+            self.positions.pop(symbol, None)
+            self.position_cost_basis.pop(symbol, None)
+            self.position_strategies.pop(symbol, None)
+        
+        logger.info(
+            f"💰 Position exit: {symbol} {quantity} @ ${exit_price:.2f} "
+            f"(realized P&L: ${realized_pnl:,.2f})"
+        )
+        
+        return realized_pnl
+    
+    def _calculate_strategy_pnl(
+        self,
+        pnl_by_position: Dict[str, float]
+    ) -> Dict[str, float]:
+        """Calculate P&L attribution by strategy"""
+        strategy_pnl = {}
+        
+        for symbol, position_pnl in pnl_by_position.items():
+            strategy_id = self.position_strategies.get(symbol, 'unknown')
+            
+            if strategy_id not in strategy_pnl:
+                strategy_pnl[strategy_id] = 0.0
+            
+            # Add unrealized P&L
+            strategy_pnl[strategy_id] += position_pnl
+            
+            # Add realized P&L
+            realized = self.strategy_realized_pnl.get(strategy_id, 0.0)
+            if realized != 0:
+                strategy_pnl[strategy_id] += realized
+        
+        return strategy_pnl
+    
+    def reset_daily(self):
+        """Reset daily P&L tracking (called at market open)"""
+        self.daily_start_pnl = self.realized_pnl + self.unrealized_pnl
+        self.daily_high_pnl = 0.0
+        logger.info("🔄 Daily P&L tracking reset")
+```
+
+### Integration with CentralRiskManager
+
+```python
+class CentralRiskManager:
+    """Enhanced with real-time P&L tracking"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        
+        # NEW: Real-time P&L tracker
+        self.pnl_tracker = RealTimePnLTracker()
+    
+    def update_position(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        strategy_id: str,
+        timestamp: datetime
+    ):
+        """
+        Update position with P&L tracking
+        
+        ENHANCED: Now updates real-time P&L
+        """
+        # Update positions (existing logic)
+        # ...
+        
+        # NEW: Update P&L tracking
+        if side.lower() == 'buy':
+            self.pnl_tracker.on_position_entry(symbol, quantity, price, strategy_id)
+        elif side.lower() == 'sell':
+            realized_pnl = self.pnl_tracker.on_position_exit(symbol, quantity, price)
+            logger.info(f"💰 Realized P&L: ${realized_pnl:,.2f}")
+    
+    async def get_current_pnl(self, current_prices: Dict[str, float]) -> PnLSnapshot:
+        """Get current P&L snapshot (called every tick)"""
+        return await self.pnl_tracker.update_real_time_pnl(current_prices)
+```
+
+### Real-Time P&L Dashboard
+
+```python
+class PnLDashboard:
+    """Real-time P&L monitoring dashboard"""
+    
+    def __init__(self, pnl_tracker: RealTimePnLTracker):
+        self.pnl_tracker = pnl_tracker
+    
+    async def display_current_pnl(self) -> str:
+        """Display current P&L status"""
+        snapshot = self.pnl_tracker.pnl_history[-1]
+        
+        return f"""
+        📊 REAL-TIME P&L DASHBOARD
+        ═══════════════════════════════════════
+        Total P&L:        ${snapshot.total_pnl:>12,.2f}
+        Realized P&L:     ${snapshot.realized_pnl:>12,.2f}
+        Unrealized P&L:   ${snapshot.unrealized_pnl:>12,.2f}
+        
+        Daily High:       ${snapshot.daily_high_pnl:>12,.2f}
+        Drawdown:         ${snapshot.drawdown_from_high:>12,.2f} ({snapshot.drawdown_pct:.1%})
+        
+        Open Positions:   {snapshot.position_count}
+        Largest Winner:   {snapshot.largest_winner[0]}: ${snapshot.largest_winner[1]:,.2f}
+        Largest Loser:    {snapshot.largest_loser[0]}: ${snapshot.largest_loser[1]:,.2f}
+        
+        BY STRATEGY:
+        {self._format_strategy_pnl(snapshot.pnl_by_strategy)}
+        """
+    
+    def _format_strategy_pnl(self, strategy_pnl: Dict[str, float]) -> str:
+        lines = []
+        for strategy_id, pnl in sorted(strategy_pnl.items(), key=lambda x: -x[1]):
+            lines.append(f"  {strategy_id:<30} ${pnl:>12,.2f}")
+        return "\n".join(lines)
+```
+```
 
 ---
 
-**Status:** Rule 4 enhancements documented
-**Next:** Implement new classes and update remaining rules
+### NEW SECTION: Phase 10B - Position Reconciliation (HIGH PRIORITY) 🟠
+
+**Insert After Real-Time P&L**
+
+```markdown
+## Phase 10B: Position Reconciliation with Broker (HIGH PRIORITY) 🟠
+
+**Component:** PositionReconciliation (NEW)  
+**File:** `core_engine/system/position_reconciliation.py`  
+**Authority:** GOVERNANCE_CONTROL  
+**Responsibility:** Ensure internal positions match broker positions
+
+### Why Position Reconciliation is Critical
+
+**Real-World Risk:**
+- Internal position tracking can drift from broker
+- Partial fills not properly recorded
+- Corporate actions (splits, dividends) not reflected
+- Manual trades outside system
+- System bugs causing position errors
+
+**Failure Impact:**
+- Trade on wrong positions (think you have 100, actually have 0)
+- Risk calculations based on incorrect positions
+- Regulatory violations (position limit breaches)
+- Failed trades (insufficient position to sell)
+- P&L inaccuracies
+
+### Reconciliation Architecture
+
+```
+Every 5 Minutes:
+         ↓
+┌────────────────────────────────────────────┐
+│ PositionReconciliation (NEW)               │
+│                                            │
+│ Process:                                   │
+│ 1. Get broker positions (API call)        │
+│ 2. Get internal positions                 │
+│ 3. Compare all symbols                    │
+│ 4. Identify discrepancies                 │
+│ 5. Log and alert discrepancies            │
+│ 6. Auto-correct OR escalate               │
+│                                            │
+│ Output: ReconciliationReport              │
+│   - matching_positions: List[str]         │
+│   - discrepancies: List[Discrepancy]      │
+│   - total_discrepancy_value: float        │
+│   - action_taken: str                     │
+└────────────────────────────────────────────┘
+         ↓
+   IF discrepancies → Alert risk team
+   IF large discrepancy → Auto-correct to broker
+```
+
+### Implementation: PositionReconciliation
+
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+from datetime import datetime
+
+@dataclass
+class PositionDiscrepancy:
+    """Position mismatch between internal and broker"""
+    symbol: str
+    internal_position: float
+    broker_position: float
+    difference: float
+    difference_pct: float
+    market_value_difference: float
+    severity: str  # 'minor', 'moderate', 'severe'
+
+@dataclass
+class ReconciliationReport:
+    """Position reconciliation report"""
+    timestamp: datetime
+    matching_positions: List[str]
+    discrepancies: List[PositionDiscrepancy]
+    total_symbols_checked: int
+    total_discrepancy_value: float
+    action_taken: str
+    
+    @property
+    def has_discrepancies(self) -> bool:
+        return len(self.discrepancies) > 0
+
+class PositionReconciliation:
+    """
+    Position reconciliation engine (INSTITUTIONAL REQUIREMENT)
+    
+    Reconciles internal positions with broker every 5 minutes.
+    Critical for detecting position drift and ensuring accuracy.
+    """
+    
+    def __init__(self, broker_api, risk_manager):
+        self.broker_api = broker_api
+        self.risk_manager = risk_manager
+        
+        # Configuration
+        self.tolerance = 0.01  # 0.01 share tolerance
+        self.reconciliation_interval = 300  # 5 minutes
+        
+        # Tracking
+        self.reconciliation_history: List[ReconciliationReport] = []
+        self.last_reconciliation: Optional[datetime] = None
+        
+        logger.info("✅ PositionReconciliation initialized")
+    
+    async def reconcile_positions(self) -> ReconciliationReport:
+        """
+        Reconcile internal positions with broker
+        
+        MANDATORY: Run every 5 minutes during trading
+        
+        Returns: ReconciliationReport with any discrepancies found
+        """
+        try:
+            # Step 1: Get broker positions
+            broker_positions = await self._get_broker_positions()
+            
+            # Step 2: Get internal positions
+            internal_positions = self.risk_manager.current_positions.copy()
+            
+            # Step 3: Find all symbols (union of both)
+            all_symbols = set(broker_positions.keys()) | set(internal_positions.keys())
+            
+            # Step 4: Check each symbol
+            discrepancies = []
+            matching = []
+            
+            for symbol in all_symbols:
+                internal_pos = internal_positions.get(symbol, 0.0)
+                broker_pos = broker_positions.get(symbol, 0.0)
+                
+                diff = abs(internal_pos - broker_pos)
+                
+                if diff > self.tolerance:
+                    # DISCREPANCY FOUND
+                    current_price = await self._get_current_price(symbol)
+                    market_value_diff = diff * current_price
+                    
+                    diff_pct = (diff / max(abs(internal_pos), abs(broker_pos), 1.0)) * 100
+                    
+                    # Determine severity
+                    if market_value_diff > 10000:  # $10K+ difference
+                        severity = 'severe'
+                    elif market_value_diff > 1000:  # $1K-$10K
+                        severity = 'moderate'
+                    else:
+                        severity = 'minor'
+                    
+                    discrepancy = PositionDiscrepancy(
+                        symbol=symbol,
+                        internal_position=internal_pos,
+                        broker_position=broker_pos,
+                        difference=diff,
+                        difference_pct=diff_pct,
+                        market_value_difference=market_value_diff,
+                        severity=severity
+                    )
+                    
+                    discrepancies.append(discrepancy)
+                    
+                    logger.error(
+                        f"🔴 Position discrepancy: {symbol} "
+                        f"Internal={internal_pos:.2f}, Broker={broker_pos:.2f}, "
+                        f"Diff={diff:.2f} (${market_value_diff:,.2f})"
+                    )
+                else:
+                    matching.append(symbol)
+            
+            # Step 5: Calculate total discrepancy value
+            total_discrepancy_value = sum(d.market_value_difference for d in discrepancies)
+            
+            # Step 6: Take action on discrepancies
+            action_taken = await self._handle_discrepancies(discrepancies)
+            
+            # Create report
+            report = ReconciliationReport(
+                timestamp=datetime.now(),
+                matching_positions=matching,
+                discrepancies=discrepancies,
+                total_symbols_checked=len(all_symbols),
+                total_discrepancy_value=total_discrepancy_value,
+                action_taken=action_taken
+            )
+            
+            # Store history
+            self.reconciliation_history.append(report)
+            self.last_reconciliation = datetime.now()
+            
+            # Log summary
+            if discrepancies:
+                logger.error(
+                    f"🔴 Reconciliation FAILED: {len(discrepancies)} discrepancies "
+                    f"(${total_discrepancy_value:,.2f} total)"
+                )
+            else:
+                logger.info(
+                    f"✅ Reconciliation PASSED: {len(matching)} positions match"
+                )
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"Reconciliation failed: {e}")
+            return ReconciliationReport(
+                timestamp=datetime.now(),
+                matching_positions=[],
+                discrepancies=[],
+                total_symbols_checked=0,
+                total_discrepancy_value=0.0,
+                action_taken=f"ERROR: {str(e)}"
+            )
+    
+    async def _get_broker_positions(self) -> Dict[str, float]:
+        """Get current positions from broker API"""
+        try:
+            positions = await self.broker_api.get_positions()
+            return {pos['symbol']: pos['quantity'] for pos in positions}
+        except Exception as e:
+            logger.error(f"Failed to get broker positions: {e}")
+            return {}
+    
+    async def _get_current_price(self, symbol: str) -> float:
+        """Get current market price"""
+        try:
+            quote = await self.broker_api.get_quote(symbol)
+            return quote['price']
+        except Exception as e:
+            logger.warning(f"Failed to get price for {symbol}: {e}")
+            return 100.0  # Fallback
+    
+    async def _handle_discrepancies(
+        self,
+        discrepancies: List[PositionDiscrepancy]
+    ) -> str:
+        """
+        Handle position discrepancies
+        
+        Strategy:
+        - Minor: Log and monitor
+        - Moderate: Alert risk team
+        - Severe: Auto-correct to broker + alert
+        """
+        if not discrepancies:
+            return "No action needed"
+        
+        actions = []
+        
+        for disc in discrepancies:
+            if disc.severity == 'severe':
+                # Auto-correct to broker (trust broker over internal)
+                await self._auto_correct_position(disc)
+                actions.append(f"Auto-corrected {disc.symbol} to broker position")
+                
+                # Alert risk team
+                await self._alert_risk_team(disc)
+                actions.append(f"Alerted risk team about {disc.symbol}")
+                
+            elif disc.severity == 'moderate':
+                # Alert only
+                await self._alert_risk_team(disc)
+                actions.append(f"Alerted risk team about {disc.symbol}")
+                
+            else:  # minor
+                # Log only
+                actions.append(f"Logged minor discrepancy in {disc.symbol}")
+        
+        return "; ".join(actions)
+    
+    async def _auto_correct_position(self, disc: PositionDiscrepancy):
+        """
+        Auto-correct internal position to match broker
+        
+        CRITICAL DECISION: Trust broker over internal tracking
+        """
+        logger.critical(
+            f"🔧 Auto-correcting position: {disc.symbol} "
+            f"{disc.internal_position} → {disc.broker_position}"
+        )
+        
+        # Update internal position to broker position
+        self.risk_manager.current_positions[disc.symbol] = disc.broker_position
+        
+        # Log correction
+        self.risk_manager.position_history.append({
+            'timestamp': datetime.now(),
+            'symbol': disc.symbol,
+            'action': 'reconciliation_correction',
+            'previous_position': disc.internal_position,
+            'new_position': disc.broker_position,
+            'difference': disc.difference
+        })
+    
+    async def _alert_risk_team(self, disc: PositionDiscrepancy):
+        """Send alert to risk team"""
+        logger.critical(
+            f"📧 Risk team alert: Position discrepancy in {disc.symbol} "
+            f"(${disc.market_value_difference:,.2f} difference)"
+        )
+        # Implementation would send email/SMS/Slack
+```
+
+### Automated Reconciliation Schedule
+
+```python
+class ReconciliationScheduler:
+    """Automated position reconciliation"""
+    
+    def __init__(self, reconciliation: PositionReconciliation):
+        self.reconciliation = reconciliation
+        self.running = False
+    
+    async def start_reconciliation_loop(self):
+        """Run reconciliation every 5 minutes"""
+        self.running = True
+        
+        while self.running:
+            try:
+                # Reconcile positions
+                report = await self.reconciliation.reconcile_positions()
+                
+                # If severe discrepancies, increase frequency
+                if any(d.severity == 'severe' for d in report.discrepancies):
+                    logger.warning("⚠️ Severe discrepancies - increasing reconciliation frequency")
+                    await asyncio.sleep(60)  # Check every minute
+                else:
+                    await asyncio.sleep(300)  # Normal: every 5 minutes
+                    
+            except Exception as e:
+                logger.error(f"Reconciliation loop error: {e}")
+                await asyncio.sleep(60)  # Retry in 1 minute
+```
+```
+
+---
+
+## Next Steps
+
+1. ✅ Document Rule 4 enhancements (compliance + circuit breakers)
+2. ✅ Document Rule 7 enhancements (P&L + reconciliation) 
+3. ⏳ Document Rule 7 enhancements (order rejection + position aging)
+4. ⏳ Document Rule 2 enhancements (fast regime detection)
+5. ⏳ Update actual rule files with enhancements
+6. ⏳ Re-audit core_engine against enhanced rules
+
+---
+
+**Status:** Rules 4 & 7 (partial) enhancements documented
+**Next:** Complete Rule 7 enhancements, then Rules 1, 2, 5
 
