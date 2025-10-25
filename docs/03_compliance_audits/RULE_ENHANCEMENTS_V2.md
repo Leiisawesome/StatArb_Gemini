@@ -1640,17 +1640,1100 @@ class ReconciliationScheduler:
 
 ---
 
+### NEW SECTION: Phase 9A - Intelligent Order Rejection Handling (MEDIUM) 🟡
+
+**Insert in Rule 7, After Phase 9**
+
+```markdown
+## Phase 9A: Intelligent Order Rejection Handling (MEDIUM) 🟡
+
+**Component:** OrderRejectionHandler (NEW)  
+**File:** `core_engine/system/order_rejection_handler.py`  
+**Authority:** OPERATIONAL  
+**Responsibility:** Handle broker order rejections intelligently with retry logic
+
+### Why Intelligent Rejection Handling is Important
+
+**Common Rejection Reasons:**
+- Insufficient margin
+- Stock halted
+- Invalid price (collar violation)
+- Duplicate order ID
+- Connection timeout
+- Market closed
+- Position limit exceeded
+
+**Current Gap:**
+- Orders rejected with no retry
+- No intelligent handling by rejection type
+- No fallback algorithm selection
+- Manual intervention required
+
+### Rejection Handling Strategy
+
+```
+Order Rejected by Broker
+         ↓
+┌────────────────────────────────────────────┐
+│ OrderRejectionHandler (NEW)                │
+│                                            │
+│ Pattern Matching:                         │
+│ 1. "insufficient margin" → Reduce qty     │
+│ 2. "halted" → Wait for resumption         │
+│ 3. "price collar" → Adjust price          │
+│ 4. "timeout" → Retry with longer timeout  │
+│ 5. "duplicate" → Generate new order ID    │
+│ 6. "unknown" → Escalate to risk team      │
+│                                            │
+│ Output: RejectionResolution               │
+│   - action: 'retry', 'cancel', 'escalate' │
+│   - modified_order: Order (if retry)      │
+│   - reason: str                            │
+└────────────────────────────────────────────┘
+         ↓
+   IF retry → Resubmit modified order
+   IF cancel → Log and alert
+   IF escalate → Risk team review
+```
+
+### Implementation: OrderRejectionHandler
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+from enum import Enum
+
+class RejectionAction(Enum):
+    """Actions to take on order rejection"""
+    RETRY = "retry"              # Retry with modifications
+    CANCEL = "cancel"            # Cancel order permanently  
+    ESCALATE = "escalate"        # Escalate to risk team
+    WAIT_AND_RETRY = "wait_retry" # Wait then retry
+
+@dataclass
+class RejectionResolution:
+    """Resolution for order rejection"""
+    action: RejectionAction
+    modified_order: Optional[Dict] = None
+    wait_seconds: int = 0
+    reason: str = ""
+    max_retries_reached: bool = False
+
+class OrderRejectionHandler:
+    """
+    Intelligent order rejection handling
+    
+    Analyzes broker rejection reasons and takes appropriate action.
+    Reduces manual intervention and improves order success rate.
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.max_retries = config.get('max_order_retries', 3)
+        self.retry_delays = [5, 10, 30]  # seconds
+        
+        # Track retry attempts
+        self.retry_counts: Dict[str, int] = {}  # order_id → retry_count
+        
+        logger.info("✅ OrderRejectionHandler initialized")
+    
+    async def handle_rejection(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str,
+        rejection_code: Optional[str] = None
+    ) -> RejectionResolution:
+        """
+        Handle order rejection intelligently
+        
+        Args:
+            order: Original order that was rejected
+            rejection_reason: Broker's rejection message
+            rejection_code: Optional rejection code
+            
+        Returns:
+            RejectionResolution with action to take
+        """
+        order_id = order.get('order_id', 'unknown')
+        
+        # Check retry limit
+        retry_count = self.retry_counts.get(order_id, 0)
+        if retry_count >= self.max_retries:
+            logger.error(
+                f"❌ Max retries reached for order {order_id} "
+                f"({retry_count}/{self.max_retries})"
+            )
+            return RejectionResolution(
+                action=RejectionAction.CANCEL,
+                reason=f"Max retries ({self.max_retries}) exceeded",
+                max_retries_reached=True
+            )
+        
+        # Pattern matching on rejection reason
+        reason_lower = rejection_reason.lower()
+        
+        # PATTERN 1: Insufficient margin
+        if "insufficient margin" in reason_lower or "buying power" in reason_lower:
+            return await self._handle_insufficient_margin(order, rejection_reason)
+        
+        # PATTERN 2: Stock halted
+        elif "halted" in reason_lower or "suspended" in reason_lower:
+            return await self._handle_stock_halted(order, rejection_reason)
+        
+        # PATTERN 3: Price collar violation
+        elif "collar" in reason_lower or "limit up" in reason_lower or "limit down" in reason_lower:
+            return await self._handle_price_collar(order, rejection_reason)
+        
+        # PATTERN 4: Connection timeout
+        elif "timeout" in reason_lower or "timed out" in reason_lower:
+            return await self._handle_timeout(order, rejection_reason)
+        
+        # PATTERN 5: Duplicate order
+        elif "duplicate" in reason_lower:
+            return await self._handle_duplicate_order(order, rejection_reason)
+        
+        # PATTERN 6: Market closed
+        elif "market closed" in reason_lower or "outside market hours" in reason_lower:
+            return RejectionResolution(
+                action=RejectionAction.CANCEL,
+                reason="Market closed - cannot execute"
+            )
+        
+        # PATTERN 7: Position limit
+        elif "position limit" in reason_lower:
+            return RejectionResolution(
+                action=RejectionAction.CANCEL,
+                reason="Position limit exceeded - escalate to risk"
+            )
+        
+        # PATTERN 8: Unknown rejection
+        else:
+            logger.warning(f"⚠️ Unknown rejection reason: {rejection_reason}")
+            return RejectionResolution(
+                action=RejectionAction.ESCALATE,
+                reason=f"Unknown rejection reason: {rejection_reason}"
+            )
+    
+    async def _handle_insufficient_margin(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str
+    ) -> RejectionResolution:
+        """
+        Handle insufficient margin rejection
+        
+        Strategy: Reduce order quantity by 50%
+        """
+        original_qty = order['quantity']
+        reduced_qty = original_qty * 0.5
+        
+        if reduced_qty < 1:
+            return RejectionResolution(
+                action=RejectionAction.CANCEL,
+                reason="Quantity too small after margin reduction"
+            )
+        
+        modified_order = order.copy()
+        modified_order['quantity'] = reduced_qty
+        
+        self._increment_retry_count(order['order_id'])
+        
+        logger.warning(
+            f"⚠️ Insufficient margin - reducing quantity: "
+            f"{original_qty} → {reduced_qty}"
+        )
+        
+        return RejectionResolution(
+            action=RejectionAction.RETRY,
+            modified_order=modified_order,
+            reason=f"Reduced quantity by 50% due to margin"
+        )
+    
+    async def _handle_stock_halted(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str
+    ) -> RejectionResolution:
+        """
+        Handle stock halt rejection
+        
+        Strategy: Wait for trading to resume
+        """
+        symbol = order['symbol']
+        
+        # Check if trading has resumed
+        is_trading = await self._check_if_trading(symbol)
+        
+        if is_trading:
+            # Trading resumed - retry immediately
+            self._increment_retry_count(order['order_id'])
+            return RejectionResolution(
+                action=RejectionAction.RETRY,
+                modified_order=order,
+                reason=f"{symbol} trading resumed - retrying"
+            )
+        else:
+            # Still halted - wait and retry
+            wait_time = 60  # Wait 1 minute
+            self._increment_retry_count(order['order_id'])
+            
+            logger.warning(
+                f"⚠️ {symbol} halted - waiting {wait_time}s"
+            )
+            
+            return RejectionResolution(
+                action=RejectionAction.WAIT_AND_RETRY,
+                modified_order=order,
+                wait_seconds=wait_time,
+                reason=f"{symbol} halted - wait and retry"
+            )
+    
+    async def _handle_price_collar(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str
+    ) -> RejectionResolution:
+        """
+        Handle price collar violation
+        
+        Strategy: Adjust order to market price
+        """
+        symbol = order['symbol']
+        
+        # Get current market price
+        current_price = await self._get_current_market_price(symbol)
+        
+        modified_order = order.copy()
+        
+        # If it's a limit order, adjust limit price
+        if order.get('order_type') == 'limit':
+            modified_order['limit_price'] = current_price
+            logger.warning(
+                f"⚠️ Price collar violation - adjusting to market: ${current_price:.2f}"
+            )
+        else:
+            # Market order hitting collar - convert to limit at market price
+            modified_order['order_type'] = 'limit'
+            modified_order['limit_price'] = current_price
+            logger.warning(
+                f"⚠️ Converting to limit order at market price: ${current_price:.2f}"
+            )
+        
+        self._increment_retry_count(order['order_id'])
+        
+        return RejectionResolution(
+            action=RejectionAction.RETRY,
+            modified_order=modified_order,
+            reason=f"Adjusted price to ${current_price:.2f}"
+        )
+    
+    async def _handle_timeout(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str
+    ) -> RejectionResolution:
+        """
+        Handle connection timeout
+        
+        Strategy: Retry with exponential backoff
+        """
+        order_id = order['order_id']
+        retry_count = self.retry_counts.get(order_id, 0)
+        
+        # Exponential backoff
+        if retry_count < len(self.retry_delays):
+            wait_time = self.retry_delays[retry_count]
+        else:
+            wait_time = 60  # Max 1 minute
+        
+        self._increment_retry_count(order_id)
+        
+        logger.warning(
+            f"⚠️ Order timeout - retrying in {wait_time}s (attempt {retry_count + 1})"
+        )
+        
+        return RejectionResolution(
+            action=RejectionAction.WAIT_AND_RETRY,
+            modified_order=order,
+            wait_seconds=wait_time,
+            reason=f"Timeout - retry with {wait_time}s backoff"
+        )
+    
+    async def _handle_duplicate_order(
+        self,
+        order: Dict[str, Any],
+        rejection_reason: str
+    ) -> RejectionResolution:
+        """
+        Handle duplicate order ID
+        
+        Strategy: Generate new order ID and retry
+        """
+        import uuid
+        
+        modified_order = order.copy()
+        modified_order['order_id'] = f"retry_{uuid.uuid4().hex[:8]}"
+        
+        self._increment_retry_count(order['order_id'])
+        
+        logger.warning(
+            f"⚠️ Duplicate order ID - generating new ID: {modified_order['order_id']}"
+        )
+        
+        return RejectionResolution(
+            action=RejectionAction.RETRY,
+            modified_order=modified_order,
+            reason="Generated new order ID"
+        )
+    
+    def _increment_retry_count(self, order_id: str):
+        """Track retry attempts"""
+        self.retry_counts[order_id] = self.retry_counts.get(order_id, 0) + 1
+    
+    async def _check_if_trading(self, symbol: str) -> bool:
+        """Check if stock is currently trading"""
+        # Implementation would query broker API or market data
+        return False  # Stub
+    
+    async def _get_current_market_price(self, symbol: str) -> float:
+        """Get current market price"""
+        # Implementation would query market data
+        return 100.0  # Stub
+```
+
+### Integration with UnifiedExecutionEngine
+
+```python
+class UnifiedExecutionEngine:
+    """Enhanced with rejection handling"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        
+        # NEW: Order rejection handler
+        self.rejection_handler = OrderRejectionHandler(config)
+    
+    async def execute_authorized_trade(
+        self,
+        request: ExecutionRequest
+    ) -> ExecutionResult:
+        """
+        Execute with intelligent rejection handling
+        
+        ENHANCED: Automatically handles rejections
+        """
+        max_attempts = 3
+        attempt = 0
+        
+        while attempt < max_attempts:
+            try:
+                # Attempt execution
+                result = await self._execute_order(request)
+                
+                if result.status == ExecutionStatus.REJECTED:
+                    # NEW: Handle rejection intelligently
+                    resolution = await self.rejection_handler.handle_rejection(
+                        order=request.to_dict(),
+                        rejection_reason=result.rejection_reason
+                    )
+                    
+                    if resolution.action == RejectionAction.RETRY:
+                        # Retry with modified order
+                        request = self._apply_modifications(request, resolution.modified_order)
+                        logger.info(f"🔄 Retrying order: {resolution.reason}")
+                        attempt += 1
+                        continue
+                        
+                    elif resolution.action == RejectionAction.WAIT_AND_RETRY:
+                        # Wait and retry
+                        await asyncio.sleep(resolution.wait_seconds)
+                        logger.info(f"🔄 Retrying after {resolution.wait_seconds}s wait")
+                        attempt += 1
+                        continue
+                        
+                    elif resolution.action == RejectionAction.CANCEL:
+                        # Cancel order
+                        logger.error(f"❌ Order cancelled: {resolution.reason}")
+                        return result
+                        
+                    else:  # ESCALATE
+                        # Escalate to risk team
+                        await self._escalate_to_risk_team(request, resolution.reason)
+                        return result
+                
+                # Success or other status
+                return result
+                
+            except Exception as e:
+                logger.error(f"Execution error: {e}")
+                attempt += 1
+                if attempt >= max_attempts:
+                    raise
+                await asyncio.sleep(5)
+        
+        # Max attempts reached
+        return ExecutionResult(status=ExecutionStatus.REJECTED, rejection_reason="Max attempts exceeded")
+```
+```
+
+---
+
+### NEW SECTION: Phase 10C - Position Aging & Time Decay Tracking (MEDIUM) 🟡
+
+**Insert After Position Reconciliation**
+
+```markdown
+## Phase 10C: Position Aging & Time Decay Tracking (MEDIUM) 🟡
+
+**Component:** PositionAgingMonitor (NEW)  
+**File:** `core_engine/system/position_aging_monitor.py`  
+**Authority:** GOVERNANCE_CONTROL  
+**Responsibility:** Monitor position age and enforce holding period limits
+
+### Why Position Aging is Important
+
+**Capital Efficiency:**
+- Mean reversion trades should close within 1-3 days
+- Stale positions (>30 days) indicate stuck trades
+- Long-held positions tie up capital
+- Aging affects strategy performance
+
+**Current Gap:**
+- No automatic position age monitoring
+- No alerts for stale positions
+- No forced exit on max holding period
+- Manual review required
+
+### Position Aging Architecture
+
+```
+Daily Check (End of Day):
+         ↓
+┌────────────────────────────────────────────┐
+│ PositionAgingMonitor (NEW)                 │
+│                                            │
+│ Check Each Position:                       │
+│ 1. Calculate days held                    │
+│ 2. Compare to strategy max age            │
+│ 3. Classify: Fresh/Aging/Stale/Expired   │
+│ 4. Generate alerts                        │
+│ 5. Auto-close expired positions           │
+│                                            │
+│ Max Holding Periods:                       │
+│ - Mean Reversion: 3 days                  │
+│ - Momentum: 7 days                        │
+│ - Trend Following: 30 days                │
+│ - Stat Arb: 5 days                        │
+│                                            │
+│ Output: AgingReport                        │
+│   - fresh_positions: List[Position]       │
+│   - aging_positions: List[Position]       │
+│   - stale_positions: List[Position]       │
+│   - expired_positions: List[Position]     │
+└────────────────────────────────────────────┘
+         ↓
+   IF stale → Alert trader
+   IF expired → Auto-close position
+```
+
+### Implementation: PositionAgingMonitor
+
+```python
+from dataclasses import dataclass
+from typing import Dict, List
+from datetime import datetime, timedelta
+from enum import Enum
+
+class PositionAgeCategory(Enum):
+    """Position age categories"""
+    FRESH = "fresh"          # < 50% of max age
+    AGING = "aging"          # 50-80% of max age
+    STALE = "stale"          # 80-100% of max age
+    EXPIRED = "expired"      # > max age
+
+@dataclass
+class PositionAge:
+    """Position with age information"""
+    symbol: str
+    strategy: str
+    entry_time: datetime
+    days_held: int
+    max_age_days: int
+    age_category: PositionAgeCategory
+    age_pct: float  # % of max age
+    market_value: float
+
+@dataclass
+class AgingReport:
+    """Position aging report"""
+    timestamp: datetime
+    fresh_positions: List[PositionAge]
+    aging_positions: List[PositionAge]
+    stale_positions: List[PositionAge]
+    expired_positions: List[PositionAge]
+    actions_taken: List[str]
+
+class PositionAgingMonitor:
+    """
+    Position aging monitor (CAPITAL EFFICIENCY)
+    
+    Monitors position age and enforces holding period limits.
+    Prevents capital from being tied up in stale positions.
+    """
+    
+    def __init__(self, risk_manager):
+        self.risk_manager = risk_manager
+        
+        # Strategy-specific max holding periods (days)
+        self.max_holding_periods = {
+            'mean_reversion': 3,      # Quick in/out
+            'stat_arb': 5,            # Statistical edge decays
+            'momentum': 7,            # Trend exhaustion
+            'breakout': 10,           # Breakout follow-through
+            'trend_following': 30,    # Long-term trends
+            'pairs_trading': 5,       # Cointegration mean reversion
+            'volatility': 7,          # Vol mean reversion
+            'factor': 14,             # Factor rotation
+            'multi_asset': 14,        # Portfolio rotation
+            'arbitrage': 2,           # Quick arb opportunity
+            'default': 14             # Default for unknown strategies
+        }
+        
+        # Aging thresholds
+        self.aging_threshold = 0.5    # 50% of max age
+        self.stale_threshold = 0.8    # 80% of max age
+        
+        # Tracking
+        self.aging_history: List[AgingReport] = []
+        
+        logger.info("✅ PositionAgingMonitor initialized")
+    
+    async def check_position_aging(self) -> AgingReport:
+        """
+        Check aging of all open positions
+        
+        RECOMMENDED: Run daily at end of trading
+        
+        Returns: AgingReport with aging analysis and actions taken
+        """
+        now = datetime.now()
+        
+        fresh = []
+        aging = []
+        stale = []
+        expired = []
+        actions_taken = []
+        
+        # Get all positions with entry times
+        positions = self.risk_manager.current_positions
+        position_entry_times = self._get_position_entry_times()
+        position_strategies = self._get_position_strategies()
+        
+        for symbol, position in positions.items():
+            if position == 0:
+                continue
+            
+            # Get position info
+            entry_time = position_entry_times.get(symbol, now)
+            strategy = position_strategies.get(symbol, 'default')
+            
+            # Calculate age
+            days_held = (now - entry_time).days
+            max_age_days = self.max_holding_periods.get(strategy, self.max_holding_periods['default'])
+            age_pct = days_held / max_age_days
+            
+            # Get market value
+            current_price = await self._get_current_price(symbol)
+            market_value = abs(position) * current_price
+            
+            # Determine age category
+            if days_held > max_age_days:
+                category = PositionAgeCategory.EXPIRED
+            elif age_pct >= self.stale_threshold:
+                category = PositionAgeCategory.STALE
+            elif age_pct >= self.aging_threshold:
+                category = PositionAgeCategory.AGING
+            else:
+                category = PositionAgeCategory.FRESH
+            
+            # Create position age object
+            position_age = PositionAge(
+                symbol=symbol,
+                strategy=strategy,
+                entry_time=entry_time,
+                days_held=days_held,
+                max_age_days=max_age_days,
+                age_category=category,
+                age_pct=age_pct,
+                market_value=market_value
+            )
+            
+            # Categorize
+            if category == PositionAgeCategory.FRESH:
+                fresh.append(position_age)
+            elif category == PositionAgeCategory.AGING:
+                aging.append(position_age)
+            elif category == PositionAgeCategory.STALE:
+                stale.append(position_age)
+                # Alert trader
+                await self._alert_stale_position(position_age)
+                actions_taken.append(f"Alerted trader: {symbol} stale ({days_held} days)")
+            else:  # EXPIRED
+                expired.append(position_age)
+                # Auto-close expired position
+                await self._auto_close_expired_position(position_age)
+                actions_taken.append(f"Auto-closed: {symbol} expired ({days_held} > {max_age_days} days)")
+        
+        # Create report
+        report = AgingReport(
+            timestamp=now,
+            fresh_positions=fresh,
+            aging_positions=aging,
+            stale_positions=stale,
+            expired_positions=expired,
+            actions_taken=actions_taken
+        )
+        
+        # Store history
+        self.aging_history.append(report)
+        
+        # Log summary
+        logger.info(
+            f"📊 Position Aging: Fresh={len(fresh)}, Aging={len(aging)}, "
+            f"Stale={len(stale)}, Expired={len(expired)}"
+        )
+        
+        if stale or expired:
+            logger.warning(
+                f"⚠️ Aged positions detected: {len(stale)} stale, {len(expired)} expired"
+            )
+        
+        return report
+    
+    def _get_position_entry_times(self) -> Dict[str, datetime]:
+        """Get entry times for all positions"""
+        entry_times = {}
+        
+        for entry in self.risk_manager.position_history:
+            symbol = entry.get('symbol')
+            if symbol and entry.get('side') == 'buy':
+                entry_times[symbol] = entry.get('timestamp', datetime.now())
+        
+        return entry_times
+    
+    def _get_position_strategies(self) -> Dict[str, str]:
+        """Get strategy for each position"""
+        strategies = {}
+        
+        for entry in self.risk_manager.position_history:
+            symbol = entry.get('symbol')
+            strategy = entry.get('strategy_id', 'default')
+            if symbol:
+                strategies[symbol] = strategy
+        
+        return strategies
+    
+    async def _get_current_price(self, symbol: str) -> float:
+        """Get current market price"""
+        # Implementation would fetch from market data
+        return 100.0  # Stub
+    
+    async def _alert_stale_position(self, position: PositionAge):
+        """Alert trader about stale position"""
+        logger.warning(
+            f"⚠️ STALE POSITION: {position.symbol} held {position.days_held} days "
+            f"({position.age_pct:.0%} of max {position.max_age_days} days, "
+            f"${position.market_value:,.2f} market value)"
+        )
+        # Implementation would send alert to trader
+    
+    async def _auto_close_expired_position(self, position: PositionAge):
+        """Auto-close expired position"""
+        logger.critical(
+            f"🔴 AUTO-CLOSING EXPIRED POSITION: {position.symbol} "
+            f"held {position.days_held} days (max: {position.max_age_days})"
+        )
+        
+        # Create close order
+        # Implementation would submit close order to execution engine
+        
+        # Log forced close
+        self.risk_manager.position_history.append({
+            'timestamp': datetime.now(),
+            'symbol': position.symbol,
+            'action': 'forced_close_age_limit',
+            'days_held': position.days_held,
+            'max_age': position.max_age_days,
+            'market_value': position.market_value
+        })
+```
+
+### Aging Dashboard
+
+```python
+class PositionAgingDashboard:
+    """Position aging visualization"""
+    
+    def __init__(self, aging_monitor: PositionAgingMonitor):
+        self.aging_monitor = aging_monitor
+    
+    def display_aging_report(self) -> str:
+        """Display position aging dashboard"""
+        if not self.aging_monitor.aging_history:
+            return "No aging data available"
+        
+        report = self.aging_monitor.aging_history[-1]
+        
+        output = [
+            "\n📊 POSITION AGING DASHBOARD",
+            "═" * 60,
+            f"Fresh Positions:   {len(report.fresh_positions):<3} (< 50% max age)",
+            f"Aging Positions:   {len(report.aging_positions):<3} (50-80% max age)",
+            f"Stale Positions:   {len(report.stale_positions):<3} (80-100% max age) ⚠️",
+            f"Expired Positions: {len(report.expired_positions):<3} (> max age) 🔴",
+            ""
+        ]
+        
+        if report.stale_positions:
+            output.append("⚠️ STALE POSITIONS:")
+            for pos in report.stale_positions:
+                output.append(
+                    f"  {pos.symbol:<10} {pos.days_held:>3}/{pos.max_age_days} days "
+                    f"({pos.age_pct:.0%})  ${pos.market_value:>10,.2f}"
+                )
+            output.append("")
+        
+        if report.expired_positions:
+            output.append("🔴 EXPIRED POSITIONS (AUTO-CLOSED):")
+            for pos in report.expired_positions:
+                output.append(
+                    f"  {pos.symbol:<10} {pos.days_held:>3}/{pos.max_age_days} days "
+                    f"(EXPIRED)  ${pos.market_value:>10,.2f}"
+                )
+            output.append("")
+        
+        if report.actions_taken:
+            output.append("Actions Taken:")
+            for action in report.actions_taken:
+                output.append(f"  • {action}")
+        
+        return "\n".join(output)
+```
+```
+
+---
+
+## Rule 2 Enhancements: Fast Regime Detection (MEDIUM) 🟡
+
+### NEW SECTION: Enhanced Regime Detection with Fast Indicators
+
+**Insert in Rule 2, Regime-First Implementation**
+
+```markdown
+## Enhanced Regime Detection: Fast Regime Transitions (MEDIUM) 🟡
+
+**Component:** FastRegimeDetector (ENHANCEMENT)  
+**File:** `core_engine/regime/fast_regime_detector.py`  
+**Authority:** SUPPORT  
+**Responsibility:** Detect regime changes with minimal lag (1-5 minutes)
+
+### Why Fast Detection Matters
+
+**Current Gap:**
+- Regime detection uses 20-60 bars (10-60 minute lag)
+- System continues with wrong regime during transitions
+- Losses mount during detection lag
+- Flash crashes not detected quickly enough
+
+**Institutional Approach:**
+- Use fast-moving leading indicators
+- VIX spike detection (1-minute response)
+- Market breadth indicators (real-time)
+- Order flow toxicity (sub-minute)
+
+### Fast Detection Strategy
+
+```
+Market Data Tick
+         ↓
+┌────────────────────────────────────────────┐
+│ FastRegimeDetector (ENHANCEMENT)           │
+│                                            │
+│ Fast Indicators (1-5 min detection):      │
+│ 1. VIX Spike Detection                    │
+│    - VIX +20% in 5 min → Crisis           │
+│                                            │
+│ 2. Market Breadth                         │
+│    - % stocks declining > 70% → High Vol  │
+│                                            │
+│ 3. Order Book Imbalance                   │
+│    - Buy/sell imbalance > 80% → Crisis    │
+│                                            │
+│ 4. Volatility Spike                       │
+│    - Realized vol > 3x normal → High Vol  │
+│                                            │
+│ If ANY fast indicator triggers:           │
+│   → Switch regime immediately             │
+│   → Override historical detection         │
+│   → Alert all components                  │
+│                                            │
+│ Else:                                      │
+│   → Use traditional regime detection      │
+└────────────────────────────────────────────┘
+         ↓
+   Fast regime detected (1-5 min lag)
+   vs Traditional (10-60 min lag)
+```
+
+### Implementation: FastRegimeDetector
+
+```python
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+@dataclass
+class FastRegimeSignal:
+    """Fast regime change signal"""
+    detected_regime: str
+    confidence: float
+    detection_method: str  # 'vix_spike', 'market_breadth', etc.
+    trigger_value: float
+    timestamp: datetime
+
+class FastRegimeDetector:
+    """
+    Fast regime detection using leading indicators
+    
+    Reduces regime detection lag from 10-60 minutes to 1-5 minutes.
+    Critical for protecting capital during rapid market changes.
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        
+        # Fast detection thresholds
+        self.vix_spike_threshold = 0.20  # 20% VIX increase
+        self.market_breadth_crisis = 0.70  # 70% stocks down
+        self.order_imbalance_crisis = 0.80  # 80% sell orders
+        self.vol_spike_multiplier = 3.0  # 3x normal volatility
+        
+        # Tracking
+        self.recent_vix: List[float] = []
+        self.vix_timestamps: List[datetime] = []
+        
+        logger.info("✅ FastRegimeDetector initialized")
+    
+    async def check_fast_regime_change(
+        self,
+        market_data: Dict[str, Any]
+    ) -> Optional[FastRegimeSignal]:
+        """
+        Check for fast regime changes using leading indicators
+        
+        Returns: FastRegimeSignal if regime change detected, None otherwise
+        """
+        # CHECK 1: VIX Spike Detection (highest priority)
+        vix_signal = await self._check_vix_spike(market_data)
+        if vix_signal:
+            logger.critical(
+                f"🔴 FAST REGIME DETECTED: VIX spike - switching to {vix_signal.detected_regime}"
+            )
+            return vix_signal
+        
+        # CHECK 2: Market Breadth
+        breadth_signal = await self._check_market_breadth(market_data)
+        if breadth_signal:
+            logger.critical(
+                f"🔴 FAST REGIME DETECTED: Market breadth - switching to {breadth_signal.detected_regime}"
+            )
+            return breadth_signal
+        
+        # CHECK 3: Order Book Imbalance
+        imbalance_signal = await self._check_order_imbalance(market_data)
+        if imbalance_signal:
+            logger.critical(
+                f"🔴 FAST REGIME DETECTED: Order imbalance - switching to {imbalance_signal.detected_regime}"
+            )
+            return imbalance_signal
+        
+        # CHECK 4: Volatility Spike
+        vol_signal = await self._check_volatility_spike(market_data)
+        if vol_signal:
+            logger.warning(
+                f"⚠️ FAST REGIME DETECTED: Volatility spike - switching to {vol_signal.detected_regime}"
+            )
+            return vol_signal
+        
+        # No fast regime change detected
+        return None
+    
+    async def _check_vix_spike(
+        self,
+        market_data: Dict[str, Any]
+    ) -> Optional[FastRegimeSignal]:
+        """
+        Detect VIX spikes (crisis indicator)
+        
+        VIX +20% in 5 minutes = Market stress
+        """
+        current_vix = market_data.get('vix', 0.0)
+        if current_vix == 0:
+            return None
+        
+        now = datetime.now()
+        
+        # Store VIX history
+        self.recent_vix.append(current_vix)
+        self.vix_timestamps.append(now)
+        
+        # Keep only last 5 minutes
+        cutoff_time = now - timedelta(minutes=5)
+        while self.vix_timestamps and self.vix_timestamps[0] < cutoff_time:
+            self.recent_vix.pop(0)
+            self.vix_timestamps.pop(0)
+        
+        if len(self.recent_vix) < 2:
+            return None
+        
+        # Check for spike
+        vix_5min_ago = self.recent_vix[0]
+        vix_change_pct = (current_vix - vix_5min_ago) / vix_5min_ago
+        
+        if vix_change_pct > self.vix_spike_threshold:
+            # VIX SPIKE DETECTED!
+            return FastRegimeSignal(
+                detected_regime='crisis',
+                confidence=0.95,
+                detection_method='vix_spike',
+                trigger_value=vix_change_pct,
+                timestamp=now
+            )
+        
+        return None
+    
+    async def _check_market_breadth(
+        self,
+        market_data: Dict[str, Any]
+    ) -> Optional[FastRegimeSignal]:
+        """
+        Check market breadth indicators
+        
+        >70% stocks declining = High volatility regime
+        """
+        breadth = market_data.get('market_breadth', {})
+        pct_declining = breadth.get('pct_declining', 0.5)
+        
+        if pct_declining > self.market_breadth_crisis:
+            return FastRegimeSignal(
+                detected_regime='high_volatility',
+                confidence=0.90,
+                detection_method='market_breadth',
+                trigger_value=pct_declining,
+                timestamp=datetime.now()
+            )
+        
+        return None
+    
+    async def _check_order_imbalance(
+        self,
+        market_data: Dict[str, Any]
+    ) -> Optional[FastRegimeSignal]:
+        """
+        Check order flow imbalance
+        
+        >80% sell orders = Crisis/panic
+        """
+        order_flow = market_data.get('order_flow', {})
+        sell_imbalance = order_flow.get('sell_ratio', 0.5)
+        
+        if sell_imbalance > self.order_imbalance_crisis:
+            return FastRegimeSignal(
+                detected_regime='crisis',
+                confidence=0.88,
+                detection_method='order_imbalance',
+                trigger_value=sell_imbalance,
+                timestamp=datetime.now()
+            )
+        
+        return None
+    
+    async def _check_volatility_spike(
+        self,
+        market_data: Dict[str, Any]
+    ) -> Optional[FastRegimeSignal]:
+        """
+        Check for realized volatility spikes
+        
+        Realized vol > 3x normal = High volatility
+        """
+        realized_vol = market_data.get('realized_volatility', 0.0)
+        normal_vol = market_data.get('average_volatility', 0.02)
+        
+        if realized_vol > normal_vol * self.vol_spike_multiplier:
+            return FastRegimeSignal(
+                detected_regime='high_volatility',
+                confidence=0.85,
+                detection_method='volatility_spike',
+                trigger_value=realized_vol / normal_vol,
+                timestamp=datetime.now()
+            )
+        
+        return None
+```
+
+### Integration with EnhancedRegimeEngine
+
+```python
+class EnhancedRegimeEngine:
+    """Enhanced with fast detection"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        
+        # NEW: Fast regime detector
+        self.fast_detector = FastRegimeDetector(config)
+    
+    async def get_current_regime(self) -> RegimeContext:
+        """
+        Get current regime with fast detection
+        
+        ENHANCED: Checks fast indicators first
+        """
+        # STEP 1: Check fast indicators (1-5 min detection)
+        fast_signal = await self.fast_detector.check_fast_regime_change(market_data)
+        
+        if fast_signal:
+            # Fast regime change detected - override historical
+            logger.critical(
+                f"🔴 FAST REGIME OVERRIDE: {fast_signal.detected_regime} "
+                f"(method: {fast_signal.detection_method})"
+            )
+            
+            return RegimeContext(
+                primary_regime=fast_signal.detected_regime,
+                confidence=fast_signal.confidence,
+                detection_method='fast_indicators',
+                detection_latency_minutes=1  # Fast detection
+            )
+        
+        # STEP 2: Use traditional regime detection (10-60 min lag)
+        return await self._traditional_regime_detection()
+```
+```
+
+---
+
 ## Next Steps
 
 1. ✅ Document Rule 4 enhancements (compliance + circuit breakers)
-2. ✅ Document Rule 7 enhancements (P&L + reconciliation) 
-3. ⏳ Document Rule 7 enhancements (order rejection + position aging)
-4. ⏳ Document Rule 2 enhancements (fast regime detection)
+2. ✅ Document Rule 7 enhancements (P&L + reconciliation + rejection + aging)
+3. ✅ Document Rule 2 enhancements (fast regime detection)
+4. ⏳ Document Rules 1 & 5 minor enhancements
 5. ⏳ Update actual rule files with enhancements
 6. ⏳ Re-audit core_engine against enhanced rules
 
 ---
 
-**Status:** Rules 4 & 7 (partial) enhancements documented
-**Next:** Complete Rule 7 enhancements, then Rules 1, 2, 5
+**Status:** Rules 2, 4, 7 enhancements documented (7/8 gaps covered)
+**Next:** Final documentation (Rules 1 & 5), then update actual rule files
 
