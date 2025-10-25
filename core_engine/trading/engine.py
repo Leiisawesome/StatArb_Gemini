@@ -1021,14 +1021,540 @@ class EnhancedTradingEngine(ISystemComponent):
         """Standardized method for generating execution plans (alias for create_execution_plan)"""
         return self.handle_authorization(authorization)
     
-    def create_execution_plan(self, authorization: Any) -> Dict[str, Any]:
-        """Standardized method for creating execution plans"""
-        return {
-            'execution_plan_created': True,
-            'authorization_data': authorization,
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'EnhancedTradingEngine'
-        }
+    async def create_execution_plan(self, authorization: Any) -> Dict[str, Any]:
+        """
+        Create optimal execution plan from authorized trade
+        
+        Fully implements Phase 8 per Rule 7.1:
+        - Assesses liquidity conditions
+        - Selects optimal execution algorithm
+        - Estimates market impact
+        - Creates comprehensive execution request
+        
+        Args:
+            authorization: TradingAuthorization from CentralRiskManager (Phase 7)
+            
+        Returns:
+            ExecutionRequest with complete execution plan (Phase 8 output)
+        """
+        try:
+            plan_start_time = datetime.now()
+            
+            # Extract authorization data
+            if isinstance(authorization, dict):
+                symbol = authorization.get('symbol', '')
+                side = authorization.get('side', '')
+                quantity = authorization.get('authorized_quantity', authorization.get('quantity', 0))
+                urgency = authorization.get('urgency', 'normal')
+                max_execution_time = authorization.get('max_execution_time', 3600)
+            else:
+                # Handle authorization object
+                symbol = getattr(authorization, 'symbol', '')
+                side = getattr(authorization, 'side', '')
+                quantity = getattr(authorization, 'authorized_quantity', 0)
+                urgency = getattr(authorization, 'urgency', 'normal')
+                max_execution_time = getattr(authorization, 'max_execution_time', 3600)
+            
+            self.logger.info(f"📋 Creating execution plan: {symbol} {side} {quantity} shares")
+            
+            # Step 1: Get market data
+            market_data = await self._get_market_data(symbol)
+            
+            # Step 2: Assess liquidity
+            liquidity_score = await self._assess_liquidity(symbol, quantity, market_data)
+            
+            # Step 3: Select execution algorithm
+            algorithm = self._select_execution_algorithm(
+                quantity=quantity,
+                urgency=urgency,
+                liquidity_score=liquidity_score,
+                time_horizon=max_execution_time
+            )
+            
+            # Step 4: Estimate market impact
+            impact_estimate = await self._estimate_market_impact(
+                symbol=symbol,
+                quantity=quantity,
+                side=side,
+                liquidity_score=liquidity_score,
+                market_data=market_data
+            )
+            
+            # Step 5: Create execution request
+            execution_request = {
+                'request_id': str(uuid.uuid4()),
+                'authorization': authorization,
+                'symbol': symbol,
+                'side': side,
+                'quantity': quantity,
+                'algorithm': algorithm,
+                'urgency': urgency,
+                'time_horizon': max_execution_time,
+                
+                # Liquidity assessment
+                'liquidity_score': liquidity_score,
+                
+                # Market impact estimation
+                'estimated_impact_bps': impact_estimate['total_impact_bps'],
+                'permanent_impact_bps': impact_estimate['permanent_impact_bps'],
+                'temporary_impact_bps': impact_estimate['temporary_impact_bps'],
+                
+                # Pricing
+                'current_price': market_data.get('current_price', 100.0),
+                'estimated_fill_price': market_data.get('current_price', 100.0) + impact_estimate['price_adjustment'],
+                'price_limit': impact_estimate.get('price_limit'),
+                
+                # Venue routing
+                'venue_preferences': self._get_venue_preferences(symbol, liquidity_score),
+                
+                # Order slicing (for large orders)
+                'slicing_plan': self._create_slicing_plan(
+                    total_quantity=quantity,
+                    algorithm=algorithm,
+                    time_horizon=max_execution_time,
+                    market_data=market_data
+                ) if quantity > liquidity_score.get('avg_trade_size', 1000) * 5 else None,
+                
+                # Metadata
+                'metadata': {
+                    'liquidity_regime': liquidity_score.get('liquidity_regime', 'normal_liquidity'),
+                    'market_regime': market_data.get('regime', 'unknown'),
+                    'volatility': market_data.get('volatility', 0.02),
+                    'planning_timestamp': datetime.now().isoformat(),
+                    'planning_duration_ms': (datetime.now() - plan_start_time).total_seconds() * 1000
+                }
+            }
+            
+            # Update metrics
+            self.health_metrics['performance_metrics']['total_execution_plans'] += 1
+            self.health_metrics['performance_metrics']['successful_execution_plans'] += 1
+            
+            self.logger.info(
+                f"✅ Execution plan created: {symbol} {algorithm} "
+                f"(impact: {impact_estimate['total_impact_bps']:.2f}bps, "
+                f"liquidity: {liquidity_score.get('overall_score', 0):.1f})"
+            )
+            
+            return execution_request
+            
+        except Exception as e:
+            self.logger.error(f"❌ Execution plan creation failed: {e}")
+            self.health_metrics['performance_metrics']['failed_execution_plans'] += 1
+            self.health_metrics['error_count'] += 1
+            
+            # Return fallback plan
+            return {
+                'request_id': str(uuid.uuid4()),
+                'authorization': authorization,
+                'algorithm': 'market',  # Fallback to market order
+                'error': str(e),
+                'fallback': True
+            }
+    
+    # ========================================
+    # EXECUTION PLANNING HELPER METHODS (Phase 8 Implementation)
+    # ========================================
+    
+    async def _get_market_data(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get current market data for execution planning
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            Market data dict with price, volume, volatility, etc.
+        """
+        try:
+            if self.data_manager and hasattr(self.data_manager, 'get_current_market_data'):
+                # Use data manager if available
+                market_data = await self.data_manager.get_current_market_data(symbol)
+                return market_data
+            else:
+                # Fallback to reasonable defaults
+                self.logger.warning(f"No data manager available, using defaults for {symbol}")
+                return {
+                    'symbol': symbol,
+                    'current_price': 100.0,
+                    'bid': 99.95,
+                    'ask': 100.05,
+                    'volume': 1000000,
+                    'avg_volume': 1000000,
+                    'volatility': 0.02,  # 2% daily volatility
+                    'regime': 'normal_volatility',
+                    'timestamp': datetime.now()
+                }
+        except Exception as e:
+            self.logger.error(f"Error getting market data: {e}")
+            # Return safe defaults
+            return {
+                'symbol': symbol,
+                'current_price': 100.0,
+                'volume': 1000000,
+                'volatility': 0.02,
+                'regime': 'unknown'
+            }
+    
+    async def _assess_liquidity(
+        self, 
+        symbol: str, 
+        quantity: float, 
+        market_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Assess liquidity for execution planning
+        
+        Args:
+            symbol: Trading symbol
+            quantity: Intended trade quantity
+            market_data: Current market data
+            
+        Returns:
+            Liquidity score dict with assessment details
+        """
+        try:
+            # Try to use liquidity engine if available
+            if hasattr(self, 'liquidity_engine') and self.liquidity_engine:
+                from ..data.liquidity_engine import LiquidityAssessmentEngine
+                if isinstance(self.liquidity_engine, LiquidityAssessmentEngine):
+                    score = self.liquidity_engine.assess_liquidity_score(
+                        symbol, market_data
+                    )
+                    return score
+            
+            # Fallback: Simple liquidity assessment
+            avg_volume = market_data.get('avg_volume', market_data.get('volume', 1000000))
+            current_volume = market_data.get('volume', avg_volume)
+            
+            # Volume ratio
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            
+            # Participation rate
+            participation_rate = quantity / avg_volume if avg_volume > 0 else 0.01
+            
+            # Liquidity score (0-100)
+            overall_score = 70.0  # Start with normal
+            if volume_ratio > 1.5:
+                overall_score += 15  # High volume = better liquidity
+            elif volume_ratio < 0.5:
+                overall_score -= 20  # Low volume = worse liquidity
+            
+            # Adjust for participation rate
+            if participation_rate > 0.1:  # More than 10% of daily volume
+                overall_score -= 20
+            elif participation_rate > 0.05:  # 5-10%
+                overall_score -= 10
+            
+            overall_score = max(0, min(100, overall_score))
+            
+            # Determine regime
+            if overall_score >= 80:
+                liquidity_regime = 'high_liquidity'
+            elif overall_score >= 60:
+                liquidity_regime = 'normal_liquidity'
+            elif overall_score >= 40:
+                liquidity_regime = 'low_liquidity'
+            else:
+                liquidity_regime = 'illiquid'
+            
+            return {
+                'symbol': symbol,
+                'overall_score': overall_score,
+                'liquidity_regime': liquidity_regime,
+                'avg_daily_volume': avg_volume,
+                'current_volume': current_volume,
+                'volume_ratio': volume_ratio,
+                'participation_rate': participation_rate,
+                'avg_trade_size': avg_volume / 1000,  # Estimate average trade size
+                'bid_ask_spread_bps': market_data.get('spread_bps', 5.0),
+                'effective_spread_bps': market_data.get('spread_bps', 5.0) * 1.4,
+                'market_depth': avg_volume * 0.05,
+                'confidence': 0.7
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error assessing liquidity: {e}")
+            # Return conservative defaults
+            return {
+                'symbol': symbol,
+                'overall_score': 50.0,
+                'liquidity_regime': 'normal_liquidity',
+                'avg_daily_volume': 1000000,
+                'avg_trade_size': 1000,
+                'confidence': 0.5
+            }
+    
+    def _select_execution_algorithm(
+        self,
+        quantity: float,
+        urgency: str,
+        liquidity_score: Dict[str, Any],
+        time_horizon: int
+    ) -> str:
+        """
+        Select optimal execution algorithm based on conditions
+        
+        Args:
+            quantity: Trade quantity
+            urgency: Execution urgency level
+            liquidity_score: Liquidity assessment results
+            time_horizon: Maximum execution time (seconds)
+            
+        Returns:
+            Selected algorithm name
+        """
+        try:
+            liquidity_regime = liquidity_score.get('liquidity_regime', 'normal_liquidity')
+            
+            # Emergency/urgent trades use market orders
+            if urgency in ['urgent', 'emergency']:
+                self.logger.info(f"📊 Algorithm selected: MARKET (urgency: {urgency})")
+                return 'market'
+            
+            # Small quantities use market orders
+            if quantity < 100:
+                self.logger.info(f"📊 Algorithm selected: MARKET (small quantity: {quantity})")
+                return 'market'
+            
+            # Illiquid markets use adaptive algorithms
+            if liquidity_regime in ['illiquid', 'crisis_liquidity']:
+                self.logger.info(f"📊 Algorithm selected: ADAPTIVE (liquidity: {liquidity_regime})")
+                return 'adaptive'
+            
+            # Large quantities with time flexibility use TWAP
+            if time_horizon > 300 and quantity > 5000:
+                self.logger.info(f"📊 Algorithm selected: TWAP (large order, time available)")
+                return 'twap'
+            
+            # Volume-sensitive use VWAP
+            participation_rate = liquidity_score.get('participation_rate', 0.0)
+            if participation_rate > 0.05:  # More than 5% of daily volume
+                self.logger.info(f"📊 Algorithm selected: VWAP (high participation: {participation_rate:.2%})")
+                return 'vwap'
+            
+            # Low liquidity - use adaptive
+            if liquidity_regime == 'low_liquidity':
+                self.logger.info(f"📊 Algorithm selected: ADAPTIVE (low liquidity)")
+                return 'adaptive'
+            
+            # Default to LIMIT for normal conditions
+            self.logger.info(f"📊 Algorithm selected: LIMIT (normal conditions)")
+            return 'limit'
+            
+        except Exception as e:
+            self.logger.error(f"Error selecting algorithm: {e}")
+            return 'market'  # Safe fallback
+    
+    async def _estimate_market_impact(
+        self,
+        symbol: str,
+        quantity: float,
+        side: str,
+        liquidity_score: Dict[str, Any],
+        market_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Estimate market impact using Almgren-Chriss model
+        
+        Args:
+            symbol: Trading symbol
+            quantity: Trade quantity
+            side: 'buy' or 'sell'
+            liquidity_score: Liquidity assessment
+            market_data: Current market data
+            
+        Returns:
+            Market impact estimate dict
+        """
+        try:
+            import numpy as np
+            
+            # Get parameters
+            price = market_data.get('current_price', 100.0)
+            volatility = market_data.get('volatility', 0.02)
+            avg_volume = liquidity_score.get('avg_daily_volume', 1000000)
+            participation_rate = quantity / avg_volume if avg_volume > 0 else 0.01
+            
+            # Almgren-Chriss model coefficients
+            # These can be calibrated based on historical data
+            linear_coefficient = 0.001  # Permanent impact coefficient
+            sqrt_coefficient = 0.01     # Temporary impact coefficient
+            
+            # Adjust coefficients based on liquidity regime
+            liquidity_regime = liquidity_score.get('liquidity_regime', 'normal_liquidity')
+            if liquidity_regime == 'high_liquidity':
+                linear_coefficient *= 0.5
+                sqrt_coefficient *= 0.7
+            elif liquidity_regime in ['low_liquidity', 'illiquid']:
+                linear_coefficient *= 2.0
+                sqrt_coefficient *= 1.5
+            elif liquidity_regime == 'crisis_liquidity':
+                linear_coefficient *= 3.0
+                sqrt_coefficient *= 2.0
+            
+            # Permanent impact (linear in participation rate)
+            permanent_impact = linear_coefficient * participation_rate
+            
+            # Temporary impact (square root law)
+            temporary_impact = sqrt_coefficient * np.sqrt(participation_rate)
+            
+            # Total impact in basis points
+            total_impact_bps = (permanent_impact + temporary_impact) * 10000
+            permanent_impact_bps = permanent_impact * 10000
+            temporary_impact_bps = temporary_impact * 10000
+            
+            # Price adjustment (positive for buys, negative for sells)
+            price_adjustment = price * (total_impact_bps / 10000)
+            if side.lower() == 'sell':
+                price_adjustment = -price_adjustment
+            
+            # Spread cost
+            spread_cost_bps = liquidity_score.get('bid_ask_spread_bps', 5.0) / 2
+            
+            # Total execution cost
+            execution_cost_bps = spread_cost_bps + total_impact_bps
+            
+            # Price limit (for limit orders)
+            if side.lower() == 'buy':
+                price_limit = price + (price * (total_impact_bps * 1.5 / 10000))  # 1.5x impact as limit
+            else:
+                price_limit = price - (price * (total_impact_bps * 1.5 / 10000))
+            
+            self.logger.info(
+                f"💰 Market impact estimate: {total_impact_bps:.2f}bps "
+                f"(permanent: {permanent_impact_bps:.2f}bps, temporary: {temporary_impact_bps:.2f}bps)"
+            )
+            
+            return {
+                'permanent_impact_bps': permanent_impact_bps,
+                'temporary_impact_bps': temporary_impact_bps,
+                'total_impact_bps': total_impact_bps,
+                'spread_cost_bps': spread_cost_bps,
+                'execution_cost_bps': execution_cost_bps,
+                'price_adjustment': price_adjustment,
+                'price_limit': price_limit,
+                'participation_rate': participation_rate,
+                'model_type': 'almgren_chriss'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error estimating market impact: {e}")
+            # Return conservative estimates
+            return {
+                'permanent_impact_bps': 5.0,
+                'temporary_impact_bps': 5.0,
+                'total_impact_bps': 10.0,
+                'price_adjustment': 0.0,
+                'execution_cost_bps': 15.0,
+                'model_type': 'fallback'
+            }
+    
+    def _get_venue_preferences(
+        self, 
+        symbol: str, 
+        liquidity_score: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Get venue routing preferences
+        
+        Args:
+            symbol: Trading symbol
+            liquidity_score: Liquidity assessment
+            
+        Returns:
+            List of preferred venues in priority order
+        """
+        # Default venue preferences
+        # In production, this would query venue analytics
+        venues = ['NYSE', 'NASDAQ', 'ARCA']
+        
+        # Adjust based on liquidity
+        liquidity_regime = liquidity_score.get('liquidity_regime', 'normal_liquidity')
+        if liquidity_regime in ['low_liquidity', 'illiquid']:
+            # Prefer primary exchange for low liquidity
+            venues = ['NYSE', 'NASDAQ']
+        elif liquidity_regime == 'high_liquidity':
+            # Can use more venues
+            venues = ['NYSE', 'NASDAQ', 'ARCA', 'BATS']
+        
+        return venues
+    
+    def _create_slicing_plan(
+        self,
+        total_quantity: float,
+        algorithm: str,
+        time_horizon: int,
+        market_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create order slicing plan for large orders
+        
+        Args:
+            total_quantity: Total order quantity
+            algorithm: Selected execution algorithm
+            time_horizon: Time available for execution (seconds)
+            market_data: Current market data
+            
+        Returns:
+            Slicing plan dict
+        """
+        try:
+            if algorithm == 'twap':
+                # Time-Weighted Average Price slicing
+                num_slices = max(3, min(20, time_horizon // 60))  # 1 slice per minute, max 20
+                slice_size = total_quantity / num_slices
+                slice_interval = time_horizon / num_slices
+                
+                return {
+                    'algorithm': 'twap',
+                    'num_slices': num_slices,
+                    'slice_size': slice_size,
+                    'slice_interval_seconds': slice_interval,
+                    'total_duration_seconds': time_horizon
+                }
+                
+            elif algorithm == 'vwap':
+                # Volume-Weighted Average Price slicing
+                # Distribute quantity proportional to expected volume pattern
+                num_slices = max(3, min(15, time_horizon // 120))  # 1 slice per 2 minutes
+                
+                return {
+                    'algorithm': 'vwap',
+                    'num_slices': num_slices,
+                    'volume_weighted': True,
+                    'total_duration_seconds': time_horizon
+                }
+                
+            elif algorithm == 'adaptive':
+                # Adaptive slicing based on market conditions
+                num_slices = max(5, min(25, time_horizon // 45))  # More frequent for adaptive
+                
+                return {
+                    'algorithm': 'adaptive',
+                    'num_slices': num_slices,
+                    'adaptive_sizing': True,
+                    'total_duration_seconds': time_horizon
+                }
+            
+            else:
+                # Simple equal slicing
+                num_slices = max(3, min(10, time_horizon // 180))  # 1 slice per 3 minutes
+                slice_size = total_quantity / num_slices
+                
+                return {
+                    'algorithm': 'simple',
+                    'num_slices': num_slices,
+                    'slice_size': slice_size,
+                    'total_duration_seconds': time_horizon
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error creating slicing plan: {e}")
+            return {
+                'algorithm': 'simple',
+                'num_slices': 1,
+                'slice_size': total_quantity
+            }
     
     # ========================================
     # AUTHORIZATION METHODS
