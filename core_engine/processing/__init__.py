@@ -3,6 +3,7 @@ Core Engine Processing Module
 ==============================
 
 Professional data processing pipeline with orchestrator integration:
+- Pipeline Orchestration: Unified data flow coordination (Rule 3)
 - Technical Indicators: 42+ institutional-grade indicators
 - Feature Engineering: ML-ready feature transformation
 - Signal Generation: Multi-strategy signal generation with ML enhancement
@@ -12,8 +13,11 @@ Professional data processing pipeline with orchestrator integration:
 All components implement ISystemComponent and IRegimeAware interfaces.
 
 Author: StatArb_Gemini Core Engine
-Version: 2.0.0 (Enhanced with orchestrator integration)
+Version: 2.0.0 (Enhanced with Pipeline Orchestrator - Phase 2 Complete)
 """
+
+# Import pipeline orchestrator (Rule 3 - Unified Data Flow)
+from .pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
 
 # Import main processing components
 from .indicators.engine import EnhancedTechnicalIndicators, IndicatorResult
@@ -29,6 +33,10 @@ from .signals.validators import SignalValidator, ValidationResult
 from .signals.combiners import SignalCombiner, CombinationMethod
 
 __all__ = [
+    # Pipeline Orchestrator (Rule 3)
+    'ProcessingPipelineOrchestrator',
+    'EnrichedMarketData',
+    
     # Indicators
     'EnhancedTechnicalIndicators',
     'IndicatorResult',

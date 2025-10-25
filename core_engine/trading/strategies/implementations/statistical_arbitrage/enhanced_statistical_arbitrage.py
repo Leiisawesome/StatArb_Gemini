@@ -352,15 +352,63 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate statistical arbitrage signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        StatArb strategy requires pre-calculated returns for spread analysis.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'returns_1',        # 1-period returns (from FeatureEngineer)
+            'close',            # Close prices (needed for spread calculation)
+            'volume'            # Volume (for liquidity checks)
+        ]
+        
+        for symbol, data in enriched_data.items():
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_features)} features present")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate statistical arbitrage signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        features from the ProcessingPipelineOrchestrator. It reads pre-calculated
+        returns instead of calculating them.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + returns]
+                          Must contain: returns_1 (1-period returns)
+        
+        Returns:
+            List[StrategySignal]: Generated statistical arbitrage signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data cache
-            self._update_market_data_cache(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
+            # Update market data cache with enriched data
+            self._update_market_data_cache(enriched_data)
             
             # Update cointegration analysis
             await self._update_cointegration_analysis()
@@ -380,7 +428,9 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} StatArb signals in {generation_time:.3f}s")
+            logger.info(f"📊 StatArb Strategy (Rule 3 Phase 4 - Enriched Data):")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -717,15 +767,25 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
     # ========================================
     
     def _update_market_data_cache(self, market_data: Dict[str, pd.DataFrame]) -> None:
-        """Update market data cache"""
+        """
+        Update market data cache using PRE-CALCULATED returns (Rule 3 Phase 4)
         
+        **CRITICAL:** This method now reads pre-calculated returns from enriched data
+        instead of calculating them. Returns are provided by FeatureEngineer.
+        """
         for symbol, data in market_data.items():
             if symbol in self.config.asset_universe:
                 self.price_data[symbol] = data
                 
-                # Calculate returns
-                if 'close' in data.columns:
+                # READ pre-calculated returns from enriched data (Rule 3 Phase 4)
+                if 'returns_1' in data.columns:
+                    # Use pre-calculated returns from FeatureEngineer
+                    self.returns_data[symbol] = data['returns_1'].dropna()
+                    logger.debug(f"✅ {symbol}: Using pre-calculated returns from pipeline")
+                elif 'close' in data.columns:
+                    # Fallback: calculate if not available (backward compatibility)
                     self.returns_data[symbol] = data['close'].pct_change().dropna()
+                    logger.warning(f"⚠️  {symbol}: Falling back to calculated returns (pipeline missing returns_1)")
     
     def _calculate_current_spread_zscore(self, pair: Tuple[str, str], coint_data: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
         """

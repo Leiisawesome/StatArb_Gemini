@@ -205,15 +205,64 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate arbitrage signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        Arbitrage strategy requires OHLCV data for price discrepancy detection.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'close',            # Close prices (for arbitrage opportunities)
+            'volume'            # Volume (for liquidity checks)
+        ]
+        
+        # Iterate over enriched_data keys instead of self.config.symbols
+        # (ArbitrageConfig uses arbitrage_pairs, not symbols)
+        for symbol in enriched_data.keys():
+            data = enriched_data[symbol]
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate arbitrage signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data from the
+        ProcessingPipelineOrchestrator. Arbitrage calculations are strategy-specific
+        and appropriately kept in the strategy.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV]
+        
+        Returns:
+            List[StrategySignal]: Generated arbitrage signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
             # Update market data
-            self._update_market_data(market_data)
+            self._update_market_data(enriched_data)
             
             # Detect arbitrage opportunities
             opportunities = self._detect_arbitrage_opportunities()

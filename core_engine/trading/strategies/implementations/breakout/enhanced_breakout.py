@@ -168,20 +168,70 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate breakout signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        Breakout strategy requires pre-calculated indicators for support/resistance.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'high', 'low', 'close', 'volume',  # OHLCV
+            'SMA_20',          # Moving average for trend
+            'ATR_14',          # Volatility for breakout confirmation
+            'volume_ratio'     # Volume surge detection
+        ]
+        
+        for symbol in self.config.symbols:
+            if symbol not in enriched_data:
+                continue
+            
+            data = enriched_data[symbol]
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_features)} features present")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate breakout signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        indicators from the ProcessingPipelineOrchestrator. It reads pre-calculated
+        indicators instead of calculating them.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: SMA_20, ATR_14, volume_ratio
+        
+        Returns:
+            List[StrategySignal]: Generated breakout signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data
-            self._update_market_data(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
             
-            # Calculate indicators
-            self._calculate_indicators()
+            # Update market data with enriched data
+            self._update_market_data(enriched_data)
             
-            # Generate signals for each symbol
+            # Generate signals for each symbol (using pre-calculated indicators)
             for symbol in self.config.symbols:
                 if symbol in self.market_data and len(self.market_data[symbol]) > self.config.lookback_period:
                     symbol_signals = await self._generate_symbol_signals(symbol)
@@ -191,7 +241,9 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} Breakout signals in {generation_time:.3f}s")
+            logger.info(f"📊 Breakout Strategy (Rule 3 Phase 4 - Enriched Data):")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -226,8 +278,11 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
     # ========================================
     
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
-        """Generate signals for a specific symbol"""
+        """
+        Generate signals for a specific symbol using PRE-CALCULATED features (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads support/resistance from high/low data and volume_ratio from enriched data.
+        """
         signals = []
         
         try:
@@ -235,16 +290,30 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
             if symbol in self.active_positions:
                 return signals
             
-            if symbol not in self.indicators:
+            # READ from enriched data (Rule 3 Phase 4)
+            data = self.market_data[symbol]
+            if len(data) < self.config.lookback_period:
                 return signals
             
-            indicators = self.indicators[symbol]
-            current_data = self.market_data[symbol].iloc[-1]
+            current_data = data.iloc[-1]
             
-            # Get breakout levels
-            resistance = indicators['resistance'].iloc[-1] if len(indicators['resistance']) > 0 else 0
-            support = indicators['support'].iloc[-1] if len(indicators['support']) > 0 else 0
-            volume_ratio = indicators['volume_ratio'].iloc[-1] if len(indicators['volume_ratio']) > 0 else 1
+            # Calculate support and resistance from OHLC (strategy-specific logic)
+            high_prices = data['high']
+            low_prices = data['low']
+            resistance = high_prices.tail(self.config.lookback_period).max()
+            support = low_prices.tail(self.config.lookback_period).min()
+            
+            # READ pre-calculated volume_ratio (Rule 3 Phase 4)
+            if 'volume_ratio' in data.columns:
+                # ✅ READ from FeatureEngineer
+                volume_ratio = current_data['volume_ratio']
+                logger.debug(f"✅ {symbol}: Using pre-calculated volume_ratio")
+            else:
+                # Fallback: calculate if not available
+                volume = data['volume']
+                volume_ma = volume.tail(self.config.lookback_period).mean()
+                volume_ratio = current_data['volume'] / volume_ma if volume_ma > 0 else 1.0
+                logger.warning(f"⚠️  {symbol}: Falling back to calculated volume_ratio")
             
             current_price = current_data['close']
             
@@ -309,39 +378,6 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
     # ========================================
     # INDICATOR CALCULATION METHODS
     # ========================================
-    
-    def _calculate_indicators(self) -> None:
-        """Calculate technical indicators for all symbols"""
-        
-        for symbol in self.config.symbols:
-            if symbol in self.market_data:
-                self.indicators[symbol] = self._calculate_symbol_indicators(symbol)
-    
-    def _calculate_symbol_indicators(self, symbol: str) -> Dict[str, pd.Series]:
-        """Calculate indicators for a specific symbol"""
-        
-        try:
-            data = self.market_data[symbol]
-            indicators = {}
-            
-            # Calculate support and resistance levels
-            high_prices = data['high']
-            low_prices = data['low']
-            volume = data['volume']
-            
-            # Rolling max/min for support/resistance
-            indicators['resistance'] = high_prices.rolling(self.config.lookback_period).max()
-            indicators['support'] = low_prices.rolling(self.config.lookback_period).min()
-            
-            # Volume ratio
-            volume_ma = volume.rolling(self.config.lookback_period).mean()
-            indicators['volume_ratio'] = volume / volume_ma
-            
-            return indicators
-            
-        except Exception as e:
-            logger.error(f"Indicator calculation failed for {symbol}: {e}")
-            return {}
     
     # ========================================
     # HELPER METHODS

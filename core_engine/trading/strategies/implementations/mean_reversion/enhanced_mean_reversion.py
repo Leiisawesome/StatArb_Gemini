@@ -267,18 +267,69 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate mean reversion signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required indicators (Rule 3 Phase 4)
         
+        This method ensures the data has passed through the ProcessingPipelineOrchestrator
+        and contains all indicators required by the mean reversion strategy.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required indicators
+        """
+        required_indicators = [
+            'SMA_20',           # Moving average (Bollinger Band middle)
+            'RSI_14',           # RSI for overbought/oversold
+            'bb_upper',         # Bollinger Band upper
+            'bb_lower',         # Bollinger Band lower
+            'bb_middle',        # Bollinger Band middle
+            'ATR_14',           # Average True Range
+            'volume_ratio'      # Volume indicator
+        ]
+        
+        for symbol, data in enriched_data.items():
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_indicators if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required indicators: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_indicators)} indicators present")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate mean reversion signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        indicators and features from the ProcessingPipelineOrchestrator. It does NOT
+        calculate indicators itself.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: zscore, RSI_14, bb_upper, bb_lower, bb_middle, 
+                                       bb_position, ATR_14, volume_ratio
+        
+        Returns:
+            List[StrategySignal]: Generated mean reversion signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data
-            self._update_market_data(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
             
-            # Calculate indicators
-            self._calculate_indicators()
+            # Update market data with enriched data
+            self._update_market_data(enriched_data)
             
             # Update regime analysis
             if self.config.enable_regime_filter:
@@ -294,7 +345,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} Mean Reversion signals in {generation_time:.3f}s")
+            logger.info(f"📊 Mean Reversion Strategy (Rule 3 Phase 4 - Enriched Data):")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -361,8 +414,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # ========================================
     
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
-        """Generate signals for a specific symbol"""
+        """
+        Generate signals for a specific symbol using PRE-CALCULATED indicators (Rule 3 Phase 4)
         
+        **CRITICAL:** This method READS pre-calculated indicator values from enriched data.
+        It does NOT calculate indicators itself.
+        """
         signals = []
         
         try:
@@ -370,17 +427,17 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             if symbol in self.active_positions:
                 return signals
             
-            # Get current indicators
-            if symbol not in self.indicators:
+            # Get enriched data with pre-calculated indicators
+            if symbol not in self.market_data:
                 return signals
             
-            indicators = self.indicators[symbol]
-            current_data = self.market_data[symbol].iloc[-1]
+            data = self.market_data[symbol]
+            current_row = data.iloc[-1]
             
-            # Calculate mean reversion signals
-            zscore = indicators['zscore'].iloc[-1] if len(indicators['zscore']) > 0 else 0
-            rsi = indicators['rsi'].iloc[-1] if len(indicators['rsi']) > 0 else 50
-            bb_position = indicators['bb_position'].iloc[-1] if len(indicators['bb_position']) > 0 else 0.5
+            # READ pre-calculated indicators from enriched DataFrame
+            zscore = current_row.get('zscore', 0.0)
+            rsi = current_row.get('RSI_14', 50.0)
+            bb_position = current_row.get('bb_position', 0.5)
             
             # Apply regime filter
             if self.config.enable_regime_filter:
@@ -408,7 +465,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                             'zscore': zscore,
                             'rsi': rsi,
                             'bb_position': bb_position,
-                            'entry_price': current_data['close']
+                            'entry_price': current_row['close']
                         }
                     )
                     signals.append(signal)
@@ -455,100 +512,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # INDICATOR CALCULATION METHODS
     # ========================================
     
-    def _calculate_indicators(self) -> None:
-        """Calculate technical indicators for all symbols"""
-        
-        for symbol in self.config.symbols:
-            if symbol in self.market_data:
-                self.indicators[symbol] = self._calculate_symbol_indicators(symbol)
-    
-    def _calculate_symbol_indicators(self, symbol: str) -> Dict[str, pd.Series]:
-        """Calculate indicators for a specific symbol"""
-        
-        try:
-            data = self.market_data[symbol]
-            indicators = {}
-            
-            # Calculate Z-score (mean reversion signal)
-            close_prices = data['close']
-            rolling_mean = close_prices.rolling(self.config.lookback_period).mean()
-            rolling_std = close_prices.rolling(self.config.lookback_period).std()
-            indicators['zscore'] = (close_prices - rolling_mean) / rolling_std
-            
-            # Calculate RSI
-            indicators['rsi'] = self._calculate_rsi(close_prices, self.config.rsi_period)
-            
-            # Calculate Bollinger Bands
-            bb_mean = close_prices.rolling(self.config.bollinger_period).mean()
-            bb_std = close_prices.rolling(self.config.bollinger_period).std()
-            bb_upper = bb_mean + (bb_std * self.config.bollinger_std)
-            bb_lower = bb_mean - (bb_std * self.config.bollinger_std)
-            
-            indicators['bb_upper'] = bb_upper
-            indicators['bb_lower'] = bb_lower
-            indicators['bb_middle'] = bb_mean
-            
-            # Calculate Bollinger Band position (0 = lower band, 1 = upper band)
-            indicators['bb_position'] = (close_prices - bb_lower) / (bb_upper - bb_lower)
-            
-            # Calculate ATR
-            indicators['atr'] = self._calculate_atr_series(data)
-            
-            return indicators
-            
-        except Exception as e:
-            logger.error(f"Indicator calculation failed for {symbol}: {e}")
-            return {}
-    
-    def _calculate_rsi(self, prices: pd.Series, period: int) -> pd.Series:
-        """Calculate RSI indicator"""
-        
-        try:
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-            
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            return rsi
-            
-        except Exception as e:
-            logger.error(f"RSI calculation failed: {e}")
-            return pd.Series(index=prices.index, dtype=float)
-    
-    def _calculate_atr_series(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate ATR series"""
-        
-        try:
-            high_low = data['high'] - data['low']
-            high_close = np.abs(data['high'] - data['close'].shift())
-            low_close = np.abs(data['low'] - data['close'].shift())
-            
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr = true_range.rolling(self.config.atr_period).mean()
-            
-            return atr
-            
-        except Exception as e:
-            logger.error(f"ATR calculation failed: {e}")
-            return pd.Series(index=data.index, dtype=float)
-    
-    def _calculate_atr(self, symbol: str) -> float:
-        """Calculate current ATR for a symbol"""
-        
-        try:
-            if symbol in self.indicators and 'atr' in self.indicators[symbol]:
-                atr_series = self.indicators[symbol]['atr']
-                return atr_series.iloc[-1] if len(atr_series) > 0 else 0.0
-            return 0.0
-            
-        except Exception as e:
-            logger.error(f"ATR calculation failed for {symbol}: {e}")
-            return 0.0
-    
     # ========================================
-    # HELPER METHODS
+    # HELPER METHODS (Rule 3 Phase 4)
+    # Reads pre-calculated indicators from enriched data
     # ========================================
     
     def _update_market_data(self, market_data: Dict[str, pd.DataFrame]) -> None:

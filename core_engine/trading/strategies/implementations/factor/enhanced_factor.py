@@ -165,15 +165,68 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate factor-based signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        Factor strategy requires pre-calculated returns and volatility metrics.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'returns_1',        # 1-period returns (for momentum factor)
+            'volatility',       # Volatility metric (for quality/volatility factors)
+            'close',            # Close prices (fallback)
+            'volume'            # Volume (for liquidity checks)
+        ]
+        
+        for symbol in self.config.symbols:
+            if symbol not in enriched_data:
+                continue  # Skip if symbol not in data
+            
+            data = enriched_data[symbol]
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_features)} features present")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate factor-based signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        features from the ProcessingPipelineOrchestrator. It reads pre-calculated
+        returns and volatility instead of calculating them.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: returns_1, volatility
+        
+        Returns:
+            List[StrategySignal]: Generated factor-based signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data
-            self._update_market_data(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
+            # Update market data with enriched data
+            self._update_market_data(enriched_data)
             
             # Calculate factor scores
             self._calculate_factor_scores()
@@ -185,7 +238,9 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} Factor signals in {generation_time:.3f}s")
+            logger.info(f"📊 Factor Strategy (Rule 3 Phase 4 - Enriched Data):")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -226,8 +281,12 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                 self.factor_scores[symbol] = self._calculate_symbol_factors(symbol)
     
     def _calculate_symbol_factors(self, symbol: str) -> Dict[str, float]:
-        """Calculate factor scores for a specific symbol"""
+        """
+        Calculate factor scores using PRE-CALCULATED features (Rule 3 Phase 4)
         
+        **CRITICAL:** This method now reads pre-calculated returns and volatility
+        from enriched data instead of calculating them.
+        """
         try:
             data = self.market_data[symbol]
             scores = {}
@@ -235,27 +294,77 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
             if len(data) < self.config.factor_lookback:
                 return scores
             
-            # Calculate momentum factor
+            # Calculate momentum factor using PRE-CALCULATED returns (Rule 3 Phase 4)
             if 'momentum' in self.config.factors:
-                returns = data['close'].pct_change()
-                momentum_score = returns.tail(self.config.factor_lookback).mean()
-                scores['momentum'] = momentum_score
+                if 'returns_1' in data.columns:
+                    # ✅ READ pre-calculated returns from FeatureEngineer
+                    returns = data['returns_1']
+                    momentum_score = returns.tail(self.config.factor_lookback).mean()
+                    scores['momentum'] = momentum_score
+                    logger.debug(f"✅ {symbol}: Using pre-calculated returns for momentum factor")
+                elif 'close' in data.columns:
+                    # Fallback (backward compatibility)
+                    returns = data['close'].pct_change()
+                    momentum_score = returns.tail(self.config.factor_lookback).mean()
+                    scores['momentum'] = momentum_score
+                    logger.warning(f"⚠️  {symbol}: Falling back to calculated returns for momentum")
             
-            # Calculate value factor (simplified P/E proxy)
+            # Calculate value factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'value' in self.config.factors:
-                # Simplified value score using price volatility as proxy
-                price_volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
-                scores['value'] = -price_volatility  # Lower volatility = higher value score
+                if 'volatility' in data.columns:
+                    # ✅ READ pre-calculated volatility from FeatureEngineer
+                    price_volatility = data['volatility'].tail(self.config.factor_lookback).mean()
+                    scores['value'] = -price_volatility  # Lower volatility = higher value score
+                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for value factor")
+                elif 'returns_1' in data.columns:
+                    # Fallback using returns
+                    price_volatility = data['returns_1'].tail(self.config.factor_lookback).std()
+                    scores['value'] = -price_volatility
+                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for value")
+                elif 'close' in data.columns:
+                    # Double fallback
+                    price_volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
+                    scores['value'] = -price_volatility
+                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for value")
             
-            # Calculate quality factor (simplified using price stability)
+            # Calculate quality factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'quality' in self.config.factors:
-                price_stability = 1.0 / (1.0 + data['close'].pct_change().tail(self.config.factor_lookback).std())
-                scores['quality'] = price_stability
+                if 'volatility' in data.columns:
+                    # ✅ READ pre-calculated volatility
+                    vol = data['volatility'].tail(self.config.factor_lookback).mean()
+                    price_stability = 1.0 / (1.0 + vol)
+                    scores['quality'] = price_stability
+                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for quality factor")
+                elif 'returns_1' in data.columns:
+                    # Fallback using returns
+                    vol = data['returns_1'].tail(self.config.factor_lookback).std()
+                    price_stability = 1.0 / (1.0 + vol)
+                    scores['quality'] = price_stability
+                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for quality")
+                elif 'close' in data.columns:
+                    # Double fallback
+                    vol = data['close'].pct_change().tail(self.config.factor_lookback).std()
+                    price_stability = 1.0 / (1.0 + vol)
+                    scores['quality'] = price_stability
+                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for quality")
             
-            # Calculate volatility factor
+            # Calculate volatility factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'volatility' in self.config.factors:
-                volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
-                scores['volatility'] = -volatility  # Lower volatility = higher score
+                if 'volatility' in data.columns:
+                    # ✅ READ pre-calculated volatility
+                    volatility = data['volatility'].tail(self.config.factor_lookback).mean()
+                    scores['volatility'] = -volatility  # Lower volatility = higher score
+                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for volatility factor")
+                elif 'returns_1' in data.columns:
+                    # Fallback using returns
+                    volatility = data['returns_1'].tail(self.config.factor_lookback).std()
+                    scores['volatility'] = -volatility
+                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for volatility factor")
+                elif 'close' in data.columns:
+                    # Double fallback
+                    volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
+                    scores['volatility'] = -volatility
+                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for volatility factor")
             
             return scores
             

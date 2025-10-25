@@ -188,15 +188,67 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate multi-asset portfolio signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        Multi-asset strategy requires returns and volatility for portfolio optimization.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'returns_1',        # Pre-calculated returns
+            'volatility',       # Pre-calculated volatility
+            'close',            # Close prices (fallback)
+            'volume'            # Volume
+        ]
+        
+        # Iterate over enriched_data keys instead of self.config.symbols
+        # (MultiAssetConfig manages asset classes internally)
+        for symbol in enriched_data.keys():
+            data = enriched_data[symbol]
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate multi-asset portfolio signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        features from the ProcessingPipelineOrchestrator. It reads pre-calculated
+        returns and volatility instead of calculating them.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: returns_1, volatility
+        
+        Returns:
+            List[StrategySignal]: Generated multi-asset portfolio signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
             # Update market data
-            self._update_market_data(market_data)
+            self._update_market_data(enriched_data)
             
             # Calculate correlation matrix
             self._calculate_correlation_matrix()
@@ -251,12 +303,21 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         try:
             all_symbols = [symbol for symbols in self.config.asset_classes.values() for symbol in symbols]
             
-            # Collect returns data
+            # Collect returns data (READ from enriched data - Rule 3 Phase 4)
             returns_data = {}
             
             for symbol in all_symbols:
                 if symbol in self.market_data and len(self.market_data[symbol]) >= self.config.correlation_lookback:
-                    returns = self.market_data[symbol]['close'].pct_change().dropna()
+                    # READ pre-calculated returns (Rule 3 Phase 4)
+                    if 'returns_1' in self.market_data[symbol].columns:
+                        # ✅ READ from FeatureEngineer
+                        returns = self.market_data[symbol]['returns_1'].dropna()
+                        logger.debug(f"✅ {symbol}: Using pre-calculated returns for correlation")
+                    else:
+                        # Fallback (backward compatibility)
+                        returns = self.market_data[symbol]['close'].pct_change().dropna()
+                        logger.warning(f"⚠️  {symbol}: Falling back to calculated returns for correlation")
+                    
                     if len(returns) >= self.config.correlation_lookback:
                         returns_data[symbol] = returns.tail(self.config.correlation_lookback)
             
@@ -336,15 +397,31 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         try:
             risk_adjusted_weights = weights.copy()
             
-            # Calculate individual asset volatilities
+            # Calculate individual asset volatilities (READ from enriched data - Rule 3 Phase 4)
             asset_volatilities = {}
             
             for symbol in weights:
                 if symbol in self.market_data:
-                    returns = self.market_data[symbol]['close'].pct_change().dropna()
-                    if len(returns) >= 20:
-                        volatility = returns.tail(20).std() * np.sqrt(252)
+                    # READ pre-calculated volatility or returns (Rule 3 Phase 4)
+                    if 'volatility' in self.market_data[symbol].columns:
+                        # ✅ READ pre-calculated volatility from FeatureEngineer
+                        volatility = self.market_data[symbol]['volatility'].tail(20).mean()
                         asset_volatilities[symbol] = volatility
+                        logger.debug(f"✅ {symbol}: Using pre-calculated volatility for risk budgeting")
+                    elif 'returns_1' in self.market_data[symbol].columns:
+                        # Fallback using pre-calculated returns
+                        returns = self.market_data[symbol]['returns_1'].dropna()
+                        if len(returns) >= 20:
+                            volatility = returns.tail(20).std() * np.sqrt(252)
+                            asset_volatilities[symbol] = volatility
+                        logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for risk budgeting")
+                    else:
+                        # Double fallback (backward compatibility)
+                        returns = self.market_data[symbol]['close'].pct_change().dropna()
+                        if len(returns) >= 20:
+                            volatility = returns.tail(20).std() * np.sqrt(252)
+                            asset_volatilities[symbol] = volatility
+                        logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for risk budgeting")
             
             # Adjust weights inversely to volatility (risk parity approach)
             if asset_volatilities:

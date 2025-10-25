@@ -171,15 +171,68 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate volatility-based signals"""
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required features (Rule 3 Phase 4)
         
+        Volatility strategy requires pre-calculated volatility and returns.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+        
+        Raises:
+            ValueError: If data is missing required features
+        """
+        required_features = [
+            'volatility',       # Pre-calculated volatility metric
+            'returns_1',        # 1-period returns (fallback)
+            'ATR_14',          # Average True Range (volatility measure)
+            'close', 'high', 'low'  # OHLC for range calculations
+        ]
+        
+        for symbol in self.config.symbols:
+            if symbol not in enriched_data:
+                continue
+            
+            data = enriched_data[symbol]
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_features if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])
+                raise ValueError(
+                    f"{symbol} missing required features: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_features)} features present")
+    
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate volatility-based signals from ENRICHED data (Rule 3 Phase 4)
+        
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        features from the ProcessingPipelineOrchestrator. It reads pre-calculated
+        volatility metrics instead of calculating them.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: volatility, ATR_14, returns_1
+        
+        Returns:
+            List[StrategySignal]: Generated volatility-based signals
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data
-            self._update_market_data(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
+            # Update market data with enriched data
+            self._update_market_data(enriched_data)
             
             # Calculate volatility metrics
             self._calculate_volatility_metrics()
@@ -191,7 +244,9 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            logger.info(f"📊 Generated {len(signals)} Volatility signals in {generation_time:.3f}s")
+            logger.info(f"📊 Volatility Strategy (Rule 3 Phase 4 - Enriched Data):")
+            logger.info(f"   Signals generated: {len(signals)}")
+            logger.info(f"   Generation time: {generation_time:.3f}s")
             
             return signals
             
@@ -243,8 +298,12 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                 self.volatility_data[symbol] = self._calculate_symbol_volatility(symbol)
     
     def _calculate_symbol_volatility(self, symbol: str) -> Dict[str, float]:
-        """Calculate volatility metrics for a specific symbol"""
+        """
+        Calculate volatility metrics using PRE-CALCULATED features (Rule 3 Phase 4)
         
+        **CRITICAL:** This method now reads pre-calculated volatility from enriched data
+        instead of calculating it.
+        """
         try:
             data = self.market_data[symbol]
             vol_data = {}
@@ -252,25 +311,46 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             if len(data) < self.config.volatility_lookback:
                 return vol_data
             
-            # Calculate returns
-            returns = data['close'].pct_change().dropna()
-            
-            # Realized volatility
-            realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
-            vol_data['realized_volatility'] = realized_vol
+            # READ pre-calculated volatility (Rule 3 Phase 4)
+            if 'volatility' in data.columns:
+                # ✅ READ pre-calculated volatility from FeatureEngineer
+                realized_vol = data['volatility'].tail(self.config.volatility_lookback).mean()
+                vol_data['realized_volatility'] = realized_vol
+                logger.debug(f"✅ {symbol}: Using pre-calculated volatility")
+            elif 'returns_1' in data.columns:
+                # Fallback using pre-calculated returns
+                returns = data['returns_1'].dropna()
+                realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
+                vol_data['realized_volatility'] = realized_vol
+                logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility")
+            elif 'close' in data.columns:
+                # Double fallback (backward compatibility)
+                returns = data['close'].pct_change().dropna()
+                realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
+                vol_data['realized_volatility'] = realized_vol
+                logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility")
+            else:
+                return vol_data
             
             # Historical volatility (longer period)
-            if len(returns) >= 60:
-                historical_vol = returns.tail(60).std() * np.sqrt(252)
+            if 'volatility' in data.columns and len(data) >= 60:
+                historical_vol = data['volatility'].tail(60).mean()
                 vol_data['historical_volatility'] = historical_vol
                 
                 # Volatility ratio
                 vol_data['volatility_ratio'] = realized_vol / historical_vol if historical_vol > 0 else 1.0
+            elif 'returns_1' in data.columns and len(data) >= 60:
+                returns = data['returns_1'].dropna()
+                historical_vol = returns.tail(60).std() * np.sqrt(252)
+                vol_data['historical_volatility'] = historical_vol
+                vol_data['volatility_ratio'] = realized_vol / historical_vol if historical_vol > 0 else 1.0
             
             # Volatility regime
             if self.config.regime_detection:
-                vol_regime = self._detect_volatility_regime(returns)
-                vol_data['volatility_regime'] = vol_regime
+                if 'returns_1' in data.columns:
+                    returns = data['returns_1'].dropna()
+                    vol_regime = self._detect_volatility_regime(returns)
+                    vol_data['volatility_regime'] = vol_regime
             
             return vol_data
             

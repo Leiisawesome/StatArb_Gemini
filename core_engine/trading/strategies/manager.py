@@ -96,6 +96,15 @@ except ImportError:
         def set_regime_engine(self, regime_engine: Any) -> None:
             pass
 
+# Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
+try:
+    from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
+    PIPELINE_AVAILABLE = True
+except ImportError:
+    PIPELINE_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("ProcessingPipelineOrchestrator not available, using legacy mode")
+
 logger = logging.getLogger(__name__)
 
 class SignalType(Enum):
@@ -163,6 +172,10 @@ class StrategyManagerConfig:
     conflict_resolution_method: str = "confidence_weighted"
     enable_dynamic_weighting: bool = True
     enable_strategy_attribution: bool = True
+    
+    # Phase 3: Pipeline integration settings (Rule 3)
+    enable_pipeline_integration: bool = True  # Use ProcessingPipelineOrchestrator
+    pipeline_config: Optional[Any] = None      # Pipeline configuration
 
 
 class EnhancedStrategyFactory:
@@ -320,6 +333,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         self.strategy_factory = EnhancedStrategyFactory()
         self.strategy_registry: Optional[StrategyRegistry] = None
         
+        # Phase 3: Pipeline orchestrator integration (Rule 3)
+        self.pipeline_orchestrator: Optional[ProcessingPipelineOrchestrator] = None
+        self.pipeline_enabled = (
+            PIPELINE_AVAILABLE and 
+            self.config.enable_pipeline_integration
+        )
+        
+        if self.pipeline_enabled:
+            logger.info("✅ Pipeline integration enabled (Rule 3 - Phase 3)")
+        else:
+            logger.warning("⚠️  Pipeline integration disabled, using legacy mode")
+        
         # Strategy infrastructure - Now stores actual enhanced strategies
         self.active_strategies: Dict[str, EnhancedBaseStrategy] = {}
         self.strategy_allocations: Dict[str, StrategyAllocation] = {}
@@ -463,6 +488,26 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             if self.enable_multi_strategy:
                 await self._initialize_multi_strategy_coordination()
             
+            # Phase 3: Initialize pipeline orchestrator (Rule 3)
+            if self.pipeline_enabled:
+                try:
+                    logger.info("🔧 Initializing ProcessingPipelineOrchestrator (Rule 3)...")
+                    self.pipeline_orchestrator = ProcessingPipelineOrchestrator(
+                        data_config=self.config.pipeline_config if self.config.pipeline_config else None
+                    )
+                    await self.pipeline_orchestrator.initialize()
+                    await self.pipeline_orchestrator.start()
+                    
+                    # Inject regime engine into pipeline
+                    if self.regime_engine:
+                        self.pipeline_orchestrator.set_regime_engine(self.regime_engine)
+                        logger.debug("✅ Regime engine propagated to pipeline")
+                    
+                    logger.info("✅ Pipeline orchestrator initialized and operational")
+                except Exception as e:
+                    logger.error(f"❌ Pipeline orchestrator initialization failed: {e}")
+                    self.pipeline_enabled = False
+            
             self.is_initialized = True
             logger.info("✅ Enhanced Strategy Manager (WHAT) initialization complete")
             logger.info(f"📊 Active enhanced strategies: {len(self.active_strategies)}")
@@ -570,6 +615,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     pass
                 self.signal_generation_task = None
             
+            # Phase 3: Stop pipeline orchestrator
+            if self.pipeline_orchestrator:
+                await self.pipeline_orchestrator.stop()
+                logger.debug("✅ Pipeline orchestrator stopped")
+            
             self.is_running = False
             logger.info("✅ Strategy Manager stopped")
             return True
@@ -665,6 +715,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """
         self.regime_engine = regime_engine
         logger.info("✅ Regime Engine linked to Strategy Manager (IRegimeAware, Rule 2)")
+        
+        # Phase 3: Propagate regime engine to pipeline (Rule 2 + Rule 3)
+        if self.pipeline_orchestrator and hasattr(self.pipeline_orchestrator, 'set_regime_engine'):
+            self.pipeline_orchestrator.set_regime_engine(regime_engine)
+            logger.debug("✅ Regime engine propagated to pipeline orchestrator")
     
     async def on_regime_change(self, new_regime_context: Any) -> None:
         """
@@ -932,6 +987,136 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             
         except Exception as e:
             logger.error(f"❌ Enhanced signal generation failed: {e}")
+            return []
+    
+    async def generate_signals_with_pipeline(
+        self,
+        symbols: List[str],
+        start_time: datetime,
+        end_time: datetime,
+        timeframe: str = "1min",
+        current_positions: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> List[TradingSignal]:
+        """
+        Generate trading signals using pipeline orchestrator (Rule 3 - Phase 3)
+        
+        **KEY CHANGE:** Process data through pipeline ONCE, then all strategies
+        consume the SAME enriched data.
+        
+        Args:
+            symbols: List of symbols to process
+            start_time: Start time for data
+            end_time: End time for data
+            timeframe: Data timeframe (default: 1min)
+            current_positions: Current positions for position-aware generation
+        
+        Returns:
+            List[TradingSignal]: Aggregated signals from all strategies
+        """
+        try:
+            if not self.pipeline_enabled or not self.pipeline_orchestrator:
+                logger.warning("Pipeline not available, falling back to legacy generate_signals")
+                # Fallback to existing method
+                return await self.generate_signals(symbols, market_data=None, current_positions=current_positions)
+            
+            # PHASE 1-4: Process data through pipeline ONCE
+            logger.info(f"📊 Processing {len(symbols)} symbols through pipeline (Rule 3)")
+            enriched_data = await self.pipeline_orchestrator.process_market_data(
+                symbols=symbols,
+                start_time=start_time,
+                end_time=end_time,
+                timeframe=timeframe
+            )
+            
+            if not enriched_data:
+                logger.warning("No enriched data from pipeline")
+                return []
+            
+            logger.info(f"✅ Pipeline processing complete: {len(enriched_data)} symbols enriched")
+            
+            # Convert EnrichedMarketData to strategy format
+            enriched_dataframes = {
+                symbol: data.get_enriched_dataframe()
+                for symbol, data in enriched_data.items()
+            }
+            
+            # PHASE 5: All strategies consume SAME enriched data
+            all_signals = []
+            
+            # Update market context
+            await self._update_market_context()
+            regime_info = await self._get_current_regime_info()
+            
+            # Generate signals from each active strategy
+            for strategy_name, strategy in self.active_strategies.items():
+                allocation = self.strategy_allocations.get(strategy_name)
+                if not allocation or not allocation.active:
+                    continue
+                
+                try:
+                    logger.debug(f"📡 Generating signals from {strategy_name} with enriched data")
+                    
+                    # Call strategy with enriched data
+                    if isinstance(strategy, EnhancedBaseStrategy):
+                        # Strategy receives enriched DataFrames (OHLCV + indicators + features)
+                        raw_signals = await strategy.generate_signals(enriched_dataframes)
+                        
+                        logger.info(f"✅ {strategy_name}: generated {len(raw_signals)} signals from enriched data")
+                        
+                        # Convert to TradingSignal objects
+                        strategy_type = allocation.strategy_type
+                        for raw_signal in raw_signals:
+                            trading_signal = TradingSignal(
+                                signal_id=str(uuid.uuid4()),
+                                strategy_name=strategy_name,
+                                strategy_type=strategy_type,
+                                symbol=raw_signal.symbol,
+                                signal_type=SignalType(raw_signal.signal_type.lower()),
+                                strength=raw_signal.strength,
+                                confidence=getattr(raw_signal, 'confidence', 0.5),
+                                expected_return=getattr(raw_signal, 'expected_return', 0.0),
+                                risk_score=getattr(raw_signal, 'risk_score', 0.5),
+                                quantity=getattr(raw_signal, 'quantity', None),
+                                target_price=getattr(raw_signal, 'target_price', None),
+                                stop_loss=getattr(raw_signal, 'stop_loss', None),
+                                take_profit=getattr(raw_signal, 'take_profit', None),
+                                time_horizon=None,
+                                metadata={
+                                    'pipeline_processed': True,  # Mark as pipeline-processed
+                                    'enriched_data': True,
+                                    **getattr(raw_signal, 'additional_data', {})
+                                }
+                            )
+                            all_signals.append(trading_signal)
+                
+                except Exception as e:
+                    logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
+                    continue
+            
+            # Enhanced filtering and aggregation
+            filtered_signals = await self._filter_signals_enhanced(all_signals, regime_info, current_positions)
+            aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
+            
+            # Store signals
+            for signal in aggregated_signals:
+                self.pending_signals[signal.signal_id] = signal
+                self.aggregated_signals[signal.symbol] = signal
+            
+            # Notify subscribers
+            for signal in aggregated_signals:
+                for subscriber in self.subscribers:
+                    await subscriber.on_signal_generated(signal)
+            
+            logger.info(
+                f"📊 Pipeline signal generation complete: "
+                f"{len(aggregated_signals)} final signals from {len(all_signals)} raw signals "
+                f"(regime: {regime_info.get('regime', 'unknown')})"
+            )
+            
+            return aggregated_signals
+            
+        except Exception as e:
+            logger.error(f"❌ Pipeline signal generation failed: {e}", exc_info=True)
             return []
     
     async def submit_trade_requests(self) -> List[str]:

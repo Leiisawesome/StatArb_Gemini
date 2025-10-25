@@ -130,6 +130,43 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         logger.info(f"🧠 Enhanced Momentum Strategy {self.strategy_id} initialized")
     
+    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Validate that data is enriched with required indicators (Rule 3 Phase 4)
+        
+        This method ensures the data has passed through the ProcessingPipelineOrchestrator
+        and contains all indicators required by the momentum strategy.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame]
+            
+        Raises:
+            ValueError: If data is missing required indicators
+        """
+        required_indicators = [
+            'SMA_10', 'SMA_20', 'SMA_50',  # Moving averages for trend direction
+            'RSI_14',                       # Momentum oscillator
+            'ADX_14',                       # Trend strength indicator
+            'MACD',                         # MACD line
+            'ATR_14',                       # Average True Range (volatility)
+            'volume_ratio'                  # Volume indicator
+        ]
+        
+        for symbol, data in enriched_data.items():
+            if data.empty:
+                raise ValueError(f"{symbol} has empty DataFrame")
+            
+            missing = [col for col in required_indicators if col not in data.columns]
+            if missing:
+                available_cols = list(data.columns[:20])  # Show first 20 columns
+                raise ValueError(
+                    f"{symbol} missing required indicators: {missing}. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {available_cols}"
+                )
+            
+            logger.debug(f"✅ {symbol} enriched data validated: {len(required_indicators)} indicators present")
+    
     # ========================================
     # STRATEGY-SPECIFIC LIFECYCLE HOOKS
     # ========================================
@@ -269,24 +306,39 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
-    async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate momentum signals"""
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+        """
+        Generate momentum signals from ENRICHED data (Rule 3 Phase 4)
         
+        **CRITICAL CHANGE:** This method now receives enriched data with pre-calculated
+        indicators and features from the ProcessingPipelineOrchestrator. It does NOT
+        calculate indicators itself.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+                          Must contain: SMA_10, SMA_20, SMA_50, RSI_14, ADX_14, MACD, ATR_14, volume_ratio
+        
+        Returns:
+            List[StrategySignal]: Momentum signals
+            
+        Raises:
+            ValueError: If enriched_data is missing required indicators
+        """
         start_time = datetime.now()
         signals = []
         
         try:
-            # Update market data
-            self._update_market_data(market_data)
+            # PHASE 4: Validate enriched data (Rule 3)
+            self._validate_enriched_data(enriched_data)
+            
+            # Update market data with enriched data
+            self._update_market_data(enriched_data)
             
             logger.debug(f"🔍 DEBUG: After update, market_data keys: {list(self.market_data.keys())}")
             for symbol, df in self.market_data.items():
                 logger.debug(f"   {symbol}: {len(df)} rows")
             
-            # Calculate indicators
-            self._calculate_indicators()
-            
-            # Update momentum analysis
+            # Update momentum analysis (using pre-calculated indicators)
             self._update_momentum_analysis()
             
             logger.debug(f"🔍 DEBUG: Processing symbols: {self.config.symbols}")
@@ -307,10 +359,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
             
-            # 🔍 DEBUG: Enhanced logging
+            # Enhanced logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
             print(f"🔍 DEBUG: About to log summary - signals list has {len(signals)} items")
-            logger.info(f"📊 Momentum Strategy Summary:")
+            logger.info(f"📊 Momentum Strategy Summary (Rule 3 Phase 4 - Enriched Data):")
             logger.info(f"   Symbols checked: {len(symbols_checked)} {symbols_checked}")
             logger.info(f"   Signals generated: {len(signals)}")
             logger.info(f"   Generation time: {generation_time:.3f}s")
@@ -575,128 +627,40 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             return []
     
     # ========================================
-    # INDICATOR CALCULATION METHODS
-    # ========================================
-    
-    def _calculate_indicators(self) -> None:
-        """Calculate technical indicators for all symbols"""
-        
-        for symbol in self.config.symbols:
-            if symbol in self.market_data:
-                logger.debug(f"🔧 Calculating indicators for {symbol} ({len(self.market_data[symbol])} bars)")
-                self.indicators[symbol] = self._calculate_symbol_indicators(symbol)
-                logger.debug(f"✅ Indicators calculated for {symbol}: {list(self.indicators[symbol].keys()) if symbol in self.indicators else 'FAILED'}")
-            else:
-                logger.warning(f"⚠️  {symbol} not in market_data, skipping indicators calculation")
-    
-    def _calculate_symbol_indicators(self, symbol: str) -> Dict[str, pd.Series]:
-        """Calculate indicators for a specific symbol"""
-        
-        try:
-            data = self.market_data[symbol]
-            indicators = {}
-            
-            # Calculate momentum indicators
-            close_prices = data['close']
-            
-            # Short-term momentum (rate of change)
-            indicators['momentum_short'] = close_prices.pct_change(self.config.short_period)
-            
-            # Medium-term momentum
-            indicators['momentum_medium'] = close_prices.pct_change(self.config.medium_period)
-            
-            # Long-term momentum
-            indicators['momentum_long'] = close_prices.pct_change(self.config.long_period)
-            
-            # Moving averages for trend direction
-            indicators['sma_short'] = close_prices.rolling(self.config.short_period).mean()
-            indicators['sma_medium'] = close_prices.rolling(self.config.medium_period).mean()
-            indicators['sma_long'] = close_prices.rolling(self.config.long_period).mean()
-            
-            # ADX for trend strength
-            indicators['adx'] = self._calculate_adx(data)
-            
-            # Volume indicators
-            volume_ma = data['volume'].rolling(self.config.volume_ma_period).mean()
-            indicators['volume_ratio'] = data['volume'] / volume_ma
-            
-            # Price position relative to recent range
-            high_max = data['high'].rolling(self.config.breakout_lookback).max()
-            low_min = data['low'].rolling(self.config.breakout_lookback).min()
-            indicators['price_position'] = (close_prices - low_min) / (high_max - low_min)
-            
-            return indicators
-            
-        except Exception as e:
-            logger.error(f"Indicator calculation failed for {symbol}: {e}")
-            return {}
-    
-    def _calculate_adx(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate Average Directional Index (ADX)"""
-        
-        try:
-            high = data['high']
-            low = data['low']
-            close = data['close']
-            
-            # Calculate True Range
-            tr1 = high - low
-            tr2 = np.abs(high - close.shift())
-            tr3 = np.abs(low - close.shift())
-            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            
-            # Calculate Directional Movement
-            plus_dm = high.diff()
-            minus_dm = -low.diff()
-            
-            plus_dm[plus_dm < 0] = 0
-            minus_dm[minus_dm < 0] = 0
-            
-            # Smooth the values
-            period = self.config.adx_period
-            tr_smooth = true_range.rolling(period).mean()
-            plus_dm_smooth = plus_dm.rolling(period).mean()
-            minus_dm_smooth = minus_dm.rolling(period).mean()
-            
-            # Calculate Directional Indicators
-            plus_di = 100 * (plus_dm_smooth / tr_smooth)
-            minus_di = 100 * (minus_dm_smooth / tr_smooth)
-            
-            # Calculate ADX
-            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
-            adx = dx.rolling(period).mean()
-            
-            return adx
-            
-        except Exception as e:
-            logger.error(f"ADX calculation failed: {e}")
-            return pd.Series(index=data.index, dtype=float)
-    
-    # ========================================
-    # MOMENTUM ANALYSIS METHODS
+    # MOMENTUM ANALYSIS METHODS (Rule 3 Phase 4)
+    # Reads pre-calculated indicators from enriched data
     # ========================================
     
     def _update_momentum_analysis(self) -> None:
-        """Update momentum analysis for all symbols"""
+        """
+        Update momentum analysis using PRE-CALCULATED indicators (Rule 3 Phase 4)
         
+        Reads momentum indicators from enriched data, does NOT calculate them.
+        """
         for symbol in self.config.symbols:
-            if symbol in self.indicators:
-                logger.debug(f"📈 Updating momentum analysis for {symbol}")
+            if symbol in self.market_data:
+                logger.debug(f"📈 Updating momentum analysis for {symbol} from enriched data")
                 self.momentum_data[symbol] = self._analyze_symbol_momentum(symbol)
                 logger.debug(f"✅ Momentum data updated for {symbol}: {list(self.momentum_data[symbol].keys()) if symbol in self.momentum_data else 'FAILED'}")
             else:
-                logger.warning(f"⚠️  Cannot update momentum for {symbol} - missing indicators")
+                logger.warning(f"⚠️  Cannot update momentum for {symbol} - missing market data")
     
     def _analyze_symbol_momentum(self, symbol: str) -> Dict[str, float]:
-        """Analyze momentum for a specific symbol"""
+        """
+        Analyze momentum for a specific symbol using PRE-CALCULATED values (Rule 3 Phase 4)
         
+        **CRITICAL:** This method READS pre-calculated momentum values from enriched data.
+        It does NOT calculate momentum itself.
+        """
         try:
-            indicators = self.indicators[symbol]
+            data = self.market_data[symbol]
+            current_row = data.iloc[-1]
             
-            # Get latest momentum values
-            short_momentum = indicators['momentum_short'].iloc[-1] if len(indicators['momentum_short']) > 0 else 0
-            medium_momentum = indicators['momentum_medium'].iloc[-1] if len(indicators['momentum_medium']) > 0 else 0
-            long_momentum = indicators['momentum_long'].iloc[-1] if len(indicators['momentum_long']) > 0 else 0
+            # READ pre-calculated momentum indicators (from FeatureEngineer)
+            # These are already in the enriched DataFrame from the pipeline
+            short_momentum = current_row.get('momentum_short', 0.0)
+            medium_momentum = current_row.get('momentum_medium', 0.0)
+            long_momentum = current_row.get('momentum_long', 0.0)
             
             # Calculate momentum strength (combination of all timeframes)
             momentum_strength = (short_momentum * 0.5 + 
@@ -708,9 +672,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             momentum_consistency = 1.0 - (np.std(momentum_values) / (np.mean(np.abs(momentum_values)) + 0.001))
             
             # Calculate momentum acceleration (is momentum increasing?)
-            if len(indicators['momentum_short']) >= 2:
-                momentum_acceleration = (indicators['momentum_short'].iloc[-1] - 
-                                       indicators['momentum_short'].iloc[-2])
+            if len(data) >= 2:
+                prev_momentum = data.iloc[-2].get('momentum_short', 0.0)
+                momentum_acceleration = short_momentum - prev_momentum
             else:
                 momentum_acceleration = 0
             
