@@ -2682,6 +2682,138 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"Signal aggregation failed: {e}")
             return []
     
+    async def convert_signals_to_trading_requests(
+        self,
+        signals: List[EnhancedSignal],
+        regime_context: Optional[Dict[str, Any]] = None
+    ) -> List['TradingDecisionRequest']:
+        """
+        Convert EnhancedSignal objects to TradingDecisionRequest objects
+        
+        Implements Phase 6→7 conversion per Rule 4.1
+        
+        Args:
+            signals: List of EnhancedSignal from strategy aggregation
+            regime_context: Optional regime context for decision requests
+            
+        Returns:
+            List of TradingDecisionRequest ready for risk authorization
+        """
+        from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
+        
+        try:
+            # Get current regime if not provided
+            if regime_context is None and self.regime_engine:
+                try:
+                    regime_analysis = await self.regime_engine.get_current_regime()
+                    regime_context = {
+                        'regime': regime_analysis.primary_regime.value if hasattr(regime_analysis, 'primary_regime') else 'unknown',
+                        'confidence': regime_analysis.confidence if hasattr(regime_analysis, 'confidence') else 0.5,
+                        'volatility': regime_analysis.volatility if hasattr(regime_analysis, 'volatility') else 0.02
+                    }
+                except Exception as e:
+                    logger.warning(f"Could not get regime context: {e}")
+                    regime_context = {'regime': 'unknown', 'confidence': 0.5, 'volatility': 0.02}
+            elif regime_context is None:
+                regime_context = {'regime': 'unknown', 'confidence': 0.5, 'volatility': 0.02}
+            
+            trading_requests = []
+            
+            for signal in signals:
+                # Determine decision type based on signal type
+                # Handle both enum and string values
+                signal_type_value = signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type)
+                
+                if signal_type_value.lower() in ['buy', 'long']:
+                    decision_type = TradingDecisionType.POSITION_ENTRY
+                    side = 'buy'
+                elif signal_type_value.lower() in ['sell', 'short']:
+                    decision_type = TradingDecisionType.POSITION_EXIT
+                    side = 'sell'
+                elif signal_type_value.lower() == 'close':
+                    decision_type = TradingDecisionType.POSITION_EXIT
+                    side = 'sell'  # Close implies sell
+                else:  # HOLD or unknown
+                    continue  # Skip hold signals
+                
+                # Create TradingDecisionRequest
+                request = TradingDecisionRequest(
+                    decision_type=decision_type,
+                    strategy_id=signal.strategy_id,
+                    symbol=signal.symbol,
+                    side=side,
+                    quantity=signal.quantity,
+                    confidence=signal.confidence,
+                    
+                    # Market context
+                    current_price=signal.price if signal.price else signal.metadata.get('current_price', 0.0),
+                    market_regime=regime_context.get('regime', 'unknown'),
+                    regime_confidence=regime_context.get('confidence', 0.5),
+                    volatility_estimate=regime_context.get('volatility', 0.02),
+                    
+                    # Metadata from signal
+                    requesting_component='StrategyManager',
+                    justification=f"Signal from {signal.strategy_type} strategy",
+                    metadata={
+                        'signal_id': signal.signal_id,
+                        'strategy_type': signal.strategy_type,
+                        'signal_timestamp': signal.timestamp.isoformat() if isinstance(signal.timestamp, datetime) else str(signal.timestamp),
+                        'original_signal_metadata': signal.metadata
+                    }
+                )
+                
+                trading_requests.append(request)
+            
+            logger.info(
+                f"✅ Converted {len(signals)} signals to {len(trading_requests)} trading requests "
+                f"(Phase 6→7 conversion per Rule 4.1)"
+            )
+            
+            return trading_requests
+            
+        except Exception as e:
+            logger.error(f"Signal to request conversion failed: {e}")
+            return []
+    
+    async def aggregate_signals_and_create_requests(
+        self,
+        strategy_signals: Dict[str, List[EnhancedSignal]]
+    ) -> List['TradingDecisionRequest']:
+        """
+        Complete Phase 6 flow: Aggregate signals and convert to trading requests
+        
+        This is the main entry point for Phase 6→7 integration.
+        
+        Args:
+            strategy_signals: Dict mapping strategy_id to list of signals
+            
+        Returns:
+            List of TradingDecisionRequest ready for Phase 7 authorization
+        """
+        try:
+            # Step 1: Aggregate signals from multiple strategies
+            aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)
+            
+            if not aggregated_signals:
+                logger.warning("No signals after aggregation")
+                return []
+            
+            logger.info(f"📊 Aggregated {len(aggregated_signals)} signals from {len(strategy_signals)} strategies")
+            
+            # Step 2: Convert to TradingDecisionRequest
+            trading_requests = await self.convert_signals_to_trading_requests(aggregated_signals)
+            
+            logger.info(
+                f"✅ Phase 6 complete: {len(aggregated_signals)} signals → "
+                f"{len(trading_requests)} trading requests ready for Phase 7"
+            )
+            
+            return trading_requests
+            
+        except Exception as e:
+            logger.error(f"Phase 6 aggregation and conversion failed: {e}")
+            return []
+    
     async def generate_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
         """Generate signals using multi-strategy coordination"""
         try:
