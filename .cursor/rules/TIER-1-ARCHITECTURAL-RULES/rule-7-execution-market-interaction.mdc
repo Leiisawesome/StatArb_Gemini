@@ -3,62 +3,860 @@ alwaysApply: true
 description: "Execution Management & Market Interaction (Consolidated Rules 6 & 12)"
 ---
 
-# Rule 7: Execution Management & Market Interaction
+# Rule 7: Execution Management & Portfolio Update Pipeline
 
-**Version:** 2.0 (Consolidated Rules 6 & 12)
-**Date:** October 21, 2025
-**Status:** ACTIVE
+**Version:** 3.0 (Complete Pipeline Specification)
+**Date:** October 25, 2025
+**Status:** ACTIVE - MANDATORY COMPLIANCE
 
 ---
 
 ## Overview
 
-This rule provides **unified execution guidance** from basic execution patterns through advanced market microstructure optimization. It consolidates:
-- **Section A:** Execution Flow & Authorization (from previous Rule 6)
-- **Section B:** Liquidity Management & Market Impact (from previous Rule 12)
-- **Section C:** Smart Order Routing & TCA (from previous Rule 12)
+Rule 7 defines the **complete execution and portfolio update pipeline** from authorized trades through execution to portfolio state updates. This pipeline ensures **institutional-grade execution**, **transaction cost optimization**, and **accurate portfolio tracking**.
 
-**Key Principle:** ALL execution operations are governed by **Rule 4 (Centralized Risk Governance)** and optimized for **institutional-grade transaction quality**.
+**Key Principle:** ALL execution operations are governed by **Rule 4 (Risk Authorization)** and flow through the **TradingEngine (HOW) → UnifiedExecutionEngine (ACTION) → Portfolio Update** sequence.
 
 ---
 
-## SECTION A: Execution Flow & Authorization
+## Complete Execution Pipeline (Phases 8-11)
+
+This pipeline continues from Rule 4 (Phase 7: Authorization) and completes the trading cycle.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FROM RULE 4: PHASE 7 OUTPUT                                │
+│                   TradingAuthorization (approved trades)                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 8: EXECUTION PLANNING (HOW) (Rule 7.1)                                │
+│ Component: EnhancedTradingEngine (core_engine/trading/engine.py)            │
+│ Authority: OPERATIONAL - Execution strategy planning                        │
+│ Responsibility: Determine HOW to execute authorized trades                  │
+│ Input: TradingAuthorization                                                 │
+│ Output: ExecutionRequest (with execution plan)                              │
+│                                                                              │
+│ Planning Decisions:                                                         │
+│ 1. Select execution algorithm (MARKET/LIMIT/TWAP/VWAP/ADAPTIVE)             │
+│ 2. Determine order slicing strategy (for large orders)                      │
+│ 3. Calculate participation rate and timing                                  │
+│ 4. Assess liquidity and market impact                                       │
+│ 5. Choose venue routing strategy                                            │
+│ 6. Set execution parameters (time horizon, urgency)                         │
+│                                                                              │
+│ Methods: create_execution_plan(authorization) -> ExecutionRequest           │
+│ File: core_engine/trading/engine.py                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                **ExecutionRequest Object**
+                (Authorization + Execution Plan)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 9: EXECUTION ACTION (Rule 7.2) ⭐                                      │
+│ Component: UnifiedExecutionEngine                                           │
+│           (core_engine/system/unified_execution_engine.py)                  │
+│ Authority: OPERATIONAL - Trade execution                                    │
+│ Responsibility: Execute trades per plan (ACTION)                            │
+│ Input: ExecutionRequest                                                     │
+│ Output: ExecutionResult                                                     │
+│                                                                              │
+│ Execution Steps:                                                            │
+│ 1. Validate authorization (check expiry, limits)                            │
+│ 2. Execute according to selected algorithm                                  │
+│ 3. Monitor fills and partial fills                                          │
+│ 4. Calculate execution quality metrics                                      │
+│ 5. Handle execution errors and retries                                      │
+│ 6. Generate execution report                                                │
+│                                                                              │
+│ Methods: execute_authorized_trade(request) -> ExecutionResult               │
+│ File: core_engine/system/unified_execution_engine.py                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                **ExecutionResult Object**
+                (Fill price, quantity, timestamp)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 10: PORTFOLIO UPDATE (Rule 7.3) ⭐                                     │
+│ Component: CentralRiskManager (callback)                                    │
+│           (core_engine/system/central_risk_manager.py)                      │
+│ Authority: GOVERNANCE_CONTROL - Position management                         │
+│ Responsibility: Update positions and cash (ONLY HERE)                       │
+│ Input: ExecutionResult                                                      │
+│ Output: PositionUpdate (broadcast to all components)                        │
+│                                                                              │
+│ Update Operations:                                                          │
+│ 1. Update position quantities (BUY: +qty, SELL: -qty)                       │
+│ 2. Update cash balances (BUY: -cash, SELL: +cash)                           │
+│ 3. Record position history                                                  │
+│ 4. Calculate P&L (realized + unrealized)                                    │
+│ 5. Update portfolio metrics                                                 │
+│ 6. Broadcast updates to all components                                      │
+│                                                                              │
+│ Methods: update_position(symbol, side, qty, price, timestamp)               │
+│ File: core_engine/system/central_risk_manager.py                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                **PositionUpdate Broadcast**
+                (All components notified)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 11: ANALYTICS & TCA (Rule 7.4)                                        │
+│ Component: EnhancedAnalyticsManager                                         │
+│           (core_engine/analytics/manager_enhanced.py)                       │
+│ Authority: OPERATIONAL - Performance measurement                            │
+│ Responsibility: Transaction cost analysis and performance tracking          │
+│ Input: ExecutionResult + PositionUpdate                                     │
+│ Output: ExecutionQualityMetrics                                             │
+│                                                                              │
+│ Analytics Calculated:                                                       │
+│ 1. Slippage analysis (expected vs realized)                                 │
+│ 2. Market impact measurement (permanent + temporary)                        │
+│ 3. Execution cost breakdown (commissions + impact + slippage)               │
+│ 4. Benchmark comparisons (VWAP, TWAP, arrival price)                        │
+│ 5. Strategy performance attribution                                         │
+│ 6. Execution quality scores                                                 │
+│                                                                              │
+│ Methods: analyze_execution_quality(result) -> ExecutionQualityMetrics       │
+│ File: core_engine/analytics/manager_enhanced.py                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phase 8: Execution Planning (HOW)
+
+### Component: EnhancedTradingEngine
+
+**File:** `core_engine/trading/engine.py`  
+**Layer:** OPERATIONAL  
+**Responsibility:** Determine HOW to execute authorized trades
 
 ### Core Execution Pattern
 
-The UnifiedExecutionEngine operates **exclusively under CentralRiskManager control** (per Rule 4) and implements the ACTION layer in the institutional hierarchy.
+The EnhancedTradingEngine operates **exclusively under CentralRiskManager control** (per Rule 4) and implements the HOW layer (execution planning).
 
-### MANDATORY Execution Authorization Pattern
+### MANDATORY Execution Flow Pattern
 
 ```python
 from core_engine.system.unified_execution_engine import (
-    UnifiedExecutionEngine, ExecutionRequest, ExecutionAlgorithm
+    UnifiedExecutionEngine, ExecutionRequest, ExecutionAlgorithm, ExecutionUrgency
 )
 from core_engine.trading.engine import EnhancedTradingEngine
 
-# Step 1: Get authorization from RiskManager (REQUIRED per Rule 4)
-authorization = await risk_manager.authorize_trading_decision(request)
-
-# Step 2: Create execution plan via TradingEngine (HOW to execute)
-if authorization.authorization_level != AuthorizationLevel.REJECTED:
-    execution_plan = await trading_engine.create_execution_plan(authorization)
+# PHASE 8: Create execution plan (HOW to execute)
+async def plan_and_execute_trade(self, authorization: TradingAuthorization):
+    """
+    Complete execution flow from authorization to portfolio update
     
-    # Step 3: Create execution request with plan
+    Follows Phases 8 → 9 → 10 → 11
+    """
+    
+    # PHASE 8: Create execution plan via TradingEngine (HOW)
+    execution_plan = await self.trading_engine.create_execution_plan(authorization)
+    
+    # Create execution request
     execution_request = ExecutionRequest(
         authorization=authorization,
         execution_plan=execution_plan,
-        algorithm=ExecutionAlgorithm.ADAPTIVE,
-        urgency=ExecutionUrgency.NORMAL,
-        time_horizon=300
+        algorithm=execution_plan.selected_algorithm,
+        urgency=authorization.urgency,
+        time_horizon=authorization.max_execution_time
     )
     
-    # Step 4: Execute via UnifiedExecutionEngine (ACTION)
-    result = await execution_engine.execute_authorized_trade(execution_request)
+    # PHASE 9: Execute via UnifiedExecutionEngine (ACTION)
+    result = await self.execution_engine.execute_authorized_trade(execution_request)
+    
+    # PHASE 10: Position update happens automatically via RiskManager callback
+    # (UnifiedExecutionEngine calls risk_manager.update_position internally)
+    
+    # PHASE 11: Analytics also happen automatically via event system
+    
+    return result
 ```
 
-### Execution Algorithms
+### Input: TradingAuthorization (from Rule 4, Phase 7)
 
-Available execution algorithms with selection criteria:
+```python
+@dataclass
+class TradingAuthorization:
+    """Input from CentralRiskManager"""
+    authorization_id: str
+    symbol: str
+    side: str  # 'buy' or 'sell'
+    authorized_quantity: float
+    authorization_timestamp: datetime
+    risk_budget_allocated: float
+    max_execution_time: int  # seconds
+    conditions: List[str]
+    expiry_time: datetime
+```
+
+### Processing: Create Execution Plan
+
+```python
+async def create_execution_plan(
+    self, 
+    authorization: TradingAuthorization
+) -> ExecutionRequest:
+    """
+    Create optimal execution plan
+    
+    Determines:
+    1. Execution algorithm
+    2. Order slicing strategy
+    3. Timing parameters
+    4. Venue selection
+    """
+    
+    # Get market data for execution planning
+    market_data = await self.data_manager.get_market_data(authorization.symbol)
+    
+    # Assess liquidity
+    liquidity_score = await self.liquidity_engine.assess_liquidity(
+        authorization.symbol, 
+        authorization.authorized_quantity
+    )
+    
+    # Select execution algorithm
+    algorithm = self._select_execution_algorithm(
+        quantity=authorization.authorized_quantity,
+        urgency=authorization.urgency,
+        liquidity_score=liquidity_score,
+        time_horizon=authorization.max_execution_time
+    )
+    
+    # Create order slicing plan (for large orders)
+    if authorization.authorized_quantity > liquidity_score.avg_trade_size * 5:
+        slicing_plan = self._create_slicing_plan(
+            total_quantity=authorization.authorized_quantity,
+            algorithm=algorithm,
+            time_horizon=authorization.max_execution_time
+        )
+    else:
+        slicing_plan = None
+    
+    # Calculate market impact estimate
+    impact_estimate = await self._estimate_market_impact(
+        symbol=authorization.symbol,
+        quantity=authorization.authorized_quantity,
+        liquidity_score=liquidity_score
+    )
+    
+    # Create execution request
+    execution_request = ExecutionRequest(
+        authorization=authorization,
+        algorithm=algorithm,
+        slicing_plan=slicing_plan,
+        estimated_impact_bps=impact_estimate.total_impact_bps,
+        estimated_fill_price=market_data.current_price + impact_estimate.price_adjustment,
+        venue_preferences=self._get_venue_preferences(authorization.symbol),
+        metadata={
+            'liquidity_score': liquidity_score.overall_score,
+            'market_regime': market_data.regime,
+            'planning_timestamp': datetime.now()
+        }
+    )
+    
+    return execution_request
+```
+
+### Execution Algorithm Selection
+
+```python
+def _select_execution_algorithm(
+    self,
+    quantity: float,
+    urgency: ExecutionUrgency,
+    liquidity_score: LiquidityScore,
+    time_horizon: int
+) -> ExecutionAlgorithm:
+    """
+    Select optimal execution algorithm based on conditions
+    """
+    
+    # Emergency/urgent trades use market orders
+    if urgency in [ExecutionUrgency.URGENT, ExecutionUrgency.EMERGENCY]:
+        return ExecutionAlgorithm.MARKET
+    
+    # Small quantities use market orders
+    if quantity < 1000:
+        return ExecutionAlgorithm.MARKET
+    
+    # Illiquid markets use adaptive algorithms
+    if liquidity_score.liquidity_regime == LiquidityRegime.ILLIQUID:
+        return ExecutionAlgorithm.ADAPTIVE
+    
+    # Large quantities with time flexibility use TWAP
+    if time_horizon > 300 and quantity > 5000:
+        return ExecutionAlgorithm.TWAP
+    
+    # Volume-sensitive use VWAP
+    if quantity > liquidity_score.avg_daily_volume * 0.1:
+        return ExecutionAlgorithm.VWAP
+    
+    # Default to adaptive for optimization
+    return ExecutionAlgorithm.ADAPTIVE
+```
+
+### Output: ExecutionRequest
+
+```python
+@dataclass
+class ExecutionRequest:
+    """Output: Complete execution plan"""
+    authorization: TradingAuthorization  # Original authorization
+    algorithm: ExecutionAlgorithm        # Selected algorithm
+    slicing_plan: Optional[Dict]         # Order slicing strategy
+    estimated_impact_bps: float          # Expected market impact
+    estimated_fill_price: float          # Expected execution price
+    venue_preferences: List[str]         # Preferred venues
+    metadata: Dict[str, Any]             # Additional context
+```
+
+---
+
+## Phase 9: Execution Action (EXECUTE)
+
+### Component: UnifiedExecutionEngine ⭐
+
+**File:** `core_engine/system/unified_execution_engine.py`  
+**Layer:** OPERATIONAL  
+**Authority:** Execute trades under RiskManager control  
+**Responsibility:** Perform actual trade execution (ACTION)
+
+### Execution Pattern
+
+```python
+async def execute_authorized_trade(
+    self, 
+    request: ExecutionRequest
+) -> ExecutionResult:
+    """
+    Execute trade according to plan
+    
+    Steps:
+    1. Validate authorization
+    2. Execute per algorithm
+    3. Monitor fills
+    4. Calculate metrics
+    5. Report to RiskManager
+    """
+    
+    # Step 1: Validate authorization
+    if not self._validate_authorization(request.authorization):
+        return self._create_rejected_result(
+            request,
+            "Authorization expired or invalid"
+        )
+    
+    # Step 2: Execute based on algorithm
+    if request.algorithm == ExecutionAlgorithm.MARKET:
+        result = await self._execute_market_order(request)
+    elif request.algorithm == ExecutionAlgorithm.TWAP:
+        result = await self._execute_twap(request)
+    elif request.algorithm == ExecutionAlgorithm.VWAP:
+        result = await self._execute_vwap(request)
+    elif request.algorithm == ExecutionAlgorithm.ADAPTIVE:
+        result = await self._execute_adaptive(request)
+    else:
+        result = await self._execute_market_order(request)  # fallback
+    
+    # Step 3: Calculate execution metrics
+    result.execution_quality = self._calculate_execution_quality(request, result)
+    
+    # Step 4: MANDATORY - Report to RiskManager for position update (Phase 10)
+    if result.status == ExecutionStatus.FILLED:
+        await self._handle_position_updates(request, result)
+    
+    return result
+```
+
+### Position Update Callback (CRITICAL)
+
+**CRITICAL:** The execution engine CANNOT directly update positions. ALL position updates MUST flow through the CentralRiskManager (per Rule 4).
+
+```python
+async def _handle_position_updates(
+    self, 
+    request: ExecutionRequest, 
+    result: ExecutionResult
+):
+    """
+    Handle position updates after successful execution
+    
+    MANDATORY: Update position via Risk Manager ONLY (Rule 4)
+    """
+    
+    if result.status != ExecutionStatus.FILLED:
+        return
+    
+    # MANDATORY: Update position via Risk Manager callback (Rule 4, Phase 10)
+    if self.risk_manager_callback:
+        position_update = await self.risk_manager_callback.update_position(
+            symbol=request.authorization.symbol,
+            side=request.authorization.side.lower(),
+            quantity=result.filled_quantity,
+            price=result.avg_fill_price,
+            timestamp=result.execution_timestamp
+        )
+        
+        self.logger.info(
+            f"📊 Position updated via RiskManager (Rule 4, Phase 10): "
+            f"{request.authorization.symbol} {request.authorization.side} "
+            f"{result.filled_quantity} @ ${result.avg_fill_price:.2f}"
+        )
+        
+        return position_update
+    else:
+        self.logger.error("❌ No RiskManager callback - violates Rule 4")
+        raise RuntimeError(
+            "Cannot update position without RiskManager callback. "
+            "This violates Rule 4 (Position Management Authority)."
+        )
+```
+
+### Output: ExecutionResult
+
+```python
+@dataclass
+class ExecutionResult:
+    """Execution outcome"""
+    
+    # Execution identity
+    execution_id: str
+    authorization_id: str
+    symbol: str
+    
+    # Execution details
+    status: ExecutionStatus  # FILLED/PARTIALLY_FILLED/CANCELLED/REJECTED
+    filled_quantity: float
+    avg_fill_price: float
+    execution_timestamp: datetime
+    
+    # Cost breakdown
+    commission: float
+    realized_slippage_bps: float
+    estimated_market_impact_bps: float
+    total_execution_cost: float
+    
+    # Quality metrics
+    execution_quality: Optional[ExecutionQualityMetrics] = None
+    
+    # Fills (for partial fills)
+    fills: List[Dict[str, Any]] = field(default_factory=list)
+```
+
+---
+
+## Phase 10: Portfolio Update (POSITION MANAGEMENT)
+
+### Component: CentralRiskManager (Callback) ⭐
+
+**File:** `core_engine/system/central_risk_manager.py`  
+**Layer:** GOVERNANCE_CONTROL  
+**Authority:** SINGLE AUTHORITY for position updates  
+**Responsibility:** Update positions and cash (ONLY HERE per Rule 4)
+
+### Position Update Flow (from Phase 9)
+
+```python
+# This method is called by UnifiedExecutionEngine after successful execution
+async def update_position(
+    self,
+    symbol: str,
+    side: str,
+    quantity: float,
+    price: float,
+    timestamp: datetime
+) -> Dict[str, Any]:
+    """
+    Update position after trade execution
+    
+    ONLY THIS METHOD can modify positions (Rule 4 enforcement).
+    """
+    
+    # Get current position
+    current_position = self.current_positions.get(symbol, 0.0)
+    
+    # Calculate new position and cash
+    if side.lower() == 'buy':
+        new_position = current_position + quantity
+        cash_change = -(quantity * price)  # Reduce cash
+    elif side.lower() == 'sell':
+        new_position = current_position - quantity
+        cash_change = +(quantity * price)  # Increase cash
+    else:
+        raise ValueError(f"Invalid side: {side}")
+    
+    # Update position
+    self.current_positions[symbol] = new_position
+    self.available_cash += cash_change
+    
+    # Calculate P&L
+    if side.lower() == 'sell' and current_position > 0:
+        # Realized P&L calculation
+        avg_entry_price = self.position_cost_basis.get(symbol, price)
+        realized_pnl = (price - avg_entry_price) * quantity
+    else:
+        realized_pnl = 0.0
+    
+    # Record position change
+    position_change = {
+        'timestamp': timestamp,
+        'symbol': symbol,
+        'side': side,
+        'quantity': quantity,
+        'price': price,
+        'previous_position': current_position,
+        'new_position': new_position,
+        'position_value': new_position * price,
+        'cash_change': cash_change,
+        'realized_pnl': realized_pnl
+    }
+    self.position_history.append(position_change)
+    
+    # Update portfolio metrics
+    self._update_portfolio_metrics()
+    
+    # BROADCAST position update to all components
+    await self._notify_position_change(position_change)
+    
+    self.logger.info(
+        f"📈 Position Update (Phase 10): {symbol} "
+        f"{current_position:.2f} → {new_position:.2f} "
+        f"(Cash: ${self.available_cash:,.2f})"
+    )
+    
+    return {
+        'symbol': symbol,
+        'position': new_position,
+        'position_value': new_position * price,
+        'portfolio_value': self.portfolio_value,
+        'available_cash': self.available_cash,
+        'realized_pnl': realized_pnl
+    }
+```
+
+### Position Update Broadcast
+
+```python
+async def _notify_position_change(self, position_change: Dict[str, Any]):
+    """
+    Broadcast position update to all components (READ-ONLY)
+    """
+    # Notify Portfolio Manager
+    if self.portfolio_manager:
+        await self.portfolio_manager.on_position_update(position_change)
+    
+    # Notify Analytics Engine  
+    if self.analytics_engine:
+        await self.analytics_engine.on_position_update(position_change)
+    
+    # Notify Risk Monitoring
+    if self.risk_monitor:
+        await self.risk_monitor.on_position_update(position_change)
+    
+    # Notify Strategy Manager (for strategy-level P&L)
+    if self.strategy_manager:
+        await self.strategy_manager.on_position_update(position_change)
+```
+
+---
+
+## Phase 11: Analytics & TCA
+
+### Component: EnhancedAnalyticsManager
+
+**File:** `core_engine/analytics/manager_enhanced.py`  
+**Layer:** OPERATIONAL  
+**Responsibility:** Transaction cost analysis and performance measurement
+
+### Analytics Processing
+
+```python
+async def analyze_execution_quality(
+    self,
+    execution_result: ExecutionResult,
+    market_data: Dict[str, Any]
+) -> ExecutionQualityMetrics:
+    """
+    Comprehensive execution quality analysis
+    
+    Calculates:
+    1. Slippage metrics
+    2. Market impact
+    3. Cost breakdown
+    4. Benchmark comparisons
+    """
+    
+    # Calculate benchmark prices
+    benchmarks = await self._calculate_benchmarks(
+        execution_result.symbol,
+        execution_result.execution_timestamp,
+        market_data
+    )
+    
+    # Slippage analysis
+    arrival_price = benchmarks['arrival_price']
+    slippage_bps = (
+        (execution_result.avg_fill_price - arrival_price) / arrival_price * 10000
+    )
+    
+    # Market impact measurement
+    impact_metrics = self._measure_market_impact(
+        execution_result,
+        market_data
+    )
+    
+    # Cost breakdown
+    total_cost_bps = (
+        slippage_bps +
+        impact_metrics.total_impact_bps +
+        execution_result.commission / (execution_result.filled_quantity * arrival_price) * 10000
+    )
+    
+    # Benchmark comparisons
+    vwap_performance_bps = (
+        (execution_result.avg_fill_price - benchmarks['vwap']) / benchmarks['vwap'] * 10000
+    )
+    
+    return ExecutionQualityMetrics(
+        arrival_cost_bps=slippage_bps,
+        vwap_performance_bps=vwap_performance_bps,
+        realized_slippage_bps=execution_result.realized_slippage_bps,
+        permanent_impact_bps=impact_metrics.permanent_impact_bps,
+        temporary_impact_bps=impact_metrics.temporary_impact_bps,
+        total_cost_bps=total_cost_bps,
+        overall_quality_score=self._calculate_quality_score(total_cost_bps)
+    )
+```
+
+---
+
+## Component Responsibility Matrix (Phases 8-11)
+
+| Phase | Component | Input | Output | Can Authorize? | Can Execute? | Can Update Positions? |
+|-------|-----------|-------|--------|---------------|--------------|----------------------|
+| **8** | TradingEngine | TradingAuthorization | ExecutionRequest | ❌ NO | ❌ NO | ❌ NO |
+| **9** | UnifiedExecutionEngine | ExecutionRequest | ExecutionResult | ❌ NO | ✅ YES | ❌ NO |
+| **10** | CentralRiskManager | ExecutionResult | PositionUpdate | ✅ YES | ❌ NO | ✅ YES (ONLY HERE) |
+| **11** | AnalyticsManager | ExecutionResult | QualityMetrics | ❌ NO | ❌ NO | ❌ NO |
+
+**KEY PRINCIPLE:** 
+- Only UnifiedExecutionEngine can **execute** trades
+- Only CentralRiskManager can **update positions**
+- All other components are **read-only observers**
+
+---
+
+## PROHIBITED Execution Patterns (Rule 7 Violations)
+
+### ❌ PROHIBITED: Direct Position Updates from Execution Engine
+
+```python
+# ❌ BAD: Execution engine updating positions directly
+class BadExecutionEngine:
+    async def execute_trade(self, request):
+        result = await self.broker.place_order(...)
+        
+        # VIOLATES RULE 7: Direct position update!
+        self.portfolio.positions[symbol] += result.quantity  # ❌ PROHIBITED!
+        return result
+```
+
+**Why This is Bad:**
+- ❌ Bypasses CentralRiskManager (violates Rule 4)
+- ❌ Creates position discrepancies  
+- ❌ No audit trail for position changes
+- ❌ Risk metrics become stale
+
+### ❌ PROHIBITED: Bypassing Execution Planning
+
+```python
+# ❌ BAD: Executing without planning phase
+class BadTradingFlow:
+    async def execute(self, authorization):
+        # VIOLATES RULE 7: Skips Phase 8 planning!
+        # Goes directly to execution without strategy
+        result = await self.execution_engine.execute_authorized_trade(authorization)  # ❌ BAD!
+```
+
+**Why This is Bad:**
+- ❌ No liquidity assessment
+- ❌ No market impact estimation
+- ❌ Suboptimal execution algorithm selection
+- ❌ Poor execution quality
+
+### ❌ PROHIBITED: Independent Execution Without Authorization
+
+```python
+# ❌ BAD: Executing without authorization
+class BadStrategy:
+    async def execute_signal(self, signal):
+        # VIOLATES RULE 7 & 4: No authorization check!
+        order = Order(symbol=signal.symbol, quantity=signal.quantity)
+        result = await self.broker.place_order(order)  # ❌ PROHIBITED!
+```
+
+**Why This is Bad:**
+- ❌ Bypasses Rule 4 risk authorization
+- ❌ No risk limits enforcement
+- ❌ Can cause portfolio blow-up
+- ❌ Violates governance model
+
+### ✅ CORRECT: Complete Pipeline Flow
+
+```python
+# ✅ GOOD: Proper Phase 8 → 9 → 10 → 11 flow
+class GoodTradingOrchestrator:
+    async def execute_complete_trade_flow(self, signal):
+        # Phase 6-7: Strategy coordination and authorization (Rule 4)
+        request = self._create_trading_decision_request(signal)
+        authorization = await self.risk_manager.authorize_trading_decision(request)
+        
+        if authorization.authorization_level == AuthorizationLevel.REJECTED:
+            self.logger.warning(f"Trade rejected: {authorization.rejection_reason}")
+            return None
+        
+        # PHASE 8: Execution planning (Rule 7)
+        execution_request = await self.trading_engine.create_execution_plan(authorization)
+        
+        # PHASE 9: Execution action (Rule 7)
+        result = await self.execution_engine.execute_authorized_trade(execution_request)
+        
+        # PHASE 10: Position update (automatic via RiskManager callback)
+        # PHASE 11: Analytics (automatic via event system)
+        
+        return result
+```
+
+---
+
+## Complete Pipeline Summary (Phases 0-11)
+
+**The Complete Trading Pipeline Across Rules 3, 4, and 7:**
+
+```
+RULE 3: DATA PROCESSING PIPELINE (Phases 0-5)
+├── Phase 0: Raw Data (ClickHouse Storage)
+├── Phase 1: Data Loading (ClickHouseDataManager)
+├── Phase 2: Indicators (EnhancedTechnicalIndicators)
+├── Phase 3: Features (EnhancedFeatureEngineer)
+├── Phase 4: Signals (EnhancedSignalGenerator)
+└── Phase 5: Strategy Logic (Trading Strategies)
+                    ↓
+RULE 4: RISK GOVERNANCE PIPELINE (Phases 6-7)
+├── Phase 6: Multi-Strategy Coordination (StrategyManager)
+└── Phase 7: Risk Authorization (CentralRiskManager) ⭐ GOVERNANCE
+                    ↓
+RULE 7: EXECUTION & PORTFOLIO PIPELINE (Phases 8-11)
+├── Phase 8: Execution Planning - HOW (EnhancedTradingEngine)
+├── Phase 9: Execution Action - ACTION (UnifiedExecutionEngine)
+├── Phase 10: Portfolio Update ⭐ GOVERNANCE (CentralRiskManager)
+└── Phase 11: Analytics & TCA (EnhancedAnalyticsManager)
+```
+
+### Data Flow Through Complete Pipeline
+
+```python
+# COMPLETE PIPELINE EXAMPLE
+
+# PHASE 0-5 (Rule 3): Data → Indicators → Features → Signals → Strategy
+enriched_data = await pipeline.process_market_data(symbols=['AAPL'])
+strategy_signal = await momentum_strategy.generate_signals(enriched_data)
+# Output: StrategySignal(symbol='AAPL', type=BUY, confidence=0.75, quantity=100)
+
+# PHASE 6 (Rule 4): Multi-strategy coordination
+aggregated_signals = await strategy_manager.aggregate_strategy_signals({
+    'momentum_1': [strategy_signal]
+})
+trading_request = aggregated_signals[0]
+# Output: TradingDecisionRequest(symbol='AAPL', side='buy', quantity=100, confidence=0.75)
+
+# PHASE 7 (Rule 4): Risk authorization ⭐ GOVERNANCE
+authorization = await risk_manager.authorize_trading_decision(trading_request)
+# Output: TradingAuthorization(authorized=True, authorized_quantity=100, authorization_id='auth_123')
+
+# PHASE 8 (Rule 7): Execution planning
+execution_request = await trading_engine.create_execution_plan(authorization)
+# Output: ExecutionRequest(algorithm=MARKET, estimated_impact_bps=2.5)
+
+# PHASE 9 (Rule 7): Execution action
+result = await execution_engine.execute_authorized_trade(execution_request)
+# Output: ExecutionResult(status=FILLED, filled_quantity=100, avg_fill_price=150.25)
+
+# PHASE 10 (Rule 7): Portfolio update ⭐ GOVERNANCE (automatic callback)
+# Risk Manager updates positions: AAPL position: 0 → 100, Cash: $100,000 → $84,975
+position_update = {
+    'symbol': 'AAPL',
+    'new_position': 100,
+    'cash_change': -15025,
+    'portfolio_value': 100000
+}
+
+# PHASE 11 (Rule 7): Analytics & TCA (automatic)
+quality_metrics = await analytics.analyze_execution_quality(result, market_data)
+# Output: ExecutionQualityMetrics(slippage_bps=1.5, impact_bps=2.5, quality_score=85)
+```
+
+---
+
+## Integration with Rule 4 (Risk Governance)
+
+**ALL execution operations in Rule 7 are governed by Rule 4:**
+
+```python
+# Rule 4 authorization is MANDATORY for ALL executions
+authorization = await risk_manager.authorize_trading_decision(request)  # Rule 4, Phase 7
+
+# Rule 7 executes ONLY with valid authorization
+if authorization.authorization_level != AuthorizationLevel.REJECTED:
+    # Proceed with execution per Rule 7 (Phases 8-9)
+    result = await execution_engine.execute_authorized_trade(authorization)
+```
+
+**Position updates MUST go through Rule 4 governance:**
+
+```python
+# Rule 7 execution completes (Phase 9)
+result = await execution_engine.execute_authorized_trade(request)
+
+# Rule 4 governs position updates (Phase 10)
+position_update = await risk_manager.update_position(
+    symbol=symbol, 
+    side=side, 
+    quantity=result.filled_quantity, 
+    price=result.avg_fill_price
+)
+```
+
+---
+
+## Integration with Rule 2 (Regime-First)
+
+**ALL execution operations are regime-aware:**
+
+```python
+# Get regime context (Rule 2)
+regime_context = await regime_engine.get_current_regime_context()
+
+# Select execution algorithm based on regime (Phase 8)
+if regime_context.execution_urgency == 'urgent':
+    algorithm = ExecutionAlgorithm.MARKET
+elif regime_context.liquidity_regime == LiquidityRegime.LOW_LIQUIDITY:
+    algorithm = ExecutionAlgorithm.ADAPTIVE
+else:
+    algorithm = regime_context.recommended_execution_style
+
+# Adjust market impact for regime
+impact_multiplier = regime_context.market_impact_multiplier
+adjusted_impact = base_impact * impact_multiplier
+```
+
+---
+
+## SECTION B: Liquidity Management & Market Impact (Advanced)
 
 ```python
 class ExecutionAlgorithm(Enum):

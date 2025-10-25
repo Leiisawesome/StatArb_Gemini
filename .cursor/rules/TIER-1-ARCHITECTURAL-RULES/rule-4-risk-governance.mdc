@@ -1,52 +1,398 @@
 ---
 alwaysApply: true
-description: "Central Risk Manager Governance and Authorization Patterns"
+description: "Rule 4: Risk Governance and Authorization Pipeline - Complete Specification"
 ---
 
-# Central Risk Manager Governance and Authorization Patterns
+# Rule 4: Risk Governance and Authorization Pipeline
 
-The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the **SINGLE POINT OF AUTHORITY** for ALL trading decisions in the system.
+**Version:** 2.0 (Enhanced with Complete Pipeline Specification)  
+**Date:** October 25, 2025  
+**Status:** ACTIVE - MANDATORY COMPLIANCE
 
-## MANDATORY Risk Authorization Pattern
+---
+
+## Overview
+
+Rule 4 defines the **complete authorization pipeline** from strategy signals through risk governance to authorized trades. The [CentralRiskManager](mdc:core_engine/system/central_risk_manager.py) serves as the **SINGLE POINT OF AUTHORITY** for ALL trading decisions.
+
+**Key Principle:** ALL trading decisions MUST flow through CentralRiskManager authorization. NO component can execute trades independently.
+
+---
+
+## Complete Authorization Pipeline (Phases 6-7)
+
+This pipeline continues from Rule 3 (Phase 5: Strategy Signals) and feeds into Rule 7 (Phase 8: Execution).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FROM RULE 3: PHASE 5 OUTPUT                                │
+│                   Strategy Signals (List[StrategySignal])                    │
+│                   Multiple strategies generate trading signals               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 6: MULTI-STRATEGY COORDINATION (Rule 4.1)                             │
+│ Component: StrategyManager (core_engine/trading/strategies/manager.py)      │
+│ Authority: OPERATIONAL - Multi-strategy coordination                        │
+│ Responsibility: Aggregate signals, resolve conflicts, prioritize trades     │
+│ Input: Dict[strategy_id, List[StrategySignal]]                              │
+│ Output: List[TradingDecisionRequest]                                        │
+│                                                                              │
+│ Processing Steps:                                                           │
+│ 1. Collect signals from all active strategies                               │
+│ 2. Aggregate conflicting signals (MultiStrategySignalAggregator)            │
+│ 3. Resolve conflicts (SignalConflictResolver)                               │
+│ 4. Create TradingDecisionRequest for each final signal                      │
+│ 5. Add strategy metadata (strategy_id, confidence, regime_context)          │
+│                                                                              │
+│ Methods: aggregate_strategy_signals() -> List[TradingDecisionRequest]       │
+│ File: core_engine/trading/strategies/manager.py                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                **TradingDecisionRequest Objects**
+                (Aggregated signals with metadata)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 7: RISK AUTHORIZATION (Rule 4.2) ⭐                                    │
+│ Component: CentralRiskManager (core_engine/system/central_risk_manager.py) │
+│ Authority: GOVERNANCE_CONTROL - Single Authority for ALL trades            │
+│ Responsibility: Authorize/reject ALL trading decisions                      │
+│ Input: TradingDecisionRequest                                               │
+│ Output: TradingAuthorization                                                │
+│                                                                              │
+│ Authorization Checks (ALL MANDATORY):                                       │
+│ 1. ✅ Signal confidence > min_confidence_threshold (default: 60%)           │
+│ 2. ✅ Cash availability for BUY orders                                      │
+│ 3. ✅ Position availability for SELL orders                                 │
+│ 4. ✅ Position size limits (max_position_size: 10% of portfolio)            │
+│ 5. ✅ Portfolio concentration limits (max_concentration: 15%)               │
+│ 6. ✅ Daily VaR limits (max_daily_var: 5%)                                  │
+│ 7. ✅ Strategy allocation limits (max_strategy_allocation: 33%)             │
+│ 8. ✅ Regime-adjusted risk scaling                                          │
+│ 9. ✅ Emergency mode checks                                                 │
+│                                                                              │
+│ Authorization Outcomes:                                                     │
+│ • AUTOMATIC: Auto-approved (normal parameters)                              │
+│ • STANDARD: Approved with standard review                                   │
+│ • ELEVATED: Approved with elevated review                                   │
+│ • REJECTED: Denied with reason                                              │
+│                                                                              │
+│ Methods: authorize_trading_decision(request) -> TradingAuthorization        │
+│ File: core_engine/system/central_risk_manager.py                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                **TradingAuthorization Object**
+                (Authorized trade with limits and authorization_id)
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   TO RULE 7: PHASE 8 INPUT                                   │
+│                   TradingAuthorization → Execution Planning                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phase 6: Multi-Strategy Coordination
+
+### Component: StrategyManager
+
+**File:** `core_engine/trading/strategies/manager.py`  
+**Layer:** OPERATIONAL  
+**Responsibility:** Coordinate multiple strategies and aggregate signals
+
+### Input Data Structure
+```python
+# Input: Signals from multiple strategies
+strategy_signals: Dict[str, List[StrategySignal]] = {
+    'momentum_strategy_1': [
+        StrategySignal(symbol='AAPL', signal_type=SignalType.BUY, 
+                      confidence=0.75, quantity=100),
+        StrategySignal(symbol='TSLA', signal_type=SignalType.SELL,
+                      confidence=0.68, quantity=50)
+    ],
+    'mean_reversion_strategy_1': [
+        StrategySignal(symbol='AAPL', signal_type=SignalType.BUY,
+                      confidence=0.82, quantity=150)
+    ]
+}
+```
+
+### Processing Logic
+```python
+async def aggregate_strategy_signals(
+    self, 
+    strategy_signals: Dict[str, List[StrategySignal]]
+) -> List[TradingDecisionRequest]:
+    """
+    Aggregate signals from multiple strategies
+    
+    Steps:
+    1. Collect all signals with strategy weights
+    2. Group signals by symbol
+    3. Resolve conflicts (conflicting signals for same symbol)
+    4. Create TradingDecisionRequest for each final signal
+    """
+    aggregated_signals = []
+    
+    # Group signals by symbol
+    signals_by_symbol = defaultdict(list)
+    for strategy_id, signals in strategy_signals.items():
+        for signal in signals:
+            signals_by_symbol[signal.symbol].append((strategy_id, signal))
+    
+    # Resolve conflicts and create requests
+    for symbol, symbol_signals in signals_by_symbol.items():
+        # Resolve conflicts
+        resolved_signal = await self.conflict_resolver.resolve_conflicts(
+            symbol_signals
+        )
+        
+        # Create TradingDecisionRequest
+        if resolved_signal:
+            request = TradingDecisionRequest(
+                decision_type=TradingDecisionType.POSITION_ENTRY,
+                symbol=symbol,
+                side=resolved_signal.signal_type.value,
+                quantity=resolved_signal.quantity,
+                confidence=resolved_signal.confidence,
+                strategy_id=resolved_signal.metadata.get('strategy_id'),
+                market_regime=await self._get_current_regime(),
+                requesting_component='StrategyManager'
+            )
+            aggregated_signals.append(request)
+    
+    return aggregated_signals
+```
+
+### Output Data Structure
+```python
+# Output: Trading decision requests ready for authorization
+trading_requests: List[TradingDecisionRequest] = [
+    TradingDecisionRequest(
+        request_id='req_123',
+        decision_type=TradingDecisionType.POSITION_ENTRY,
+        symbol='AAPL',
+        side='buy',
+        quantity=125,  # Aggregated from multiple strategies
+        confidence=0.78,  # Weighted confidence
+        strategy_id='aggregated_momentum_mean_reversion',
+        market_regime='normal_volatility',
+        requesting_component='StrategyManager'
+    )
+]
+```
+
+---
+
+## Phase 7: Risk Authorization (GOVERNANCE)
+
+### Component: CentralRiskManager ⭐
+
+**File:** `core_engine/system/central_risk_manager.py`  
+**Layer:** GOVERNANCE_CONTROL  
+**Authority:** SINGLE POINT OF AUTHORITY for ALL trades  
+**Responsibility:** Authorize or reject ALL trading decisions
+
+### MANDATORY Risk Authorization Pattern
 
 **REQUIRED**: All trading components MUST use this exact pattern:
 
 ```python
 from core_engine.system.central_risk_manager import (
-    CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
+    CentralRiskManager, TradingDecisionRequest, TradingDecisionType, 
+    AuthorizationLevel, TradingAuthorization
 )
 
-async def execute_trading_strategy(self, signal):
-    # Step 1: Create authorization request
-    request = TradingDecisionRequest(
-        decision_type=TradingDecisionType.POSITION_ENTRY,
-        symbol=signal.symbol,
-        side=signal.signal_type.value,
-        quantity=signal.quantity,
-        strategy_id=self.strategy_id,
-        confidence=signal.confidence,
-        market_regime=current_regime,
-        requesting_component=self.component_id
-    )
+async def execute_trading_strategy(self, request: TradingDecisionRequest):
+    """
+    Execute trading strategy with MANDATORY risk authorization
     
-    # Step 2: Request authorization from RiskManager
-    authorization = await self.risk_manager.authorize_trading_decision(request)
+    This is the ONLY approved pattern for executing trades.
+    """
     
-    # Step 3: Execute only if authorized
+    # PHASE 7: Request authorization from CentralRiskManager (MANDATORY)
+    authorization: TradingAuthorization = await self.risk_manager.authorize_trading_decision(request)
+    
+    # Check authorization outcome
     if authorization.authorization_level != AuthorizationLevel.REJECTED:
-        return await self.execution_engine.execute_authorized_trade(authorization)
+        # Proceed to Phase 8 (Rule 7: Execution Planning)
+        return authorization  # Pass to TradingEngine
     else:
-        self.logger.warning(f"Trade rejected: {authorization.rejection_reason}")
+        # Trade rejected - log and handle
+        self.logger.warning(
+            f"Trade REJECTED by RiskManager: {authorization.rejection_reason}\n"
+            f"Symbol: {request.symbol}, Qty: {request.quantity}, "
+            f"Confidence: {request.confidence:.2%}"
+        )
         return None
 ```
+
+### Authorization Processing Logic
+
+```python
+async def authorize_trading_decision(
+    self, 
+    request: TradingDecisionRequest
+) -> TradingAuthorization:
+    """
+    Authorize or reject trading decision
+    
+    Performs 9 mandatory checks before authorizing any trade.
+    """
+    
+    # CHECK 1: Signal confidence
+    if request.confidence < self.risk_limits.min_signal_confidence:
+        return self._reject_authorization(
+            request, 
+            f"Confidence {request.confidence:.2%} below threshold"
+        )
+    
+    # CHECK 2: Cash availability (BUY orders)
+    if request.side.lower() == 'buy':
+        required_cash = request.quantity * request.current_price
+        if required_cash > self.available_cash:
+            # Adjust quantity or reject
+            max_affordable = self.available_cash / request.current_price
+            if max_affordable < request.quantity * 0.5:  # Less than 50% affordable
+                return self._reject_authorization(
+                    request,
+                    f"Insufficient cash: need ${required_cash:,.2f}, have ${self.available_cash:,.2f}"
+                )
+            else:
+                # Partial fill authorization
+                request.quantity = max_affordable
+    
+    # CHECK 3: Position availability (SELL orders)
+    elif request.side.lower() == 'sell':
+        current_position = self.current_positions.get(request.symbol, 0.0)
+        if current_position <= 0:
+            return self._reject_authorization(
+                request,
+                f"No position to sell: current position = {current_position}"
+            )
+        if request.quantity > current_position:
+            # Cap at available position
+            request.quantity = current_position
+    
+    # CHECK 4: Position size limits
+    new_position_value = request.quantity * request.current_price
+    if new_position_value > self.risk_limits.max_position_size * self.portfolio_value:
+        return self._reject_authorization(
+            request,
+            f"Position size ${new_position_value:,.2f} exceeds limit"
+        )
+    
+    # CHECK 5: Concentration limits
+    concentration = new_position_value / self.portfolio_value
+    if concentration > self.risk_limits.max_concentration:
+        return self._reject_authorization(
+            request,
+            f"Concentration {concentration:.2%} exceeds limit"
+        )
+    
+    # CHECK 6: Daily VaR limits
+    current_var = self._calculate_current_var()
+    if current_var > self.risk_limits.max_daily_var:
+        return self._reject_authorization(
+            request,
+            f"Daily VaR {current_var:.2%} exceeds limit"
+        )
+    
+    # CHECK 7: Strategy allocation limits
+    strategy_allocation = self._get_strategy_allocation(request.strategy_id)
+    if strategy_allocation > self.risk_limits.max_strategy_allocation:
+        return self._reject_authorization(
+            request,
+            f"Strategy allocation {strategy_allocation:.2%} exceeds limit"
+        )
+    
+    # CHECK 8: Regime-adjusted risk scaling
+    regime_multiplier = self._get_regime_risk_multiplier(request.market_regime)
+    adjusted_quantity = request.quantity * regime_multiplier
+    
+    # CHECK 9: Emergency mode
+    if self.emergency_mode:
+        return self._reject_authorization(
+            request,
+            "System in emergency mode - all trades blocked"
+        )
+    
+    # ALL CHECKS PASSED - Authorize trade
+    authorization = TradingAuthorization(
+        authorization_id=str(uuid.uuid4()),
+        request_id=request.request_id,
+        authorization_level=AuthorizationLevel.AUTOMATIC,
+        authorized=True,
+        authorized_quantity=adjusted_quantity,
+        authorization_timestamp=datetime.now(),
+        risk_budget_allocated=new_position_value * 0.02,  # 2% risk
+        conditions=['regime_adjusted', 'standard_limits'],
+        expiry_time=datetime.now() + timedelta(seconds=request.max_execution_time)
+    )
+    
+    # Store active authorization
+    self.active_authorizations[authorization.authorization_id] = authorization
+    
+    return authorization
+```
+
+### Output Data Structure: TradingAuthorization
+
+```python
+@dataclass
+class TradingAuthorization:
+    """Authorization output from CentralRiskManager"""
+    
+    # Authorization identity
+    authorization_id: str                    # Unique authorization token
+    request_id: str                          # Original request ID
+    authorization_level: AuthorizationLevel  # AUTOMATIC/STANDARD/ELEVATED/REJECTED
+    
+    # Authorization details
+    authorized: bool                         # True if authorized
+    authorized_quantity: float               # May differ from requested
+    authorization_timestamp: datetime
+    
+    # Risk constraints
+    risk_budget_allocated: float            # Risk budget allocated for this trade
+    max_position_size: float                # Position size limit
+    max_execution_time: int                 # Time limit in seconds
+    
+    # Conditions and restrictions
+    conditions: List[str]                   # Execution conditions
+    restrictions: List[str]                 # Trading restrictions
+    
+    # Rejection (if rejected)
+    rejection_reason: Optional[str] = None
+    
+    # Metadata
+    expiry_time: datetime                   # Authorization expires
+    metadata: Dict[str, Any] = field(default_factory=dict)
+```
+
+**This authorization object is passed to Rule 7 (Phase 8) for execution planning.**
+
+---
+
+## Component Responsibility Matrix (Phases 6-7)
+
+| Phase | Component | Input | Output | Can Authorize Trades? | Can Execute Trades? | Can Update Positions? |
+|-------|-----------|-------|--------|----------------------|--------------------|-----------------------|
+| **6** | StrategyManager | Strategy Signals | TradingDecisionRequest | ❌ NO | ❌ NO | ❌ NO |
+| **7** | CentralRiskManager | TradingDecisionRequest | TradingAuthorization | ✅ YES (ONLY HERE) | ❌ NO | ✅ YES (ONLY HERE) |
+
+**KEY PRINCIPLE:** Only CentralRiskManager can authorize trades and update positions. ALL other components are READ-ONLY.
+
+---
 
 ## Risk Manager Integration Requirements
 
 All trading components MUST:
-- Register with the RiskManager during initialization
-- Route ALL trading decisions through `authorize_trading_decision()`
-- Respect authorization limits (quantity, risk budget, position limits)
-- Implement proper error handling for rejected trades
+1. **Register** with the RiskManager during initialization
+2. **Route ALL** trading decisions through `authorize_trading_decision()`
+3. **Respect** authorization limits (quantity, risk budget, position limits)
+4. **Handle** rejected trades gracefully with proper logging
+5. **Never bypass** risk authorization (PROHIBITED)
 
 ## Regime-Aware Risk Management
 
@@ -237,14 +583,195 @@ elif request.side.lower() == 'sell':
         authorized_qty = min(authorized_qty, max_sellable)
 ```
 
-## PROHIBITED Risk Patterns
+## PROHIBITED Risk Patterns (Rule 4 Violations)
 
-❌ **Direct Position Management**: Components cannot modify positions directly
-❌ **Risk Limit Bypassing**: Cannot circumvent risk checks
-❌ **Independent Risk Assessment**: Must use centralized risk evaluation
-❌ **Unauthorized Trading**: All trades require explicit authorization tokens
-❌ **Cash Overdraft**: BUY orders must validate cash availability
-❌ **Short Selling Without Position**: SELL orders must validate position availability
+### ❌ PROHIBITED: Bypassing Risk Authorization
+
+```python
+# ❌ BAD: Executing trades without authorization
+class BadTradingEngine:
+    async def execute_trade(self, signal):
+        # VIOLATES RULE 4: No authorization check!
+        order = Order(symbol=signal.symbol, quantity=signal.quantity)
+        result = await self.broker.place_order(order)  # ❌ PROHIBITED!
+        return result
+```
+
+**Why This is Bad:**
+- ❌ Bypasses ALL risk checks (position limits, cash availability, VaR)
+- ❌ No audit trail
+- ❌ Can cause portfolio blow-up
+- ❌ Violates governance model
+
+### ❌ PROHIBITED: Direct Position Updates
+
+```python
+# ❌ BAD: Updating positions outside RiskManager
+class BadPortfolioManager:
+    async def update_position(self, symbol, quantity):
+        # VIOLATES RULE 4: Only RiskManager can update positions!
+        self.positions[symbol] += quantity  # ❌ PROHIBITED!
+```
+
+**Why This is Bad:**
+- ❌ Creates position discrepancies
+- ❌ Risk Manager has stale position data
+- ❌ Breaks single source of truth
+- ❌ Risk limits based on wrong positions
+
+### ❌ PROHIBITED: Independent Risk Assessment
+
+```python
+# ❌ BAD: Component doing own risk checks
+class BadStrategy:
+    async def check_risk(self, signal):
+        # VIOLATES RULE 4: Only RiskManager assesses risk!
+        if signal.quantity * signal.price < 10000:  # ❌ PROHIBITED!
+            return True  # Component decides risk independently
+```
+
+**Why This is Bad:**
+- ❌ Inconsistent risk standards
+- ❌ Bypasses centralized governance
+- ❌ Each component has different limits
+- ❌ No portfolio-level risk view
+
+### ✅ CORRECT: Proper Authorization Pattern
+
+```python
+# ✅ GOOD: Proper authorization flow
+class GoodTradingEngine:
+    async def execute_trade(self, request: TradingDecisionRequest):
+        # ✅ Step 1: Get authorization (MANDATORY per Rule 4)
+        authorization = await self.risk_manager.authorize_trading_decision(request)
+        
+        # ✅ Step 2: Check authorization
+        if authorization.authorization_level == AuthorizationLevel.REJECTED:
+            self.logger.warning(f"Trade rejected: {authorization.rejection_reason}")
+            return None
+        
+        # ✅ Step 3: Execute ONLY with authorization
+        result = await self._execute_authorized(authorization)
+        
+        # ✅ Step 4: Report result back to RiskManager
+        await self.risk_manager.on_execution_complete(authorization.authorization_id, result)
+        
+        return result
+```
+
+---
+
+## Position Management Authority (CRITICAL)
+
+### SINGLE SOURCE OF TRUTH: CentralRiskManager
+
+**The CentralRiskManager is the ONLY component that can update positions.**
+
+### Position Update Flow (MANDATORY)
+
+```python
+# MANDATORY: All position updates flow through RiskManager
+class CentralRiskManager:
+    async def update_position(
+        self, 
+        symbol: str, 
+        side: str, 
+        quantity: float, 
+        price: float, 
+        timestamp: datetime
+    ) -> Dict[str, Any]:
+        """
+        Update position and notify all components
+        
+        ONLY THIS METHOD can modify positions.
+        """
+        # Get current position
+        current_position = self.current_positions.get(symbol, 0.0)
+        
+        # Calculate new position
+        if side.lower() == 'buy':
+            new_position = current_position + quantity
+            self.available_cash -= (quantity * price)  # Reduce cash
+        elif side.lower() == 'sell':
+            new_position = current_position - quantity
+            self.available_cash += (quantity * price)  # Increase cash
+        
+        # Update position
+        self.current_positions[symbol] = new_position
+        
+        # Record position change in history
+        position_change = {
+            'timestamp': timestamp,
+            'symbol': symbol,
+            'side': side,
+            'quantity': quantity,
+            'price': price,
+            'previous_position': current_position,
+            'new_position': new_position,
+            'position_value': new_position * price
+        }
+        self.position_history.append(position_change)
+        
+        # Update portfolio metrics
+        self._update_portfolio_metrics()
+        
+        # NOTIFY all dependent components
+        await self._notify_position_change(position_change)
+        
+        return {
+            'symbol': symbol,
+            'position': new_position,
+            'position_value': new_position * price,
+            'portfolio_value': self.portfolio_value,
+            'available_cash': self.available_cash
+        }
+    
+    async def _notify_position_change(self, position_change: Dict[str, Any]):
+        """Notify all components of position update"""
+        # Notify Portfolio Manager (read-only)
+        if self.portfolio_manager:
+            await self.portfolio_manager.on_position_update(position_change)
+        
+        # Notify Analytics Engine (read-only)
+        if self.analytics_engine:
+            await self.analytics_engine.on_position_update(position_change)
+        
+        # Notify Risk Monitoring (read-only)
+        if self.risk_monitor:
+            await self.risk_monitor.on_position_update(position_change)
+```
+
+### Position Callback Pattern (for other components)
+
+```python
+# Other components receive position updates via callbacks (READ-ONLY)
+class EnhancedPortfolioManager:
+    async def on_position_update(self, position_change: Dict[str, Any]):
+        """
+        Receive position update from RiskManager (READ-ONLY)
+        
+        This component CANNOT modify positions - only track them.
+        """
+        symbol = position_change['symbol']
+        new_position = position_change['new_position']
+        
+        # Update local tracking (READ-ONLY)
+        self.position_tracking[symbol] = {
+            'position': new_position,
+            'last_updated': position_change['timestamp'],
+            'position_value': position_change['position_value']
+        }
+        
+        # Update analytics
+        self._update_position_analytics(symbol, new_position)
+        
+        self.logger.info(
+            f"📊 Position update received: {symbol} = {new_position} "
+            f"(Source: CentralRiskManager per Rule 4)"
+        )
+```
+
+---
 
 ## Centralized Position Management Framework
 
