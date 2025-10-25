@@ -1263,8 +1263,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         
         # Signal confidence validation (from test findings)
         if request and hasattr(request, 'confidence'):
-            if request.confidence < self.config.min_signal_confidence:
-                logger.warning(f"Signal confidence {request.confidence:.2f} below minimum {self.config.min_signal_confidence}")
+            if request.confidence < self.min_signal_confidence:
+                logger.warning(f"Signal confidence {request.confidence:.2f} below minimum {self.min_signal_confidence}")
                 return AuthorizationLevel.REJECTED
         
         # Adjust risk impact for regime
@@ -1459,8 +1459,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         
         # Check confidence first
         if request and hasattr(request, 'confidence'):
-            if request.confidence < self.config.min_signal_confidence:
-                reasons.append(f"Signal confidence {request.confidence:.2f} below minimum {self.config.min_signal_confidence:.2f}")
+            if request.confidence < self.min_signal_confidence:
+                reasons.append(f"Signal confidence {request.confidence:.2f} below minimum {self.min_signal_confidence:.2f}")
         
         if not position_check:
             reasons.append("Position limit exceeded")
