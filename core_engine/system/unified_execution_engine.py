@@ -527,6 +527,360 @@ class AdaptiveAlgorithm(IExecutionAlgorithm):
         return algorithm.estimate_market_impact(request)
 
 
+class VWAPAlgorithm(IExecutionAlgorithm):
+    """
+    Volume-Weighted Average Price (VWAP) execution algorithm
+    
+    Executes trades to match the volume profile of the market,
+    minimizing market impact by trading in proportion to market volume.
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self._test_mode = False
+        self.impact_model = MarketImpactModel()
+        self.order_manager = OrderManager()
+    
+    @property
+    def test_mode(self) -> bool:
+        """Get test mode"""
+        return self._test_mode
+    
+    @test_mode.setter
+    def test_mode(self, value: bool):
+        """Set test mode"""
+        self._test_mode = value
+    
+    async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        """
+        Execute using VWAP strategy
+        
+        Slices order to match historical volume profile
+        """
+        try:
+            start_time = datetime.now()
+            quantity = request.authorization.quantity
+            symbol = request.authorization.symbol
+            side = request.authorization.side
+            
+            # Get historical volume profile (mock for now)
+            volume_profile = self._get_volume_profile(symbol)
+            
+            # Create order slices based on volume profile
+            order_slices = self._create_vwap_slices(quantity, volume_profile, request.time_horizon)
+            
+            logger.info(
+                f"🎯 VWAP execution starting: {symbol} {side.upper()} {quantity} "
+                f"over {request.time_horizon}s in {len(order_slices)} slices"
+            )
+            
+            # Test mode: return simulated result
+            if self._test_mode:
+                return self._create_test_result(request, quantity, order_slices)
+            
+            # Execute order slices
+            fills = []
+            total_filled = 0.0
+            total_value = 0.0
+            
+            for i, (slice_qty, slice_timing) in enumerate(order_slices):
+                # Wait for scheduled time
+                await asyncio.sleep(slice_timing)
+                
+                # Execute slice (mock execution)
+                fill_price = 100.0 + np.random.normal(0, 0.1)  # Mock fill
+                fill_qty = slice_qty
+                
+                fill = {
+                    'slice': i + 1,
+                    'quantity': fill_qty,
+                    'price': fill_price,
+                    'timestamp': datetime.now(),
+                    'value': fill_qty * fill_price
+                }
+                fills.append(fill)
+                
+                total_filled += fill_qty
+                total_value += fill['value']
+                
+                logger.info(f"   Slice {i+1}/{len(order_slices)}: {fill_qty:.0f} @ ${fill_price:.2f}")
+            
+            # Calculate VWAP
+            avg_fill_price = total_value / total_filled if total_filled > 0 else 0.0
+            
+            # Create execution result
+            result = ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=request.authorization.authorization_id,
+                status=ExecutionStatus.FILLED,
+                filled_quantity=total_filled,
+                avg_fill_price=avg_fill_price,
+                execution_time=(datetime.now() - start_time).total_seconds(),
+                algorithm_used=ExecutionAlgorithm.VWAP,
+                fills=fills,
+                market_impact=self.estimate_market_impact(request)
+            )
+            
+            result.execution_log.append(
+                f"VWAP execution complete: {len(fills)} slices, "
+                f"avg price=${avg_fill_price:.2f}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"VWAP execution failed: {e}")
+            result = ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=request.authorization.authorization_id,
+                status=ExecutionStatus.FAILED,
+                algorithm_used=ExecutionAlgorithm.VWAP
+            )
+            result.execution_log.append(f"Execution failed: {e}")
+            return result
+    
+    def _get_volume_profile(self, symbol: str) -> List[float]:
+        """
+        Get historical intraday volume profile
+        
+        In production, this would query actual market data.
+        Returns normalized volume distribution across trading day.
+        """
+        # Mock volume profile (higher volume at open/close, lower midday)
+        profile = [
+            0.15,  # 9:30-10:00 (high open volume)
+            0.10,  # 10:00-11:00
+            0.08,  # 11:00-12:00
+            0.07,  # 12:00-13:00 (lunch, low volume)
+            0.08,  # 13:00-14:00
+            0.10,  # 14:00-15:00
+            0.12,  # 15:00-15:30
+            0.15,  # 15:30-16:00 (high close volume)
+            0.15   # 16:00 (close)
+        ]
+        return profile
+    
+    def _create_vwap_slices(
+        self, 
+        total_quantity: float, 
+        volume_profile: List[float],
+        time_horizon: int
+    ) -> List[Tuple[float, float]]:
+        """
+        Create order slices based on volume profile
+        
+        Returns: List of (quantity, timing_seconds) tuples
+        """
+        # Calculate slice quantities proportional to volume
+        total_profile = sum(volume_profile)
+        slices = []
+        
+        # Distribute quantity across volume periods
+        time_per_slice = time_horizon / len(volume_profile)
+        
+        for i, vol_pct in enumerate(volume_profile):
+            slice_qty = total_quantity * (vol_pct / total_profile)
+            slice_timing = i * time_per_slice
+            slices.append((slice_qty, slice_timing))
+        
+        return slices
+    
+    def _create_test_result(
+        self, 
+        request: ExecutionRequest, 
+        quantity: float,
+        order_slices: List[Tuple[float, float]]
+    ) -> ExecutionResult:
+        """Create test mode result"""
+        # Simulate fills
+        fills = []
+        total_value = 0.0
+        
+        for i, (slice_qty, _) in enumerate(order_slices):
+            fill_price = 100.0 + np.random.normal(0, 0.05)
+            fills.append({
+                'slice': i + 1,
+                'quantity': slice_qty,
+                'price': fill_price,
+                'value': slice_qty * fill_price,
+                'timestamp': datetime.now()
+            })
+            total_value += slice_qty * fill_price
+        
+        avg_price = total_value / quantity
+        
+        return ExecutionResult(
+            request_id=request.request_id,
+            authorization_id=request.authorization.authorization_id,
+            status=ExecutionStatus.FILLED,
+            filled_quantity=quantity,
+            avg_fill_price=avg_price,
+            execution_time=request.time_horizon,
+            algorithm_used=ExecutionAlgorithm.VWAP,
+            fills=fills,
+            market_impact=self.estimate_market_impact(request)
+        )
+    
+    def estimate_execution_time(self, request: ExecutionRequest) -> float:
+        """Estimate VWAP execution time (uses full time horizon)"""
+        return request.time_horizon
+    
+    def estimate_market_impact(self, request: ExecutionRequest) -> float:
+        """Estimate market impact for VWAP execution"""
+        # VWAP typically has lower impact than aggressive strategies
+        return self.impact_model.estimate_impact(
+            quantity=request.authorization.quantity,
+            price=100.0,  # Mock price
+            urgency=request.urgency
+        ) * 0.7  # 30% reduction vs aggressive execution
+
+
+class OrderManager:
+    """
+    Manages order lifecycle and fill tracking
+    
+    Handles:
+    - Order creation and submission
+    - Fill monitoring and aggregation
+    - Partial fill management
+    - Order cancellation
+    """
+    
+    def __init__(self):
+        self.active_orders: Dict[str, Dict[str, Any]] = {}
+        self.order_history: List[Dict[str, Any]] = []
+        self.fills: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    
+    def create_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        limit_price: Optional[float] = None
+    ) -> str:
+        """
+        Create a new order
+        
+        Returns: order_id
+        """
+        order_id = str(uuid.uuid4())
+        
+        order = {
+            'order_id': order_id,
+            'symbol': symbol,
+            'side': side,
+            'quantity': quantity,
+            'order_type': order_type,
+            'limit_price': limit_price,
+            'status': 'pending',
+            'filled_quantity': 0.0,
+            'remaining_quantity': quantity,
+            'avg_fill_price': 0.0,
+            'created_at': datetime.now(),
+            'fills': []
+        }
+        
+        self.active_orders[order_id] = order
+        logger.info(f"📝 Order created: {order_id} - {symbol} {side.upper()} {quantity}")
+        
+        return order_id
+    
+    def add_fill(
+        self,
+        order_id: str,
+        fill_quantity: float,
+        fill_price: float,
+        fill_timestamp: Optional[datetime] = None
+    ) -> bool:
+        """
+        Add a fill to an order
+        
+        Handles partial fills and order completion
+        """
+        if order_id not in self.active_orders:
+            logger.warning(f"Order {order_id} not found")
+            return False
+        
+        order = self.active_orders[order_id]
+        
+        if fill_timestamp is None:
+            fill_timestamp = datetime.now()
+        
+        # Create fill record
+        fill = {
+            'fill_id': str(uuid.uuid4()),
+            'quantity': fill_quantity,
+            'price': fill_price,
+            'timestamp': fill_timestamp,
+            'value': fill_quantity * fill_price
+        }
+        
+        # Update order
+        order['fills'].append(fill)
+        order['filled_quantity'] += fill_quantity
+        order['remaining_quantity'] -= fill_quantity
+        
+        # Recalculate average fill price
+        total_value = sum(f['value'] for f in order['fills'])
+        order['avg_fill_price'] = total_value / order['filled_quantity']
+        
+        # Update order status
+        if order['remaining_quantity'] <= 0:
+            order['status'] = 'filled'
+            order['completed_at'] = fill_timestamp
+            logger.info(f"✅ Order {order_id[:8]}... FILLED @ ${order['avg_fill_price']:.2f}")
+        else:
+            order['status'] = 'partially_filled'
+            logger.info(
+                f"📊 Order {order_id[:8]}... PARTIAL FILL: "
+                f"{order['filled_quantity']:.0f}/{order['quantity']:.0f} "
+                f"@ ${fill_price:.2f}"
+            )
+        
+        # Store fill
+        self.fills[order_id].append(fill)
+        
+        return True
+    
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an active order"""
+        if order_id not in self.active_orders:
+            logger.warning(f"Order {order_id} not found for cancellation")
+            return False
+        
+        order = self.active_orders[order_id]
+        order['status'] = 'cancelled'
+        order['cancelled_at'] = datetime.now()
+        
+        # Move to history
+        self.order_history.append(order)
+        del self.active_orders[order_id]
+        
+        logger.info(f"❌ Order {order_id[:8]}... cancelled")
+        return True
+    
+    def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
+        """Get order status and fills"""
+        if order_id in self.active_orders:
+            return self.active_orders[order_id]
+        
+        # Check history
+        for order in reversed(self.order_history):
+            if order['order_id'] == order_id:
+                return order
+        
+        return None
+    
+    def get_fills(self, order_id: str) -> List[Dict[str, Any]]:
+        """Get all fills for an order"""
+        return self.fills.get(order_id, [])
+    
+    def get_active_orders(self) -> Dict[str, Dict[str, Any]]:
+        """Get all active orders"""
+        return self.active_orders.copy()
+
+
 class ExecutionValidator:
     """Validates execution requests against authorization and risk limits"""
     
@@ -591,6 +945,7 @@ class UnifiedExecutionEngine(ISystemComponent):
         self.algorithms = {
             ExecutionAlgorithm.MARKET: MarketAlgorithm(config),
             ExecutionAlgorithm.TWAP: TWAPAlgorithm(config),
+            ExecutionAlgorithm.VWAP: VWAPAlgorithm(config),  # Week 3 Day 1: VWAP added
             ExecutionAlgorithm.ADAPTIVE: AdaptiveAlgorithm(config)
         }
         
