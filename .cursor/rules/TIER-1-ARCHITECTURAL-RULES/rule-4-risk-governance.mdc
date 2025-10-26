@@ -5,9 +5,15 @@ description: "Rule 4: Risk Governance and Authorization Pipeline - Complete Spec
 
 # Rule 4: Risk Governance and Authorization Pipeline
 
-**Version:** 2.0 (Enhanced with Complete Pipeline Specification)  
+**Version:** 3.0 (Enhanced with Institutional Requirements)  
 **Date:** October 25, 2025  
 **Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Enhancements in v3.0:**
+- 🔴 **Phase 7A:** Pre-Trade Compliance Checks (7 mandatory regulatory checks)
+- 🔴 **Phase 7B:** Trading Circuit Breakers & Kill Switches (5 protection mechanisms)
+- 🟠 **Enhanced Position Management:** Real-time P&L tracking + Broker reconciliation
+- See detailed specifications: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
 
 ---
 
@@ -374,14 +380,177 @@ class TradingAuthorization:
 
 ---
 
-## Component Responsibility Matrix (Phases 6-7)
+## ENHANCED: Phase 7A - Pre-Trade Compliance (CRITICAL) 🔴
+
+**Component:** `PreTradeComplianceChecker` (NEW - Institutional Requirement)  
+**File:** `core_engine/system/compliance_checker.py`  
+**Authority:** GOVERNANCE_CONTROL  
+**Priority:** CRITICAL - Regulatory compliance
+
+### 7 Mandatory Compliance Checks
+
+The `PreTradeComplianceChecker` performs regulatory compliance validation **BEFORE** risk authorization:
+
+1. **Restricted Securities List** - Internal compliance restrictions
+2. **Hard-to-Borrow (Reg SHO)** - Share locate requirements for short sales
+3. **Insider Blackout Periods** - Earnings blackouts, MNPI periods
+4. **13D/G Filing Triggers** - 5% ownership disclosure requirements
+5. **Pattern Day Trading Rules** - 4 trades in 5 days, $25K minimum (Reg T)
+6. **Concentration Limits** - Position concentration tracking
+7. **Watch List Monitoring** - Compliance watch list alerts
+
+### Enhanced Authorization Flow
+
+```
+TradingDecisionRequest
+         ↓
+  [Phase 0: Circuit Breakers] ← Check system health FIRST
+         ↓
+  [Phase 7A: Compliance] ← NEW: Regulatory checks
+         ↓ (if approved)
+  [Phase 7: Risk Authorization] ← Existing risk checks
+         ↓ (if authorized)
+  [Phase 8: Execution Planning] → Rule 7
+```
+
+**Integration Pattern:**
+```python
+async def authorize_trading_decision(self, request):
+    # STEP 0: Circuit Breaker Checks (Phase 7B)
+    breaker_status = await self.circuit_breakers.check_circuit_breakers()
+    if not breaker_status.can_trade:
+        return self._reject_authorization(request, "CIRCUIT BREAKER")
+    
+    # STEP 1: Compliance Checks (Phase 7A - NEW)
+    compliance = await self.compliance_checker.check_pre_trade_compliance(request)
+    if not compliance.approved:
+        return self._reject_authorization(request, f"COMPLIANCE: {compliance.rejection_reason}")
+    
+    # STEP 2: Risk Authorization (Phase 7 - Existing)
+    # ... perform 9 mandatory risk checks ...
+    
+    return authorization
+```
+
+---
+
+## ENHANCED: Phase 7B - Circuit Breakers & Kill Switches (CRITICAL) 🔴
+
+**Component:** `TradingCircuitBreakers` (NEW - System Safety Requirement)  
+**File:** `core_engine/system/circuit_breakers.py`  
+**Authority:** SYSTEM_CONTROL  
+**Priority:** CRITICAL - Catastrophic loss prevention
+
+### 5 Circuit Breaker Mechanisms
+
+1. **Manual Kill Switch** (highest priority)
+   - Instant trading halt
+   - Requires manual override to resume
+   - Authorization code validation
+
+2. **Order Rate Limiting**
+   - Default: 10 orders/second max
+   - Warning at 80% threshold
+   - Auto-halt on breach
+
+3. **Daily Loss Limit**
+   - Default: -2% of portfolio
+   - Warning at 80% (-1.6%)
+   - Auto-halt on breach
+
+4. **Drawdown from High**
+   - Default: -5% from intraday high
+   - Warning at 80% (-4%)
+   - Tracks intraday P&L peak
+
+5. **Position Concentration**
+   - Per-trade validation
+   - Portfolio-level tracking
+
+### Circuit Breaker Levels
+
+- 🟢 **NORMAL** - All systems operational
+- 🟡 **WARNING** - Approaching limits (80% threshold)
+- 🟠 **CAUTION** - Limit breached
+- 🔴 **HALT** - Trading stopped
+- ⚫ **EMERGENCY** - System shutdown
+
+**Emergency Actions on Halt:**
+1. Set halt flag
+2. Cancel all pending orders
+3. Optional: Flatten all positions
+4. Notify risk team (email/SMS/Slack)
+5. Complete audit trail logging
+
+---
+
+## ENHANCED: Position Management Authority (HIGH) 🟠
+
+### Real-Time P&L Tracking (NEW)
+
+**Component:** `RealTimePnLTracker`  
+**Integration:** Within `CentralRiskManager`  
+**Updates:** Every market data tick
+
+**Tracks:**
+- Unrealized P&L (mark-to-market)
+- Realized P&L (closed positions)
+- Total P&L (realized + unrealized)
+- Intraday high-water mark
+- Drawdown from high
+- Position-level attribution
+- Strategy-level attribution
+
+### Position Reconciliation (NEW)
+
+**Component:** `PositionReconciliation`  
+**Schedule:** Every 5 minutes (1 minute if discrepancies)  
+**Auto-Correction:** Severe discrepancies (>$10K)
+
+**Severity Classification:**
+- Minor (<$1K): Log and monitor
+- Moderate ($1K-$10K): Alert risk team  
+- Severe (>$10K): Auto-correct to broker + alert
+
+**Reconciliation Flow:**
+```python
+async def reconcile_positions(self):
+    # 1. Get broker positions via API
+    broker_positions = await self.broker_api.get_positions()
+    
+    # 2. Compare with internal tracking
+    internal_positions = self.risk_manager.current_positions
+    
+    # 3. Identify discrepancies
+    discrepancies = self._find_discrepancies(broker_positions, internal_positions)
+    
+    # 4. Handle based on severity
+    for disc in discrepancies:
+        if disc.severity == 'severe':
+            # Trust broker over internal (safer)
+            await self._auto_correct_position(disc)
+            await self._alert_risk_team(disc)
+```
+
+---
+
+## Component Responsibility Matrix (Phases 6-7 + Enhancements)
 
 | Phase | Component | Input | Output | Can Authorize Trades? | Can Execute Trades? | Can Update Positions? |
 |-------|-----------|-------|--------|----------------------|--------------------|-----------------------|
 | **6** | StrategyManager | Strategy Signals | TradingDecisionRequest | ❌ NO | ❌ NO | ❌ NO |
+| **7A** | PreTradeComplianceChecker | TradingDecisionRequest | ComplianceResult | ❌ NO | ❌ NO | ❌ NO |
+| **7B** | TradingCircuitBreakers | System State | CircuitBreakerStatus | ❌ NO | ❌ NO | ❌ NO |
 | **7** | CentralRiskManager | TradingDecisionRequest | TradingAuthorization | ✅ YES (ONLY HERE) | ❌ NO | ✅ YES (ONLY HERE) |
+| **7+** | RealTimePnLTracker | Market Data + Positions | P&LSnapshot | ❌ NO | ❌ NO | ❌ NO (READ-ONLY) |
+| **7+** | PositionReconciliation | Broker + Internal Positions | ReconciliationReport | ❌ NO | ❌ NO | ⚠️ YES (Auto-correct only) |
 
-**KEY PRINCIPLE:** Only CentralRiskManager can authorize trades and update positions. ALL other components are READ-ONLY.
+**KEY PRINCIPLE:** 
+- Only `PreTradeComplianceChecker` validates regulatory compliance
+- Only `TradingCircuitBreakers` can halt trading system-wide
+- Only `CentralRiskManager` authorizes trades and updates positions (primary authority)
+- `PositionReconciliation` can auto-correct positions only during severe discrepancies (trusts broker)
+- All other components are **READ-ONLY** observers
 
 ---
 
@@ -989,3 +1158,25 @@ self.authorization_audit.append(audit_entry)
 ```
 
 This governance model ensures **centralized risk control**, **comprehensive authorization**, and **complete audit trails** for all trading activities.
+
+---
+
+## Detailed Implementation Specifications
+
+**For complete implementation details, see:**
+- **File:** `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
+- **Sections:** Rule 4 Enhancements (Lines 23-940)
+
+**Components Fully Specified:**
+1. `PreTradeComplianceChecker` (300+ lines) - 7 regulatory checks
+2. `TradingCircuitBreakers` (350+ lines) - 5 protection mechanisms
+3. `RealTimePnLTracker` (200+ lines) - Tick-level P&L monitoring
+4. `PositionReconciliation` (200+ lines) - Broker position synchronization
+
+**Total:** 1,050+ lines of production-ready implementation code
+
+---
+
+**Last Updated:** October 25, 2025  
+**Status:** v3.0 - ACTIVE (Enhanced with Institutional Requirements)  
+**Related:** Rule 2 (Regime-First), Rule 3 (Data Pipeline), Rule 7 (Execution Management)

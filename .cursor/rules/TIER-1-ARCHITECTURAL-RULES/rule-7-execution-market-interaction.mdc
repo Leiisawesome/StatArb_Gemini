@@ -5,9 +5,16 @@ description: "Execution Management & Market Interaction (Consolidated Rules 6 & 
 
 # Rule 7: Execution Management & Portfolio Update Pipeline
 
-**Version:** 3.0 (Complete Pipeline Specification)
+**Version:** 4.0 (Enhanced with Institutional Execution Requirements)
 **Date:** October 25, 2025
 **Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Enhancements in v4.0:**
+- 🟠 **Phase 9+:** Order Rejection Handler (8 intelligent retry patterns)
+- 🟡 **Phase 10+:** Position Aging Monitor (strategy-specific holding limits)
+- 🟠 **Phase 11:** Real-Time P&L Tracking (integrated from Rule 4)
+- 🟠 **Phase 11:** Position Reconciliation (5-minute broker sync)
+- See detailed specifications: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
 
 ---
 
@@ -634,18 +641,160 @@ async def analyze_execution_quality(
 
 ---
 
-## Component Responsibility Matrix (Phases 8-11)
+## ENHANCED: Phase 9+ - Order Rejection Handler (HIGH) 🟠
+
+**Component:** `OrderRejectionHandler` (NEW - Operational Excellence)  
+**File:** `core_engine/system/order_rejection_handler.py`  
+**Authority:** OPERATIONAL  
+**Priority:** HIGH - 60-80% fill rate improvement
+
+### 8 Intelligent Rejection Patterns
+
+The `OrderRejectionHandler` analyzes broker rejection reasons and automatically attempts recovery:
+
+1. **Insufficient Margin** → Reduce quantity by 50%, retry
+2. **Stock Halted** → Wait for resumption (monitor market status)
+3. **Price Collar Violation** → Adjust price to within limits, retry
+4. **Connection Timeout** → Exponential backoff (5s, 10s, 30s)
+5. **Duplicate Order ID** → Generate new order ID, retry
+6. **Market Closed** → Cancel order (log for next session)
+7. **Position Limit Reached** → Escalate to risk team
+8. **Unknown Error** → Escalate with full diagnostics
+
+### Retry Strategy
+
+- **Max Retries:** 3 per order
+- **Backoff:** Exponential (5s, 10s, 30s)
+- **Modifications:** Pattern-specific (quantity, price, timing)
+- **Escalation:** After 3 failed attempts → Alert risk team
+
+**Integration:**
+```python
+async def handle_execution_result(self, result: ExecutionResult):
+    if result.status == ExecutionStatus.REJECTED:
+        # Intelligent rejection handling
+        resolution = await self.rejection_handler.handle_rejection(
+            order=result.order,
+            rejection_reason=result.rejection_reason,
+            rejection_code=result.rejection_code
+        )
+        
+        if resolution.action == 'RETRY':
+            # Retry with modifications
+            modified_order = resolution.modified_order
+            return await self.execute_order(modified_order)
+        elif resolution.action == 'ESCALATE':
+            # Alert risk team
+            await self._escalate_to_risk_team(result, resolution)
+```
+
+---
+
+## ENHANCED: Phase 10+ - Position Aging Monitor (MEDIUM) 🟡
+
+**Component:** `PositionAgingMonitor` (NEW - Capital Efficiency)  
+**File:** `core_engine/system/position_aging_monitor.py`  
+**Authority:** OPERATIONAL  
+**Priority:** MEDIUM - Capital efficiency optimization
+
+### Strategy-Specific Holding Limits
+
+Different strategies have different optimal holding periods:
+
+- **Arbitrage:** 2 days (fast convergence)
+- **Mean Reversion:** 3 days (price mean reversion)
+- **Statistical Arbitrage:** 5 days (statistical convergence)
+- **Momentum:** 7 days (trend riding)
+- **Breakout:** 10 days (breakout follow-through)
+- **Trend Following:** 30 days (long-term trends)
+
+### Position Age Categories
+
+- 🟢 **Fresh** (<50% of limit): Normal operation
+- 🟡 **Aging** (50-80%): Monitor closely
+- 🟠 **Stale** (80-100%): Alert trader, prepare to close
+- 🔴 **Expired** (>100%): Auto-close position
+
+### Auto-Close Logic
+
+```python
+async def check_position_aging(self):
+    for symbol, position_info in self.risk_manager.position_tracking.items():
+        age_days = (datetime.now() - position_info['entry_time']).days
+        strategy_id = position_info['strategy_id']
+        max_age = self.max_holding_periods.get(strategy_id, 7)
+        
+        if age_days > max_age:
+            # Expired position - auto-close
+            logger.warning(f"🔴 Position {symbol} expired ({age_days} days > {max_age} days limit)")
+            await self.risk_manager.close_expired_position(symbol, reason='holding_period_exceeded')
+```
+
+---
+
+## ENHANCED: Phase 11 - Real-Time P&L Tracking (HIGH) 🟠
+
+**Component:** `RealTimePnLTracker` (ENHANCED from Rule 4)  
+**Integration:** Within `CentralRiskManager` and `EnhancedAnalyticsManager`  
+**Updates:** Every market data tick
+
+### Tick-Level P&L Monitoring
+
+- **Unrealized P&L:** Mark-to-market on every price update
+- **Realized P&L:** Updated on position closes
+- **Total P&L:** Realized + Unrealized
+- **Intraday High:** Peak P&L during trading day
+- **Drawdown:** Current P&L - Intraday High
+- **Position Attribution:** P&L by symbol
+- **Strategy Attribution:** P&L by strategy
+
+### Integration with Circuit Breakers
+
+Real-time P&L feeds directly into circuit breaker logic:
+- Daily Loss Limit: -2% → Auto-halt
+- Drawdown Limit: -5% from high → Auto-halt
+
+---
+
+## ENHANCED: Phase 11 - Position Reconciliation (HIGH) 🟠
+
+**Component:** `PositionReconciliation` (ENHANCED from Rule 4)  
+**Schedule:** Every 5 minutes (1 minute if discrepancies)  
+**Auto-Correction:** Severe discrepancies (>$10K)
+
+### Reconciliation Flow
+
+1. **Fetch Broker Positions:** Via API every 5 minutes
+2. **Compare Internal:** Match with `CentralRiskManager` positions
+3. **Calculate Discrepancies:** Symbol-by-symbol comparison
+4. **Classify Severity:**
+   - Minor (<$1K): Log and monitor
+   - Moderate ($1K-$10K): Alert risk team
+   - Severe (>$10K): Auto-correct + alert
+5. **Auto-Correction:** Trust broker over internal (safer approach)
+6. **Audit Logging:** Complete trail of all reconciliation actions
+
+---
+
+## Component Responsibility Matrix (Phases 8-11 + Enhancements)
 
 | Phase | Component | Input | Output | Can Authorize? | Can Execute? | Can Update Positions? |
 |-------|-----------|-------|--------|---------------|--------------|----------------------|
 | **8** | TradingEngine | TradingAuthorization | ExecutionRequest | ❌ NO | ❌ NO | ❌ NO |
 | **9** | UnifiedExecutionEngine | ExecutionRequest | ExecutionResult | ❌ NO | ✅ YES | ❌ NO |
+| **9+** | OrderRejectionHandler | ExecutionResult | RejectionResolution | ❌ NO | ⚠️ RETRY ONLY | ❌ NO |
 | **10** | CentralRiskManager | ExecutionResult | PositionUpdate | ✅ YES | ❌ NO | ✅ YES (ONLY HERE) |
+| **10+** | PositionAgingMonitor | Position Ages | AgingReport | ❌ NO | ❌ NO | ⚠️ Auto-close only |
 | **11** | AnalyticsManager | ExecutionResult | QualityMetrics | ❌ NO | ❌ NO | ❌ NO |
+| **11+** | RealTimePnLTracker | Market Data + Positions | P&LSnapshot | ❌ NO | ❌ NO | ❌ NO (READ-ONLY) |
+| **11+** | PositionReconciliation | Broker + Internal | ReconciliationReport | ❌ NO | ❌ NO | ⚠️ Auto-correct only |
 
 **KEY PRINCIPLE:** 
 - Only UnifiedExecutionEngine can **execute** trades
-- Only CentralRiskManager can **update positions**
+- Only CentralRiskManager can **update positions** (primary authority)
+- OrderRejectionHandler can **retry** rejected orders (with modifications)
+- PositionAgingMonitor can **auto-close** expired positions
+- PositionReconciliation can **auto-correct** severe discrepancies (trusts broker)
 - All other components are **read-only observers**
 
 ---
@@ -1340,5 +1489,24 @@ adjusted_impact = base_impact * impact_multiplier
 
 **This unified rule provides complete execution guidance from basic patterns through advanced market microstructure optimization.**
 
-**Last Updated:** October 21, 2025
-**Status:** ACTIVE (v2.0 - Consolidated Rules 6 & 12)
+---
+
+## Detailed Implementation Specifications
+
+**For complete implementation details, see:**
+- **File:** `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
+- **Sections:** Rule 7 Enhancements (Lines 941-2718)
+
+**Components Fully Specified:**
+1. `OrderRejectionHandler` (250+ lines) - 8 intelligent retry patterns
+2. `PositionAgingMonitor` (200+ lines) - Strategy-specific holding limits
+3. `RealTimePnLTracker` (200+ lines) - Tick-level P&L monitoring
+4. `PositionReconciliation` (200+ lines) - Broker position synchronization
+
+**Total:** 850+ lines of production-ready implementation code
+
+---
+
+**Last Updated:** October 25, 2025  
+**Status:** v4.0 - ACTIVE (Enhanced with Institutional Execution Requirements)  
+**Related:** Rule 2 (Regime-First), Rule 3 (Data Pipeline), Rule 4 (Risk Governance)

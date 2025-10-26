@@ -5,9 +5,14 @@ description: "Hierarchical System Architecture with Regime-First Principle"
 
 # Rule 2: Hierarchical System Architecture with Regime-First Principle ⭐
 
-**Version:** 2.0 (Consolidated with Rule 13)
-**Date:** October 21, 2025
+**Version:** 3.0 (Enhanced with Fast Regime Detection)
+**Date:** October 25, 2025
 **Status:** ACTIVE
+
+**Enhancements in v3.0:**
+- 🟡 **Fast Regime Detection:** 1-5 minute detection lag (vs 10-60 min traditional)
+- Uses leading indicators: VIX spikes, market breadth, order flow toxicity
+- See detailed specifications: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
 
 ---
 
@@ -379,6 +384,69 @@ async def initialize_system_with_regime_first():
 - Adaptive signal generation and filtering
 - Dynamic execution algorithm selection
 - Multi-timeframe regime analysis
+
+---
+
+## ENHANCED: Fast Regime Detection (MEDIUM) 🟡
+
+**Component:** `FastRegimeDetector` (NEW - Operational Excellence)  
+**File:** `core_engine/regime/fast_regime_detector.py`  
+**Authority:** OPERATIONAL  
+**Priority:** MEDIUM - 80-95% faster regime response
+
+### Why Fast Detection Matters
+
+**Traditional Regime Detection:**
+- Lag: 10-60 minutes (statistical window requirements)
+- Risk: System operates under wrong regime during rapid transitions
+- Impact: Missed flash crashes, late de-risking, suboptimal strategy selection
+
+**Fast Regime Detection:**
+- Lag: 1-5 minutes (leading indicators)
+- Improvement: 80-95% faster response
+- Protection: Flash crash detection, rapid crisis response
+
+### 4 Fast Indicators
+
+1. **VIX Spike Detection**
+   - Threshold: +20% in 5 minutes
+   - Signal: Volatility crisis regime
+   - Example: VIX 15 → 18 in 5 min → ALERT
+
+2. **Market Breadth Collapse**
+   - Threshold: >70% stocks declining
+   - Signal: High volatility / crisis regime
+   - Calculated from real-time market data
+
+3. **Order Book Imbalance**
+   - Threshold: >80% sell-side pressure
+   - Signal: Potential flash crash
+   - Monitors order flow toxicity
+
+4. **Volatility Spike (Intraday)**
+   - Threshold: >3x normal intraday volatility
+   - Signal: High volatility regime
+   - Rolling 15-minute comparison
+
+### Integration with Traditional Detection
+
+```python
+async def detect_regime(self):
+    # STEP 1: Check fast indicators (1-5 min detection)
+    fast_signal = await self.fast_detector.check_fast_regime_change()
+    
+    if fast_signal and fast_signal.severity in ['CRISIS', 'HIGH_VOL']:
+        # Override traditional detection with fast signal
+        logger.warning(f"⚡ Fast regime transition detected: {fast_signal.new_regime}")
+        return await self._apply_fast_regime_change(fast_signal)
+    
+    # STEP 2: Use traditional regime detection (10-60 min lag)
+    return await self._traditional_regime_detection()
+```
+
+**For complete implementation (200+ lines), see:**
+- File: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
+- Section: Rule 2 Enhancements (Lines 2519-2721)
 
 ---
 

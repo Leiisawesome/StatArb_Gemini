@@ -1,9 +1,20 @@
 ---
 alwaysApply: true
-description: "Multi-Strategy Coordination Standards"
+description: "Multi-Strategy Coordination Standards - Enhanced v2.0"
 ---
 
-# Rule 8: Multi-Strategy Coordination Standards - IMPLEMENTED ✅
+# Rule 5: Multi-Strategy Coordination Standards - IMPLEMENTED ✅
+
+**Version:** 2.0 (Enhanced with Correlation Analysis)  
+**Date:** October 25, 2025  
+**Status:** ACTIVE
+
+**Enhancements in v2.0:**
+- 🟢 **Strategy Correlation Analysis:** Daily correlation matrix (diversification monitoring)
+- Rebalancing recommendations for highly correlated strategies
+- See detailed specifications: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
+
+---
 
 All strategies within the core_engine coordinate through **fully implemented production components** that ensure **signal aggregation**, **conflict resolution**, and **unified risk management**.
 

@@ -1,9 +1,20 @@
 ---
 alwaysApply: true
-description: "Component Integration Standards for Core Engine"
+description: "Component Integration Standards for Core Engine - Enhanced v2.0"
 ---
 
 # Component Integration Standards for Core Engine
+
+**Version:** 2.0 (Enhanced with Advanced Health Monitoring)  
+**Date:** October 25, 2025  
+**Status:** ACTIVE
+
+**Enhancements in v2.0:**
+- 🟢 **Enhanced Health Monitoring:** Multi-dimensional health scoring (0-100)
+- Auto-recovery for impaired components
+- See detailed specifications: `docs/03_compliance_audits/RULE_ENHANCEMENTS_V2.md`
+
+---
 
 All components within the `core_engine` must integrate seamlessly with the [HierarchicalSystemOrchestrator](mdc:core_engine/system/hierarchical_orchestrator.py) and adhere to these standards:
 
