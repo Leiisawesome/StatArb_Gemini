@@ -40,7 +40,7 @@ class TestPhase3ProcessingPipeline:
         
         # Load test configuration
         cls.config = BacktestConfiguration.from_json(
-            'backtest/config/examples/single_strategy.json'
+            'backtest/config/examples/multi_strategy.json'
         )
         
         # Create engine instance

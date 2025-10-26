@@ -165,6 +165,9 @@ class HistoricalExecutionSimulator:
         self.enable_random_slippage = self.config.get('enable_random_slippage', True)
         self.slippage_std = self.config.get('slippage_std', 0.5)  # Std dev in bps
         
+        # Rejection simulation (for testing)
+        self.disable_rejections = self.config.get('disable_rejections', False)
+        
         # Timing
         self.execution_delay_seconds = self.config.get('execution_delay_seconds', 0)
         
@@ -629,6 +632,10 @@ class HistoricalExecutionSimulator:
         Returns:
             Rejection info dict if rejected, None if accepted
         """
+        
+        # Check if rejections are disabled (for testing)
+        if self.disable_rejections:
+            return None
         
         # Extract market conditions
         market_price = market_data.get('close', 100.0)

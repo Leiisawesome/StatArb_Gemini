@@ -185,13 +185,13 @@ class DataConfig:
     symbols: Optional[List[str]] = None
     """List of symbols to trade. Default: None (all available)"""
     
-    target_date: str = "2024-12-20"
-    """Target date for data retrieval. Format: YYYY-MM-DD"""
+    target_date: Optional[str] = None
+    """DEPRECATED: Target date for data retrieval. Use start_date/end_date. Format: YYYY-MM-DD"""
     
-    start_date: Optional[str] = None
+    start_date: str = "2024-12-20"
     """Start date for historical data. Format: YYYY-MM-DD"""
     
-    end_date: Optional[str] = None
+    end_date: str = "2024-12-20"
     """End date for historical data. Format: YYYY-MM-DD"""
     
     # Performance (composition)
@@ -711,12 +711,25 @@ class SignalConfig:
     
     Consolidated from core_engine/processing/signals/generator.py
     """
+    # Strategy weights
+    mean_reversion_weight: float = 0.4
+    """Mean reversion strategy weight. Default: 40%"""
+    
+    momentum_weight: float = 0.4
+    """Momentum strategy weight. Default: 40%"""
+    
+    volume_weight: float = 0.2
+    """Volume strategy weight. Default: 20%"""
+    
     # Signal thresholds
     signal_threshold: float = 0.6
     """Minimum signal threshold. Default: 60%"""
     
     confidence_threshold: float = 0.6
     """Minimum confidence threshold. Default: 60%"""
+    
+    strong_signal_threshold: float = 0.8
+    """Strong signal threshold. Default: 80%"""
     
     # Risk parameters
     max_position_size: float = 0.10
@@ -725,12 +738,43 @@ class SignalConfig:
     stop_loss_pct: float = 0.02
     """Stop loss percentage. Default: 2%"""
     
+    take_profit_pct: float = 0.04
+    """Take profit percentage. Default: 4%"""
+    
+    # Signal filtering
+    min_volume_ratio: float = 0.5
+    """Minimum volume ratio vs average. Default: 50%"""
+    
+    max_volatility_percentile: float = 0.95
+    """Maximum volatility percentile filter. Default: 95%"""
+    
+    # Mean reversion specific
+    rsi_oversold_threshold: float = 25
+    """RSI oversold threshold. Default: 25"""
+    
+    rsi_overbought_threshold: float = 75
+    """RSI overbought threshold. Default: 75"""
+    
+    zscore_threshold: float = 1.8
+    """Z-score threshold for mean reversion. Default: 1.8"""
+    
+    # Quality requirements
+    min_conditions_required: int = 1
+    """Minimum conditions required for signal. Default: 1"""
+    
+    confidence_scaling_factor: float = 0.8
+    """Confidence scaling factor. Default: 0.8"""
+    
     # Signal processing
     enable_filtering: bool = True
     """Enable signal filtering. Default: True"""
     
     aggregation_method: str = "weighted"
     """Signal aggregation method ('weighted', 'average', 'max'). Default: 'weighted'"""
+    
+    # Machine learning
+    enable_ml_signals: bool = True
+    """Enable machine learning signals. Default: True"""
     
     # Performance
     enable_caching: bool = True

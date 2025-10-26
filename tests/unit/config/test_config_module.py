@@ -36,7 +36,9 @@ class TestDataConfig:
         """Test DataConfig initialization with defaults."""
         config = DataConfig()
         assert config.symbols is None
-        assert config.target_date == "2024-12-20"
+        assert config.start_date == "2024-12-20"
+        assert config.end_date == "2024-12-20"
+        assert config.target_date is None
         assert config.enable_caching is True
         assert config.cache_ttl == 3600
 

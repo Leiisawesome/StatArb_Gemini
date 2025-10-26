@@ -320,8 +320,9 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     - IRegimeAware for regime adaptation (Rule 2)
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], data_config: Optional[Any] = None):
         self.config = StrategyManagerConfig(**config) if config else StrategyManagerConfig()
+        self.data_config = data_config  # Store data config for pipeline orchestrator
         self.component_id = f"strategy_manager_{uuid.uuid4().hex[:8]}"
         
         # Component references (set by Risk Manager)
@@ -493,7 +494,9 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 try:
                     logger.info("🔧 Initializing ProcessingPipelineOrchestrator (Rule 3)...")
                     self.pipeline_orchestrator = ProcessingPipelineOrchestrator(
-                        data_config=self.config.pipeline_config if self.config.pipeline_config else None
+                        data_config=self.data_config if self.data_config else (
+                            self.config.pipeline_config if self.config.pipeline_config else None
+                        )
                     )
                     await self.pipeline_orchestrator.initialize()
                     await self.pipeline_orchestrator.start()

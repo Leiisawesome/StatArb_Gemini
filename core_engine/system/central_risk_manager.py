@@ -30,7 +30,8 @@ from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
-from .interfaces import ISystemComponent, IRegimeAware
+from .interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
 from ..config.component_config import RiskConfig
@@ -487,8 +488,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             'regime': regime_context.primary_regime,
             'volatility_regime': regime_context.volatility_regime,
             'risk_multiplier': self.risk_multiplier,
-            'max_position_size_adjusted': self.config.max_position_size * self.risk_multiplier,
-            'max_daily_var_adjusted': self.config.max_daily_var * self.risk_multiplier,
+            'max_position_size_adjusted': self.max_position_size * self.risk_multiplier,
+            'max_daily_var_adjusted': self.max_daily_var * self.risk_multiplier,
             'adapted': True
         }
     
@@ -988,9 +989,9 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 try:
                     breaker_status = await self.circuit_breakers.check_circuit_breakers()
                     
-                    if not breaker_status.get('can_trade', True):
+                    if not breaker_status.can_trade:
                         # Trading halted by circuit breakers
-                        halt_reason = breaker_status.get('halt_reason', 'Circuit breaker activated')
+                        halt_reason = breaker_status.halt_reason or 'Circuit breaker activated'
                         logger.warning(f"🚨 Trade BLOCKED by circuit breaker: {halt_reason}")
                         
                         return TradingAuthorization(
@@ -1000,8 +1001,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         )
                     
                     # Log any warnings from circuit breakers
-                    if breaker_status.get('level') in ['WARNING', 'CAUTION']:
-                        logger.warning(f"⚠️ Circuit breaker warning: {breaker_status.get('message', 'Approaching limits')}")
+                    if breaker_status.level in [CircuitBreakerLevel.WARNING, CircuitBreakerLevel.CAUTION]:
+                        logger.warning(f"⚠️ Circuit breaker warning: {', '.join(breaker_status.warnings) if breaker_status.warnings else 'Approaching limits'}")
                 
                 except Exception as e:
                     # Log circuit breaker check error but don't block trade
@@ -1063,14 +1064,12 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     
                     # Perform comprehensive pre-trade compliance check
                     compliance_result = await self.compliance_checker.check_pre_trade_compliance(
-                        trade_id=request.request_id,
                         symbol=request.symbol,
-                        trade_type=request.side.lower(),
+                        side=request.side.lower(),
                         quantity=request.quantity,
                         price=request.current_price if request.current_price > 0 else 100.0,
-                        account_value=self.portfolio_value,
-                        current_positions=self.current_positions,
-                        timestamp=request.created_at
+                        strategy_id=request.strategy_id,
+                        account_id=None
                     )
                     
                     if not compliance_result.approved:
@@ -1079,12 +1078,12 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         authorization.rejection_reason = f"COMPLIANCE: {compliance_result.rejection_reason}"
                         
                         logger.warning(f"🚨 Trade rejected - Compliance violation: {compliance_result.rejection_reason}")
-                        logger.info(f"   Violations: {', '.join(compliance_result.violations)}")
+                        logger.info(f"   Violation type: {compliance_result.violation_type}")
                         
                         return authorization
                     
                     # Compliance approved - add metadata
-                    logger.info(f"✅ Compliance checks passed: {len(compliance_result.checks_passed)} checks")
+                    logger.info(f"✅ Compliance checks passed: {len(compliance_result.compliance_checks_performed)} checks")
                     
                 except Exception as e:
                     # Log compliance check error but don't block trade
@@ -1135,7 +1134,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 
                 # Set execution constraints
                 authorization.allowed_algorithms = self._get_allowed_algorithms(request)
-                authorization.max_execution_time = min(request.max_execution_time, self.config.max_execution_time)
+                authorization.max_execution_time = min(request.max_execution_time, self.max_execution_time)
                 
                 # Set conditions and monitoring
                 authorization.conditions = self._get_authorization_conditions(request, risk_impact)
@@ -1212,7 +1211,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             # Create execution request
             execution_request = ExecutionRequest(
                 authorization=execution_auth,
-                algorithm=execution_params.get('algorithm', self.config.default_execution_algorithm) if execution_params else self.config.default_execution_algorithm,
+                algorithm=execution_params.get('algorithm', self.default_execution_algorithm) if execution_params else self.default_execution_algorithm,
                 urgency=execution_params.get('urgency', ExecutionUrgency.NORMAL) if execution_params else ExecutionUrgency.NORMAL
             )
             
@@ -1246,7 +1245,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             volatility_adjustment = max(1.0, request.volatility_estimate)
             
             # Regime adjustment
-            regime_multiplier = self.config.regime_risk_multipliers.get(request.market_regime, 1.0)
+            regime_multiplier = self.regime_risk_multipliers.get(request.market_regime, 1.0)
             
             # Total risk impact
             total_impact = position_impact * volatility_adjustment * regime_multiplier
@@ -1269,8 +1268,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             position_value = abs(new_position * price)
             position_pct = position_value / self.portfolio_value
             
-            logger.warning(f"DEBUG: position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.config.max_position_size:.6f}")
-            return position_pct <= self.config.max_position_size
+            logger.warning(f"DEBUG: position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.max_position_size:.6f}")
+            return position_pct <= self.max_position_size
             
         except Exception as e:
             logger.error(f"Error checking position limits: {e}")
@@ -1288,7 +1287,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             position_value = abs(new_position * price)
             concentration = position_value / self.portfolio_value
             
-            return concentration <= self.config.position_concentration_limit
+            return concentration <= self.position_concentration_limit
             
         except Exception as e:
             logger.error(f"Error checking concentration limits: {e}")
@@ -1327,7 +1326,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         
         try:
             current_allocation = self.strategy_allocations.get(request.strategy_id, 0.0)
-            return current_allocation <= self.config.strategy_allocation_limit
+            return current_allocation <= self.strategy_allocation_limit
             
         except Exception as e:
             logger.error(f"Error checking strategy limits: {e}")
@@ -1336,7 +1335,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
     def _get_regime_risk_adjustment(self, request: TradingDecisionRequest) -> float:
         """Get regime-based risk adjustment"""
         
-        regime_multiplier = self.config.regime_risk_multipliers.get(request.market_regime, 1.0)
+        regime_multiplier = self.regime_risk_multipliers.get(request.market_regime, 1.0)
         confidence_adjustment = max(0.5, request.regime_confidence)  # Minimum 50% confidence
         
         return regime_multiplier * confidence_adjustment
@@ -1365,21 +1364,21 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         # Enhanced authorization logic with confidence consideration
         if request and hasattr(request, 'confidence'):
             # High confidence signals get preferential treatment
-            if request.confidence >= self.config.extreme_confidence_threshold:
+            if request.confidence >= self.extreme_confidence_threshold:
                 # Extreme confidence (0.9+) - automatic approval for reasonable risk
-                if adjusted_risk <= self.config.elevated_review_threshold:
+                if adjusted_risk <= self.elevated_review_threshold:
                     return AuthorizationLevel.AUTOMATIC
-            elif request.confidence >= self.config.high_confidence_threshold:
+            elif request.confidence >= self.high_confidence_threshold:
                 # High confidence (0.8+) - automatic approval for low risk
-                if adjusted_risk <= self.config.auto_approval_threshold * 2:
+                if adjusted_risk <= self.auto_approval_threshold * 2:
                     return AuthorizationLevel.AUTOMATIC
         
         # Standard risk-based authorization
-        if adjusted_risk <= self.config.auto_approval_threshold:
+        if adjusted_risk <= self.auto_approval_threshold:
             return AuthorizationLevel.AUTOMATIC
-        elif adjusted_risk <= self.config.elevated_review_threshold:
+        elif adjusted_risk <= self.elevated_review_threshold:
             return AuthorizationLevel.STANDARD
-        elif adjusted_risk <= self.config.emergency_threshold:
+        elif adjusted_risk <= self.emergency_threshold:
             return AuthorizationLevel.ELEVATED
         else:
             return AuthorizationLevel.EMERGENCY

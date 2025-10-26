@@ -324,21 +324,26 @@ class InstitutionalBacktestEngine:
         logger.info("-" * 80)
         
         try:
-            from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
+            from core_engine.data.manager import ClickHouseDataManager
+            from core_engine.config import DataConfig as CentralizedDataConfig, ConnectionConfig, CachingConfig
             
-            # Create data manager config from backtest config
-            data_config = ClickHouseDataConfig(
+            # Create centralized data config (Rule 1, Section 7)
+            data_config = CentralizedDataConfig(
                 symbols=self.config.data.symbols,
                 start_date=self.config.data.start_date,
                 end_date=self.config.data.end_date,
-                interval=self.config.data.interval,
-                clickhouse_host=self.config.data.clickhouse_host,
-                clickhouse_port=self.config.data.clickhouse_port,
-                clickhouse_database=self.config.data.clickhouse_database,
-                enable_caching=True
+                connection=ConnectionConfig(
+                    clickhouse_host=self.config.data.clickhouse_host,
+                    clickhouse_port=self.config.data.clickhouse_port,
+                    clickhouse_database=self.config.data.clickhouse_database
+                ),
+                caching=CachingConfig(
+                    enable_caching=True,
+                    cache_ttl=3600
+                )
             )
             
-            # Create data manager
+            # Create data manager with centralized config
             self.data_manager = ClickHouseDataManager(data_config)
             
             # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
@@ -636,8 +641,27 @@ class InstitutionalBacktestEngine:
                 'enable_strategy_attribution': True  # Performance tracking
             }
             
+            # Convert backtest DataConfig to centralized DataConfig format
+            from core_engine.config import DataConfig as CentralizedDataConfig, ConnectionConfig, CachingConfig
+            
+            centralized_data_config = CentralizedDataConfig(
+                symbols=self.config.data.symbols,
+                start_date=self.config.data.start_date,
+                end_date=self.config.data.end_date,
+                interval=self.config.data.interval,
+                connection=ConnectionConfig(
+                    clickhouse_host=self.config.data.clickhouse_host,
+                    clickhouse_port=self.config.data.clickhouse_port,
+                    clickhouse_database=self.config.data.clickhouse_database
+                ),
+                caching=CachingConfig(
+                    enable_caching=True,  # Default for backtest
+                    cache_ttl=300  # 5 minutes
+                )
+            )
+            
             # Create strategy manager instance
-            self.strategy_manager = StrategyManager(strategy_config)
+            self.strategy_manager = StrategyManager(strategy_config, data_config=centralized_data_config)
             
             # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.strategy_manager, 'set_regime_engine'):
@@ -2919,6 +2943,7 @@ class InstitutionalBacktestEngine:
             
             # Create simulator if not exists
             if not hasattr(self, 'execution_simulator'):
+                disable_rejections = getattr(self, 'disable_rejections', False)
                 self.execution_simulator = HistoricalExecutionSimulator({
                     'fill_model': 'realistic',
                     'base_spread_bps': 5.0,
@@ -2926,7 +2951,8 @@ class InstitutionalBacktestEngine:
                     'commission_per_share': 0.005,
                     'enable_random_slippage': False,  # Deterministic for backtesting
                     'impact_linear_coeff': 0.1,
-                    'impact_sqrt_coeff': 0.5
+                    'impact_sqrt_coeff': 0.5,
+                    'disable_rejections': disable_rejections
                 })
             
             executed_trades = []

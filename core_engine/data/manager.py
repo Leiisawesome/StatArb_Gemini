@@ -66,9 +66,15 @@ except ImportError:
 
 # Import centralized configuration (Rule 1, Section 7)
 try:
-    from core_engine.config import DataConfig as CentralizedDataConfig
+    from core_engine.config import (
+        DataConfig as CentralizedDataConfig,
+        ConnectionConfig,
+        CachingConfig
+    )
 except ImportError:
     CentralizedDataConfig = None
+    ConnectionConfig = None
+    CachingConfig = None
 
 try:
     from core_engine.type_definitions.data import (
@@ -192,7 +198,7 @@ class ClickHouseDataConfig(DataConfig):
             self.end_date = self.target_date
         
         elif not (self.start_date or self.end_date or self.target_date):
-            logger.warning("No date configuration provided. Using default.")
+            # No date configuration provided. Using default.
             self.target_date = "2024-12-20"
             self.start_date = self.target_date
             self.end_date = self.target_date
@@ -204,12 +210,14 @@ class ClickHouseDataConfig(DataConfig):
     
     def to_centralized_config(self) -> 'CentralizedDataConfig':
         """Convert to centralized DataConfig format"""
-        if CentralizedDataConfig is None:
-            raise ImportError("CentralizedDataConfig not available")
-        
-        from core_engine.config import ConnectionConfig, CachingConfig
-        
+        if CentralizedDataConfig is None or ConnectionConfig is None or CachingConfig is None:
+            raise ImportError("Centralized configuration classes not available")
+
         return CentralizedDataConfig(
+            symbols=self.symbols,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            interval=self.interval,
             connection=ConnectionConfig(
                 clickhouse_host=self.clickhouse_host,
                 clickhouse_port=self.clickhouse_port,
@@ -218,11 +226,7 @@ class ClickHouseDataConfig(DataConfig):
             caching=CachingConfig(
                 enable_caching=self.enable_caching,
                 cache_ttl=self.cache_ttl
-            ),
-            symbols=self.symbols,
-            start_date=self.start_date,
-            end_date=self.end_date,
-            interval=self.interval
+            )
         )
 
 @dataclass
@@ -286,6 +290,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 symbols=config.symbols,
                 start_date=config.start_date,
                 end_date=config.end_date,
+                target_date=None,  # Explicitly set to None to avoid deprecation warning
                 interval=config.interval,
                 clickhouse_host=config.connection.clickhouse_host,
                 clickhouse_port=config.connection.clickhouse_port,

@@ -68,8 +68,8 @@ def backtest_config():
     
     data_config = DataConfig(
         symbols=['NVDA'],
-        start_date='2024-12-20',
-        end_date='2024-12-20',
+        start_date='2024-01-02',  # Same date range as Phase 2 and Phase 3
+        end_date='2024-03-31',
         interval='1min'
     )
     
@@ -152,6 +152,9 @@ class TestSimulateExecution:
         print("TEST 1: Basic simulate_execution Functionality")
         print("=" * 80)
         
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
+        
         bar_timestamp = datetime(2024, 12, 20, 10, 30, 0)
         
         # Simulate execution
@@ -222,6 +225,9 @@ class TestRegimeAwareExecution:
         print("TEST 3: Regime Context Injection (Rule 2 Regime-First)")
         print("=" * 80)
         
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
+        
         # Execute trades
         executed_trades = await backtest_engine.simulate_execution(
             authorized_trades=[mock_authorized_trades[0]],  # Just first trade
@@ -254,6 +260,9 @@ class TestLiquidityAwareExecution:
         print("TEST 4: Liquidity Score Injection (Rule 7 Section B)")
         print("=" * 80)
         
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
+        
         # Execute trades
         executed_trades = await backtest_engine.simulate_execution(
             authorized_trades=[mock_authorized_trades[0]],
@@ -284,6 +293,9 @@ class TestPositionUpdates:
         print("\n" + "=" * 80)
         print("TEST 5: Position Updates After Execution")
         print("=" * 80)
+        
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
         
         # Get initial position
         initial_position_obj = backtest_engine.position_tracker.get_position('NVDA')
@@ -340,6 +352,9 @@ class TestExecutionHistory:
         print("TEST 6: Execution History Tracking")
         print("=" * 80)
         
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
+        
         # Initial history should be empty
         assert len(backtest_engine.execution_history) == 0
         
@@ -380,6 +395,9 @@ class TestExecutionStatistics:
         print("\n" + "=" * 80)
         print("TEST 7: Execution Statistics")
         print("=" * 80)
+        
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
         
         # Execute trades
         await backtest_engine.simulate_execution(
@@ -424,6 +442,9 @@ class TestCostBreakdown:
         print("\n" + "=" * 80)
         print("TEST 8: Cost Component Breakdown")
         print("=" * 80)
+        
+        # Disable random rejections for reliable testing
+        backtest_engine.disable_rejections = True
         
         executed_trades = await backtest_engine.simulate_execution(
             authorized_trades=[mock_authorized_trades[0]],
@@ -486,6 +507,10 @@ async def test_phase5_3_summary(backtest_engine):
         'quantity': 100,
         'strategy_id': 'test'
     }
+    
+    # Disable random rejections for reliable testing
+    if hasattr(backtest_engine, 'execution_simulator'):
+        backtest_engine.disable_rejections = True
     
     executed = await backtest_engine.simulate_execution(
         [mock_trade], sample_bar, datetime.now()

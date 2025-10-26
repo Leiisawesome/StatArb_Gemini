@@ -799,53 +799,74 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """Create lagged features for temporal patterns"""
         # Key features to lag
         key_features = ['return_1d', 'rsi', 'volume_change', 'atr_normalized']
-        
+
+        # Collect all new columns to avoid fragmentation
+        new_columns = {}
+
         for feature in key_features:
             if feature in df.columns:
                 for lag in self.config.lag_periods:
-                    df[f'{feature}_lag_{lag}'] = df[feature].shift(lag)
-        
+                    new_columns[f'{feature}_lag_{lag}'] = df[feature].shift(lag)
+
+        # Add all columns at once to avoid fragmentation
+        if new_columns:
+            df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+
         return df
     
     def _create_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create rolling statistics features"""
         base_features = ['return_1d', 'volume_change', 'hl_ratio']
-        
+
+        # Collect all new columns to avoid fragmentation
+        new_columns = {}
+
         for feature in base_features:
             if feature in df.columns:
                 for period in self.config.lookback_periods:
                     if len(df) >= period:
-                        # Rolling statistics
-                        df[f'{feature}_mean_{period}'] = df[feature].rolling(period).mean()
-                        df[f'{feature}_std_{period}'] = df[feature].rolling(period).std()
-                        df[f'{feature}_skew_{period}'] = df[feature].rolling(period).skew()
-                        df[f'{feature}_rank_{period}'] = df[feature].rolling(period).rank(pct=True)
-        
+                        # Rolling statistics - collect all at once
+                        new_columns[f'{feature}_mean_{period}'] = df[feature].rolling(period).mean()
+                        new_columns[f'{feature}_std_{period}'] = df[feature].rolling(period).std()
+                        new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(period).skew()
+                        new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(period).rank(pct=True)
+
+        # Add all columns at once to avoid fragmentation
+        if new_columns:
+            df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+
         return df
     
     def _create_cross_sectional_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create cross-sectional (relative) features"""
         # Group by timestamp for cross-sectional analysis
         grouped = df.groupby('timestamp')
-        
+
         # Key features for cross-sectional analysis
         cs_features = ['return_1d', 'rsi', 'volume_ratio', 'atr_normalized']
-        
+
+        # Collect all new columns to avoid fragmentation
+        new_columns = {}
+
         for feature in cs_features:
             if feature in df.columns:
                 # Cross-sectional rank
-                df[f'{feature}_cs_rank'] = grouped[feature].rank(pct=True)
-                
+                new_columns[f'{feature}_cs_rank'] = grouped[feature].rank(pct=True)
+
                 # Z-score relative to universe
-                df[f'{feature}_cs_zscore'] = grouped[feature].transform(
+                new_columns[f'{feature}_cs_zscore'] = grouped[feature].transform(
                     lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
                 )
-                
+
                 # Quintile assignment
-                df[f'{feature}_cs_quintile'] = grouped[feature].transform(
+                new_columns[f'{feature}_cs_quintile'] = grouped[feature].transform(
                     lambda x: pd.qcut(x, min(5, len(x.unique())), labels=list(range(1, min(6, len(x.unique())+1))), duplicates='drop') if len(x.unique()) > 1 else 1
                 )
-        
+
+        # Add all columns at once to avoid fragmentation
+        if new_columns:
+            df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+
         return df
     
     def _normalize_features(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -40,6 +40,22 @@ from backtest.engine.position_tracker import PositionTracker, Position, Trade
 
 def create_test_config(backtest_name="test", strategies=None, risk_settings=None, execution_settings=None):
     """Helper to create test configuration"""
+    # Convert strategy dictionaries to StrategyConfig objects if needed
+    strategy_configs = []
+    if strategies:
+        for strategy in strategies:
+            if isinstance(strategy, dict):
+                strategy_configs.append(StrategyConfig(
+                    strategy_type=strategy.get('type', 'momentum'),
+                    strategy_name=strategy.get('name', f"test_{strategy.get('type', 'momentum')}"),
+                    allocation_pct=strategy.get('allocation_pct', 1.0),
+                    parameters=strategy.get('parameters', {}),
+                    max_position_size=strategy.get('max_position_size', 0.10),
+                    max_concentration=strategy.get('max_concentration', 0.15)
+                ))
+            else:
+                strategy_configs.append(strategy)
+    
     return BacktestConfiguration(
         backtest_name=backtest_name,
         backtest_mode="simulation",
@@ -49,7 +65,7 @@ def create_test_config(backtest_name="test", strategies=None, risk_settings=None
             end_date='2024-01-05',
             interval='1min'
         ),
-        strategies=strategies or [],
+        strategies=strategy_configs,
         risk=risk_settings or {'initial_capital': 1_000_000},
         execution=execution_settings or {},
         analytics={}

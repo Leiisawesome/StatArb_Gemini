@@ -338,7 +338,10 @@ class TestPhase2DataRegimeLayer:
         # Verify data loaded
         assert len(engine.market_data) > 0, "No market data loaded"
         total_bars = sum(len(df) for df in engine.market_data.values())
-        assert total_bars > 50000, f"Insufficient data: {total_bars} bars"
+        # For NVDA January 2023 with 1min intervals, expect reasonable data volume
+        # (approximately 22 trading days * ~390 minutes/day = ~8,580 bars)
+        # Allow some flexibility for data availability and synthetic data generation
+        assert 1000 <= total_bars <= 20000, f"Unexpected data volume: {total_bars} bars (expected 1,000-20,000 for 1-month 1min data)"
         
         # Verify engine ready
         assert engine.is_initialized, "Engine not initialized"

@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import logging
 
 
 @dataclass
@@ -114,7 +115,7 @@ class YahooDataProvider(DataProvider):
             # Fallback: generate synthetic data
             return self._generate_synthetic_data(symbol, start_date, end_date)
         except Exception as e:
-            print(f"Error fetching data for {symbol}: {e}")
+            self.logger.error(f"Error fetching data for {symbol}: {e}")
             return self._generate_synthetic_data(symbol, start_date, end_date)
     
     def get_current_price(self, symbol: str) -> Optional[float]:
@@ -198,6 +199,7 @@ class DataManager:
     
     def __init__(self, config: DataConfig):
         self.config = config
+        self.logger = logging.getLogger(__name__)
         self.provider = self._create_provider()
         self._data_cache: Dict[str, pd.DataFrame] = {}
         self._last_update: Dict[str, datetime] = {}

@@ -47,11 +47,11 @@ from backtest.engine.institutional_backtest_engine import InstitutionalBacktestE
 def backtest_config():
     """Create minimal backtest configuration for Phase 5 testing"""
     
-    # Single day of data (will generate 391 bars)
+    # 3-month period of data (2024-01-02 → 2024-03-31)
     data_config = DataConfig(
         symbols=['NVDA'],
-        start_date='2024-12-20',
-        end_date='2024-12-20',
+        start_date='2024-01-02',
+        end_date='2024-03-31',
         interval='1min'
     )
     

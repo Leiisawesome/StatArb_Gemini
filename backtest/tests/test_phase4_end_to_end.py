@@ -49,9 +49,9 @@ def real_data_config():
         backtest_mode="historical",
         
         data=DataConfig(
-            symbols=["NVDA"],  # Single symbol for focused testing
-            start_date="2024-01-15",  # One day of data (historical date with real data)
-            end_date="2024-01-15",
+            symbols=["NVDA", "TSLA"],  # Multi-symbol for comprehensive testing
+            start_date="2024-01-02",  # Same date range as Phase 2 and Phase 3
+            end_date="2024-03-31",
             interval="1min"
             # ClickHouse is the default data source
         ),

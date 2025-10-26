@@ -88,6 +88,8 @@ from ..config.component_config import (
     IndicatorConfig, FeatureConfig, SignalConfig,
     RegimeConfig, AnalyticsConfig, ExecutionConfig, PortfolioConfig
 )
+from ..trading.strategies.manager import StrategyManagerConfig
+from ..trading.engine import TradingEngineConfig
 from ..config.strategies import (
     MomentumConfig, MeanReversionConfig, BreakoutConfig,
     FactorConfig, MultiAssetConfig, PairsConfig
@@ -157,7 +159,7 @@ class SystemConfiguration:
     # Analytics & Strategy (using typed configs)
     analytics_manager_config: Optional[AnalyticsConfig] = None
     metrics_calculator_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create MetricsConfig
-    strategy_manager_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create StrategyManagerConfig
+    strategy_manager_config: Optional[StrategyManagerConfig] = None  # StrategyManagerConfig exists in core_engine.trading.strategies.manager
     strategy_engine_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create StrategyEngineConfig
     strategy_registry_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # Strategy-specific
     strategy_validator_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # Validator-specific
@@ -171,7 +173,7 @@ class SystemConfiguration:
     regime_engine_config: Optional[RegimeConfig] = None
     
     # Trading & Execution (using typed configs)
-    trading_engine_config: Optional[Dict[str, Any]] = field(default_factory=dict)  # TODO: Create TradingEngineConfig
+    trading_engine_config: Optional[TradingEngineConfig] = None  # TradingEngineConfig exists in core_engine.trading.engine
     portfolio_manager_config: Optional[PortfolioConfig] = None
     
     # Production Monitoring (component-specific)
