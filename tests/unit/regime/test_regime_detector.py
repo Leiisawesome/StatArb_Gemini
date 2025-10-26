@@ -16,7 +16,6 @@ from core_engine.regime.regime_detector import (
     RegimeType,
     DetectionMethod,
     ConfidenceLevel,
-    RegimeDetectionConfig,
     RegimeDetection,
     RegimeTransition,
     MarkovSwitchingDetector,
@@ -25,6 +24,7 @@ from core_engine.regime.regime_detector import (
     ThresholdBasedDetector,
     RegimeDetector
 )
+from core_engine.config.component_config import RegimeConfig as RegimeDetectionConfig
 
 
 

@@ -14,15 +14,14 @@ from core_engine.regime.engine import (
     MarketRegime,
     TimeframeRegime,
     RegimeAnalysis,
-    RegimeEngineConfig,
     EnhancedRegimeEngine
 )
+from core_engine.config.component_config import RegimeConfig as RegimeEngineConfig
 
 from core_engine.regime.market_regime_analyzer import (
     MacroRegime,
     MarketCycle,
     RiskEnvironment,
-    RegimeAnalysisConfig,
     AssetRegimeProfile,
     CrossAssetRegime,
     FactorAnalyzer,
@@ -30,6 +29,7 @@ from core_engine.regime.market_regime_analyzer import (
     SectorRotationAnalyzer,
     MarketRegimeAnalyzer
 )
+from core_engine.config.component_config import RegimeConfig as RegimeAnalysisConfig
 
 
 from core_engine.regime.regime_detector import (

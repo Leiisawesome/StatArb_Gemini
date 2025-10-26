@@ -203,12 +203,15 @@ class EnhancedRegimeEngine(ISystemComponent):
     """
     
     def __init__(self, config: Dict[str, Any]):
-        # Use centralized RegimeConfig (Rule 1, Section 7)
-        if RegimeConfig is None:
-            # Fallback if import failed (testing scenario)
+        # Try to import centralized RegimeConfig (Rule 1, Section 7)
+        try:
+            from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
+            RegimeConfigClass = CentralizedRegimeConfig
+        except ImportError:
+            # Fallback: Create local RegimeConfig if import fails (testing/backtest scenario)
             from dataclasses import dataclass
             @dataclass
-            class RegimeConfig:
+            class RegimeConfigClass:
                 lookback_window: int = 60
                 volatility_window: int = 20
                 trend_threshold: float = 0.02
@@ -216,15 +219,16 @@ class EnhancedRegimeEngine(ISystemComponent):
                 update_frequency: int = 300
                 enable_enhanced_detection: bool = True
         
-        # Initialize with centralized config
-        if isinstance(config, RegimeConfig):
-            self.config = config
+        # Initialize with config (supports RegimeConfig object or dict)
+        if config is None:
+            self.config = RegimeConfigClass()
         elif isinstance(config, dict):
-            self.config = RegimeConfig(**config) if config else RegimeConfig()
-        elif config is None:
-            self.config = RegimeConfig()
+            self.config = RegimeConfigClass(**config)
+        elif hasattr(config, '__dict__'):
+            # Already a config object (centralized or local)
+            self.config = config
         else:
-            self.config = RegimeConfig()
+            self.config = RegimeConfigClass()
         
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("✅ Using centralized RegimeConfig (Rule 1, Section 7)")

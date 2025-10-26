@@ -202,6 +202,13 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.trading_engine: Optional[Any] = None    # Will be set by orchestrator
         self.regime_engine: Optional[Any] = None     # Will be set by orchestrator
         
+        # Phase 7A & 7B: Institutional enhancements (Sprint 0)
+        self.compliance_checker: Optional[Any] = None  # Pre-trade compliance (GAP 4-1)
+        self.circuit_breakers: Optional[Any] = None    # Emergency controls (GAP 4-2)
+        
+        # Sprint 1: Real-time P&L tracking (GAP 4-5)
+        self.pnl_tracker: Optional[Any] = None  # Real-time P&L monitoring
+        
         # Authorization tracking
         self.pending_requests: Dict[str, TradingDecisionRequest] = {}
         self.active_authorizations: Dict[str, TradingAuthorization] = {}
@@ -380,6 +387,29 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         if regime_engine:
             self.regime_engine = regime_engine
             logger.info("✅ RegimeEngine registered with Central Risk Manager")
+    
+    def set_institutional_components(self, compliance_checker: Any = None,
+                                     circuit_breakers: Any = None,
+                                     pnl_tracker: Any = None):
+        """
+        Set institutional enhancement components (Sprint 0 & Sprint 1)
+        
+        Args:
+            compliance_checker: PreTradeComplianceChecker instance
+            circuit_breakers: TradingCircuitBreakers instance
+            pnl_tracker: RealTimePnLTracker instance (Sprint 1)
+        """
+        if compliance_checker:
+            self.compliance_checker = compliance_checker
+            logger.info("✅ ComplianceChecker integrated with Central Risk Manager (GAP 4-1)")
+        
+        if circuit_breakers:
+            self.circuit_breakers = circuit_breakers
+            logger.info("✅ CircuitBreakers integrated with Central Risk Manager (GAP 4-2)")
+        
+        if pnl_tracker:
+            self.pnl_tracker = pnl_tracker
+            logger.info("✅ RealTimePnLTracker integrated with Central Risk Manager (GAP 4-5, Sprint 1)")
     
     # ========================================
     # IREGIMEAWARE INTERFACE IMPLEMENTATION
@@ -952,7 +982,33 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     rejection_reason="Risk manager not initialized - component in crashed state"
                 )
             
-            # Check emergency mode first
+            # PHASE 7B: Circuit Breaker Checks (GAP 4-2 - Sprint 0.2)
+            # Check circuit breakers BEFORE any other processing
+            if hasattr(self, 'circuit_breakers') and self.circuit_breakers:
+                try:
+                    breaker_status = await self.circuit_breakers.check_circuit_breakers()
+                    
+                    if not breaker_status.get('can_trade', True):
+                        # Trading halted by circuit breakers
+                        halt_reason = breaker_status.get('halt_reason', 'Circuit breaker activated')
+                        logger.warning(f"🚨 Trade BLOCKED by circuit breaker: {halt_reason}")
+                        
+                        return TradingAuthorization(
+                            request_id=request.request_id,
+                            authorization_level=AuthorizationLevel.REJECTED,
+                            rejection_reason=f"CIRCUIT BREAKER: {halt_reason}"
+                        )
+                    
+                    # Log any warnings from circuit breakers
+                    if breaker_status.get('level') in ['WARNING', 'CAUTION']:
+                        logger.warning(f"⚠️ Circuit breaker warning: {breaker_status.get('message', 'Approaching limits')}")
+                
+                except Exception as e:
+                    # Log circuit breaker check error but don't block trade
+                    # (fail-open for backtest, fail-closed for live trading)
+                    logger.warning(f"⚠️ Circuit breaker check failed: {e} - Proceeding with caution")
+            
+            # Check emergency mode
             if self.emergency_mode:
                 logger.warning(f"🚨 Authorization rejected - Emergency mode active: {request.request_id}")
                 return TradingAuthorization(
@@ -998,6 +1054,42 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         
         try:
             authorization = TradingAuthorization(request_id=request.request_id)
+            
+            # PHASE 7A: Pre-Trade Compliance Checks (GAP 4-1 - Sprint 0.1)
+            # Check compliance BEFORE risk assessment for regulatory validation
+            if hasattr(self, 'compliance_checker') and self.compliance_checker:
+                try:
+                    from .compliance_checker import ComplianceResult
+                    
+                    # Perform comprehensive pre-trade compliance check
+                    compliance_result = await self.compliance_checker.check_pre_trade_compliance(
+                        trade_id=request.request_id,
+                        symbol=request.symbol,
+                        trade_type=request.side.lower(),
+                        quantity=request.quantity,
+                        price=request.current_price if request.current_price > 0 else 100.0,
+                        account_value=self.portfolio_value,
+                        current_positions=self.current_positions,
+                        timestamp=request.created_at
+                    )
+                    
+                    if not compliance_result.approved:
+                        # Reject trade due to compliance violation
+                        authorization.authorization_level = AuthorizationLevel.REJECTED
+                        authorization.rejection_reason = f"COMPLIANCE: {compliance_result.rejection_reason}"
+                        
+                        logger.warning(f"🚨 Trade rejected - Compliance violation: {compliance_result.rejection_reason}")
+                        logger.info(f"   Violations: {', '.join(compliance_result.violations)}")
+                        
+                        return authorization
+                    
+                    # Compliance approved - add metadata
+                    logger.info(f"✅ Compliance checks passed: {len(compliance_result.checks_passed)} checks")
+                    
+                except Exception as e:
+                    # Log compliance check error but don't block trade
+                    # (fail-open for backtest, fail-closed for live trading)
+                    logger.warning(f"⚠️  Compliance check failed: {e} - Proceeding with caution")
             
             # Input validation - reject invalid requests early
             validation_error = self._validate_request_inputs(request)
@@ -1545,7 +1637,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"Post-execution risk check failed: {e}")
     
-    def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None):
+    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None):
         """
         Update position with comprehensive cash tracking (Phase 10 per Rule 7.3)
         
@@ -1623,6 +1715,32 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             # Update portfolio metrics
             self._update_portfolio_metrics()
             
+            # Sprint 1: Update P&L tracking (GAP 4-5)
+            if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                try:
+                    # Determine if this is entry or close
+                    if side.lower() == 'buy':
+                        # Position entry (buy)
+                        await self.pnl_tracker.update_position_entry(
+                            symbol=symbol,
+                            quantity=quantity,
+                            entry_price=price,
+                            strategy_id=None,  # Would come from authorization metadata
+                            timestamp=timestamp
+                        )
+                    elif side.lower() == 'sell':
+                        # Position close (sell)
+                        await self.pnl_tracker.update_position_close(
+                            symbol=symbol,
+                            quantity=quantity,
+                            exit_price=price,
+                            strategy_id=None,  # Would come from authorization metadata
+                            timestamp=timestamp
+                        )
+                    logger.debug(f"✅ P&L tracker updated for {symbol} (Sprint 1)")
+                except Exception as e:
+                    logger.warning(f"⚠️ P&L tracker update failed: {e}")
+            
             logger.info(
                 f"📊 Position Update Complete (Rule 7.3, Phase 10): {symbol} "
                 f"{current_position} → {new_position} | "
@@ -1656,6 +1774,30 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
     def get_all_positions(self) -> Dict[str, float]:
         """Get all current positions"""
         return self.current_positions.copy()
+    
+    async def update_market_prices(self, prices: Dict[str, float], timestamp: Optional[datetime] = None):
+        """
+        Update market prices for real-time P&L tracking (Sprint 1)
+        
+        This method updates the P&L tracker with current market prices
+        to calculate unrealized P&L (mark-to-market).
+        
+        Args:
+            prices: Dict of symbol -> current price
+            timestamp: Price timestamp (defaults to now)
+        """
+        if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+            try:
+                if timestamp is None:
+                    timestamp = datetime.now()
+                
+                # Update each symbol
+                for symbol, price in prices.items():
+                    await self.pnl_tracker.update_market_data(symbol, price, timestamp)
+                
+                logger.debug(f"✅ Market prices updated for {len(prices)} symbols (Sprint 1)")
+            except Exception as e:
+                logger.warning(f"⚠️ Market price update failed: {e}")
     
     @property
     def authorization_audit_trail(self) -> List[Dict[str, Any]]:

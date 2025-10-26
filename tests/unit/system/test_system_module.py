@@ -22,9 +22,9 @@ from core_engine.system.central_risk_manager import (
     TradingDecisionRequest,
     ExecutionAuthorization,
     TradingAuthorization,
-    CentralRiskManager,
-    RiskManagerConfig
+    CentralRiskManager
 )
+from core_engine.config.component_config import RiskConfig as RiskManagerConfig
 from core_engine.system.unified_execution_engine import (
     ExecutionStatus,
     ExecutionAlgorithm,

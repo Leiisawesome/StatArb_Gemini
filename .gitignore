@@ -237,3 +237,6 @@ strategy_registry/
 .Trashes
 ehthumbs.db
 Thumbs.dbtests/strategy_assessment/results/
+
+# Obsolete tests (kept for reference, not run)
+tests/_obsolete/

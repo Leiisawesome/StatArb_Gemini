@@ -21,9 +21,10 @@ from datetime import datetime
 from unittest.mock import Mock
 
 from core_engine.system.central_risk_manager import (
-    CentralRiskManager, RiskManagerConfig, TradingDecisionRequest,
+    CentralRiskManager, TradingDecisionRequest,
     TradingAuthorization, TradingDecisionType, AuthorizationLevel
 )
+from core_engine.config.component_config import RiskConfig as RiskManagerConfig
 from core_engine.system.unified_execution_engine import ExecutionUrgency
 
 

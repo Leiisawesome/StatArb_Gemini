@@ -23,14 +23,13 @@ import pytest
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, patch
 
-from core_engine.trading.execution.engine import (
+from core_engine.trading.execution.execution_engine import (
     ExecutionEngine,
     ExecutionStatus,
-    ExecutionPriority,
+    ExecutionUrgency as ExecutionPriority,
     ExecutionRequest,
-    ExecutionReport,
-    ExecutionEngineConfig,
-    IExecutionSubscriber
+    ExecutionResult as ExecutionReport,
+    ExecutionConfig as ExecutionEngineConfig
 )
 from core_engine.type_definitions.orders import (
     Order, OrderType, OrderSide

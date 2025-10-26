@@ -23,7 +23,6 @@ from core_engine.regime.regime_detector import (
 from core_engine.regime.regime_indicators import (
     IndicatorType,
     SignalStrength,
-    IndicatorConfig,
     RegimeIndicator,
     TransitionSignal,
     VolatilityRegimeIndicators,
@@ -32,16 +31,17 @@ from core_engine.regime.regime_indicators import (
     TransitionSignalDetector,
     RegimeIndicatorEngine
 )
+from core_engine.config.component_config import RegimeConfig as IndicatorConfig
 
 from core_engine.regime.regime_manager import (
     RegimeManagerStatus,
-    RegimeManagerConfig,
     RegimeState,
     RegimeAdaptation,
     RegimeAwarePortfolioManager,
     RegimePerformanceAttribution,
     RegimeManager
 )
+from core_engine.config.component_config import RegimeConfig as RegimeManagerConfig
 
 
 class TestVolatilityRegimeIndicators:

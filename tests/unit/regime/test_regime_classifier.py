@@ -15,7 +15,6 @@ from unittest.mock import Mock, patch
 from core_engine.regime.regime_classifier import (
     MLModel,
     FeatureType,
-    ClassificationConfig,
     FeatureImportance,
     ModelPerformance,
     RegimeClassification,

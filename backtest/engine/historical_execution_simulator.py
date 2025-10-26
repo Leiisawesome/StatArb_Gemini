@@ -595,4 +595,291 @@ class HistoricalExecutionSimulator:
             # Total traded value
             'total_notional': sum(f.quantity * f.market_price for f in fills)
         }
+    
+    # ========================================================================
+    # SPRINT 0.3: ORDER REJECTION SIMULATION (GAP 4-3)
+    # ========================================================================
+    
+    def simulate_rejection_scenario(self,
+                                    symbol: str,
+                                    side: str,
+                                    quantity: float,
+                                    market_data: Dict[str, Any],
+                                    regime_context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Simulate realistic order rejection scenarios for backtesting
+        
+        This method models the 8 common rejection patterns from OrderRejectionHandler:
+        1. Insufficient margin
+        2. Stock halted
+        3. Price collar violation
+        4. Connection timeout
+        5. Duplicate order ID
+        6. Market closed
+        7. Position limit reached
+        8. Unknown error
+        
+        Args:
+            symbol: Trading symbol
+            side: 'buy' or 'sell'
+            quantity: Order quantity
+            market_data: Current market data
+            regime_context: Market regime (affects rejection probability)
+        
+        Returns:
+            Rejection info dict if rejected, None if accepted
+        """
+        
+        # Extract market conditions
+        market_price = market_data.get('close', 100.0)
+        volatility = market_data.get('volatility', 0.02)
+        volume = market_data.get('volume', 1000000)
+        
+        # Get regime
+        regime = 'normal_volatility'
+        if regime_context:
+            regime = regime_context.get('primary_regime', regime)
+            if hasattr(regime, 'value'):
+                regime = regime.value
+        
+        # Calculate rejection probability based on regime
+        # More volatile regimes = higher rejection probability
+        base_rejection_prob = {
+            'low_volatility': 0.01,      # 1% rejection in calm markets
+            'normal_volatility': 0.02,   # 2% rejection in normal markets
+            'high_volatility': 0.05,     # 5% rejection in volatile markets
+            'extreme_volatility': 0.10,  # 10% rejection in extreme vol
+            'crisis': 0.20               # 20% rejection in crisis
+        }.get(regime, 0.02)
+        
+        # Additional rejection factors
+        if quantity * market_price > 1000000:  # Large orders ($1M+)
+            base_rejection_prob *= 1.5
+        
+        if volume < 100000:  # Low volume stocks
+            base_rejection_prob *= 1.3
+        
+        # Determine if order is rejected
+        if np.random.random() < base_rejection_prob:
+            # Order rejected - determine rejection reason
+            rejection_reasons = [
+                ('insufficient_margin', 0.15, 'Insufficient margin for trade'),
+                ('stock_halted', 0.10, 'Stock trading halted'),
+                ('price_collar', 0.20, 'Price outside collar limits'),
+                ('connection_timeout', 0.25, 'Connection timeout to exchange'),
+                ('duplicate_order_id', 0.05, 'Duplicate order ID'),
+                ('market_closed', 0.05, 'Market closed'),
+                ('position_limit', 0.10, 'Position limit reached'),
+                ('unknown_error', 0.10, 'Unknown broker error')
+            ]
+            
+            # Weighted random selection
+            weights = [r[1] for r in rejection_reasons]
+            reason_tuple = rejection_reasons[np.random.choice(len(rejection_reasons), p=weights)]
+            
+            rejection_info = {
+                'rejected': True,
+                'rejection_code': reason_tuple[0],
+                'rejection_reason': reason_tuple[2],
+                'rejection_severity': self._get_rejection_severity(reason_tuple[0]),
+                'can_retry': self._can_retry_rejection(reason_tuple[0]),
+                'suggested_action': self._get_suggested_action(reason_tuple[0], quantity),
+                'timestamp': market_data.get('timestamp', datetime.now())
+            }
+            
+            logger.info(f"🚫 Order REJECTED - {symbol} {side} {quantity}: {rejection_info['rejection_reason']}")
+            return rejection_info
+        
+        # Order accepted
+        return None
+    
+    def _get_rejection_severity(self, rejection_code: str) -> str:
+        """Get severity level of rejection"""
+        severity_map = {
+            'insufficient_margin': 'MODERATE',
+            'stock_halted': 'HIGH',
+            'price_collar': 'MINOR',
+            'connection_timeout': 'MINOR',
+            'duplicate_order_id': 'MINOR',
+            'market_closed': 'MODERATE',
+            'position_limit': 'HIGH',
+            'unknown_error': 'MODERATE'
+        }
+        return severity_map.get(rejection_code, 'MODERATE')
+    
+    def _can_retry_rejection(self, rejection_code: str) -> bool:
+        """Determine if rejection can be retried"""
+        retryable = {
+            'insufficient_margin': True,   # Can retry with smaller quantity
+            'stock_halted': False,         # Wait for resumption
+            'price_collar': True,          # Can retry with adjusted price
+            'connection_timeout': True,    # Can retry after delay
+            'duplicate_order_id': True,    # Can retry with new ID
+            'market_closed': False,        # Wait for market open
+            'position_limit': False,       # Cannot exceed limit
+            'unknown_error': True          # Can retry
+        }
+        return retryable.get(rejection_code, False)
+    
+    def _get_suggested_action(self, rejection_code: str, original_quantity: float) -> Dict[str, Any]:
+        """Get suggested action for handling rejection"""
+        actions = {
+            'insufficient_margin': {
+                'action': 'REDUCE_QUANTITY',
+                'modified_quantity': original_quantity * 0.5,
+                'retry_delay_seconds': 0,
+                'max_retries': 3
+            },
+            'stock_halted': {
+                'action': 'WAIT_FOR_RESUMPTION',
+                'modified_quantity': original_quantity,
+                'retry_delay_seconds': 300,  # 5 minutes
+                'max_retries': 1
+            },
+            'price_collar': {
+                'action': 'ADJUST_PRICE',
+                'modified_quantity': original_quantity,
+                'retry_delay_seconds': 5,
+                'max_retries': 3
+            },
+            'connection_timeout': {
+                'action': 'RETRY_WITH_BACKOFF',
+                'modified_quantity': original_quantity,
+                'retry_delay_seconds': 5,  # Exponential backoff
+                'max_retries': 3
+            },
+            'duplicate_order_id': {
+                'action': 'NEW_ORDER_ID',
+                'modified_quantity': original_quantity,
+                'retry_delay_seconds': 0,
+                'max_retries': 1
+            },
+            'market_closed': {
+                'action': 'CANCEL',
+                'modified_quantity': 0,
+                'retry_delay_seconds': 0,
+                'max_retries': 0
+            },
+            'position_limit': {
+                'action': 'ESCALATE',
+                'modified_quantity': 0,
+                'retry_delay_seconds': 0,
+                'max_retries': 0
+            },
+            'unknown_error': {
+                'action': 'ESCALATE',
+                'modified_quantity': original_quantity,
+                'retry_delay_seconds': 10,
+                'max_retries': 1
+            }
+        }
+        return actions.get(rejection_code, actions['unknown_error'])
+    
+    def simulate_fill_with_rejection(self,
+                                     symbol: str,
+                                     side: str,
+                                     quantity: float,
+                                     decision_price: float,
+                                     market_data: Dict[str, Any],
+                                     authorization_id: str = "",
+                                     strategy_id: str = "",
+                                     regime_context: Optional[Dict[str, Any]] = None,
+                                     liquidity_score: Optional[float] = None,
+                                     max_retries: int = 3) -> Dict[str, Any]:
+        """
+        Simulate fill with rejection handling and intelligent retries
+        
+        This is the complete simulation that includes:
+        1. Initial rejection check
+        2. Retry logic with modifications
+        3. Final fill simulation if accepted
+        
+        Args:
+            All standard simulate_fill args plus:
+            max_retries: Maximum retry attempts
+        
+        Returns:
+            Dict with 'fill' (SimulatedFill or None) and 'rejection_history'
+        """
+        
+        rejection_history = []
+        current_quantity = quantity
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            # Check for rejection
+            rejection = self.simulate_rejection_scenario(
+                symbol, side, current_quantity, market_data, regime_context
+            )
+            
+            if rejection is None:
+                # Order accepted - proceed with fill
+                fill = self.simulate_fill(
+                    symbol=symbol,
+                    side=side,
+                    quantity=current_quantity,
+                    decision_price=decision_price,
+                    market_data=market_data,
+                    authorization_id=authorization_id,
+                    strategy_id=strategy_id,
+                    regime_context=regime_context,
+                    liquidity_score=liquidity_score
+                )
+                
+                return {
+                    'success': True,
+                    'fill': fill,
+                    'rejection_history': rejection_history,
+                    'retry_count': retry_count,
+                    'final_quantity': current_quantity
+                }
+            
+            # Order rejected - check if retryable
+            rejection_history.append(rejection)
+            
+            if not rejection['can_retry'] or retry_count >= max_retries:
+                # Cannot retry or max retries exceeded
+                logger.warning(f"❌ Order FAILED after {retry_count} retries: {rejection['rejection_reason']}")
+                return {
+                    'success': False,
+                    'fill': None,
+                    'rejection_history': rejection_history,
+                    'retry_count': retry_count,
+                    'final_quantity': 0,
+                    'failure_reason': rejection['rejection_reason']
+                }
+            
+            # Apply suggested action
+            suggested_action = rejection['suggested_action']
+            action_type = suggested_action['action']
+            
+            if action_type == 'REDUCE_QUANTITY':
+                current_quantity = suggested_action['modified_quantity']
+                logger.info(f"🔄 Retry {retry_count + 1}: Reducing quantity to {current_quantity}")
+            
+            elif action_type == 'ADJUST_PRICE':
+                # Price adjustment would happen here (simplified for backtest)
+                logger.info(f"🔄 Retry {retry_count + 1}: Adjusting price")
+            
+            elif action_type == 'NEW_ORDER_ID':
+                # New order ID (simulated)
+                logger.info(f"🔄 Retry {retry_count + 1}: Generating new order ID")
+            
+            elif action_type == 'RETRY_WITH_BACKOFF':
+                # Exponential backoff (simulated)
+                delay = suggested_action['retry_delay_seconds'] * (2 ** retry_count)
+                logger.info(f"🔄 Retry {retry_count + 1}: Waiting {delay}s (exponential backoff)")
+            
+            retry_count += 1
+        
+        # Max retries exceeded
+        logger.error(f"❌ Order FAILED: Max retries ({max_retries}) exceeded")
+        return {
+            'success': False,
+            'fill': None,
+            'rejection_history': rejection_history,
+            'retry_count': retry_count,
+            'final_quantity': 0,
+            'failure_reason': 'Max retries exceeded'
+        }
 

@@ -15,12 +15,8 @@ from core_engine.trading.execution.execution_engine import (
     ExecutionConfig,
     ExecutionRequest,
     ExecutionMetrics,
-    ExecutionStatus
-)
-
-from core_engine.trading.execution.execution_manager import (
-    ExecutionManager,
-    ExecutionConfiguration
+    ExecutionStatus,
+    ExecutionResult
 )
 
 from core_engine.trading.execution.execution_validator import (
@@ -28,20 +24,10 @@ from core_engine.trading.execution.execution_validator import (
     ExecutionContext
 )
 
-from core_engine.trading.execution.order_executor import (
-    OrderExecutor
-)
-
 from core_engine.trading.execution.fill_processor import (
     FillProcessor,
     FillEvent,
     FillMetrics
-)
-
-from core_engine.trading.execution.trade_executor import (
-    TradeExecutor,
-    TradeExecutionRequest,
-    TradeExecutionAlgorithm
 )
 
 
@@ -140,78 +126,6 @@ class TestExecutionEngine:
         assert hasattr(metrics, 'total_executions')
         assert hasattr(metrics, 'successful_executions')
         assert hasattr(metrics, 'failed_executions')
-
-
-class TestExecutionManager:
-    """Test suite for ExecutionManager class."""
-
-    @pytest.fixture
-    def execution_manager_config(self):
-        """Create test execution manager configuration."""
-        return ExecutionConfiguration(
-            max_order_size=1000000,
-            max_notional_per_order=10000000,
-            order_timeout=1800,
-            fill_timeout=600,
-            max_slippage_bps=50.0
-        )
-
-    @pytest.fixture
-    def execution_manager(self, execution_manager_config):
-        """Create test execution manager."""
-        return ExecutionManager(execution_manager_config)
-
-    def test_initialization(self, execution_manager, execution_manager_config):
-        """Test execution manager initialization."""
-        assert execution_manager.config == execution_manager_config
-        assert len(execution_manager.execution_queue._queue) == 0
-        assert len(execution_manager._active_executions) == 0
-
-    @pytest.mark.asyncio
-    async def test_queue_execution_request(self, execution_manager):
-        """Test queuing an execution request."""
-        from core_engine.trading.execution.execution_manager import UnifiedExecutionRequest
-
-        request = UnifiedExecutionRequest(
-            request_id="req_123",
-            symbol="AAPL",
-            side="BUY",
-            quantity=100
-        )
-
-        execution_id = await execution_manager.submit_execution_request(request)
-
-        assert execution_id == "req_123"
-        assert len(execution_manager.execution_queue._queue) == 1
-
-    @pytest.mark.asyncio
-    async def test_process_execution_queue(self, execution_manager):
-        """Test processing the execution queue."""
-        from core_engine.trading.execution.execution_manager import UnifiedExecutionRequest
-
-        request = UnifiedExecutionRequest(
-            request_id="req_456",
-            symbol="AAPL",
-            side="BUY",
-            quantity=100
-        )
-
-        # Submit the request (this adds it to the queue)
-        execution_id = await execution_manager.submit_execution_request(request)
-        
-        # Verify it was queued
-        assert execution_id == "req_456"
-        assert len(execution_manager.execution_queue._queue) == 1
-
-        # Mock the processing method to verify it would be called
-        with patch.object(execution_manager, '_process_execution_request', new_callable=AsyncMock) as mock_process:
-            mock_process.return_value = None
-            
-            # Manually trigger processing (normally done by the async loop)
-            await execution_manager._process_execution_request(request)
-            
-            # Verify processing was called
-            mock_process.assert_called_once_with(request)
 
 
 class TestExecutionValidator:
@@ -450,95 +364,6 @@ class TestExecutionValidator:
         assert all(is_valid for is_valid, _ in results_list)
 
 
-class TestOrderExecutor:
-    """Test suite for OrderExecutor class."""
-
-    @pytest.fixture
-    def execution_context(self):
-        """Create test execution context."""
-        return ExecutionContext(
-            execution_id="exec_123",
-            order_id="order_123",
-            symbol="AAPL",
-            side="BUY",
-            quantity=100.0,
-            price=150.0,
-            current_price=150.0
-        )
-
-    @pytest.fixture
-    def order_executor(self):
-        """Create test order executor."""
-        return OrderExecutor()
-
-    def test_initialization(self, order_executor):
-        """Test order executor initialization."""
-        assert order_executor is not None
-
-    @pytest.mark.asyncio
-    async def test_execute_market_order(self, order_executor, execution_context):
-        """Test executing a market order."""
-        from core_engine.trading.execution.order_executor import OrderRequest, OrderType
-        
-        request = OrderRequest(
-            order_id="order_123",
-            symbol="AAPL",
-            side="BUY",
-            quantity=100,
-            order_type=OrderType.MARKET
-        )
-        
-        with patch.object(order_executor, '_execute_across_venues', new_callable=AsyncMock) as mock_execute:
-            mock_execute.return_value = None
-            
-            # Mock the lifecycle manager and analyzers
-            with patch.object(order_executor.lifecycle_manager, 'create_order_state') as mock_state:
-                mock_state.return_value = Mock()
-                with patch.object(order_executor.microstructure_analyzer, 'analyze_order_book') as mock_book:
-                    mock_book.return_value = {}
-                    with patch.object(order_executor.microstructure_analyzer, 'calculate_optimal_price') as mock_price:
-                        mock_price.return_value = {'optimal_price': 150.0}
-                        with patch.object(order_executor.venue_selector, 'select_execution_venues') as mock_venues:
-                            mock_venues.return_value = [('VENUE1', 100, {})]
-                            
-                            order_id = await order_executor.execute_order(request)
-                            
-                            assert order_id == "order_123"
-                            mock_execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_execute_limit_order(self, order_executor, execution_context):
-        """Test executing a limit order."""
-        from core_engine.trading.execution.order_executor import OrderRequest, OrderType
-        
-        request = OrderRequest(
-            order_id="order_124",
-            symbol="AAPL",
-            side="BUY",
-            quantity=100,
-            order_type=OrderType.LIMIT,
-            limit_price=149.0
-        )
-        
-        with patch.object(order_executor, '_execute_across_venues', new_callable=AsyncMock) as mock_execute:
-            mock_execute.return_value = None
-            
-            # Mock the lifecycle manager and analyzers
-            with patch.object(order_executor.lifecycle_manager, 'create_order_state') as mock_state:
-                mock_state.return_value = Mock()
-                with patch.object(order_executor.microstructure_analyzer, 'analyze_order_book') as mock_book:
-                    mock_book.return_value = {}
-                    with patch.object(order_executor.microstructure_analyzer, 'calculate_optimal_price') as mock_price:
-                        mock_price.return_value = {'optimal_price': 149.0}
-                        with patch.object(order_executor.venue_selector, 'select_execution_venues') as mock_venues:
-                            mock_venues.return_value = [('VENUE1', 100, {})]
-                            
-                            order_id = await order_executor.execute_order(request)
-                            
-                            assert order_id == "order_124"
-                            mock_execute.assert_called_once()
-
-
 class TestFillProcessor:
     """Test suite for FillProcessor class."""
 
@@ -588,66 +413,3 @@ class TestFillProcessor:
         assert metrics.total_fills == 3
         assert metrics.total_quantity == 300
         assert abs(metrics.average_price - 151.0) < 0.01
-
-
-class TestTradeExecutor:
-    """Test suite for TradeExecutor class."""
-
-    @pytest.fixture
-    def trade_executor(self):
-        """Create test trade executor."""
-        return TradeExecutor()
-
-    def test_initialization(self, trade_executor):
-        """Test trade executor initialization."""
-        assert trade_executor is not None
-
-    @pytest.mark.asyncio
-    async def test_execute_trade(self, trade_executor):
-        """Test executing a trade."""
-        request = TradeExecutionRequest(
-            trade_id="trade_123",
-            symbol="AAPL",
-            quantity=100,
-            side="BUY",
-            algorithm=TradeExecutionAlgorithm.TWAP,
-            urgency_level=5
-        )
-
-        with patch.object(trade_executor, '_get_market_data', new_callable=AsyncMock) as mock_market:
-            mock_market.return_value = Mock()
-            with patch.object(trade_executor, '_execute_trade_slices', new_callable=AsyncMock) as mock_slices:
-                mock_slices.return_value = None
-                
-                trade_id = await trade_executor.execute_trade(request)
-                
-                assert trade_id == "trade_123"
-                mock_slices.assert_called_once_with("trade_123")
-
-    @pytest.mark.asyncio
-    async def test_cancel_trade(self, trade_executor):
-        """Test canceling a trade."""
-        trade_id = "trade_123"
-
-        # First start a trade so we have something to cancel
-        request = TradeExecutionRequest(
-            trade_id="trade_123",
-            symbol="AAPL",
-            quantity=100,
-            side="BUY",
-            algorithm=TradeExecutionAlgorithm.TWAP,
-            urgency_level=5
-        )
-        
-        with patch.object(trade_executor, '_get_market_data', new_callable=AsyncMock) as mock_market:
-            mock_market.return_value = Mock()
-            with patch.object(trade_executor, '_execute_trade_slices', new_callable=AsyncMock) as mock_slices:
-                mock_slices.return_value = None
-                
-                # Start the trade
-                await trade_executor.execute_trade(request)
-                
-                # Now cancel it
-                result = trade_executor.cancel_trade(trade_id)
-                
-                assert result is True

@@ -663,9 +663,15 @@ class TradingCircuitBreakers:
             f"  Order Rate:       {stats['orders_per_second']}/sec",
             "",
             "TRIGGERED BREAKERS:",
-            *[f"  - {breaker}" for breaker in stats['triggered_breakers']] if stats['triggered_breakers'] else ["  None"],
-            "=" * 60
         ]
+        
+        # Add triggered breakers
+        if stats['triggered_breakers']:
+            report.extend([f"  - {breaker}" for breaker in stats['triggered_breakers']])
+        else:
+            report.append("  None")
+        
+        report.append("=" * 60)
         
         return "\n".join(report)
 
