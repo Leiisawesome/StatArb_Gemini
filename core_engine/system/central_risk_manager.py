@@ -219,8 +219,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.current_positions: Dict[str, float] = {}
         self.strategy_allocations: Dict[str, float] = {}
         self.current_var: float = 0.0
-        self.portfolio_value: float = 1000000.0  # $1M default
-        self.available_cash: float = 1000000.0   # Start with full cash
+        
+        # Portfolio value and cash (PHASE 1 ENHANCEMENT: Use initial_capital from config)
+        initial_capital = config.get('initial_capital', 1000000.0) if isinstance(config, dict) else 1000000.0
+        self.portfolio_value: float = initial_capital
+        self.available_cash: float = initial_capital  # Start with full cash
         self.position_history: List[Dict[str, Any]] = []  # Track all position changes
         
         # Risk limits and audit trails (FIXED: Missing initialization)

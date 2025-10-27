@@ -31,8 +31,8 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Configuration
-from backtest.config.backtest_config import BacktestConfiguration
+# Configuration (CENTRALIZED - using core_engine configs per Rule 1, Section 7)
+from core_engine.config import BacktestConfig, BacktestMode
 
 # Core engine orchestration (BRICK #0)
 from core_engine.system.hierarchical_orchestrator import (
@@ -68,14 +68,14 @@ class InstitutionalBacktestEngine:
         40 - UnifiedExecutionEngine
     
     Usage:
-        config = BacktestConfiguration.from_json("my_backtest.json")
+        config = BacktestConfig.from_dict({"backtest_name": "My Backtest", ...})
         engine = InstitutionalBacktestEngine(config)
         await engine.initialize()
         results = await engine.run_backtest()
         report = await engine.generate_report()
     """
     
-    def __init__(self, config: BacktestConfiguration):
+    def __init__(self, config: BacktestConfig):
         """
         Initialize backtest engine with configuration
         
@@ -204,8 +204,8 @@ class InstitutionalBacktestEngine:
             logger.info("=" * 80)
             logger.info(f"   Backtest: {self.backtest_name}")
             logger.info(f"   Mode: {self.backtest_mode}")  # backtest_mode is already a string
-            logger.info(f"   Period: {self.config.data.start_date} → {self.config.data.end_date}")
-            logger.info(f"   Symbols: {', '.join(self.config.data.symbols)}")
+            logger.info(f"   Period: {self.config.start_date} → {self.config.end_date}")
+            logger.info(f"   Symbols: {', '.join(self.config.symbols)}")
             logger.info(f"   Strategies: {len(self.config.strategies)}")
             logger.info(f"   Components Registered: {len(self.components)}")
             logger.info("=" * 80 + "\n")
@@ -329,13 +329,13 @@ class InstitutionalBacktestEngine:
             
             # Create centralized data config (Rule 1, Section 7)
             data_config = CentralizedDataConfig(
-                symbols=self.config.data.symbols,
-                start_date=self.config.data.start_date,
-                end_date=self.config.data.end_date,
+                symbols=self.config.symbols,
+                start_date=self.config.start_date,
+                end_date=self.config.end_date,
                 connection=ConnectionConfig(
-                    clickhouse_host=self.config.data.clickhouse_host,
-                    clickhouse_port=self.config.data.clickhouse_port,
-                    clickhouse_database=self.config.data.clickhouse_database
+                    clickhouse_host=self.config.clickhouse_host,
+                    clickhouse_port=self.config.clickhouse_port,
+                    clickhouse_database=self.config.clickhouse_database
                 ),
                 caching=CachingConfig(
                     enable_caching=True,
@@ -365,10 +365,10 @@ class InstitutionalBacktestEngine:
             
             logger.info(f"✅ ClickHouseDataManager registered (component_id: {component_id})")
             logger.info(f"   Initialization Order: 10 (after RegimeEngine=5)")
-            logger.info(f"   Symbols: {', '.join(self.config.data.symbols)}")
-            logger.info(f"   Period: {self.config.data.start_date} → {self.config.data.end_date}")
-            logger.info(f"   Interval: {self.config.data.interval}")
-            logger.info(f"   Database: {self.config.data.clickhouse_database}")
+            logger.info(f"   Symbols: {', '.join(self.config.symbols)}")
+            logger.info(f"   Period: {self.config.start_date} → {self.config.end_date}")
+            logger.info(f"   Interval: {self.config.interval}")
+            logger.info(f"   Database: {self.config.clickhouse_database}")
             logger.info(f"   Regime-Aware: ✅")
             
             # Load historical data
@@ -408,13 +408,13 @@ class InstitutionalBacktestEngine:
             logger.info("   Fetching data from ClickHouse...")
             
             # Convert date strings to datetime objects
-            start_dt = datetime.strptime(self.config.data.start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(self.config.data.end_date, "%Y-%m-%d")
+            start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
             
             # ENHANCEMENT: Add trading hours for intraday data
             # If we're loading intraday data (1min, 5min, 15min), ensure we have
             # proper trading hours to get a full day of data
-            if self.config.data.interval in ['1min', '5min', '15min', '1h']:
+            if self.config.interval in ['1min', '5min', '15min', '1h']:
                 # For single-day backtests, set to market hours (09:30 - 16:00 ET)
                 if start_dt.date() == end_dt.date():
                     logger.info(f"   Single-day backtest detected - using market hours (09:30-16:00)")
@@ -431,7 +431,7 @@ class InstitutionalBacktestEngine:
             # Load data for all symbols
             self.market_data = {}
             
-            for symbol in self.config.data.symbols:
+            for symbol in self.config.symbols:
                 logger.info(f"   Loading {symbol}...")
                 
                 # Load market data using data manager (not async)
@@ -439,7 +439,7 @@ class InstitutionalBacktestEngine:
                     symbols=[symbol],  # Pass as list
                     start_time=start_dt,
                     end_time=end_dt,
-                    interval=self.config.data.interval
+                    interval=self.config.interval
                 )
                 
                 if data is not None and not data.empty:
@@ -645,14 +645,14 @@ class InstitutionalBacktestEngine:
             from core_engine.config import DataConfig as CentralizedDataConfig, ConnectionConfig, CachingConfig
             
             centralized_data_config = CentralizedDataConfig(
-                symbols=self.config.data.symbols,
-                start_date=self.config.data.start_date,
-                end_date=self.config.data.end_date,
-                interval=self.config.data.interval,
+                symbols=self.config.symbols,
+                start_date=self.config.start_date,
+                end_date=self.config.end_date,
+                interval=self.config.interval,
                 connection=ConnectionConfig(
-                    clickhouse_host=self.config.data.clickhouse_host,
-                    clickhouse_port=self.config.data.clickhouse_port,
-                    clickhouse_database=self.config.data.clickhouse_database
+                    clickhouse_host=self.config.clickhouse_host,
+                    clickhouse_port=self.config.clickhouse_port,
+                    clickhouse_database=self.config.clickhouse_database
                 ),
                 caching=CachingConfig(
                     enable_caching=True,  # Default for backtest
@@ -746,20 +746,35 @@ class InstitutionalBacktestEngine:
             registered_count = 0
             for strategy_config in self.config.strategies:
                 try:
-                    # Convert strategy type string to StrategyType enum
-                    strategy_type_str = strategy_config.strategy_type
-                    strategy_type = StrategyType(strategy_type_str)
-                    
-                    # Convert dataclass to dict for registration
-                    config_dict = {
-                        'name': strategy_config.strategy_name,
-                        'type': strategy_config.strategy_type,
-                        'allocation_pct': strategy_config.allocation_pct,
-                        'parameters': strategy_config.parameters,
-                        'max_position_size': strategy_config.max_position_size,
-                        'max_concentration': strategy_config.max_concentration,
-                        'symbols': self.config.data.symbols  # Pass available symbols to strategy
-                    }
+                    # Handle both dict and dataclass strategy configs
+                    if isinstance(strategy_config, dict):
+                        # Dict-based config (flattened structure)
+                        strategy_type_str = strategy_config.get('type', 'momentum')
+                        strategy_type = StrategyType(strategy_type_str)
+                        
+                        config_dict = {
+                            'name': strategy_config.get('name', f'strategy_{registered_count}'),
+                            'type': strategy_type_str,
+                            'allocation_pct': strategy_config.get('allocation_pct', 1.0),
+                            'parameters': strategy_config.get('parameters', {}),
+                            'max_position_size': strategy_config.get('max_position_size', 0.10),
+                            'max_concentration': strategy_config.get('max_concentration', 0.15),
+                            'symbols': self.config.symbols  # Pass available symbols to strategy
+                        }
+                    else:
+                        # Dataclass-based config (legacy structure)
+                        strategy_type_str = strategy_config.strategy_type
+                        strategy_type = StrategyType(strategy_type_str)
+                        
+                        config_dict = {
+                            'name': strategy_config.strategy_name,
+                            'type': strategy_config.strategy_type,
+                            'allocation_pct': strategy_config.allocation_pct,
+                            'parameters': strategy_config.parameters,
+                            'max_position_size': strategy_config.max_position_size,
+                            'max_concentration': strategy_config.max_concentration,
+                            'symbols': self.config.symbols  # Pass available symbols to strategy
+                        }
                     
                     # Register with strategy manager
                     success = await self.strategy_manager.register_enhanced_strategy(
@@ -769,9 +784,9 @@ class InstitutionalBacktestEngine:
                     
                     if success:
                         registered_count += 1
-                        logger.info(f"   ✅ Registered: {strategy_config.strategy_name} ({strategy_type_str})")
+                        logger.info(f"   ✅ Registered: {config_dict['name']} ({strategy_type_str})")
                     else:
-                        logger.warning(f"   ⚠️  Failed to register: {strategy_config.strategy_name}")
+                        logger.warning(f"   ⚠️  Failed to register: {config_dict['name']}")
                 
                 except Exception as e:
                     logger.error(f"   ❌ Strategy registration error: {e}")
@@ -819,49 +834,34 @@ class InstitutionalBacktestEngine:
             # For backtesting, we configure institutional-grade risk limits
             # with regime-aware adjustments
             
-            # Get risk config from backtest configuration (dataclass)
-            risk_config = self.config.risk if self.config.risk else None
+            # Get risk config from flattened BacktestConfig
+            # All risk settings are now direct attributes of self.config
             
             # Create risk manager config dict (CentralRiskManager creates RiskManagerConfig internally)
             risk_manager_config_dict = {
-                # Position limits (regime-adjusted)
-                'max_position_size': risk_config.get('max_position_size', 0.10) if isinstance(risk_config, dict) else (risk_config.max_position_size if risk_config else 0.10),  # 10% max
-                'max_daily_var': risk_config.get('max_daily_var', 0.05) if isinstance(risk_config, dict) else (risk_config.max_daily_var if risk_config else 0.05),  # 5% VaR
+                # Initial capital - from flattened config
+                'initial_capital': self.config.initial_capital,
+                
+                # Position limits (regime-adjusted) - from flattened config
+                'max_position_size': self.config.max_position_size,  # Default: 0.10 (10% max)
+                'max_daily_var': self.config.max_daily_var,  # Default: 0.05 (5% VaR)
                 'max_total_risk': 0.20,  # 20% total
-                'position_concentration_limit': risk_config.get('max_concentration', 0.15) if isinstance(risk_config, dict) else (risk_config.max_concentration if risk_config else 0.15),  # 15%
+                'position_concentration_limit': self.config.max_concentration,  # Default: 0.15 (15%)
                 'strategy_allocation_limit': 0.33,  # 33%
                 
-                # Signal confidence requirements
-                'min_signal_confidence': risk_config.get('min_signal_confidence', 0.6) if isinstance(risk_config, dict) else (risk_config.min_signal_confidence if risk_config else 0.6),  # 60% min
+                # Signal confidence requirements - from flattened config
+                'min_signal_confidence': self.config.min_signal_confidence,  # Default: 0.6 (60% min)
                 'high_confidence_threshold': 0.8,  # 80% for automatic approval
                 'extreme_confidence_threshold': 0.9,  # 90% for priority
                 
-                # Regime-aware adjustments (Rule 2 Regime-First)
-                'regime_risk_multipliers': (
-                    risk_config.get('regime_risk_multipliers', {
-                        'low_volatility': 1.2,  # Increase risk in stable markets
-                        'normal_volatility': 1.0,  # Normal risk
-                        'high_volatility': 0.7,  # Reduce risk in volatile markets
-                        'extreme_volatility': 0.4,  # Significantly reduce in extreme vol
-                        'crisis': 0.2  # Minimal risk in crisis
-                    }) if isinstance(risk_config, dict) else (
-                        risk_config.regime_risk_multipliers 
-                        if risk_config and hasattr(risk_config, 'regime_risk_multipliers') 
-                        else {
-                            'low_volatility': 1.2,  # Increase risk in stable markets
-                            'normal_volatility': 1.0,  # Normal risk
-                            'high_volatility': 0.7,  # Reduce risk in volatile markets
-                            'extreme_volatility': 0.4,  # Significantly reduce in extreme vol
-                            'crisis': 0.2  # Minimal risk in crisis
-                        }
-                    )
-                ),
+                # Regime-aware adjustments (Rule 2 Regime-First) - from flattened config
+                'regime_risk_multipliers': self.config.regime_risk_multipliers,
                 
                 # Monitoring
                 'real_time_monitoring': False,  # Disabled for backtesting
                 
-                # Short selling configuration
-                'allow_shorts': risk_config.get('allow_shorts', False) if isinstance(risk_config, dict) else (risk_config.allow_shorts if risk_config else False)
+                # Short selling configuration - from flattened config
+                'allow_shorts': self.config.allow_shorts
             }
             
             # Create risk manager instance (it will create RiskManagerConfig internally)
@@ -924,73 +924,48 @@ class InstitutionalBacktestEngine:
     
     async def _initialize_position_tracker(self) -> None:
         """
-        Phase 4.4: Initialize PositionTracker Helper
+        Phase 4.4: Position Tracking via CentralRiskManager (PHASE 2 COMPLETE)
         
-        The position tracker is a critical helper component that provides:
-        - Position tracking by symbol (long/short)
-        - Cash availability tracking and validation
-        - Trade validation (sufficient cash for BUY, sufficient position for SELL)
-        - Unrealized and realized P&L calculation
-        - Position history for analytics
-        - Integration with CentralRiskManager
+        ✅ PHASE 2: Removed duplicate PositionTracker
         
-        This component ensures:
-        - Can't buy if insufficient cash
-        - Can't sell if no position
-        - Accurate position and P&L tracking
-        - Complete audit trail
+        Position tracking is now handled by CentralRiskManager (Rule 4, Section 10)
+        - Single source of truth for all positions
+        - Cash management integrated with risk limits
+        - Real-time P&L tracking
+        - Position reconciliation
         
-        Critical for institutional-grade backtesting accuracy!
+        No separate position_tracker needed - CentralRiskManager provides:
+        - self.risk_manager.current_positions: Position tracking
+        - self.risk_manager.available_cash: Cash management
+        - self.risk_manager.update_position(): Position updates
+        - self.risk_manager.position_history: Complete audit trail
         """
         logger.info("\n" + "-" * 80)
-        logger.info("📊 PositionTracker Helper (Phase 4.4)")
+        logger.info("📊 Position Tracking via CentralRiskManager (Phase 4.4 - PHASE 2 COMPLETE)")
         logger.info("-" * 80)
         
-        try:
-            from backtest.engine.position_tracker import PositionTracker
-            
-            # Get initial capital from risk manager config (handles both dict and dataclass)
-            initial_capital = (
-                self.config.risk.get('initial_capital', 1_000_000) if isinstance(self.config.risk, dict) 
-                else (self.config.risk.initial_capital if self.config.risk else 1_000_000)
-            )
-            
-            # Get commission settings from config (handles both dict and dataclass)
-            commission_per_trade = (
-                self.config.execution.get('commission_per_trade', 0.005) if isinstance(self.config.execution, dict)
-                else (getattr(self.config.execution, 'commission_per_trade', 0.005) if self.config.execution else 0.005)
-            )
-            
-            # Create position tracker
-            self.position_tracker = PositionTracker(
-                initial_capital=initial_capital,
-                commission_per_trade=commission_per_trade
-            )
-            
-            logger.info(f"✅ PositionTracker initialized")
-            logger.info(f"   Initial Capital: ${initial_capital:,.2f}")
-            logger.info(f"   Commission/Trade: ${commission_per_trade:.2f}")
-            logger.info(f"\n   Capabilities:")
-            logger.info(f"   • Position tracking by symbol (long/short)")
-            logger.info(f"   • Cash availability validation")
-            logger.info(f"   • Trade validation (BUY/SELL)")
-            logger.info(f"   • Unrealized P&L calculation")
-            logger.info(f"   • Realized P&L tracking")
-            logger.info(f"   • Position history for analytics")
-            logger.info(f"\n   Integration:")
-            logger.info(f"   • CentralRiskManager: Position validation")
-            logger.info(f"   • Execution Engine: Trade recording")
-            logger.info(f"   • Analytics: Performance calculation")
-            
-            # Link to risk manager for position validation callbacks
-            if self.risk_manager:
-                # The risk manager will use position_tracker for validation
-                # This will be implemented when authorization flow is built
-                logger.info(f"   • Risk Manager: ✅ Linked for position validation")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize PositionTracker: {e}", exc_info=True)
-            raise RuntimeError(f"Position tracker initialization failed: {e}")
+        if not self.risk_manager:
+            raise RuntimeError("CentralRiskManager must be initialized before position tracking")
+        
+        logger.info(f"✅ Position tracking configured")
+        logger.info(f"   Source: CentralRiskManager (Rule 4, Section 10)")
+        logger.info(f"   Initial Capital: ${self.config.initial_capital:,.2f}")
+        logger.info(f"   Cash Available: ${self.risk_manager.available_cash:,.2f}")
+        logger.info(f"\n   Capabilities (via CentralRiskManager):")
+        logger.info(f"   • Position tracking by symbol (via current_positions)")
+        logger.info(f"   • Cash availability validation (via risk limits)")
+        logger.info(f"   • Trade validation (BUY/SELL authorization)")
+        logger.info(f"   • Real-time P&L calculation")
+        logger.info(f"   • Position history audit trail")
+        logger.info(f"\n   Integration:")
+        logger.info(f"   • CentralRiskManager: ✅ Single source of truth (Rule 4)")
+        logger.info(f"   • Execution Engine: ✅ Position updates via callbacks")
+        logger.info(f"   • Analytics: ✅ Performance from position history")
+        
+        # No separate position_tracker instance - use CentralRiskManager directly
+        # Access positions via: self.risk_manager.current_positions
+        # Access cash via: self.risk_manager.available_cash
+        # Update positions via: await self.risk_manager.update_position()
     
     async def _initialize_indicators_engine(self) -> None:
         """
@@ -1331,15 +1306,16 @@ class InstitutionalBacktestEngine:
             # Create execution engine
             self.execution_engine = UnifiedExecutionEngine(execution_config)
             
-            # CRITICAL: Set position callbacks to PositionTracker
-            if self.position_tracker and hasattr(self.execution_engine, 'set_position_callbacks'):
+            # CRITICAL: Set position callbacks to CentralRiskManager (Phase 2 Complete)
+            # Position tracking now handled by CentralRiskManager (Rule 4, Section 10)
+            if self.risk_manager and hasattr(self.execution_engine, 'set_position_callbacks'):
                 self.execution_engine.set_position_callbacks(
-                    risk_manager_callback=self.position_tracker,  # Position updates flow through tracker
-                    position_update_callback=self.position_tracker.update_position
+                    risk_manager_callback=self.risk_manager,  # Position updates via CentralRiskManager
+                    position_update_callback=self.risk_manager.update_position
                 )
-                logger.info("✅ Position callbacks configured → PositionTracker")
+                logger.info("✅ Position callbacks configured → CentralRiskManager (Phase 2 Complete)")
             else:
-                logger.warning("⚠️  No position tracker available - position updates may not work")
+                logger.warning("⚠️  No risk manager available - position updates may not work")
             
             # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.execution_engine, 'set_regime_engine'):
@@ -1370,7 +1346,7 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Spread Model: {execution_config['spread_model']} (fallback: {execution_config['spread_fallback_bps']} bps)")
             logger.info(f"   Impact Model: {execution_config['impact_model']} (Rule 7 Section B)")
             logger.info(f"   Base Slippage: {execution_config['base_slippage_bps']} bps")
-            logger.info(f"   Position Tracking: ✅ (via PositionTracker)")
+            logger.info(f"   Position Tracking: ✅ (via CentralRiskManager - Phase 2 Complete)")
             logger.info(f"   Regime-Aware: ✅ (Rule 2 - execution costs adapt to regime)")
             logger.info(f"   Rule 7 Compliance (Liquidity Management): ✅ Liquidity-Aware Execution Costs")
             logger.info(f"   Rule 4 Compliance: ✅ Executes ONLY authorized trades")
@@ -1659,44 +1635,53 @@ class InstitutionalBacktestEngine:
     
     async def _initialize_performance_reporter(self) -> None:
         """
-        Phase 6.3: Initialize PerformanceReporter (Helper)
+        Phase 6.3: Performance Reporting via EnhancedAnalyticsManager (PHASE 2 COMPLETE)
         
-        The performance reporter is a helper class (not a registered component)
-        that aggregates results from analytics components and formats
-        comprehensive backtest reports.
+        ✅ PHASE 2: Removed duplicate PerformanceReporter
         
-        Responsibilities:
-        - Generate performance summary from execution history
-        - Format reports in multiple formats (console, JSON, CSV)
-        - Calculate derived statistics
-        - Export reports to files
-        - Provide transaction cost analysis (TCA)
+        Performance reporting is now handled by EnhancedAnalyticsManager (Rule 9)
+        - Centralized analytics and reporting
+        - Institutional-grade metrics
+        - Regime-aware performance attribution
+        - Strategy-level analytics
+        
+        No separate performance_reporter needed - EnhancedAnalyticsManager provides:
+        - self.analytics_manager.get_performance_summary(): Performance metrics
+        - self.analytics_manager.generate_report(): Report generation
+        - self.analytics_manager.calculate_metrics(): Risk-adjusted metrics
+        - self.performance_analyzer: Detailed performance analysis
         """
         logger.info("\n" + "-" * 80)
-        logger.info("📊 HELPER: PerformanceReporter")
+        logger.info("📊 Performance Reporting via EnhancedAnalyticsManager (Phase 6.3 - PHASE 2 COMPLETE)")
         logger.info("-" * 80)
         
-        try:
-            from backtest.engine.performance_reporter import PerformanceReporter
-            
-            # Create performance reporter config
-            reporter_config = {
-                'output_dir': 'backtest_results',
-                'risk_free_rate': 0.04,  # 4% annual risk-free rate
-                'trading_days_per_year': 252
-            }
-            
-            # Create performance reporter
-            self.performance_reporter = PerformanceReporter(reporter_config)
-            
-            logger.info(f"✅ PerformanceReporter created")
-            logger.info(f"   Output Directory: {self.performance_reporter.output_dir}")
-            logger.info(f"   Risk-Free Rate: {self.performance_reporter.risk_free_rate:.2%}")
-            logger.info(f"   Report Formats: Console, JSON, CSV, Markdown")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize PerformanceReporter: {e}", exc_info=True)
-            raise RuntimeError(f"Performance reporter initialization failed: {e}")
+        if not self.analytics_manager:
+            raise RuntimeError("EnhancedAnalyticsManager must be initialized before performance reporting")
+        
+        logger.info(f"✅ Performance reporting configured")
+        logger.info(f"   Source: EnhancedAnalyticsManager (Rule 9)")
+        logger.info(f"   Output Directory: backtest_results")
+        logger.info(f"   Risk-Free Rate: 4.0%")
+        logger.info(f"\n   Capabilities (via EnhancedAnalyticsManager):")
+        logger.info(f"   • Performance metrics calculation")
+        logger.info(f"   • Risk-adjusted returns (Sharpe, Sortino, Calmar)")
+        logger.info(f"   • Drawdown analysis")
+        logger.info(f"   • Transaction cost analysis (TCA)")
+        logger.info(f"   • Regime-aware attribution")
+        logger.info(f"   • Strategy-level performance")
+        logger.info(f"\n   Report Formats:")
+        logger.info(f"   • Console output (real-time)")
+        logger.info(f"   • JSON export (programmatic)")
+        logger.info(f"   • CSV export (Excel-compatible)")
+        logger.info(f"   • Markdown (documentation)")
+        logger.info(f"\n   Integration:")
+        logger.info(f"   • PerformanceAnalyzer: ✅ Detailed analytics")
+        logger.info(f"   • MetricsCalculator: ✅ Professional metrics")
+        logger.info(f"   • CentralRiskManager: ✅ Position data source")
+        
+        # No separate performance_reporter instance - use EnhancedAnalyticsManager
+        # Generate reports via: await self.analytics_manager.generate_report()
+        # Get metrics via: await self.analytics_manager.get_performance_summary()
     
     # ============================================================
     # SPRINT 0: INSTITUTIONAL COMPONENTS INITIALIZATION
@@ -2266,7 +2251,7 @@ class InstitutionalBacktestEngine:
                 return "No trades executed - cannot generate report"
             
             # Get initial and final capital
-            initial_capital = self.config.execution.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
+            initial_capital = self.config.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
             final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
             
             # Generate performance summary
@@ -2318,7 +2303,7 @@ class InstitutionalBacktestEngine:
             if not self.performance_reporter or not self.execution_history:
                 return None
             
-            initial_capital = self.config.execution.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
+            initial_capital = self.config.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
             final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
             
             summary = self.performance_reporter.generate_performance_summary(
@@ -2372,8 +2357,8 @@ class InstitutionalBacktestEngine:
         logger.info("🚀 STARTING BACKTEST EXECUTION")
         logger.info("=" * 80)
         logger.info(f"   Backtest: {self.backtest_name}")
-        logger.info(f"   Period: {self.config.data.start_date} → {self.config.data.end_date}")
-        logger.info(f"   Symbols: {', '.join(self.config.data.symbols)}")
+        logger.info(f"   Period: {self.config.start_date} → {self.config.end_date}")
+        logger.info(f"   Symbols: {', '.join(self.config.symbols)}")
         logger.info("=" * 80 + "\n")
         
         if not self.is_initialized:
@@ -2625,7 +2610,7 @@ class InstitutionalBacktestEngine:
                             # Get first active strategy (for single-strategy backtest)
                             try:
                                 strategy = list(self.strategy_manager.active_strategies.values())[0]
-                                symbol = self.config.data.symbols[0]
+                                symbol = self.config.symbols[0]
                                 
                                 # ✅ FIX: Pass RAW HISTORICAL DATA (not features) to strategy
                                 # Strategy expects OHLCV data so it can calculate its own indicators
@@ -2687,7 +2672,7 @@ class InstitutionalBacktestEngine:
                 bar_df = bar_df.reset_index()
                 
                 # Accumulate historical market data for strategies
-                for symbol in self.config.data.symbols:
+                for symbol in self.config.symbols:
                     if symbol not in self.historical_market_data:
                         self.historical_market_data[symbol] = pd.DataFrame()
                     # Append current bar to historical data
@@ -2702,7 +2687,7 @@ class InstitutionalBacktestEngine:
                 if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
                     # STRATEGY generates signals based on its custom logic
                     try:
-                        strategy_signals = await self.strategy_manager.generate_signals(self.config.data.symbols, self.historical_market_data)
+                        strategy_signals = await self.strategy_manager.generate_signals(self.config.symbols, self.historical_market_data)
                         # Strategy returns List[Signal], convert to DataFrame
                         if strategy_signals is not None:
                             if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
@@ -2830,7 +2815,7 @@ class InstitutionalBacktestEngine:
             # Convert signals to trade requests
             for idx, signal_row in signals_df.iterrows():
                 # Extract signal information
-                symbol = signal_row.get('symbol', self.config.data.symbols[0])
+                symbol = signal_row.get('symbol', self.config.symbols[0])
                 signal_type = signal_row.get('signal', 'HOLD')
                 confidence = signal_row.get('confidence', 0.5)
                 
@@ -2852,7 +2837,11 @@ class InstitutionalBacktestEngine:
                         # Enter long position
                         side = 'buy'
                         # Calculate quantity based on position size percentage and current price
-                        position_size_pct = self.config.strategies[0].max_position_size
+                        # Use first strategy's config if available, otherwise use default max_position_size
+                        if self.config.strategies and len(self.config.strategies) > 0:
+                            position_size_pct = self.config.strategies[0].get('max_position_size', self.config.max_position_size)
+                        else:
+                            position_size_pct = self.config.max_position_size
                         portfolio_value = 1000000  # Should match risk manager default
                         dollar_amount = position_size_pct * portfolio_value
                         quantity = dollar_amount / current_price

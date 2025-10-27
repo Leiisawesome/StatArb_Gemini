@@ -27,7 +27,7 @@ from typing import Dict, Any, Optional
 
 # Import backtest components
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
-from backtest.config.backtest_config import BacktestConfiguration
+from core_engine.config import BacktestConfig, BacktestMode  # CENTRALIZED CONFIG
 from backtest.cli.interactive import InteractiveBacktestCLI
 from backtest.cli.config_builder import ConfigurationBuilder
 
@@ -425,135 +425,74 @@ Examples:
         
         return 0
     
-    def _load_config_file(self, path: str) -> BacktestConfiguration:
+    def _load_config_file(self, path: str) -> BacktestConfig:
         """Load configuration from JSON file"""
         
         with open(path, 'r') as f:
             config_dict = json.load(f)
         
-        # Convert to BacktestConfiguration
-        # TODO: Implement proper deserialization
-        from backtest.config.backtest_config import DataConfig, StrategyConfig, RiskConfig, ExecutionConfig, AnalyticsConfig
-        
-        return BacktestConfiguration(
-            backtest_name=config_dict.get('backtest_name', 'backtest'),
-            backtest_mode=config_dict.get('backtest_mode', 'historical'),
-            data=DataConfig(**config_dict.get('data', {})),
-            strategies=[StrategyConfig(**s) for s in config_dict.get('strategies', [])],
-            risk=RiskConfig(**config_dict.get('risk', {})),
-            execution=ExecutionConfig(**config_dict.get('execution', {})),
-            analytics=AnalyticsConfig(**config_dict.get('analytics', {}))
-        )
+        # Convert to BacktestConfig (CENTRALIZED using core_engine)
+        # BacktestConfig now flattens all nested configs (Rule 1, Section 7)
+        return BacktestConfig.from_dict(config_dict)
     
-    def _build_config_from_args(self, args: argparse.Namespace) -> BacktestConfiguration:
+    def _build_config_from_args(self, args: argparse.Namespace) -> BacktestConfig:
         """Build configuration from command-line arguments"""
         
-        from backtest.config.backtest_config import (
-            DataConfig, StrategyConfig, RiskConfig, ExecutionConfig, AnalyticsConfig
-        )
-        
-        # Data configuration
-        data_config = DataConfig(
+        # Create BacktestConfig directly (flattened structure)
+        return BacktestConfig(
+            backtest_name=args.name or f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            backtest_mode=BacktestMode.SINGLE_STRATEGY,
+            # Data settings
             symbols=args.symbols.split(',') if args.symbols else ['NVDA'],
             start_date=args.start_date or '2024-01-01',
             end_date=args.end_date or '2024-03-31',
-            interval=args.interval
-        )
-        
-        # Strategy configuration
-        strategy_types = args.strategies.split(',') if args.strategies else ['momentum']
-        strategies = [
-            StrategyConfig(
-                strategy_type=st,
-                strategy_name=f'{st}_strategy',
-                allocation_pct=1.0 / len(strategy_types),
-                max_position_size=0.10
-            )
-            for st in strategy_types
-        ]
-        
-        # Risk configuration
-        risk_config = RiskConfig(
+            interval=args.interval,
+            # Risk settings
             initial_capital=args.initial_capital,
             max_position_size=0.10,
             max_daily_var=0.05,
-            max_concentration=0.20
-        )
-        
-        # Execution configuration
-        execution_config = ExecutionConfig(
+            max_concentration=0.20,
+            # Execution settings
             enable_realistic_fills=True,
             enable_cost_modeling=True,
-            apply_slippage=True,
-            apply_market_impact=True
-        )
-        
-        # Analytics configuration
-        analytics_config = AnalyticsConfig(
+            # Analytics settings
             enable_regime_attribution=True,
             enable_strategy_attribution=True,
             generate_html_report=True,
             generate_json_report=True
         )
-        
-        return BacktestConfiguration(
-            backtest_name=args.name or f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            backtest_mode='historical',
-            data=data_config,
-            strategies=strategies,
-            risk=risk_config,
-            execution=execution_config,
-            analytics=analytics_config
-        )
     
-    def _validate_configuration(self, config: BacktestConfiguration) -> Dict[str, Any]:
+    def _validate_configuration(self, config: BacktestConfig) -> Dict[str, Any]:
         """Validate backtest configuration"""
         
-        errors = []
+        # Use BacktestConfig's built-in validation method
+        is_valid, errors = config.validate()
+        
+        # Additional warnings
         warnings = []
-        
-        # Validate data configuration
-        if not config.data.symbols:
-            errors.append("No symbols specified")
-        
-        if not config.data.start_date or not config.data.end_date:
-            errors.append("Start and end dates are required")
-        
-        # Validate strategies
-        if not config.strategies:
-            errors.append("At least one strategy is required")
-        
-        total_allocation = sum(s.allocation_pct for s in config.strategies)
-        if abs(total_allocation - 1.0) > 0.01:
-            warnings.append(f"Strategy allocations sum to {total_allocation:.2%}, should be 100%")
-        
-        # Validate risk configuration
-        if config.risk.initial_capital <= 0:
-            errors.append("Initial capital must be positive")
+        if config.initial_capital < 10000:
+            warnings.append("Initial capital is very low (<$10k), results may not be realistic")
         
         return {
-            'valid': len(errors) == 0,
+            'valid': is_valid,
             'errors': errors,
             'warnings': warnings
         }
     
-    def _display_config_summary(self, config: BacktestConfiguration):
+    def _display_config_summary(self, config: BacktestConfig):
         """Display configuration summary"""
         
         print(f"\n📊 Configuration Summary:")
         print(f"   Name: {config.backtest_name}")
-        print(f"   Mode: {config.backtest_mode}")
+        print(f"   Mode: {config.backtest_mode.value}")
         print(f"\n   Data:")
-        print(f"     Symbols: {', '.join(config.data.symbols)}")
-        print(f"     Period: {config.data.start_date} → {config.data.end_date}")
-        print(f"     Interval: {config.data.interval}")
-        print(f"\n   Strategies: {len(config.strategies)}")
-        for strategy in config.strategies:
-            print(f"     • {strategy.strategy_name} ({strategy.strategy_type}): {strategy.allocation_pct:.1%}")
+        print(f"     Symbols: {', '.join(config.symbols)}")
+        print(f"     Period: {config.start_date} → {config.end_date}")
+        print(f"     Interval: {config.interval}")
         print(f"\n   Risk:")
-        print(f"     Initial Capital: ${config.risk.initial_capital:,.0f}")
-        print(f"     Max Position Size: {config.risk.max_position_size:.1%}")
-        print(f"     Max Daily VaR: {config.risk.max_daily_var:.1%}")
+        print(f"     Initial Capital: ${config.initial_capital:,.0f}")
+        print(f"     Max Position Size: {config.max_position_size:.1%}")
+        print(f"     Max Daily VaR: {config.max_daily_var:.1%}")
     
     def _display_results_summary(self, results: Dict[str, Any]):
         """Display results summary"""

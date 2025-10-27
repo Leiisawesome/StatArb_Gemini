@@ -14,9 +14,14 @@ This application orchestrates all 9 core_engine components to provide:
 
 Usage:
     from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
-    from backtest.config.backtest_config import BacktestConfiguration
+    from core_engine.config import BacktestConfig, BacktestMode
     
-    config = BacktestConfiguration.from_json("my_backtest.json")
+    config = BacktestConfig.from_dict({
+        "backtest_name": "My Backtest",
+        "symbols": ["AAPL"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-03-31"
+    })
     engine = InstitutionalBacktestEngine(config)
     await engine.initialize()
     results = await engine.run_backtest()
@@ -26,14 +31,16 @@ Usage:
 __version__ = "1.0.0"
 __author__ = "StatArb_Gemini Team"
 
-# Phase 1: Configuration system (available)
-from backtest.config.backtest_config import BacktestConfiguration
+# Phase 1: Configuration system (CENTRALIZED - using core_engine configs per Rule 1, Section 7)
+from core_engine.config import BacktestConfig, BacktestMode
 
 # Phase 2.1: Main engine skeleton (available)
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 
 __all__ = [
     'InstitutionalBacktestEngine',
-    'BacktestConfiguration',
+    'BacktestConfig',
+    'BacktestMode',
 ]
+
 

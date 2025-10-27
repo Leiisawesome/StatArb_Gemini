@@ -21,7 +21,7 @@ from .unified_config import (
 )
 
 # System-wide configuration
-from .system_config import SystemConfig
+from .system_config import SystemConfig, BacktestConfig, BacktestMode
 
 # Broker configuration  
 from .broker_config import (
@@ -117,7 +117,7 @@ __all__ = [
     'config_get', 'config_set', 'config_section',
     
     # System
-    'SystemConfig',
+    'SystemConfig', 'BacktestConfig', 'BacktestMode',
     
     # Broker
     'BrokerConfig', 'AlpacaConfig', 'InteractiveBrokersConfig',

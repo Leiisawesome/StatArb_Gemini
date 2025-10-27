@@ -27,15 +27,8 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backtest.config.backtest_config import (
-    BacktestConfiguration,
-    DataConfig,
-    StrategyConfig,
-    RiskConfig,
-    ExecutionConfig,
-    AnalyticsConfig,
-    BacktestMode
-)
+# PHASE 1 COMPLETE: Using centralized configuration (Rule 1, Section 7)
+from core_engine.config import BacktestConfig, BacktestMode
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 
 
@@ -45,48 +38,43 @@ from backtest.engine.institutional_backtest_engine import InstitutionalBacktestE
 
 @pytest.fixture
 def backtest_config():
-    """Create minimal backtest configuration for Phase 5 testing"""
+    """
+    Create minimal backtest configuration for Phase 5 testing (Phase 1 Complete - flattened)
+    """
     
-    # 3-month period of data (2024-01-02 → 2024-03-31)
-    data_config = DataConfig(
+    # Create full configuration with flattened structure
+    config = BacktestConfig(
+        backtest_name="Phase5_ExecutionTest",
+        backtest_mode=BacktestMode.SINGLE_STRATEGY,
+        
+        # Data settings (flattened) - 3-month period (2024-01-02 → 2024-03-31)
         symbols=['NVDA'],
         start_date='2024-01-02',
         end_date='2024-03-31',
-        interval='1min'
-    )
-    
-    # Minimal strategy config (not used for Phase 5.1 test)
-    strategy_config = StrategyConfig(
-        strategy_type='momentum',
-        strategy_name='momentum_test',
-        allocation_pct=1.0,
-        parameters={
-            'lookback_period': 20,
-            'momentum_threshold': 0.02
-        }
-    )
-    
-    # Risk config
-    risk_config = RiskConfig(
+        interval='1min',
+        
+        # Strategy configurations
+        strategies=[{
+            'type': 'momentum',
+            'name': 'momentum_test',
+            'allocation_pct': 1.0,
+            'parameters': {
+                'lookback_period': 20,
+                'momentum_threshold': 0.02
+            }
+        }],
+        
+        # Risk settings (flattened)
+        initial_capital=1_000_000.0,
         max_position_size=0.10,
-        max_concentration=0.15
-    )
-    
-    # Execution config
-    execution_config = ExecutionConfig()
-    
-    # Analytics config
-    analytics_config = AnalyticsConfig()
-    
-    # Create full configuration
-    config = BacktestConfiguration(
-        backtest_name="Phase5_ExecutionTest",
-        backtest_mode=BacktestMode.SINGLE_STRATEGY,
-        data=data_config,
-        strategies=[strategy_config],
-        risk=risk_config,
-        execution=execution_config,
-        analytics=analytics_config
+        max_concentration=0.15,
+        max_daily_var=0.05,
+        
+        # Execution settings (flattened)
+        enable_realistic_fills=True,
+        enable_cost_modeling=True,
+        enable_liquidity_filtering=True,
+        commission_per_trade=0.005
     )
     
     return config
@@ -159,40 +147,41 @@ class TestPhase51_ExecutionEngineIntegration:
     
     async def test_position_callbacks_configured(self, backtest_engine):
         """
-        Test 2: Position callbacks configured to PositionTracker
+        Test 2: Position callbacks configured (Phase 2 Complete - via CentralRiskManager)
         
         Success Criteria:
-        - Position tracker exists
-        - Execution engine has position callbacks
-        - Callbacks point to position tracker
+        - Risk manager handles position tracking
+        - Execution engine has access to risk manager
+        - Position tracking capability verified
         """
         print("\n" + "=" * 80)
-        print("TEST 2: Position Callbacks Configuration")
+        print("TEST 2: Position Callbacks Configuration (via CentralRiskManager)")
         print("=" * 80)
         
-        # Check position tracker exists
-        assert backtest_engine.position_tracker is not None, \
-            "Position tracker should be initialized"
+        # Phase 2 Complete: Position tracking via CentralRiskManager
+        assert backtest_engine.risk_manager is not None, \
+            "Risk manager (with position tracking) should be initialized"
+        assert backtest_engine.risk_manager.available_cash > 0, \
+            "Position tracking initialized with capital"
         
         # Check execution engine has callback configuration
         execution_engine = backtest_engine.execution_engine
         
-        # The execution engine should have position callback configured
-        # (Exact implementation may vary, checking for common callback attributes)
+        # The execution engine should have risk manager for position updates
         has_callbacks = (
             hasattr(execution_engine, 'risk_manager_callback') or
             hasattr(execution_engine, 'position_update_callback') or
             hasattr(execution_engine, '_position_callbacks')
         )
         
-        print(f"✅ Position tracker available: {backtest_engine.position_tracker is not None}")
+        print(f"✅ Position tracking available: {backtest_engine.risk_manager is not None}")
         print(f"✅ Execution engine has callback capability: {has_callbacks}")
-        print(f"   Position Tracker Type: {type(backtest_engine.position_tracker).__name__}")
+        print(f"   Risk Manager Type: {type(backtest_engine.risk_manager).__name__}")
+        print(f"   Initial Capital: ${backtest_engine.risk_manager.available_cash:,.2f}")
         
-        # Note: Exact callback verification depends on UnifiedExecutionEngine implementation
-        # For Phase 5.1, we verify the setup is correct, actual callback testing in Phase 5.3
+        # Phase 2: Position updates handled by CentralRiskManager (Rule 4, Section 10)
         
-        print("✅ Test 2 PASSED: Position callbacks configured\n")
+        print("✅ Test 2 PASSED: Position callbacks configured (via CentralRiskManager)\n")
     
     async def test_regime_engine_injection(self, backtest_engine):
         """

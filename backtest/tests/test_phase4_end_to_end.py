@@ -27,10 +27,8 @@ import sys
 # Add backtest to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backtest.config.backtest_config import (
-    BacktestConfiguration, DataConfig, StrategyConfig,
-    RiskConfig, ExecutionConfig, AnalyticsConfig
-)
+# PHASE 1 COMPLETE: Using centralized configuration (Rule 1, Section 7)
+from core_engine.config import BacktestConfig, BacktestMode
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 
 # Configure logging
@@ -43,54 +41,34 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def real_data_config():
-    """Configuration using real ClickHouse data"""
-    return BacktestConfiguration(
+    """Configuration using real ClickHouse data (PHASE 1: Flattened config)"""
+    return BacktestConfig(
         backtest_name="phase4_end_to_end_test",
-        backtest_mode="historical",
+        backtest_mode=BacktestMode.SINGLE_STRATEGY,
         
-        data=DataConfig(
-            symbols=["NVDA", "TSLA"],  # Multi-symbol for comprehensive testing
-            start_date="2024-01-02",  # Same date range as Phase 2 and Phase 3
-            end_date="2024-03-31",
-            interval="1min"
-            # ClickHouse is the default data source
-        ),
+        # Data settings (flattened)
+        symbols=["NVDA", "TSLA"],  # Multi-symbol for comprehensive testing
+        start_date="2024-01-02",  # Same date range as Phase 2 and Phase 3
+        end_date="2024-03-31",
+        interval="1min",
         
-        strategies=[
-            StrategyConfig(
-                strategy_type="momentum",
-                strategy_name="test_momentum",
-                allocation_pct=1.0,  # 100% allocation for single strategy
-                parameters={
-                    "lookback_period": 20,
-                    "momentum_threshold": 0.02,
-                    "signal_confidence": 0.6
-                }
-            )
-        ],
+        # Risk settings (flattened)
+        initial_capital=100000.0,
+        max_position_size=0.10,  # 10% max position
+        max_daily_var=0.05,
+        max_concentration=0.15,
+        allow_shorts=False,
         
-        risk=RiskConfig(
-            initial_capital=100000.0,
-            max_position_size=0.10,  # 10% max position
-            max_daily_var=0.05,
-            max_concentration=0.15,
-            min_signal_confidence=0.6,
-            enable_regime_adjustments=True
-        ),
+        # Execution settings (flattened)
+        enable_realistic_fills=True,
+        enable_cost_modeling=True,
+        enable_liquidity_filtering=True,
+        commission_per_trade=0.005,
+        base_slippage_bps=5.0,
         
-        execution=ExecutionConfig(
-            enable_realistic_fills=True,
-            enable_cost_modeling=True,
-            apply_spread_cost=True,
-            apply_market_impact=True,
-            apply_slippage=True,
-            base_slippage_bps=5.0
-        ),
-        
-        analytics=AnalyticsConfig(
-            enable_regime_attribution=True,
-            enable_strategy_attribution=True
-        )
+        # Analytics settings (flattened)
+        risk_free_rate=0.04,
+        enable_regime_analysis=True
     )
 
 
@@ -262,12 +240,12 @@ async def test_end_to_end_data_to_authorization(real_data_config):
         logger.info(f"   • Authorized: {len(authorized_trades)}")
         logger.info(f"   • Rejected: {len(rejected_trades)}")
         
-        # STEP 8: Verify position tracker state
-        logger.info("\n💰 Step 8: Verify position tracker state...")
+        # STEP 8: Verify position tracking (via CentralRiskManager - Phase 2 complete)
+        logger.info("\n💰 Step 8: Verify position tracking state...")
         
-        logger.info(f"   • Initial cash: ${engine.position_tracker.cash:,.2f}")
-        logger.info(f"   • Available positions: {list(engine.position_tracker.positions.keys())}")
-        logger.info(f"   • Total trades executed: {len(engine.position_tracker.trades)}")
+        logger.info(f"   • Initial cash: ${engine.risk_manager.available_cash:,.2f}")
+        logger.info(f"   • Available positions: {list(engine.risk_manager.current_positions.keys())}")
+        logger.info(f"   • Portfolio value: ${engine.risk_manager.portfolio_value:,.2f}")
         
         # FINAL ASSERTIONS
         logger.info("\n" + "="*80)
@@ -302,9 +280,9 @@ async def test_end_to_end_data_to_authorization(real_data_config):
         assert total_decisions == len(signals), "Authorization count mismatch"
         logger.info("✅ Risk authorization verified")
         
-        # Verify position tracker initialized
-        assert engine.position_tracker.cash > 0, "Position tracker not initialized"
-        logger.info("✅ Position tracker verified")
+        # Verify position tracking initialized (via CentralRiskManager - Phase 2 complete)
+        assert engine.risk_manager.available_cash > 0, "Position tracking not initialized"
+        logger.info("✅ Position tracking (via CentralRiskManager) verified")
         
         logger.info("\n" + "="*80)
         logger.info("🎉 END-TO-END INTEGRATION TEST PASSED!")
@@ -385,8 +363,8 @@ async def test_multi_symbol_processing(real_data_config):
     """
     Test pipeline with multiple symbols to ensure scalability
     """
-    # Modify config for multi-symbol
-    real_data_config.data.symbols = ["NVDA", "TSLA"]
+    # Modify config for multi-symbol (flattened structure)
+    real_data_config.symbols = ["NVDA", "TSLA"]
     
     logger.info("\n🧪 Testing multi-symbol processing...")
     
