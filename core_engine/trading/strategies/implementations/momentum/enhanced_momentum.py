@@ -543,7 +543,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             strategy_id=self.strategy_id,
                             symbol=symbol,
                             signal_type=SignalType.BUY,
-                            strength=min(momentum_strength / self.config.momentum_threshold, 1.0),
+                            strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
                             confidence=confidence,
                             target_quantity=self.config.base_position_pct,
                             timestamp=datetime.now(),
@@ -641,6 +641,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             if symbol in self.market_data:
                 logger.debug(f"📈 Updating momentum analysis for {symbol} from enriched data")
                 self.momentum_data[symbol] = self._analyze_symbol_momentum(symbol)
+                # Also populate indicators dictionary for signal generation
+                self._extract_indicators_from_data(symbol)
                 logger.debug(f"✅ Momentum data updated for {symbol}: {list(self.momentum_data[symbol].keys()) if symbol in self.momentum_data else 'FAILED'}")
             else:
                 logger.warning(f"⚠️  Cannot update momentum for {symbol} - missing market data")
@@ -692,6 +694,30 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             return {
                 'short_momentum': 0, 'medium_momentum': 0, 'long_momentum': 0,
                 'momentum_strength': 0, 'momentum_consistency': 0, 'momentum_acceleration': 0
+            }
+    
+    def _extract_indicators_from_data(self, symbol: str) -> None:
+        """
+        Extract indicators from enriched dataframe into indicators dictionary
+        """
+        try:
+            data = self.market_data[symbol]
+            
+            # Extract indicators as Series for signal generation
+            self.indicators[symbol] = {
+                'adx': data['ADX_14'] if 'ADX_14' in data.columns else pd.Series([25.0] * len(data), index=data.index),
+                'volume_ratio': data['volume_ratio'] if 'volume_ratio' in data.columns else pd.Series([1.0] * len(data), index=data.index),
+                'trend_strength': data['trend_strength'] if 'trend_strength' in data.columns else pd.Series([0.0] * len(data), index=data.index),
+            }
+            
+            logger.debug(f"✅ Extracted indicators for {symbol}: {list(self.indicators[symbol].keys())}")
+            
+        except Exception as e:
+            logger.error(f"Failed to extract indicators for {symbol}: {e}")
+            self.indicators[symbol] = {
+                'adx': pd.Series([25.0]),
+                'volume_ratio': pd.Series([1.0]),
+                'trend_strength': pd.Series([0.0])
             }
     
     def _check_breakout(self, symbol: str, direction: str) -> bool:

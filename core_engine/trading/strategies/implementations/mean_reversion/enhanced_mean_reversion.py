@@ -494,7 +494,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                             'zscore': zscore,
                             'rsi': rsi,
                             'bb_position': bb_position,
-                            'entry_price': current_data['close']
+                            'entry_price': current_row['close']
                         }
                     )
                     signals.append(signal)
@@ -638,24 +638,25 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         """Calculate signal confidence based on multiple factors"""
         
         try:
-            if symbol not in self.indicators:
+            if symbol not in self.market_data:
                 return 0.5
             
-            indicators = self.indicators[symbol]
+            data = self.market_data[symbol]
+            current_row = data.iloc[-1]
             
             # Base confidence from Z-score magnitude
-            zscore = indicators['zscore'].iloc[-1] if len(indicators['zscore']) > 0 else 0
+            zscore = current_row.get('zscore', 0.0)
             zscore_confidence = min(abs(zscore) / (self.config.zscore_entry_threshold * 1.5), 1.0)
             
             # RSI confirmation
-            rsi = indicators['rsi'].iloc[-1] if len(indicators['rsi']) > 0 else 50
+            rsi = current_row.get('RSI_14', 50.0)
             if signal_type == MeanReversionSignal.OVERSOLD_BUY:
                 rsi_confidence = max(0, (50 - rsi) / 20)  # Higher confidence for lower RSI
             else:  # OVERBOUGHT_SELL
                 rsi_confidence = max(0, (rsi - 50) / 20)  # Higher confidence for higher RSI
             
             # Bollinger Band confirmation
-            bb_position = indicators['bb_position'].iloc[-1] if len(indicators['bb_position']) > 0 else 0.5
+            bb_position = current_row.get('bb_position', 0.5)
             if signal_type == MeanReversionSignal.OVERSOLD_BUY:
                 bb_confidence = max(0, (0.5 - bb_position) / 0.5)  # Higher confidence near lower band
             else:  # OVERBOUGHT_SELL

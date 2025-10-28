@@ -278,31 +278,67 @@ class MeanReversionConfig(BaseStrategyConfig):
 class StatisticalArbitrageConfig(BaseStrategyConfig):
     """
     Statistical arbitrage strategy configuration
-    
+
     Consolidated from: trading/strategies/implementations/statistical_arbitrage/enhanced_statistical_arbitrage.py
     """
     strategy_type: StrategyType = StrategyType.STATISTICAL_ARBITRAGE
-    
+
     # Cointegration parameters
     cointegration_lookback: int = 252
     """Cointegration lookback period. Default: 252 days (1 year)"""
-    
+
     cointegration_threshold: float = 0.05
     """Cointegration p-value threshold. Default: 0.05"""
-    
+
+    min_correlation: float = 0.7
+    """Minimum correlation for pair selection. Default: 0.7"""
+
     # Entry/exit
     entry_zscore_threshold: float = 2.0
     """Entry z-score threshold. Default: 2.0"""
-    
+
     exit_zscore_threshold: float = 0.5
     """Exit z-score threshold. Default: 0.5"""
-    
+
+    stop_loss_zscore: float = 3.5
+    """Stop loss z-score threshold. Default: 3.5"""
+
+    # Position sizing
+    max_spread_positions: int = 5
+    """Maximum concurrent spread positions. Default: 5"""
+
+    position_size_method: str = "risk_parity"
+    """Position sizing method ('fixed', 'volatility_adjusted', 'risk_parity'). Default: 'risk_parity'"""
+
+    base_position_size: float = 0.02
+    """Base position size as fraction of portfolio. Default: 0.02"""
+
+    # Risk management
+    max_holding_period: int = 20
+    """Maximum days to hold position. Default: 20"""
+
     # Rebalancing
     rebalance_frequency: str = 'daily'
     """Rebalance frequency. Default: 'daily'"""
-    
+
     hedge_ratio_method: str = 'ols'
     """Hedge ratio calculation method ('ols', 'tls'). Default: 'ols'"""
+
+    # Model parameters
+    kalman_filter_enabled: bool = True
+    """Use Kalman filter for hedge ratios. Default: True"""
+
+    ou_process_modeling: bool = True
+    """Ornstein-Uhlenbeck process modeling. Default: True"""
+
+    error_correction_model: bool = True
+    """Use ECM for spread dynamics. Default: True"""
+
+    # Asset universe
+    asset_universe: List[str] = field(default_factory=lambda: [
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
+    ])
+    """Asset universe for statistical arbitrage. Default: Major tech stocks"""
 
 
 @dataclass
@@ -460,20 +496,28 @@ class VolatilityConfig(BaseStrategyConfig):
     strategy_type: StrategyType = StrategyType.VOLATILITY
     
     # Volatility parameters
-    volatility_window: int = 20
-    """Volatility calculation window. Default: 20 bars"""
+    volatility_lookback: int = 20
+    """Volatility calculation period. Default: 20 bars"""
     
     volatility_threshold: float = 0.02
-    """Volatility threshold for trading. Default: 2%"""
+    """Volatility threshold (2%). Default: 2%"""
     
-    regime_window: int = 60
-    """Regime detection window. Default: 60 bars"""
+    regime_detection: bool = True
+    """Enable volatility regime detection. Default: True"""
     
-    high_vol_threshold: float = 0.03
-    """High volatility threshold. Default: 3%"""
+    # Position sizing
+    base_position_pct: float = 0.025
+    """Base position size (2.5%). Default: 2.5%"""
     
-    low_vol_threshold: float = 0.01
-    """Low volatility threshold. Default: 1%"""
+    max_position_pct: float = 0.07
+    """Maximum position size (7%). Default: 7%"""
+    
+    volatility_scaling: bool = True
+    """Scale positions by volatility. Default: True"""
+    
+    # Risk management
+    vol_target: float = 0.15
+    """Target portfolio volatility (15%). Default: 15%"""
 
 
 @dataclass

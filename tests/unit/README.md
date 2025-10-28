@@ -24,11 +24,11 @@ tests/unit/
 │   │   ├── test_mean_reversion_refactoring.py # Phase 4.2 (17 tests)
 │   │   ├── test_statistical_arbitrage_refactoring.py # Phase 4.3 (15 tests)
 │   │   └── test_remaining_strategies.py       # Phase 4.5 (15 tests for 7 strategies)
-│   ├── test_strategy_manager_pipeline.py     # Phase 3: Pipeline integration
-│   ├── test_enhanced_momentum.py
-│   ├── test_enhanced_mean_reversion.py
-│   ├── test_enhanced_statistical_arbitrage.py
-│   └── ... (other strategy tests)
+│   ├── test_all_strategies.py                 # Comprehensive strategy tests
+│   ├── test_base_strategy_enhanced.py         # Base strategy framework tests
+│   ├── test_strategy_manager.py               # Strategy manager tests
+│   ├── test_strategy_manager_pipeline.py      # Phase 3: Pipeline integration
+│   └── conftest.py                             # Test configuration
 ├── system/            # System orchestration tests
 ├── trading/           # Trading engine tests
 └── utils/             # Utility module tests
@@ -53,16 +53,10 @@ tests/unit/
 **Purpose:** Test trading strategy implementations
 
 #### Core Strategy Tests
-- `test_enhanced_momentum.py` - Momentum strategy
-- `test_enhanced_mean_reversion.py` - Mean reversion strategy
-- `test_enhanced_statistical_arbitrage.py` - Statistical arbitrage
-- `test_enhanced_factor.py` - Factor-based strategy
-- `test_enhanced_multi_asset.py` - Multi-asset allocation
-- `test_enhanced_trend_following.py` - Trend following
-- `test_enhanced_breakout.py` - Breakout strategy
-- `test_enhanced_pairs_trading.py` - Pairs trading
-- `test_enhanced_volatility.py` - Volatility strategy
-- `test_enhanced_arbitrage.py` - Arbitrage strategy
+- `test_all_strategies.py` - Comprehensive tests for all 10 strategy implementations
+- `test_base_strategy_enhanced.py` - Base strategy framework and ISystemComponent integration
+- `test_strategy_manager.py` - Strategy manager orchestration
+- `test_strategy_manager_pipeline.py` - Strategy manager pipeline integration
 
 #### Phase 4 Refactoring Tests (`strategies/phase4_refactoring/`)
 **Purpose:** Validate Phase 4 pipeline refactoring - ensures strategies consume enriched data instead of calculating their own indicators

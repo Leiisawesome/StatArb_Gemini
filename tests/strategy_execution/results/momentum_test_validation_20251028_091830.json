@@ -1,0 +1,104 @@
+{
+  "strategy_id": "momentum_test",
+  "test_timestamp": "2025-10-28T09:18:30.256265",
+  "execution_time": 0.034521,
+  "signal_validation": {
+    "strategy_id": "momentum_test",
+    "symbol": "AAPL",
+    "test_period": [
+      "2023-01-01 00:00:00",
+      "2024-01-01 00:00:00"
+    ],
+    "total_signals": 3,
+    "valid_signals": 3,
+    "invalid_signals": 0,
+    "signal_quality_score": 1.0,
+    "timing_accuracy": 0.5,
+    "market_alignment": 0.6999999999999998,
+    "validation_errors": [],
+    "test_result": {
+      "_value_": "pass",
+      "_name_": "PASS",
+      "__objclass__": "{'_generate_next_value_': <staticmethod(<function Enum._generate_next_value_ at 0x102aa3880>)>, '__module__': 'tests.strategy_execution.framework.strategy_test_engine', '__firstlineno__': 47, '__doc__': 'Test execution results', '__static_attributes__': (), '_new_member_': <built-in method __new__ of type object at 0x103b04fc8>, '_use_args_': False, '_member_names_': ['PASS', 'FAIL', 'ERROR', 'SKIP'], '_member_map_': {'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>}, '_value2member_map_': {'pass': <TestResult.PASS: 'pass'>, 'fail': <TestResult.FAIL: 'fail'>, 'error': <TestResult.ERROR: 'error'>, 'skip': <TestResult.SKIP: 'skip'>}, '_hashable_values_': ['pass', 'fail', 'error', 'skip'], '_unhashable_values_': [], '_unhashable_values_map_': {}, '_member_type_': <class 'object'>, '_value_repr_': None, 'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>, '__new__': <function Enum.__new__ at 0x102aa3600>}",
+      "_sort_order_": 0
+    },
+    "execution_time": 0.001538,
+    "additional_metrics": {
+      "total_signals": 3,
+      "valid_signals": 3,
+      "invalid_signals": 0,
+      "quality_score": 1.0,
+      "timing_accuracy": 0.5,
+      "market_alignment": 0.6999999999999998,
+      "signal_details": [
+        {
+          "signal_id": "",
+          "quality_score": 0.6912764983364261,
+          "timing_score": 0.5,
+          "alignment_score": 0.7,
+          "strength_score": 0.8738294950092784
+        },
+        {
+          "signal_id": "",
+          "quality_score": 0.6948033761949972,
+          "timing_score": 0.5,
+          "alignment_score": 0.7,
+          "strength_score": 0.8844101285849917
+        },
+        {
+          "signal_id": "",
+          "quality_score": 0.6948033761949972,
+          "timing_score": 0.5,
+          "alignment_score": 0.7,
+          "strength_score": 0.8844101285849917
+        }
+      ]
+    }
+  },
+  "execution_validation": {
+    "strategy_id": "momentum_test",
+    "symbol": "AAPL",
+    "signals_tested": 100,
+    "trades_executed": 95,
+    "execution_success_rate": 0.95,
+    "average_slippage": 0.0005,
+    "average_transaction_cost": 0.0002,
+    "total_pnl": 12500.0,
+    "sharpe_ratio": 1.2,
+    "max_drawdown": 0.08,
+    "validation_errors": [],
+    "test_result": {
+      "_value_": "pass",
+      "_name_": "PASS",
+      "__objclass__": "{'_generate_next_value_': <staticmethod(<function Enum._generate_next_value_ at 0x102aa3880>)>, '__module__': 'tests.strategy_execution.framework.strategy_test_engine', '__firstlineno__': 47, '__doc__': 'Test execution results', '__static_attributes__': (), '_new_member_': <built-in method __new__ of type object at 0x103b04fc8>, '_use_args_': False, '_member_names_': ['PASS', 'FAIL', 'ERROR', 'SKIP'], '_member_map_': {'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>}, '_value2member_map_': {'pass': <TestResult.PASS: 'pass'>, 'fail': <TestResult.FAIL: 'fail'>, 'error': <TestResult.ERROR: 'error'>, 'skip': <TestResult.SKIP: 'skip'>}, '_hashable_values_': ['pass', 'fail', 'error', 'skip'], '_unhashable_values_': [], '_unhashable_values_map_': {}, '_member_type_': <class 'object'>, '_value_repr_': None, 'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>, '__new__': <function Enum.__new__ at 0x102aa3600>}",
+      "_sort_order_": 0
+    },
+    "execution_time": 6.9e-05,
+    "trade_log": []
+  },
+  "performance_attribution": {
+    "attribution_accuracy": 0.0,
+    "total_pnl": 0.0,
+    "strategy_contributions": {},
+    "validation_checks": {
+      "no_data": true
+    }
+  },
+  "cross_validation": {
+    "interaction_conflicts": 0,
+    "coordination_efficiency": 1.0,
+    "test_result": {
+      "_value_": "pass",
+      "_name_": "PASS",
+      "__objclass__": "{'_generate_next_value_': <staticmethod(<function Enum._generate_next_value_ at 0x102aa3880>)>, '__module__': 'tests.strategy_execution.framework.strategy_test_engine', '__firstlineno__': 47, '__doc__': 'Test execution results', '__static_attributes__': (), '_new_member_': <built-in method __new__ of type object at 0x103b04fc8>, '_use_args_': False, '_member_names_': ['PASS', 'FAIL', 'ERROR', 'SKIP'], '_member_map_': {'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>}, '_value2member_map_': {'pass': <TestResult.PASS: 'pass'>, 'fail': <TestResult.FAIL: 'fail'>, 'error': <TestResult.ERROR: 'error'>, 'skip': <TestResult.SKIP: 'skip'>}, '_hashable_values_': ['pass', 'fail', 'error', 'skip'], '_unhashable_values_': [], '_unhashable_values_map_': {}, '_member_type_': <class 'object'>, '_value_repr_': None, 'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>, '__new__': <function Enum.__new__ at 0x102aa3600>}",
+      "_sort_order_": 0
+    }
+  },
+  "overall_result": {
+    "_value_": "pass",
+    "_name_": "PASS",
+    "__objclass__": "{'_generate_next_value_': <staticmethod(<function Enum._generate_next_value_ at 0x102aa3880>)>, '__module__': 'tests.strategy_execution.framework.strategy_test_engine', '__firstlineno__': 47, '__doc__': 'Test execution results', '__static_attributes__': (), '_new_member_': <built-in method __new__ of type object at 0x103b04fc8>, '_use_args_': False, '_member_names_': ['PASS', 'FAIL', 'ERROR', 'SKIP'], '_member_map_': {'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>}, '_value2member_map_': {'pass': <TestResult.PASS: 'pass'>, 'fail': <TestResult.FAIL: 'fail'>, 'error': <TestResult.ERROR: 'error'>, 'skip': <TestResult.SKIP: 'skip'>}, '_hashable_values_': ['pass', 'fail', 'error', 'skip'], '_unhashable_values_': [], '_unhashable_values_map_': {}, '_member_type_': <class 'object'>, '_value_repr_': None, 'PASS': <TestResult.PASS: 'pass'>, 'FAIL': <TestResult.FAIL: 'fail'>, 'ERROR': <TestResult.ERROR: 'error'>, 'SKIP': <TestResult.SKIP: 'skip'>, '__new__': <function Enum.__new__ at 0x102aa3600>}",
+    "_sort_order_": 0
+  },
+  "recommendations": []
+}

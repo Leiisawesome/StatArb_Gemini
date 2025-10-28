@@ -442,21 +442,46 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         """Apply minimum and maximum weight constraints"""
         
         try:
-            # Apply maximum weight constraint
+            # Apply maximum weight constraint first
             for symbol in self.target_weights:
                 if self.target_weights[symbol] > self.config.max_asset_weight:
                     self.target_weights[symbol] = self.config.max_asset_weight
             
-            # Apply minimum weight constraint
-            for symbol in self.target_weights:
-                if self.target_weights[symbol] < self.config.min_asset_weight:
+            # Iteratively apply minimum weight constraint and renormalize
+            # This ensures all weights meet minimum after renormalization
+            max_iterations = 10
+            for _ in range(max_iterations):
+                # Check if all weights meet minimum constraint
+                min_violations = [
+                    symbol for symbol, weight in self.target_weights.items() 
+                    if weight < self.config.min_asset_weight
+                ]
+                
+                if not min_violations:
+                    break  # All constraints satisfied
+                
+                # Apply minimum weight to violations
+                for symbol in min_violations:
                     self.target_weights[symbol] = self.config.min_asset_weight
-            
-            # Renormalize after constraints
-            total_weight = sum(self.target_weights.values())
-            if total_weight > 0:
-                for symbol in self.target_weights:
-                    self.target_weights[symbol] /= total_weight
+                
+                # Renormalize the remaining weights
+                total_weight = sum(self.target_weights.values())
+                excess_weight = total_weight - 1.0
+                
+                if excess_weight > 0:
+                    # Reduce weights proportionally for assets above minimum
+                    adjustable_symbols = [
+                        symbol for symbol, weight in self.target_weights.items()
+                        if weight > self.config.min_asset_weight
+                    ]
+                    
+                    if adjustable_symbols:
+                        # Distribute excess weight reduction proportionally
+                        total_adjustable = sum(self.target_weights[s] for s in adjustable_symbols)
+                        reduction_factor = excess_weight / total_adjustable
+                        
+                        for symbol in adjustable_symbols:
+                            self.target_weights[symbol] *= (1.0 - reduction_factor)
             
         except Exception as e:
             logger.error(f"Weight constraint application failed: {e}")
