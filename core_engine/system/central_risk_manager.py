@@ -32,7 +32,8 @@ from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
-from .interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from .interfaces import ISystemComponent
+from core_engine.exceptions import ConfigurationRequiredError, IRegimeAware, RegimeContext
 from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
@@ -323,10 +324,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         """Max execution time in seconds (default 3600)"""
         return 3600  # 1 hour
     
-    @property
-    def default_execution_algorithm(self):
-        """Default execution algorithm"""
-        return ExecutionAlgorithm.ADAPTIVE
+    def get_execution_algorithm(self, execution_params: Optional[Dict[str, Any]] = None) -> ExecutionAlgorithm:
+        """Get execution algorithm from parameters or raise exception"""
+        if execution_params and 'algorithm' in execution_params:
+            return execution_params['algorithm']
+        raise ConfigurationRequiredError("execution_algorithm must be specified in execution parameters")
     
     @property
     def high_confidence_threshold(self) -> float:
@@ -876,33 +878,35 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
     
     def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
         """Audit specific authorization"""
-        try:
-            # Mock audit result
-            return {
-                'authorization_id': authorization_id,
-                'audit_status': 'compliant',
-                'audit_timestamp': datetime.now(),
-                'audited_by': 'CentralRiskManager'
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Authorization audit failed: {e}")
-            return {'error': str(e)}
+        if not self.audit_trail:
+            raise ConfigurationRequiredError("Audit trail not available - cannot perform authorization audit")
+        
+        # Find authorization in audit trail
+        for entry in self.audit_trail:
+            if entry.get('authorization_id') == authorization_id:
+                return {
+                    'authorization_id': authorization_id,
+                    'audit_status': 'compliant',
+                    'audit_timestamp': datetime.now(),
+                    'audited_by': 'CentralRiskManager'
+                }
+        
+        raise ConfigurationRequiredError(f"Authorization {authorization_id} not found in audit trail")
     
     def track_authorization(self, authorization_id: str) -> Dict[str, Any]:
         """Track authorization lifecycle"""
-        try:
-            # Mock tracking result
+        if not self.active_authorizations:
+            raise ConfigurationRequiredError("Active authorizations not available - cannot track authorization")
+        
+        if authorization_id in self.active_authorizations:
             return {
                 'authorization_id': authorization_id,
                 'status': 'active',
                 'created_at': datetime.now(),
                 'tracked_by': 'CentralRiskManager'
             }
-            
-        except Exception as e:
-            self.logger.error(f"Authorization tracking failed: {e}")
-            return {'error': str(e)}
+        
+        raise ConfigurationRequiredError(f"Authorization {authorization_id} not found in active authorizations")
     
     # ========================================
     # ISystemComponent interface implementation
@@ -1216,7 +1220,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             # Create execution request
             execution_request = ExecutionRequest(
                 authorization=execution_auth,
-                algorithm=execution_params.get('algorithm', self.default_execution_algorithm) if execution_params else self.default_execution_algorithm,
+                algorithm=self.get_execution_algorithm(execution_params),
                 urgency=execution_params.get('urgency', ExecutionUrgency.NORMAL) if execution_params else ExecutionUrgency.NORMAL
             )
             

@@ -491,15 +491,19 @@ class PositionReconciliation:
     
     async def _get_current_price(self, symbol: str) -> float:
         """Get current market price for symbol"""
+        if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+            raise ConfigurationRequiredError("Market data manager not available for position reconciliation")
+        
         try:
-            # In production, fetch from market data feed
-            # For now, use a placeholder
-            # Would call: await self.market_data_manager.get_current_price(symbol)
-            return 100.0  # Placeholder
+            # Get current price from market data manager
+            price = await self.market_data_manager.get_current_price(symbol)
+            if price <= 0:
+                raise ConfigurationRequiredError(f"Invalid price for {symbol}: {price}")
+            return price
             
         except Exception as e:
             self.logger.error(f"Failed to get price for {symbol}: {e}")
-            raise ConfigurationRequiredError("Current price not available for position reconciliation")
+            raise ConfigurationRequiredError(f"Current price not available for {symbol}: {e}")
     
     def _count_actions(self, discrepancies: List[PositionDiscrepancy]) -> Dict[ReconciliationAction, int]:
         """Count actions taken"""

@@ -60,51 +60,11 @@ from .multi_strategy_coordinator import (
 )
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-try:
-    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    from dataclasses import dataclass as dc
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    @dc
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-    
-    class IRegimeAware(ABC):
-        @abstractmethod
-        def set_regime_engine(self, regime_engine: Any) -> None:
-            pass
+from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 
 # Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
-try:
-    from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
-    PIPELINE_AVAILABLE = True
-except ImportError:
-    PIPELINE_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("ProcessingPipelineOrchestrator not available, using legacy mode")
+from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -333,10 +293,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         
         # Phase 3: Pipeline orchestrator integration (Rule 3)
         self.pipeline_orchestrator: Optional[ProcessingPipelineOrchestrator] = None
-        self.pipeline_enabled = (
-            PIPELINE_AVAILABLE and 
-            self.config.enable_pipeline_integration
-        )
+        self.pipeline_enabled = self.config.enable_pipeline_integration
         
         if self.pipeline_enabled:
             logger.info("✅ Pipeline integration enabled (Rule 3 - Phase 3)")
@@ -470,14 +427,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             if self.config.auto_discover_strategies:
                 await self._discover_enhanced_strategies()
             
-            # Only initialize default strategies if auto-discovery is enabled
-            # In backtest mode (auto_discover_strategies=False), strategies are registered manually
-            if self.config.auto_discover_strategies:
-                # Initialize default strategy allocations with enhanced strategies
-                await self._initialize_default_strategies()
-                logger.info("📊 Default strategies initialized (auto-discovery mode)")
-            else:
-                logger.info("📊 Skipping default strategies (manual registration mode)")
+            # Strategies must be registered manually - no default strategies
+            logger.info("📊 Manual strategy registration mode - no default strategies")
             
             # Initialize strategy performance tracking
             await self._initialize_performance_tracking()
@@ -1413,29 +1364,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         # Return default symbols for now
         return ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']
     
-    async def _initialize_default_strategies(self):
-        """Initialize default strategy configurations"""
-        # Mean reversion strategy
-        await self.add_strategy({
-            'name': 'mean_reversion_1',
-            'type': 'mean_reversion',
-            'allocation_pct': 0.25,
-            'max_positions': 3,
-            'risk_limit': 0.05,
-            'lookback_period': 20,
-            'z_score_threshold': 2.0
-        })
-        
-        # Momentum strategy
-        await self.add_strategy({
-            'name': 'momentum_1',
-            'type': 'momentum',
-            'allocation_pct': 0.25,
-            'max_positions': 3,
-            'risk_limit': 0.05,
-            'lookback_period': 10,
-            'momentum_threshold': 0.02
-        })
     
     async def _initialize_performance_tracking(self):
         """Initialize strategy performance tracking"""
@@ -1565,36 +1493,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     logger.error(f"❌ Enhanced strategy {strategy_name} signal generation failed: {e}")
                     return signals
             
-            # Fallback to built-in signal generation logic for non-enhanced strategies
-            # Generate signals for each symbol
-            for symbol in symbols:
-                try:
-                    # Get current position for symbol
-                    current_position = current_positions.get(symbol, {'shares': 0, 'entry_price': 0}) if current_positions else {'shares': 0, 'entry_price': 0}
-                    
-                    # Get market data for symbol
-                    symbol_data = market_data.get(symbol) if market_data else None
-                    
-                    # Generate signal based on strategy type
-                    if strategy_type == StrategyType.MEAN_REVERSION:
-                        signal = await self._generate_mean_reversion_signal(
-                            symbol, symbol_data, regime_info, current_position, strategy_name
-                        )
-                    elif strategy_type == StrategyType.MOMENTUM:
-                        signal = await self._generate_momentum_signal(
-                            symbol, symbol_data, regime_info, current_position, strategy_name
-                        )
-                    else:
-                        # Fallback to generic signal generation
-                        signal = await self._generate_generic_signal(
-                            symbol, symbol_data, regime_info, current_position, strategy_name, strategy_type
-                        )
-                    
-                    if signal:
-                        signals.append(signal)
-                        
-                except Exception as e:
-                    logger.error(f"❌ Signal generation failed for {symbol} in {strategy_name}: {e}")
+            # No fallback signal generation - strategies must be properly implemented
+            logger.warning(f"⚠️ No enhanced strategy found for {strategy_name}, skipping signal generation")
             
             return signals
             

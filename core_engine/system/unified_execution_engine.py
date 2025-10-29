@@ -37,30 +37,8 @@ from collections import defaultdict
 import warnings
 
 # Import ISystemComponent for orchestrator integration
-try:
-    from .interfaces import ISystemComponent
-except ImportError:
-    # Fallback definition
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
+from .interfaces import ISystemComponent
+from core_engine.exceptions import ConfigurationRequiredError
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
