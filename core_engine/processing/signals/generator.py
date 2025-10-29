@@ -26,67 +26,13 @@ import uuid
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-try:
-    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    from dataclasses import dataclass as dc
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    @dc
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-    
-    class IRegimeAware(ABC):
-        @abstractmethod
-        def set_regime_engine(self, regime_engine: Any) -> None:
-            pass
+from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import SignalConfig
-except ImportError:
-    # Fallback for backward compatibility during migration
-    @dataclass
-    class SignalConfig:
-        """DEPRECATED: Use core_engine.config.SignalConfig instead"""
-        # Signal generation thresholds
-        signal_threshold: float = 0.6
-        confidence_threshold: float = 0.6
-        
-        # Risk parameters
-        max_position_size: float = 0.10
-        stop_loss_pct: float = 0.02
-        
-        # Signal processing
-        enable_filtering: bool = True
-        aggregation_method: str = "weighted"
-        
-        # Performance
-        enable_caching: bool = True
+from core_engine.config import SignalConfig
 
 class SignalType(Enum):
     """Types of trading signals"""

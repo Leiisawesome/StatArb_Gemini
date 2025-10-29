@@ -23,76 +23,13 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-try:
-    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    from dataclasses import dataclass as dc
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    @dc
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-    
-    class IRegimeAware(ABC):
-        @abstractmethod
-        def set_regime_engine(self, regime_engine: Any) -> None:
-            pass
+from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import FeatureConfig
-except ImportError:
-    # Fallback for backward compatibility during migration
-    @dataclass
-    class FeatureConfig:
-        """DEPRECATED: Use core_engine.config.FeatureConfig instead"""
-        # Normalization
-        use_normalization: bool = True
-        normalization_method: str = "robust"
-        lookback_periods: List[int] = None
-        
-        # Cross-sectional features
-        enable_cross_sectional: bool = True
-        cross_sectional_universe: List[str] = None
-        
-        # Feature selection
-        max_features: Optional[int] = None
-        feature_importance_threshold: float = 0.01
-        
-        # Lag features
-        lag_periods: List[int] = None
-        
-        def __post_init__(self):
-            if self.lookback_periods is None:
-                self.lookback_periods = [5, 10, 20]
-            if self.lag_periods is None:
-                self.lag_periods = [1, 2, 3]
-            if self.cross_sectional_universe is None:
-                self.cross_sectional_universe = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
+from core_engine.config import FeatureConfig
 
 class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     """
@@ -272,11 +209,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                 })
                 self.logger.info(f"📊 Features adapted for low volatility: standard scaling, shorter lookbacks")
             else:
-                self.config.normalization_method = 'robust'  # Default robust
-                self.config.lookback_periods = [5, 10, 20]  # Normal periods
+                # Use existing configuration without modification
                 adaptations['adjustments'].append({
-                    'normalization': 'robust',
-                    'lookback_periods': [5, 10, 20],
+                    'normalization': self.config.normalization_method,
+                    'lookback_periods': self.config.lookback_periods,
                     'reason': 'normal_volatility'
                 })
             
@@ -480,7 +416,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                 elif self.config.normalization_method == "robust":
                     self.scalers['default'] = RobustScaler()
                 else:
-                    self.scalers['default'] = StandardScaler()
+                    raise ValueError(f"Unsupported normalization method: {self.config.normalization_method}")
             
             self.logger.info("✅ Feature engineering engines initialized")
             

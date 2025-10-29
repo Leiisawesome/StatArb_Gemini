@@ -30,132 +30,27 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-try:
-    from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    # Fallback RegimeContext
-    from dataclasses import dataclass
-    @dataclass
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-    
-    class IRegimeAware(ABC):
-        @abstractmethod
-        def set_regime_engine(self, regime_engine: Any) -> None:
-            pass
+from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 
 # Core engine architectural compliance
-try:
-    # Try to import from core_engine types for consistency
-    import sys
-    import os
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    sys.path.append(current_dir)
+from abc import ABC, abstractmethod
+
+class IIndicatorProcessor(ABC):
+    """Interface for indicator processing components"""
     
-    # Interface for indicator processors (following core_engine patterns)
-    class IIndicatorProcessor(ABC):
-        """Interface for indicator processing components"""
-        
-        @abstractmethod
-        def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
-            """Calculate indicators for market data"""
-        
-        @abstractmethod
-        def get_supported_indicators(self) -> List[str]:
-            """Get list of supported indicators"""
-        
-except ImportError:
-    # Fallback for architectural compliance
-    class IIndicatorProcessor(ABC):
-        pass
+    @abstractmethod
+    def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate indicators for market data"""
+    
+    @abstractmethod
+    def get_supported_indicators(self) -> List[str]:
+        """Get list of supported indicators"""
 
 logger = logging.getLogger(__name__)
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import IndicatorConfig as EnhancedIndicatorConfig
-except ImportError:
-    # Fallback for backward compatibility during migration
-    @dataclass
-    class EnhancedIndicatorConfig:
-        """DEPRECATED: Use core_engine.config.IndicatorConfig instead"""
-        # Moving averages (professional defaults)
-        sma_periods: List[int] = field(default_factory=lambda: [10, 20, 50, 200])
-        ema_periods: List[int] = field(default_factory=lambda: [9, 21, 50])
-        
-        # Momentum indicators (institutional standards)
-        rsi_period: int = 14
-        macd_fast: int = 12
-        macd_slow: int = 26
-        macd_signal: int = 9
-        adx_period: int = 14
-        
-        # Volatility indicators
-        bb_period: int = 20
-        bb_std: float = 2.0
-        atr_period: int = 14
-        
-        # Volume indicators
-        volume_sma_period: int = 20
-        
-        # Oscillators
-        stoch_k_period: int = 14
-        stoch_d_period: int = 3
-        williams_r_period: int = 14
-        
-        # Advanced indicators
-        aroon_period: int = 25
-        
-        # Performance optimization
-        enable_caching: bool = True
-        parallel_processing: bool = False
-        
-        # Integration settings
-        output_format: str = "enhanced"
-        include_signals: bool = True
-        normalize_values: bool = False
-        
-        # Multi-timeframe settings
-        enable_multi_timeframe: bool = True
-        timeframes: List[str] = field(default_factory=lambda: ["5min", "1H", "1D", "1W"])
-        
-        # Macro regime indicators
-        enable_macro_indicators: bool = True
-        macro_symbols: List[str] = field(default_factory=lambda: [
-            "VIX", "DXY", "TNX", "TLT", "GLD", "USO", "HYG", "LQD", "EEM", "IWM"
-        ])
-        
-        # Multi-timeframe specific periods
-        timeframe_rsi_periods: Dict[str, int] = field(default_factory=lambda: {
-            "5min": 14, "1H": 14, "1D": 14, "1W": 14
-        })
-        timeframe_ma_periods: Dict[str, List[int]] = field(default_factory=lambda: {
-            "5min": [10, 20, 50], "1H": [20, 50, 100], "1D": [50, 100, 200], "1W": [10, 20, 50]
-        })
+from core_engine.config import IndicatorConfig as EnhancedIndicatorConfig
 
 @dataclass
 class IndicatorResult:
@@ -1404,11 +1299,11 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
                 rsi_alignment = max(0, 1 - (rsi_std / 50))  # Normalize by max possible std
                 return rsi_alignment
             
-            return 0.5  # Default moderate alignment
+            raise ValueError("Insufficient RSI data for timeframe alignment calculation")
             
         except Exception as e:
-            self.logger.warning(f"Error calculating timeframe alignment: {e}")
-            return 0.5
+            self.logger.error(f"Error calculating timeframe alignment: {e}")
+            raise
     
     def _determine_dominant_timeframe(self, timeframe_indicators: Dict[str, Dict[str, float]]) -> str:
         """Determine the most influential timeframe"""

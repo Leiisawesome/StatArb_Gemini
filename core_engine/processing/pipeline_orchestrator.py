@@ -24,23 +24,16 @@ from datetime import datetime
 import asyncio
 
 from core_engine.system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 
 # Import will be available after components exist
-try:
-    from core_engine.data.manager import ClickHouseDataManager
-    from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
-    from core_engine.processing.features.engineer import EnhancedFeatureEngineer
-    from core_engine.processing.signals.generator import EnhancedSignalGenerator
-    COMPONENTS_AVAILABLE = True
-except ImportError:
-    COMPONENTS_AVAILABLE = False
+from core_engine.data.manager import ClickHouseDataManager
+from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
+from core_engine.processing.features.engineer import EnhancedFeatureEngineer
+from core_engine.processing.signals.generator import EnhancedSignalGenerator
 
 # Import configurations
-try:
-    from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
-    CONFIG_AVAILABLE = True
-except ImportError:
-    CONFIG_AVAILABLE = False
+from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +188,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.orchestrator: Optional[Any] = None
         
         # Load configurations
-        if CONFIG_AVAILABLE:
+        if True:  # Config is always available now
             self.data_config = data_config or DataConfig()
             self.indicator_config = indicator_config or IndicatorConfig()
             self.feature_config = feature_config or FeatureConfig()
@@ -245,10 +238,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             True if initialization successful
         """
         try:
-            if not COMPONENTS_AVAILABLE:
-                logger.warning("Pipeline components not available, running in mock mode")
-                self.is_initialized = True
-                return True
             
             logger.info("🔧 Initializing pipeline components...")
             
@@ -374,8 +363,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             'cache_size': len(self.enriched_data_cache),
             'total_processed': self.total_processed,
             'avg_processing_times_ms': {k: v * 1000 for k, v in avg_times.items()},
-            'components_available': COMPONENTS_AVAILABLE,
-            'config_available': CONFIG_AVAILABLE
+            'components_available': True,
+            'config_available': True
         }
     
     # ================================================================
