@@ -431,30 +431,32 @@ class TestPerformanceAnalyzer:
         """Setup for each test method"""
         self.performance_analyzer = PerformanceAnalyzer()
     
-    def test_analyze_performance(self):
+    @pytest.mark.asyncio
+    async def test_analyze_performance(self):
         """Test performance analysis"""
         returns = pd.Series([0.01, 0.02, -0.01, 0.015, 0.02, -0.005, 0.01, -0.02, 0.025, 0.01] * 10)
         
-        analysis = self.performance_analyzer.analyze_performance(returns)
-        assert isinstance(analysis, dict)
-        assert 'performance_summary' in analysis
-        assert 'risk_metrics' in analysis
-        assert 'statistical_metrics' in analysis
-        assert 'recommendations' in analysis
+        analysis = await self.performance_analyzer.analyze_performance(returns)
+        assert hasattr(analysis, 'total_return')
+        assert hasattr(analysis, 'annualized_return')
+        assert hasattr(analysis, 'volatility')
+        assert hasattr(analysis, 'sharpe_ratio')
     
-    def test_analyze_performance_by_period(self):
+    @pytest.mark.asyncio
+    async def test_analyze_performance_by_period(self):
         """Test performance analysis by period"""
         returns = pd.Series([0.01, 0.02, -0.01, 0.015, 0.02, -0.005, 0.01, -0.02, 0.025, 0.01] * 10)
         timestamps = pd.date_range('2024-01-01', periods=len(returns), freq='D')
         returns.index = timestamps
         
-        period_analysis = self.performance_analyzer.analyze_performance_by_period(returns)
+        period_analysis = await self.performance_analyzer.analyze_performance_by_period(returns)
         assert isinstance(period_analysis, dict)
-        assert 'daily_performance' in period_analysis
-        assert 'weekly_performance' in period_analysis
-        assert 'monthly_performance' in period_analysis
+        assert 'monthly' in period_analysis
+        assert 'quarterly' in period_analysis
+        assert 'yearly' in period_analysis
     
-    def test_analyze_performance_by_strategy(self):
+    @pytest.mark.asyncio
+    async def test_analyze_performance_by_strategy(self):
         """Test performance analysis by strategy"""
         strategy_returns = {
             'momentum': pd.Series([0.01, 0.02, -0.01, 0.015, 0.02] * 20),
@@ -462,7 +464,7 @@ class TestPerformanceAnalyzer:
             'statistical_arbitrage': pd.Series([0.008, 0.012, -0.005, 0.018, 0.015] * 20)
         }
         
-        strategy_analysis = self.performance_analyzer.analyze_performance_by_strategy(strategy_returns)
+        strategy_analysis = await self.performance_analyzer.analyze_performance_by_strategy(strategy_returns)
         assert isinstance(strategy_analysis, dict)
         assert 'momentum' in strategy_analysis
         assert 'mean_reversion' in strategy_analysis

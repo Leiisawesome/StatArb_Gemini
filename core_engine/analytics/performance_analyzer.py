@@ -882,7 +882,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     async def analyze_performance(
         self,
         returns: pd.Series,
-        symbol: str,
+        symbol: str = "UNKNOWN",
         benchmark_returns: Optional[pd.Series] = None,
         period: PerformancePeriod = PerformancePeriod.INCEPTION,
         start_date: Optional[datetime] = None,
@@ -1011,6 +1011,72 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"Error analyzing performance for {symbol}: {e}")
             return metrics
+    
+    async def analyze_performance_by_period(self, returns: pd.Series) -> Dict[str, Any]:
+        """Analyze performance by different periods"""
+        if returns.empty:
+            raise PerformanceDataUnavailableError("No returns data available for period analysis")
+        
+        try:
+            # Calculate performance for different periods
+            period_analysis = {
+                'monthly': await self._calculate_period_metrics(returns, 'M'),
+                'quarterly': await self._calculate_period_metrics(returns, 'Q'),
+                'yearly': await self._calculate_period_metrics(returns, 'Y')
+            }
+            
+            return period_analysis
+        except Exception as e:
+            raise PerformanceDataUnavailableError(f"Failed to analyze performance by period: {e}") from e
+    
+    async def analyze_performance_by_strategy(self, strategy_returns: Dict[str, pd.Series]) -> Dict[str, Any]:
+        """Analyze performance by strategy"""
+        if not strategy_returns:
+            raise PerformanceDataUnavailableError("No strategy returns data available")
+        
+        try:
+            strategy_analysis = {}
+            for strategy_name, returns in strategy_returns.items():
+                if not returns.empty:
+                    strategy_analysis[strategy_name] = await self.analyze_performance(returns, strategy_name)
+                else:
+                    strategy_analysis[strategy_name] = None
+            
+            return strategy_analysis
+        except Exception as e:
+            raise PerformanceDataUnavailableError(f"Failed to analyze performance by strategy: {e}") from e
+    
+    async def _calculate_period_metrics(self, returns: pd.Series, period: str) -> Dict[str, Any]:
+        """Calculate metrics for a specific period"""
+        try:
+            # Resample returns to the specified period
+            period_returns = returns.resample(period).apply(lambda x: (1 + x).prod() - 1)
+            
+            if period_returns.empty:
+                return {}
+            
+            # Calculate basic metrics
+            total_return = period_returns.sum()
+            volatility = period_returns.std() * np.sqrt(252 / self._get_period_days(period))
+            sharpe_ratio = total_return / volatility if volatility > 0 else 0.0
+            
+            return {
+                'total_return': total_return,
+                'volatility': volatility,
+                'sharpe_ratio': sharpe_ratio,
+                'count': len(period_returns)
+            }
+        except Exception as e:
+            raise PerformanceDataUnavailableError(f"Failed to calculate {period} metrics: {e}") from e
+    
+    def _get_period_days(self, period: str) -> int:
+        """Get number of days for a period"""
+        period_days = {
+            'M': 30,
+            'Q': 90,
+            'Y': 365
+        }
+        return period_days.get(period, 30)
     
     def _get_periods_per_year(self, returns: pd.Series) -> float:
         """Determine periods per year based on data frequency"""
