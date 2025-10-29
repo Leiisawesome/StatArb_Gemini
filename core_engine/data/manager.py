@@ -356,6 +356,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 self.logger.info("Synthetic market data forced via STATARB_USE_SYNTHETIC_DATA")
             elif not self._connection_available:
                 self.logger.warning("ClickHouse unavailable; synthetic market data will be generated")
+                self._use_synthetic_data = True
         
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
@@ -485,7 +486,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             }
         }
         
-        # Test connection if operational
+        # Test connection if operational and not using synthetic data
         if self.is_operational and not self._use_synthetic_data:
             try:
                 connection_test = self._test_connection()
@@ -495,6 +496,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             except Exception as e:
                 health_status['connection_error'] = str(e)
                 health_status['healthy'] = False
+        elif self.is_operational and self._use_synthetic_data:
+            # Data manager is healthy when operational with synthetic data fallback
+            health_status['healthy'] = True
+            health_status['fallback_mode'] = 'synthetic_data'
         
         return health_status
     
