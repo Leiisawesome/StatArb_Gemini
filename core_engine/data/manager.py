@@ -37,32 +37,8 @@ sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'types'))
 
 # Import ISystemComponent for orchestrator integration
-try:
-    from core_engine.system.interfaces import ISystemComponent
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
+from core_engine.system.interfaces import ISystemComponent
+from core_engine.exceptions import ClickHouseConnectionError, DataUnavailableError
 
 # Import centralized configuration (Rule 1, Section 7)
 try:
@@ -343,20 +319,20 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Regime-aware integration (Rule 2 (Regime-First Principle))
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
         
-        # Determine whether we can reach ClickHouse
+        # Test ClickHouse connection - FAIL FAST if unavailable
         self._connection_available = False
-        self._use_synthetic_data = bool(int(os.getenv("STATARB_USE_SYNTHETIC_DATA", "0")))
         try:
             self._connection_available = self._test_connection()
-        except Exception:
-            # _test_connection already logged the failure; fall back to synthetic data
-            self._connection_available = False
-        finally:
-            if self._use_synthetic_data:
-                self.logger.info("Synthetic market data forced via STATARB_USE_SYNTHETIC_DATA")
-            elif not self._connection_available:
-                self.logger.warning("ClickHouse unavailable; synthetic market data will be generated")
-                self._use_synthetic_data = True
+            if not self._connection_available:
+                raise ClickHouseConnectionError(
+                    "ClickHouse database unavailable. Cannot proceed without real market data."
+                )
+        except Exception as e:
+            if isinstance(e, ClickHouseConnectionError):
+                raise
+            raise ClickHouseConnectionError(
+                f"ClickHouse connection test failed: {e}. Cannot proceed without real market data."
+            ) from e
         
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
@@ -417,9 +393,12 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         try:
             self.logger.info("Initializing ClickHouseDataManager...")
             
-            # Test connection if not using synthetic data
-            if not self._use_synthetic_data:
-                self._connection_available = self._test_connection()
+            # Test connection - FAIL FAST if unavailable
+            self._connection_available = self._test_connection()
+            if not self._connection_available:
+                raise ClickHouseConnectionError(
+                    "ClickHouse database unavailable during initialization. Cannot proceed without real market data."
+                )
             
             # Validate configuration
             if not self.enhanced_config.symbols:
@@ -472,12 +451,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on the data manager"""
         health_status = {
-            'healthy': self.is_operational and self.is_initialized,
+            'healthy': self.is_operational and self.is_initialized and self._connection_available,
             'initialized': self.is_initialized,
             'operational': self.is_operational,
             'component_type': 'ClickHouseDataManager',
             'connection_available': self._connection_available,
-            'using_synthetic_data': self._use_synthetic_data,
             'cache_size': len(self._cache),
             'configured_symbols': len(self.enhanced_config.symbols),
             'date_range': {
@@ -486,20 +464,18 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             }
         }
         
-        # Test connection if operational and not using synthetic data
-        if self.is_operational and not self._use_synthetic_data:
+        # Test connection if operational - FAIL FAST if unavailable
+        if self.is_operational:
             try:
                 connection_test = self._test_connection()
                 health_status['connection_test_result'] = connection_test
                 if not connection_test:
                     health_status['healthy'] = False
+                    health_status['error'] = 'ClickHouse connection failed'
             except Exception as e:
                 health_status['connection_error'] = str(e)
                 health_status['healthy'] = False
-        elif self.is_operational and self._use_synthetic_data:
-            # Data manager is healthy when operational with synthetic data fallback
-            health_status['healthy'] = True
-            health_status['fallback_mode'] = 'synthetic_data'
+                health_status['error'] = f'ClickHouse connection test failed: {e}'
         
         return health_status
     
@@ -510,7 +486,6 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             'initialized': self.is_initialized,
             'operational': self.is_operational,
             'connection_available': self._connection_available,
-            'using_synthetic_data': self._use_synthetic_data,
             'cache_stats': self.get_cache_stats(),
             'configuration': {
                 'symbols_count': len(self.enhanced_config.symbols),
@@ -637,13 +612,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.debug(f"Returning cached data for {cache_key}")
             return self._cache[cache_key]
         
-        use_synthetic = self._use_synthetic_data or not self._connection_available
-        
-        if use_synthetic:
-            df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
-            self._cache[cache_key] = df
-            self._cache_timestamps[cache_key] = datetime.now()
-            return df
+        # Verify ClickHouse connection is available - FAIL FAST if not
+        if not self._connection_available:
+            raise ClickHouseConnectionError(
+                "ClickHouse database unavailable. Cannot load market data without real database connection."
+            )
         
         # Build query based on interval
         query = self._build_query(symbols, start_time, end_time, interval)
@@ -654,11 +627,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             query_time = time.time() - start_query_time
             
             if df.empty:
-                self.logger.warning(
-                    "No data returned for symbols %s; generating synthetic fallback data",
-                    symbols,
+                raise DataUnavailableError(
+                    f"No data returned for symbols {symbols}. Real market data required."
                 )
-                df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
             else:
                 # Standardize the data
                 df = self._standardize_data(df)
@@ -669,113 +640,17 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     query_time,
                 )
         except Exception as e:
-            self.logger.warning(
-                "Failed to load market data from ClickHouse (%s); generating synthetic fallback data",
-                e,
-            )
-            df = self._generate_synthetic_data(symbols, start_time, end_time, interval)
+            if isinstance(e, (ClickHouseConnectionError, DataUnavailableError)):
+                raise
+            raise DataUnavailableError(
+                f"Failed to load market data from ClickHouse: {e}. Real market data required."
+            ) from e
         
         # Cache the result (real or synthetic)
         self._cache[cache_key] = df
         self._cache_timestamps[cache_key] = datetime.now()
         return df
 
-    def _generate_synthetic_data(
-        self,
-        symbols: List[str],
-        start_time: datetime,
-        end_time: datetime,
-        interval: str,
-    ) -> pd.DataFrame:
-        """
-        Generate deterministic synthetic OHLCV data for offline testing.
-        
-        ENHANCED: Intelligently handles same-day date ranges by generating
-        a full trading day of data (09:30 - 16:00) when start and end are
-        the same day with no time component.
-        """
-
-        freq_map = {
-            "1min": "1min",
-            "5min": "5min",
-            "15min": "15min",
-            "1h": "1H",
-        }
-
-        if interval not in freq_map:
-            raise ValueError(f"Unsupported interval for synthetic data: {interval}")
-
-        # ENHANCEMENT: Handle same-day ranges intelligently
-        # If start and end are the same day (both at 00:00:00), generate a full trading day
-        if start_time.date() == end_time.date() and start_time.time().hour == 0 and end_time.time().hour == 0:
-            self.logger.info(
-                "Detected same-day range with no time - generating full trading day (09:30-16:00)"
-            )
-            # Standard US market hours: 9:30 AM - 4:00 PM ET
-            start_time = start_time.replace(hour=9, minute=30, second=0)
-            end_time = end_time.replace(hour=16, minute=0, second=0)
-            self.logger.info(f"Adjusted time range: {start_time} to {end_time}")
-
-        index = pd.date_range(start=start_time, end=end_time, freq=freq_map[interval])
-
-        # ENHANCEMENT: Improved fallback logic for insufficient data
-        # If we have too few bars, generate a reasonable amount based on interval
-        min_bars_map = {
-            "1min": 120,   # 2 hours minimum
-            "5min": 80,    # ~6.5 hours (full trading day)
-            "15min": 30,   # ~7.5 hours
-            "1h": 7,       # Full trading day
-        }
-        min_bars = min_bars_map.get(interval, 50)
-        
-        if len(index) < min_bars:
-            self.logger.warning(
-                f"Only {len(index)} bars generated for {interval} interval. "
-                f"Generating {min_bars} bars for meaningful analysis."
-            )
-            index = pd.date_range(start=start_time, periods=min_bars, freq=freq_map[interval])
-
-        max_points = 1000 if interval in ("1min", "5min") else 500
-        if len(index) > max_points:
-            index = index[:max_points]
-
-        records = []
-        for symbol in symbols:
-            seed = abs(hash((symbol, start_time.date(), interval))) % (2**32)
-            rng = np.random.default_rng(seed)
-            base_price = 100 + rng.normal(0, 5)
-            drift = rng.normal(0.0002, 0.0005)
-            volatility = rng.uniform(0.005, 0.02)
-            returns = rng.normal(drift, volatility, size=len(index))
-            prices = base_price * np.exp(np.cumsum(returns))
-
-            high = prices * (1 + rng.uniform(0.001, 0.01, size=len(prices)))
-            low = prices * (1 - rng.uniform(0.001, 0.01, size=len(prices)))
-            open_prices = np.concatenate(([prices[0]], prices[:-1]))
-            volume = rng.integers(1_000, 50_000, size=len(prices))
-
-            for ts, o, h, l, c, v in zip(index, open_prices, high, low, prices, volume):
-                records.append(
-                    {
-                        "timestamp": ts,
-                        "symbol": symbol,
-                        "open": float(o),
-                        "high": float(max(h, l, o, c)),
-                        "low": float(min(l, o, c)),
-                        "close": float(c),
-                        "volume": int(v),
-                        "transactions": int(v // 10),
-                    }
-                )
-
-        df = pd.DataFrame.from_records(records)
-        self.logger.info(
-            "Generated %d synthetic records for %d symbols (%s interval)",
-            len(df),
-            len(symbols),
-            interval,
-        )
-        return df
     
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
         """Build ClickHouse query for market data"""

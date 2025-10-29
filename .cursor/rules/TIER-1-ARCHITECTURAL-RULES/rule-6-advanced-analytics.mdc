@@ -3,7 +3,7 @@ alwaysApply: true
 description: "Advanced Analytics Integration Standards"
 ---
 
-# Rule 9: Advanced Analytics Integration Standards
+# Rule 6: Advanced Analytics Integration Standards
 
 All analytics components within the core_engine must support **real-time processing**, **batch analytics**, **performance attribution**, **regime-aware analysis**, and **multi-timeframe capabilities**.
 

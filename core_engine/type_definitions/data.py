@@ -12,6 +12,15 @@ import pandas as pd
 import numpy as np
 import logging
 
+# Import fail-fast exceptions
+try:
+    from core_engine.exceptions import DataUnavailableError
+except ImportError:
+    # Fallback for standalone usage
+    class DataUnavailableError(Exception):
+        """Raised when required data is unavailable"""
+        pass
+
 
 @dataclass
 class DataConfig:
@@ -111,12 +120,14 @@ class YahooDataProvider(DataProvider):
             
             return data
             
-        except ImportError:
-            # Fallback: generate synthetic data
-            return self._generate_synthetic_data(symbol, start_date, end_date)
+        except ImportError as e:
+            raise DataUnavailableError(
+                f"Required data library not available: {e}. Cannot fetch real market data."
+            ) from e
         except Exception as e:
-            self.logger.error(f"Error fetching data for {symbol}: {e}")
-            return self._generate_synthetic_data(symbol, start_date, end_date)
+            raise DataUnavailableError(
+                f"Error fetching data for {symbol}: {e}. Real market data required."
+            ) from e
     
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for symbol"""
@@ -137,14 +148,10 @@ class YahooDataProvider(DataProvider):
             self._cache[cache_key] = (price, datetime.now())
             return price
             
-        except Exception:
-            # Fallback: use last known price or synthetic
-            historical = self.get_historical_data(symbol, 
-                                                datetime.now() - timedelta(days=2), 
-                                                datetime.now())
-            if not historical.empty:
-                return float(historical['Close'].iloc[-1])
-            return 100.0  # Default price
+        except Exception as e:
+            raise DataUnavailableError(
+                f"Error fetching current price for {symbol}: {e}. Real market data required."
+            ) from e
     
     def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols"""
@@ -155,43 +162,6 @@ class YahooDataProvider(DataProvider):
                 prices[symbol] = price
         return prices
     
-    def _generate_synthetic_data(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """Generate synthetic market data for testing"""
-        # Create date range
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
-        
-        # Generate synthetic price data
-        np.random.seed(hash(symbol) % 1000)  # Consistent seed per symbol
-        returns = np.random.normal(0.001, 0.02, len(dates))  # 0.1% daily return, 2% volatility
-        
-        # Starting price based on symbol hash
-        start_price = 50 + (hash(symbol) % 200)
-        
-        prices = [start_price]
-        for ret in returns[1:]:
-            prices.append(prices[-1] * (1 + ret))
-        
-        # Create OHLCV data
-        data = []
-        for i, (date, close) in enumerate(zip(dates, prices)):
-            # Generate OHLC from close
-            volatility = 0.01  # 1% intraday volatility
-            high = close * (1 + np.random.uniform(0, volatility))
-            low = close * (1 - np.random.uniform(0, volatility))
-            open_price = low + (high - low) * np.random.uniform(0.2, 0.8)
-            volume = int(np.random.uniform(1000000, 10000000))
-            
-            data.append({
-                'Open': open_price,
-                'High': high,
-                'Low': low,
-                'Close': close,
-                'Volume': volume
-            })
-        
-        df = pd.DataFrame(data, index=dates)
-        df.index.name = 'Date'
-        return df
 
 
 class DataManager:

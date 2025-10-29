@@ -194,8 +194,8 @@ Desktop.ini
 # ClickHouse data
 clickhouse/
 
-# Trading data
-data/
+# Trading data (but not test data)
+/data/
 logs/
 backtest_results/
 performance_reports/
