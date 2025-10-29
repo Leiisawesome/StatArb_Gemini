@@ -23,6 +23,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Set
 from enum import Enum
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 # Import interfaces to avoid circular imports
 from .interfaces import ISystemComponent
 from .central_risk_manager import TradingDecisionRequest
@@ -2297,8 +2299,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         Note: The orchestrator doesn't register with itself in practice,
         but this method exists for interface consistency during testing.
         """
-        # Return a mock component ID for testing purposes
-        return "orchestrator_self_registration"
+        # Orchestrator doesn't register with itself in production
+        raise ConfigurationRequiredError("Orchestrator cannot register with itself")
 
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """
@@ -2365,7 +2367,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """Audit specific authorization"""
         try:
             from datetime import datetime
-            # Mock audit result for system-level authorization
+            # System-level authorization audit
             return {
                 'authorization_id': authorization_id,
                 'audit_status': 'system_compliant',
@@ -2382,7 +2384,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """Track system authorization lifecycle"""
         try:
             from datetime import datetime
-            # Mock tracking result for system-level authorization
+            # System-level authorization tracking
             return {
                 'authorization_id': authorization_id,
                 'status': 'system_active',

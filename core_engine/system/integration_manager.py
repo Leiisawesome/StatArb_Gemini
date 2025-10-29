@@ -33,6 +33,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 # PHASE 6: Replaced config_adapter with centralized configs
 # OLD: from .config_adapter import safe_component_init
 # NEW: Using consolidated configs from core_engine.config
@@ -47,40 +49,16 @@ def safe_component_init(component_class, config_dict):
     try:
         return component_class(config_dict)
     except Exception as e:
-        # Try with None as fallback (many components accept None and use defaults)
-        try:
-            return component_class(None)
-        except Exception:
-            # Last resort - try with empty dict
-            return component_class({})
+        logger.error(f"Failed to create component {component_class.__name__}: {e}")
+        raise ConfigurationRequiredError(f"Cannot create component {component_class.__name__}: {e}") from e
 
 # Import ISystemComponent for orchestrator integration
 try:
     from .interfaces import ISystemComponent
     from .hierarchical_orchestrator import HierarchicalSystemOrchestrator
 except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
+    logger.error("ISystemComponent interface not available")
+    raise ConfigurationRequiredError("ISystemComponent interface not available")
 
 # PHASE 6: Import centralized configs (Rule 1, Section 7)
 from ..config.component_config import (

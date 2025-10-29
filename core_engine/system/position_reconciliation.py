@@ -29,6 +29,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 logger = logging.getLogger(__name__)
 
 
@@ -497,7 +499,7 @@ class PositionReconciliation:
             
         except Exception as e:
             self.logger.error(f"Failed to get price for {symbol}: {e}")
-            return 100.0  # Fallback
+            raise ConfigurationRequiredError("Current price not available for position reconciliation")
     
     def _count_actions(self, discrepancies: List[PositionDiscrepancy]) -> Dict[ReconciliationAction, int]:
         """Count actions taken"""

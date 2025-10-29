@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 # Import the UnifiedExecutionEngine and ISystemComponent
 from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest, 
@@ -1241,7 +1243,9 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         
         try:
             # Position size as percentage of portfolio using actual price
-            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            if request.current_price <= 0:
+                raise ConfigurationRequiredError("Current price must be provided for risk calculation")
+            price = request.current_price
             position_impact = (request.quantity * price) / self.portfolio_value
             
             # Adjust for volatility
@@ -1267,7 +1271,9 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             new_position = current_position + request.quantity
             
             # Use actual current price for position value calculation
-            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            if request.current_price <= 0:
+                raise ConfigurationRequiredError("Current price must be provided for risk calculation")
+            price = request.current_price
             position_value = abs(new_position * price)
             position_pct = position_value / self.portfolio_value
             
@@ -1286,7 +1292,9 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             new_position = current_position + request.quantity
             
             # Use actual current price for position value calculation
-            price = request.current_price if request.current_price > 0 else 100.0  # Fallback to $100 if not provided
+            if request.current_price <= 0:
+                raise ConfigurationRequiredError("Current price must be provided for risk calculation")
+            price = request.current_price
             position_value = abs(new_position * price)
             concentration = position_value / self.portfolio_value
             

@@ -27,32 +27,14 @@ from dataclasses import dataclass
 from enum import Enum
 from collections import deque
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 # Import ISystemComponent for orchestrator integration
 try:
     from .interfaces import ISystemComponent
 except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
+    logger.error("ISystemComponent interface not available")
+    raise ConfigurationRequiredError("ISystemComponent interface not available")
 
 logger = logging.getLogger(__name__)
 

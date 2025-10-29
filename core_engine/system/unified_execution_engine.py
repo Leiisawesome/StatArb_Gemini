@@ -28,6 +28,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
+
+from core_engine.exceptions import ConfigurationRequiredError
 from enum import Enum
 from abc import ABC, abstractmethod
 import numpy as np
@@ -1503,12 +1505,9 @@ class UnifiedExecutionEngine(ISystemComponent):
                 except Exception as e:
                     logger.error(f"❌ Risk Manager position update failed: {e}")
             
-            # Fallback to direct position update callback
-            elif self.position_update_callback:
-                try:
-                    await self._update_position_via_callback(symbol, side, filled_quantity, avg_price)
-                except Exception as e:
-                    logger.error(f"❌ Direct position update failed: {e}")
+            else:
+                logger.error("❌ No position update mechanism available")
+                raise ConfigurationRequiredError("No position update mechanism available")
             
             logger.info(f"📊 Position updated: {symbol} {side.upper()} {filled_quantity} @ ${avg_price:.2f}")
             
