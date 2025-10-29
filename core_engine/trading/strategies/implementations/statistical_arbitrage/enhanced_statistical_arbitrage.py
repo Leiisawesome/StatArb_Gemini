@@ -53,7 +53,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import StatisticalArbitrageConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 warnings.filterwarnings('ignore')
@@ -497,7 +497,7 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                 logger.info(f"📈 Loaded {len(self.cointegrated_pairs)} pre-selected cointegrated pairs")
                 return
             
-            # FALLBACK: Live cointegration testing (not recommended for intraday data)
+            # Live cointegration testing (not recommended for intraday data)
             assets = self.config.asset_universe
             
             # Test all possible pairs
@@ -783,7 +783,7 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                     self.returns_data[symbol] = data['returns_1'].dropna()
                     logger.debug(f"✅ {symbol}: Using pre-calculated returns from pipeline")
                 elif 'close' in data.columns:
-                    # Fallback: calculate if not available (backward compatibility)
+                    # Calculate if not available
                     self.returns_data[symbol] = data['close'].pct_change().dropna()
                     logger.warning(f"⚠️  {symbol}: Falling back to calculated returns (pipeline missing returns_1)")
     

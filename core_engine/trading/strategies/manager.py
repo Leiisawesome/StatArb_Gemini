@@ -30,6 +30,7 @@ import pandas as pd
 
 # Use internal core_engine types for independence
 from ...type_definitions.strategy import StrategyType, StrategyConfig
+from ...exceptions import ConfigurationRequiredError
 
 # Import enhanced strategy implementations
 from .implementations import (
@@ -215,8 +216,8 @@ class EnhancedStrategyFactory:
         try:
             strategy_class = cls.STRATEGY_CLASSES.get(strategy_type)
             if not strategy_class:
-                logger.warning(f"No enhanced strategy class found for type: {strategy_type}")
-                return None
+                logger.error(f"No enhanced strategy class found for type: {strategy_type}")
+                raise ConfigurationRequiredError(f"Unknown strategy type: {strategy_type}")
             
             # Create configuration object
             config_class = cls.CONFIG_CLASSES.get(strategy_type)
@@ -239,7 +240,7 @@ class EnhancedStrategyFactory:
             
         except Exception as e:
             logger.error(f"❌ Failed to create enhanced strategy {strategy_type}: {e}")
-            return None
+            raise ConfigurationRequiredError(f"Cannot create enhanced strategy {strategy_type}: {e}") from e
     
     @classmethod
     def _create_config_object(cls, config_class: Type, config_dict: Dict[str, Any]):
@@ -270,12 +271,8 @@ class EnhancedStrategyFactory:
             return config_class(**valid_params)
             
         except Exception as e:
-            logger.warning(f"Failed to create config object: {e}, using basic config")
-            return StrategyConfig(
-                strategy_name=config_dict.get('name', 'strategy'),
-                strategy_type=StrategyType(config_dict.get('type', 'momentum')),
-                **{k: v for k, v in config_dict.items() if k not in ['name', 'type']}
-            )
+            logger.error(f"Failed to create config object: {e}")
+            raise ConfigurationRequiredError(f"Cannot create strategy configuration: {e}") from e
     
     @classmethod
     def get_available_strategies(cls) -> List[StrategyType]:
@@ -1183,19 +1180,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     logger.info(f"✅ Enhanced strategy created and initialized: {config['name']}")
                     return strategy_instance
                 else:
-                    logger.warning(f"⚠️ Failed to create enhanced strategy, falling back to basic strategy")
-            
-            # Fallback to basic strategy instance
-            strategy_instance = type('BasicStrategy', (), {
-                'name': config['name'],
-                'config': config,
-                'strategy_type': strategy_type,
-                'generate_signals': lambda symbols: [],
-                'get_status': lambda: {'active': True, 'type': strategy_type.value}
-            })()
-            
-            logger.info(f"📝 Basic strategy created: {config['name']}")
-            return strategy_instance
+                    logger.error(f"❌ Failed to create enhanced strategy: {strategy_type}")
+                    raise ConfigurationRequiredError(f"Cannot create enhanced strategy: {strategy_type}")
+            else:
+                logger.error(f"❌ Enhanced strategies disabled, cannot create strategy: {strategy_type}")
+                raise ConfigurationRequiredError("Enhanced strategies are disabled")
             
         except Exception as e:
             logger.error(f"❌ Error creating strategy instance: {e}")
@@ -1213,11 +1202,12 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 # Use core strategy manager if available
                 raw_signals = await self.core_strategy_manager.generate_signals(symbols)
             else:
-                # Fallback to strategy-specific generation
+                # Strategy must have generate_signals method
                 if hasattr(strategy, 'generate_signals'):
                     raw_signals = await strategy.generate_signals(symbols)
                 else:
-                    raw_signals = []
+                    logger.error(f"❌ Strategy {strategy_name} has no generate_signals method")
+                    raise ConfigurationRequiredError(f"Strategy {strategy_name} missing generate_signals method")
             
             # Convert to TradingSignal objects
             signals = []

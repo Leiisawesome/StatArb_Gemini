@@ -32,7 +32,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import BreakoutConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
                 volume_ratio = current_data['volume_ratio']
                 logger.debug(f"✅ {symbol}: Using pre-calculated volume_ratio")
             else:
-                # Fallback: calculate if not available
+                # Calculate if not available
                 volume = data['volume']
                 volume_ma = volume.tail(self.config.lookback_period).mean()
                 volume_ratio = current_data['volume'] / volume_ma if volume_ma > 0 else 1.0

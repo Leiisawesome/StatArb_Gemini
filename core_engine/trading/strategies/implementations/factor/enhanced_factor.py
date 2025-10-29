@@ -33,7 +33,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import FactorConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
         required_features = [
             'returns_1',        # 1-period returns (for momentum factor)
             'volatility',       # Volatility metric (for quality/volatility factors)
-            'close',            # Close prices (fallback)
+            'close',            # Close prices
             'volume'            # Volume (for liquidity checks)
         ]
         
@@ -303,7 +303,7 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                     scores['momentum'] = momentum_score
                     logger.debug(f"✅ {symbol}: Using pre-calculated returns for momentum factor")
                 elif 'close' in data.columns:
-                    # Fallback (backward compatibility)
+                    # Use pre-calculated returns
                     returns = data['close'].pct_change()
                     momentum_score = returns.tail(self.config.factor_lookback).mean()
                     scores['momentum'] = momentum_score
@@ -317,12 +317,12 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                     scores['value'] = -price_volatility  # Lower volatility = higher value score
                     logger.debug(f"✅ {symbol}: Using pre-calculated volatility for value factor")
                 elif 'returns_1' in data.columns:
-                    # Fallback using returns
+                    # Use returns
                     price_volatility = data['returns_1'].tail(self.config.factor_lookback).std()
                     scores['value'] = -price_volatility
                     logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for value")
                 elif 'close' in data.columns:
-                    # Double fallback
+                    # Calculate from close prices
                     price_volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
                     scores['value'] = -price_volatility
                     logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for value")
@@ -336,13 +336,13 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                     scores['quality'] = price_stability
                     logger.debug(f"✅ {symbol}: Using pre-calculated volatility for quality factor")
                 elif 'returns_1' in data.columns:
-                    # Fallback using returns
+                    # Use returns
                     vol = data['returns_1'].tail(self.config.factor_lookback).std()
                     price_stability = 1.0 / (1.0 + vol)
                     scores['quality'] = price_stability
                     logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for quality")
                 elif 'close' in data.columns:
-                    # Double fallback
+                    # Calculate from close prices
                     vol = data['close'].pct_change().tail(self.config.factor_lookback).std()
                     price_stability = 1.0 / (1.0 + vol)
                     scores['quality'] = price_stability
@@ -356,12 +356,12 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                     scores['volatility'] = -volatility  # Lower volatility = higher score
                     logger.debug(f"✅ {symbol}: Using pre-calculated volatility for volatility factor")
                 elif 'returns_1' in data.columns:
-                    # Fallback using returns
+                    # Use returns
                     volatility = data['returns_1'].tail(self.config.factor_lookback).std()
                     scores['volatility'] = -volatility
                     logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for volatility factor")
                 elif 'close' in data.columns:
-                    # Double fallback
+                    # Calculate from close prices
                     volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
                     scores['volatility'] = -volatility
                     logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for volatility factor")

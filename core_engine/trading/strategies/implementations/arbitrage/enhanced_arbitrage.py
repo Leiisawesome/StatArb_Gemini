@@ -46,7 +46,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import ArbitrageConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 logger = logging.getLogger(__name__)

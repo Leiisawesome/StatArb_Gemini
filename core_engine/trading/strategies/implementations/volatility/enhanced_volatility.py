@@ -33,7 +33,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import VolatilityConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 logger = logging.getLogger(__name__)
@@ -185,7 +185,7 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
         """
         required_features = [
             'volatility',       # Pre-calculated volatility metric
-            'returns_1',        # 1-period returns (fallback)
+            'returns_1',        # 1-period returns
             'ATR_14',          # Average True Range (volatility measure)
             'close', 'high', 'low'  # OHLC for range calculations
         ]
@@ -318,13 +318,13 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                 vol_data['realized_volatility'] = realized_vol
                 logger.debug(f"✅ {symbol}: Using pre-calculated volatility")
             elif 'returns_1' in data.columns:
-                # Fallback using pre-calculated returns
+                # Use pre-calculated returns
                 returns = data['returns_1'].dropna()
                 realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
                 vol_data['realized_volatility'] = realized_vol
                 logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility")
             elif 'close' in data.columns:
-                # Double fallback (backward compatibility)
+                # Calculate from close prices
                 returns = data['close'].pct_change().dropna()
                 realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
                 vol_data['realized_volatility'] = realized_vol

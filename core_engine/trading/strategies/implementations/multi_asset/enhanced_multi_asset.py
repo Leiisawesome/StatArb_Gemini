@@ -33,7 +33,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import MultiAssetConfig
 except ImportError:
-    # Fallback: local config will be used if centralized not available
+    # Configuration must be provided
     pass
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         required_features = [
             'returns_1',        # Pre-calculated returns
             'volatility',       # Pre-calculated volatility
-            'close',            # Close prices (fallback)
+            'close',            # Close prices
             'volume'            # Volume
         ]
         
@@ -314,7 +314,7 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
                         returns = self.market_data[symbol]['returns_1'].dropna()
                         logger.debug(f"✅ {symbol}: Using pre-calculated returns for correlation")
                     else:
-                        # Fallback (backward compatibility)
+                        # Use pre-calculated returns
                         returns = self.market_data[symbol]['close'].pct_change().dropna()
                         logger.warning(f"⚠️  {symbol}: Falling back to calculated returns for correlation")
                     
@@ -409,14 +409,14 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
                         asset_volatilities[symbol] = volatility
                         logger.debug(f"✅ {symbol}: Using pre-calculated volatility for risk budgeting")
                     elif 'returns_1' in self.market_data[symbol].columns:
-                        # Fallback using pre-calculated returns
+                        # Use pre-calculated returns
                         returns = self.market_data[symbol]['returns_1'].dropna()
                         if len(returns) >= 20:
                             volatility = returns.tail(20).std() * np.sqrt(252)
                             asset_volatilities[symbol] = volatility
                         logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for risk budgeting")
                     else:
-                        # Double fallback (backward compatibility)
+                        # Calculate from close prices
                         returns = self.market_data[symbol]['close'].pct_change().dropna()
                         if len(returns) >= 20:
                             volatility = returns.tail(20).std() * np.sqrt(252)

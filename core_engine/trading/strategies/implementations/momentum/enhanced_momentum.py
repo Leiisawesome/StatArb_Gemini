@@ -48,7 +48,7 @@ from ...strategy_engine import (
 try:
     from core_engine.config import MomentumConfig
 except ImportError:
-    # Fallback for backward compatibility during migration
+    # Configuration must be provided
     from dataclasses import dataclass, field
     from typing import List
     
