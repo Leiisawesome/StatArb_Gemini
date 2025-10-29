@@ -507,7 +507,9 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.firmQuoteOnly = False  # Explicitly disable firm quote only
             ib_order.outsideRth = False  # Orders only during regular trading hours
             
-            # Get order ID
+            # Get order ID (must be connected to have valid next_order_id)
+            if self.wrapper.next_order_id is None:
+                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
             order_id = self.wrapper.next_order_id
             self.wrapper.next_order_id += 1
             
@@ -564,7 +566,9 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.lmtPrice = round(limit_price, 2)
             ib_order.transmit = True
             
-            # Get order ID
+            # Get order ID (must be connected to have valid next_order_id)
+            if self.wrapper.next_order_id is None:
+                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
             order_id = self.wrapper.next_order_id
             self.wrapper.next_order_id += 1
             
@@ -622,7 +626,9 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.auxPrice = round(stop_price, 2)
             ib_order.transmit = True
             
-            # Get order ID
+            # Get order ID (must be connected to have valid next_order_id)
+            if self.wrapper.next_order_id is None:
+                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
             order_id = self.wrapper.next_order_id
             self.wrapper.next_order_id += 1
             
@@ -683,7 +689,9 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.auxPrice = round(stop_price, 2)
             ib_order.transmit = True
             
-            # Get order ID
+            # Get order ID (must be connected to have valid next_order_id)
+            if self.wrapper.next_order_id is None:
+                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
             order_id = self.wrapper.next_order_id
             self.wrapper.next_order_id += 1
             

@@ -2181,41 +2181,6 @@ class InstitutionalBacktestEngine:
                                         key=lambda x: x[1])[0] if self.rejection_stats['rejection_reasons'] else None
         }
     
-    def print_rejection_report(self) -> None:
-        """Print human-readable rejection statistics report"""
-        stats = self.get_rejection_statistics()
-        
-        print("\n" + "=" * 80)
-        print("📊 ORDER REJECTION STATISTICS (Sprint 0.3)")
-        print("=" * 80)
-        
-        if stats['total_rejections'] == 0:
-            print("✅ No order rejections - all trades executed successfully")
-            return
-        
-        print(f"\n📈 Rejection Overview:")
-        print(f"   Total Trades Attempted: {stats['total_trades_attempted']}")
-        print(f"   Total Rejections: {stats['total_rejections']}")
-        print(f"   Rejection Rate: {stats['rejection_rate']:.2%}")
-        
-        if stats.get('rejection_reasons'):
-            print(f"\n🚫 Rejection Reasons Breakdown:")
-            for reason, count in sorted(stats['rejection_reasons'].items(), key=lambda x: x[1], reverse=True):
-                percentage = count / stats['total_rejections'] * 100
-                print(f"   • {reason.replace('_', ' ').title()}: {count} ({percentage:.1f}%)")
-        
-        if stats.get('retry_stats'):
-            print(f"\n🔄 Retry Statistics:")
-            total_retries = sum(stats['retry_stats'].values())
-            print(f"   Trades requiring retries: {total_retries}")
-            for retry_count, count in sorted(stats['retry_stats'].items()):
-                print(f"   • {retry_count} retries: {count} trades")
-        
-        if stats.get('most_common_rejection'):
-            print(f"\n⚠️  Most Common Rejection: {stats['most_common_rejection'].replace('_', ' ').title()}")
-        
-        print("=" * 80 + "\n")
-    
     # ============================================================
     # REPORT GENERATION METHODS
     # ============================================================
@@ -2225,69 +2190,106 @@ class InstitutionalBacktestEngine:
                                    export: bool = False) -> str:
         """
         Generate comprehensive performance report from backtest results
-        
+
         This method aggregates results from:
         - execution_history: Executed trades with costs
         - position_tracker: Portfolio positions and P&L
         - analytics_manager: Performance metrics
-        
+
         Args:
             format: Report format ('console', 'json', 'csv', 'markdown')
             export: Whether to export report to file
-        
+
         Returns:
             Formatted report string
         """
         logger.info("\n" + "=" * 80)
         logger.info("📊 GENERATING BACKTEST PERFORMANCE REPORT")
         logger.info("=" * 80)
-        
+
         try:
-            if not self.performance_reporter:
-                raise RuntimeError("PerformanceReporter not initialized")
-            
+            # Check if we have execution history
             if not self.execution_history:
                 logger.warning("⚠️ No execution history available")
                 return "No trades executed - cannot generate report"
-            
+
+            # Get basic performance data
+            total_trades = len(self.execution_history)
+            total_bars = len(self.historical_data) if self.historical_data is not None else 0
+
             # Get initial and final capital
-            initial_capital = self.config.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
+            initial_capital = self.config.initial_capital if hasattr(self.config, 'initial_capital') else 100000.0
             final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
-            
-            # Generate performance summary
-            from backtest.engine.performance_reporter import ReportFormat
-            
-            # Map string format to ReportFormat enum
-            format_map = {
-                'console': ReportFormat.CONSOLE,
-                'json': ReportFormat.JSON,
-                'csv': ReportFormat.CSV,
-                'markdown': ReportFormat.MARKDOWN
-            }
-            report_format = format_map.get(format.lower(), ReportFormat.CONSOLE)
-            
-            summary = self.performance_reporter.generate_performance_summary(
-                backtest_config=self.config,
-                execution_history=self.execution_history,
-                position_history=self.position_history,
-                initial_capital=initial_capital,
-                final_capital=final_capital
-            )
-            
-            # Add bars processed count
-            if self.historical_data is not None:
-                summary.total_bars_processed = len(self.historical_data)
-            
-            # Format report
-            report = self.performance_reporter.format_report(summary, report_format)
-            
+
+            # Calculate basic metrics
+            total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
+
+            # Generate basic report
+            report_lines = [
+                "# Backtest Performance Report",
+                f"## Backtest: {self.backtest_name}",
+                f"## Period: {self.config.start_date} to {self.config.end_date}",
+                f"## Symbol: {', '.join(self.config.symbols) if hasattr(self.config, 'symbols') else 'N/A'}",
+                "",
+                "## Summary Statistics",
+                f"- **Total Bars Processed**: {total_bars}",
+                f"- **Total Trades**: {total_trades}",
+                f"- **Initial Capital**: ${initial_capital:,.2f}",
+                f"- **Final Capital**: ${final_capital:,.2f}",
+                f"- **Total Return**: {total_return:.2%}",
+                "",
+                "## Trade Details"
+            ]
+
+            # Add trade details if available
+            if self.execution_history:
+                report_lines.append("| Timestamp | Symbol | Side | Quantity | Price | Value |")
+                report_lines.append("|-----------|--------|------|----------|-------|-------|")
+
+                for trade in self.execution_history[:10]:  # Show first 10 trades
+                    timestamp = trade.get('timestamp', 'N/A')
+                    symbol = trade.get('symbol', 'N/A')
+                    side = trade.get('side', 'N/A')
+                    quantity = trade.get('quantity', 0)
+                    price = trade.get('price', 0)
+                    value = quantity * price
+                    report_lines.append(f"| {timestamp} | {symbol} | {side} | {quantity} | ${price:.2f} | ${value:.2f} |")
+
+                if len(self.execution_history) > 10:
+                    report_lines.append(f"\n*... and {len(self.execution_history) - 10} more trades*")
+
+            report = "\n".join(report_lines)
+
             # Export if requested
             if export:
-                filepath = self.performance_reporter.export_report(summary, report_format)
+                from pathlib import Path
+                output_dir = Path(self.config.output_directory) if hasattr(self.config, 'output_directory') else Path("backtest_results")
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+                if format.lower() == 'json':
+                    import json
+                    json_data = {
+                        "backtest_name": self.backtest_name,
+                        "total_bars": total_bars,
+                        "total_trades": total_trades,
+                        "initial_capital": initial_capital,
+                        "final_capital": final_capital,
+                        "total_return": total_return,
+                        "trades": self.execution_history
+                    }
+                    filepath = output_dir / "backtest_report.json"
+                    with open(filepath, 'w') as f:
+                        json.dump(json_data, f, indent=2, default=str)
+                else:
+                    # Default to markdown
+                    filepath = output_dir / "backtest_report.md"
+                    with open(filepath, 'w') as f:
+                        f.write(report)
+
                 logger.info(f"✅ Report exported to: {filepath}")
-            
+
             return report
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to generate performance report: {e}", exc_info=True)
             return f"Error generating report: {str(e)}"
@@ -2295,27 +2297,39 @@ class InstitutionalBacktestEngine:
     def get_performance_summary(self) -> Optional[Any]:
         """
         Get performance summary object (for programmatic access)
-        
+
         Returns:
-            BacktestSummary object or None if not available
+            Dict with basic performance metrics or None if not available
         """
         try:
-            if not self.performance_reporter or not self.execution_history:
+            if not self.execution_history:
                 return None
-            
-            initial_capital = self.config.initial_capital if hasattr(self.config.execution, 'initial_capital') else 100000.0
+
+            # Get basic performance data
+            total_trades = len(self.execution_history)
+            total_bars = len(self.historical_data) if self.historical_data is not None else 0
+
+            # Get initial and final capital
+            initial_capital = self.config.initial_capital if hasattr(self.config, 'initial_capital') else 100000.0
             final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
-            
-            summary = self.performance_reporter.generate_performance_summary(
-                backtest_config=self.config,
-                execution_history=self.execution_history,
-                position_history=self.position_history,
-                initial_capital=initial_capital,
-                final_capital=final_capital
-            )
-            
+
+            # Calculate basic metrics
+            total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
+
+            # Create summary dict
+            summary = {
+                "backtest_name": self.backtest_name,
+                "total_bars_processed": total_bars,
+                "total_trades": total_trades,
+                "initial_capital": initial_capital,
+                "final_capital": final_capital,
+                "total_return": total_return,
+                "execution_history": self.execution_history,
+                "position_history": self.position_history
+            }
+
             return summary
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to get performance summary: {e}")
             return None
@@ -2603,8 +2617,8 @@ class InstitutionalBacktestEngine:
                     if bar_index < len(self.pre_calculated_features):
                         features_row = self.pre_calculated_features.iloc[bar_index:bar_index+1]
                         
-                        # ✅ FIX: Pass HISTORICAL CONTEXT to strategy (not just current bar)
-                        # Strategy needs historical data to check momentum trends
+                        # ✅ CORRECTED FLOW (Phase 7.2): Pass PRE-CALCULATED ENRICHED FEATURES
+                        # NOT raw OHLCV - strategies receive cached indicators ready to use
                         signals_df = None
                         if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
                             # Get first active strategy (for single-strategy backtest)
@@ -2612,21 +2626,26 @@ class InstitutionalBacktestEngine:
                                 strategy = list(self.strategy_manager.active_strategies.values())[0]
                                 symbol = self.config.symbols[0]
                                 
-                                # ✅ FIX: Pass RAW HISTORICAL DATA (not features) to strategy
-                                # Strategy expects OHLCV data so it can calculate its own indicators
-                                # Get raw market data up to and including current bar
-                                raw_historical_data = self.market_data[symbol].iloc[:bar_index+1].copy()
+                                # ✅ CRITICAL FIX: Pass ENRICHED FEATURES (not raw OHLCV)
+                                # Pre-calculated features include all indicators: SMA_10, SMA_20, SMA_50, RSI_14, ADX_14, MACD, ATR_14, etc
+                                # This is the CORRECT professional quant approach
+                                # Get enriched features up to and including current bar
+                                enriched_historical_data = self.pre_calculated_features.iloc[:bar_index+1].copy()
                                 
-                                # Log on first bar to confirm strategy is being called
+                                # Log on first bar to confirm strategy is being called with enriched data
                                 if bar_index < 3:
                                     logger.info(f"📊 Bar {bar_index}: Calling strategy {strategy.__class__.__name__} for {symbol}")
-                                    logger.info(f"   Historical context: {len(raw_historical_data)} bars of raw OHLCV data")
+                                    logger.info(f"   Data type: ENRICHED FEATURES (pre-calculated indicators)")
+                                    logger.info(f"   Historical context: {len(enriched_historical_data)} bars of enriched data")
+                                    if len(enriched_historical_data.columns) > 6:
+                                        logger.info(f"   Indicators available: {', '.join(enriched_historical_data.columns[6:12].tolist())}...")
                                 
-                                # Call strategy's generate_signals with Dict[symbol, DataFrame of raw OHLCV]
-                                strategy_signals = await strategy.generate_signals({symbol: raw_historical_data})
+                                # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
+                                # Strategy receives pre-calculated indicators (no recalculation needed)
+                                strategy_signals = await strategy.generate_signals({symbol: enriched_historical_data})
                                 
                                 if bar_index < 3:
-                                    logger.info(f"   Strategy returned: {len(strategy_signals) if strategy_signals else 0} signals")
+                                    logger.info(f"   ✅ Strategy returned: {len(strategy_signals) if strategy_signals else 0} signals (from enriched data)")
                                 
                                 # Strategy returns List[StrategySignal], convert to DataFrame
                                 if strategy_signals is not None and len(strategy_signals) > 0:
@@ -2639,12 +2658,13 @@ class InstitutionalBacktestEngine:
                                     } for s in strategy_signals])
                                     bar_results['signals_generated'] = len(signals_df)
                                     if bar_index < 10:
-                                        logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals!")
+                                        logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals from enriched features!")
                                 else:
                                     pass
                             except Exception as e:
                                 logger.error(f"Strategy signal generation failed at bar {bar_index}: {e}", exc_info=True)
-                                # Fallback to pipeline signal generator
+                                logger.error(f"   Falling back to pipeline signal generator (suboptimal)")
+                                # Fallback to pipeline signal generator only if enriched data fails
                                 signals_df = self.signal_generator.generate_signals(features_row) if self.signal_generator else None
                         else:
                             # No strategy manager, use pipeline signal generator as fallback
@@ -2682,17 +2702,26 @@ class InstitutionalBacktestEngine:
                 indicators_df = self.indicators_engine.calculate_indicators(bar_df) if self.indicators_engine else bar_df
                 features_df = self.feature_engineer.create_features(indicators_df) if self.feature_engineer and indicators_df is not None else indicators_df
                 
-                # ✅ FIX: Pass historical market data to STRATEGY for signal generation
-                signals_df = None
+                # ✅ CORRECTED FLOW: Even in fallback, use enriched features not raw OHLCV
+                # Fallback should calculate fresh enriched data if pre-calculated unavailable
                 if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
-                    # STRATEGY generates signals based on its custom logic
+                    # STRATEGY generates signals based on enriched features (not raw OHLCV)
                     try:
-                        strategy_signals = await self.strategy_manager.generate_signals(self.config.symbols, self.historical_market_data)
+                        # For fallback: create enriched data on-the-fly
+                        enriched_features_fallback = features_df.copy()
+                        
+                        logger.warning(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
+                        
+                        # Pass enriched features to strategy (not raw OHLCV)
+                        strategy_signals = await self.strategy_manager.generate_signals(
+                            self.config.symbols, 
+                            {symbol: enriched_features_fallback for symbol in self.config.symbols}
+                        )
+                        
                         # Strategy returns List[Signal], convert to DataFrame
                         if strategy_signals is not None:
                             if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
                                 # Convert list of Signal objects to DataFrame
-                                # CRITICAL FIX: Convert signal_type enum to .value string
                                 signals_df = pd.DataFrame([{
                                     'symbol': s.symbol,
                                     'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
@@ -2702,13 +2731,17 @@ class InstitutionalBacktestEngine:
                                     'target_quantity': getattr(s, 'target_quantity', 0),
                                     'additional_data': getattr(s, 'additional_data', {})
                                 } for s in strategy_signals])
+                                logger.info(f"   ✅ Generated {len(signals_df)} signals from fallback enriched features")
                             elif isinstance(strategy_signals, pd.DataFrame) and not strategy_signals.empty:
                                 signals_df = strategy_signals
                     except Exception as e:
-                        # Fallback to pipeline signal generator
+                        logger.error(f"Fallback strategy generation failed: {e}", exc_info=True)
+                        # Final fallback to pipeline signal generator only as last resort
+                        logger.warning(f"   Falling back to pipeline signal generator (not ideal)")
                         signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
                 else:
                     # No strategy manager, use pipeline signal generator as fallback
+                    logger.warning(f"⚠️  No strategy manager available, using pipeline signal generator")
                     signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
                 
                 if signals_df is not None and not signals_df.empty:
@@ -3360,7 +3393,7 @@ async def create_backtest_engine(config_path: Path) -> InstitutionalBacktestEngi
         results = await engine.run_backtest()
     """
     # Load configuration
-    config = BacktestConfiguration.from_json(config_path)
+    config = BacktestConfig.from_json(config_path)
     
     # Create engine
     engine = InstitutionalBacktestEngine(config)
