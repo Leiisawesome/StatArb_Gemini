@@ -16,6 +16,8 @@ from collections import deque
 from scipy import stats
 from scipy.stats import kendalltau, spearmanr
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 logger = logging.getLogger(__name__)
 
 
@@ -273,8 +275,8 @@ class CorrelationAnalyzer:
             elif method == CorrelationMethod.KENDALL:
                 correlation, p_value = kendalltau(aligned_data['asset1'], aligned_data['asset2'])
             else:
-                # Default to Pearson for other methods
-                correlation, p_value = stats.pearsonr(aligned_data['asset1'], aligned_data['asset2'])
+                # No default - raise exception for unknown correlation methods
+                raise ConfigurationRequiredError(f"Unknown correlation method: {method}")
             
             # Calculate confidence interval using Fisher transformation
             n = len(aligned_data)

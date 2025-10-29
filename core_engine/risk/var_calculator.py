@@ -15,6 +15,8 @@ import time
 from collections import deque
 from scipy import stats
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,8 +96,13 @@ class VarCalculator:
         self._calculation_history = deque(maxlen=1000)
         
         # Configuration parameters
-        self.default_confidence_levels = self.config.get('confidence_levels', [0.95, 0.99, 0.999])
-        self.default_time_horizon = self.config.get('time_horizon_days', 1)
+        self.confidence_levels = self.config.get('confidence_levels', [self.config.get('default_confidence', 0.95)])
+        if not self.confidence_levels:
+            raise ConfigurationRequiredError("confidence_levels must be specified in VaR calculator config")
+        
+        self.time_horizon = self.config.get('time_horizon_days', 1)
+        if not self.time_horizon or self.time_horizon <= 0:
+            raise ConfigurationRequiredError("time_horizon_days must be specified and greater than 0")
         self.lookback_window = self.config.get('lookback_window_days', 252)  # 1 year
         self.min_observations = self.config.get('min_observations', 50)
         self.mc_simulations = self.config.get('monte_carlo_simulations', 10000)
@@ -104,61 +111,11 @@ class VarCalculator:
         self.risk_free_rate = self.config.get('risk_free_rate_annual', 0.02)
         
         # Stress test scenarios
-        self._stress_scenarios = {}
-        self._load_default_scenarios()
+        self._stress_scenarios = self.config.get('stress_scenarios', {})
+        # Note: stress_scenarios are optional for VaR calculator
         
         logger.info("VarCalculator initialized")
     
-    def _load_default_scenarios(self) -> None:
-        """Load default stress test scenarios"""
-        
-        # 2008 Financial Crisis scenario
-        crisis_2008 = StressTestScenario(
-            name="2008_Financial_Crisis",
-            description="Scenario based on 2008 financial crisis shocks",
-            factor_shocks={
-                'EQUITY': -0.40,  # 40% equity drop
-                'CREDIT': 0.05,   # 500bp credit spread widening
-                'VOLATILITY': 2.5  # 250% volatility increase
-            },
-            volatility_multipliers={
-                'EQUITY': 2.0,
-                'CREDIT': 1.5,
-                'FX': 1.8
-            }
-        )
-        
-        # COVID-19 March 2020 scenario
-        covid_2020 = StressTestScenario(
-            name="COVID_2020",
-            description="Scenario based on COVID-19 March 2020 market shock",
-            factor_shocks={
-                'EQUITY': -0.35,  # 35% equity drop
-                'OIL': -0.60,     # 60% oil price drop
-                'VOLATILITY': 3.0  # 300% volatility increase
-            },
-            volatility_multipliers={
-                'EQUITY': 2.5,
-                'COMMODITIES': 2.0,
-                'FX': 1.5
-            }
-        )
-        
-        # Interest rate shock
-        rate_shock = StressTestScenario(
-            name="Interest_Rate_Shock", 
-            description="Parallel shift in yield curve",
-            factor_shocks={
-                'RATES': 0.02,    # 200bp rate increase
-                'DURATION': -0.15  # Duration impact
-            }
-        )
-        
-        self._stress_scenarios = {
-            'crisis_2008': crisis_2008,
-            'covid_2020': covid_2020,
-            'rate_shock': rate_shock
-        }
     
     async def calculate_var(
         self,
@@ -180,7 +137,7 @@ class VarCalculator:
             Dictionary mapping confidence levels to VaR results
         """
         if confidence_levels is None:
-            confidence_levels = self.default_confidence_levels
+            confidence_levels = self.confidence_levels
         
         start_time = time.time()
         
@@ -464,7 +421,7 @@ class VarCalculator:
             var_1d = {}
             cvar_1d = {}
             
-            for confidence_level in self.default_confidence_levels:
+            for confidence_level in self.confidence_levels:
                 # Historical VaR
                 quantile = 1 - confidence_level
                 var_value = -np.percentile(portfolio_returns, quantile * 100)

@@ -13,6 +13,8 @@ from enum import Enum
 import time
 from collections import defaultdict, deque
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 logger = logging.getLogger(__name__)
 
 
@@ -524,8 +526,8 @@ class StressTester:
             else:
                 return 0.1  # Small volatility sensitivity for most assets
         
-        # Default
-        return 0.0
+        # No default - raise exception for unknown asset types
+        raise ConfigurationRequiredError(f"Unknown asset type for volatility sensitivity: {asset_type}")
     
     def _calculate_risk_breakdown(
         self,

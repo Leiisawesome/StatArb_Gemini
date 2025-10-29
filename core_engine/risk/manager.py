@@ -30,6 +30,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core_engine.exceptions import ConfigurationRequiredError
+
 # Leverage existing high-quality risk components
 # Use internal core_engine types for independence
 from ..type_definitions import (
@@ -115,7 +117,9 @@ class RiskManager:
         
         # Risk tracking
         self.daily_pnl = 0.0
-        self.portfolio_value = 100000.0  # Default starting value
+        self.portfolio_value = config.get('portfolio_value', 0.0)
+        if self.portfolio_value <= 0:
+            raise ConfigurationRequiredError("Portfolio value must be specified and greater than 0")
         self.position_limits: Dict[str, float] = {}
         
         # Subscribers for risk events
@@ -343,13 +347,8 @@ class RiskManager:
                 confidence=trade_request.confidence
             )
         
-        # Fallback basic analysis
-        return type('RiskAnalysis', (), {
-            'risk_level': RiskLevel.MEDIUM,
-            'position_impact': 0.05,
-            'portfolio_impact': 0.02,
-            'concentration_risk': 0.03
-        })()
+        # Risk analysis failed - raise exception instead of fallback
+        raise ConfigurationRequiredError("Risk analysis failed - insufficient data or configuration")
     
     async def _make_authorization_decision(self, trade_request: TradeRequest, risk_analysis: Any) -> Any:
         """Make final authorization decision"""
