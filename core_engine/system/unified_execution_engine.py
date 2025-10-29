@@ -320,17 +320,36 @@ class TWAPAlgorithm(IExecutionAlgorithm):
                 if not self.test_mode:
                     await asyncio.sleep(0.1)  # Simulate network latency
                 
-                # Mock fill
-                fill_price = 100.0 + np.random.normal(0, 0.01)  # Mock price with noise
-                fill_qty = current_slice
+                # Execute through real broker - no mock data
+                if not hasattr(self, 'broker_adapter') or not self.broker_adapter:
+                    raise ConfigurationRequiredError("Broker adapter required for trade execution")
                 
-                executed_quantity += fill_qty
-                result.fills.append({
-                    'timestamp': datetime.now(),
-                    'quantity': fill_qty,
-                    'price': fill_price,
-                    'venue': 'MOCK_EXCHANGE'
-                })
+                try:
+                    fill_result = await self.broker_adapter.execute_order({
+                        'symbol': request.authorization.symbol,
+                        'side': request.authorization.side,
+                        'quantity': current_slice,
+                        'order_type': 'market'
+                    })
+                    
+                    if not fill_result or not fill_result.get('filled'):
+                        raise ConfigurationRequiredError(f"Order execution failed: {fill_result}")
+                    
+                    fill_price = fill_result.get('fill_price')
+                    fill_qty = fill_result.get('fill_quantity')
+                    
+                    if not fill_price or not fill_qty or fill_price <= 0 or fill_qty <= 0:
+                        raise ConfigurationRequiredError(f"Invalid fill data: price={fill_price}, qty={fill_qty}")
+                    
+                    executed_quantity += fill_qty
+                    result.fills.append({
+                        'timestamp': datetime.now(),
+                        'quantity': fill_qty,
+                        'price': fill_price,
+                        'venue': fill_result.get('venue', 'UNKNOWN')
+                    })
+                except Exception as e:
+                    raise ConfigurationRequiredError(f"Broker execution failed: {e}")
                 
                 # Wait for next slice
                 if executed_quantity < total_quantity and not self.test_mode:
@@ -357,11 +376,12 @@ class TWAPAlgorithm(IExecutionAlgorithm):
         """Estimate TWAP execution time"""
         return float(request.time_horizon)
     
-    def estimate_market_impact(self, request: ExecutionRequest) -> float:
+    async def estimate_market_impact(self, request: ExecutionRequest) -> float:
         """Estimate TWAP market impact"""
+        current_price = await self._get_current_price(request.authorization.symbol)
         return self.impact_model.estimate_impact(
             request.authorization.quantity,
-            100.0,  # Mock price
+            current_price,
             request.urgency
         ) * 0.7  # TWAP typically reduces impact
 
@@ -391,7 +411,20 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 await asyncio.sleep(0.05)  # 50ms latency
             
             quantity = request.authorization.quantity
-            fill_price = 100.0 + np.random.normal(0, 0.005)  # Mock price with spread
+            # Get real market price - no mock data
+            if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+                raise ConfigurationRequiredError("Market data manager required for price data")
+            
+            try:
+                market_data = await self.market_data_manager.get_current_price(request.authorization.symbol)
+                if not market_data or 'price' not in market_data:
+                    raise ConfigurationRequiredError(f"No price data available for {request.authorization.symbol}")
+                
+                fill_price = market_data['price']
+                if fill_price <= 0:
+                    raise ConfigurationRequiredError(f"Invalid price data: {fill_price}")
+            except Exception as e:
+                raise ConfigurationRequiredError(f"Failed to get market price: {e}")
             
             result.filled_quantity = quantity
             result.remaining_quantity = 0.0
@@ -568,7 +601,20 @@ class VWAPAlgorithm(IExecutionAlgorithm):
                 await asyncio.sleep(slice_timing)
                 
                 # Execute slice (mock execution)
-                fill_price = 100.0 + np.random.normal(0, 0.1)  # Mock fill
+                # Get real market price for slice execution
+                if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+                    raise ConfigurationRequiredError("Market data manager required for slice execution")
+                
+                try:
+                    market_data = await self.market_data_manager.get_current_price(request.authorization.symbol)
+                    if not market_data or 'price' not in market_data:
+                        raise ConfigurationRequiredError(f"No price data available for slice execution")
+                    
+                    fill_price = market_data['price']
+                    if fill_price <= 0:
+                        raise ConfigurationRequiredError(f"Invalid price data for slice: {fill_price}")
+                except Exception as e:
+                    raise ConfigurationRequiredError(f"Failed to get market price for slice: {e}")
                 fill_qty = slice_qty
                 
                 fill = {
@@ -705,12 +751,13 @@ class VWAPAlgorithm(IExecutionAlgorithm):
         """Estimate VWAP execution time (uses full time horizon)"""
         return request.time_horizon
     
-    def estimate_market_impact(self, request: ExecutionRequest) -> float:
+    async def estimate_market_impact(self, request: ExecutionRequest) -> float:
         """Estimate market impact for VWAP execution"""
         # VWAP typically has lower impact than aggressive strategies
+        current_price = await self._get_current_price(request.authorization.symbol)
         return self.impact_model.estimate_impact(
             quantity=request.authorization.quantity,
-            price=100.0,  # Mock price
+            price=current_price,
             urgency=request.urgency
         ) * 0.7  # 30% reduction vs aggressive execution
 
@@ -1320,7 +1367,7 @@ class UnifiedExecutionEngine(ISystemComponent):
         with self.execution_lock:
             return self.execution_metrics.copy()
     
-    def estimate_execution_cost(self, request: ExecutionRequest) -> Dict[str, float]:
+    async def estimate_execution_cost(self, request: ExecutionRequest) -> Dict[str, float]:
         """Estimate execution costs before execution"""
         
         try:
@@ -1328,11 +1375,26 @@ class UnifiedExecutionEngine(ISystemComponent):
             if not algorithm:
                 return {'error': 'Algorithm not available'}
             
-            estimated_impact = algorithm.estimate_market_impact(request)
+            estimated_impact = await algorithm.estimate_market_impact(request)
             estimated_time = algorithm.estimate_execution_time(request)
             
             quantity = request.authorization.quantity
-            price = 100.0  # Mock reference price
+            symbol = request.authorization.symbol
+            
+            # Get real reference price - no mock data
+            if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+                raise ConfigurationRequiredError("Market data manager required for reference price")
+            
+            try:
+                market_data = await self.market_data_manager.get_current_price(symbol)
+                if not market_data or 'price' not in market_data:
+                    raise ConfigurationRequiredError(f"No price data available for {symbol}")
+                
+                price = market_data['price']
+                if price <= 0:
+                    raise ConfigurationRequiredError(f"Invalid reference price: {price}")
+            except Exception as e:
+                raise ConfigurationRequiredError(f"Failed to get reference price: {e}")
             
             costs = {
                 'market_impact': estimated_impact * quantity * price,

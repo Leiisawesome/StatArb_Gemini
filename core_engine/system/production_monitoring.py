@@ -30,11 +30,7 @@ from collections import deque
 from core_engine.exceptions import ConfigurationRequiredError
 
 # Import ISystemComponent for orchestrator integration
-try:
-    from .interfaces import ISystemComponent
-except ImportError:
-    logger.error("ISystemComponent interface not available")
-    raise ConfigurationRequiredError("ISystemComponent interface not available")
+from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
@@ -322,29 +318,55 @@ class ProductionHealthMonitor(ISystemComponent):
     
     async def _check_component_health(self) -> HealthCheck:
         """Check registered component health"""
-        # Placeholder - would check registered components
-        return HealthCheck(
-            component_name="components",
-            status=HealthStatus.HEALTHY,
-            message="Component health checks not yet implemented",
-            timestamp=datetime.now(),
-            metrics={'registered_components': 0},
-            dependencies=[],
-            response_time_ms=1.0
-        )
+        if not hasattr(self, 'orchestrator') or not self.orchestrator:
+            raise ConfigurationRequiredError("Orchestrator required for component health checks")
+        
+        try:
+            components = self.orchestrator.get_all_components()
+            if not components:
+                raise ConfigurationRequiredError("No components registered for health checks")
+            
+            healthy_count = 0
+            for component in components:
+                if hasattr(component, 'health_check'):
+                    health = await component.health_check()
+                    if health.get('healthy', False):
+                        healthy_count += 1
+            
+            return HealthCheck(
+                component_name="components",
+                status=HealthStatus.HEALTHY if healthy_count == len(components) else HealthStatus.WARNING,
+                message=f"Component health: {healthy_count}/{len(components)} healthy",
+                timestamp=datetime.now(),
+                metrics={'registered_components': len(components), 'healthy_components': healthy_count},
+                dependencies=[],
+                response_time_ms=1.0
+            )
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Component health check failed: {e}")
     
     async def _check_database_connectivity(self) -> HealthCheck:
         """Check database connectivity"""
-        # Placeholder - would check ClickHouse connectivity
-        return HealthCheck(
-            component_name="database",
-            status=HealthStatus.HEALTHY,
-            message="Database connectivity check not yet implemented",
-            timestamp=datetime.now(),
-            metrics={'connection_status': 'unknown'},
-            dependencies=[],
-            response_time_ms=1.0
-        )
+        if not hasattr(self, 'data_manager') or not self.data_manager:
+            raise ConfigurationRequiredError("Data manager required for database connectivity checks")
+        
+        try:
+            # Check ClickHouse connectivity
+            health = await self.data_manager.health_check()
+            if not health.get('healthy', False):
+                raise ConfigurationRequiredError(f"Database unhealthy: {health.get('message', 'Unknown error')}")
+            
+            return HealthCheck(
+                component_name="database",
+                status=HealthStatus.HEALTHY,
+                message="Database connectivity healthy",
+                timestamp=datetime.now(),
+                metrics=health.get('metrics', {}),
+                dependencies=[],
+                response_time_ms=health.get('response_time_ms', 0.0)
+            )
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Database connectivity check failed: {e}")
     
     async def _check_external_dependencies(self) -> HealthCheck:
         """Check external dependencies"""

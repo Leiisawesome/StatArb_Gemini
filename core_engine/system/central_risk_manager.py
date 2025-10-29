@@ -33,7 +33,7 @@ from .unified_execution_engine import (
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
 from .interfaces import ISystemComponent
-from core_engine.exceptions import ConfigurationRequiredError, IRegimeAware, RegimeContext
+from core_engine.exceptions import ConfigurationRequiredError
 from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
@@ -142,7 +142,7 @@ class TradingAuthorization:
 # Rationale: Eliminates 60 lines of duplicate configuration (Rule 1, Section 7)
 
 
-class CentralRiskManager(ISystemComponent, IRegimeAware):
+class CentralRiskManager(ISystemComponent):
     """
     Central Risk Manager - Institutional Governance Hub
     
