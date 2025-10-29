@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 from collections import deque
+from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
@@ -387,39 +388,77 @@ class FastRegimeDetector:
         
         return None
     
-    # Helper Methods (Placeholders - would integrate with real market data)
+    # Helper Methods - Require real market data integration
     
     async def _get_current_vix(self) -> float:
         """Get current VIX level"""
-        # Placeholder - would fetch from market data
-        # return await self.market_data_manager.get_vix()
-        return 15.0  # Placeholder
+        if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+            raise ConfigurationRequiredError("Market data manager required for VIX data")
+        
+        try:
+            vix = await self.market_data_manager.get_vix()
+            if vix <= 0:
+                raise ConfigurationRequiredError(f"Invalid VIX value: {vix}")
+            return vix
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Failed to get VIX data: {e}")
     
     async def _calculate_market_breadth(self) -> Optional[Dict]:
         """Calculate advancing vs declining stocks"""
-        # Placeholder - would calculate from market data
-        # stocks_data = await self.market_data_manager.get_all_stocks_snapshot()
-        # declining = sum(1 for s in stocks_data if s['change'] < 0)
-        # total = len(stocks_data)
-        # return {'declining_pct': declining / total, ...}
-        return None  # Placeholder
+        if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+            raise ConfigurationRequiredError("Market data manager required for market breadth calculation")
+        
+        try:
+            stocks_data = await self.market_data_manager.get_all_stocks_snapshot()
+            if not stocks_data:
+                raise ConfigurationRequiredError("No stocks data available for breadth calculation")
+            
+            declining = sum(1 for s in stocks_data if s.get('change', 0) < 0)
+            total = len(stocks_data)
+            return {'declining_pct': declining / total, 'total_stocks': total}
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Failed to calculate market breadth: {e}")
     
     async def _analyze_order_book_imbalance(self) -> Optional[Dict]:
         """Analyze order book for sell/buy pressure"""
-        # Placeholder - would analyze order book
-        # order_book = await self.market_data_manager.get_order_book_aggregate()
-        # sell_volume = order_book['total_sell_volume']
-        # total_volume = order_book['total_volume']
-        # return {'sell_pressure_pct': sell_volume / total_volume, ...}
-        return None  # Placeholder
+        if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+            raise ConfigurationRequiredError("Market data manager required for order book analysis")
+        
+        try:
+            order_book = await self.market_data_manager.get_order_book_aggregate()
+            if not order_book:
+                raise ConfigurationRequiredError("No order book data available")
+            
+            sell_volume = order_book.get('total_sell_volume', 0)
+            total_volume = order_book.get('total_volume', 0)
+            if total_volume <= 0:
+                raise ConfigurationRequiredError("Invalid order book volume data")
+            
+            return {'sell_pressure_pct': sell_volume / total_volume, 'total_volume': total_volume}
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Failed to analyze order book: {e}")
     
     async def _calculate_intraday_volatility(self) -> float:
         """Calculate current intraday volatility"""
-        # Placeholder - would calculate from tick data
-        # price_data = await self.market_data_manager.get_recent_prices(minutes=15)
-        # returns = calculate_returns(price_data)
-        # return np.std(returns) * np.sqrt(252 * 390 / 15)  # Annualized
-        return 0.15  # Placeholder
+        if not hasattr(self, 'market_data_manager') or not self.market_data_manager:
+            raise ConfigurationRequiredError("Market data manager required for volatility calculation")
+        
+        try:
+            price_data = await self.market_data_manager.get_recent_prices(minutes=15)
+            if price_data is None or len(price_data) < 2:
+                raise ConfigurationRequiredError("Insufficient price data for volatility calculation")
+            
+            returns = price_data.pct_change().dropna()
+            if len(returns) < 2:
+                raise ConfigurationRequiredError("Insufficient returns data for volatility calculation")
+            
+            volatility = np.std(returns) * np.sqrt(252 * 390 / 15)  # Annualized
+            if volatility <= 0:
+                raise ConfigurationRequiredError(f"Invalid volatility calculation: {volatility}")
+            
+            return volatility
+        except Exception as e:
+            raise ConfigurationRequiredError(f"Failed to calculate intraday volatility: {e}")
     
     def _record_signal(self, signal: FastRegimeSignal):
         """Record fast regime signal"""

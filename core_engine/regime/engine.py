@@ -26,38 +26,11 @@ import uuid
 import asyncio
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
-try:
-    from ..system.interfaces import ISystemComponent
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
+from ..system.interfaces import ISystemComponent
+from core_engine.exceptions import ConfigurationRequiredError
 
 # Import centralized configuration (Rule 1, Section 7)
-try:
-    from ..config.component_config import RegimeConfig
-except ImportError:
-    # Fallback for testing - will create inline
-    RegimeConfig = None
+from ..config.component_config import RegimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -203,32 +176,16 @@ class EnhancedRegimeEngine(ISystemComponent):
     """
     
     def __init__(self, config: Dict[str, Any]):
-        # Try to import centralized RegimeConfig (Rule 1, Section 7)
-        try:
-            from ..config.component_config import RegimeConfig as CentralizedRegimeConfig
-            RegimeConfigClass = CentralizedRegimeConfig
-        except ImportError:
-            # Fallback: Create local RegimeConfig if import fails (testing/backtest scenario)
-            from dataclasses import dataclass
-            @dataclass
-            class RegimeConfigClass:
-                lookback_window: int = 60
-                volatility_window: int = 20
-                trend_threshold: float = 0.02
-                regime_change_threshold: float = 0.7
-                update_frequency: int = 300
-                enable_enhanced_detection: bool = True
-        
-        # Initialize with config (supports RegimeConfig object or dict)
+        # Initialize with centralized RegimeConfig (Rule 1, Section 7)
         if config is None:
-            self.config = RegimeConfigClass()
+            self.config = RegimeConfig()
         elif isinstance(config, dict):
-            self.config = RegimeConfigClass(**config)
+            self.config = RegimeConfig(**config)
         elif hasattr(config, '__dict__'):
-            # Already a config object (centralized or local)
+            # Already a config object
             self.config = config
         else:
-            self.config = RegimeConfigClass()
+            raise ConfigurationRequiredError("Invalid config type for RegimeEngine")
         
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("✅ Using centralized RegimeConfig (Rule 1, Section 7)")
@@ -834,12 +791,8 @@ class EnhancedRegimeEngine(ISystemComponent):
             primary_regime = MarketRegime.CHOPPY
             confidence = 0.65
         else:
-            # Default to appropriate trending regime
-            if trend_strength > 0.6:
-                primary_regime = MarketRegime.STRONG_TRENDING
-            else:
-                primary_regime = MarketRegime.WEAK_TRENDING
-            confidence = 0.6
+            # No default - raise exception for unknown volatility regime
+            raise ConfigurationRequiredError(f"Unknown volatility regime: {vol_regime}")
         
         # Create regime analysis
         regime_analysis = RegimeAnalysis(

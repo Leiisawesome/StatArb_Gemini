@@ -14,10 +14,8 @@ from enum import Enum
 import warnings
 
 # Import centralized configuration (Rule 1, Section 7)
-try:
-    from ..config.component_config import RegimeConfig
-except ImportError:
-    RegimeConfig = None
+from ..config.component_config import RegimeConfig
+from core_engine.exceptions import ConfigurationRequiredError
 
 # Import regime components
 from .regime_detector import RegimeType
