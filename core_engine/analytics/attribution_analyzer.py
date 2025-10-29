@@ -17,6 +17,9 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression, Ridge
 import warnings
 
+# Import fail-fast exceptions
+from ..exceptions import PerformanceDataUnavailableError, BenchmarkDataUnavailableError
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -671,24 +674,11 @@ class AttributionAnalyzer:
     ) -> pd.DataFrame:
         """Get default factor returns (simplified)"""
         
-        # In a real implementation, this would fetch from a data source
-        # For now, create synthetic factor returns
-        
-        date_range = pd.date_range(start_date, end_date, freq='D')
-        
-        # Create synthetic factor returns
-        np.random.seed(42)  # For reproducibility
-        
-        factor_returns = pd.DataFrame({
-            'market': np.random.normal(0.0005, 0.015, len(date_range)),
-            'size': np.random.normal(0.0001, 0.008, len(date_range)),
-            'value': np.random.normal(0.0002, 0.010, len(date_range)),
-            'momentum': np.random.normal(0.0001, 0.012, len(date_range)),
-            'quality': np.random.normal(0.0003, 0.007, len(date_range)),
-            'volatility': np.random.normal(-0.0001, 0.009, len(date_range))
-        }, index=date_range)
-        
-        return factor_returns
+        # Require real factor data - FAIL FAST if unavailable
+        raise PerformanceDataUnavailableError(
+            f"Real factor returns data required for period {start_date} to {end_date}. "
+            "Cannot proceed with synthetic data. Please provide real factor data source."
+        )
     
     async def _get_benchmark_returns(
         self,
@@ -697,15 +687,10 @@ class AttributionAnalyzer:
     ) -> pd.Series:
         """Get benchmark returns (simplified)"""
         
-        # In a real implementation, this would fetch actual benchmark data
-        date_range = pd.date_range(start_date, end_date, freq='D')
-        
-        # Create synthetic benchmark returns
-        np.random.seed(42)
-        benchmark_returns = pd.Series(
-            np.random.normal(0.0008, 0.012, len(date_range)),
-            index=date_range,
-            name=self.config.benchmark_symbol
+        # Require real benchmark data - FAIL FAST if unavailable
+        raise BenchmarkDataUnavailableError(
+            f"Real benchmark returns data required for {self.config.benchmark_symbol} "
+            f"period {start_date} to {end_date}. Cannot proceed with synthetic data."
         )
         
         return benchmark_returns

@@ -27,43 +27,8 @@ except ImportError:
     logger.warning("Centralized PerformanceAnalyticsConfig not available, using local config")
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
-try:
-    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    class IRegimeAware(ABC):
-        pass
-    
-    # Minimal RegimeContext for fallback
-    from dataclasses import dataclass
-    @dataclass
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-        regime_start_time: datetime = None
-        regime_duration_minutes: float = 0.0
+from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from ..exceptions import PerformanceDataUnavailableError, BenchmarkDataUnavailableError
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -540,11 +505,19 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             )
             logger.info("✅ Using centralized PerformanceAnalyticsConfig (Rule 1 Section 7)")
         else:
-            # Fallback to local config
-            self.config = config if isinstance(config, PerformanceConfig) else PerformanceConfig()
+            # Require explicit configuration - FAIL FAST if missing
+            if not isinstance(config, PerformanceConfig):
+                raise ConfigurationRequiredError(
+                    "PerformanceAnalytics requires explicit PerformanceConfig. "
+                    "Cannot proceed with default configuration."
+                )
+            self.config = config
             self.centralized_config = None
             if not CENTRALIZED_CONFIG_AVAILABLE:
-                logger.debug("Using local PerformanceConfig (centralized config not available)")
+                raise ConfigurationRequiredError(
+                    "Centralized configuration not available. "
+                    "Cannot proceed without proper configuration setup."
+                )
         
         # Component calculators
         self.risk_calculator = RiskMetricsCalculator(self.config)
@@ -965,13 +938,11 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             try:
                 metrics.maximum_drawdown, metrics.maximum_drawdown_duration = \
                     self.risk_calculator.calculate_maximum_drawdown(returns)
-            except Exception:
-                # Fallback: calculate max drawdown directly
-                cumulative = (1 + returns).cumprod()
-                running_max = cumulative.expanding().max()
-                drawdown = (cumulative - running_max) / running_max
-                metrics.maximum_drawdown = drawdown.min()
-                metrics.maximum_drawdown_duration = 0
+            except Exception as e:
+                raise PerformanceDataUnavailableError(
+                    f"Failed to calculate maximum drawdown: {e}. "
+                    "Real performance data required for risk calculations."
+                ) from e
             
             # VaR metrics
             metrics.var_95 = self.risk_calculator.calculate_var(returns, self.config.confidence_level)
@@ -2514,13 +2485,20 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'disclosures': []
             }
 
-            # Performance summary (placeholder - would use actual data)
+            # Performance summary requires real data
+            if not self._performance_cache:
+                raise PerformanceDataUnavailableError(
+                    "No performance data available. Cannot generate institutional report without real performance data."
+                )
+            
+            # Get actual performance metrics
+            performance_metrics = await self.calculate_performance_metrics(portfolio_returns, benchmark_returns)
             institutional_report['performance_summary'] = {
-                'total_return': 0.127,  # 12.7%
-                'annualized_return': 0.124,
-                'benchmark_return': 0.089,  # 8.9%
-                'excess_return': 0.038,  # 3.8%
-                'tracking_error': 0.052
+                'total_return': performance_metrics.total_return,
+                'annualized_return': performance_metrics.annualized_return,
+                'benchmark_return': performance_metrics.benchmark_return,
+                'excess_return': performance_metrics.excess_return,
+                'tracking_error': performance_metrics.tracking_error
             }
 
             # Risk metrics

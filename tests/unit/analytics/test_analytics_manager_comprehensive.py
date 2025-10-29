@@ -346,9 +346,10 @@ class TestAnalyticsManagerEnhanced:
             assert 'sections' in report
             assert 'summary' in report
     
-    def test_health_check(self):
+    @pytest.mark.asyncio
+    async def test_health_check(self):
         """Test health check functionality"""
-        health_status = self.analytics_manager.health_check()
+        health_status = await self.analytics_manager.health_check()
         assert isinstance(health_status, dict)
         assert 'healthy' in health_status
         assert 'real_time_analytics' in health_status

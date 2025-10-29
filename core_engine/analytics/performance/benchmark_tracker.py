@@ -15,6 +15,9 @@ from collections import defaultdict
 import threading
 import yfinance as yf
 
+# Import fail-fast exceptions
+from ...exceptions import BenchmarkDataUnavailableError
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -176,8 +179,11 @@ class BenchmarkDataProvider:
             if self.config.enable_live_data:
                 prices = await self._download_prices_async(symbol, start_date, end_date)
             else:
-                # Use mock data for testing
-                prices = self._generate_mock_prices(symbol, start_date, end_date)
+                # Require real data - FAIL FAST if live data disabled
+                raise BenchmarkDataUnavailableError(
+                    f"Live data disabled for {symbol}. Real benchmark data required. "
+                    "Cannot proceed with mock data."
+                )
             
             # Cache the data
             if self.config.cache_data:
@@ -188,8 +194,12 @@ class BenchmarkDataProvider:
             return prices
             
         except Exception as e:
-            logger.error(f"Error getting benchmark prices for {symbol}: {e}")
-            return pd.Series(dtype=float)
+            if isinstance(e, BenchmarkDataUnavailableError):
+                raise
+            raise BenchmarkDataUnavailableError(
+                f"Error getting benchmark prices for {symbol}: {e}. "
+                "Real benchmark data required."
+            ) from e
     
     async def _download_prices_async(self, symbol: str,
                                    start_date: Optional[datetime] = None,
@@ -215,42 +225,10 @@ class BenchmarkDataProvider:
             
         except Exception as e:
             logger.error(f"Error downloading prices for {symbol}: {e}")
-            return self._generate_mock_prices(symbol, start_date, end_date)
+            raise BenchmarkDataUnavailableError(
+                f"Failed to download prices for {symbol}. Real benchmark data required."
+            )
     
-    def _generate_mock_prices(self, symbol: str,
-                            start_date: Optional[datetime] = None,
-                            end_date: Optional[datetime] = None) -> pd.Series:
-        """Generate mock price data for testing"""
-        
-        try:
-            if start_date is None:
-                start_date = datetime.now() - timedelta(days=365)
-            if end_date is None:
-                end_date = datetime.now()
-            
-            # Generate date range
-            date_range = pd.date_range(start=start_date, end=end_date, freq='D')
-            
-            # Generate mock returns (random walk with drift)
-            np.random.seed(hash(symbol) % 2**32)  # Consistent seed based on symbol
-            returns = np.random.normal(0.0008, 0.015, len(date_range))  # ~20% annual vol, 20% drift
-            
-            # Generate prices
-            initial_price = 100.0
-            prices = [initial_price]
-            
-            for ret in returns[1:]:
-                prices.append(prices[-1] * (1 + ret))
-            
-            price_series = pd.Series(prices, index=date_range)
-            
-            logger.debug(f"Generated {len(price_series)} mock prices for {symbol}")
-            
-            return price_series
-            
-        except Exception as e:
-            logger.error(f"Error generating mock prices for {symbol}: {e}")
-            return pd.Series(dtype=float)
     
     async def get_benchmark_composition(self, symbol: str) -> Dict[str, float]:
         """Get benchmark composition (constituent weights)"""
@@ -266,8 +244,10 @@ class BenchmarkDataProvider:
             composition = self._get_predefined_composition(symbol)
             
             if not composition:
-                # Generate mock composition
-                composition = self._generate_mock_composition(symbol)
+                # Require real composition data - FAIL FAST if unavailable
+                raise BenchmarkDataUnavailableError(
+                    f"No composition data available for {symbol}. Real benchmark composition required."
+                )
             
             # Cache the composition
             if self.config.cache_data:
@@ -305,28 +285,6 @@ class BenchmarkDataProvider:
         
         return compositions.get(symbol, {})
     
-    def _generate_mock_composition(self, symbol: str) -> Dict[str, float]:
-        """Generate mock composition for testing"""
-        
-        try:
-            # Generate random composition
-            np.random.seed(hash(symbol) % 2**32)
-            
-            num_constituents = np.random.randint(10, 50)
-            weights = np.random.exponential(0.1, num_constituents)
-            weights = weights / np.sum(weights)  # Normalize to sum to 1
-            
-            # Generate mock symbol names
-            constituents = {}
-            for i, weight in enumerate(weights):
-                mock_symbol = f"STOCK_{i:03d}"
-                constituents[mock_symbol] = weight
-            
-            return constituents
-            
-        except Exception as e:
-            logger.error(f"Error generating mock composition for {symbol}: {e}")
-            return {}
 
 
 class RelativePerformanceCalculator:

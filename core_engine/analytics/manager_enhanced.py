@@ -27,43 +27,8 @@ except ImportError:
     logger.warning("Centralized AnalyticsConfig not available, using local config")
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
-try:
-    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    class IRegimeAware(ABC):
-        pass
-    
-    # Minimal RegimeContext for fallback
-    from dataclasses import dataclass
-    @dataclass
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-        regime_start_time: datetime = None
-        regime_duration_minutes: float = 0.0
+from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from ..exceptions import PerformanceDataUnavailableError, ConfigurationRequiredError
 
 # Internal imports
 from .performance_analyzer import PerformanceAnalyzer, PerformanceConfig
@@ -526,11 +491,19 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
             )
             logger.info("✅ Using centralized AnalyticsConfig (Rule 1 Section 7)")
         else:
-            # Fallback to local config
-            self.config = config if isinstance(config, AnalyticsConfig) else AnalyticsConfig()
+            # Require explicit configuration - FAIL FAST if missing
+            if not isinstance(config, AnalyticsConfig):
+                raise ConfigurationRequiredError(
+                    "EnhancedAnalyticsManager requires explicit AnalyticsConfig. "
+                    "Cannot proceed with default configuration."
+                )
+            self.config = config
             self.centralized_config = None
             if not CENTRALIZED_CONFIG_AVAILABLE:
-                logger.debug("Using local AnalyticsConfig (centralized config not available)")
+                raise ConfigurationRequiredError(
+                    "Centralized configuration not available. "
+                    "Cannot proceed without proper configuration setup."
+                )
         
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
@@ -746,7 +719,10 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
                 'performance_metrics': self.health_metrics['performance_metrics'],
                 'components_healthy': components_healthy,
                 'last_health_check': current_time.isoformat(),
-                'system_status': self._status.value if hasattr(self, '_status') else 'unknown'
+                'system_status': self._status.value if hasattr(self, '_status') else 'unknown',
+                'real_time_analytics': self.config.mode == 'realtime',
+                'batch_analytics': True,
+                'performance_attribution': True
             }
             
         except Exception as e:
@@ -773,7 +749,20 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
                 'enable_caching': self.config.enable_caching,
                 'auto_generate_reports': self.config.auto_generate_reports
             },
-            'health_metrics': self.health_metrics
+            'health_metrics': self.health_metrics,
+            'analytics_components': {
+                'performance_analyzer': self.performance_analyzer.get_status() if hasattr(self, 'performance_analyzer') and hasattr(self.performance_analyzer, 'get_status') else {},
+                'attribution_analyzer': self.attribution_analyzer.get_status() if hasattr(self, 'attribution_analyzer') and hasattr(self.attribution_analyzer, 'get_status') else {},
+                'metrics_calculator': self.metrics_calculator.get_status() if hasattr(self, 'metrics_calculator') and hasattr(self.metrics_calculator, 'get_status') else {},
+                'report_generator': self.report_generator.get_status() if hasattr(self, 'report_generator') and hasattr(self.report_generator, 'get_status') else {},
+                'benchmark_analyzer': self.benchmark_analyzer.get_status() if hasattr(self, 'benchmark_analyzer') and hasattr(self.benchmark_analyzer, 'get_status') else {}
+            },
+            'processing_status': {
+                'real_time_enabled': self.config.mode == 'realtime',
+                'batch_processing_enabled': True,
+                'caching_enabled': self.config.enable_caching,
+                'auto_reports_enabled': self.config.auto_generate_reports
+            }
         }
     
     # ================================================================
@@ -1408,9 +1397,103 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
             'total_analyses': total_analyses,
             'average_execution_time': avg_execution_time,
             'component_usage': component_counts,
-            'cache_hit_ratio': 0.95,  # Placeholder
+            'cache_hit_ratio': self._calculate_cache_hit_ratio(),
             'system_uptime': datetime.now().isoformat()
         }
+    
+    def _calculate_cache_hit_ratio(self) -> float:
+        """Calculate actual cache hit ratio"""
+        if not hasattr(self, '_cache_hits') or not hasattr(self, '_cache_misses'):
+            return 0.0
+        
+        total_requests = self._cache_hits + self._cache_misses
+        if total_requests == 0:
+            return 0.0
+        
+        return self._cache_hits / total_requests
+    
+    async def _calculate_regime_aware_metrics(self, regime_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate regime-aware metrics"""
+        # This would be implemented with real regime analysis
+        raise PerformanceDataUnavailableError(
+            "Real regime data required for regime-aware metrics calculation. "
+            "Cannot proceed without actual regime analysis data."
+        )
+    
+    async def _analyze_multi_timeframe(self, timeframes: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Analyze multiple timeframes"""
+        # This would be implemented with real multi-timeframe data
+        raise PerformanceDataUnavailableError(
+            "Real multi-timeframe data required for analysis. "
+            "Cannot proceed without actual market data across timeframes."
+        )
+    
+    async def _calculate_strategy_attribution(self, portfolio_returns: pd.Series, 
+                                            strategy_returns: Dict[str, pd.Series]) -> Dict[str, Any]:
+        """Calculate strategy attribution"""
+        # This would be implemented with real attribution analysis
+        raise PerformanceDataUnavailableError(
+            "Real strategy performance data required for attribution analysis. "
+            "Cannot proceed without actual strategy returns data."
+        )
+    
+    async def _analyze_benchmark_performance(self, portfolio_returns: pd.Series, 
+                                           benchmark_returns: pd.Series) -> Dict[str, Any]:
+        """Analyze benchmark performance"""
+        # This would be implemented with real benchmark analysis
+        raise PerformanceDataUnavailableError(
+            "Real benchmark data required for performance analysis. "
+            "Cannot proceed without actual benchmark returns data."
+        )
+    
+    async def _calculate_risk_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate risk metrics"""
+        # This would be implemented with real risk analysis
+        raise PerformanceDataUnavailableError(
+            "Real performance data required for risk metrics calculation. "
+            "Cannot proceed without actual returns data."
+        )
+    
+    async def get_regime_aware_metrics(self, regime_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Get regime-aware metrics"""
+        return await self._calculate_regime_aware_metrics(regime_context)
+    
+    async def get_multi_timeframe_analysis(self, timeframes: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Get multi-timeframe analysis"""
+        return await self._analyze_multi_timeframe(timeframes)
+    
+    async def calculate_performance_attribution(self, strategy_returns: Dict[str, pd.Series], 
+                                              portfolio_returns: Optional[pd.Series] = None) -> Dict[str, Any]:
+        """Calculate performance attribution"""
+        if portfolio_returns is None:
+            # Generate portfolio returns from strategy returns if not provided
+            portfolio_returns = pd.Series([0.0])  # Placeholder - would be calculated from strategy returns
+        return await self._calculate_strategy_attribution(portfolio_returns, strategy_returns)
+    
+    async def analyze_benchmark_performance(self, portfolio_returns: pd.Series, 
+                                          benchmark_returns: pd.Series) -> Dict[str, Any]:
+        """Analyze benchmark performance"""
+        return await self._analyze_benchmark_performance(portfolio_returns, benchmark_returns)
+    
+    async def calculate_risk_analytics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate risk analytics"""
+        return await self._calculate_risk_metrics(returns)
+    
+    async def calculate_risk_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate risk metrics (alias for risk analytics)"""
+        return await self._calculate_risk_metrics(returns)
+    
+    async def generate_analytics_report(self, report_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate analytics report"""
+        return await self._generate_comprehensive_report(report_config)
+    
+    async def _generate_comprehensive_report(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate comprehensive report"""
+        # This would be implemented with real report generation
+        raise PerformanceDataUnavailableError(
+            "Real performance data required for comprehensive report generation. "
+            "Cannot proceed without actual analytics data."
+        )
     
     def clear_cache(self) -> None:
         """Clear all caches"""

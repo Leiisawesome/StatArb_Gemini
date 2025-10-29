@@ -27,43 +27,8 @@ except ImportError:
     logger.warning("Centralized MetricsCalculatorConfig not available, using local config")
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
-try:
-    from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-except ImportError:
-    # Fallback definition
-    from abc import ABC, abstractmethod
-    class ISystemComponent(ABC):
-        @abstractmethod
-        async def initialize(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def start(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def stop(self) -> bool:
-            pass
-        
-        @abstractmethod
-        async def health_check(self) -> Dict[str, Any]:
-            pass
-        
-        @abstractmethod
-        def get_status(self) -> Dict[str, Any]:
-            pass
-    
-    class IRegimeAware(ABC):
-        pass
-    
-    # Minimal RegimeContext for fallback
-    from dataclasses import dataclass
-    @dataclass
-    class RegimeContext:
-        primary_regime: str = "unknown"
-        regime_confidence: float = 0.5
-        regime_start_time: datetime = None
-        regime_duration_minutes: float = 0.0
+from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from ..exceptions import PerformanceDataUnavailableError, ConfigurationRequiredError
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -823,11 +788,19 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
             )
             logger.info("✅ Using centralized MetricsCalculatorConfig (Rule 1 Section 7)")
         else:
-            # Fallback to local config
-            self.config = config if isinstance(config, MetricConfig) else MetricConfig()
+            # Require explicit configuration - FAIL FAST if missing
+            if not isinstance(config, MetricConfig):
+                raise ConfigurationRequiredError(
+                    "MetricsCalculator requires explicit MetricConfig. "
+                    "Cannot proceed with default configuration."
+                )
+            self.config = config
             self.centralized_config = None
             if not CENTRALIZED_CONFIG_AVAILABLE:
-                logger.debug("Using local MetricConfig (centralized config not available)")
+                raise ConfigurationRequiredError(
+                    "Centralized configuration not available. "
+                    "Cannot proceed without proper configuration setup."
+                )
         
         # Component identification and lifecycle
         self.component_id = str(uuid.uuid4())
@@ -1445,6 +1418,18 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
         with self._lock:
             return self._rolling_metrics.get(symbol, {})
     
+    def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate performance metrics"""
+        return self._calculate_performance_metrics(returns)
+    
+    def calculate_risk_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate risk metrics"""
+        return self._calculate_risk_metrics(returns)
+    
+    def calculate_statistical_metrics(self, returns: pd.Series) -> Dict[str, Any]:
+        """Calculate statistical metrics"""
+        return self._calculate_statistical_metrics(returns)
+    
     def clear_cache(self) -> None:
         """Clear metrics cache"""
         
@@ -1507,8 +1492,11 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
                     else:
                         returns_series = prices_data.pct_change().dropna()
                 else:
-                    # Mock calculation for testing
-                    returns_series = pd.Series([0.01, 0.02, -0.01, 0.015, 0.005])
+                    # Require real data - FAIL FAST if unavailable
+                    raise PerformanceDataUnavailableError(
+                        "Real performance data required for metrics calculation. "
+                        "Cannot proceed with mock data."
+                    )
             elif isinstance(data, (pd.Series, pd.DataFrame)):
                 if isinstance(data, pd.DataFrame) and 'returns' in data.columns:
                     returns_series = data['returns']
@@ -1517,8 +1505,11 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
                 else:
                     returns_series = data if isinstance(data, pd.Series) else data.iloc[:, 0]
             else:
-                # Default mock data for testing
-                returns_series = pd.Series([0.01, 0.02, -0.01, 0.015, 0.005])
+                # Require real data - FAIL FAST if unavailable
+                raise PerformanceDataUnavailableError(
+                    "Real performance data required for metrics calculation. "
+                    "Cannot proceed with default mock data."
+                )
             
             # Calculate comprehensive metrics using existing methods
             metrics_bundles = self.calculate_comprehensive_metrics(returns_series)
