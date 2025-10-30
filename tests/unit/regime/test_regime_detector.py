@@ -18,13 +18,13 @@ from core_engine.regime.regime_detector import (
     ConfidenceLevel,
     RegimeDetection,
     RegimeTransition,
+    RegimeDetectionConfig,
     MarkovSwitchingDetector,
     GaussianMixtureDetector,
     VolatilityBasedDetector,
     ThresholdBasedDetector,
     RegimeDetector
 )
-from core_engine.config.component_config import RegimeConfig as RegimeDetectionConfig
 
 
 

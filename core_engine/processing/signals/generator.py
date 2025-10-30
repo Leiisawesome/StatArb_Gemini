@@ -285,10 +285,10 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         Args:
             new_regime_context: New regime context with updated information
         """
-        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (self.current_regime.primary_regime if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None)
         self.current_regime = new_regime_context
         
-        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
+        regime_name = new_regime_context.primary_regime.value if (hasattr(new_regime_context, 'primary_regime') and hasattr(new_regime_context.primary_regime, 'value')) else (new_regime_context.primary_regime if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context))
         self.logger.info(f"🔄 Signals adapting to regime change: {previous_regime} → {regime_name}")
         
         # Adapt signal generation to regime
@@ -321,14 +321,14 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         """
         adaptations = {
             'timestamp': datetime.now().isoformat(),
-            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
-            'new_regime': str(regime_context.primary_regime.value) if hasattr(regime_context, 'primary_regime') else 'unknown',
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (str(self.current_regime.primary_regime) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None),
+            'new_regime': str(regime_context.primary_regime.value) if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (str(regime_context.primary_regime) if hasattr(regime_context, 'primary_regime') else 'unknown'),
             'adjustments': [],
             'success': True
         }
         
         try:
-            regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
+            regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (regime_context.primary_regime if hasattr(regime_context, 'primary_regime') else str(regime_context))
             volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
             
             # Adapt signal thresholds based on volatility
@@ -1064,7 +1064,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             regime_adjustment_factor = 1.0
             
             if self.current_regime and hasattr(self.current_regime, 'primary_regime'):
-                regime_name = self.current_regime.primary_regime.value
+                regime_name = self.current_regime.primary_regime.value if (hasattr(self.current_regime.primary_regime, 'value')) else self.current_regime.primary_regime
                 volatility_regime = getattr(self.current_regime, 'volatility_regime', 'normal_volatility')
                 regime_confidence = getattr(self.current_regime, 'regime_confidence', 0.5)
                 

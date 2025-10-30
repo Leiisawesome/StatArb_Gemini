@@ -71,7 +71,7 @@ class TestRegimeTransitionEdgeCases:
         await indicators_engine.start()
         
         # Simulate rapid regime changes
-        regimes = ['low_volatility', 'high_volatility', 'low_volatility', 'extreme_volatility']
+        regimes = ['low_volatility', 'high_volatility', 'low_volatility', 'crisis']
         
         for regime in regimes:
             regime_context = RegimeContext(
@@ -141,8 +141,10 @@ class TestRegimeTransitionEdgeCases:
         
         # Create contradictory regime context
         regime_context = RegimeContext(
-            primary_regime='trending',  # Suggests momentum strategy
+            primary_regime='momentum',  # Suggests momentum strategy
             regime_confidence=0.5,  # But low confidence
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=5.0,
             volatility_regime='high_volatility',  # Suggests caution
             liquidity_regime='low_liquidity'  # Suggests avoiding trades
         )
@@ -204,7 +206,9 @@ class TestRegimeTransitionEdgeCases:
         # Create incomplete regime context
         regime_context = RegimeContext(
             primary_regime='unknown',  # Unknown regime
-            regime_confidence=0.0  # Zero confidence
+            regime_confidence=0.0,  # Zero confidence
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=0.0
         )
         
         await signal_generator.on_regime_change(regime_context)
@@ -230,7 +234,8 @@ class TestRegimeTransitionEdgeCases:
         old_regime = RegimeContext(
             primary_regime='low_volatility',
             regime_confidence=0.8,
-            timestamp=datetime.now() - timedelta(hours=24)
+            regime_start_time=datetime.now() - timedelta(hours=24),
+            regime_duration_minutes=1440.0  # 24 hours in minutes
         )
         
         await indicators_engine.on_regime_change(old_regime)
@@ -259,9 +264,10 @@ class TestRegimeTransitionEdgeCases:
         
         # Create extreme volatility regime
         extreme_regime = RegimeContext(
-            primary_regime='extreme_volatility',
+            primary_regime='crisis',
             regime_confidence=0.95,
-            volatility=0.10,  # 10% volatility
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=5.0,
             volatility_regime='extreme_volatility'
         )
         
@@ -289,6 +295,8 @@ class TestRegimeTransitionEdgeCases:
         crisis_regime = RegimeContext(
             primary_regime='choppy',
             regime_confidence=0.9,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=5.0,
             liquidity_regime='crisis_liquidity'
         )
         

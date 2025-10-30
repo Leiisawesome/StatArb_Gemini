@@ -794,8 +794,9 @@ class TestSignalStrategies:
         # Data shorter than lookback period
         short_data = pd.DataFrame({
             'close': [100, 101, 102, 103, 104],
-            'symbol': ['TEST'] * 5
-        }, index=pd.date_range('2023-01-01', periods=5))
+            'symbol': ['TEST'] * 5,
+            'timestamp': pd.date_range('2023-01-01', periods=5)
+        })
 
         signal = asyncio.run(strategy.generate_signal("TEST", short_data, {}))
         assert signal is None

@@ -411,7 +411,10 @@ class ValidationRuleEngine:
         """Validate expected volatility"""
         rule = self.rules["volatility_check"]
         
-        volatility = getattr(signal, 'expected_volatility', context.get('historical_volatility', 0.2))
+        # Get volatility from signal or context, with proper fallback
+        volatility = getattr(signal, 'expected_volatility', None)
+        if volatility is None:
+            volatility = context.get('historical_volatility', 0.2)
         
         if volatility <= rule.max_threshold:
             return ValidationResult(
@@ -609,11 +612,22 @@ class SignalValidator:
             "market_conditions": {"valid": market_valid, "status": market_status, "message": market_msg}
         }
         
-        return {
+        # Calculate overall score
+        overall_score = sum(all_validations) / len(all_validations) if all_validations else 0.0
+        
+        result = {
             "overall_status": overall_status,
+            "overall_score": overall_score,
             "validation_details": validation_details,
             "warnings": warnings
         }
+        
+        # Track validation in history
+        with self._lock:
+            self._validation_history.append(result)
+            self._validation_stats[overall_status] += 1
+        
+        return result
     
     def _generate_recommendations(self, report: SignalValidationReport) -> List[str]:
         """Generate recommendations based on validation results"""
@@ -661,7 +675,10 @@ class SignalValidator:
         portfolio_report = PortfolioValidationReport(
             validation_id=f"portfolio_{int(time.time())}",
             validation_timestamp=datetime.now(),
-            total_signals=len(signals)
+            total_signals=len(signals),
+            valid_signals=0,
+            invalid_signals=0,
+            portfolio_concentration=0.0
         )
         
         try:
@@ -673,15 +690,15 @@ class SignalValidator:
             quality_scores = []
             
             for signal in signals:
-                signal_report = await self.validate_signal(signal, context)
+                signal_report = self.validate_signal(signal, context, context)
                 signal_reports.append(signal_report)
                 
-                if signal_report.overall_status in [ValidationStatus.PASSED, ValidationStatus.WARNING]:
+                if signal_report.get('overall_status') in [ValidationStatus.PASSED, ValidationStatus.WARNING]:
                     valid_signals += 1
                 else:
                     invalid_signals += 1
                 
-                quality_scores.append(signal_report.overall_score)
+                quality_scores.append(signal_report.get('overall_score', 0.0))
             
             portfolio_report.signal_reports = signal_reports
             portfolio_report.valid_signals = valid_signals
@@ -807,6 +824,10 @@ class SignalValidator:
         min_confidence = self.config.get('min_confidence', 0.5)
         confidence = getattr(signal, 'confidence', 0.5)
         
+        # Handle None values
+        if confidence is None:
+            confidence = 0.5
+        
         if confidence >= min_confidence:
             return True, ValidationStatus.PASSED, f"Confidence {confidence:.3f} meets minimum threshold {min_confidence:.3f}"
         else:
@@ -816,6 +837,10 @@ class SignalValidator:
         """Validate signal age (freshness)"""
         max_age_seconds = self.config.get('max_age_seconds', 300)  # 5 minutes default
         timestamp = getattr(signal, 'timestamp', datetime.now())
+        
+        # Handle None values
+        if timestamp is None:
+            timestamp = datetime.now()
         
         age_seconds = (datetime.now() - timestamp).total_seconds()
         
@@ -828,6 +853,11 @@ class SignalValidator:
         """Validate required indicators are present"""
         required_indicators = self.config.get('required_indicators', ['rsi', 'macd', 'volume'])
         metadata = getattr(signal, 'metadata', {})
+        
+        # Handle None values
+        if metadata is None:
+            metadata = {}
+        
         indicators = metadata.get('indicators', {})
         
         missing_indicators = [ind for ind in required_indicators if ind not in indicators]

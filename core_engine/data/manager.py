@@ -122,9 +122,8 @@ class ClickHouseDataConfig(DataConfig):
     """
     # Legacy parameters (for backward compatibility)
     symbols: List[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    target_date: Optional[str] = "2024-12-20"
+    start_date: Optional[str] = "2024-12-20"
+    end_date: Optional[str] = "2024-12-20"
     interval: str = "1min"
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
@@ -168,21 +167,10 @@ class ClickHouseDataConfig(DataConfig):
             except ValueError as e:
                 raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
         
-        elif self.target_date and not (self.start_date or self.end_date):
-            logger.warning("Using deprecated target_date. Consider using start_date/end_date.")
-            self.start_date = self.target_date
-            self.end_date = self.target_date
-        
-        elif not (self.start_date or self.end_date or self.target_date):
+        elif not (self.start_date or self.end_date):
             # No date configuration provided. Using default.
-            self.target_date = "2024-12-20"
-            self.start_date = self.target_date
-            self.end_date = self.target_date
-        
-        if not self.start_date:
-            self.start_date = self.target_date
-        if not self.end_date:
-            self.end_date = self.target_date
+            self.start_date = "2024-12-20"
+            self.end_date = "2024-12-20"
     
     def to_centralized_config(self) -> 'CentralizedDataConfig':
         """Convert to centralized DataConfig format"""
@@ -266,7 +254,6 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 symbols=config.symbols,
                 start_date=config.start_date,
                 end_date=config.end_date,
-                target_date=None,  # Explicitly set to None to avoid deprecation warning
                 interval=config.interval,
                 clickhouse_host=config.connection.clickhouse_host,
                 clickhouse_port=config.connection.clickhouse_port,
@@ -561,7 +548,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         FROM {self.enhanced_config.clickhouse_database}.ticks 
         WHERE toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
-        HAVING records > 100
+        HAVING records >= 100
         ORDER BY records DESC
         """
         
@@ -655,11 +642,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
         """Build ClickHouse query for market data"""
         symbols_str = "', '".join(symbols)
-        start_ns = int(start_time.timestamp() * 1_000_000_000)
-        end_ns = int(end_time.timestamp() * 1_000_000_000)
+        
+        # Convert datetime to string format for timezone-aware querying
+        start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
+        end_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
         
         if interval == "1min":
-            # Use raw 1-minute data
+            # Use raw 1-minute data with timezone conversion
             query = f"""
             SELECT 
                 toDateTime(window_start / 1000000000) as timestamp,
@@ -672,8 +661,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 transactions
             FROM {self.enhanced_config.clickhouse_database}.ticks
             WHERE ticker IN ('{symbols_str}')
-            AND window_start >= {start_ns}
-            AND window_start <= {end_ns}
+            AND toDateTime(window_start / 1000000000, 'America/New_York') >= '{start_str}'
+            AND toDateTime(window_start / 1000000000, 'America/New_York') <= '{end_str}'
             ORDER BY ticker, window_start
             """
         elif interval == "5min":
@@ -820,8 +809,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         
         Args:
             symbol: Trading symbol
-            start_time: Start time in 'HH:MM' format (optional)
-            end_time: End time in 'HH:MM' format (optional)
+            start_time: Start time in 'YYYY-MM-DD' or 'HH:MM' format (optional)
+            end_time: End time in 'YYYY-MM-DD' or 'HH:MM' format (optional)
             
         Returns:
             DataFrame with OHLCV data following core_engine standards
@@ -832,9 +821,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             end_dt = None
             
             if start_time:
-                start_dt = datetime.strptime(f"{self.enhanced_config.start_date} {start_time}:00", "%Y-%m-%d %H:%M:%S")
+                # Check format and parse accordingly
+                if ' ' in start_time:  # Full datetime format (YYYY-MM-DD HH:MM:SS)
+                    start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+                elif len(start_time.split('-')) == 3:  # Date format (YYYY-MM-DD)
+                    start_dt = datetime.strptime(f"{start_time} 09:30:00", "%Y-%m-%d %H:%M:%S")
+                else:  # Time format (HH:MM)
+                    start_dt = datetime.strptime(f"{self.enhanced_config.start_date} {start_time}:00", "%Y-%m-%d %H:%M:%S")
+            
             if end_time:
-                end_dt = datetime.strptime(f"{self.enhanced_config.end_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
+                # Check format and parse accordingly
+                if ' ' in end_time:  # Full datetime format (YYYY-MM-DD HH:MM:SS)
+                    end_dt = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+                elif len(end_time.split('-')) == 3:  # Date format (YYYY-MM-DD)
+                    end_dt = datetime.strptime(f"{end_time} 16:00:00", "%Y-%m-%d %H:%M:%S")
+                else:  # Time format (HH:MM)
+                    end_dt = datetime.strptime(f"{self.enhanced_config.end_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
             
             # Use existing load_market_data method
             df = self.load_market_data(

@@ -27,14 +27,16 @@ class TestDataConfigurationEnums:
         assert config.interval == "1min"
     
     def test_data_config_backward_compatibility(self):
-        """Test backward compatibility with target_date"""
+        """Test backward compatibility with start_date/end_date"""
         from core_engine.data.manager import ClickHouseDataConfig
         
         config = ClickHouseDataConfig(
             symbols=["AAPL"],
-            target_date="2024-12-20"
+            start_date="2024-12-20",
+            end_date="2024-12-20"
         )
-        assert config.target_date == "2024-12-20"
+        assert config.start_date == "2024-12-20"
+        assert config.end_date == "2024-12-20"
         assert config.interval == "1min"
     
     def test_clickhouse_config_defaults(self):

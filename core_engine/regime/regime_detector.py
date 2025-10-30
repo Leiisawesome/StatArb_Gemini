@@ -54,6 +54,8 @@ class RegimeType(Enum):
     RECOVERY = "recovery"
     EXPANSION = "expansion"
     CONTRACTION = "contraction"
+    MEAN_REVERSION = "mean_reversion"
+    MOMENTUM = "momentum"
     UNKNOWN = "unknown"
 
 
@@ -138,6 +140,84 @@ class RegimeTransition:
     # Performance impact
     performance_impact: float = 0.0
     risk_impact: float = 0.0
+
+
+@dataclass
+class RegimeDetectionConfig:
+    """Configuration for regime detection methods"""
+    
+    # Detection methods
+    methods: List[DetectionMethod] = field(default_factory=lambda: [
+        DetectionMethod.MARKOV_SWITCHING, 
+        DetectionMethod.GAUSSIAN_MIXTURE, 
+        DetectionMethod.VOLATILITY_BASED
+    ])
+    
+    # Lookback periods
+    short_lookback: int = 20
+    medium_lookback: int = 60
+    long_lookback: int = 252
+    
+    # Volatility parameters
+    volatility_window: int = 20
+    volatility_threshold_high: float = 0.25
+    volatility_threshold_low: float = 0.10
+    
+    # Return thresholds
+    bull_threshold: float = 0.15
+    bear_threshold: float = -0.10
+    
+    # Regime parameters
+    min_regime_duration: int = 10
+    confidence_threshold: float = 0.75
+    
+    # Model parameters
+    n_regimes: int = 3
+    switching_variance: bool = True
+    n_clusters: int = 3
+    random_state: int = 42
+
+
+@dataclass
+class RegimeAnalysisConfig:
+    """Configuration for regime analysis and market analysis"""
+    
+    # Asset universe
+    equity_indices: List[str] = field(default_factory=lambda: [
+        "SPY", "QQQ", "IWM", "EFA", "EEM"
+    ])
+    fixed_income: List[str] = field(default_factory=lambda: [
+        "TLT", "IEF", "SHY", "LQD", "HYG"
+    ])
+    commodities: List[str] = field(default_factory=lambda: [
+        "GLD", "SLV", "USO", "UNG", "DBA"
+    ])
+    currencies: List[str] = field(default_factory=lambda: [
+        "UUP", "FXE", "FXY", "FXB"
+    ])
+    volatility: List[str] = field(default_factory=lambda: [
+        "VIX", "VXX", "UVXY"
+    ])
+    
+    # Analysis parameters
+    lookback_periods: List[int] = field(default_factory=lambda: [20, 60, 252])
+    correlation_window: int = 60
+    factor_analysis_window: int = 252
+    correlation_threshold: float = 0.7
+    volatility_percentile_threshold: float = 0.8  # Note: different from vol_percentile_threshold
+    momentum_threshold: float = 0.1
+    
+    # Clustering parameters
+    min_cluster_size: int = 5
+    eps_parameter: float = 0.3
+    n_components_pca: int = 5
+    
+    # Update frequency
+    update_frequency: str = "daily"
+    
+    # Risk parameters
+    var_confidence: float = 0.05
+    expected_shortfall_confidence: float = 0.05
 
 
 class MarkovSwitchingDetector:
@@ -309,17 +389,17 @@ class GaussianMixtureDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+        self.model = None
+        self.scaler = StandardScaler()
+        self.fitted = False
+        
+        logger.info("Gaussian mixture detector initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        self.model = None
-        self.scaler = StandardScaler()
-        self.fitted = False
-        
-        logger.info("Gaussian mixture detector initialized")
     
     def fit(self, features: pd.DataFrame) -> bool:
         """Fit Gaussian mixture model"""
@@ -564,13 +644,13 @@ class ThresholdBasedDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+        logger.info("Threshold-based detector initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        logger.info("Threshold-based detector initialized")
     
     def detect_regime(self, returns: pd.Series, timestamp: datetime) -> Optional[RegimeDetection]:
         """Detect regime based on return thresholds"""
@@ -755,14 +835,24 @@ class RegimeDetector(ISystemComponent):
             if timestamp is None:
                 timestamp = datetime.now()
             
+            # Check for empty data
+            if market_data.empty:
+                logger.warning("Empty market data provided for regime detection")
+                return None
+            
             # Extract returns from market data
             if 'close' in market_data.columns:
                 returns = market_data['close'].pct_change().dropna()
             elif 'price' in market_data.columns:
                 returns = market_data['price'].pct_change().dropna()
             else:
+                # Check if there are any numeric columns
+                numeric_cols = market_data.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) == 0:
+                    logger.warning("No numeric columns found in market data")
+                    return None
                 # Assume first numeric column is price
-                price_col = market_data.select_dtypes(include=[np.number]).columns[0]
+                price_col = numeric_cols[0]
                 returns = market_data[price_col].pct_change().dropna()
             
             if len(returns) < self._get_config_attr("short_lookback", 20):
@@ -811,6 +901,10 @@ class RegimeDetector(ISystemComponent):
         except Exception as e:
             logger.error(f"Error detecting current regime: {e}")
             return None
+    
+    def detect_regime(self, market_data: pd.DataFrame, timestamp: Optional[datetime] = None) -> Optional[RegimeDetection]:
+        """Alias for detect_current_regime for backward compatibility"""
+        return self.detect_current_regime(market_data, timestamp)
     
     def _prepare_features(self, market_data: pd.DataFrame, returns: pd.Series) -> pd.DataFrame:
         """Prepare features for machine learning models"""

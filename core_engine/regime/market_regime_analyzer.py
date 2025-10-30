@@ -150,17 +150,17 @@ class FactorAnalyzer:
     
     def __init__(self, config: Any = None):
         self.config = config
+        self.pca = PCA(n_components=self._get_config_attr("n_components_pca", 5))
+        self.scaler = StandardScaler()
+        self.fitted = False
+        
+        logger.info("Factor analyzer initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        self.pca = PCA(n_components=self.config.n_components_pca)
-        self.scaler = StandardScaler()
-        self.fitted = False
-        
-        logger.info("Factor analyzer initialized")
     
     def analyze_factors(self, returns_data: pd.DataFrame) -> Dict[str, Any]:
         """Analyze underlying market factors"""
@@ -176,7 +176,12 @@ class FactorAnalyzer:
                 logger.warning("Insufficient assets for factor analysis")
                 return {}
             
-            # Fit PCA
+            # Fit PCA - adjust components to available features
+            n_components = min(self._get_config_attr("n_components_pca", 5), len(clean_data.columns))
+            if n_components != self.pca.n_components:
+                from sklearn.decomposition import PCA
+                self.pca = PCA(n_components=n_components)
+            
             scaled_data = self.scaler.fit_transform(clean_data)
             pca_result = self.pca.fit_transform(scaled_data)
             
@@ -185,7 +190,7 @@ class FactorAnalyzer:
             # Analyze factor loadings
             factor_loadings = pd.DataFrame(
                 self.pca.components_.T,
-                columns=[f'Factor_{i+1}' for i in range(self.config.n_components_pca)],
+                columns=[f'Factor_{i+1}' for i in range(n_components)],
                 index=clean_data.columns
             )
             
@@ -193,7 +198,7 @@ class FactorAnalyzer:
             factor_returns = pd.DataFrame(
                 pca_result,
                 index=clean_data.index,
-                columns=[f'Factor_{i+1}' for i in range(self.config.n_components_pca)]
+                columns=[f'Factor_{i+1}' for i in range(n_components)]
             )
             
             # Analyze factor characteristics
@@ -281,14 +286,13 @@ class CrossAssetAnalyzer:
     
     def __init__(self, config: Any = None):
         self.config = config
+        logger.info("Cross-asset analyzer initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        
-        logger.info("Cross-asset analyzer initialized")
     
     def analyze_cross_asset_regime(self, market_data: Dict[str, pd.DataFrame]) -> CrossAssetRegime:
         """Analyze cross-asset regime"""
@@ -1183,7 +1187,10 @@ class MarketRegimeAnalyzer:
         
         logger.info("✅ MarketRegimeAnalyzer using centralized RegimeConfig (Rule 1, Section 7)")
         
-        # Initialize analyzers (simplified)
+        # Initialize analyzers
+        self.cross_asset_analyzer = CrossAssetAnalyzer(self.config)
+        self.factor_analyzer = FactorAnalyzer(self.config)
+        self.sector_analyzer = SectorRotationAnalyzer(self.config)
         
         # Analysis history
         self.analysis_history: List[CrossAssetRegime] = []

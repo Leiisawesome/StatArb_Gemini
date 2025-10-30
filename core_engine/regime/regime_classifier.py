@@ -165,32 +165,32 @@ class FeatureEngineer:
             features_list = []
             
             # Price-based features
-            if FeatureType.PRICE_BASED in self.config.feature_types:
+            if "price_based" in self.config.feature_types:
                 price_features = self._create_price_features(price_data)
                 features_list.append(price_features)
             
             # Volatility-based features
-            if FeatureType.VOLATILITY_BASED in self.config.feature_types:
+            if "volatility_based" in self.config.feature_types:
                 volatility_features = self._create_volatility_features(price_data)
                 features_list.append(volatility_features)
             
             # Momentum-based features
-            if FeatureType.MOMENTUM_BASED in self.config.feature_types:
+            if "momentum_based" in self.config.feature_types:
                 momentum_features = self._create_momentum_features(price_data)
                 features_list.append(momentum_features)
             
             # Correlation-based features
-            if FeatureType.CORRELATION_BASED in self.config.feature_types:
+            if "correlation_based" in self.config.feature_types:
                 correlation_features = self._create_correlation_features(price_data)
                 features_list.append(correlation_features)
             
             # Volume-based features
-            if FeatureType.VOLUME_BASED in self.config.feature_types and volume_data is not None:
+            if "volume_based" in self.config.feature_types and volume_data is not None:
                 volume_features = self._create_volume_features(price_data, volume_data)
                 features_list.append(volume_features)
             
             # Technical indicators
-            if FeatureType.TECHNICAL_INDICATORS in self.config.feature_types:
+            if "technical_indicators" in self.config.feature_types:
                 technical_features = self._create_technical_indicators(price_data)
                 features_list.append(technical_features)
             
@@ -275,8 +275,10 @@ class FeatureEngineer:
                 
                 # Range-based volatility (Garman-Klass if OHLC available)
                 if all(col in price_data.columns for col in ['high', 'low', 'close']):
-                    gk_vol = np.log(price_data['high'] / price_data['low']) ** 2
-                    features[f'gk_volatility_{window}d'] = gk_vol.rolling(window).mean()
+                    hl_ratio = price_data['high'] / price_data['low']
+                    # Only calculate log for positive ratios to avoid invalid values
+                    gk_vol = np.where(hl_ratio > 0, np.log(hl_ratio) ** 2, 0)
+                    features[f'gk_volatility_{window}d'] = pd.Series(gk_vol).rolling(window).mean()
                 
                 # Volatility clustering
                 vol_changes = vol_series.diff().abs()
@@ -537,12 +539,6 @@ class RegimeModelTrainer:
     
     def __init__(self, config: Any = None):
         self.config = config
-    
-    def _get_config_attr(self, attr_name, default):
-        """Safely get config attribute with default fallback"""
-        if self.config is None:
-            return default
-        return getattr(self.config, attr_name, default)
         self.models = {}
         self.scalers = {}
         self.label_encoder = LabelEncoder()
@@ -551,6 +547,12 @@ class RegimeModelTrainer:
         self.is_trained = False
         
         logger.info("Model trainer initialized")
+    
+    def _get_config_attr(self, attr_name, default):
+        """Safely get config attribute with default fallback"""
+        if self.config is None:
+            return default
+        return getattr(self.config, attr_name, default)
     
     def train_models(self, features: pd.DataFrame, 
                     regime_labels: pd.Series) -> Dict[str, ModelPerformance]:
@@ -576,7 +578,14 @@ class RegimeModelTrainer:
                 return {}
             
             # Encode labels
-            y_encoded = self.label_encoder.fit_transform([regime.value for regime in y])
+            # Handle both enum and string regime types
+            regime_values = []
+            for regime in y:
+                if hasattr(regime, 'value'):
+                    regime_values.append(regime.value)
+                else:
+                    regime_values.append(str(regime))
+            y_encoded = self.label_encoder.fit_transform(regime_values)
             
             # Feature selection
             X_selected = self._select_features(X, y_encoded)
@@ -612,7 +621,7 @@ class RegimeModelTrainer:
             model_performances = {}
             
             for model_type in self.config.models_to_test:
-                logger.info(f"Training {model_type.value} model")
+                logger.info(f"Training {model_type} model")
                 
                 try:
                     # Create and train model
@@ -631,18 +640,18 @@ class RegimeModelTrainer:
                             model = CalibratedClassifierCV(model, cv=3)
                             model.fit(X_train_scaled, y_train)
                     
-                    self.models[model_type.value] = model
+                    self.models[model_type] = model
                     
                     # Evaluate model
                     performance = self._evaluate_model(
                         model, X_train_scaled, X_test_scaled, y_train, y_test,
-                        X_selected.columns, model_type.value, training_time
+                        X_selected.columns, model_type, training_time
                     )
                     
-                    model_performances[model_type.value] = performance
+                    model_performances[model_type] = performance
                     
                 except Exception as e:
-                    logger.error(f"Error training {model_type.value} model: {e}")
+                    logger.error(f"Error training {model_type} model: {e}")
                     continue
             
             # Create ensemble if multiple models trained
@@ -694,11 +703,14 @@ class RegimeModelTrainer:
             logger.error(f"Error selecting features: {e}")
             return X
     
-    def _create_model(self, model_type: MLModel):
+    def _create_model(self, model_type):
         """Create model instance"""
         
         try:
-            if model_type == MLModel.RANDOM_FOREST:
+            # Handle both enum and string model types
+            model_type_str = model_type.value if hasattr(model_type, 'value') else str(model_type)
+            
+            if model_type_str in ['random_forest', 'RandomForestClassifier']:
                 return RandomForestClassifier(
                     n_estimators=100,
                     max_depth=10,
@@ -709,7 +721,7 @@ class RegimeModelTrainer:
                     n_jobs=-1
                 )
             
-            elif model_type == MLModel.GRADIENT_BOOSTING:
+            elif model_type_str in ['gradient_boosting', 'GradientBoostingClassifier']:
                 return GradientBoostingClassifier(
                     n_estimators=100,
                     learning_rate=0.1,
@@ -719,7 +731,7 @@ class RegimeModelTrainer:
                     random_state=42
                 )
             
-            elif model_type == MLModel.SVM:
+            elif model_type_str in ['svm', 'SVC']:
                 return SVC(
                     kernel='rbf',
                     C=1.0,
@@ -729,7 +741,7 @@ class RegimeModelTrainer:
                     random_state=42
                 )
             
-            elif model_type == MLModel.NEURAL_NETWORK:
+            elif model_type_str in ['neural_network', 'MLPClassifier']:
                 return MLPClassifier(
                     hidden_layer_sizes=(100, 50),
                     activation='relu',
@@ -740,7 +752,7 @@ class RegimeModelTrainer:
                     random_state=42
                 )
             
-            elif model_type == MLModel.LOGISTIC_REGRESSION:
+            elif model_type_str in ['logistic_regression', 'LogisticRegression']:
                 return LogisticRegression(
                     C=0.1,  # Stronger regularization
                     class_weight='balanced' if self.config.use_class_weights else None,
@@ -750,7 +762,7 @@ class RegimeModelTrainer:
                     random_state=42
                 )
             
-            elif model_type == MLModel.NAIVE_BAYES:
+            elif model_type_str in ['naive_bayes', 'GaussianNB']:
                 return GaussianNB()
             
             else:
@@ -890,7 +902,7 @@ class RegimeModelTrainer:
                 return None
             
             # Use primary model or best performing model
-            model_name = self.config.primary_model.value
+            model_name = self.config.primary_model
             if model_name not in self.models:
                 model_name = list(self.models.keys())[0]
             
@@ -1048,6 +1060,8 @@ class RegimeClassifier(ISystemComponent):
         
         # Initialize components (simplified - uses centralized config)
         # Note: Sub-components will be updated to use centralized config
+        self.feature_engineer = FeatureEngineer(self.config)
+        self.model_trainer = RegimeModelTrainer(self.config)
         
         # Classification history
         self.classification_history: List[RegimeClassification] = []

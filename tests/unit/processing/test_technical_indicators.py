@@ -47,6 +47,7 @@ class TestIndicatorEngine:
     @pytest.fixture
     def indicator_config(self):
         """Create indicator configuration for testing."""
+        from core_engine.config.component_config import PerformanceConfig
         return IndicatorConfig(
             sma_periods=[20, 50],
             ema_periods=[12, 26],
@@ -54,7 +55,7 @@ class TestIndicatorEngine:
             macd_fast=12,
             macd_slow=26,
             macd_signal=9,
-            enable_caching=False
+            performance=PerformanceConfig(enable_caching=False)
         )
 
     @pytest.fixture

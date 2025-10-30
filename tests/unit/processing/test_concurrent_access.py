@@ -112,10 +112,30 @@ class TestConcurrentAccess:
         
         # Define multiple regime contexts
         regimes = [
-            RegimeContext(primary_regime='low_volatility', regime_confidence=0.8),
-            RegimeContext(primary_regime='high_volatility', regime_confidence=0.9),
-            RegimeContext(primary_regime='trending', regime_confidence=0.7),
-            RegimeContext(primary_regime='choppy', regime_confidence=0.6),
+            RegimeContext(
+                primary_regime='low_volatility', 
+                regime_confidence=0.8,
+                regime_start_time=datetime.now(),
+                regime_duration_minutes=60.0
+            ),
+            RegimeContext(
+                primary_regime='high_volatility', 
+                regime_confidence=0.9,
+                regime_start_time=datetime.now(),
+                regime_duration_minutes=45.0
+            ),
+            RegimeContext(
+                primary_regime='trending', 
+                regime_confidence=0.7,
+                regime_start_time=datetime.now(),
+                regime_duration_minutes=90.0
+            ),
+            RegimeContext(
+                primary_regime='choppy', 
+                regime_confidence=0.6,
+                regime_start_time=datetime.now(),
+                regime_duration_minutes=30.0
+            ),
         ]
         
         # Update regimes concurrently

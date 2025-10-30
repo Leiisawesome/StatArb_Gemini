@@ -157,7 +157,9 @@ class TimeSeriesAnalyzer:
             if return_type == ReturnType.SIMPLE:
                 returns = np.diff(prices) / prices[:-1]
             elif return_type == ReturnType.LOG:
-                returns = np.log(prices[1:] / prices[:-1])
+                price_ratios = prices[1:] / prices[:-1]
+                # Only calculate log for positive ratios to avoid invalid values
+                returns = np.where(price_ratios > 0, np.log(price_ratios), np.nan)
             else:
                 returns = np.diff(prices) / prices[:-1]  # Default to simple
             

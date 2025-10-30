@@ -84,7 +84,8 @@ class TestEnhancedMarketData:
 def data_manager():
     """Fixture for ClickHouseDataManager instance."""
     config = ClickHouseDataConfig()
-    return ClickHouseDataManager(config)
+    with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
+        return ClickHouseDataManager(config)
 
 
 class TestClickHouseDataManager:

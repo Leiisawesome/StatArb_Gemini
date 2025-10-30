@@ -245,8 +245,6 @@ class BrokerConfigLoader:
         elif active_broker in ["ib", "interactive_brokers"]:
             config.active_broker = BrokerType.INTERACTIVE_BROKERS
         
-        config.active_broker = BrokerType.INTERACTIVE_BROKERS
-        
         # Load risk limits (support both old and new variable names)
         config.risk_limits = RiskLimits(
             max_position_size=int(os.getenv("TRADING_MAX_POSITION_SIZE") or os.getenv("PHASE_9_MAX_POSITION_SIZE") or "100"),

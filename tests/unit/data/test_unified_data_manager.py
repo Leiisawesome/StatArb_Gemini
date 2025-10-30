@@ -45,7 +45,8 @@ def data_config() -> ClickHouseDataConfig:
 @pytest.fixture
 def data_manager(data_config) -> ClickHouseDataManager:
     """Initialize ClickHouseDataManager for testing"""
-    return ClickHouseDataManager(data_config)
+    with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
+        return ClickHouseDataManager(data_config)
 
 @pytest.fixture
 def sample_market_data() -> pd.DataFrame:
@@ -105,10 +106,10 @@ class TestClickHouseDataConfig:
         logger.info("✅ Date range validation test passed")
     
     def test_config_backward_compatibility(self):
-        """Test backward compatibility with target_date"""
-        config = ClickHouseDataConfig(target_date="2024-01-15")
+        """Test backward compatibility with start_date/end_date"""
+        config = ClickHouseDataConfig(start_date="2024-01-15", end_date="2024-01-15")
         
-        # Should set both start_date and end_date to target_date
+        # Should set both start_date and end_date
         assert config.start_date == "2024-01-15"
         assert config.end_date == "2024-01-15"
         
@@ -124,43 +125,47 @@ class TestClickHouseDataManager:
     
     def test_initialization(self, data_config):
         """Test ClickHouseDataManager initialization"""
-        data_manager = ClickHouseDataManager(data_config)
-        
-        # Verify configuration
-        assert data_manager.enhanced_config.symbols == ['AAPL', 'MSFT', 'GOOGL']
-        assert data_manager.enhanced_config.interval == "1min"
-        
-        # Verify initial state
-        assert not data_manager.is_initialized
-        assert not data_manager.is_operational
-        
-        # Verify collections are initialized
-        assert isinstance(data_manager.subscribers, list)
-        assert isinstance(data_manager._cache, dict)
-        assert isinstance(data_manager._cache_timestamps, dict)
-        
-        logger.info("✅ Initialization test passed")
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
+            data_manager = ClickHouseDataManager(data_config)
+            
+            # Verify configuration
+            assert data_manager.enhanced_config.symbols == ['AAPL', 'MSFT', 'GOOGL']
+            assert data_manager.enhanced_config.interval == "1min"
+            
+            # Verify initial state
+            assert not data_manager.is_initialized
+            assert not data_manager.is_operational
+            
+            # Verify collections are initialized
+            assert isinstance(data_manager.subscribers, list)
+            assert isinstance(data_manager._cache, dict)
+            assert isinstance(data_manager._cache_timestamps, dict)
+            
+            logger.info("✅ Initialization test passed")
     
     @pytest.mark.asyncio
     async def test_component_lifecycle(self, data_manager):
         """Test ISystemComponent lifecycle methods"""
         
-        # Test initialization
-        result = await data_manager.initialize()
-        assert result is True
-        assert data_manager.is_initialized
+        # Test initialization with mocked connection and queries
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True), \
+             patch.object(data_manager, '_execute_query', return_value=pd.DataFrame({'ticker': ['AAPL'], 'records': [1000]})):
+            result = await data_manager.initialize()
+            assert result is True
+            assert data_manager.is_initialized
         
         # Test start
         result = await data_manager.start()
         assert result is True
         assert data_manager.is_operational
         
-        # Test health check
-        health = await data_manager.health_check()
-        assert health['healthy'] is True
-        assert health['initialized'] is True
-        assert health['operational'] is True
-        assert health['component_type'] == 'ClickHouseDataManager'
+        # Test health check with mocked connection
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
+            health = await data_manager.health_check()
+            assert health['healthy'] is True
+            assert health['initialized'] is True
+            assert health['operational'] is True
+            assert health['component_type'] == 'ClickHouseDataManager'
         
         # Test status
         status = data_manager.get_status()
@@ -234,12 +239,26 @@ class TestClickHouseDataManager:
         # Force synthetic data mode
         data_manager._use_synthetic_data = True
         
-        result = data_manager.load_market_data(
-            symbols=['AAPL', 'MSFT'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 10, 30),
-            interval='1min'
-        )
+        # Mock the query execution to return synthetic data
+        with patch.object(data_manager, '_execute_query') as mock_query:
+            # Create mock synthetic data
+            mock_data = pd.DataFrame({
+                'timestamp': pd.date_range('2024-01-01 09:30:00', periods=60, freq='1min'),
+                'symbol': ['AAPL'] * 30 + ['MSFT'] * 30,
+                'open': [150.0] * 60,
+                'high': [151.0] * 60,
+                'low': [149.0] * 60,
+                'close': [150.5] * 60,
+                'volume': [1000] * 60
+            })
+            mock_query.return_value = mock_data
+            
+            result = data_manager.load_market_data(
+                symbols=['AAPL', 'MSFT'],
+                start_time=datetime(2024, 1, 1, 9, 30),
+                end_time=datetime(2024, 1, 1, 10, 30),
+                interval='1min'
+            )
         
         assert not result.empty
         assert set(result['symbol'].unique()) == {'AAPL', 'MSFT'}
@@ -261,24 +280,38 @@ class TestClickHouseDataManager:
         data_manager.enhanced_config.enable_caching = True
         data_manager._use_synthetic_data = True
         
-        # First load - should cache
-        result1 = data_manager.load_market_data(
-            symbols=['AAPL'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 10, 30),
-            interval='1min'
-        )
-        
-        # Check cache
-        assert len(data_manager._cache) > 0
-        
-        # Second load - should use cache
-        result2 = data_manager.load_market_data(
-            symbols=['AAPL'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 10, 30),
-            interval='1min'
-        )
+        # Mock the query execution
+        with patch.object(data_manager, '_execute_query') as mock_query:
+            # Create mock data
+            mock_data = pd.DataFrame({
+                'timestamp': pd.date_range('2024-01-01 09:30:00', periods=60, freq='1min'),
+                'symbol': ['AAPL'] * 60,
+                'open': [150.0] * 60,
+                'high': [151.0] * 60,
+                'low': [149.0] * 60,
+                'close': [150.5] * 60,
+                'volume': [1000] * 60
+            })
+            mock_query.return_value = mock_data
+            
+            # First load - should cache
+            result1 = data_manager.load_market_data(
+                symbols=['AAPL'],
+                start_time=datetime(2024, 1, 1, 9, 30),
+                end_time=datetime(2024, 1, 1, 10, 30),
+                interval='1min'
+            )
+            
+            # Check cache
+            assert len(data_manager._cache) > 0
+            
+            # Second load - should use cache
+            result2 = data_manager.load_market_data(
+                symbols=['AAPL'],
+                start_time=datetime(2024, 1, 1, 9, 30),
+                end_time=datetime(2024, 1, 1, 10, 30),
+                interval='1min'
+            )
         
         # Results should be identical (from cache)
         pd.testing.assert_frame_equal(result1, result2)
@@ -485,33 +518,32 @@ class TestClickHouseDataManager:
     # ERROR HANDLING TESTS
     # ========================================
     
-    @patch.object(ClickHouseDataManager, '_execute_query')
-    def test_query_error_handling(self, mock_execute, data_manager):
+    def test_query_error_handling(self, data_manager):
         """Test error handling in query execution"""
         # Mock query failure
-        mock_execute.side_effect = Exception("Query failed")
-        
-        # Force real connection mode to trigger query
-        data_manager._connection_available = True
-        data_manager._use_synthetic_data = False
-        
-        # Should fall back to synthetic data
-        result = data_manager.load_market_data(
-            symbols=['AAPL'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 10, 30),
-            interval='1min'
-        )
-        
-        # Should still return data (synthetic fallback)
-        assert not result.empty
+        with patch.object(data_manager, '_execute_query') as mock_execute:
+            mock_execute.side_effect = Exception("Query failed")
+            
+            # Force real connection mode to trigger query
+            data_manager._connection_available = True
+            data_manager._use_synthetic_data = False
+            
+            # Should raise an exception when query fails
+            with pytest.raises(Exception, match="Query failed"):
+                data_manager.load_market_data(
+                    symbols=['AAPL'],
+                    start_time=datetime(2024, 1, 1, 9, 30),
+                    end_time=datetime(2024, 1, 1, 10, 30),
+                    interval='1min'
+                )
         
         logger.info("✅ Query error handling test passed")
     
     def test_invalid_interval_handling(self, data_manager):
         """Test handling of invalid intervals"""
+        # Test invalid interval in load_market_data
         with pytest.raises(ValueError, match="Unsupported interval"):
-            data_manager._generate_synthetic_data(
+            data_manager.load_market_data(
                 symbols=['AAPL'],
                 start_time=datetime(2024, 1, 1, 9, 30),
                 end_time=datetime(2024, 1, 1, 10, 30),
@@ -529,13 +561,27 @@ class TestClickHouseDataManager:
         # Force synthetic data for consistent testing
         data_manager._use_synthetic_data = True
         
-        # Load data for multiple symbols over longer period
-        result = data_manager.load_market_data(
-            symbols=['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'AMZN'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 16, 0),
-            interval='1min'
-        )
+        # Mock the query execution to return large dataset
+        with patch.object(data_manager, '_execute_query') as mock_query:
+            # Create mock large dataset
+            mock_data = pd.DataFrame({
+                'timestamp': pd.date_range('2024-01-01 09:30:00', periods=1200, freq='1min'),
+                'symbol': ['AAPL'] * 240 + ['MSFT'] * 240 + ['GOOGL'] * 240 + ['TSLA'] * 240 + ['AMZN'] * 240,
+                'open': [150.0] * 1200,
+                'high': [151.0] * 1200,
+                'low': [149.0] * 1200,
+                'close': [150.5] * 1200,
+                'volume': [1000] * 1200
+            })
+            mock_query.return_value = mock_data
+            
+            # Load data for multiple symbols over longer period
+            result = data_manager.load_market_data(
+                symbols=['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'AMZN'],
+                start_time=datetime(2024, 1, 1, 9, 30),
+                end_time=datetime(2024, 1, 1, 16, 0),
+                interval='1min'
+            )
         
         # Should handle large dataset
         assert not result.empty
@@ -553,24 +599,50 @@ class TestClickHouseDataManager:
         # Force synthetic data
         data_manager._use_synthetic_data = True
         
-        # Create multiple concurrent data requests
-        symbols = ['AAPL', 'MSFT', 'GOOGL']
-        tasks = []
-        
-        for symbol in symbols:
-            task = asyncio.create_task(
-                asyncio.to_thread(
-                    data_manager.load_market_data,
-                    symbols=[symbol],
-                    start_time=datetime(2024, 1, 1, 9, 30),
-                    end_time=datetime(2024, 1, 1, 10, 30),
-                    interval='1min'
+        # Mock the query execution
+        with patch.object(data_manager, '_execute_query') as mock_query:
+            # Create mock data for each symbol
+            def mock_query_side_effect(query):
+                # Extract symbol from query (simplified)
+                if 'AAPL' in query:
+                    symbol = 'AAPL'
+                elif 'MSFT' in query:
+                    symbol = 'MSFT'
+                elif 'GOOGL' in query:
+                    symbol = 'GOOGL'
+                else:
+                    symbol = 'UNKNOWN'
+                
+                return pd.DataFrame({
+                    'timestamp': pd.date_range('2024-01-01 09:30:00', periods=60, freq='1min'),
+                    'symbol': [symbol] * 60,
+                    'open': [150.0] * 60,
+                    'high': [151.0] * 60,
+                    'low': [149.0] * 60,
+                    'close': [150.5] * 60,
+                    'volume': [1000] * 60
+                })
+            
+            mock_query.side_effect = mock_query_side_effect
+            
+            # Create multiple concurrent data requests
+            symbols = ['AAPL', 'MSFT', 'GOOGL']
+            tasks = []
+            
+            for symbol in symbols:
+                task = asyncio.create_task(
+                    asyncio.to_thread(
+                        data_manager.load_market_data,
+                        symbols=[symbol],
+                        start_time=datetime(2024, 1, 1, 9, 30),
+                        end_time=datetime(2024, 1, 1, 10, 30),
+                        interval='1min'
+                    )
                 )
-            )
-            tasks.append(task)
-        
-        # Wait for all tasks to complete
-        results = await asyncio.gather(*tasks)
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            results = await asyncio.gather(*tasks)
         
         # Verify all requests completed successfully
         assert len(results) == len(symbols)
@@ -617,39 +689,54 @@ class TestDataManagerIntegration:
     async def test_full_data_pipeline(self, data_config):
         """Test complete data pipeline from initialization to data delivery"""
         # Initialize data manager
-        data_manager = ClickHouseDataManager(data_config)
-        
-        # Force synthetic data for consistent testing
-        data_manager._use_synthetic_data = True
-        
-        # Test full lifecycle
-        await data_manager.initialize()
-        await data_manager.start()
-        
-        # Load data
-        result = data_manager.load_market_data(
-            symbols=['AAPL'],
-            start_time=datetime(2024, 1, 1, 9, 30),
-            end_time=datetime(2024, 1, 1, 10, 30),
-            interval='1min'
-        )
-        
-        # Validate data
-        validation_result = data_manager.validate_data(result)
-        assert validation_result['valid'] is True
-        
-        # Test core engine interface
-        market_data = data_manager.get_market_data('AAPL')
-        assert market_data is not None
-        
-        # Test health check
-        health = await data_manager.health_check()
-        assert health['healthy'] is True
-        
-        # Cleanup
-        await data_manager.stop()
-        
-        logger.info("✅ Full data pipeline integration test passed")
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True), \
+             patch.object(ClickHouseDataManager, '_execute_query') as mock_query:
+            
+            # Create mock data
+            mock_data = pd.DataFrame({
+                'timestamp': pd.date_range('2024-01-01 09:30:00', periods=60, freq='1min'),
+                'symbol': ['AAPL'] * 60,
+                'open': [150.0] * 60,
+                'high': [151.0] * 60,
+                'low': [149.0] * 60,
+                'close': [150.5] * 60,
+                'volume': [1000] * 60
+            })
+            mock_query.return_value = mock_data
+            
+            data_manager = ClickHouseDataManager(data_config)
+            
+            # Force synthetic data for consistent testing
+            data_manager._use_synthetic_data = True
+            
+            # Test full lifecycle
+            await data_manager.initialize()
+            await data_manager.start()
+            
+            # Load data
+            result = data_manager.load_market_data(
+                symbols=['AAPL'],
+                start_time=datetime(2024, 1, 1, 9, 30),
+                end_time=datetime(2024, 1, 1, 10, 30),
+                interval='1min'
+            )
+            
+            # Validate data
+            validation_result = data_manager.validate_data(result)
+            assert validation_result['valid'] is True
+            
+            # Test core engine interface
+            market_data = data_manager.get_market_data('AAPL')
+            assert market_data is not None
+            
+            # Test health check
+            health = await data_manager.health_check()
+            assert health['healthy'] is True
+            
+            # Cleanup
+            await data_manager.stop()
+            
+            logger.info("✅ Full data pipeline integration test passed")
 
 
 if __name__ == "__main__":

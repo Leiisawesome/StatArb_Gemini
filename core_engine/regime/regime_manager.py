@@ -663,6 +663,9 @@ class RegimeManager(ISystemComponent):
         """Asynchronous regime analysis update"""
         
         try:
+            # Extract returns data for regime detection
+            returns_data = self._extract_returns_data(market_data)
+            
             # Create async tasks
             loop = asyncio.get_event_loop()
             
@@ -670,7 +673,7 @@ class RegimeManager(ISystemComponent):
             detection_task = loop.run_in_executor(
                 self.executor,
                 self.regime_detector.detect_regime,
-                market_data
+                returns_data
             )
             
             # Analysis task
@@ -709,14 +712,16 @@ class RegimeManager(ISystemComponent):
         """Synchronous regime analysis update"""
         
         try:
+            # Extract returns data for regime detection
+            returns_data = self._extract_returns_data(market_data)
+            
             # Detection
-            detection_result = self.regime_detector.detect_regime(market_data)
+            detection_result = self.regime_detector.detect_regime(returns_data)
             
             # Market analysis
             analysis_result = self.market_analyzer.analyze_market_regime(market_data)
             
             # Indicators
-            returns_data = self._extract_returns_data(market_data)
             indicators_result = self.indicator_engine.calculate_all_indicators(returns_data)
             
             # Combine results

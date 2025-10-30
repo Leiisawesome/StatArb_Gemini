@@ -185,8 +185,6 @@ class DataConfig:
     symbols: Optional[List[str]] = None
     """List of symbols to trade. Default: None (all available)"""
     
-    target_date: Optional[str] = None
-    """DEPRECATED: Target date for data retrieval. Use start_date/end_date. Format: YYYY-MM-DD"""
     
     start_date: str = "2024-12-20"
     """Start date for historical data. Format: YYYY-MM-DD"""
@@ -1031,6 +1029,102 @@ class RegimeConfig:
     Migration: From IndicatorConfig
     """
     
+    mean_reversion_periods: List[int] = field(default_factory=lambda: [5, 10, 20, 30])
+    """
+    Mean reversion calculation periods for regime indicators.
+    Default: [5, 10, 20, 30] periods
+    Rationale: Multi-timeframe mean reversion analysis
+    Migration: From IndicatorConfig
+    """
+    
+    rsi_periods: List[int] = field(default_factory=lambda: [14, 21, 30])
+    """
+    RSI calculation periods for regime indicators.
+    Default: [14, 21, 30] periods
+    Rationale: Multi-timeframe RSI analysis
+    Migration: From IndicatorConfig
+    """
+    
+    bollinger_std: float = 2.0
+    """
+    Bollinger Bands standard deviation multiplier.
+    Default: 2.0
+    Rationale: Standard Bollinger Bands configuration
+    Migration: From IndicatorConfig
+    """
+    
+    vol_clustering_window: int = 20
+    """
+    Volatility clustering analysis window.
+    Default: 20 periods
+    Rationale: Volatility clustering detection period
+    Migration: From IndicatorConfig
+    """
+    
+    momentum_smoothing: int = 5
+    """
+    Momentum smoothing period.
+    Default: 5 periods
+    Rationale: Smooth momentum calculations
+    Migration: From IndicatorConfig
+    """
+    
+    volatility_percentile_threshold: float = 0.75
+    """
+    Volatility percentile threshold for regime classification.
+    Default: 0.75 (75th percentile)
+    Rationale: High volatility definition
+    Migration: From RegimeAnalysisConfig
+    """
+    
+    equity_indices: List[str] = field(default_factory=lambda: [
+        "SPY", "QQQ", "IWM", "EFA", "EEM"
+    ])
+    """
+    Equity indices for cross-asset analysis.
+    Default: ["SPY", "QQQ", "IWM", "EFA", "EEM"]
+    Rationale: Major equity indices for regime analysis
+    Migration: From RegimeAnalysisConfig
+    """
+    
+    fixed_income: List[str] = field(default_factory=lambda: [
+        "TLT", "IEF", "SHY", "LQD", "HYG"
+    ])
+    """
+    Fixed income asset symbols for regime analysis.
+    Default: ["TLT", "IEF", "SHY", "LQD", "HYG"]
+    Rationale: Treasury and corporate bond ETFs for regime analysis
+    Migration: From RegimeAnalysisConfig
+    """
+    
+    commodities: List[str] = field(default_factory=lambda: [
+        "GLD", "SLV", "USO", "UNG", "DBA"
+    ])
+    """
+    Commodity asset symbols for regime analysis.
+    Default: ["GLD", "SLV", "USO", "UNG", "DBA"]
+    Rationale: Gold, silver, oil, gas, agriculture ETFs for regime analysis
+    Migration: From RegimeAnalysisConfig
+    """
+    
+    momentum_threshold: float = 0.1
+    """
+    Momentum threshold for regime classification.
+    Default: 0.1 (10%)
+    Rationale: Threshold for momentum-based regime detection
+    Migration: From RegimeAnalysisConfig
+    """
+    
+    currencies: List[str] = field(default_factory=lambda: [
+        "UUP", "FXE", "FXY", "FXB"
+    ])
+    """
+    Currency asset symbols for regime analysis.
+    Default: ["UUP", "FXE", "FXY", "FXB"]
+    Rationale: Major currency ETFs for regime analysis
+    Migration: From RegimeAnalysisConfig
+    """
+    
     # ========================================================================
     # TRANSITION PREDICTION CONFIGURATION
     # ========================================================================
@@ -1050,6 +1144,60 @@ class RegimeConfig:
     Rationale: Capture features across multiple timeframes
     Migration: From TransitionPredictionConfig
     """
+    
+    # ========================================================================
+    # MACHINE LEARNING PARAMETERS (for regime classification)
+    # ========================================================================
+    
+    # Feature types for ML classification
+    feature_types: List[str] = field(default_factory=lambda: [
+        "price_based", "volatility_based", "momentum_based", 
+        "correlation_based", "volume_based", "technical_indicators"
+    ])
+    """
+    Feature types to use for regime classification.
+    Default: All available feature types
+    Migration: From ClassificationConfig
+    """
+    
+    # ML model parameters
+    primary_model: str = "ensemble"
+    """Primary ML model for regime classification. Default: 'ensemble'"""
+    
+    models_to_test: List[str] = field(default_factory=lambda: [
+        "random_forest", "gradient_boosting", "svm", "logistic_regression"
+    ])
+    """ML models to test for regime classification. Default: All major models"""
+    
+    min_training_samples: int = 100
+    """Minimum samples required for training. Default: 100"""
+    
+    test_size: float = 0.2
+    """Test set size as fraction of total data. Default: 0.2"""
+    
+    validation_splits: int = 5
+    """Number of cross-validation splits. Default: 5"""
+    
+    max_features: int = 50
+    """Maximum features to use for classification. Default: 50"""
+    
+    feature_selection_method: str = "mutual_info"
+    """Feature selection method. Default: 'mutual_info'"""
+    
+    correlation_threshold: float = 0.95
+    """Correlation threshold for feature removal. Default: 0.95"""
+    
+    # Cross-validation parameters
+    cross_validation_method: str = "kfold"
+    """Cross-validation method. Default: 'kfold'"""
+    
+    # Model calibration parameters
+    calibrate_probabilities: bool = True
+    """Enable probability calibration. Default: True"""
+    
+    # Model training parameters
+    use_class_weights: bool = True
+    """Use class weights for imbalanced data. Default: True"""
     
     # ========================================================================
     # ADAPTATION & RISK PARAMETERS
@@ -1688,12 +1836,6 @@ class DataConfig:
     storage_path: Optional[str] = None
     """Storage path for persisted data"""
     
-    # Backward compatibility (deprecated)
-    target_date: Optional[str] = None
-    """
-    DEPRECATED: Use start_date/end_date instead.
-    Single target date for backward compatibility.
-    """
     
     def __post_init__(self):
         """Validate data configuration"""
@@ -1710,15 +1852,6 @@ class DataConfig:
                     raise ValueError(f"Dates must be in YYYY-MM-DD format. Error: {e}")
                 raise
         
-        # Handle deprecated target_date
-        if self.target_date and not (self.start_date or self.end_date):
-            warnings.warn(
-                "target_date is deprecated. Use start_date/end_date instead.",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            self.start_date = self.target_date
-            self.end_date = self.target_date
         
         # Validate interval
         valid_intervals = ['1min', '5min', '15min', '30min', '1h', '4h', '1D', '1W', '1M']

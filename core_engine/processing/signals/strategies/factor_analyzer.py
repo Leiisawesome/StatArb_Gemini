@@ -379,7 +379,8 @@ class SizeFactorCalculator(FactorCalculator):
         market_cap = context.get('market_cap', 1000000000)  # Default 1B
         
         # Log market cap (size factor is typically log of market cap)
-        log_market_cap = np.log(market_cap)
+        # Only calculate log for positive values to avoid invalid values
+        log_market_cap = np.log(market_cap) if market_cap > 0 else np.nan
         
         size_series = pd.Series([log_market_cap], index=[data.index[-1]])
         

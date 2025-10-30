@@ -189,13 +189,13 @@ class VolatilityRegimeIndicators:
                     continue
                 
                 # Rolling volatility
-                vol = returns.rolling(period).std().mean(axis=1) * np.sqrt(252)
+                vol = returns.rolling(period).std().iloc[:, 0] * np.sqrt(252)
                 
                 # Current volatility level
                 current_vol = vol.iloc[-1] if len(vol) > 0 else 0
                 
                 # Volatility percentile
-                vol_percentile = (vol <= current_vol).mean()
+                vol_percentile = (vol <= current_vol).mean() if len(vol) > 0 else 0.5
                 
                 # Volatility signal
                 if vol_percentile > self.config.vol_percentile_threshold:
@@ -208,9 +208,14 @@ class VolatilityRegimeIndicators:
                     signal_direction = 0  # Normal volatility
                     signal_strength = SignalStrength.WEAK
                 
-                # Z-score
-                vol_mean = vol.mean()
-                vol_std = vol.std()
+                # Z-score - ensure we work with numeric values
+                if len(vol) > 0:
+                    vol_values = vol.values if hasattr(vol, 'values') else vol
+                    vol_mean = np.mean(vol_values)
+                    vol_std = np.std(vol_values)
+                else:
+                    vol_mean = 0
+                    vol_std = 1
                 z_score = (current_vol - vol_mean) / vol_std if vol_std > 0 else 0
                 
                 indicator = RegimeIndicator(
@@ -255,12 +260,12 @@ class VolatilityRegimeIndicators:
             indicators = {}
             
             # Volatility clustering measure
-            vol = returns.rolling(self.config.vol_clustering_window).std().mean(axis=1)
+            vol = returns.rolling(self.config.vol_clustering_window).std().iloc[:, 0]
             vol_changes = vol.diff().abs()
             
             # Clustering strength
-            clustering_strength = vol_changes.rolling(self.config.vol_clustering_window).mean().iloc[-1]
-            clustering_percentile = (vol_changes.rolling(self.config.vol_clustering_window).mean() <= clustering_strength).mean()
+            clustering_strength = vol_changes.rolling(self.config.vol_clustering_window).mean().iloc[-1] if len(vol_changes) > 0 else 0
+            clustering_percentile = (vol_changes.rolling(self.config.vol_clustering_window).mean() <= clustering_strength).mean() if len(vol_changes) > 0 else 0.5
             
             # Signal interpretation
             if clustering_percentile > 0.8:
@@ -300,7 +305,7 @@ class VolatilityRegimeIndicators:
             indicators = {}
             
             # Simple GARCH approximation
-            market_returns = returns.mean(axis=1)
+            market_returns = returns.iloc[:, 0]
             squared_returns = market_returns ** 2
             
             # EWMA volatility
@@ -309,7 +314,7 @@ class VolatilityRegimeIndicators:
             ewma_vol = np.sqrt(ewma_var * 252)
             
             current_ewma_vol = ewma_vol.iloc[-1] if len(ewma_vol) > 0 else 0
-            ewma_percentile = (ewma_vol <= current_ewma_vol).mean()
+            ewma_percentile = (ewma_vol <= current_ewma_vol).mean() if len(ewma_vol) > 0 else 0.5
             
             # Signal
             if ewma_percentile > 0.8:
@@ -368,7 +373,7 @@ class VolatilityRegimeIndicators:
             atr = true_range.rolling(14).mean()
             
             current_atr = atr.iloc[-1] if len(atr) > 0 else 0
-            atr_percentile = (atr <= current_atr).mean()
+            atr_percentile = (atr <= current_atr).mean() if len(atr) > 0 else 0.5
             
             # Signal
             if atr_percentile > 0.8:
@@ -408,9 +413,9 @@ class VolatilityRegimeIndicators:
             indicators = {}
             
             # Multiple timeframe volatility
-            short_vol = returns.rolling(20).std().mean(axis=1) * np.sqrt(252)
-            medium_vol = returns.rolling(60).std().mean(axis=1) * np.sqrt(252) if len(returns) >= 60 else short_vol
-            long_vol = returns.rolling(252).std().mean(axis=1) * np.sqrt(252) if len(returns) >= 252 else medium_vol
+            short_vol = returns.rolling(20).std().iloc[:, 0] * np.sqrt(252)
+            medium_vol = returns.rolling(60).std().iloc[:, 0] * np.sqrt(252) if len(returns) >= 60 else short_vol
+            long_vol = returns.rolling(252).std().iloc[:, 0] * np.sqrt(252) if len(returns) >= 252 else medium_vol
             
             current_short = short_vol.iloc[-1] if len(short_vol) > 0 else 0
             current_medium = medium_vol.iloc[-1] if len(medium_vol) > 0 else 0
@@ -523,15 +528,16 @@ class MomentumRegimeIndicators:
                     continue
                 
                 # Momentum calculation
-                momentum = returns.rolling(period).sum().mean(axis=1)
+                momentum = returns.rolling(period).sum().iloc[:, 0]
                 current_momentum = momentum.iloc[-1] if len(momentum) > 0 else 0
                 
-                # Smoothed momentum
-                smoothed_momentum = momentum.rolling(self.config.momentum_smoothing).mean()
+                # Smoothed momentum - ensure we work with numeric values
+                momentum_values = momentum.values if hasattr(momentum, 'values') else momentum
+                smoothed_momentum = pd.Series(momentum_values).rolling(self.config.momentum_smoothing).mean()
                 current_smoothed = smoothed_momentum.iloc[-1] if len(smoothed_momentum) > 0 else current_momentum
                 
                 # Momentum percentile
-                momentum_percentile = (momentum <= current_momentum).mean()
+                momentum_percentile = (momentum <= current_momentum).mean() if len(momentum) > 0 else 0.5
                 
                 # Signal strength based on magnitude and consistency
                 momentum_magnitude = abs(current_smoothed)
@@ -593,13 +599,15 @@ class MomentumRegimeIndicators:
             
             # Cross-sectional momentum dispersion
             momentum_20d = returns.rolling(20).sum()
-            momentum_rank = momentum_20d.rank(axis=1, pct=True)
+            # Ensure we work with numeric values to avoid DatetimeArray issues
+            momentum_20d_numeric = momentum_20d.copy()
+            momentum_rank = momentum_20d_numeric.rank(axis=1, pct=True)
             
             # Momentum dispersion (how spread out momentum is)
-            momentum_dispersion = momentum_rank.std(axis=1)
+            momentum_dispersion = momentum_rank.iloc[:, 0] if momentum_rank.shape[1] > 0 else pd.Series()
             current_dispersion = momentum_dispersion.iloc[-1] if len(momentum_dispersion) > 0 else 0
             
-            dispersion_percentile = (momentum_dispersion <= current_dispersion).mean()
+            dispersion_percentile = (momentum_dispersion <= current_dispersion).mean() if len(momentum_dispersion) > 0 else 0.5
             
             # High dispersion indicates strong momentum regime
             if dispersion_percentile > 0.8:
@@ -639,15 +647,15 @@ class MomentumRegimeIndicators:
             indicators = {}
             
             # Momentum persistence
-            momentum_5d = returns.rolling(5).sum().mean(axis=1)
-            momentum_20d = returns.rolling(20).sum().mean(axis=1)
+            momentum_5d = returns.rolling(5).sum().iloc[:, 0]
+            momentum_20d = returns.rolling(20).sum().iloc[:, 0]
             
-            # Sign persistence
-            momentum_sign_5d = np.sign(momentum_5d)
-            momentum_sign_20d = np.sign(momentum_20d)
+            # Sign persistence - ensure we work with numeric values
+            momentum_sign_5d = np.sign(momentum_5d.values if hasattr(momentum_5d, 'values') else momentum_5d)
+            momentum_sign_20d = np.sign(momentum_20d.values if hasattr(momentum_20d, 'values') else momentum_20d)
             
             # Persistence measure
-            sign_agreement = (momentum_sign_5d == momentum_sign_20d).rolling(20).mean()
+            sign_agreement = pd.Series(momentum_sign_5d == momentum_sign_20d).rolling(20).mean()
             current_persistence = sign_agreement.iloc[-1] if len(sign_agreement) > 0 else 0.5
             
             # High persistence indicates strong momentum regime
@@ -688,15 +696,19 @@ class MomentumRegimeIndicators:
             indicators = {}
             
             # Momentum acceleration
-            momentum_short = returns.rolling(5).sum().mean(axis=1)
-            momentum_medium = returns.rolling(20).sum().mean(axis=1)
+            momentum_short = returns.rolling(5).sum().iloc[:, 0]
+            momentum_medium = returns.rolling(20).sum().iloc[:, 0]
             
-            # Acceleration
+            # Acceleration - ensure we work with numeric values
             acceleration = momentum_short - momentum_medium
             current_acceleration = acceleration.iloc[-1] if len(acceleration) > 0 else 0
             
             # Acceleration percentile
-            acceleration_percentile = (acceleration <= current_acceleration).mean()
+            if len(acceleration) > 0:
+                acceleration_values = acceleration.values if hasattr(acceleration, 'values') else acceleration
+                acceleration_percentile = (acceleration_values <= current_acceleration).mean()
+            else:
+                acceleration_percentile = 0.5
             
             # Signal interpretation
             acceleration_magnitude = abs(current_acceleration)
@@ -917,10 +929,16 @@ class MeanReversionIndicators:
                 return indicators
             
             # Half-life of mean reversion
-            market_returns = returns.mean(axis=1) if returns.shape[1] > 1 else returns.iloc[:, 0]
+            market_returns = returns.iloc[:, 0] if returns.shape[1] > 0 else pd.Series()
             
-            # Autocorrelation as proxy for mean reversion
-            autocorr = market_returns.rolling(60).apply(lambda x: x.autocorr(lag=1)).iloc[-1] if len(market_returns) >= 60 else 0
+            # Autocorrelation as proxy for mean reversion - ensure we work with numeric values
+            if len(market_returns) >= 60:
+                # Convert to numeric values to avoid DatetimeArray issues
+                numeric_returns = market_returns.values if hasattr(market_returns, 'values') else market_returns
+                numeric_series = pd.Series(numeric_returns)
+                autocorr = numeric_series.rolling(60).apply(lambda x: x.autocorr(lag=1) if len(x) > 1 else 0).iloc[-1]
+            else:
+                autocorr = 0
             
             # Negative autocorrelation indicates mean reversion
             mean_reversion_strength = -autocorr if not np.isnan(autocorr) else 0
@@ -1368,7 +1386,11 @@ class RegimeIndicatorEngine:
         
         logger.info("✅ RegimeIndicatorEngine using centralized RegimeConfig (Rule 1, Section 7)")
         
-        # Initialize indicator calculators (simplified)
+        # Initialize indicator calculators
+        self.volatility_indicators = VolatilityRegimeIndicators(self.config)
+        self.momentum_indicators = MomentumRegimeIndicators(self.config)
+        self.mean_reversion_indicators = MeanReversionIndicators(self.config)
+        self.transition_detector = TransitionSignalDetector(self.config)
         
         # Indicator history
         self.indicator_history: List[Dict[str, RegimeIndicator]] = []

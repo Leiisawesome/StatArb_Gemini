@@ -510,7 +510,7 @@ class FactorAlphaStrategy(AlphaStrategy):
                 'value_factor': factor_exposures.get('book_to_market', 0),
                 'quality_factor': factor_exposures.get('quality_score', 0),
                 'volatility_factor': factor_exposures.get('volatility', 0),
-                'size_factor': np.log(market_cap),
+                'size_factor': np.log(market_cap) if market_cap > 0 else np.nan,
                 'price_momentum': (prices.iloc[-1] / prices.iloc[-21] - 1) if len(prices) >= 21 else 0,
                 'earnings_yield': context.get('fundamental_data', {}).get(symbol, {}).get('earnings_yield', 0.05),
                 'debt_to_equity': context.get('fundamental_data', {}).get(symbol, {}).get('debt_to_equity', 0.5)

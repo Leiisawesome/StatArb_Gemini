@@ -35,25 +35,24 @@ class TestDataConfig:
     def test_initialization(self):
         """Test DataConfig initialization with defaults."""
         config = DataConfig()
-        assert config.symbols is None
-        assert config.start_date == "2024-12-20"
-        assert config.end_date == "2024-12-20"
-        assert config.target_date is None
-        assert config.enable_caching is True
-        assert config.cache_ttl == 3600
+        assert config.symbols == ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
+        assert config.start_date is None
+        assert config.end_date is None
+        assert config.caching.enable_caching is True
+        assert config.caching.cache_ttl == 300
 
     def test_custom_initialization(self):
         """Test DataConfig initialization with custom values."""
         config = DataConfig(
             symbols=["AAPL", "GOOGL"],
-            target_date="2024-01-01",
-            enable_caching=False,
-            cache_ttl=7200
+            start_date="2024-01-01",
+            end_date="2024-01-31"
         )
         assert config.symbols == ["AAPL", "GOOGL"]
-        assert config.target_date == "2024-01-01"
-        assert config.enable_caching is False
-        assert config.cache_ttl == 7200
+        assert config.start_date == "2024-01-01"
+        assert config.end_date == "2024-01-31"
+        assert config.caching.enable_caching is True  # Default from CachingConfig
+        assert config.caching.cache_ttl == 300  # Default from CachingConfig
 
 
 class TestRiskConfig:
@@ -62,21 +61,23 @@ class TestRiskConfig:
     def test_initialization(self):
         """Test RiskConfig initialization with defaults."""
         config = RiskConfig()
-        assert config.max_position_size == 0.10
-        assert config.max_daily_var == 0.05
+        assert config.position_limits.max_position_size == 0.10
+        assert config.risk_limits.max_daily_var == 0.05
         assert config.auto_approval_threshold == 0.01
         assert config.elevated_review_threshold == 0.05
 
     def test_custom_initialization(self):
         """Test RiskConfig initialization with custom values."""
+        from core_engine.config.component_config import PositionLimits, RiskLimits
+        
         config = RiskConfig(
-            max_position_size=0.05,
-            max_daily_var=0.03,
+            position_limits=PositionLimits(max_position_size=0.05),
+            risk_limits=RiskLimits(max_daily_var=0.03),
             auto_approval_threshold=0.005,
             elevated_review_threshold=0.03
         )
-        assert config.max_position_size == 0.05
-        assert config.max_daily_var == 0.03
+        assert config.position_limits.max_position_size == 0.05
+        assert config.risk_limits.max_daily_var == 0.03
         assert config.auto_approval_threshold == 0.005
         assert config.elevated_review_threshold == 0.03
 

@@ -675,6 +675,101 @@ class EnhancedRegimeEngine(ISystemComponent):
                         'processing_timestamp': datetime.now()
                     }
             
+            elif isinstance(market_data, pd.DataFrame):
+                # Handle DataFrame input (for batch processing)
+                if market_data.empty:
+                    return {
+                        'market_data_processed': False,
+                        'error': 'Empty DataFrame provided',
+                        'processing_timestamp': datetime.now()
+                    }
+                
+                # Get symbol from DataFrame (assume single symbol)
+                symbol = market_data['symbol'].iloc[0] if 'symbol' in market_data.columns else 'UNKNOWN'
+                
+                # Process each row in the DataFrame
+                for _, row in market_data.iterrows():
+                    timestamp = row.get('timestamp', datetime.now())
+                    close = row.get('close', 0.0)
+                    high = row.get('high', close)
+                    low = row.get('low', close)
+                    volume = row.get('volume', 0)
+                    
+                    # Initialize symbol buffer if needed
+                    if symbol not in self.market_data_buffer:
+                        self.market_data_buffer[symbol] = {
+                            'close': [],
+                            'high': [],
+                            'low': [],
+                            'volume': [],
+                            'timestamp': []
+                        }
+                    
+                    # Add data to buffer
+                    buffer = self.market_data_buffer[symbol]
+                    buffer['close'].append(close)
+                    buffer['high'].append(high)
+                    buffer['low'].append(low)
+                    buffer['volume'].append(volume)
+                    buffer['timestamp'].append(timestamp)
+                    
+                    # Keep buffer size manageable (last N points)
+                    max_buffer_size = self.config.lookback_window * 2  # Keep 2x lookback for safety
+                    if len(buffer['close']) > max_buffer_size:
+                        for key in buffer:
+                            buffer[key] = buffer[key][-max_buffer_size:]
+                
+                # After processing all rows, analyze the regime
+                if len(self.market_data_buffer[symbol]['close']) >= self.config.lookback_window:
+                    # Calculate regime indicators
+                    regime_indicators = self._calculate_regime_indicators(symbol)
+                    
+                    # Classify regime
+                    new_regime = self._classify_regime(symbol, regime_indicators)
+                    
+                    # Check for regime change
+                    regime_changed = False
+                    if new_regime and self.current_regime is not None:
+                        if self.current_regime.primary_regime != new_regime.primary_regime:
+                            regime_changed = True
+                            self.logger.info(f"Regime change detected for {symbol}: {self.current_regime.primary_regime.value} -> {new_regime.primary_regime.value}")
+                    
+                    # Update current regime
+                    if new_regime:
+                        self.current_regime = new_regime
+                        self.regime_history.append(new_regime)
+                        
+                        # Keep regime history manageable
+                        if len(self.regime_history) > 1000:
+                            self.regime_history = self.regime_history[-1000:]
+                    
+                    # Update metrics
+                    self.health_metrics['performance_metrics']['total_regime_analyses'] += 1
+                    self.health_metrics['performance_metrics']['successful_regime_analyses'] += 1
+                    if regime_changed:
+                        self.health_metrics['performance_metrics']['regime_changes_detected'] += 1
+                    
+                    return {
+                        'market_data_processed': True,
+                        'symbol': symbol,
+                        'regime_detected': new_regime.primary_regime.value if new_regime else None,
+                        'regime_changed': regime_changed,
+                        'confidence': new_regime.confidence if new_regime else 0.0,
+                        'buffer_size': len(self.market_data_buffer[symbol]['close']),
+                        'processing_timestamp': datetime.now()
+                    }
+                else:
+                    # Not enough data yet
+                    return {
+                        'market_data_processed': True,
+                        'symbol': symbol,
+                        'regime_detected': None,
+                        'regime_changed': False,
+                        'buffer_size': len(self.market_data_buffer[symbol]['close']),
+                        'required_size': self.config.lookback_window,
+                        'processing_timestamp': datetime.now()
+                    }
+            
             else:
                 self.logger.warning(f"Unexpected market_data type: {type(market_data)}")
                 return {

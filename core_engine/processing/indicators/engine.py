@@ -245,10 +245,10 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         Args:
             new_regime_context: New regime context with updated information (RegimeContext or compatible object)
         """
-        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (self.current_regime.primary_regime if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None)
         self.current_regime = new_regime_context
         
-        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
+        regime_name = new_regime_context.primary_regime.value if (hasattr(new_regime_context, 'primary_regime') and hasattr(new_regime_context.primary_regime, 'value')) else (new_regime_context.primary_regime if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context))
         self.logger.info(f"🔄 Indicators adapting to regime change: {previous_regime} → {regime_name}")
         
         # Adapt indicator parameters based on regime
@@ -281,14 +281,14 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         """
         adaptations = {
             'timestamp': datetime.now().isoformat(),
-            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
-            'new_regime': str(regime_context.primary_regime.value) if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else 'unknown',
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (str(self.current_regime.primary_regime) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None),
+            'new_regime': str(regime_context.primary_regime.value) if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (str(regime_context.primary_regime) if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else 'unknown'),
             'adjustments': [],
             'success': True
         }
         
         try:
-            regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else str(regime_context)
+            regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value') and regime_context.primary_regime is not None) else (regime_context.primary_regime if (hasattr(regime_context, 'primary_regime') and regime_context.primary_regime is not None) else str(regime_context))
             volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
             
             # Adapt Bollinger Bands based on volatility
@@ -679,7 +679,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         # Rate of Change
         for period in [1, 5, 10]:
             if len(df) > period:
-                df[f'roc_{period}'] = df['close'].pct_change(period) * 100
+                df[f'roc_{period}'] = df['close'].pct_change(period, fill_method=None) * 100
         
         return df
     
@@ -703,7 +703,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         # Historical Volatility
         for period in [10, 20, 30]:
             if len(df) > period:
-                returns = df['close'].pct_change()
+                returns = df['close'].pct_change(fill_method=None)
                 df[f'volatility_{period}'] = returns.rolling(window=period).std() * np.sqrt(252)  # Annualized
         
         return df
@@ -720,7 +720,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         
         # Volume-Price Trend (VPT)
         if len(df) > 1:
-            price_change = df['close'].pct_change()
+            price_change = df['close'].pct_change(fill_method=None)
             df['vpt'] = (price_change * df['volume']).cumsum()
         
         # On-Balance Volume (OBV)
@@ -1439,7 +1439,7 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
             
             for symbol, df in macro_data.items():
                 if df is not None and not df.empty and len(df) >= 20:
-                    returns = df['close'].pct_change().dropna()
+                    returns = df['close'].pct_change(fill_method=None).dropna()
                     if len(returns) >= 10:
                         returns_data[symbol] = returns.tail(20)
             

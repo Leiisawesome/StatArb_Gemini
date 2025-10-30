@@ -66,11 +66,10 @@ class TestVolatilityRegimeIndicators:
         prices = base_price * np.exp(np.cumsum(returns))
 
         data = pd.DataFrame({
-            'timestamp': dates,
             'close': prices,
             'high': prices * (1 + np.random.uniform(0.005, 0.02, 200)),
             'low': prices * (1 - np.random.uniform(0.005, 0.02, 200))
-        })
+        }, index=dates)
 
         return data
 

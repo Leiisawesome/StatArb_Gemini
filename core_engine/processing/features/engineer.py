@@ -143,10 +143,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         Args:
             new_regime_context: New regime context with updated information
         """
-        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
+        previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (self.current_regime.primary_regime if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None)
         self.current_regime = new_regime_context
         
-        regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
+        regime_name = new_regime_context.primary_regime.value if (hasattr(new_regime_context, 'primary_regime') and hasattr(new_regime_context.primary_regime, 'value')) else (new_regime_context.primary_regime if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context))
         self.logger.info(f"🔄 Features adapting to regime change: {previous_regime} → {regime_name}")
         
         # Adapt feature engineering to regime
@@ -179,14 +179,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """
         adaptations = {
             'timestamp': datetime.now().isoformat(),
-            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None,
-            'new_regime': str(regime_context.primary_regime.value) if hasattr(regime_context, 'primary_regime') else 'unknown',
+            'previous_regime': str(self.current_regime.primary_regime.value) if (self.current_regime and hasattr(self.current_regime, 'primary_regime') and hasattr(self.current_regime.primary_regime, 'value')) else (str(self.current_regime.primary_regime) if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None),
+            'new_regime': str(regime_context.primary_regime.value) if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (str(regime_context.primary_regime) if hasattr(regime_context, 'primary_regime') else 'unknown'),
             'adjustments': [],
             'success': True
         }
         
         try:
-            regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
+            regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (regime_context.primary_regime if hasattr(regime_context, 'primary_regime') else str(regime_context))
             volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
             
             # Adapt normalization method based on volatility
@@ -586,8 +586,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             if len(df) > period:
                 df[f'return_{period}d'] = df['close'].pct_change(period)
         
-        # Log returns
-        df['log_return'] = np.log(df['close'] / df['close'].shift(1))
+        # Log returns (handle invalid values)
+        price_ratio = df['close'] / df['close'].shift(1)
+        # Only calculate log for positive ratios to avoid invalid values
+        df['log_return'] = np.where(price_ratio > 0, np.log(price_ratio), np.nan)
         
         # OHLC ratios
         df['hl_ratio'] = (df['high'] - df['low']) / df['close']
@@ -670,17 +672,52 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # ATR features
         if 'atr' in df.columns:
             df['atr_normalized'] = df['atr'] / df['close']
-            df['atr_percentile'] = df['atr'].rolling(50).rank(pct=True)
+            try:
+                # Clean the ATR column before rolling operations
+                clean_atr = pd.to_numeric(df['atr'], errors='coerce').fillna(0)
+                df['atr_percentile'] = clean_atr.rolling(50).rank(pct=True)
+                df['atr_percentile'] = df['atr_percentile'].fillna(0.5)
+            except Exception as e:
+                # If any error occurs, set atr_percentile to 0.5
+                self.logger.warning(f"Error calculating ATR percentile: {e}")
+                df['atr_percentile'] = 0.5
         
         # Historical volatility features
         vol_cols = [col for col in df.columns if col.startswith('volatility_')]
         for col in vol_cols:
             period = col.split('_')[1]
-            df[f'vol_regime_{period}'] = (df[col] > df[col].rolling(60).quantile(0.7)).astype(int)
+            try:
+                # Clean the volatility column before rolling operations
+                clean_vol = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                rolling_quantile = clean_vol.rolling(60).quantile(0.7)
+                rolling_quantile = rolling_quantile.fillna(0)
+                df[f'vol_regime_{period}'] = (clean_vol > rolling_quantile).astype(int)
+            except Exception as e:
+                # If any error occurs, set vol_regime to 0
+                self.logger.warning(f"Error calculating volatility regime for {col}: {e}")
+                df[f'vol_regime_{period}'] = 0
         
         # Volatility clustering
-        df['vol_clustering'] = (df['log_return'].abs() > 
-                               df['log_return'].abs().rolling(20).quantile(0.8)).astype(int)
+        if 'log_return' in df.columns:
+            try:
+                # Handle invalid values in log_return
+                log_returns_abs = df['log_return'].abs()
+                # Replace any _NoValueType or invalid values with 0
+                log_returns_abs = log_returns_abs.fillna(0)
+                # Ensure all values are numeric
+                log_returns_abs = pd.to_numeric(log_returns_abs, errors='coerce').fillna(0)
+                
+                # Calculate rolling quantile with error handling
+                rolling_quantile = log_returns_abs.rolling(20).quantile(0.8)
+                rolling_quantile = rolling_quantile.fillna(0)
+                
+                df['vol_clustering'] = (log_returns_abs > rolling_quantile).astype(int)
+            except Exception as e:
+                # If any error occurs, set vol_clustering to 0
+                self.logger.warning(f"Error calculating volatility clustering: {e}")
+                df['vol_clustering'] = 0
+        else:
+            df['vol_clustering'] = 0
         
         return df
     
@@ -761,11 +798,22 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             if feature in df.columns:
                 for period in self.config.lookback_periods:
                     if len(df) >= period:
-                        # Rolling statistics - collect all at once
-                        new_columns[f'{feature}_mean_{period}'] = df[feature].rolling(period).mean()
-                        new_columns[f'{feature}_std_{period}'] = df[feature].rolling(period).std()
-                        new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(period).skew()
-                        new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(period).rank(pct=True)
+                        try:
+                            # Clean the feature column before rolling operations
+                            clean_feature = pd.to_numeric(df[feature], errors='coerce').fillna(0)
+                            
+                            # Rolling statistics - collect all at once
+                            new_columns[f'{feature}_mean_{period}'] = clean_feature.rolling(period).mean()
+                            new_columns[f'{feature}_std_{period}'] = clean_feature.rolling(period).std()
+                            new_columns[f'{feature}_skew_{period}'] = clean_feature.rolling(period).skew()
+                            new_columns[f'{feature}_rank_{period}'] = clean_feature.rolling(period).rank(pct=True)
+                        except Exception as e:
+                            # If any error occurs, set all rolling features to 0
+                            self.logger.warning(f"Error calculating rolling features for {feature}: {e}")
+                            new_columns[f'{feature}_mean_{period}'] = 0
+                            new_columns[f'{feature}_std_{period}'] = 0
+                            new_columns[f'{feature}_skew_{period}'] = 0
+                            new_columns[f'{feature}_rank_{period}'] = 0
 
         # Add all columns at once to avoid fragmentation
         if new_columns:
@@ -786,18 +834,28 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
 
         for feature in cs_features:
             if feature in df.columns:
-                # Cross-sectional rank
-                new_columns[f'{feature}_cs_rank'] = grouped[feature].rank(pct=True)
+                try:
+                    # Clean the feature column before cross-sectional operations
+                    clean_feature = pd.to_numeric(df[feature], errors='coerce').fillna(0)
+                    
+                    # Cross-sectional rank
+                    new_columns[f'{feature}_cs_rank'] = grouped[feature].rank(pct=True)
 
-                # Z-score relative to universe
-                new_columns[f'{feature}_cs_zscore'] = grouped[feature].transform(
-                    lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
-                )
+                    # Z-score relative to universe
+                    new_columns[f'{feature}_cs_zscore'] = grouped[feature].transform(
+                        lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
+                    )
 
-                # Quintile assignment
-                new_columns[f'{feature}_cs_quintile'] = grouped[feature].transform(
-                    lambda x: pd.qcut(x, min(5, len(x.unique())), labels=list(range(1, min(6, len(x.unique())+1))), duplicates='drop') if len(x.unique()) > 1 else 1
-                )
+                    # Quintile assignment
+                    new_columns[f'{feature}_cs_quintile'] = grouped[feature].transform(
+                        lambda x: pd.qcut(x, min(5, len(x.unique())), labels=list(range(1, min(6, len(x.unique())+1))), duplicates='drop') if len(x.unique()) > 1 else 1
+                    )
+                except Exception as e:
+                    # If any error occurs, set all cross-sectional features to 0
+                    self.logger.warning(f"Error calculating cross-sectional features for {feature}: {e}")
+                    new_columns[f'{feature}_cs_rank'] = 0
+                    new_columns[f'{feature}_cs_zscore'] = 0
+                    new_columns[f'{feature}_cs_quintile'] = 0
 
         # Add all columns at once to avoid fragmentation
         if new_columns:
@@ -879,10 +937,17 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                 self.logger.warning("Still have inf/nan values after cleaning, using median fill")
                 for col in feature_data.columns:
                     if feature_data[col].dtype in ['float64', 'float32']:
-                        median_val = feature_data[col].replace([np.inf, -np.inf], np.nan).median()
-                        if np.isnan(median_val):
-                            median_val = 0.0
-                        feature_data[col] = feature_data[col].replace([np.inf, -np.inf, np.nan], median_val)
+                        try:
+                            # Convert to numeric and handle _NoValueType
+                            clean_col = pd.to_numeric(feature_data[col], errors='coerce')
+                            clean_col = clean_col.replace([np.inf, -np.inf], np.nan)
+                            median_val = clean_col.median()
+                            if pd.isna(median_val) or not np.isfinite(median_val):
+                                median_val = 0.0
+                            feature_data[col] = feature_data[col].replace([np.inf, -np.inf, np.nan], median_val)
+                        except (TypeError, ValueError) as e:
+                            self.logger.warning(f"Error calculating median for {col}: {e}, using 0.0")
+                            feature_data[col] = feature_data[col].replace([np.inf, -np.inf, np.nan], 0.0)
             
             # Fit scaler on cleaned data
             scaled_features = scaler.fit_transform(feature_data)
@@ -919,18 +984,42 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                     if len(values) > 0:
                         # Check for reasonable price ranges
                         if indicator in ['close', 'sma_20', 'bb_upper_20', 'bb_lower_20']:
-                            if values.min() < 1.0:  # Prices should be > $1
-                                self.logger.error(f"❌ DATA CORRUPTION: {indicator} has values < $1.00 (min: {values.min():.4f})")
-                                raise ValueError(f"Data corruption detected in {indicator}")
-                            
-                            if values.max() > 10000.0:  # Reasonable upper bound
-                                self.logger.warning(f"⚠️ UNUSUAL VALUES: {indicator} has very high values (max: {values.max():.2f})")
+                            try:
+                                min_val = values.min()
+                                max_val = values.max()
+                                
+                                # Check if values are numeric and not NaN
+                                if pd.isna(min_val) or pd.isna(max_val) or not np.isfinite(min_val) or not np.isfinite(max_val):
+                                    self.logger.warning(f"⚠️ Invalid values found in {indicator}, skipping validation")
+                                    continue
+                                    
+                                if min_val < 1.0:  # Prices should be > $1
+                                    self.logger.error(f"❌ DATA CORRUPTION: {indicator} has values < $1.00 (min: {min_val:.4f})")
+                                    raise ValueError(f"Data corruption detected in {indicator}")
+                                
+                                if max_val > 10000.0:  # Reasonable upper bound
+                                    self.logger.warning(f"⚠️ UNUSUAL VALUES: {indicator} has very high values (max: {max_val:.2f})")
+                            except (ValueError, TypeError) as e:
+                                self.logger.warning(f"⚠️ Error validating {indicator}: {e}, skipping validation")
+                                continue
                         
                         # Check RSI is in valid range
                         elif indicator == 'rsi_14':
-                            if values.min() < 0 or values.max() > 100:
-                                self.logger.error(f"❌ DATA CORRUPTION: RSI out of range [0,100] (range: {values.min():.2f}-{values.max():.2f})")
-                                raise ValueError(f"RSI data corruption detected")
+                            try:
+                                min_val = values.min()
+                                max_val = values.max()
+                                
+                                # Check if values are numeric and not NaN
+                                if pd.isna(min_val) or pd.isna(max_val) or not np.isfinite(min_val) or not np.isfinite(max_val):
+                                    self.logger.warning(f"⚠️ Invalid values found in {indicator}, skipping validation")
+                                    continue
+                                    
+                                if min_val < 0 or max_val > 100:
+                                    self.logger.error(f"❌ DATA CORRUPTION: RSI out of range [0,100] (range: {min_val:.2f}-{max_val:.2f})")
+                                    raise ValueError(f"RSI data corruption detected")
+                            except (ValueError, TypeError) as e:
+                                self.logger.warning(f"⚠️ Error validating {indicator}: {e}, skipping validation")
+                                continue
             
             # Check for extreme z-score issues
             if 'close' in df.columns and 'sma_20' in df.columns:

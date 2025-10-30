@@ -29,7 +29,7 @@ from core_engine.regime.market_regime_analyzer import (
     SectorRotationAnalyzer,
     MarketRegimeAnalyzer
 )
-from core_engine.config.component_config import RegimeConfig as RegimeAnalysisConfig
+from core_engine.regime.regime_detector import RegimeAnalysisConfig
 
 
 from core_engine.regime.regime_detector import (
@@ -226,18 +226,18 @@ class TestEnhancedRegimeEngine:
     @pytest.fixture
     def sample_market_data(self):
         """Create sample market data for testing."""
-        dates = pd.date_range('2023-01-01', periods=200, freq='D')
+        dates = pd.date_range('2023-01-01', periods=300, freq='D')  # Increased to 300 days
         np.random.seed(42)
 
         data = pd.DataFrame({
             'timestamp': dates,
-            'symbol': ['AAPL'] * 200,
-            'close': 100 + np.cumsum(np.random.randn(200) * 0.5),
-            'high': 102 + np.cumsum(np.random.randn(200) * 0.5),
-            'low': 98 + np.cumsum(np.random.randn(200) * 0.5),
-            'volume': np.random.randint(1000, 10000, 200),
-            'returns': np.random.randn(200) * 0.02,
-            'volatility': np.random.uniform(0.1, 0.5, 200)
+            'symbol': ['AAPL'] * 300,  # Updated to match periods
+            'close': 100 + np.cumsum(np.random.randn(300) * 0.5),  # Updated to match periods
+            'high': 102 + np.cumsum(np.random.randn(300) * 0.5),   # Updated to match periods
+            'low': 98 + np.cumsum(np.random.randn(300) * 0.5),     # Updated to match periods
+            'volume': np.random.randint(1000, 10000, 300),         # Updated to match periods
+            'returns': np.random.randn(300) * 0.02,                # Updated to match periods
+            'volatility': np.random.uniform(0.1, 0.5, 300)         # Updated to match periods
         })
 
         return data
@@ -765,15 +765,15 @@ class TestMarketRegimeAnalyzer:
     @pytest.fixture
     def sample_market_data(self):
         """Create sample market data for testing."""
-        dates = pd.date_range('2023-01-01', periods=200, freq='D')
+        dates = pd.date_range('2023-01-01', periods=300, freq='D')  # Increased to 300 days
         np.random.seed(42)
 
         data = pd.DataFrame({
             'timestamp': dates,
-            'SPY': 400 + np.cumsum(np.random.randn(200) * 1.0),  # Market index
-            'VIX': 20 + np.random.randn(200) * 5,  # Volatility index
-            'DXY': 100 + np.random.randn(200) * 2,  # Dollar index
-            'TNX': 4.0 + np.random.randn(200) * 0.5,  # Treasury yield
+            'SPY': 400 + np.cumsum(np.random.randn(300) * 1.0),  # Market index - Updated to match periods
+            'VIX': 20 + np.random.randn(300) * 5,  # Volatility index - Updated to match periods
+            'DXY': 100 + np.random.randn(300) * 2,  # Dollar index - Updated to match periods
+            'TNX': 4.0 + np.random.randn(300) * 0.5,  # Treasury yield - Updated to match periods
         })
 
         return data

@@ -145,8 +145,8 @@ class TestPriority2_SystemConfiguration:
             position_limits=PositionLimits(max_position_size=0.20)
         )
         custom_data = DataConfig(
-            target_date="2024-12-25",
-            enable_caching=False
+            start_date="2024-12-25",
+            end_date="2024-12-25"
         )
         
         sys_config = SystemConfiguration(
@@ -156,8 +156,9 @@ class TestPriority2_SystemConfiguration:
         
         # Verify custom values
         assert sys_config.risk_manager_config.position_limits.max_position_size == 0.20
-        assert sys_config.data_manager_config.target_date == "2024-12-25"
-        assert sys_config.data_manager_config.enable_caching is False
+        assert sys_config.data_manager_config.start_date == "2024-12-25"
+        assert sys_config.data_manager_config.end_date == "2024-12-25"
+        assert sys_config.data_manager_config.caching.enable_caching is True  # Default from CachingConfig
         
         print("✅ Test 2.2 passed: Custom typed configs work")
     
