@@ -13,7 +13,6 @@ Test Coverage:
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
 from core_engine.system.compliance_checker import (
     PreTradeComplianceChecker,

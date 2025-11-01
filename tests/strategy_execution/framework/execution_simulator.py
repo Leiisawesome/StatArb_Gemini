@@ -28,11 +28,10 @@ Version: 1.0.0
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-import asyncio
 
 # Import strategy components
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType

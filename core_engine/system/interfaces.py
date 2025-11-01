@@ -157,7 +157,6 @@ class IRegimeAware(ABC):
         Args:
             regime_engine: EnhancedRegimeEngine instance
         """
-        pass
     
     @abstractmethod
     async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
@@ -169,7 +168,6 @@ class IRegimeAware(ABC):
         Args:
             new_regime_context: New regime context with updated information
         """
-        pass
     
     @abstractmethod
     def get_current_regime_context(self) -> Optional[RegimeContext]:
@@ -179,7 +177,6 @@ class IRegimeAware(ABC):
         Returns:
             Current RegimeContext or None if not available
         """
-        pass
     
     @abstractmethod
     async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
@@ -192,7 +189,6 @@ class IRegimeAware(ABC):
         Returns:
             Dictionary with adaptation details and adjustments made
         """
-        pass
     
     @abstractmethod
     def validate_regime_dependency(self) -> bool:
@@ -202,4 +198,3 @@ class IRegimeAware(ABC):
         Returns:
             True if regime engine is properly configured, False otherwise
         """
-        pass

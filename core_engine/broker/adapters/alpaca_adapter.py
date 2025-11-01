@@ -6,7 +6,6 @@ Real broker integration for Alpaca Markets using alpaca-py SDK
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 # Alpaca SDK imports
 from alpaca.trading.client import TradingClient
@@ -18,7 +17,6 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import (
     OrderSide,
     TimeInForce,
-    OrderType,
     OrderStatus as AlpacaOrderStatus
 )
 from alpaca.data.historical import StockHistoricalDataClient
@@ -28,7 +26,6 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from core_engine.config.broker_config import AlpacaConfig
 from core_engine.type_definitions.broker_types import (
-    TimeInForce as SystemTimeInForce,
     Position,
     AccountInfo
 )

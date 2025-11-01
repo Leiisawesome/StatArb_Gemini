@@ -22,12 +22,11 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import json
@@ -35,7 +34,7 @@ import os
 
 # Import strategy components
 from core_engine.trading.strategies.strategy_engine import (
-    StrategySignal, SignalType, StrategyConfig, StrategyType
+    StrategySignal, SignalType, StrategyConfig
 )
 from core_engine.system.interfaces import ISystemComponent
 
@@ -626,7 +625,7 @@ class SignalValidator:
                 return 0.5
 
             df = market_data[symbol]
-            signal_time = signal.timestamp
+            signal.timestamp
 
             # Simple regime detection based on recent volatility and trend
             recent_volatility = df['close'].pct_change().std()

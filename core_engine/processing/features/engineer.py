@@ -13,8 +13,7 @@ Version: 1.0.0 (Feature Engineering)
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Any, Union
 from sklearn.preprocessing import StandardScaler, RobustScaler
 import warnings
 import threading
@@ -23,8 +22,7 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-from core_engine.exceptions import ConfigurationRequiredError
+from ...system.interfaces import ISystemComponent, IRegimeAware
 
 logger = logging.getLogger(__name__)
 
@@ -485,62 +483,95 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             self.logger.warning(f"Engine health check failed: {e}")
             return False
     
-    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def create_features(self, data: Union[Dict[str, pd.DataFrame], pd.DataFrame]) -> Union[Dict[str, pd.DataFrame], pd.DataFrame]:
         """
-        Create trading features from indicators DataFrame
+        Create trading features for multiple symbols or a single DataFrame.
+
+        Args:
+            data: Dictionary where keys are symbols and values are DataFrames with indicators,
+                  OR a single DataFrame with indicators.
+
+        Returns:
+            Dictionary where keys are symbols and values are DataFrames with engineered features,
+            OR a single DataFrame with engineered features.
+        """
+        # Handle single DataFrame input
+        if isinstance(data, pd.DataFrame):
+            return self._create_features_for_single_df(data)
+        
+        # Handle dictionary input
+        result = {}
+
+        for symbol, df in data.items():
+            if df.empty:
+                self.logger.warning(f"Data for {symbol} is empty. Skipping feature creation.")
+                continue
+
+            if 'timestamp' not in df.columns:
+                self.logger.error(f"Data for {symbol} must have a 'timestamp' column. Skipping feature creation.")
+                continue
+
+            df = df.sort_values('timestamp')
+
+            if len(df) < 10:
+                self.logger.warning(f"Insufficient data for {symbol}. Skipping feature creation.")
+                continue
+
+            # Create features for this symbol
+            df = self._create_symbol_features(df)
+
+            # Create cross-sectional features if enabled
+            if self.config.enable_cross_sectional:
+                df = self._create_cross_sectional_features(df)
+
+            # Normalize features if enabled
+            if self.config.use_normalization:
+                df = self._normalize_features(df)
+
+            result[symbol] = df
+
+        return result
+    
+    def _create_features_for_single_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create features for a single DataFrame.
         
         Args:
-            df: DataFrame with indicators (from TechnicalIndicators)
+            df: Single DataFrame with indicators
             
         Returns:
             DataFrame with engineered features
         """
+        # Handle empty DataFrame
         if df.empty:
-            return df
-        
-        # Ensure timestamp column exists (handle both column and index formats)
-        df_copy = df.copy()
-        if 'timestamp' not in df_copy.columns and df_copy.index.name == 'timestamp':
-            df_copy = df_copy.reset_index()
-        elif 'timestamp' not in df_copy.columns:
-            self.logger.error("DataFrame must have 'timestamp' column or index")
-            return df
-        
-        self.logger.info(f"Creating features for {len(df_copy['symbol'].unique())} symbols")
-        
-        # Process each symbol separately, then combine
-        result_dfs = []
-        
-        for symbol in df_copy['symbol'].unique():
-            symbol_df = df_copy[df_copy['symbol'] == symbol].copy().sort_values('timestamp')
-            
-            if len(symbol_df) < 10:  # Need minimum data for feature engineering
-                self.logger.warning(f"Insufficient data for {symbol}, skipping feature engineering")
-                continue
-            
-            # Create features for this symbol
-            symbol_df = self._create_symbol_features(symbol_df)
-            result_dfs.append(symbol_df)
-        
-        if not result_dfs:
+            self.logger.warning("DataFrame is empty. Returning empty DataFrame.")
             return pd.DataFrame()
         
-        # Combine all symbols
-        result = pd.concat(result_dfs, ignore_index=True)
+        # Handle missing timestamp
+        if 'timestamp' not in df.columns:
+            self.logger.error("DataFrame must have a 'timestamp' column. Returning empty DataFrame.")
+            return pd.DataFrame()
         
-        # Create cross-sectional features
+        # Handle insufficient data
+        if len(df) < 10:
+            self.logger.warning(f"Insufficient data (only {len(df)} rows). Returning original DataFrame.")
+            return df.copy()
+        
+        # Sort by timestamp
+        df = df.sort_values('timestamp').copy()
+        
+        # Create features for this symbol
+        df = self._create_symbol_features(df)
+
+        # Create cross-sectional features if enabled
         if self.config.enable_cross_sectional:
-            result = self._create_cross_sectional_features(result)
-        
-        # Normalize features
+            df = self._create_cross_sectional_features(df)
+
+        # Normalize features if enabled
         if self.config.use_normalization:
-            result = self._normalize_features(result)
-        
-        # Store feature metadata
-        self._update_feature_metadata(result)
-        
-        self.logger.info(f"Created {len(self.feature_columns)} features for {len(result)} records")
-        return result
+            df = self._normalize_features(df)
+
+        return df
     
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -769,9 +800,16 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return df
     
     def _create_lag_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create lagged features for temporal patterns"""
-        # Key features to lag
-        key_features = ['return_1d', 'rsi', 'volume_change', 'atr_normalized']
+        """
+        Create lagged features for temporal patterns.
+
+        Args:
+            df: DataFrame with input data.
+
+        Returns:
+            DataFrame with lagged features added.
+        """
+        key_features = ['close', 'return_1d', 'volume_change', 'hl_ratio']
 
         # Collect all new columns to avoid fragmentation
         new_columns = {}
@@ -779,7 +817,11 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         for feature in key_features:
             if feature in df.columns:
                 for lag in self.config.lag_periods:
-                    new_columns[f'{feature}_lag_{lag}'] = df[feature].shift(lag)
+                    try:
+                        new_columns[f'{feature}_lag_{lag}'] = df[feature].shift(lag)
+                    except Exception as e:
+                        self.logger.warning(f"Error creating lag feature {feature}_lag_{lag}: {e}")
+                        new_columns[f'{feature}_lag_{lag}'] = np.nan
 
         # Add all columns at once to avoid fragmentation
         if new_columns:
@@ -788,32 +830,30 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return df
     
     def _create_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create rolling statistics features"""
-        base_features = ['return_1d', 'volume_change', 'hl_ratio']
+        """
+        Create rolling features for temporal patterns.
+
+        Args:
+            df: DataFrame with input data.
+
+        Returns:
+            DataFrame with rolling features added.
+        """
+        key_features = ['close', 'return_1d', 'volume_change', 'hl_ratio']
 
         # Collect all new columns to avoid fragmentation
         new_columns = {}
 
-        for feature in base_features:
+        for feature in key_features:
             if feature in df.columns:
                 for period in self.config.lookback_periods:
-                    if len(df) >= period:
-                        try:
-                            # Clean the feature column before rolling operations
-                            clean_feature = pd.to_numeric(df[feature], errors='coerce').fillna(0)
-                            
-                            # Rolling statistics - collect all at once
-                            new_columns[f'{feature}_mean_{period}'] = clean_feature.rolling(period).mean()
-                            new_columns[f'{feature}_std_{period}'] = clean_feature.rolling(period).std()
-                            new_columns[f'{feature}_skew_{period}'] = clean_feature.rolling(period).skew()
-                            new_columns[f'{feature}_rank_{period}'] = clean_feature.rolling(period).rank(pct=True)
-                        except Exception as e:
-                            # If any error occurs, set all rolling features to 0
-                            self.logger.warning(f"Error calculating rolling features for {feature}: {e}")
-                            new_columns[f'{feature}_mean_{period}'] = 0
-                            new_columns[f'{feature}_std_{period}'] = 0
-                            new_columns[f'{feature}_skew_{period}'] = 0
-                            new_columns[f'{feature}_rank_{period}'] = 0
+                    try:
+                        new_columns[f'{feature}_mean_{period}'] = df[feature].rolling(window=period).mean()
+                        new_columns[f'{feature}_std_{period}'] = df[feature].rolling(window=period).std()
+                        new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(window=period).skew()
+                        new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(window=period).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+                    except Exception as e:
+                        self.logger.warning(f"Error creating rolling feature {feature} for period {period}: {e}")
 
         # Add all columns at once to avoid fragmentation
         if new_columns:
@@ -1050,7 +1090,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             return pd.DataFrame()
         
         # Calculate correlations
-        feature_cols = [col for col in self.feature_columns if col != target_col]
+        # Use feature_columns if populated, otherwise derive from df
+        if self.feature_columns:
+            feature_cols = [col for col in self.feature_columns if col != target_col]
+        else:
+            # Derive feature columns from DataFrame
+            metadata_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
+            feature_cols = [col for col in df.columns if col not in metadata_cols and col != target_col]
+        
         correlations = []
         
         for col in feature_cols:
@@ -1061,6 +1108,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                     'correlation': corr,
                     'abs_correlation': abs(corr) if not pd.isna(corr) else 0
                 })
+        
+        if not correlations:
+            return pd.DataFrame()
         
         importance_df = pd.DataFrame(correlations)
         importance_df = importance_df.sort_values('abs_correlation', ascending=False)

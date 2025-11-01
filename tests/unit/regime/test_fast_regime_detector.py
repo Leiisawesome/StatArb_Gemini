@@ -6,7 +6,6 @@ VIX spikes, market breadth, order book imbalance, volatility spikes.
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import Mock, AsyncMock, patch
 

@@ -26,9 +26,8 @@ Date: October 28, 2025
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
+from typing import Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,6 @@ logger = logging.getLogger(__name__)
 from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage import (
     EnhancedArbitrageStrategy, ArbitrageConfig, ArbitrageType
 )
-from core_engine.config.strategies import ArbitrageConfig as CentralizedArbitrageConfig
-from core_engine.config.component_config import PositionLimits, RiskLimits
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 from tests.strategy_execution.framework.strategy_test_engine import StrategyTestEngine
 from tests.strategy_execution.framework.signal_validator import SignalValidator

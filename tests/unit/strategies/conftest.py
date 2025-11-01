@@ -13,15 +13,10 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
-from unittest.mock import Mock, AsyncMock, MagicMock
+from typing import Dict, Any
+from unittest.mock import Mock, AsyncMock
 
 # Import all strategy configs
-from core_engine.config import (
-    MomentumConfig, MeanReversionConfig, StatisticalArbitrageConfig,
-    TrendFollowingConfig, PairsConfig, FactorConfig, MultiAssetConfig,
-    BreakoutConfig, VolatilityConfig, ArbitrageConfig
-)
 
 # Import type definitions
 from core_engine.type_definitions.strategy import TradingSignal
@@ -220,7 +215,7 @@ class BaseStrategyTest:
         assert strategy.regime_engine is not None
         
         # Verify regime context access
-        regime_context = strategy.get_current_regime_context()
+        strategy.get_current_regime_context()
         # May be None initially, which is okay
         
         # Test regime change handling

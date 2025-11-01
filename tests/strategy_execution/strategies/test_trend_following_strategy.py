@@ -26,12 +26,11 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict
 import logging
 
 # Import testing framework
@@ -45,7 +44,6 @@ from tests.strategy_execution.framework import (
 
 # Import strategy components
 from core_engine.trading.strategies.implementations.trend_following.enhanced_trend_following import EnhancedTrendFollowingStrategy, TrendFollowingConfig
-from core_engine.trading.strategies.strategy_engine import StrategyConfig, StrategyType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -540,11 +538,11 @@ class TestTrendFollowingStrategyExecution:
         if signals:
             # Validate signals
             signal_validator = SignalValidator()
-            quality_result = await signal_validator.validate_signals(signals)
+            await signal_validator.validate_signals(signals)
 
             # Simulate execution
             execution_simulator = ExecutionSimulator()
-            execution_result = await execution_simulator.simulate_execution(signals, test_config)
+            await execution_simulator.simulate_execution(signals, test_config)
 
             # Attribute performance
             mock_trades = [
@@ -560,7 +558,7 @@ class TestTrendFollowingStrategyExecution:
             ]
 
             attributor = PerformanceAttributor()
-            attribution_result = await attributor.attribute_performance(mock_trades, "trend_following_test")
+            await attributor.attribute_performance(mock_trades, "trend_following_test")
 
             logger.info("End-to-end pipeline test completed successfully")
         else:

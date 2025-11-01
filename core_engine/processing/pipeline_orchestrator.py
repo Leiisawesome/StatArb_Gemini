@@ -17,14 +17,12 @@ Status: Production
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 import pandas as pd
 from datetime import datetime
-import asyncio
 
 from core_engine.system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-from core_engine.exceptions import ConfigurationRequiredError
 
 # Import will be available after components exist
 from core_engine.data.manager import ClickHouseDataManager
@@ -101,12 +99,16 @@ class EnrichedMarketData:
         Returns:
             True if data has all required stages
         """
+        # Check for required OHLCV columns - prefer signals (fully enriched) but fallback to raw_data
+        target_df = self.signals if not self.signals.empty else self.raw_data
+        required_ohlcv = ['open', 'high', 'low', 'close', 'volume']
+        
         checks = {
             'has_raw_data': not self.raw_data.empty,
             'has_indicators': not self.indicators.empty,
             'has_features': not self.features.empty,
             'has_signals': not self.signals.empty,
-            'raw_columns_present': all(col in self.signals.columns for col in ['open', 'high', 'low', 'close', 'volume']),
+            'raw_columns_present': all(col in target_df.columns for col in required_ohlcv) if not target_df.empty else False,
         }
         
         all_valid = all(checks.values())

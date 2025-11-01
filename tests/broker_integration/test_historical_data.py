@@ -3,7 +3,6 @@ Test historical data retrieval from Alpaca.
 Tests OHLCV bar data fetching for backtesting and analysis.
 """
 
-import pytest
 from datetime import datetime, timedelta
 from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
 from core_engine.config.broker_config import load_broker_config

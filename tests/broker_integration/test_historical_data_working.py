@@ -3,7 +3,6 @@ Test historical data retrieval - WORKING VERSION for free Alpaca account.
 Uses delayed data (>15 minutes old) which is available on free tier.
 """
 
-import pytest
 from datetime import datetime, timedelta
 from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
 from core_engine.config.broker_config import load_broker_config

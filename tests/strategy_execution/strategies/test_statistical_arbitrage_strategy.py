@@ -20,13 +20,11 @@ Version: 1.0.0 (Phase 7 Strategy Validation)
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
 import logging
 
 from core_engine.trading.strategies.implementations.statistical_arbitrage.enhanced_statistical_arbitrage import (
-    EnhancedStatisticalArbitrageStrategy, StatisticalArbitrageConfig
+    EnhancedStatisticalArbitrageStrategy
 )
 from core_engine.config.strategies import StatisticalArbitrageConfig as CentralizedStatisticalArbitrageConfig
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
@@ -169,7 +167,7 @@ class TestStatisticalArbitrageStrategyExecution:
             )
             assert isinstance(validation_results, dict)
             assert 'signal_quality_score' in validation_results
-        except AttributeError as e:
+        except AttributeError:
             # Handle config compatibility issues gracefully
             logger.info("Comprehensive validation test completed (config compatibility handled)")
 

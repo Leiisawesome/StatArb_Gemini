@@ -6,7 +6,6 @@ Abstract base class that all broker adapters must implement for consistency
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from decimal import Decimal
 
 from core_engine.type_definitions.broker_types import (
     Order, OrderSide, OrderType, Position, AccountInfo
@@ -31,14 +30,12 @@ class BaseBrokerAdapter(ABC):
         Returns:
             bool: True if connection successful, False otherwise
         """
-        pass
     
     @abstractmethod
     def disconnect(self) -> None:
         """
         Disconnect from broker and clean up resources
         """
-        pass
     
     @abstractmethod
     def is_connected(self) -> bool:
@@ -48,7 +45,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             bool: True if connected, False otherwise
         """
-        pass
     
     @abstractmethod
     def check_connection_health(self) -> Dict[str, Any]:
@@ -58,7 +54,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             dict: Health status with keys like 'connected', 'latency', 'last_heartbeat'
         """
-        pass
     
     # ==================== Market Data ====================
     
@@ -79,7 +74,6 @@ class BaseBrokerAdapter(ABC):
                 - last_price: Last trade price (optional)
                 - timestamp: Quote timestamp
         """
-        pass
     
     @abstractmethod
     def is_market_open(self) -> bool:
@@ -89,7 +83,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             bool: True if market is open, False otherwise
         """
-        pass
     
     # ==================== Order Management ====================
     
@@ -111,7 +104,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object with order details and ID
         """
-        pass
     
     @abstractmethod
     def submit_limit_order(
@@ -133,7 +125,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object with order details and ID
         """
-        pass
     
     @abstractmethod
     def submit_stop_order(
@@ -155,7 +146,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object with order details and ID
         """
-        pass
     
     @abstractmethod
     def submit_stop_limit_order(
@@ -179,7 +169,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object with order details and ID
         """
-        pass
     
     @abstractmethod
     def cancel_order(self, order_id: str) -> bool:
@@ -192,7 +181,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             bool: True if cancellation successful, False otherwise
         """
-        pass
     
     @abstractmethod
     def get_order(self, order_id: str) -> Optional[Order]:
@@ -205,7 +193,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object if found, None otherwise
         """
-        pass
     
     @abstractmethod
     def get_orders(self, status: str = "open") -> List[Order]:
@@ -218,7 +205,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             list[Order]: List of orders matching the status
         """
-        pass
     
     # ==================== Position Management ====================
     
@@ -230,7 +216,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             list[Position]: List of all positions
         """
-        pass
     
     @abstractmethod
     def get_position(self, symbol: str) -> Optional[Position]:
@@ -243,7 +228,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Position: Position object if exists, None otherwise
         """
-        pass
     
     @abstractmethod
     def close_position(self, symbol: str) -> Order:
@@ -256,7 +240,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             Order: Order object for the closing order
         """
-        pass
     
     @abstractmethod
     def close_all_positions(self) -> List[Order]:
@@ -266,7 +249,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             list[Order]: List of closing orders
         """
-        pass
     
     # ==================== Account Management ====================
     
@@ -278,7 +260,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             AccountInfo: Account details including balance, buying power, etc.
         """
-        pass
     
     # ==================== Validation & Safety ====================
     
@@ -306,7 +287,6 @@ class BaseBrokerAdapter(ABC):
         Returns:
             tuple: (is_valid: bool, error_message: str or None)
         """
-        pass
     
     # ==================== Broker-Specific Info ====================
     
@@ -316,7 +296,6 @@ class BaseBrokerAdapter(ABC):
         """
         Return broker name (e.g., 'Alpaca', 'Interactive Brokers')
         """
-        pass
     
     @property
     @abstractmethod
@@ -324,7 +303,6 @@ class BaseBrokerAdapter(ABC):
         """
         Does this broker support fractional shares?
         """
-        pass
     
     @property
     @abstractmethod
@@ -332,7 +310,6 @@ class BaseBrokerAdapter(ABC):
         """
         Does this broker support cryptocurrency trading?
         """
-        pass
     
     @property
     @abstractmethod
@@ -340,7 +317,6 @@ class BaseBrokerAdapter(ABC):
         """
         Minimum order size for this broker
         """
-        pass
     
     # ==================== Optional Advanced Features ====================
     

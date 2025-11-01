@@ -19,7 +19,6 @@ except ImportError:
     # Fallback for standalone usage
     class DataUnavailableError(Exception):
         """Raised when required data is unavailable"""
-        pass
 
 
 @dataclass

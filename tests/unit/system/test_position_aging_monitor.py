@@ -6,9 +6,8 @@ auto-close expired positions, and alert generation.
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock
 
 import sys
 sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
@@ -16,9 +15,7 @@ sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
 from core_engine.system.position_aging_monitor import (
     PositionAgingMonitor,
     PositionAgeCategory,
-    StrategyType,
-    PositionAgeInfo,
-    AgingReport
+    StrategyType
 )
 
 

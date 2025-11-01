@@ -201,7 +201,6 @@ class BacktestConfig:
     def from_json(cls, json_path: str) -> 'BacktestConfig':
         """Create BacktestConfig from JSON file (convenience method for testing)"""
         import json
-        from pathlib import Path
         
         with open(json_path, 'r') as f:
             config_dict = json.load(f)

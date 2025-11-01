@@ -14,7 +14,6 @@ Test Coverage:
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import Mock
 from core_engine.system.realtime_pnl_tracker import (

@@ -60,11 +60,11 @@ from .multi_strategy_coordinator import (
 )
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+from ...system.interfaces import ISystemComponent, IRegimeAware
 from core_engine.exceptions import ConfigurationRequiredError
 
 # Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
-from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
+from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
 
 logger = logging.getLogger(__name__)
 

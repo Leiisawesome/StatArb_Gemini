@@ -19,8 +19,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Import centralized configuration (Rule 1, Section 7)
-from ..config.component_config import RegimeConfig
-from core_engine.exceptions import ConfigurationRequiredError
 
 # Import regime components
 from .regime_detector import RegimeType

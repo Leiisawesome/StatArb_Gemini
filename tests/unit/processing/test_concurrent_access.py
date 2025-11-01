@@ -18,10 +18,8 @@ import pytest
 import pandas as pd
 import numpy as np
 import asyncio
-import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import Mock
 
 # Import processing components
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
@@ -84,7 +82,7 @@ class TestConcurrentAccess:
             try:
                 result = engine.calculate_indicators(datasets[symbol])
                 return symbol, result
-            except Exception as e:
+            except Exception:
                 return symbol, None
         
         # Run calculations concurrently
@@ -176,7 +174,7 @@ class TestConcurrentAccess:
             try:
                 features = engineer.create_features(datasets[symbol])
                 return symbol, features
-            except Exception as e:
+            except Exception:
                 return symbol, None
         
         # Run feature engineering in parallel
@@ -216,7 +214,7 @@ class TestConcurrentAccess:
             try:
                 signals = generator.generate_signals(datasets[symbol])
                 return symbol, signals
-            except Exception as e:
+            except Exception:
                 return symbol, []
         
         # Generate signals concurrently

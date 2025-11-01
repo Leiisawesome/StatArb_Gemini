@@ -1371,7 +1371,7 @@ class EnhancedTradingEngine(ISystemComponent):
             
             # Get parameters
             price = market_data.get('current_price', 100.0)
-            volatility = market_data.get('volatility', 0.02)
+            market_data.get('volatility', 0.02)
             avg_volume = liquidity_score.get('avg_daily_volume', 1000000)
             participation_rate = quantity / avg_volume if avg_volume > 0 else 0.01
             

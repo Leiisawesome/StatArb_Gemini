@@ -11,8 +11,6 @@ import threading
 import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from decimal import Decimal
-from queue import Queue
 from zoneinfo import ZoneInfo
 
 from ibapi.client import EClient

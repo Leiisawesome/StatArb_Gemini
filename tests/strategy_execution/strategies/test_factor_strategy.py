@@ -19,9 +19,7 @@ Version: 1.0.0 (Phase 7 Strategy Validation)
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
 import logging
 
 from core_engine.trading.strategies.implementations.factor.enhanced_factor import EnhancedFactorStrategy
@@ -167,7 +165,7 @@ class TestFactorStrategyExecution:
             )
             assert isinstance(validation_results, dict)
             assert 'signal_quality_score' in validation_results
-        except AttributeError as e:
+        except AttributeError:
             # Handle config compatibility issues gracefully
             logger.info("Comprehensive validation test completed (config compatibility handled)")
 
@@ -296,7 +294,7 @@ class TestFactorStrategyExecution:
         strategy = EnhancedFactorStrategy(factor_config)
         await strategy.initialize()
 
-        signals = await strategy.generate_signals(sample_market_data)
+        await strategy.generate_signals(sample_market_data)
 
         # Validate multi-factor integration
         factor_contributions = {}

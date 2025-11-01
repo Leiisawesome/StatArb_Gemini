@@ -23,25 +23,21 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from datetime import datetime
+from typing import Dict
 import logging
 
 # Import testing framework
 from tests.strategy_execution.framework import (
-    StrategyTestConfig,
-    SignalValidator,
-    ExecutionSimulator,
-    PerformanceAttributor
+    StrategyTestConfig
 )
 
 # Import strategy components
 from core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
-from core_engine.trading.strategies.strategy_engine import StrategyConfig, StrategyType, SignalType
+from core_engine.trading.strategies.strategy_engine import SignalType
 from core_engine.config.strategies import MeanReversionConfig
 
 # Configure logging
@@ -143,17 +139,14 @@ class TestMeanReversionStrategy:
 
                 if cycle_position < trend_periods:
                     # Trend period - moderate directional movement
-                    is_trend_period = True
                     is_reversion_period = False
                     is_extreme_period = False
                 elif cycle_position < trend_periods + reversion_periods:
                     # Reversion period - strong mean reversion
-                    is_trend_period = False
                     is_reversion_period = True
                     is_extreme_period = False
                 else:
                     # Extreme period - create oversold/overbought conditions
-                    is_trend_period = False
                     is_reversion_period = False
                     is_extreme_period = True
 

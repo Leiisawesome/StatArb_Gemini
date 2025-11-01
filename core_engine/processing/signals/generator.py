@@ -26,8 +26,7 @@ import uuid
 warnings.filterwarnings('ignore')
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
-from ...system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-from core_engine.exceptions import ConfigurationRequiredError
+from ...system.interfaces import ISystemComponent, IRegimeAware
 
 logger = logging.getLogger(__name__)
 

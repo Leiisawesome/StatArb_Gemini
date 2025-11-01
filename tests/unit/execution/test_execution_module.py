@@ -4,7 +4,7 @@ Tests execution engine, order management, and related components.
 """
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch
 from datetime import datetime
 
 from core_engine.trading.execution.execution_engine import (
@@ -15,8 +15,7 @@ from core_engine.trading.execution.execution_engine import (
     ExecutionConfig,
     ExecutionRequest,
     ExecutionMetrics,
-    ExecutionStatus,
-    ExecutionResult
+    ExecutionStatus
 )
 
 from core_engine.trading.execution.execution_validator import (

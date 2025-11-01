@@ -12,8 +12,7 @@ Phase: Integration Testing - Data Generation
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -233,7 +232,7 @@ class HistoricalDataGenerator:
         symbol: str
     ) -> pd.DataFrame:
         """Generate OHLCV data from price series"""
-        n_periods = len(prices)
+        len(prices)
         
         # Generate realistic OHLC from close prices
         data = []
@@ -384,7 +383,7 @@ class RegimeTestDataGenerator:
         symbol: str
     ) -> pd.DataFrame:
         """Generate OHLCV data from price series (same as HistoricalDataGenerator)"""
-        n_periods = len(prices)
+        len(prices)
         data = []
         
         for i, (date, close) in enumerate(zip(dates, prices)):

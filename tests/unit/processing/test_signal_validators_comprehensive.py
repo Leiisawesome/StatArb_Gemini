@@ -7,11 +7,9 @@ Tests all functionality to achieve 100% coverage.
 """
 
 import pytest
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
-import warnings
 
 from core_engine.processing.signals.validators import (
     SignalValidator,
@@ -24,7 +22,6 @@ from core_engine.processing.signals.validators import (
     ValidationCategory,
     ValidationStatus
 )
-from core_engine.type_definitions.strategy import StrategyType, TradingSignal
 
 
 class TestValidationRule:
@@ -1480,7 +1477,6 @@ class TestPerformanceAndOptimization:
     def test_concurrent_validation(self, validator):
         """Test concurrent validation if threading is supported"""
         import threading
-        import time
         
         def validate_signal_worker(signal_id):
             signal = Mock()

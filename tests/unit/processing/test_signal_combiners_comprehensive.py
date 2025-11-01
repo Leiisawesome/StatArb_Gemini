@@ -7,24 +7,15 @@ Tests all functionality to achieve 100% coverage.
 """
 
 import pytest
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
-import warnings
+from unittest.mock import Mock
 
 from core_engine.processing.signals.combiners import (
     SignalCombiner,
     CombinationMethod,
-    EnsembleStrategy,
-    SignalWeight,
-    CombinationConfig,
-    SignalCombination,
-    EnsembleModel,
-    SignalWeightCalculator,
-    EnsembleEngine
+    CombinationConfig
 )
-from core_engine.type_definitions.strategy import TradingSignal
 
 
 class TestSignalCombinerBase:
@@ -974,7 +965,7 @@ class TestSignalCombiner:
         assert result.confidence > 0
         assert result.quantity > 0
     
-    def test_combine_signals_confidence_adaptation(self, combiner):
+    def test_combine_signals_confidence_adaptation(self, combiner, mock_signals):
         """Test combining signals with confidence-based adaptation"""
         config = {'adaptation_strategy': 'confidence'}
         combiner = SignalCombiner(config)
@@ -987,7 +978,7 @@ class TestSignalCombiner:
         assert result.confidence > 0
         assert result.quantity > 0
     
-    def test_combine_signals_volatility_adaptation(self, combiner):
+    def test_combine_signals_volatility_adaptation(self, combiner, mock_signals):
         """Test combining signals with volatility-based adaptation"""
         config = {'adaptation_strategy': 'volatility'}
         combiner = SignalCombiner(config)
@@ -1491,7 +1482,7 @@ class TestIntegrationAndCompatibility:
             conn.execute('''
                 INSERT INTO signals (symbol, signal_type, confidence, price, quantity)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (result.symbol, result.signal_type.value, result.confidence, result.price, result.quantity))
+            ''', (result.symbol, result.signal_type, result.confidence, result.price, result.quantity))
             
             # Verify data was stored correctly
             cursor = conn.execute('SELECT COUNT(*) FROM signals')

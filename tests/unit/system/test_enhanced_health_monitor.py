@@ -6,8 +6,6 @@ health scoring, auto-recovery, and status reporting.
 """
 
 import pytest
-import asyncio
-from datetime import datetime
 from unittest.mock import Mock, AsyncMock, patch
 
 import sys

@@ -23,7 +23,6 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
@@ -42,7 +41,6 @@ from tests.strategy_execution.framework import (
 
 # Import strategy components
 from core_engine.trading.strategies.implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
-from core_engine.trading.strategies.strategy_engine import StrategyConfig, StrategyType
 from core_engine.config.strategies import MomentumConfig
 
 # Configure logging

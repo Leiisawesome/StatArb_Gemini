@@ -24,11 +24,10 @@ Version: 1.0
 """
 
 import logging
-import asyncio
 import uuid
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+from datetime import datetime
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -519,7 +518,7 @@ class OrderRejectionHandler:
     
     def get_rejection_statistics(self) -> Dict:
         """Get rejection handling statistics"""
-        total_attempts = self.total_retries + self.total_rejections
+        self.total_retries + self.total_rejections
         
         return {
             'total_rejections': self.total_rejections,

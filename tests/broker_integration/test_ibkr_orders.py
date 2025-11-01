@@ -4,7 +4,6 @@ Tests order submission, modification, and cancellation via Interactive Brokers A
 """
 import pytest
 import time
-from decimal import Decimal
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
@@ -175,7 +174,7 @@ class TestIBKROrders:
         
         # Cancel the order
         print("\n3. Cancelling order...")
-        result = ibkr_adapter.cancel_order(order_id)
+        ibkr_adapter.cancel_order(order_id)
         
         # Wait for cancellation to process
         time.sleep(1)

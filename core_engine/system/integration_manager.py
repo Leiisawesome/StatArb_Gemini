@@ -62,17 +62,12 @@ except ImportError:
 
 # PHASE 6: Import centralized configs (Rule 1, Section 7)
 from ..config.component_config import (
-    DataConfig, RiskConfig, ProcessingConfig, 
-    IndicatorConfig, FeatureConfig, SignalConfig,
-    RegimeConfig, AnalyticsConfig, ExecutionConfig, PortfolioConfig
+    DataConfig, RiskConfig, IndicatorConfig, 
+    FeatureConfig, SignalConfig, RegimeConfig,
+    AnalyticsConfig, ExecutionConfig, PortfolioConfig
 )
 from ..trading.strategies.manager import StrategyManagerConfig
 from ..trading.engine import TradingEngineConfig
-from ..config.strategies import (
-    MomentumConfig, MeanReversionConfig, BreakoutConfig,
-    FactorConfig, MultiAssetConfig, PairsConfig
-)
-from ..config.system_config import SystemConfig
 
 # Import all enhanced components
 try:

@@ -6,10 +6,9 @@ and rebalancing recommendations.
 """
 
 import pytest
-import asyncio
 import numpy as np
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 import sys
 sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
@@ -17,8 +16,7 @@ sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
 from core_engine.trading.strategies.correlation_analyzer import (
     StrategyCorrelationAnalyzer,
     CorrelationLevel,
-    StrategyPairCorrelation,
-    DiversificationReport
+    StrategyPairCorrelation
 )
 
 

@@ -11,10 +11,8 @@ Date: October 21, 2025
 """
 
 import pytest
-import asyncio
 from datetime import datetime
-from unittest.mock import Mock, MagicMock, AsyncMock
-from typing import Dict, Any
+from unittest.mock import Mock, AsyncMock
 
 # Import the component
 from core_engine.trading.strategies.manager import StrategyManager

@@ -13,13 +13,8 @@ from dataclasses import dataclass, field, asdict
 import time
 from collections import deque
 
-from core_engine.exceptions import ConfigurationRequiredError
 
 # Import centralized risk utility configs (Rule 1 Section 7)
-from ..config import (
-    ExposureConfig, VarConfig, StressTestConfig, 
-    LimitConfig, CorrelationConfig
-)
 
 # Import risk components
 from .exposure_calculator import ExposureCalculator, ExposureType, ExposureBreakdown

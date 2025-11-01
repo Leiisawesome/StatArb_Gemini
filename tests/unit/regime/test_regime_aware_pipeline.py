@@ -17,7 +17,7 @@ Version: 1.0.0
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import Mock, AsyncMock
 from dataclasses import dataclass
 

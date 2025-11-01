@@ -6,7 +6,6 @@ Date: October 29, 2025
 Version: 1.0.0
 """
 
-import pytest
 from dataclasses import asdict
 
 from core_engine.config.strategies import StatisticalArbitrageConfig, StrategyType

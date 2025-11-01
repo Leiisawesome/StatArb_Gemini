@@ -12,7 +12,6 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from abc import ABC, abstractmethod
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 import warnings
@@ -28,7 +27,7 @@ except ImportError:
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
 from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-from ..exceptions import PerformanceDataUnavailableError, BenchmarkDataUnavailableError
+from ..exceptions import PerformanceDataUnavailableError
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)

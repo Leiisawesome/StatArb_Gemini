@@ -845,7 +845,7 @@ class EnhancedRegimeEngine(ISystemComponent):
         
         volatility = indicators['volatility']
         trend = indicators['trend']
-        momentum = indicators['momentum']
+        indicators['momentum']
         trend_strength = indicators['trend_strength']
         
         # Classify volatility regime

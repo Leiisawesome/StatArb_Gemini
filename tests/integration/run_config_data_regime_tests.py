@@ -24,8 +24,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-import pandas as pd
+from typing import Dict, Any, List
 import numpy as np
 
 # Add core_engine to path
@@ -170,7 +169,7 @@ class IntegrationTestRunner:
         
         # Calculate performance metrics
         avg_test_duration = np.mean([r['duration'] for r in self.test_results.values()])
-        total_test_duration = sum([r['duration'] for r in self.test_results.values()])
+        sum([r['duration'] for r in self.test_results.values()])
         
         report = {
             'summary': {
@@ -278,7 +277,7 @@ async def run_integration_tests() -> Dict[str, Any]:
         report = await runner.run_all_tests()
         
         # Save report
-        report_path = runner.save_report(report)
+        runner.save_report(report)
         
         # Print final status
         success_rate = report['summary']['success_rate']

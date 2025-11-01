@@ -27,8 +27,8 @@ Version: 1.0.0
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -428,7 +428,7 @@ class PerformanceAttributor:
     def _validate_attribution_accuracy(self, total_pnl: float, attribution_result: AttributionResult) -> float:
         """Validate that attribution sums match total P&L"""
 
-        attributed_pnl = attribution_result.attributed_pnl
+        attribution_result.attributed_pnl
         unexplained_pnl = attribution_result.unexplained_pnl
 
         # Accuracy is 1 - (unexplained / total)

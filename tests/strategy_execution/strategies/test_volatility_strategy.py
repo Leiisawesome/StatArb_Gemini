@@ -14,8 +14,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from unittest.mock import AsyncMock, MagicMock
+from typing import Dict, List
 
 from core_engine.trading.strategies.implementations.volatility.enhanced_volatility import (
     EnhancedVolatilityStrategy, VolatilityConfig

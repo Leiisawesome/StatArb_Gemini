@@ -33,7 +33,7 @@ Version: 1.0
 import logging
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 from collections import defaultdict, deque

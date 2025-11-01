@@ -26,17 +26,13 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
 import logging
 
 # Import testing framework
 from tests.strategy_execution.framework import (
-    StrategyTestConfig,
     SignalValidator,
     ExecutionSimulator,
     PerformanceAttributor
@@ -202,7 +198,7 @@ class TestPairsTradingStrategyExecution:
         await pairs_trading_strategy.start()
 
         # Generate signals which should include spread calculations
-        signals = await pairs_trading_strategy.generate_signals(sample_market_data)
+        await pairs_trading_strategy.generate_signals(sample_market_data)
 
         # Check if spread data exists in market data
         aapl_data = sample_market_data['AAPL']

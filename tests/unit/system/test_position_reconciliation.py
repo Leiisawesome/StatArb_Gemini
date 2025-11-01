@@ -13,12 +13,9 @@ Test Coverage:
 
 import pytest
 import asyncio
-from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 from core_engine.system.position_reconciliation import (
     PositionReconciliation,
-    PositionDiscrepancy,
-    ReconciliationReport,
     DiscrepancySeverity,
     ReconciliationAction
 )
@@ -130,7 +127,7 @@ class TestPositionReconciliation:
         
         mock_broker_api.get_positions = AsyncMock(side_effect=get_positions_with_severe_discrepancy)
         
-        initial_position = mock_risk_manager.current_positions['AAPL']
+        mock_risk_manager.current_positions['AAPL']
         
         report = await reconciliation.reconcile_positions()
         
@@ -223,7 +220,7 @@ class TestPositionReconciliation:
         
         mock_broker_api.get_positions = AsyncMock(side_effect=get_positions_with_discrepancy)
         
-        report = await reconciliation.reconcile_positions()
+        await reconciliation.reconcile_positions()
         
         # Interval should switch to fast after discrepancy
         assert reconciliation.current_interval == 60
@@ -347,7 +344,7 @@ class TestReconciliationIntegration:
         )
         
         # Start loop
-        loop_task = asyncio.create_task(reconciliation.start_reconciliation_loop())
+        asyncio.create_task(reconciliation.start_reconciliation_loop())
         
         # Let it run for a bit
         await asyncio.sleep(0.5)

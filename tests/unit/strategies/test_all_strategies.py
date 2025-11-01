@@ -30,7 +30,7 @@ from core_engine.trading.strategies.implementations.breakout.enhanced_breakout i
 from core_engine.trading.strategies.implementations.volatility.enhanced_volatility import EnhancedVolatilityStrategy
 from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy
 
-from core_engine.trading.strategies.strategy_engine import StrategyState, SignalType
+from core_engine.trading.strategies.strategy_engine import StrategyState
 from tests.unit.strategies.conftest import BaseStrategyTest
 
 
@@ -198,7 +198,6 @@ class TestStrategyCoordination:
     @pytest.mark.asyncio
     async def test_strategy_signal_aggregation(self, market_data_uptrend):
         """Test signals from multiple strategies can be aggregated"""
-        from core_engine.trading.strategies.multi_strategy_coordinator import MultiStrategySignalAggregator
         
         # Create a few strategies
         momentum_config = MomentumConfig(name='momentum')

@@ -27,7 +27,7 @@ Version: 1.0.0
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -387,7 +387,7 @@ class SignalValidator:
         # Calculate strength score based on distribution
         # We want signals to be well-distributed, not all weak or all strong
         confidence_std = np.std(confidences)
-        strength_std = np.std(strengths)
+        np.std(strengths)
 
         # Ideal distribution has moderate standard deviation
         distribution_score = min(confidence_std * 4, 1.0)  # Scale to 0-1

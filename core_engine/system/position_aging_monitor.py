@@ -30,7 +30,7 @@ Version: 1.0
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 
 logger = logging.getLogger(__name__)

@@ -9,9 +9,7 @@ Tests core functionality to achieve good coverage.
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-import warnings
+from unittest.mock import Mock, AsyncMock
 
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 

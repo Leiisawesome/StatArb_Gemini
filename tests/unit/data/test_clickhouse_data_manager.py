@@ -12,7 +12,7 @@ Version: 1.0.0
 
 import pytest
 import pytest_asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Import enhanced data components
 from core_engine.data.manager import (

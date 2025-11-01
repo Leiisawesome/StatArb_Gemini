@@ -28,12 +28,11 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict
 import logging
 
 # Import testing framework
@@ -49,7 +48,6 @@ from tests.strategy_execution.framework import (
 from core_engine.trading.strategies.implementations.breakout.enhanced_breakout import EnhancedBreakoutStrategy
 from core_engine.config.strategies import BreakoutConfig
 from core_engine.config.component_config import PositionLimits, RiskLimits
-from core_engine.trading.strategies.strategy_engine import StrategyConfig, StrategyType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

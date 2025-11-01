@@ -29,10 +29,8 @@ import joblib
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
 from ..system.interfaces import ISystemComponent
-from core_engine.exceptions import ConfigurationRequiredError
 
 # Import centralized configuration (Rule 1, Section 7)
-from ..config.component_config import RegimeConfig
 
 # Import regime components
 from .regime_detector import RegimeType

@@ -15,17 +15,15 @@ Test Categories:
 """
 
 import pytest
-import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
 import pandas as pd
 import numpy as np
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 
 # Import components under test
-from core_engine.trading.strategies.manager import StrategyManager, StrategyManagerConfig
+from core_engine.trading.strategies.manager import StrategyManager
 from core_engine.type_definitions.strategy import StrategyType
-from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator, EnrichedMarketData
+from core_engine.processing.pipeline_orchestrator import EnrichedMarketData
 
 # Import interfaces
 from core_engine.system.interfaces import RegimeContext

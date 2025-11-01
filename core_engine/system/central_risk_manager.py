@@ -1069,7 +1069,7 @@ class CentralRiskManager(ISystemComponent):
             # Check compliance BEFORE risk assessment for regulatory validation
             if hasattr(self, 'compliance_checker') and self.compliance_checker:
                 try:
-                    from .compliance_checker import ComplianceResult
+                    pass
                     
                     # Perform comprehensive pre-trade compliance check
                     compliance_result = await self.compliance_checker.check_pre_trade_compliance(

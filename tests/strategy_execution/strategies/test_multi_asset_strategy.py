@@ -26,17 +26,13 @@ Author: StatArb_Gemini Phase 7 Strategy Validation
 Version: 1.0.0
 """
 
-import asyncio
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Any
 import logging
 
 # Import testing framework
 from tests.strategy_execution.framework import (
-    StrategyTestConfig,
     SignalValidator,
     ExecutionSimulator,
     PerformanceAttributor
@@ -175,7 +171,7 @@ class TestMultiAssetStrategyExecution:
         await multi_asset_strategy.start()
 
         # Generate signals to trigger correlation calculation
-        signals = await multi_asset_strategy.generate_signals(sample_market_data)
+        await multi_asset_strategy.generate_signals(sample_market_data)
 
         # Check that correlation matrix was calculated
         assert multi_asset_strategy.correlation_matrix is not None, "Correlation matrix should be calculated"
@@ -200,7 +196,7 @@ class TestMultiAssetStrategyExecution:
         await multi_asset_strategy.start()
 
         # Generate signals to trigger optimization
-        signals = await multi_asset_strategy.generate_signals(sample_market_data)
+        await multi_asset_strategy.generate_signals(sample_market_data)
 
         # Check that target weights were calculated
         assert multi_asset_strategy.target_weights, "Target weights should be calculated"
@@ -452,7 +448,7 @@ class TestMultiAssetStrategyExecution:
         await multi_asset_strategy.start()
 
         # Generate signals
-        signals = await multi_asset_strategy.generate_signals(sample_market_data)
+        await multi_asset_strategy.generate_signals(sample_market_data)
 
         # Update positions
         await multi_asset_strategy.update_positions(sample_market_data)
