@@ -162,6 +162,8 @@ class TestClickHouseDataManager:
         # Test health check with mocked connection
         with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
             health = await data_manager.health_check()
+            # Ensure healthy is actually a boolean, not a Mock
+            assert isinstance(health['healthy'], bool)
             assert health['healthy'] is True
             assert health['initialized'] is True
             assert health['operational'] is True

@@ -26,6 +26,12 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 
+# Timezone handling
+try:
+    import pytz
+except ImportError:
+    pytz = None
+
 # Core engine architectural compliance imports
 import sys
 import os
@@ -671,6 +677,31 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
         end_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
         
+        # Convert datetime to nanoseconds for window_start comparisons (used in aggregated intervals)
+        # ClickHouse stores window_start as nanoseconds since epoch
+        # Handle timezone-aware datetimes by converting to UTC timestamp first
+        if start_time.tzinfo is not None:
+            # Timezone-aware: convert to UTC timestamp
+            start_ts = start_time.timestamp()
+            end_ts = end_time.timestamp()
+        else:
+            # Timezone-naive: assume it's already in the target timezone (America/New_York)
+            # Create timezone-aware datetime for proper timestamp conversion
+            if pytz is not None:
+                ny_tz = pytz.timezone('America/New_York')
+                start_aware = ny_tz.localize(start_time)
+                end_aware = ny_tz.localize(end_time)
+                start_ts = start_aware.timestamp()
+                end_ts = end_aware.timestamp()
+            else:
+                # Fallback: use system timezone (less accurate but works without pytz)
+                start_ts = time.mktime(start_time.timetuple())
+                end_ts = time.mktime(end_time.timetuple())
+        
+        # Convert to nanoseconds (ClickHouse window_start format)
+        start_ns = int(start_ts * 1e9)
+        end_ns = int(end_ts * 1e9)
+        
         if interval == "1min":
             # Use raw 1-minute data with timezone conversion
             query = f"""
@@ -693,7 +724,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Aggregate to 5-minute bars
             query = f"""
             SELECT 
-                toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute) as timestamp,
+                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,
@@ -712,7 +743,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Aggregate to 15-minute bars
             query = f"""
             SELECT 
-                toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute) as timestamp,
+                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,
@@ -731,7 +762,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Aggregate to 1-hour bars
             query = f"""
             SELECT 
-                toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour) as timestamp,
+                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,

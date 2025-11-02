@@ -1192,7 +1192,8 @@ class TestGetDataComprehensive:
         validation_result = NS(passed=True)
         mock_validator = Mock()
         mock_validator.validate_data = AsyncMock(return_value=[validation_result])
-        mock_validator.calculate_quality_score = Mock(return_value=0.9)  # Above threshold
+        # Return 0.9 directly (not a Mock) so validation code can handle it
+        mock_validator.calculate_quality_score = lambda x: 0.9  # Above threshold
         data_engine.data_validator = mock_validator
         
         response = await data_engine.get_data(sample_data_request)
@@ -1321,52 +1322,79 @@ class TestRouteRequestComprehensive:
     @pytest.mark.asyncio
     async def test_route_request_fallback_to_alternative_data(self, data_engine):
         """Test route_request fallback to alternative data handler"""
-        request = DataRequest(
-            request_id="test_fallback_alt",
-            data_type="unknown_type",
-            symbols=["AAPL"],
-            fields=[],
-            use_cache=False
-        )
+        # Store original handlers for cleanup
+        original_market_handler = data_engine.market_data_handler
+        original_alt_handler = data_engine.alternative_data_handler
         
-        # Mock market data handler to fail
-        from types import SimpleNamespace
-        mock_market_response = SimpleNamespace(
-            success=False,
-            data=None,
-            metadata={},
-            timestamp=datetime.now(),
-            error_message="Not found"
-        )
-        
-        mock_market_handler = Mock()
-        mock_market_handler.get_data = AsyncMock(return_value=mock_market_response)
-        data_engine.market_data_handler = mock_market_handler
-        
-        # Mock alternative data handler to succeed
-        mock_alt_response = SimpleNamespace(
-            success=True,
-            data={'news': []},
-            metadata={},
-            timestamp=datetime.now(),
-            error_message=None
-        )
-        
-        mock_alt_handler = Mock()
-        mock_alt_handler.get_data = AsyncMock(return_value=mock_alt_response)
-        data_engine.alternative_data_handler = mock_alt_handler
-        
-        with patch('core_engine.data.sources.clickhouse.MarketDataRequest') as mock_req_class1, \
-             patch('core_engine.data.sources.clickhouse.AlternativeDataRequest') as mock_req_class2:
-            mock_req_class1.return_value = Mock()
-            mock_req_class2.return_value = Mock()
+        try:
+            request = DataRequest(
+                request_id="test_fallback_alt",
+                data_type="unknown_type",
+                symbols=["AAPL"],
+                fields=[],
+                use_cache=False
+            )
             
-            response = await data_engine._route_request(request)
+            # Clear any existing handlers first to ensure clean state
+            data_engine.market_data_handler = None
+            data_engine.alternative_data_handler = None
             
-            # Use isinstance check
-            assert isinstance(response, DataResponse)
-            assert response.success is True
-            mock_alt_handler.get_data.assert_called_once()
+            # Mock market data handler to fail
+            from types import SimpleNamespace
+            mock_market_response = SimpleNamespace(
+                success=False,
+                data=None,
+                metadata={},
+                timestamp=datetime.now(),
+                error_message="Not found"
+            )
+            
+            mock_market_handler = Mock()
+            mock_market_handler.get_data = AsyncMock(return_value=mock_market_response)
+            data_engine.market_data_handler = mock_market_handler
+            
+            # Mock alternative data handler to succeed
+            mock_alt_response = SimpleNamespace(
+                success=True,
+                data={'news': []},
+                metadata={},
+                timestamp=datetime.now(),
+                error_message=None
+            )
+            
+            mock_alt_handler = Mock()
+            mock_alt_handler.get_data = AsyncMock(return_value=mock_alt_response)
+            data_engine.alternative_data_handler = mock_alt_handler
+            
+            # Patch request classes to avoid import errors and allow creation
+            with patch('core_engine.data.sources.clickhouse.MarketDataRequest') as mock_req_class1, \
+                 patch('core_engine.data.sources.clickhouse.AlternativeDataRequest') as mock_req_class2:
+                # Configure mocks to return Mock instances when called
+                mock_market_req = Mock()
+                mock_req_class1.return_value = mock_market_req
+                
+                mock_alt_req = Mock()
+                mock_req_class2.return_value = mock_alt_req
+                
+                # Verify handlers are set correctly before routing
+                assert data_engine.market_data_handler is not None, "Market handler not set"
+                assert data_engine.alternative_data_handler is not None, "Alternative handler not set"
+                assert request.data_type == "unknown_type", f"Expected 'unknown_type', got '{request.data_type}'"
+                
+                response = await data_engine._route_request(request)
+                
+                # Use isinstance check
+                assert isinstance(response, DataResponse)
+                assert response.success is True, f"Response not successful: {response.error_message}"
+                # Market handler should have been called (and failed)
+                assert mock_market_handler.get_data.called, "Market handler was not called"
+                # Alternative handler should have been called since market handler failed
+                assert mock_alt_handler.get_data.called, "Alternative handler was not called when expected"
+                mock_alt_handler.get_data.assert_called_once()
+        finally:
+            # Restore original handlers to prevent state leakage
+            data_engine.market_data_handler = original_market_handler
+            data_engine.alternative_data_handler = original_alt_handler
 
 
 # =============================================================================
@@ -2033,12 +2061,14 @@ class TestValidationEdgeCases:
             request_id=sample_data_request.request_id,
             success=True,
             data={},  # Empty dict
-            metadata={}
+            metadata={},
+            quality_score=None  # Explicitly set to None to ensure it gets set by validation
         )
         
         mock_validator = Mock()
         mock_validator.validate_data = AsyncMock(return_value=[Mock(passed=True)])
-        mock_validator.calculate_quality_score = Mock(return_value=0.9)
+        # Return 0.9 directly (not a Mock) so validation code can handle it
+        mock_validator.calculate_quality_score = lambda x: 0.9
         data_engine.data_validator = mock_validator
         
         result = await data_engine._validate_response(sample_data_request, response)
@@ -2178,53 +2208,78 @@ class TestRouteRequestFallbackEdgeCases:
     @pytest.mark.asyncio
     async def test_route_request_fallback_market_data_fails_then_alt_succeeds(self, data_engine):
         """Test fallback when market data fails but alternative succeeds"""
-        request = DataRequest(
-            request_id="test_fallback_sequence",
-            data_type="unknown",
-            symbols=["AAPL"],
-            fields=[],
-            use_cache=False
-        )
+        # Store original handlers for cleanup
+        original_market_handler = data_engine.market_data_handler
+        original_alt_handler = data_engine.alternative_data_handler
         
-        from types import SimpleNamespace
-        
-        # Market data handler fails
-        mock_market_response = SimpleNamespace(
-            success=False,
-            data=None,
-            metadata={},
-            timestamp=datetime.now(),
-            error_message="Not found"
-        )
-        mock_market_handler = Mock()
-        mock_market_handler.get_data = AsyncMock(return_value=mock_market_response)
-        data_engine.market_data_handler = mock_market_handler
-        
-        # Alternative data handler succeeds
-        mock_alt_response = SimpleNamespace(
-            success=True,
-            data={'news': []},
-            metadata={},
-            timestamp=datetime.now(),
-            error_message=None
-        )
-        mock_alt_handler = Mock()
-        mock_alt_handler.get_data = AsyncMock(return_value=mock_alt_response)
-        data_engine.alternative_data_handler = mock_alt_handler
-        
-        with patch('core_engine.data.sources.clickhouse.MarketDataRequest') as mock_req_class1, \
-             patch('core_engine.data.sources.clickhouse.AlternativeDataRequest') as mock_req_class2:
-            mock_req_class1.return_value = Mock()
-            mock_req_class2.return_value = Mock()
+        try:
+            request = DataRequest(
+                request_id="test_fallback_sequence",
+                data_type="unknown",
+                symbols=["AAPL"],
+                fields=[],
+                use_cache=False
+            )
             
-            response = await data_engine._route_request(request)
+            # Clear any existing handlers first to ensure clean state
+            data_engine.market_data_handler = None
+            data_engine.alternative_data_handler = None
             
-            assert isinstance(response, DataResponse)
-            assert response.success is True
-            # Market handler should have been called first
-            mock_market_handler.get_data.assert_called_once()
-            # Alternative handler should have been called second
-            mock_alt_handler.get_data.assert_called_once()
+            from types import SimpleNamespace
+            
+            # Market data handler fails
+            mock_market_response = SimpleNamespace(
+                success=False,
+                data=None,
+                metadata={},
+                timestamp=datetime.now(),
+                error_message="Not found"
+            )
+            mock_market_handler = Mock()
+            mock_market_handler.get_data = AsyncMock(return_value=mock_market_response)
+            data_engine.market_data_handler = mock_market_handler
+            
+            # Alternative data handler succeeds
+            mock_alt_response = SimpleNamespace(
+                success=True,
+                data={'news': []},
+                metadata={},
+                timestamp=datetime.now(),
+                error_message=None
+            )
+            mock_alt_handler = Mock()
+            mock_alt_handler.get_data = AsyncMock(return_value=mock_alt_response)
+            data_engine.alternative_data_handler = mock_alt_handler
+            
+            # Patch request classes to avoid import errors and allow creation
+            with patch('core_engine.data.sources.clickhouse.MarketDataRequest') as mock_req_class1, \
+                 patch('core_engine.data.sources.clickhouse.AlternativeDataRequest') as mock_req_class2:
+                # Configure mocks to return Mock instances when called
+                mock_market_req = Mock()
+                mock_req_class1.return_value = mock_market_req
+                
+                mock_alt_req = Mock()
+                mock_req_class2.return_value = mock_alt_req
+                
+                # Verify handlers are set correctly before routing
+                assert data_engine.market_data_handler is not None, "Market handler not set"
+                assert data_engine.alternative_data_handler is not None, "Alternative handler not set"
+                assert request.data_type == "unknown", f"Expected 'unknown', got '{request.data_type}'"
+                
+                response = await data_engine._route_request(request)
+                
+                assert isinstance(response, DataResponse)
+                assert response.success is True, f"Response not successful: {response.error_message}"
+                # Market handler should have been called first
+                assert mock_market_handler.get_data.called, "Market handler was not called"
+                mock_market_handler.get_data.assert_called_once()
+                # Alternative handler should have been called second (after market handler failed)
+                assert mock_alt_handler.get_data.called, "Alternative handler was not called when expected"
+                mock_alt_handler.get_data.assert_called_once()
+        finally:
+            # Restore original handlers to prevent state leakage
+            data_engine.market_data_handler = original_market_handler
+            data_engine.alternative_data_handler = original_alt_handler
 
 
 # =============================================================================
