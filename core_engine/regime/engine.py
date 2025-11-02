@@ -223,6 +223,12 @@ class EnhancedRegimeEngine(ISystemComponent):
         self.current_regime: Optional[RegimeAnalysis] = None
         self.regime_history: List[RegimeAnalysis] = []
         
+        # CRITICAL: Bar-by-bar regime sequence persistence (for regime-aware processing)
+        # Maps symbol -> List[Dict] with regime for each bar (timestamp-indexed)
+        self.regime_sequence: Dict[str, List[Dict[str, Any]]] = {}
+        # Maps symbol -> Dict[timestamp] -> regime for O(1) lookup
+        self.regime_by_timestamp: Dict[str, Dict[datetime, RegimeAnalysis]] = {}
+        
         # Market data for regime analysis
         self.market_data_buffer: Dict[str, List[float]] = {}
         self.price_history: Dict[str, pd.DataFrame] = {}
@@ -358,6 +364,10 @@ class EnhancedRegimeEngine(ISystemComponent):
             # Clear buffers
             self.market_data_buffer.clear()
             self.price_history.clear()
+            
+            # Clear regime sequence persistence
+            self.regime_sequence.clear()
+            self.regime_by_timestamp.clear()
             
             # Update status
             self.is_operational = False
@@ -676,7 +686,9 @@ class EnhancedRegimeEngine(ISystemComponent):
                     }
             
             elif isinstance(market_data, pd.DataFrame):
-                # Handle DataFrame input (for batch processing)
+                # Handle DataFrame input (for sequential bar-by-bar processing to enable regime-aware design)
+                # CRITICAL: Process bar-by-bar to detect regime changes throughout the period
+                # This enables true regime-aware processing (Rule 2: Regime-First Principle)
                 if market_data.empty:
                     return {
                         'market_data_processed': False,
@@ -687,8 +699,12 @@ class EnhancedRegimeEngine(ISystemComponent):
                 # Get symbol from DataFrame (assume single symbol)
                 symbol = market_data['symbol'].iloc[0] if 'symbol' in market_data.columns else 'UNKNOWN'
                 
-                # Process each row in the DataFrame
-                for _, row in market_data.iterrows():
+                # Track regime sequence throughout the period
+                regime_sequence = []
+                last_detected_regime = None
+                
+                # Process each row in the DataFrame (bar-by-bar analysis)
+                for idx, row in market_data.iterrows():
                     timestamp = row.get('timestamp', datetime.now())
                     close = row.get('close', 0.0)
                     high = row.get('high', close)
@@ -718,48 +734,96 @@ class EnhancedRegimeEngine(ISystemComponent):
                     if len(buffer['close']) > max_buffer_size:
                         for key in buffer:
                             buffer[key] = buffer[key][-max_buffer_size:]
-                
-                # After processing all rows, analyze the regime
-                if len(self.market_data_buffer[symbol]['close']) >= self.config.lookback_window:
-                    # Calculate regime indicators
-                    regime_indicators = self._calculate_regime_indicators(symbol)
                     
-                    # Classify regime
-                    new_regime = self._classify_regime(symbol, regime_indicators)
-                    
-                    # Check for regime change
-                    regime_changed = False
-                    if new_regime and self.current_regime is not None:
-                        if self.current_regime.primary_regime != new_regime.primary_regime:
+                    # Analyze regime after each bar once we have enough data (bar-by-bar analysis)
+                    if len(buffer['close']) >= self.config.lookback_window:
+                        # Calculate regime indicators using rolling window
+                        regime_indicators = self._calculate_regime_indicators(symbol)
+                        
+                        # Classify regime for this bar
+                        new_regime = self._classify_regime(symbol, regime_indicators)
+                        
+                        # Check for regime change
+                        regime_changed = False
+                        if self.current_regime is None:
                             regime_changed = True
-                            self.logger.info(f"Regime change detected for {symbol}: {self.current_regime.primary_regime.value} -> {new_regime.primary_regime.value}")
-                    
-                    # Update current regime
-                    if new_regime:
+                        elif new_regime.primary_regime != self.current_regime.primary_regime:
+                            regime_changed = True
+                            self.logger.info(
+                                f"Regime change detected for {symbol} at {timestamp}: "
+                                f"{self.current_regime.primary_regime.value} -> {new_regime.primary_regime.value}"
+                            )
+                        
+                        # Update current regime (this is the regime at THIS bar)
                         self.current_regime = new_regime
                         self.regime_history.append(new_regime)
+                        
+                        # Track regime sequence for this period
+                        regime_entry = {
+                            'timestamp': timestamp,
+                            'bar_index': idx,
+                            'regime': new_regime.primary_regime.value,
+                            'confidence': new_regime.confidence,
+                            'regime_changed': regime_changed
+                        }
+                        regime_sequence.append(regime_entry)
+                        
+                        # CRITICAL: Persist regime sequence for component access
+                        if symbol not in self.regime_sequence:
+                            self.regime_sequence[symbol] = []
+                        self.regime_sequence[symbol].append(regime_entry)
+                        
+                        # CRITICAL: Persist regime by timestamp for O(1) lookup
+                        if symbol not in self.regime_by_timestamp:
+                            self.regime_by_timestamp[symbol] = {}
+                        self.regime_by_timestamp[symbol][timestamp] = new_regime
+                        
+                        # Keep regime sequence manageable (last 10000 bars per symbol)
+                        max_sequence_size = 10000
+                        if len(self.regime_sequence[symbol]) > max_sequence_size:
+                            # Remove oldest entries (FIFO)
+                            removed = self.regime_sequence[symbol][:-max_sequence_size]
+                            # Clean up timestamp index
+                            for entry in removed:
+                                old_timestamp = entry.get('timestamp')
+                                if old_timestamp and old_timestamp in self.regime_by_timestamp.get(symbol, {}):
+                                    del self.regime_by_timestamp[symbol][old_timestamp]
+                            self.regime_sequence[symbol] = self.regime_sequence[symbol][-max_sequence_size:]
                         
                         # Keep regime history manageable
                         if len(self.regime_history) > 1000:
                             self.regime_history = self.regime_history[-1000:]
-                    
-                    # Update metrics
-                    self.health_metrics['performance_metrics']['total_regime_analyses'] += 1
-                    self.health_metrics['performance_metrics']['successful_regime_analyses'] += 1
-                    if regime_changed:
-                        self.health_metrics['performance_metrics']['regime_changes_detected'] += 1
-                    
+                        
+                        # Notify subscribers on regime change (for real-time adaptation)
+                        if regime_changed and len(self.subscribers) > 0:
+                            asyncio.create_task(self.notify_regime_change(new_regime))
+                        
+                        # Update metrics
+                        self.health_metrics['performance_metrics']['total_regime_analyses'] += 1
+                        self.health_metrics['performance_metrics']['successful_regime_analyses'] += 1
+                        if regime_changed:
+                            self.health_metrics['performance_metrics']['regime_changes_detected'] += 1
+                        
+                        last_detected_regime = new_regime
+                
+                # Return summary with regime sequence
+                if last_detected_regime:
                     return {
                         'market_data_processed': True,
                         'symbol': symbol,
-                        'regime_detected': new_regime.primary_regime.value if new_regime else None,
-                        'regime_changed': regime_changed,
-                        'confidence': new_regime.confidence if new_regime else 0.0,
+                        'regime_detected': last_detected_regime.primary_regime.value,
+                        'regime_changed': any(r['regime_changed'] for r in regime_sequence),
+                        'confidence': last_detected_regime.confidence,
                         'buffer_size': len(self.market_data_buffer[symbol]['close']),
-                        'processing_timestamp': datetime.now()
+                        'processing_timestamp': datetime.now(),
+                        # CRITICAL: Return regime sequence for regime-aware processing
+                        'regime_sequence': regime_sequence,  # Bar-by-bar regime tracking
+                        'regime_changes_count': sum(1 for r in regime_sequence if r['regime_changed']),
+                        'total_bars_analyzed': len(regime_sequence),
+                        'warm_up_bars': max(0, len(market_data) - len(regime_sequence))
                     }
                 else:
-                    # Not enough data yet
+                    # Not enough data yet (less than lookback_window)
                     return {
                         'market_data_processed': True,
                         'symbol': symbol,
@@ -767,7 +831,10 @@ class EnhancedRegimeEngine(ISystemComponent):
                         'regime_changed': False,
                         'buffer_size': len(self.market_data_buffer[symbol]['close']),
                         'required_size': self.config.lookback_window,
-                        'processing_timestamp': datetime.now()
+                        'processing_timestamp': datetime.now(),
+                        'regime_sequence': [],  # No regime detected yet
+                        'total_bars_analyzed': 0,
+                        'warm_up_bars': len(market_data)
                     }
             
             else:
@@ -931,3 +998,77 @@ class EnhancedRegimeEngine(ISystemComponent):
     def classify_regime(self, data: Any) -> Dict[str, Any]:
         """Standardized method for regime classification (alias)"""
         return self.analyze_regime(data)
+    
+    # ========================================
+    # REGIME ACCESS METHODS (for component integration)
+    # ========================================
+    
+    def get_current_regime_context(self) -> Optional[RegimeAnalysis]:
+        """
+        Get current regime context for components (IRegimeAware interface support)
+        
+        Returns:
+            Current RegimeAnalysis or None if no regime detected yet
+        """
+        return self.current_regime
+    
+    def get_regime_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[RegimeAnalysis]:
+        """
+        Get regime for a specific timestamp (bar-by-bar lookup)
+        
+        Args:
+            symbol: Trading symbol
+            timestamp: Timestamp of the bar
+            
+        Returns:
+            RegimeAnalysis for that timestamp, or None if not found
+        """
+        if symbol not in self.regime_by_timestamp:
+            return None
+        
+        # Exact match first
+        if timestamp in self.regime_by_timestamp[symbol]:
+            return self.regime_by_timestamp[symbol][timestamp]
+        
+        # If no exact match, find closest earlier timestamp (most recent regime at that time)
+        symbol_timestamps = sorted(self.regime_by_timestamp[symbol].keys())
+        for ts in reversed(symbol_timestamps):
+            if ts <= timestamp:
+                return self.regime_by_timestamp[symbol][ts]
+        
+        return None
+    
+    def get_regime_sequence(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        Get complete regime sequence for a symbol (bar-by-bar)
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            List of regime entries, each with timestamp, bar_index, regime, confidence, regime_changed
+        """
+        return self.regime_sequence.get(symbol, [])
+    
+    def get_regime_for_dataframe_row(self, symbol: str, row_index: int, dataframe: pd.DataFrame) -> Optional[RegimeAnalysis]:
+        """
+        Get regime for a specific DataFrame row by matching timestamp
+        
+        Args:
+            symbol: Trading symbol
+            row_index: Row index in DataFrame
+            dataframe: DataFrame with 'timestamp' column
+            
+        Returns:
+            RegimeAnalysis for that row, or None if not found
+        """
+        if row_index >= len(dataframe) or 'timestamp' not in dataframe.columns:
+            return None
+        
+        timestamp = dataframe.iloc[row_index]['timestamp']
+        if isinstance(timestamp, pd.Timestamp):
+            timestamp = timestamp.to_pydatetime()
+        elif not isinstance(timestamp, datetime):
+            return None
+        
+        return self.get_regime_at_timestamp(symbol, timestamp)

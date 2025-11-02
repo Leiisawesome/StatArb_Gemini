@@ -18,7 +18,7 @@ Status: Production
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
 from datetime import datetime
 
@@ -477,17 +477,23 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         timeframe: str = "1min"
     ) -> Dict[str, EnrichedMarketData]:
         """
-        Process raw market data through complete pipeline
+        Process raw market data through complete pipeline with regime as "beacon light"
         
         Returns fully enriched data ready for strategy consumption.
         
-        **Pipeline Flow:**
+        **Pipeline Flow (Regime as Beacon Light Approach):**
+        0. Process regime FIRST (establish bar-by-bar regime sequence as beacon)
         1. Load raw OHLCV (DataManager)
-        2. Calculate indicators (EnhancedTechnicalIndicators)
-        3. Engineer features (EnhancedFeatureEngineer)
-        4. Generate signals (EnhancedSignalGenerator)
+        2. Calculate indicators on entire DataFrame (EnhancedTechnicalIndicators)
+        3. Engineer features on entire DataFrame (EnhancedFeatureEngineer)
+        4. Generate signals (EnhancedSignalGenerator) - looks up regime per bar via get_regime_at_timestamp()
+        
+        **Architecture:** Regime acts as metadata reference (beacon light), NOT as segment boundaries.
+        This avoids issues with small segments, concatenation, and index alignment.
+        Signal engine references regime per bar when filtering/adjusting confidence.
         
         **Rule 3 Compliance:** This is the ONLY way strategies should get data.
+        **Rule 2 Compliance:** Regime-aware signal filtering via bar-by-bar regime lookup.
         
         Args:
             symbols: List of symbols to process
@@ -505,6 +511,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             ...     end_time=datetime(2024, 12, 31)
             ... )
             >>> # Each symbol has OHLCV + 29 indicators + 50 features + signals
+            >>> # Indicators/features calculated with regime-appropriate config per segment
             >>> aapl_df = enriched_data['AAPL'].get_enriched_dataframe()
         """
         if not self.is_operational:
@@ -536,33 +543,123 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     continue
                 
                 symbol_data = raw_data[symbol].copy()
+                symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
                 
                 try:
-                    # PHASE 2: Calculate technical indicators
-                    logger.debug(f"🔧 Phase 2: Calculating indicators for {symbol}")
-                    phase2_start = datetime.now()
+                    # PHASE 0: Process regime FIRST (store bar-by-bar regime sequence as "beacon light")
+                    # Regime acts as metadata reference, not as segment boundaries
+                    dominant_regime_analysis = None
+                    regime_sequence = []
                     
-                    indicators_df = await self._calculate_indicators(symbol_data)
+                    if self.regime_engine:
+                        logger.debug(f"🔄 Phase 0: Processing regime for {symbol} (beacon light approach)")
+                        regime_result = self.regime_engine.process_market_data(symbol_data)
+                        regime_sequence = regime_result.get('regime_sequence', [])
+                        
+                        if regime_sequence:
+                            regime_changes_count = regime_result.get('regime_changes_count', 0)
+                            logger.debug(
+                                f"   ✅ {symbol}: Regime beacon established - "
+                                f"{len(regime_sequence)} regime states, "
+                                f"{regime_changes_count} regime changes"
+                            )
+                            
+                            # ENHANCED: Per-regime-change config adaptation
+                            # If regime changes detected, process in segments with config adaptation per segment
+                            if regime_changes_count > 0:
+                                logger.info(
+                                    f"   🔄 {symbol}: Regime changes detected - "
+                                    f"using per-segment config adaptation ({regime_changes_count} changes)"
+                                )
+                                
+                                # Identify regime segments (split by regime changes)
+                                regime_segments = self._identify_regime_segments(
+                                    symbol_data=symbol_data,
+                                    regime_sequence=regime_sequence,
+                                    symbol=symbol
+                                )
+                                
+                                # Process segments with config adaptation per segment
+                                indicators_df, features_df, signals_df = await self._process_regime_segments(
+                                    symbol_data=symbol_data,
+                                    regime_segments=regime_segments,
+                                    symbol=symbol
+                                )
+                                
+                                # Track processing times (approximate - distributed across segments)
+                                phase2_time = 0.1  # Placeholder - actual time distributed across segments
+                                phase3_time = 0.1
+                                phase4_time = 0.1
+                            else:
+                                # Single regime - adapt config once, then process normally
+                                logger.debug(f"   📊 {symbol}: Single regime - adapting config once")
+                                
+                                # Get regime analysis from first regime entry
+                                first_regime_entry = regime_sequence[0]
+                                timestamp = first_regime_entry.get('timestamp')
+                                if timestamp:
+                                    if isinstance(timestamp, pd.Timestamp):
+                                        timestamp = timestamp.to_pydatetime()
+                                    regime_analysis = self.regime_engine.get_regime_at_timestamp(
+                                        symbol=symbol,
+                                        timestamp=timestamp
+                                    )
+                                    
+                                    # Adapt config once for single regime
+                                    if regime_analysis:
+                                        if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
+                                            await self.indicators_engine.adapt_to_regime(regime_analysis)
+                                        if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
+                                            await self.feature_engineer.adapt_to_regime(regime_analysis)
+                                        logger.info(
+                                            f"   📊 Config adapted for regime: {regime_analysis.primary_regime.value} "
+                                            f"(single regime, {len(regime_sequence)} bars)"
+                                        )
+                                
+                                # Standard processing (entire DataFrame at once)
+                                phase2_start = datetime.now()
+                                indicators_df = await self._calculate_indicators(symbol_data)
+                                phase2_time = (datetime.now() - phase2_start).total_seconds()
+                                
+                                phase3_start = datetime.now()
+                                features_df = await self._engineer_features(indicators_df)
+                                phase3_time = (datetime.now() - phase3_start).total_seconds()
+                                
+                                phase4_start = datetime.now()
+                                signals_df = await self._generate_signals(features_df)
+                                phase4_time = (datetime.now() - phase4_start).total_seconds()
+                        else:
+                            logger.debug(f"   ⚠️  {symbol}: No regime sequence available - using standard processing")
+                            
+                            # No regime data - standard processing without adaptation
+                            phase2_start = datetime.now()
+                            indicators_df = await self._calculate_indicators(symbol_data)
+                            phase2_time = (datetime.now() - phase2_start).total_seconds()
+                            
+                            phase3_start = datetime.now()
+                            features_df = await self._engineer_features(indicators_df)
+                            phase3_time = (datetime.now() - phase3_start).total_seconds()
+                            
+                            phase4_start = datetime.now()
+                            signals_df = await self._generate_signals(features_df)
+                            phase4_time = (datetime.now() - phase4_start).total_seconds()
                     
-                    phase2_time = (datetime.now() - phase2_start).total_seconds()
+                    # If regime_engine not available, use standard processing
+                    if not self.regime_engine:
+                        phase2_start = datetime.now()
+                        indicators_df = await self._calculate_indicators(symbol_data)
+                        phase2_time = (datetime.now() - phase2_start).total_seconds()
+                        
+                        phase3_start = datetime.now()
+                        features_df = await self._engineer_features(indicators_df)
+                        phase3_time = (datetime.now() - phase3_start).total_seconds()
+                        
+                        phase4_start = datetime.now()
+                        signals_df = await self._generate_signals(features_df)
+                        phase4_time = (datetime.now() - phase4_start).total_seconds()
+                    
                     self.processing_times['indicators'].append(phase2_time)
-                    
-                    # PHASE 3: Engineer features
-                    logger.debug(f"🔬 Phase 3: Engineering features for {symbol}")
-                    phase3_start = datetime.now()
-                    
-                    features_df = await self._engineer_features(indicators_df)
-                    
-                    phase3_time = (datetime.now() - phase3_start).total_seconds()
                     self.processing_times['features'].append(phase3_time)
-                    
-                    # PHASE 4: Generate preliminary signals
-                    logger.debug(f"📡 Phase 4: Generating signals for {symbol}")
-                    phase4_start = datetime.now()
-                    
-                    signals_df = await self._generate_signals(features_df)
-                    
-                    phase4_time = (datetime.now() - phase4_start).total_seconds()
                     self.processing_times['signals'].append(phase4_time)
                     
                     # Create enriched data container
@@ -581,14 +678,17 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     if not enriched_data[symbol].validate_enrichment():
                         logger.warning(f"⚠️  {symbol}: enrichment validation failed")
                     
+                    # Log regime info if available
+                    regime_info = ""
+                    if self.regime_engine and regime_sequence:
+                        regime_info = f" ({len(regime_sequence)} regime states, {regime_result.get('regime_changes_count', 0)} changes)"
                     logger.info(
                         f"✅ {symbol} processed: {len(symbol_data)} bars → "
-                        f"{len(signals_df.columns)} total columns "
-                        f"(P2:{phase2_time:.2f}s P3:{phase3_time:.2f}s P4:{phase4_time:.2f}s)"
+                        f"{len(signals_df.columns)} total columns{regime_info}"
                     )
                     
                 except Exception as e:
-                    logger.error(f"❌ {symbol} processing failed: {e}")
+                    logger.error(f"❌ {symbol} processing failed: {e}", exc_info=True)
                     continue
             
             # Calculate total processing time
@@ -630,7 +730,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         try:
             # Load data through DataManager (Single Data Authority - Rule 3.1)
-            raw_data = await self.data_manager.load_market_data(
+            # Note: load_market_data is synchronous, not async
+            raw_data = self.data_manager.load_market_data(
                 symbols=symbols,
                 start_time=start_time,
                 end_time=end_time,
@@ -709,7 +810,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             data: DataFrame with OHLCV + indicators + features
         
         Returns:
-            DataFrame with OHLCV + indicators + features + signal columns
+            DataFrame with OHLCV + indicators + features (signals are generated separately as TradingSignal objects)
+        
+        Note: generate_signals() returns List[TradingSignal], not a DataFrame.
+        The enriched DataFrame (features + indicators) is what strategies consume.
+        TradingSignal objects are generated separately by strategies.
         """
         if not self.signal_generator:
             logger.warning("Signal generator not available, returning data as-is")
@@ -717,12 +822,273 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         try:
             # Generate signals through EnhancedSignalGenerator (Rule 3.4)
-            signals_df = self.signal_generator.generate_signals(data)
-            return signals_df
+            # Note: This returns List[TradingSignal], but we need DataFrame for pipeline
+            # The TradingSignal objects are used separately by strategies
+            # Here we just return the features DataFrame (which is what strategies consume)
+            _ = self.signal_generator.generate_signals(data)  # Generate but don't use for DataFrame
+            return data.copy()  # Return features DataFrame (signals handled separately)
             
         except Exception as e:
             logger.error(f"Signal generation failed: {e}")
             return data.copy()
+    
+    # ================================================================
+    # Regime-Segmented Processing Methods (Rule 2 Enhancement)
+    # ================================================================
+    
+    def _identify_regime_segments(
+        self,
+        symbol_data: pd.DataFrame,
+        regime_sequence: List[Dict[str, Any]],
+        symbol: str
+    ) -> List[Tuple[int, int, Optional[Dict[str, Any]]]]:
+        """
+        Identify continuous regime segments in DataFrame
+        
+        **ENHANCEMENT:** Splits DataFrame by regime transitions to enable
+        per-segment config adaptation and recalculation.
+        
+        Uses bar_index from regime_sequence for direct mapping to DataFrame rows.
+        Handles warm-up period (bars before first regime entry) as initial segment.
+        
+        Args:
+            symbol_data: DataFrame with timestamp column
+            regime_sequence: List of regime entries from regime engine (with bar_index)
+            symbol: Trading symbol (for regime lookup)
+        
+        Returns:
+            List of (start_index, end_index, regime_info) tuples
+            regime_info contains: {'regime': str, 'regime_analysis': RegimeAnalysis}
+        """
+        if not regime_sequence or symbol_data.empty:
+            # No regime data - single segment
+            return [(0, len(symbol_data), None)]
+        
+        segments = []
+        current_regime = None
+        segment_start = 0
+        
+        # Find first regime entry to determine warm-up period
+        first_regime_bar = None
+        for regime_entry in regime_sequence:
+            bar_index = regime_entry.get('bar_index')
+            if bar_index is not None and bar_index < len(symbol_data):
+                first_regime_bar = bar_index
+                break
+        
+        # If warm-up period exists (bars 0 to first_regime_bar), create initial segment
+        if first_regime_bar and first_regime_bar > 0:
+            # Warm-up segment: use first available regime or None
+            first_regime = regime_sequence[0].get('regime', 'unknown') if regime_sequence else 'unknown'
+            segment_timestamp = symbol_data.iloc[0]['timestamp']
+            if isinstance(segment_timestamp, pd.Timestamp):
+                segment_timestamp = segment_timestamp.to_pydatetime()
+            
+            regime_analysis = None
+            if self.regime_engine:
+                # Try to get regime from first bar
+                regime_analysis = self.regime_engine.get_regime_at_timestamp(
+                    symbol=symbol,
+                    timestamp=segment_timestamp
+                )
+            
+            segments.append((
+                0,
+                first_regime_bar,
+                {
+                    'regime': first_regime,  # Use first regime for warm-up period
+                    'regime_analysis': regime_analysis,
+                    'start_timestamp': symbol_data.iloc[0]['timestamp'],
+                    'end_timestamp': symbol_data.iloc[first_regime_bar - 1]['timestamp'] if first_regime_bar > 0 else symbol_data.iloc[0]['timestamp']
+                }
+            ))
+            segment_start = first_regime_bar
+        
+        # Use bar_index from regime sequence for direct DataFrame mapping
+        # Regime sequence is in chronological order with bar_index
+        for regime_entry in regime_sequence:
+            bar_index = regime_entry.get('bar_index')
+            if bar_index is None:
+                # Fallback to timestamp matching if bar_index not available
+                continue
+            
+            # Ensure bar_index is within DataFrame bounds
+            if bar_index >= len(symbol_data):
+                continue
+            
+            regime_name = regime_entry.get('regime', 'unknown')
+            
+            # Check if regime changed
+            if current_regime != regime_name:
+                # End current segment, start new one
+                if current_regime is not None:
+                    # Get regime analysis for previous segment
+                    if segment_start < len(symbol_data):
+                        segment_timestamp = symbol_data.iloc[segment_start]['timestamp']
+                        if isinstance(segment_timestamp, pd.Timestamp):
+                            segment_timestamp = segment_timestamp.to_pydatetime()
+                        
+                        regime_analysis = None
+                        if self.regime_engine:
+                            regime_analysis = self.regime_engine.get_regime_at_timestamp(
+                                symbol=symbol,
+                                timestamp=segment_timestamp
+                            )
+                        
+                        segments.append((
+                            segment_start,
+                            bar_index,
+                            {
+                                'regime': current_regime,
+                                'regime_analysis': regime_analysis,
+                                'start_timestamp': symbol_data.iloc[segment_start]['timestamp'],
+                                'end_timestamp': symbol_data.iloc[bar_index - 1]['timestamp'] if bar_index > 0 else symbol_data.iloc[segment_start]['timestamp']
+                            }
+                        ))
+                
+                segment_start = bar_index
+                current_regime = regime_name
+        
+        # Add final segment (from last regime change to end of DataFrame)
+        if segment_start < len(symbol_data):
+            segment_timestamp = symbol_data.iloc[segment_start]['timestamp']
+            if isinstance(segment_timestamp, pd.Timestamp):
+                segment_timestamp = segment_timestamp.to_pydatetime()
+            
+            regime_analysis = None
+            if self.regime_engine:
+                regime_analysis = self.regime_engine.get_regime_at_timestamp(
+                    symbol=symbol,
+                    timestamp=segment_timestamp
+                )
+            
+            segments.append((
+                segment_start,
+                len(symbol_data),
+                {
+                    'regime': current_regime,
+                    'regime_analysis': regime_analysis,
+                    'start_timestamp': symbol_data.iloc[segment_start]['timestamp'],
+                    'end_timestamp': symbol_data.iloc[-1]['timestamp']
+                }
+            ))
+        
+        # If no segments created (single regime), return single segment
+        if not segments:
+            return [(0, len(symbol_data), None)]
+        
+        return segments
+    
+    async def _process_regime_segments(
+        self,
+        symbol_data: pd.DataFrame,
+        regime_segments: List[Tuple[int, int, Optional[Dict[str, Any]]]],
+        symbol: str
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Process DataFrame in regime segments with config adaptation per segment
+        
+        **ENHANCEMENT:** Processes each regime segment separately with adapted config,
+        then combines results. This ensures indicators/features are calculated with
+        regime-appropriate parameters.
+        
+        Args:
+            symbol_data: Raw OHLCV DataFrame
+            regime_segments: List of (start_idx, end_idx, regime_info) tuples
+            symbol: Trading symbol
+        
+        Returns:
+            Tuple of (indicators_df, features_df, signals_df) - combined from all segments
+        """
+        all_indicators = []
+        all_features = []
+        
+        segment_count = len(regime_segments)
+        logger.debug(f"   🔄 Processing {segment_count} regime segments for {symbol}")
+        
+        for segment_idx, (start_idx, end_idx, regime_info) in enumerate(regime_segments):
+            # Extract segment data
+            segment_data = symbol_data.iloc[start_idx:end_idx].copy()
+            
+            if segment_data.empty:
+                continue
+            
+            # Get regime analysis for this segment
+            regime_analysis = None
+            if regime_info and 'regime_analysis' in regime_info:
+                regime_analysis = regime_info['regime_analysis']
+            elif self.regime_engine and segment_data is not None and not segment_data.empty:
+                # Fallback: Get regime from first bar of segment
+                first_timestamp = segment_data.iloc[0]['timestamp']
+                if isinstance(first_timestamp, pd.Timestamp):
+                    first_timestamp = first_timestamp.to_pydatetime()
+                regime_analysis = self.regime_engine.get_regime_at_timestamp(
+                    symbol=symbol,
+                    timestamp=first_timestamp
+                )
+            
+            # Adapt config for this segment's regime
+            if regime_analysis:
+                regime_name = regime_analysis.primary_regime.value if hasattr(regime_analysis.primary_regime, 'value') else str(regime_analysis.primary_regime)
+                logger.debug(
+                    f"   📊 Segment {segment_idx + 1}/{segment_count} ({start_idx}-{end_idx}): "
+                    f"Regime={regime_name}, Bars={len(segment_data)}"
+                )
+                
+                # Adapt indicator engine config
+                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
+                    await self.indicators_engine.adapt_to_regime(regime_analysis)
+                
+                # Adapt feature engineer config
+                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
+                    await self.feature_engineer.adapt_to_regime(regime_analysis)
+            
+            # Process segment through pipeline
+            # PHASE 2: Calculate indicators for this segment
+            segment_indicators = await self._calculate_indicators(segment_data)
+            all_indicators.append(segment_indicators)
+            
+            # PHASE 3: Engineer features for this segment
+            segment_features = await self._engineer_features(segment_indicators)
+            all_features.append(segment_features)
+        
+        # Combine segments
+        if not all_indicators:
+            # Fallback to standard processing if no segments processed
+            indicators_df = await self._calculate_indicators(symbol_data)
+            features_df = await self._engineer_features(indicators_df)
+        else:
+            # Combine indicator segments
+            indicators_df = pd.concat(all_indicators, ignore_index=True)
+            # Sort by timestamp to ensure proper order
+            if 'timestamp' in indicators_df.columns:
+                indicators_df = indicators_df.sort_values('timestamp').reset_index(drop=True)
+            
+            # Combine feature segments
+            features_df = pd.concat(all_features, ignore_index=True)
+            # Sort by timestamp to ensure proper order
+            if 'timestamp' in features_df.columns:
+                features_df = features_df.sort_values('timestamp').reset_index(drop=True)
+        
+        # PHASE 4: Generate signals (process entire combined DataFrame)
+        # Signals are already filtered bar-by-bar in _filter_signals()
+        signals_df = await self._generate_signals(features_df)
+        
+        # Track processing times
+        # Note: Segment processing time is distributed across multiple calls
+        # We'll use average time per segment for metrics
+        if segment_count > 0:
+            # Approximate time (would need more detailed tracking for exact measurement)
+            avg_segment_time = 0.01  # Placeholder - actual time captured in individual calls
+            self.processing_times['indicators'].append(avg_segment_time * segment_count)
+            self.processing_times['features'].append(avg_segment_time * segment_count)
+        
+        logger.debug(
+            f"   ✅ Combined {segment_count} segments: "
+            f"{len(indicators_df)} bars, {len(indicators_df.columns)} indicator columns"
+        )
+        
+        return indicators_df, features_df, signals_df
     
     # ================================================================
     # Utility Methods

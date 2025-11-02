@@ -516,7 +516,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return False
     
     def _execute_query(self, query: str) -> pd.DataFrame:
-        """Execute ClickHouse query and return DataFrame"""
+        """
+        Execute ClickHouse query and return DataFrame with proper timezone handling
+        
+        CRITICAL: All timestamps returned from ClickHouse queries are handled here at the source.
+        ClickHouse toTimeZone() converts timestamp values to NY time but returns timezone-naive datetimes.
+        This method ensures all timestamps are properly localized to America/New_York timezone.
+        """
         try:
             import requests
             # Add TSVWithNames format to get proper column names
@@ -533,6 +539,25 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Parse response as TSV with headers
             from io import StringIO
             df = pd.read_csv(StringIO(response.text), sep='\t')
+            
+            # FIX TIMEZONE AT SOURCE: Handle timestamp timezone conversion immediately after query
+            # This ensures ALL data returned from ClickHouse has correct timezone, regardless of caller
+            if 'timestamp' in df.columns and not df.empty:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                # ClickHouse toTimeZone() converts values to NY time but returns timezone-naive
+                # Localize directly to America/New_York (NOT UTC!) to avoid 5-hour offset
+                if df['timestamp'].dt.tz is None:
+                    df['timestamp'] = df['timestamp'].dt.tz_localize(
+                        'America/New_York', 
+                        ambiguous='infer', 
+                        nonexistent='shift_forward'
+                    )
+                else:
+                    # Already timezone-aware - ensure it's in NY timezone
+                    sample_tz_name = str(df['timestamp'].iloc[0].tz) if len(df) > 0 else None
+                    if sample_tz_name and 'America/New_York' not in sample_tz_name and 'US/Eastern' not in sample_tz_name:
+                        df['timestamp'] = df['timestamp'].dt.tz_convert('America/New_York')
+            
             return df
             
         except Exception as e:
@@ -650,7 +675,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Use raw 1-minute data with timezone conversion
             query = f"""
             SELECT 
-                toDateTime(window_start / 1000000000) as timestamp,
+                toTimeZone(toDateTime(window_start / 1000000000), 'America/New_York') as timestamp,
                 ticker as symbol,
                 open,
                 high,
@@ -731,9 +756,19 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         if df.empty:
             return df
         
-        # Ensure timestamp is datetime
+        # Ensure timestamp is datetime (timezone already handled in _execute_query at source)
+        # Note: Timezone conversion is now done in _execute_query() to fix it at the data source
+        # This ensures all ClickHouse queries return properly timezone-aware timestamps
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
+            # If somehow timezone was lost (shouldn't happen if _execute_query was used), fix it
+            if df['timestamp'].dt.tz is None:
+                self.logger.warning("Timestamp timezone missing - applying fix (should be handled in _execute_query)")
+                df['timestamp'] = df['timestamp'].dt.tz_localize(
+                    'America/New_York', 
+                    ambiguous='infer', 
+                    nonexistent='shift_forward'
+                )
         
         # Ensure numeric columns are float
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']

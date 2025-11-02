@@ -780,8 +780,8 @@ class RegimeManager(ISystemComponent):
                 regime_state.current_regime = detection_result.regime_type
                 regime_state.regime_confidence = detection_result.confidence
                 
-                if detection_result.regime_start_date:
-                    regime_state.regime_duration = (datetime.now() - detection_result.regime_start_date).days
+                if detection_result.regime_start:
+                    regime_state.regime_duration = (datetime.now() - detection_result.regime_start).days
             
             # Cross-asset regime analysis
             if 'cross_asset_regime' in analysis_result:

@@ -664,17 +664,40 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             if len(symbol_df) < 10:  # Need minimum data for signals
                 continue
             
-            # Generate different types of signals
-            mean_reversion_signals = self._generate_mean_reversion_signals(symbol_df)
-            momentum_signals = self._generate_momentum_signals(symbol_df)
-            volume_signals = self._generate_volume_signals(symbol_df)
+            # Generate different types of signals (UNBIASED APPROACH)
+            # Return separate signals per type - strategies pick what they need
+            # This removes bias from fixed-weight combination (mean_rev=0.4, momentum=0.4, volume=0.2)
             
-            # Combine signals using multi-factor approach
-            combined_signals = self._combine_signals(
-                symbol_df, mean_reversion_signals, momentum_signals, volume_signals
+            mean_reversion_scores = self._generate_mean_reversion_signals(symbol_df)
+            momentum_scores = self._generate_momentum_signals(symbol_df)
+            volume_scores = self._generate_volume_signals(symbol_df)
+            
+            # Convert score DataFrames to TradingSignal objects (separate per type)
+            # No forced combination - truly general, strategy-agnostic signals
+            # Pass all score DataFrames for metadata access
+            mean_rev_signals = self._scores_to_signals(
+                symbol_df, mean_reversion_scores, 
+                score_column='mean_reversion_score',
+                signal_source='mean_reversion',
+                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
+            )
+            momentum_sig_list = self._scores_to_signals(
+                symbol_df, momentum_scores,
+                score_column='momentum_score',
+                signal_source='momentum',
+                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
+            )
+            volume_sig_list = self._scores_to_signals(
+                symbol_df, volume_scores,
+                score_column='volume_score',
+                signal_source='volume',
+                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
             )
             
-            all_signals.extend(combined_signals)
+            # Return all signal types separately (no bias)
+            all_signals.extend(mean_rev_signals)
+            all_signals.extend(momentum_sig_list)
+            all_signals.extend(volume_sig_list)
         
         # Filter and validate signals
         filtered_signals = self._filter_signals(all_signals, df)
@@ -903,49 +926,60 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         
         return signals_df
     
-    def _combine_signals(self, df: pd.DataFrame, mean_rev: pd.DataFrame, 
-                        momentum: pd.DataFrame, volume: pd.DataFrame) -> List[TradingSignal]:
+    def _scores_to_signals(
+        self,
+        df: pd.DataFrame,
+        scores_df: pd.DataFrame,
+        score_column: str,
+        signal_source: str,
+        all_scores: Optional[Dict[str, pd.DataFrame]] = None
+    ) -> List[TradingSignal]:
         """
-        Combine different signal types into final signals with enhanced confidence scaling
-        Based on test findings: ensure high-quality signals reach 0.6+ confidence
+        Convert score DataFrame to TradingSignal objects (unbiased approach)
+        
+        Creates separate signals per signal type - no forced combination.
+        Strategies can pick signals based on their needs (mean_reversion, momentum, volume).
+        
+        Args:
+            df: Original DataFrame with OHLCV and features
+            scores_df: DataFrame with score column (e.g., 'mean_reversion_score')
+            score_column: Name of score column to use
+            signal_source: Source of signal ('mean_reversion', 'momentum', 'volume')
+        
+        Returns:
+            List of TradingSignal objects for this signal type
         """
         signals = []
         
-        # Combine scores with weights
-        combined_score = (
-            mean_rev['mean_reversion_score'] * self.config.mean_reversion_weight +
-            momentum['momentum_score'] * self.config.momentum_weight +
-            volume['volume_score'] * self.config.volume_weight
-        )
+        if score_column not in scores_df.columns:
+            return signals
         
-        # Add ML enhancement if enabled
-        if self.config.enable_ml_signals:
-            ml_score = self._generate_ml_signals(df)
-            combined_score = 0.7 * combined_score + 0.3 * ml_score
+        score_series = scores_df[score_column].fillna(0.0)
         
-        # Generate signals from combined scores
+        # Reindex to match df.index
+        if not score_series.index.equals(df.index):
+            score_series = score_series.reindex(df.index, fill_value=0.0)
+        
         for i, (idx, row) in enumerate(df.iterrows()):
-            score = combined_score.iloc[i] if i < len(combined_score) else 0
+            if idx not in score_series.index:
+                continue
             
-            # Enhanced confidence calculation from test findings
+            score = score_series.loc[idx]
             raw_confidence = abs(score)
             
-            # Scale confidence to ensure high-quality signals reach 0.6+
-            if raw_confidence >= self.config.signal_threshold:
-                # Scale confidence: 0.3 -> 0.6, 0.6 -> 0.8, 0.9 -> 0.95
-                scaled_confidence = min(0.95, 0.5 + (raw_confidence - self.config.signal_threshold) * 0.8)
-                
-                # For extreme scores (like extreme z-scores), ensure high confidence
-                if raw_confidence >= 0.8:
-                    scaled_confidence = max(0.85, scaled_confidence)
-                
-                confidence = scaled_confidence
-            else:
-                continue  # Below threshold
+            # Only create signals above threshold
+            if raw_confidence < self.config.signal_threshold:
+                continue
+            
+            # Scale confidence similar to _combine_signals (for consistency)
+            scaled_confidence = min(0.95, 0.5 + (raw_confidence - self.config.signal_threshold) * 0.8)
+            if raw_confidence >= 0.8:
+                scaled_confidence = max(0.85, scaled_confidence)
+            confidence = max(scaled_confidence, self.config.signal_threshold)
             
             signal_type = SignalType.BUY if score > 0 else SignalType.SELL
             
-            # Determine strength based on scaled confidence
+            # Determine strength
             if confidence >= 0.8:
                 strength = SignalStrength.STRONG
             elif confidence >= 0.65:
@@ -953,7 +987,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             else:
                 strength = SignalStrength.WEAK
             
-            # Calculate position size based on confidence and strength
+            # Position size
             base_size = self.config.max_position_size
             if strength == SignalStrength.STRONG:
                 position_size = base_size * confidence
@@ -962,7 +996,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             else:
                 position_size = base_size * 0.4 * confidence
             
-            # Calculate target and stop loss
+            # Target and stop loss
             current_price = row['close']
             if signal_type == SignalType.BUY:
                 target_price = current_price * (1 + self.config.take_profit_pct)
@@ -971,7 +1005,39 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 target_price = current_price * (1 - self.config.take_profit_pct)
                 stop_loss = current_price * (1 + self.config.stop_loss_pct)
             
-            # Create signal
+            # Create metadata with all scores for strategy flexibility
+            # Even though this is a single-type signal, include other scores for context
+            metadata = {
+                # This signal's score
+                f'{signal_source}_score': score,
+                'signal_source': signal_source,  # Key field: indicates signal type
+                
+                # Additional context
+                'rsi': row.get('rsi', None),
+                'volume_ratio': row.get('volume_ratio', None),
+                'signal_generation_method': 'unbiased_separate_types',
+                'bias_note': 'Signal from single source - no forced combination. Strategies can combine as needed.'
+            }
+            
+            # Add other scores if available (for strategy flexibility)
+            if all_scores:
+                try:
+                    if 'mean_reversion' in all_scores and 'mean_reversion_score' in all_scores['mean_reversion'].columns:
+                        mr_series = all_scores['mean_reversion']['mean_reversion_score']
+                        if idx in mr_series.index:
+                            metadata['mean_reversion_score'] = mr_series.loc[idx]
+                    if 'momentum' in all_scores and 'momentum_score' in all_scores['momentum'].columns:
+                        mom_series = all_scores['momentum']['momentum_score']
+                        if idx in mom_series.index:
+                            metadata['momentum_score'] = mom_series.loc[idx]
+                    if 'volume' in all_scores and 'volume_score' in all_scores['volume'].columns:
+                        vol_series = all_scores['volume']['volume_score']
+                        if idx in vol_series.index:
+                            metadata['volume_score'] = vol_series.loc[idx]
+                except Exception as meta_e:
+                    # Non-critical - metadata enhancement failed, continue with basic metadata
+                    pass
+            
             signal = TradingSignal(
                 symbol=row['symbol'],
                 timestamp=row['timestamp'],
@@ -982,18 +1048,202 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 target_price=target_price,
                 stop_loss=stop_loss,
                 position_size=position_size,
-                strategy="multi_factor",
-                metadata={
-                    'mean_reversion_score': mean_rev['mean_reversion_score'].loc[idx],
-                    'momentum_score': momentum['momentum_score'].loc[idx],
-                    'volume_score': volume['volume_score'].loc[idx],
-                    'combined_score': score,
-                    'rsi': row.get('rsi', None),
-                    'volume_ratio': row.get('volume_ratio', None)
-                }
+                strategy=f"signal_generator_{signal_source}",
+                metadata=metadata
             )
             
             signals.append(signal)
+        
+        return signals
+    
+    def _combine_signals(self, df: pd.DataFrame, mean_rev: pd.DataFrame, 
+                        momentum: pd.DataFrame, volume: pd.DataFrame) -> List[TradingSignal]:
+        """
+        Combine different signal types into final signals with enhanced confidence scaling
+        Based on test findings: ensure high-quality signals reach 0.6+ confidence
+        """
+        signals = []
+        
+        # Combine scores with weights
+        # CRITICAL: Ensure all Series have same index and handle NaN values
+        # (can occur when regime segments have insufficient data for indicator calculation)
+        mean_rev_scores = mean_rev['mean_reversion_score'].fillna(0.0) if 'mean_reversion_score' in mean_rev.columns else pd.Series(0.0, index=df.index)
+        momentum_scores = momentum['momentum_score'].fillna(0.0) if 'momentum_score' in momentum.columns else pd.Series(0.0, index=df.index)
+        volume_scores = volume['volume_score'].fillna(0.0) if 'volume_score' in volume.columns else pd.Series(0.0, index=df.index)
+        
+        # Reindex to match df.index exactly (handles regime-segmented processing index resets)
+        # Only reindex if indices don't match (to avoid unnecessary operations)
+        if not mean_rev_scores.index.equals(df.index):
+            self.logger.debug(f"Reindexing mean_rev_scores: {mean_rev_scores.index[:5]} -> {df.index[:5]}")
+            mean_rev_scores = mean_rev_scores.reindex(df.index, fill_value=0.0)
+        if not momentum_scores.index.equals(df.index):
+            self.logger.debug(f"Reindexing momentum_scores: {momentum_scores.index[:5]} -> {df.index[:5]}")
+            momentum_scores = momentum_scores.reindex(df.index, fill_value=0.0)
+        if not volume_scores.index.equals(df.index):
+            self.logger.debug(f"Reindexing volume_scores: {volume_scores.index[:5]} -> {df.index[:5]}")
+            volume_scores = volume_scores.reindex(df.index, fill_value=0.0)
+        
+        combined_score = (
+            mean_rev_scores * self.config.mean_reversion_weight +
+            momentum_scores * self.config.momentum_weight +
+            volume_scores * self.config.volume_weight
+        )
+        
+        # Add ML enhancement if enabled
+        if self.config.enable_ml_signals:
+            ml_score = self._generate_ml_signals(df)
+            combined_score = 0.7 * combined_score + 0.3 * ml_score
+        
+        # Generate signals from combined scores
+        # CRITICAL: Use loc[idx] instead of iloc[i] to ensure index alignment
+        # after filtering/sorting operations
+        signals_created_count = 0
+        signals_filtered_count = 0
+        total_rows_processed = 0
+        
+        for i, (idx, row) in enumerate(df.iterrows()):
+            total_rows_processed += 1
+            try:
+                # Use loc with index to ensure correct alignment even after DataFrame operations
+                if idx not in combined_score.index:
+                    self.logger.debug(f"Skipping row {i} (idx={idx}): index not in combined_score")
+                    continue
+                
+                score = combined_score.loc[idx]
+                
+                # Enhanced confidence calculation from test findings
+                raw_confidence = abs(score)
+                
+                # Scale confidence to ensure high-quality signals reach 0.6+
+                if raw_confidence >= self.config.signal_threshold:
+                    signals_filtered_count += 1
+                    if signals_filtered_count <= 3:  # Log first 3 to avoid spam
+                        self.logger.debug(f"Row {i} (idx={idx}): raw_confidence={raw_confidence:.4f} >= threshold={self.config.signal_threshold}")
+                    # Scale confidence: 0.3 -> 0.6, 0.6 -> 0.8, 0.9 -> 0.95
+                    scaled_confidence = min(0.95, 0.5 + (raw_confidence - self.config.signal_threshold) * 0.8)
+                    
+                    # For extreme scores (like extreme z-scores), ensure high confidence
+                    if raw_confidence >= 0.8:
+                        scaled_confidence = max(0.85, scaled_confidence)
+                    
+                    # CRITICAL FIX: Ensure scaled confidence is at least equal to threshold
+                    # Otherwise signals with raw_confidence >= threshold but scaled < threshold
+                    # will be created but then filtered out in _filter_signals
+                    confidence = max(scaled_confidence, self.config.signal_threshold)
+                else:
+                    continue  # Below threshold
+                
+                signal_type = SignalType.BUY if score > 0 else SignalType.SELL
+                
+                # Determine strength based on scaled confidence
+                if confidence >= 0.8:
+                    strength = SignalStrength.STRONG
+                elif confidence >= 0.65:
+                    strength = SignalStrength.MODERATE
+                else:
+                    strength = SignalStrength.WEAK
+                
+                # Calculate position size based on confidence and strength
+                base_size = self.config.max_position_size
+                if strength == SignalStrength.STRONG:
+                    position_size = base_size * confidence
+                elif strength == SignalStrength.MODERATE:
+                    position_size = base_size * 0.7 * confidence
+                else:
+                    position_size = base_size * 0.4 * confidence
+                
+                # Calculate target and stop loss
+                current_price = row['close']
+                if signal_type == SignalType.BUY:
+                    target_price = current_price * (1 + self.config.take_profit_pct)
+                    stop_loss = current_price * (1 - self.config.stop_loss_pct)
+                else:
+                    target_price = current_price * (1 - self.config.take_profit_pct)
+                    stop_loss = current_price * (1 + self.config.stop_loss_pct)
+                
+                # Create signal with safe metadata access
+                # Use the reindexed Series for metadata to ensure consistency
+                # ENHANCED: Include score breakdown for strategy flexibility
+                try:
+                    mr_score = mean_rev_scores.loc[idx] if idx in mean_rev_scores.index else 0.0
+                    mom_score = momentum_scores.loc[idx] if idx in momentum_scores.index else 0.0
+                    vol_score = volume_scores.loc[idx] if idx in volume_scores.index else 0.0
+                    
+                    metadata = {
+                        # Raw scores (for strategy flexibility)
+                        'mean_reversion_score': mr_score,
+                        'momentum_score': mom_score,
+                        'volume_score': vol_score,
+                        'combined_score': score,
+                        
+                        # Score breakdown (contribution analysis)
+                        'score_breakdown': {
+                            'mean_reversion_contribution': mr_score * self.config.mean_reversion_weight,
+                            'momentum_contribution': mom_score * self.config.momentum_weight,
+                            'volume_contribution': vol_score * self.config.volume_weight,
+                            'weights': {
+                                'mean_reversion': self.config.mean_reversion_weight,
+                                'momentum': self.config.momentum_weight,
+                                'volume': self.config.volume_weight
+                            }
+                        },
+                        
+                        # Additional context
+                        'rsi': row.get('rsi', None),
+                        'volume_ratio': row.get('volume_ratio', None),
+                        'signal_generation_method': 'multi_factor_combined'
+                    }
+                except Exception as meta_e:
+                    self.logger.warning(f"Error accessing metadata for row {i} (idx={idx}): {meta_e}")
+                    metadata = {'combined_score': score}
+                
+                signal = TradingSignal(
+                    symbol=row['symbol'],
+                    timestamp=row['timestamp'],
+                    signal_type=signal_type,
+                    strength=strength,
+                    confidence=confidence,
+                    price=current_price,
+                    target_price=target_price,
+                    stop_loss=stop_loss,
+                    position_size=position_size,
+                    strategy="multi_factor",
+                    metadata=metadata
+                )
+                
+                signals.append(signal)
+                signals_created_count += 1
+                if signals_created_count <= 3:  # Log first 3 to avoid spam
+                    self.logger.debug(f"✅ Signal created at row {i} (idx={idx}): {signal_type} confidence={confidence:.4f}")
+                
+            except Exception as e:
+                # Log exception but continue processing other rows
+                self.logger.error(f"❌ Error creating signal for row {i} (idx={idx}): {e}", exc_info=True)
+                continue
+        
+        # Log summary of signal creation
+        if signals_filtered_count > 0 or signals_created_count > 0:
+            self.logger.info(
+                f"Signal creation summary: {total_rows_processed} rows processed, "
+                f"{signals_filtered_count} scores above threshold, {signals_created_count} signals created"
+            )
+        elif len(df) > 0:
+            # DEBUG: Check if combined_score indices match df indices
+            score_indices_match = combined_score.index.equals(df.index)
+            self.logger.warning(
+                f"No signals created from {len(df)} rows. "
+                f"Combined score range: [{combined_score.min():.4f}, {combined_score.max():.4f}], "
+                f"Threshold: {self.config.signal_threshold}, "
+                f"Index alignment: {score_indices_match}, "
+                f"Combined score shape: {combined_score.shape}, DF shape: {df.shape}"
+            )
+            # DEBUG: Show sample indices if mismatch
+            if not score_indices_match:
+                self.logger.warning(
+                    f"Index mismatch detected! "
+                    f"DF index[:5]: {list(df.index[:5])}, "
+                    f"Combined score index[:5]: {list(combined_score.index[:5])}"
+                )
         
         return signals
     
@@ -1059,13 +1309,27 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                     continue
             
             # REGIME-AWARE FILTERING (Rule 2 (Regime-First Principle))
+            # CRITICAL: Get regime for THIS signal's timestamp (bar-by-bar regime awareness)
             adjusted_confidence = signal.confidence
             regime_adjustment_factor = 1.0
             
-            if self.current_regime and hasattr(self.current_regime, 'primary_regime'):
-                regime_name = self.current_regime.primary_regime.value if (hasattr(self.current_regime.primary_regime, 'value')) else self.current_regime.primary_regime
-                volatility_regime = getattr(self.current_regime, 'volatility_regime', 'normal_volatility')
-                regime_confidence = getattr(self.current_regime, 'regime_confidence', 0.5)
+            # Get regime for THIS signal's timestamp (not just latest regime)
+            signal_regime = None
+            if self.regime_engine:
+                # Use injected regime engine to get regime at signal's timestamp
+                signal_regime = self.regime_engine.get_regime_at_timestamp(
+                    symbol=signal.symbol,
+                    timestamp=signal.timestamp
+                )
+            
+            # Fallback to current_regime if timestamp lookup fails
+            if signal_regime is None:
+                signal_regime = self.current_regime
+            
+            if signal_regime and hasattr(signal_regime, 'primary_regime'):
+                regime_name = signal_regime.primary_regime.value if (hasattr(signal_regime.primary_regime, 'value')) else signal_regime.primary_regime
+                volatility_regime = getattr(signal_regime, 'volatility_regime', 'normal_volatility')
+                regime_confidence = getattr(signal_regime, 'confidence', 0.5)
                 
                 # Adjust signal confidence based on regime confidence
                 regime_adjustment_factor *= regime_confidence
@@ -1086,6 +1350,14 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 )
                 regime_adjustment_factor *= strategy_appropriateness
                 
+                # CRITICAL FIX: Cap minimum adjustment factor to prevent over-filtering
+                # Even in worst-case scenarios, don't reduce confidence by more than 20%
+                # This prevents signals from being filtered out too aggressively
+                # Using 0.8 ensures signals with confidence 0.65+ can still pass 0.6 threshold after adjustments
+                # Example: 0.65 × 0.8 = 0.52 (too low), but with higher base confidence (0.7+) → 0.7 × 0.8 = 0.56
+                # Combined with enhanced confidence scaling, signals should pass
+                regime_adjustment_factor = max(0.8, regime_adjustment_factor)
+                
                 # Apply regime adjustments to confidence
                 adjusted_confidence = signal.confidence * regime_adjustment_factor
                 
@@ -1099,7 +1371,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 continue
             
             # ML confidence filter (if enabled)
-            if self.config.enable_ml_signals and adjusted_confidence < self.config.ml_confidence_threshold:
+            if self.config.enable_ml_signals and hasattr(self.config, 'ml_confidence_threshold') and adjusted_confidence < self.config.ml_confidence_threshold:
                 # Only apply strict ML filter for weak signals
                 if signal.strength == SignalStrength.WEAK:
                     self.logger.debug(f"Signal filtered: ML confidence {adjusted_confidence:.2f} < threshold {self.config.ml_confidence_threshold}")
@@ -1108,10 +1380,11 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             # Update signal with adjusted confidence
             signal.confidence = adjusted_confidence
             signal.metadata['regime_adjustment_factor'] = regime_adjustment_factor
-            if self.current_regime:
+            if signal_regime:
                 signal.metadata['regime'] = regime_name
                 signal.metadata['volatility_regime'] = volatility_regime
                 signal.metadata['regime_confidence'] = regime_confidence
+                signal.metadata['regime_at_signal_timestamp'] = True  # Flag indicating bar-by-bar lookup
             
             filtered.append(signal)
         
@@ -1198,8 +1471,29 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             }
         }
         
+        # Normalize strategy name (handle 'signal_generator_<source>' format from unbiased approach)
+        # Extract signal source from strategy name (e.g., 'signal_generator_mean_reversion' -> 'mean_reversion')
+        normalized_strategy = strategy
+        if strategy.startswith('signal_generator_'):
+            normalized_strategy = strategy.replace('signal_generator_', '')
+        
+        # Normalize regime name (map regime engine names to matrix keys)
+        # Regime engine returns: 'bear_high_volatility', 'bull_high_volatility', 'range_bound', etc.
+        # Matrix expects: 'bear_market', 'bull_market', 'sideways', etc.
+        normalized_regime = self._normalize_regime_name(regime_name)
+        
         # Get base appropriateness for strategy-regime combination
-        base_appropriateness = strategy_regime_matrix.get(strategy, {}).get(regime_name, 0.5)
+        # Try normalized name first, then fall back to original strategy name
+        base_appropriateness = strategy_regime_matrix.get(normalized_strategy, {}).get(normalized_regime)
+        if base_appropriateness is None:
+            # Try original regime name with normalized strategy
+            base_appropriateness = strategy_regime_matrix.get(normalized_strategy, {}).get(regime_name)
+        if base_appropriateness is None:
+            # Fallback to original strategy name with normalized regime
+            base_appropriateness = strategy_regime_matrix.get(strategy, {}).get(normalized_regime)
+        if base_appropriateness is None:
+            # Final fallback: default 0.5
+            base_appropriateness = 0.5
         
         # Volatility regime adjustments
         volatility_adjustments = {
@@ -1218,10 +1512,46 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         # Ensure appropriateness is within valid range
         final_appropriateness = max(0.1, min(1.0, final_appropriateness))
         
-        self.logger.debug(f"Strategy appropriateness: {strategy} in {regime_name} "
+        self.logger.debug(f"Strategy appropriateness: {strategy} in {regime_name} (normalized: {normalized_regime}) "
                          f"(vol: {volatility_regime}) -> {base_appropriateness:.2f} * {volatility_factor:.2f} = {final_appropriateness:.2f}")
         
         return final_appropriateness
+    
+    def _normalize_regime_name(self, regime_name: str) -> str:
+        """
+        Map regime engine regime names to strategy_regime_matrix keys
+        
+        Regime engine returns composite names like 'bear_high_volatility', 'bull_high_volatility',
+        but strategy_regime_matrix uses simpler names like 'bear_market', 'bull_market'.
+        
+        Args:
+            regime_name: Regime name from regime engine (e.g., 'bear_high_volatility')
+        
+        Returns:
+            Normalized regime name for matrix lookup (e.g., 'bear_market')
+        """
+        # Map regime engine regime names to matrix keys
+        regime_mapping = {
+            # Directional + volatility combinations → directional markets
+            'bull_low_volatility': 'bull_market',
+            'bull_high_volatility': 'bull_market',
+            'bear_low_volatility': 'bear_market',
+            'bear_high_volatility': 'bear_market',
+            
+            # Consolidation regimes
+            'range_bound': 'sideways',
+            'choppy': 'volatile',
+            
+            # Direct mappings (if already normalized)
+            'bull_market': 'bull_market',
+            'bear_market': 'bear_market',
+            'sideways': 'sideways',
+            'trending': 'trending',
+            'volatile': 'volatile',
+            'crisis': 'crisis'
+        }
+        
+        return regime_mapping.get(regime_name, regime_name)
     
     def generate_all_signals(self, df: pd.DataFrame, symbol: str) -> List[TradingSignal]:
         """Generate all types of signals for a symbol"""
