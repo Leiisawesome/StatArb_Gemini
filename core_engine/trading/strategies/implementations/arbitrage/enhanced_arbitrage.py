@@ -43,13 +43,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import ArbitrageConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import ArbitrageConfig
 
 logger = logging.getLogger(__name__)
+
+# ✅ ArbitrageConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class ArbitrageType(Enum):
@@ -58,29 +58,6 @@ class ArbitrageType(Enum):
     STATISTICAL_ARBITRAGE = "statistical_arbitrage"
     CROSS_ASSET_ARBITRAGE = "cross_asset_arbitrage"
     TEMPORAL_ARBITRAGE = "temporal_arbitrage"
-
-
-@dataclass
-class ArbitrageConfig(StrategyConfig):
-    """Enhanced Arbitrage Configuration"""
-    
-    # Arbitrage detection parameters
-    min_price_discrepancy: float = 0.001   # Minimum price discrepancy (0.1%)
-    max_execution_time: float = 5.0        # Maximum execution time (seconds)
-    confidence_threshold: float = 0.8      # Minimum confidence for execution
-    
-    # Risk management
-    max_position_pct: float = 0.05         # Maximum position size (5%)
-    transaction_cost_threshold: float = 0.0005  # Max transaction cost (0.05%)
-    
-    # Asset pairs for arbitrage
-    arbitrage_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [
-        ('AAPL', 'MSFT'), ('GOOGL', 'AMZN'), ('TSLA', 'NVDA')
-    ])
-    
-    # Timing parameters
-    opportunity_timeout: float = 10.0      # Opportunity timeout (seconds)
-    price_update_frequency: float = 1.0    # Price update frequency (seconds)
 
 
 class EnhancedArbitrageStrategy(EnhancedBaseStrategy):

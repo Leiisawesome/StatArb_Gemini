@@ -16,7 +16,7 @@ Version: 1.0.0 (Signal Generation)
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
@@ -723,6 +723,45 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         
         return zscore.fillna(0)
     
+    def _get_regime_aware_rsi_thresholds(self) -> Tuple[float, float]:
+        """
+        Get regime-aware RSI thresholds for mean reversion signals
+        
+        Strategy:
+        - High volatility: More extreme thresholds (30/70) to filter out false signals
+          during volatile periods - only trade when RSI is very extreme
+        - Low volatility: More sensitive thresholds (45/55) to capture more opportunities
+          in calm markets where RSI extremes are less frequent
+        - Normal volatility: Balanced thresholds (40/60) - standard mean reversion approach
+        
+        Returns:
+            Tuple of (oversold_threshold, overbought_threshold)
+        """
+        # Default thresholds (normal volatility)
+        oversold_threshold = 40.0
+        overbought_threshold = 60.0
+        
+        # Get current regime context
+        regime_context = self.get_current_regime_context()
+        if regime_context:
+            volatility_regime = getattr(regime_context, 'volatility_regime', 'normal_volatility')
+            
+            if volatility_regime == 'high_volatility' or volatility_regime == 'extreme_volatility':
+                # High volatility: Use more extreme thresholds (30/70)
+                # Only trigger signals when RSI is very extreme to reduce false signals
+                oversold_threshold = 30.0
+                overbought_threshold = 70.0
+                
+            elif volatility_regime == 'low_volatility':
+                # Low volatility: Use more sensitive thresholds (45/55)
+                # Capture more opportunities when markets are calm
+                oversold_threshold = 45.0
+                overbought_threshold = 55.0
+                
+            # Normal volatility uses default (40/60)
+        
+        return (oversold_threshold, overbought_threshold)
+    
     def _generate_mean_reversion_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Generate enhanced mean reversion signals with improved quality
@@ -737,14 +776,16 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         if 'close' in df.columns:
             signals_df['improved_zscore'] = self._calculate_improved_zscore(df)
         
-        # Enhanced RSI-based signals with more sensitive thresholds
+        # Enhanced RSI-based signals with regime-aware thresholds
         if 'rsi_14' in df.columns or 'rsi' in df.columns:
             rsi_col = 'rsi_14' if 'rsi_14' in df.columns else 'rsi'
             rsi = df[rsi_col]
             
-            # More sensitive oversold/overbought thresholds (from test findings)
-            oversold_threshold = 45  # More sensitive than 30
-            overbought_threshold = 55  # More sensitive than 70
+            # ENHANCEMENT: Regime-aware RSI thresholds
+            # High volatility → More extreme thresholds (30/70) for higher quality
+            # Low volatility → More sensitive thresholds (45/55) for more signals
+            # Normal volatility → Balanced thresholds (40/60)
+            oversold_threshold, overbought_threshold = self._get_regime_aware_rsi_thresholds()
             
             # Sophisticated RSI scoring
             oversold_condition = rsi < oversold_threshold
@@ -770,8 +811,11 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             bb_deviation_buy = (bb_lower - price) / bb_lower
             bb_deviation_sell = (price - bb_upper) / bb_upper
             
-            signals_df.loc[below_bb_lower, 'buy_score'] += 0.3 * (1 + bb_deviation_buy[below_bb_lower] * 10)
-            signals_df.loc[above_bb_upper, 'sell_score'] += 0.3 * (1 + bb_deviation_sell[above_bb_upper] * 10)
+            # FIX: Reduced multiplier from 10x to 5x to prevent excessive amplification
+            # Original * 10 amplified small deviations too aggressively
+            # Example: 1% deviation → 0.3 * (1 + 0.05) = 0.315 (was 0.33 with * 10)
+            signals_df.loc[below_bb_lower, 'buy_score'] += 0.3 * (1 + bb_deviation_buy[below_bb_lower] * 5)
+            signals_df.loc[above_bb_upper, 'sell_score'] += 0.3 * (1 + bb_deviation_sell[above_bb_upper] * 5)
         
         # Enhanced Z-Score signals with extreme deviation detection
         if 'improved_zscore' in signals_df.columns:
@@ -790,21 +834,42 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             signals_df.loc[positive_zscore, 'sell_score'] += 0.4 * zscore_strength[positive_zscore]
             
             # Extreme deviation detection (from test findings)
-            extreme_positive = zscore > 1000  # Very extreme z-score
-            extreme_negative = zscore < -1000
+            # CRITICAL FIX: Changed from 1000 to 4.0 (statistically meaningful extreme)
+            # Z-score > 4.0 represents 99.99% percentile (very extreme but possible)
+            # Z-score > 1000 would be statistically impossible in real markets
+            extreme_positive = zscore > 4.0  # 99.99% percentile (very extreme but possible)
+            extreme_negative = zscore < -4.0
             
             # Create high-quality signals for extreme deviations
             signals_df.loc[extreme_positive, 'sell_score'] = 0.9  # High confidence
             signals_df.loc[extreme_negative, 'buy_score'] = 0.9   # High confidence
         
-        # Volume confirmation
+        # Volume confirmation (DIRECTIONAL - fixed from non-directional)
         if 'volume' in df.columns:
             volume = df['volume']
             volume_sma = volume.rolling(window=10).mean()
             high_volume = volume > volume_sma * 1.2  # 20% above average
             
-            signals_df.loc[high_volume, 'buy_score'] += 0.2
-            signals_df.loc[high_volume, 'sell_score'] += 0.2
+            # Volume confirmation should be DIRECTIONAL
+            # High volume + price up → confirms buy signals
+            # High volume + price down → confirms sell signals
+            if 'return_1d' in df.columns or 'close' in df.columns:
+                # Use price return to determine direction
+                if 'return_1d' in df.columns:
+                    price_up = df['return_1d'] > 0
+                    price_down = df['return_1d'] < 0
+                else:
+                    # Fallback: use close price change
+                    price_change = df['close'].diff()
+                    price_up = price_change > 0
+                    price_down = price_change < 0
+                
+                signals_df.loc[high_volume & price_up, 'buy_score'] += 0.2
+                signals_df.loc[high_volume & price_down, 'sell_score'] += 0.2
+            else:
+                # Fallback: if no price data, apply to both (old behavior)
+                signals_df.loc[high_volume, 'buy_score'] += 0.2
+                signals_df.loc[high_volume, 'sell_score'] += 0.2
         
         # Quality filters - require multiple conditions for high-quality signals
         # Count conditions met for each signal type
@@ -972,10 +1037,13 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 continue
             
             # Scale confidence similar to _combine_signals (for consistency)
-            scaled_confidence = min(0.95, 0.5 + (raw_confidence - self.config.signal_threshold) * 0.8)
+            # FIX: Ensure scaled confidence >= threshold to prevent later filtering
+            # Formula: threshold + (raw_confidence - threshold) * 0.8 ensures min = threshold
+            scaled_confidence = min(0.95, self.config.signal_threshold + (raw_confidence - self.config.signal_threshold) * 0.8)
             if raw_confidence >= 0.8:
                 scaled_confidence = max(0.85, scaled_confidence)
-            confidence = max(scaled_confidence, self.config.signal_threshold)
+            # Confidence is now guaranteed >= threshold by formula
+            confidence = scaled_confidence
             
             signal_type = SignalType.BUY if score > 0 else SignalType.SELL
             
@@ -1119,17 +1187,18 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                     signals_filtered_count += 1
                     if signals_filtered_count <= 3:  # Log first 3 to avoid spam
                         self.logger.debug(f"Row {i} (idx={idx}): raw_confidence={raw_confidence:.4f} >= threshold={self.config.signal_threshold}")
-                    # Scale confidence: 0.3 -> 0.6, 0.6 -> 0.8, 0.9 -> 0.95
-                    scaled_confidence = min(0.95, 0.5 + (raw_confidence - self.config.signal_threshold) * 0.8)
+                    # FIX: Scale confidence ensuring min = threshold at threshold value
+                    # Formula: threshold + (raw_confidence - threshold) * 0.8
+                    # Example: 0.6 + (0.6 - 0.6) * 0.8 = 0.6 (correct)
+                    # Example: 0.6 + (0.8 - 0.6) * 0.8 = 0.76 (correct)
+                    scaled_confidence = min(0.95, self.config.signal_threshold + (raw_confidence - self.config.signal_threshold) * 0.8)
                     
                     # For extreme scores (like extreme z-scores), ensure high confidence
                     if raw_confidence >= 0.8:
                         scaled_confidence = max(0.85, scaled_confidence)
                     
-                    # CRITICAL FIX: Ensure scaled confidence is at least equal to threshold
-                    # Otherwise signals with raw_confidence >= threshold but scaled < threshold
-                    # will be created but then filtered out in _filter_signals
-                    confidence = max(scaled_confidence, self.config.signal_threshold)
+                    # Confidence is now guaranteed >= threshold by formula
+                    confidence = scaled_confidence
                 else:
                     continue  # Below threshold
                 

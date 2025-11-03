@@ -21,7 +21,8 @@ class TestBreakoutConfig:
         assert config.strategy_type == StrategyType.BREAKOUT
         assert config.lookback_period == 20
         assert config.breakout_threshold == 0.02
-        assert config.volume_confirmation is True
+        assert config.volume_confirmation == 1.5  # Volume confirmation multiplier (float)
+        assert config.volume_confirmation_enabled is True  # Boolean flag for volume confirmation
         assert config.volume_multiplier == 1.5
         assert config.consolidation_periods == 10
 
@@ -95,7 +96,8 @@ class TestBreakoutConfig:
         # Test breakout-specific parameters
         assert config.lookback_period == 20
         assert config.breakout_threshold == 0.02
-        assert config.volume_confirmation is True
+        assert config.volume_confirmation == 1.5  # Volume confirmation multiplier (float)
+        assert config.volume_confirmation_enabled is True  # Boolean flag for volume confirmation
         assert config.volume_multiplier == 1.5
         assert config.consolidation_periods == 10
 

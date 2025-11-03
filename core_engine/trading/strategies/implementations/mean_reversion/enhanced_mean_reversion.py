@@ -45,38 +45,8 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import MeanReversionConfig
-except ImportError:
-    # Configuration must be provided
-    from dataclasses import dataclass, field
-    from typing import List
-    
-    @dataclass
-    class MeanReversionConfig(StrategyConfig):
-        """DEPRECATED: Use core_engine.config.MeanReversionConfig instead"""
-        lookback_period: int = 20
-        zscore_entry_threshold: float = 2.0
-        zscore_exit_threshold: float = 0.5
-        bollinger_period: int = 20
-        bollinger_std: float = 2.0
-        rsi_period: int = 14
-        rsi_oversold: float = 30.0
-        rsi_overbought: float = 70.0
-        primary_timeframe: str = "5min"
-        confirmation_timeframe: str = "15min"
-        enable_multi_timeframe: bool = True
-        atr_period: int = 14
-        base_position_pct: float = 0.02
-        max_position_pct: float = 0.05
-        volatility_target: float = 0.15
-        stop_loss_atr_multiple: float = 2.0
-        profit_target_ratio: float = 2.0
-        max_holding_period: int = 10
-        enable_regime_filter: bool = True
-        min_trend_strength: float = 0.3
-        volatility_regime_threshold: float = 0.02
-        symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import MeanReversionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -662,16 +632,16 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             else:  # OVERBOUGHT_SELL
                 bb_confidence = max(0, (bb_position - 0.5) / 0.5)  # Higher confidence near upper band
             
-            # Regime confirmation
+            # Regime confirmation - use configurable values from centralized config (Rule 1)
             regime_confidence = 1.0
             if self.config.enable_regime_filter and symbol in self.regime_data:
-                regime_confidence = 0.8 if self._is_regime_favorable(symbol) else 0.3
+                regime_confidence = self.config.regime_confidence_favorable if self._is_regime_favorable(symbol) else self.config.regime_confidence_unfavorable
             
-            # Combine confidences (weighted average)
-            total_confidence = (zscore_confidence * 0.4 + 
-                              rsi_confidence * 0.3 + 
-                              bb_confidence * 0.2 + 
-                              regime_confidence * 0.1)
+            # Combine confidences (weighted average) - use configurable weights from centralized config (Rule 1)
+            total_confidence = (zscore_confidence * self.config.confidence_weight_zscore + 
+                              rsi_confidence * self.config.confidence_weight_rsi + 
+                              bb_confidence * self.config.confidence_weight_bollinger + 
+                              regime_confidence * self.config.confidence_weight_regime)
             
             return min(total_confidence, 0.95)  # Cap at 95%
             

@@ -50,11 +50,8 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import StatisticalArbitrageConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import StatisticalArbitrageConfig
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -69,47 +66,8 @@ class SpreadState(Enum):
     CLOSED = "closed"
 
 
-@dataclass
-class StatisticalArbitrageConfig(StrategyConfig):
-    """Enhanced Statistical Arbitrage Configuration"""
-    
-    # Cointegration parameters
-    cointegration_lookback: int = 252  # 1 year of daily data
-    min_cointegration_pvalue: float = 0.05  # 5% significance level
-    min_correlation: float = 0.7  # Minimum correlation for pair selection
-    
-    # PRE-LOADED PAIRS: Professional backtesting approach
-    # Pairs should be selected offline using daily data, then pre-loaded for backtesting
-    preloaded_pairs: Optional[List[Dict[str, Any]]] = None  # Pre-selected cointegrated pairs
-    use_preloaded_pairs: bool = False  # If True, skip live cointegration testing
-    
-    # Spread trading parameters
-    entry_zscore_threshold: float = 2.0  # Z-score for entry
-    exit_zscore_threshold: float = 0.5   # Z-score for exit
-    stop_loss_zscore: float = 3.5        # Stop loss Z-score
-    
-    # Position sizing
-    max_spread_positions: int = 5        # Maximum concurrent spread positions
-    position_size_method: str = "risk_parity"  # "fixed", "volatility_adjusted", "risk_parity"
-    base_position_size: float = 0.02     # 2% of portfolio per spread
-    
-    # Risk management
-    max_holding_period: int = 20         # Maximum days to hold position
-    correlation_decay_factor: float = 0.95  # Exponential decay for correlation
-    
-    # Model parameters
-    kalman_filter_enabled: bool = True   # Use Kalman filter for hedge ratios
-    ou_process_modeling: bool = True     # Ornstein-Uhlenbeck process modeling
-    error_correction_model: bool = True  # Use ECM for spread dynamics
-    
-    # Performance settings
-    enable_monitoring: bool = True
-    rebalance_frequency: str = "daily"   # "intraday", "daily", "weekly"
-    
-    # Asset universe
-    asset_universe: List[str] = field(default_factory=lambda: [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
-    ])
+# ✅ StatisticalArbitrageConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 @dataclass
@@ -233,9 +191,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
         try:
             logger.info(f"🚀 Starting StatArb operations for {self.strategy_id}...")
             
-            # Start performance monitoring
-            if self.config.enable_monitoring:
-                self._start_performance_monitoring()
+            # Start performance monitoring (always enabled)
+            self._start_performance_monitoring()
             
             # Initialize spread tracking
             self._initialize_spread_tracking()
@@ -810,9 +767,9 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             prices1 = self.price_data[asset1]['close']
             prices2 = self.price_data[asset2]['close']
             
-            # Minimum data requirement for intraday statistics
-            # For 1-minute data: need at least 20 bars (20 minutes) for meaningful statistics
-            min_bars_required = 20
+            # Minimum data requirement for intraday statistics - use configurable value from centralized config (Rule 1)
+            # For 1-minute data: need at least N bars for meaningful statistics
+            min_bars_required = self.config.min_intraday_bars
             
             if len(prices1) < min_bars_required or len(prices2) < min_bars_required:
                 return None, None
@@ -925,9 +882,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             # Calculate volatility (20-day)
             volatility = self.returns_data[symbol].tail(20).std() * np.sqrt(252)
             
-            # Adjust position size inversely to volatility
-            target_volatility = 0.15  # 15% target volatility
-            vol_adjustment = target_volatility / max(volatility, 0.05)  # Minimum 5% volatility
+            # Adjust position size inversely to volatility - use configurable parameters from centralized config (Rule 1)
+            vol_adjustment = self.config.target_volatility / max(volatility, self.config.min_volatility_floor)
             
             adjusted_size = self.config.base_position_size * vol_adjustment
             
@@ -953,8 +909,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             # Calculate risk contribution
             volatility = self.returns_data[symbol].tail(20).std() * np.sqrt(252)
             
-            # Target risk per position
-            target_risk = 0.02  # 2% risk per position
+            # Target risk per position - use configurable value from centralized config (Rule 1)
+            target_risk = self.config.target_risk_per_position
             
             # Calculate position size for target risk
             risk_adjusted_size = target_risk / max(volatility, 0.05)

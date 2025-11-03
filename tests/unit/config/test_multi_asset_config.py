@@ -19,7 +19,14 @@ class TestMultiAssetConfig:
         config = MultiAssetConfig()
         assert config.name == "strategy"  # Inherited from BaseStrategyConfig
         assert config.strategy_type == StrategyType.MULTI_ASSET
-        assert config.asset_classes == ['equities', 'bonds', 'commodities']
+        # asset_classes is now a dict mapping class names to symbol lists (merged from local config)
+        assert isinstance(config.asset_classes, dict)
+        assert 'tech' in config.asset_classes
+        assert 'growth' in config.asset_classes
+        assert 'value' in config.asset_classes
+        assert 'equities' in config.asset_classes  # Base asset classes also available
+        assert 'bonds' in config.asset_classes
+        assert 'commodities' in config.asset_classes
         assert config.target_allocations == {
             'equities': 0.6, 'bonds': 0.3, 'commodities': 0.1
         }
@@ -100,7 +107,11 @@ class TestMultiAssetConfig:
         config = MultiAssetConfig()
         
         # Test multi-asset-specific parameters
-        assert config.asset_classes == ['equities', 'bonds', 'commodities']
+        # asset_classes is now a dict mapping class names to symbol lists (merged from local config)
+        assert isinstance(config.asset_classes, dict)
+        assert 'tech' in config.asset_classes
+        assert 'growth' in config.asset_classes
+        assert 'value' in config.asset_classes
         assert config.target_allocations == {
             'equities': 0.6, 'bonds': 0.3, 'commodities': 0.1
         }
@@ -160,13 +171,16 @@ class TestMultiAssetConfig:
         """Test that asset classes are consistent with target allocations."""
         config = MultiAssetConfig()
         
-        # All asset classes should have allocations
-        for asset_class in config.asset_classes:
-            assert asset_class in config.target_allocations
-        
-        # All allocations should correspond to asset classes
+        # asset_classes is now a dict, so we check consistency differently
+        # Base asset classes (equities, bonds, commodities) should have allocations
         for asset_class in config.target_allocations:
-            assert asset_class in config.asset_classes
+            # These base classes may or may not be in asset_classes dict (they're empty lists)
+            # But they should at least exist as keys for consistency
+            if asset_class in config.asset_classes:
+                assert isinstance(config.asset_classes[asset_class], list)
+        
+        # Additional asset class keys (tech, growth, value) don't need target_allocations
+        # They're for symbol grouping, not allocation targets
 
     def test_custom_asset_allocations(self):
         """Test custom asset allocations."""

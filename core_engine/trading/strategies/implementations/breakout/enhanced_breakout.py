@@ -29,34 +29,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import BreakoutConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import BreakoutConfig
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class BreakoutConfig(StrategyConfig):
-    """Enhanced Breakout Configuration"""
-    
-    # Breakout parameters
-    lookback_period: int = 20               # Lookback for support/resistance
-    breakout_threshold: float = 0.02        # Breakout threshold (2%)
-    volume_confirmation: float = 1.5        # Volume confirmation multiplier
-    
-    # Position sizing
-    base_position_pct: float = 0.03         # Base position size (3%)
-    max_position_pct: float = 0.08          # Maximum position size (8%)
-    
-    # Risk management
-    stop_loss_pct: float = 0.03             # Stop loss percentage (3%)
-    profit_target_ratio: float = 2.0        # Profit target vs stop loss ratio
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# ✅ BreakoutConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class EnhancedBreakoutStrategy(EnhancedBaseStrategy):

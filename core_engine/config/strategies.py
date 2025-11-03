@@ -11,7 +11,7 @@ Version: 2.0.0 (Consolidated Architecture)
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from enum import Enum
 
 # Import sub-configs from component_config
@@ -180,6 +180,34 @@ class MomentumConfig(BaseStrategyConfig):
     breakout_threshold: float = 0.02
     """Breakout threshold. Default: 2%"""
     
+    # Position sizing multipliers (moved from hardcoded values)
+    position_base_multiplier: float = 0.5
+    """Base position multiplier for initial sizing. Default: 0.5"""
+    
+    momentum_multiplier_cap: float = 2.0
+    """Maximum momentum multiplier for position scaling. Default: 2.0"""
+    
+    trend_multiplier_cap: float = 1.5
+    """Maximum trend (ADX) multiplier for position scaling. Default: 1.5"""
+    
+    acceleration_scaling_factor: float = 10.0
+    """Acceleration confidence scaling factor. Default: 10.0"""
+    
+    momentum_strength_weight_short: float = 0.5
+    """Weight for short-term momentum in strength calculation. Default: 0.5"""
+    
+    momentum_strength_weight_medium: float = 0.3
+    """Weight for medium-term momentum in strength calculation. Default: 0.3"""
+    
+    momentum_strength_weight_long: float = 0.2
+    """Weight for long-term momentum in strength calculation. Default: 0.2"""
+    
+    trend_confidence_adx_multiplier: float = 1.5
+    """ADX multiplier for trend confidence calculation. Default: 1.5"""
+    
+    momentum_threshold_low_multiplier: float = 0.5
+    """Multiplier for low momentum threshold (exhaustion detection). Default: 0.5"""
+    
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -190,6 +218,10 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"adx_period must be positive, got {self.adx_period}")
         if not 0 < self.momentum_threshold <= 1.0:
             raise ValueError(f"momentum_threshold must be (0, 1.0], got {self.momentum_threshold}")
+        if not 0 < self.position_base_multiplier <= 1.0:
+            raise ValueError(f"position_base_multiplier must be (0, 1.0], got {self.position_base_multiplier}")
+        if not 0 < self.momentum_multiplier_cap <= 5.0:
+            raise ValueError(f"momentum_multiplier_cap must be (0, 5.0], got {self.momentum_multiplier_cap}")
 
 
 @dataclass
@@ -261,6 +293,26 @@ class MeanReversionConfig(BaseStrategyConfig):
     
     volatility_regime_threshold: float = 0.02
     """Volatility threshold. Default: 0.02"""
+    
+    # Confidence parameters (moved from hardcoded values)
+    regime_confidence_favorable: float = 0.8
+    """Regime confidence when regime is favorable. Default: 0.8"""
+    
+    regime_confidence_unfavorable: float = 0.3
+    """Regime confidence when regime is unfavorable. Default: 0.3"""
+    
+    # Confidence weighting (for signal confidence calculation)
+    confidence_weight_zscore: float = 0.4
+    """Weight for z-score confidence. Default: 0.4"""
+    
+    confidence_weight_rsi: float = 0.3
+    """Weight for RSI confidence. Default: 0.3"""
+    
+    confidence_weight_bollinger: float = 0.2
+    """Weight for Bollinger Band confidence. Default: 0.2"""
+    
+    confidence_weight_regime: float = 0.1
+    """Weight for regime confidence. Default: 0.1"""
     
     # Backward compatibility aliases
     @property
@@ -339,6 +391,19 @@ class StatisticalArbitrageConfig(BaseStrategyConfig):
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
     ])
     """Asset universe for statistical arbitrage. Default: Major tech stocks"""
+    
+    # Position sizing parameters (moved from hardcoded values)
+    min_intraday_bars: int = 20
+    """Minimum bars required for intraday statistics. Default: 20"""
+    
+    target_volatility: float = 0.15
+    """Target volatility for volatility-adjusted position sizing. Default: 0.15 (15%)"""
+    
+    min_volatility_floor: float = 0.05
+    """Minimum volatility floor for position sizing calculations. Default: 0.05 (5%)"""
+    
+    target_risk_per_position: float = 0.02
+    """Target risk per position for risk parity sizing. Default: 0.02 (2%)"""
 
 
 @dataclass
@@ -362,11 +427,18 @@ class FactorConfig(BaseStrategyConfig):
     rebalance_frequency: int = 20
     """Rebalance every N days. Default: 20 days"""
     
-    factor_lookback: int = 252
-    """Factor calculation lookback. Default: 252 days"""
+    factor_lookback: int = 60
+    """Factor calculation lookback. Default: 60 days"""
     
     min_factor_score: float = 0.5
     """Minimum composite factor score. Default: 0.5"""
+    
+    # Additional parameters from local config
+    base_position_pct: float = 0.02
+    """Base position size. Default: 0.02 (2%)"""
+    
+    max_position_pct: float = 0.06
+    """Maximum position size. Default: 0.06 (6%)"""
 
 
 @dataclass
@@ -379,8 +451,17 @@ class MultiAssetConfig(BaseStrategyConfig):
     strategy_type: StrategyType = StrategyType.MULTI_ASSET
     
     # Asset allocation
-    asset_classes: List[str] = field(default_factory=lambda: ['equities', 'bonds', 'commodities'])
-    """Asset classes to trade. Default: ['equities', 'bonds', 'commodities']"""
+    # Note: asset_classes is a Dict mapping class names to symbol lists (from local config merge)
+    # The original List[str] version is replaced by this Dict for more flexibility
+    asset_classes: Dict[str, List[str]] = field(default_factory=lambda: {
+        'equities': [],  # Can be populated with equity symbols
+        'bonds': [],     # Can be populated with bond symbols
+        'commodities': [],  # Can be populated with commodity symbols
+        'tech': ['AAPL', 'MSFT', 'GOOGL'],
+        'growth': ['AMZN', 'TSLA', 'NVDA'],
+        'value': ['BRK.B', 'JPM', 'JNJ']
+    })
+    """Asset classes with their symbols. Default: Tech, Growth, Value + standard classes"""
     
     target_allocations: Dict[str, float] = field(default_factory=lambda: {
         'equities': 0.6, 'bonds': 0.3, 'commodities': 0.1
@@ -395,6 +476,22 @@ class MultiAssetConfig(BaseStrategyConfig):
     
     correlation_lookback: int = 60
     """Correlation calculation lookback. Default: 60 days"""
+    
+    # Additional parameters from local config
+    max_correlation: float = 0.8
+    """Maximum correlation threshold. Default: 0.8"""
+    
+    portfolio_vol_target: float = 0.12
+    """Target portfolio volatility (12%). Default: 0.12"""
+    
+    max_asset_weight: float = 0.3
+    """Maximum weight per asset (30%). Default: 0.3"""
+    
+    min_asset_weight: float = 0.05
+    """Minimum weight per asset (5%). Default: 0.05"""
+    
+    equal_weight_baseline: bool = True
+    """Start with equal weights. Default: True"""
 
 
 @dataclass
@@ -407,11 +504,27 @@ class TrendFollowingConfig(BaseStrategyConfig):
     strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
     
     # Trend parameters
-    fast_ma_period: int = 50
-    """Fast moving average period. Default: 50"""
+    fast_ma_period: int = 12
+    """Fast moving average period. Default: 12"""
     
-    slow_ma_period: int = 200
-    """Slow moving average period. Default: 200"""
+    slow_ma_period: int = 26
+    """Slow moving average period. Default: 26"""
+    
+    signal_ma_period: int = 9
+    """Signal line period. Default: 9"""
+    
+    ma_type: str = "EMA"
+    """Moving average type: 'SMA', 'EMA', 'TEMA'. Default: 'EMA'"""
+    
+    # MACD parameters
+    macd_fast: int = 12
+    """MACD fast period. Default: 12"""
+    
+    macd_slow: int = 26
+    """MACD slow period. Default: 26"""
+    
+    macd_signal: int = 9
+    """MACD signal period. Default: 9"""
     
     adx_period: int = 14
     """ADX period for trend strength. Default: 14"""
@@ -419,11 +532,70 @@ class TrendFollowingConfig(BaseStrategyConfig):
     adx_threshold: float = 25.0
     """Minimum ADX for strong trend. Default: 25"""
     
+    # Position sizing
+    base_position_pct: float = 0.04
+    """Base position size. Default: 4%"""
+    
+    max_position_pct: float = 0.10
+    """Maximum position size. Default: 10%"""
+    
+    trend_scaling: bool = True
+    """Scale position by trend strength. Default: True"""
+    
+    # Risk management
     atr_period: int = 14
     """ATR period for stops. Default: 14"""
     
+    atr_stop_multiplier: float = 2.0
+    """Stop loss ATR multiple. Default: 2.0"""
+    
     atr_multiplier: float = 2.0
-    """ATR multiplier for stop loss. Default: 2.0"""
+    """ATR multiplier for stop loss (alias for atr_stop_multiplier). Default: 2.0"""
+    
+    trailing_stop_pct: float = 0.02
+    """Trailing stop percentage. Default: 2%"""
+    
+    profit_target_ratio: float = 3.0
+    """Profit target vs stop ratio. Default: 3.0"""
+    
+    max_holding_period: int = 50
+    """Maximum holding period in bars. Default: 50"""
+    
+    # Trend filtering
+    enable_trend_filter: bool = True
+    """Enable trend filtering. Default: True"""
+    
+    min_trend_duration: int = 5
+    """Minimum trend duration in bars. Default: 5"""
+    
+    trend_reversal_threshold: float = 0.02
+    """Trend reversal threshold. Default: 0.02"""
+    
+    # Volatility filtering
+    enable_volatility_filter: bool = True
+    """Enable volatility filtering. Default: True"""
+    
+    volatility_lookback: int = 20
+    """Volatility calculation period. Default: 20"""
+    
+    max_volatility_percentile: float = 0.8
+    """Maximum volatility percentile. Default: 0.8"""
+    
+    # Position sizing multipliers (moved from hardcoded values)
+    trend_multiplier_cap: float = 2.0
+    """Maximum trend multiplier for position scaling. Default: 2.0"""
+    
+    adx_multiplier_cap: float = 2.0
+    """Maximum ADX multiplier for position scaling. Default: 2.0"""
+    
+    volatility_adjustment_min: float = 0.5
+    """Minimum volatility adjustment floor. Default: 0.5"""
+    
+    volatility_adjustment_cap: float = 2.0
+    """Maximum volatility adjustment cap. Default: 2.0"""
+    
+    duration_confidence_multiplier: float = 2.0
+    """Multiplier for trend duration confidence calculation. Default: 2.0"""
 
 
 @dataclass
@@ -442,7 +614,10 @@ class BreakoutConfig(BaseStrategyConfig):
     breakout_threshold: float = 0.02
     """Breakout confirmation threshold. Default: 2%"""
     
-    volume_confirmation: bool = True
+    volume_confirmation: float = 1.5
+    """Volume confirmation multiplier. Default: 1.5"""
+    
+    volume_confirmation_enabled: bool = True
     """Require volume confirmation. Default: True"""
     
     volume_multiplier: float = 1.5
@@ -450,6 +625,20 @@ class BreakoutConfig(BaseStrategyConfig):
     
     consolidation_periods: int = 10
     """Periods for consolidation detection. Default: 10"""
+    
+    # Position sizing
+    base_position_pct: float = 0.03
+    """Base position size. Default: 3%"""
+    
+    max_position_pct: float = 0.08
+    """Maximum position size. Default: 8%"""
+    
+    # Risk management
+    stop_loss_pct: float = 0.03
+    """Stop loss percentage. Default: 3%"""
+    
+    profit_target_ratio: float = 2.0
+    """Profit target vs stop loss ratio. Default: 2.0"""
 
 
 @dataclass
@@ -484,6 +673,31 @@ class PairsConfig(BaseStrategyConfig):
     
     pair_reselection_frequency: int = 20
     """Reselect pairs every N days. Default: 20 days"""
+    
+    # Additional parameters from local config
+    min_correlation: float = 0.7
+    """Minimum correlation for pair selection. Default: 0.7"""
+    
+    entry_zscore: float = 2.0
+    """Entry z-score threshold (alias for entry_zscore_threshold). Default: 2.0"""
+    
+    exit_zscore: float = 0.5
+    """Exit z-score threshold (alias for exit_zscore_threshold). Default: 0.5"""
+    
+    stop_loss_zscore: float = 3.5
+    """Stop loss Z-score. Default: 3.5"""
+    
+    position_size_pct: float = 0.02
+    """Position size per pair. Default: 0.02 (2%)"""
+    
+    max_holding_period: int = 30
+    """Maximum holding period in days. Default: 30"""
+    
+    # Asset universe (required for pair selection)
+    asset_universe: List[str] = field(default_factory=lambda: [
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
+    ])
+    """Asset universe for pairs trading. Default: Major tech stocks"""
 
 
 @dataclass
@@ -544,6 +758,27 @@ class ArbitrageConfig(BaseStrategyConfig):
     
     max_execution_time: float = 5.0
     """Maximum execution time in seconds. Default: 5.0s"""
+    
+    # Additional parameters from local config
+    min_price_discrepancy: float = 0.001
+    """Minimum price discrepancy (0.1%). Default: 0.001"""
+    
+    max_position_pct: float = 0.05
+    """Maximum position size (5%). Default: 0.05"""
+    
+    transaction_cost_threshold: float = 0.0005
+    """Max transaction cost (0.05%). Default: 0.0005"""
+    
+    arbitrage_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [
+        ('AAPL', 'MSFT'), ('GOOGL', 'AMZN'), ('TSLA', 'NVDA')
+    ])
+    """Asset pairs for arbitrage. Default: Tech stock pairs"""
+    
+    opportunity_timeout: float = 10.0
+    """Opportunity timeout in seconds. Default: 10.0s"""
+    
+    price_update_frequency: float = 1.0
+    """Price update frequency in seconds. Default: 1.0s"""
     
     # Venues
     enable_multi_venue: bool = True

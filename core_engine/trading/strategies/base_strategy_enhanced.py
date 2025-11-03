@@ -620,6 +620,99 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         logger.info(f"🔗 Risk Manager linked to strategy {self.strategy_id}")
     
     # ========================================
+    # REGIME AWARENESS (IRegimeAware Interface)
+    # ========================================
+    
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """
+        Inject regime engine dependency (IRegimeAware interface)
+        
+        Args:
+            regime_engine: EnhancedRegimeEngine instance
+        """
+        self.regime_engine = regime_engine
+        logger.info(f"🔄 Regime engine linked to strategy {self.strategy_id}")
+    
+    def get_current_regime_context(self) -> Optional[Any]:
+        """
+        Get current regime context (IRegimeAware interface)
+        
+        Returns:
+            Current RegimeContext or None if not available
+        """
+        if hasattr(self, 'regime_engine') and self.regime_engine:
+            try:
+                # Try to get current regime (may be async, so we return None if not available)
+                if hasattr(self.regime_engine, 'get_current_regime_context'):
+                    return self.regime_engine.get_current_regime_context()
+                elif hasattr(self.regime_engine, 'current_regime_context'):
+                    return self.regime_engine.current_regime_context
+            except Exception as e:
+                logger.debug(f"Could not get regime context: {e}")
+        return None
+    
+    async def on_regime_change(self, new_regime_context: Any) -> None:
+        """
+        Handle regime change event (IRegimeAware interface)
+        
+        Args:
+            new_regime_context: New RegimeContext with updated information
+        """
+        try:
+            # Store current regime context
+            if not hasattr(self, '_current_regime_context'):
+                self._current_regime_context = None
+            self._current_regime_context = new_regime_context
+            
+            # Log regime change
+            regime_name = getattr(new_regime_context, 'primary_regime', 'unknown')
+            logger.info(f"🔄 Strategy {self.strategy_id} adapting to regime: {regime_name}")
+            
+            # Strategy-specific adaptation (override in subclass if needed)
+            await self._adapt_to_regime(new_regime_context)
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling regime change: {e}")
+    
+    async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Adapt component behavior to current regime (IRegimeAware interface)
+        
+        Args:
+            regime_context: RegimeContext to adapt to
+            
+        Returns:
+            Dict with adaptation results
+        """
+        return await self._adapt_to_regime(regime_context)
+    
+    async def _adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+        """
+        Internal method for regime adaptation (override in subclass)
+        
+        Args:
+            regime_context: RegimeContext to adapt to
+            
+        Returns:
+            Dict with adaptation results
+        """
+        # Default implementation - override in strategy subclasses
+        return {
+            'adapted': True,
+            'regime': getattr(regime_context, 'primary_regime', 'unknown'),
+            'strategy_id': self.strategy_id
+        }
+    
+    def validate_regime_dependency(self) -> bool:
+        """
+        Validate regime engine is properly configured (IRegimeAware interface)
+        
+        Returns:
+            True if regime engine is available, False otherwise
+        """
+        return hasattr(self, 'regime_engine') and self.regime_engine is not None
+    
+    # ========================================
     # UTILITY METHODS
     # ========================================
     

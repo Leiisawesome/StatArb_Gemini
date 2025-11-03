@@ -30,38 +30,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import MultiAssetConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import MultiAssetConfig
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class MultiAssetConfig(StrategyConfig):
-    """Enhanced Multi-Asset Configuration"""
-    
-    # Portfolio parameters
-    rebalance_frequency: int = 10           # Rebalance every 10 days
-    correlation_lookback: int = 60          # Correlation calculation period
-    max_correlation: float = 0.8            # Maximum correlation threshold
-    
-    # Risk management
-    portfolio_vol_target: float = 0.12      # Target portfolio volatility (12%)
-    max_asset_weight: float = 0.3           # Maximum weight per asset (30%)
-    min_asset_weight: float = 0.05          # Minimum weight per asset (5%)
-    
-    # Asset allocation
-    equal_weight_baseline: bool = True      # Start with equal weights
-    
-    # Asset universe
-    asset_classes: Dict[str, List[str]] = field(default_factory=lambda: {
-        'tech': ['AAPL', 'MSFT', 'GOOGL'],
-        'growth': ['AMZN', 'TSLA', 'NVDA'],
-        'value': ['BRK.B', 'JPM', 'JNJ']
-    })
+# ✅ MultiAssetConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):

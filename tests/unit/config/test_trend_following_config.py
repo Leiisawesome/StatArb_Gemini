@@ -19,11 +19,18 @@ class TestTrendFollowingConfig:
         config = TrendFollowingConfig()
         assert config.name == "strategy"  # Inherited from BaseStrategyConfig
         assert config.strategy_type == StrategyType.TREND_FOLLOWING
-        assert config.fast_ma_period == 50
-        assert config.slow_ma_period == 200
+        # Updated defaults from local config merge: fast=12, slow=26 (MACD-like settings)
+        assert config.fast_ma_period == 12
+        assert config.slow_ma_period == 26
+        assert config.signal_ma_period == 9
+        assert config.ma_type == "EMA"
+        assert config.macd_fast == 12
+        assert config.macd_slow == 26
+        assert config.macd_signal == 9
         assert config.adx_period == 14
         assert config.adx_threshold == 25.0
         assert config.atr_period == 14
+        assert config.atr_stop_multiplier == 2.0
         assert config.atr_multiplier == 2.0
 
     def test_custom_initialization(self):
@@ -60,7 +67,7 @@ class TestTrendFollowingConfig:
         
         # Test inherited default values
         assert config.symbols == ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
-        assert config.profit_target_ratio == 2.0
+        assert config.profit_target_ratio == 3.0  # Updated from 2.0 to 3.0 (merged from local config)
         assert config.execution_timeout == 30.0
 
     def test_composition_pattern(self):
@@ -97,11 +104,15 @@ class TestTrendFollowingConfig:
         config = TrendFollowingConfig()
         
         # Test trend following-specific parameters
-        assert config.fast_ma_period == 50
-        assert config.slow_ma_period == 200
+        # Updated defaults from local config merge: fast=12, slow=26 (MACD-like settings)
+        assert config.fast_ma_period == 12
+        assert config.slow_ma_period == 26
+        assert config.signal_ma_period == 9
+        assert config.ma_type == "EMA"
         assert config.adx_period == 14
         assert config.adx_threshold == 25.0
         assert config.atr_period == 14
+        assert config.atr_stop_multiplier == 2.0
         assert config.atr_multiplier == 2.0
 
     def test_parameter_validation(self):

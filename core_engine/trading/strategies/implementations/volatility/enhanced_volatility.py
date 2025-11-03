@@ -30,34 +30,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import VolatilityConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import VolatilityConfig
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class VolatilityConfig(StrategyConfig):
-    """Enhanced Volatility Configuration"""
-    
-    # Volatility parameters
-    volatility_lookback: int = 20           # Volatility calculation period
-    volatility_threshold: float = 0.02      # Volatility threshold (2%)
-    regime_detection: bool = True           # Enable volatility regime detection
-    
-    # Position sizing
-    base_position_pct: float = 0.025        # Base position size (2.5%)
-    max_position_pct: float = 0.07          # Maximum position size (7%)
-    volatility_scaling: bool = True         # Scale positions by volatility
-    
-    # Risk management
-    vol_target: float = 0.15                # Target portfolio volatility (15%)
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# ✅ VolatilityConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
@@ -312,44 +291,41 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                 return vol_data
             
             # READ pre-calculated volatility (Rule 3 Phase 4)
-            if 'volatility' in data.columns:
-                # ✅ READ pre-calculated volatility from FeatureEngineer
-                realized_vol = data['volatility'].tail(self.config.volatility_lookback).mean()
-                vol_data['realized_volatility'] = realized_vol
-                logger.debug(f"✅ {symbol}: Using pre-calculated volatility")
-            elif 'returns_1' in data.columns:
-                # Use pre-calculated returns
-                returns = data['returns_1'].dropna()
-                realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
-                vol_data['realized_volatility'] = realized_vol
-                logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility")
-            elif 'close' in data.columns:
-                # Calculate from close prices
-                returns = data['close'].pct_change().dropna()
-                realized_vol = returns.tail(self.config.volatility_lookback).std() * np.sqrt(252)
-                vol_data['realized_volatility'] = realized_vol
-                logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility")
-            else:
-                return vol_data
+            # ✅ READ pre-calculated volatility from FeatureEngineer (Rule 3 Phase 4)
+            # PROHIBITED: No fallback calculations - validation should catch missing volatility
+            if 'volatility' not in data.columns:
+                raise ValueError(
+                    f"{symbol}: Missing required 'volatility' column. "
+                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
+                    f"Available columns: {list(data.columns[:20])}"
+                )
+            
+            # READ pre-calculated volatility from enriched DataFrame
+            realized_vol = data['volatility'].tail(self.config.volatility_lookback).mean()
+            vol_data['realized_volatility'] = realized_vol
+            logger.debug(f"✅ {symbol}: Using pre-calculated volatility from pipeline")
             
             # Historical volatility (longer period)
-            if 'volatility' in data.columns and len(data) >= 60:
+            if len(data) >= 60:
                 historical_vol = data['volatility'].tail(60).mean()
                 vol_data['historical_volatility'] = historical_vol
                 
                 # Volatility ratio
                 vol_data['volatility_ratio'] = realized_vol / historical_vol if historical_vol > 0 else 1.0
-            elif 'returns_1' in data.columns and len(data) >= 60:
-                returns = data['returns_1'].dropna()
-                historical_vol = returns.tail(60).std() * np.sqrt(252)
-                vol_data['historical_volatility'] = historical_vol
-                vol_data['volatility_ratio'] = realized_vol / historical_vol if historical_vol > 0 else 1.0
+            else:
+                vol_data['historical_volatility'] = realized_vol  # Use current if insufficient data
+                vol_data['volatility_ratio'] = 1.0
             
             # Volatility regime
             if self.config.regime_detection:
+                # Use pre-calculated returns if available, otherwise use volatility directly
                 if 'returns_1' in data.columns:
                     returns = data['returns_1'].dropna()
                     vol_regime = self._detect_volatility_regime(returns)
+                    vol_data['volatility_regime'] = vol_regime
+                else:
+                    # Fallback: use volatility to detect regime (less accurate but acceptable)
+                    vol_regime = self._detect_volatility_regime_from_vol(data['volatility'])
                     vol_data['volatility_regime'] = vol_regime
             
             return vol_data
@@ -359,13 +335,13 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             return {}
     
     def _detect_volatility_regime(self, returns: pd.Series) -> str:
-        """Detect volatility regime (low, normal, high)"""
+        """Detect volatility regime from returns (low, normal, high)"""
         
         try:
             if len(returns) < 60:
                 return 'normal'
             
-            # Calculate rolling volatility
+            # Calculate rolling volatility (acceptable - strategy-specific regime detection)
             rolling_vol = returns.rolling(20).std() * np.sqrt(252)
             current_vol = rolling_vol.iloc[-1]
             
@@ -382,6 +358,31 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                 
         except Exception as e:
             logger.error(f"Volatility regime detection failed: {e}")
+            return 'normal'
+    
+    def _detect_volatility_regime_from_vol(self, volatility_series: pd.Series) -> str:
+        """Detect volatility regime directly from volatility series (low, normal, high)"""
+        
+        try:
+            if len(volatility_series) < 60:
+                return 'normal'
+            
+            # Use pre-calculated volatility series directly
+            current_vol = volatility_series.iloc[-1]
+            
+            # Calculate percentiles
+            vol_25th = volatility_series.quantile(0.25)
+            vol_75th = volatility_series.quantile(0.75)
+            
+            if current_vol < vol_25th:
+                return 'low'
+            elif current_vol > vol_75th:
+                return 'high'
+            else:
+                return 'normal'
+                
+        except Exception as e:
+            logger.error(f"Volatility regime detection from vol series failed: {e}")
             return 'normal'
     
     async def _generate_volatility_signals(self) -> List[StrategySignal]:

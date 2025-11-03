@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
+import numpy as np
 from datetime import datetime
 
 from core_engine.system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
@@ -466,6 +467,206 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         return self.regime_engine is not None
     
     # ================================================================
+    # Data Validation & Quality Methods (Institutional-Grade)
+    # ================================================================
+    
+    def _validate_dataframe(
+        self, 
+        df: pd.DataFrame, 
+        phase: str, 
+        required_columns: List[str],
+        allow_empty: bool = False
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Comprehensive DataFrame validation (Institutional-Grade)
+        
+        Args:
+            df: DataFrame to validate
+            phase: Processing phase name (for logging)
+            required_columns: List of required column names
+            allow_empty: If True, allow empty DataFrames
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Check empty
+        if df.empty:
+            if allow_empty:
+                return True, None
+            logger.error(f"❌ {phase}: DataFrame is empty")
+            return False, f"{phase}: DataFrame is empty"
+        
+        # Check required columns
+        missing = [col for col in required_columns if col not in df.columns]
+        if missing:
+            logger.error(f"❌ {phase}: Missing required columns: {missing}")
+            return False, f"{phase}: Missing required columns: {missing}"
+        
+        # Check for NaN/Inf in critical columns
+        critical_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in critical_cols:
+            if col in df.columns:
+                nan_count = df[col].isna().sum()
+                inf_count = 0
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    inf_count = np.isinf(df[col]).sum()
+                
+                if nan_count > 0:
+                    logger.warning(f"⚠️  {phase}: {col} has {nan_count} NaN values ({nan_count/len(df)*100:.1f}%)")
+                if inf_count > 0:
+                    logger.error(f"❌ {phase}: {col} has {inf_count} Inf values")
+                    return False, f"{phase}: {col} has {inf_count} Inf values"
+        
+        # Check data types for critical columns
+        for col in critical_cols:
+            if col in df.columns:
+                if not pd.api.types.is_numeric_dtype(df[col]):
+                    logger.error(f"❌ {phase}: {col} column is not numeric (type: {df[col].dtype})")
+                    return False, f"{phase}: {col} column is not numeric"
+        
+        # Check timestamp ordering (if timestamp column exists)
+        if 'timestamp' in df.columns:
+            if not df['timestamp'].is_monotonic_increasing:
+                logger.warning(f"⚠️  {phase}: Timestamps are not sorted (may cause issues)")
+        
+        return True, None
+    
+    def _clean_dataframe(self, df: pd.DataFrame, phase: str) -> pd.DataFrame:
+        """
+        Clean DataFrame of NaN/Inf values (Institutional-Grade)
+        
+        Strategy:
+        1. Forward fill NaN values (conservative - use last known value)
+        2. Backward fill remaining NaN (for leading NaN)
+        3. Replace Inf with NaN then fill
+        4. Last resort: fill with 0 (only if all else fails)
+        
+        Args:
+            df: DataFrame to clean
+            phase: Processing phase name (for logging)
+            
+        Returns:
+            Cleaned DataFrame
+        """
+        df_clean = df.copy()
+        initial_nan = df_clean.isna().sum().sum()
+        initial_inf = 0
+        
+        # Count Inf values
+        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            inf_count = np.isinf(df_clean[col]).sum()
+            if inf_count > 0:
+                initial_inf += inf_count
+                # Replace Inf with NaN first
+                df_clean[col] = df_clean[col].replace([np.inf, -np.inf], np.nan)
+        
+        if initial_nan > 0 or initial_inf > 0:
+            logger.debug(f"🧹 {phase}: Cleaning {initial_nan} NaN, {initial_inf} Inf values")
+            
+            # Forward fill (use last known value)
+            df_clean[numeric_cols] = df_clean[numeric_cols].ffill()
+            
+            # Backward fill (for leading NaN)
+            df_clean[numeric_cols] = df_clean[numeric_cols].bfill()
+            
+            # Last resort: fill remaining NaN with 0 (should be rare)
+            remaining_nan = df_clean[numeric_cols].isna().sum().sum()
+            if remaining_nan > 0:
+                logger.warning(f"⚠️  {phase}: {remaining_nan} NaN values remain after fill, using 0")
+                df_clean[numeric_cols] = df_clean[numeric_cols].fillna(0)
+            
+            final_nan = df_clean.isna().sum().sum()
+            if final_nan == 0:
+                logger.debug(f"✅ {phase}: All NaN/Inf values cleaned")
+            else:
+                logger.error(f"❌ {phase}: {final_nan} NaN values remain after cleaning")
+        
+        return df_clean
+    
+    def _calculate_data_quality_metrics(
+        self, 
+        df: pd.DataFrame, 
+        phase: str
+    ) -> Dict[str, Any]:
+        """
+        Calculate comprehensive data quality metrics (Institutional-Grade)
+        
+        Args:
+            df: DataFrame to analyze
+            phase: Processing phase name
+            
+        Returns:
+            Dict with quality metrics
+        """
+        if df.empty:
+            return {
+                'phase': phase,
+                'row_count': 0,
+                'quality_score': 0.0,
+                'status': 'empty'
+            }
+        
+        metrics = {
+            'phase': phase,
+            'row_count': len(df),
+            'column_count': len(df.columns),
+            'missing_values': {},
+            'data_types': {},
+            'outliers': {},
+            'quality_score': 1.0
+        }
+        
+        # Check missing values
+        for col in df.columns:
+            nan_count = df[col].isna().sum()
+            if nan_count > 0:
+                metrics['missing_values'][col] = {
+                    'count': int(nan_count),
+                    'percentage': float((nan_count / len(df)) * 100)
+                }
+        
+        # Check data types
+        for col in df.columns:
+            metrics['data_types'][col] = str(df[col].dtype)
+        
+        # Check outliers (for critical numeric columns)
+        critical_cols = ['open', 'high', 'low', 'close', 'volume']
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if col in critical_cols and len(df) > 1:
+                try:
+                    q1 = df[col].quantile(0.25)
+                    q3 = df[col].quantile(0.75)
+                    iqr = q3 - q1
+                    if iqr > 0:  # Avoid division by zero
+                        outliers = ((df[col] < (q1 - 3 * iqr)) | (df[col] > (q3 + 3 * iqr))).sum()
+                        if outliers > 0:
+                            metrics['outliers'][col] = int(outliers)
+                except Exception:
+                    pass  # Skip if calculation fails
+        
+        # Calculate quality score (0.0 to 1.0)
+        quality_score = 1.0
+        
+        # Penalize missing values
+        if metrics['missing_values']:
+            total_missing = sum(v['count'] for v in metrics['missing_values'].values())
+            missing_penalty = min(0.5, total_missing / len(df))  # Max 50% penalty
+            quality_score *= (1 - missing_penalty)
+        
+        # Penalize outliers (less severe)
+        if metrics['outliers']:
+            total_outliers = sum(metrics['outliers'].values())
+            outlier_penalty = min(0.2, total_outliers / len(df))  # Max 20% penalty
+            quality_score *= (1 - outlier_penalty)
+        
+        metrics['quality_score'] = max(0.0, quality_score)
+        metrics['status'] = 'excellent' if quality_score >= 0.9 else 'good' if quality_score >= 0.7 else 'poor'
+        
+        return metrics
+    
+    # ================================================================
     # Core Pipeline Orchestration (Rule 3)
     # ================================================================
     
@@ -535,6 +736,27 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             if not raw_data or all(df.empty for df in raw_data.values()):
                 logger.warning("No raw data loaded")
                 return {}
+            
+            # Validate and clean raw data (Institutional-Grade)
+            for symbol, df in raw_data.items():
+                if not df.empty:
+                    is_valid, error = self._validate_dataframe(
+                        df, 
+                        f"Phase 1 (Raw Data) - {symbol}", 
+                        ['open', 'high', 'low', 'close', 'volume']
+                    )
+                    if not is_valid:
+                        logger.error(f"❌ {symbol}: Raw data validation failed: {error}")
+                        raw_data[symbol] = pd.DataFrame()  # Mark as invalid
+                        continue
+                    
+                    # Clean NaN/Inf values
+                    raw_data[symbol] = self._clean_dataframe(df, f"Phase 1 (Raw Data) - {symbol}")
+                    
+                    # Log quality metrics
+                    quality = self._calculate_data_quality_metrics(df, f"Phase 1 - {symbol}")
+                    if quality['quality_score'] < 0.9:
+                        logger.warning(f"⚠️  {symbol}: Raw data quality score: {quality['quality_score']:.2f}")
             
             # Process each symbol through pipeline
             for symbol in symbols:
@@ -758,7 +980,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
     
     async def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Phase 2: Calculate technical indicators
+        Phase 2: Calculate technical indicators (with validation)
         
         Args:
             data: Raw OHLCV DataFrame
@@ -770,18 +992,44 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.warning("Indicators engine not available, returning raw data")
             return data.copy()
         
+        # Validate input data
+        is_valid, error = self._validate_dataframe(data, "Phase 2 (Indicators)", ['close', 'volume'])
+        if not is_valid:
+            logger.error(f"❌ Indicator calculation input validation failed: {error}")
+            return data.copy()
+        
         try:
             # Calculate indicators through EnhancedTechnicalIndicators (Rule 3.2)
             indicators_df = self.indicators_engine.calculate_indicators(data)
+            
+            # Validate output
+            is_valid, error = self._validate_dataframe(
+                indicators_df, 
+                "Phase 2 (Indicators) Output", 
+                ['close', 'volume'],
+                allow_empty=False
+            )
+            if not is_valid:
+                logger.error(f"❌ Indicator calculation output validation failed: {error}")
+                return data.copy()  # Return raw data as fallback
+            
+            # Clean NaN/Inf from indicators
+            indicators_df = self._clean_dataframe(indicators_df, "Phase 2 (Indicators)")
+            
+            # Log quality metrics
+            quality = self._calculate_data_quality_metrics(indicators_df, "Phase 2 (Indicators)")
+            if quality['quality_score'] < 0.9:
+                logger.warning(f"⚠️  Indicator quality score: {quality['quality_score']:.2f}")
+            
             return indicators_df
             
         except Exception as e:
-            logger.error(f"Indicator calculation failed: {e}")
+            logger.error(f"❌ Indicator calculation failed: {e}", exc_info=True)
             return data.copy()
     
     async def _engineer_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Phase 3: Engineer ML-ready features
+        Phase 3: Engineer ML-ready features (with validation)
         
         Args:
             data: DataFrame with OHLCV + indicators
@@ -793,13 +1041,39 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.warning("Feature engineer not available, returning data as-is")
             return data.copy()
         
+        # Validate input data
+        is_valid, error = self._validate_dataframe(data, "Phase 3 (Features)", ['close'])
+        if not is_valid:
+            logger.error(f"❌ Feature engineering input validation failed: {error}")
+            return data.copy()
+        
         try:
             # Engineer features through EnhancedFeatureEngineer (Rule 3.3)
             features_df = self.feature_engineer.create_features(data)
+            
+            # Validate output
+            is_valid, error = self._validate_dataframe(
+                features_df, 
+                "Phase 3 (Features) Output", 
+                ['close'],
+                allow_empty=False
+            )
+            if not is_valid:
+                logger.error(f"❌ Feature engineering output validation failed: {error}")
+                return data.copy()  # Return previous stage as fallback
+            
+            # Clean NaN/Inf from features
+            features_df = self._clean_dataframe(features_df, "Phase 3 (Features)")
+            
+            # Log quality metrics
+            quality = self._calculate_data_quality_metrics(features_df, "Phase 3 (Features)")
+            if quality['quality_score'] < 0.9:
+                logger.warning(f"⚠️  Feature quality score: {quality['quality_score']:.2f}")
+            
             return features_df
             
         except Exception as e:
-            logger.error(f"Feature engineering failed: {e}")
+            logger.error(f"❌ Feature engineering failed: {e}", exc_info=True)
             return data.copy()
     
     async def _generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:

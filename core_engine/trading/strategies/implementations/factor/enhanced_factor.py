@@ -30,30 +30,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import FactorConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import FactorConfig
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class FactorConfig(StrategyConfig):
-    """Enhanced Factor Configuration"""
-    
-    # Factor parameters
-    factors: List[str] = field(default_factory=lambda: ['momentum', 'value', 'quality', 'volatility'])
-    rebalance_frequency: int = 20           # Rebalance every 20 days
-    factor_lookback: int = 60               # Factor calculation lookback
-    
-    # Position sizing
-    base_position_pct: float = 0.02         # Base position size (2%)
-    max_position_pct: float = 0.06          # Maximum position size (6%)
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# ✅ FactorConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class EnhancedFactorStrategy(EnhancedBaseStrategy):
@@ -311,60 +294,46 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
             
             # Calculate value factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'value' in self.config.factors:
-                if 'volatility' in data.columns:
-                    # ✅ READ pre-calculated volatility from FeatureEngineer
-                    price_volatility = data['volatility'].tail(self.config.factor_lookback).mean()
-                    scores['value'] = -price_volatility  # Lower volatility = higher value score
-                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for value factor")
-                elif 'returns_1' in data.columns:
-                    # Use returns
-                    price_volatility = data['returns_1'].tail(self.config.factor_lookback).std()
-                    scores['value'] = -price_volatility
-                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for value")
-                elif 'close' in data.columns:
-                    # Calculate from close prices
-                    price_volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
-                    scores['value'] = -price_volatility
-                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for value")
+                # ✅ READ pre-calculated volatility from FeatureEngineer (Rule 3 Phase 4)
+                # PROHIBITED: No fallback calculations - validation should catch missing volatility
+                if 'volatility' not in data.columns:
+                    raise ValueError(
+                        f"{symbol}: Missing required 'volatility' column for value factor. "
+                        f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3)."
+                    )
+                
+                price_volatility = data['volatility'].tail(self.config.factor_lookback).mean()
+                scores['value'] = -price_volatility  # Lower volatility = higher value score
+                logger.debug(f"✅ {symbol}: Using pre-calculated volatility for value factor")
             
             # Calculate quality factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'quality' in self.config.factors:
-                if 'volatility' in data.columns:
-                    # ✅ READ pre-calculated volatility
-                    vol = data['volatility'].tail(self.config.factor_lookback).mean()
-                    price_stability = 1.0 / (1.0 + vol)
-                    scores['quality'] = price_stability
-                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for quality factor")
-                elif 'returns_1' in data.columns:
-                    # Use returns
-                    vol = data['returns_1'].tail(self.config.factor_lookback).std()
-                    price_stability = 1.0 / (1.0 + vol)
-                    scores['quality'] = price_stability
-                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for quality")
-                elif 'close' in data.columns:
-                    # Calculate from close prices
-                    vol = data['close'].pct_change().tail(self.config.factor_lookback).std()
-                    price_stability = 1.0 / (1.0 + vol)
-                    scores['quality'] = price_stability
-                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for quality")
+                # ✅ READ pre-calculated volatility
+                # PROHIBITED: No fallback calculations
+                if 'volatility' not in data.columns:
+                    raise ValueError(
+                        f"{symbol}: Missing required 'volatility' column for quality factor. "
+                        f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3)."
+                    )
+                
+                vol = data['volatility'].tail(self.config.factor_lookback).mean()
+                price_stability = 1.0 / (1.0 + vol)
+                scores['quality'] = price_stability
+                logger.debug(f"✅ {symbol}: Using pre-calculated volatility for quality factor")
             
             # Calculate volatility factor using PRE-CALCULATED volatility (Rule 3 Phase 4)
             if 'volatility' in self.config.factors:
-                if 'volatility' in data.columns:
-                    # ✅ READ pre-calculated volatility
-                    volatility = data['volatility'].tail(self.config.factor_lookback).mean()
-                    scores['volatility'] = -volatility  # Lower volatility = higher score
-                    logger.debug(f"✅ {symbol}: Using pre-calculated volatility for volatility factor")
-                elif 'returns_1' in data.columns:
-                    # Use returns
-                    volatility = data['returns_1'].tail(self.config.factor_lookback).std()
-                    scores['volatility'] = -volatility
-                    logger.warning(f"⚠️  {symbol}: Falling back to returns-based volatility for volatility factor")
-                elif 'close' in data.columns:
-                    # Calculate from close prices
-                    volatility = data['close'].pct_change().tail(self.config.factor_lookback).std()
-                    scores['volatility'] = -volatility
-                    logger.warning(f"⚠️  {symbol}: Falling back to calculated volatility for volatility factor")
+                # ✅ READ pre-calculated volatility
+                # PROHIBITED: No fallback calculations
+                if 'volatility' not in data.columns:
+                    raise ValueError(
+                        f"{symbol}: Missing required 'volatility' column for volatility factor. "
+                        f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3)."
+                    )
+                
+                volatility = data['volatility'].tail(self.config.factor_lookback).mean()
+                scores['volatility'] = -volatility  # Lower volatility = higher score
+                logger.debug(f"✅ {symbol}: Using pre-calculated volatility for volatility factor")
             
             return scores
             

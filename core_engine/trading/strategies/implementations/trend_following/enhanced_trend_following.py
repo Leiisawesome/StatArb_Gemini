@@ -45,11 +45,8 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import TrendFollowingConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import TrendFollowingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -70,54 +67,8 @@ class TrendStrength(Enum):
     VERY_STRONG = "very_strong"
 
 
-@dataclass
-class TrendFollowingConfig(StrategyConfig):
-    """Enhanced Trend Following Configuration"""
-    
-    # Moving average parameters
-    fast_ma_period: int = 12            # Fast moving average period
-    slow_ma_period: int = 26            # Slow moving average period
-    signal_ma_period: int = 9           # Signal line period
-    ma_type: str = "EMA"                # MA type: "SMA", "EMA", "TEMA"
-    
-    # MACD parameters
-    macd_fast: int = 12                 # MACD fast period
-    macd_slow: int = 26                 # MACD slow period
-    macd_signal: int = 9                # MACD signal period
-    
-    # Trend strength indicators
-    adx_period: int = 14                # ADX period
-    adx_threshold: float = 25.0         # Minimum ADX for trend
-    
-    # Multi-timeframe analysis
-    primary_timeframe: str = "5min"     # Primary analysis timeframe
-    confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1h"])
-    enable_multi_timeframe: bool = True
-    
-    # Position sizing
-    base_position_pct: float = 0.04     # Base position size (4%)
-    max_position_pct: float = 0.10      # Maximum position size (10%)
-    trend_scaling: bool = True          # Scale position by trend strength
-    
-    # Risk management
-    atr_period: int = 14                # ATR period for stops
-    atr_stop_multiplier: float = 2.0    # Stop loss ATR multiple
-    trailing_stop_pct: float = 0.02     # Trailing stop percentage
-    profit_target_ratio: float = 3.0    # Profit target vs stop ratio
-    max_holding_period: int = 50        # Maximum holding period (bars)
-    
-    # Trend filtering
-    enable_trend_filter: bool = True
-    min_trend_duration: int = 5         # Minimum trend duration (bars)
-    trend_reversal_threshold: float = 0.02  # Trend reversal threshold
-    
-    # Volatility filtering
-    enable_volatility_filter: bool = True
-    volatility_lookback: int = 20       # Volatility calculation period
-    max_volatility_percentile: float = 0.8  # Maximum volatility percentile
-    
-    # Asset universe
-    symbols: List[str] = field(default_factory=lambda: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'])
+# ✅ TrendFollowingConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
@@ -407,24 +358,27 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
             # Base position size
             base_size = self.config.base_position_pct
             
-            # Scale by trend strength if enabled
+            # Scale by trend strength if enabled - use configurable cap from centralized config (Rule 1)
             if self.config.trend_scaling and symbol in self.trend_data:
                 trend_strength = self.trend_data[symbol].get('trend_strength_score', 1.0)
-                trend_multiplier = min(trend_strength, 2.0)
+                trend_multiplier = min(trend_strength, self.config.trend_multiplier_cap)
                 base_size *= trend_multiplier
             
             # Scale by signal confidence
             confidence_multiplier = signal.confidence
             base_size *= confidence_multiplier
             
-            # Scale by ADX (trend quality)
-            if symbol in self.indicators and 'adx' in self.indicators[symbol]:
-                adx = self.indicators[symbol]['adx'].iloc[-1]
-                adx_multiplier = min(adx / self.config.adx_threshold, 2.0)
-                base_size *= adx_multiplier
+            # Scale by ADX (trend quality) - READ from enriched DataFrame (Rule 3 Phase 4)
+            if symbol in self.market_data and len(self.market_data[symbol]) > 0:
+                current_data = self.market_data[symbol].iloc[-1]
+                adx = current_data.get('ADX_14', 0.0)
+                if adx > 0:
+                    # Use configurable ADX multiplier cap from centralized config (Rule 1)
+                    adx_multiplier = min(adx / self.config.adx_threshold, self.config.adx_multiplier_cap)
+                    base_size *= adx_multiplier
             
-            # Volatility adjustment
-            if self.config.enable_volatility_filter and symbol in self.indicators:
+            # Volatility adjustment - uses enriched DataFrame (Rule 3 Phase 4)
+            if self.config.enable_volatility_filter:
                 volatility_adjustment = self._get_volatility_adjustment(symbol)
                 base_size *= volatility_adjustment
             
@@ -440,8 +394,11 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
     # ========================================
     
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
-        """Generate signals for a specific symbol"""
+        """
+        Generate signals for a specific symbol using PRE-CALCULATED indicators (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads indicators from enriched DataFrame columns, not calculated here.
+        """
         signals = []
         
         try:
@@ -449,25 +406,29 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
             if symbol in self.active_positions:
                 return signals
             
-            # Get current indicators and trend data
-            if symbol not in self.indicators or symbol not in self.trend_data:
+            # Validate we have enriched data
+            if symbol not in self.market_data:
                 return signals
             
-            indicators = self.indicators[symbol]
-            trend = self.trend_data[symbol]
-            current_data = self.market_data[symbol].iloc[-1]
+            # Get current enriched DataFrame row
+            data = self.market_data[symbol]
+            if len(data) == 0:
+                return signals
             
-            # Get trend indicators
+            current_data = data.iloc[-1]
+            trend = self.trend_data.get(symbol, {})
+            
+            # Get trend indicators (from trend analysis)
             trend_direction = trend.get('trend_direction', 'neutral')
             trend_strength = trend.get('trend_strength', TrendStrength.WEAK)
             trend_quality = trend.get('trend_quality_score', 0)
             
-            # Get technical indicators
-            fast_ma = indicators['fast_ma'].iloc[-1] if len(indicators['fast_ma']) > 0 else 0
-            slow_ma = indicators['slow_ma'].iloc[-1] if len(indicators['slow_ma']) > 0 else 0
-            macd = indicators['macd'].iloc[-1] if len(indicators['macd']) > 0 else 0
-            macd_signal = indicators['macd_signal'].iloc[-1] if len(indicators['macd_signal']) > 0 else 0
-            adx = indicators['adx'].iloc[-1] if len(indicators['adx']) > 0 else 0
+            # READ technical indicators from enriched DataFrame columns (Rule 3 Phase 4)
+            fast_ma = current_data.get('SMA_20', 0.0)  # Use SMA_20 as fast MA
+            slow_ma = current_data.get('SMA_50', 0.0)  # Use SMA_50 as slow MA
+            macd = current_data.get('MACD', 0.0)
+            macd_signal = current_data.get('MACD_signal', 0.0)
+            adx = current_data.get('ADX_14', 0.0)
             
             # Apply filters
             if self.config.enable_trend_filter and not self._is_trend_valid(symbol):
@@ -553,155 +514,11 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
             return []
     
     # ========================================
-    # INDICATOR CALCULATION METHODS
+    # INDICATOR EXTRACTION FROM ENRICHED DATA (Rule 3 Phase 4)
     # ========================================
-    
-    def _calculate_indicators(self) -> None:
-        """Calculate technical indicators for all symbols"""
-        
-        for symbol in self.config.symbols:
-            if symbol in self.market_data:
-                self.indicators[symbol] = self._calculate_symbol_indicators(symbol)
-    
-    def _calculate_symbol_indicators(self, symbol: str) -> Dict[str, pd.Series]:
-        """Calculate indicators for a specific symbol"""
-        
-        try:
-            data = self.market_data[symbol]
-            indicators = {}
-            
-            close_prices = data['close']
-            
-            # Calculate moving averages
-            if self.config.ma_type == "SMA":
-                indicators['fast_ma'] = close_prices.rolling(self.config.fast_ma_period).mean()
-                indicators['slow_ma'] = close_prices.rolling(self.config.slow_ma_period).mean()
-            elif self.config.ma_type == "EMA":
-                indicators['fast_ma'] = close_prices.ewm(span=self.config.fast_ma_period).mean()
-                indicators['slow_ma'] = close_prices.ewm(span=self.config.slow_ma_period).mean()
-            elif self.config.ma_type == "TEMA":
-                indicators['fast_ma'] = self._calculate_tema(close_prices, self.config.fast_ma_period)
-                indicators['slow_ma'] = self._calculate_tema(close_prices, self.config.slow_ma_period)
-            
-            # Calculate MACD
-            macd_line, macd_signal, macd_histogram = self._calculate_macd(close_prices)
-            indicators['macd'] = macd_line
-            indicators['macd_signal'] = macd_signal
-            indicators['macd_histogram'] = macd_histogram
-            
-            # Calculate ADX
-            indicators['adx'] = self._calculate_adx(data)
-            
-            # Calculate ATR
-            indicators['atr'] = self._calculate_atr(data)
-            
-            # Calculate volatility
-            indicators['volatility'] = close_prices.pct_change().rolling(self.config.volatility_lookback).std()
-            
-            # Calculate price momentum
-            indicators['momentum'] = close_prices.pct_change(self.config.fast_ma_period)
-            
-            return indicators
-            
-        except Exception as e:
-            logger.error(f"Indicator calculation failed for {symbol}: {e}")
-            return {}
-    
-    def _calculate_tema(self, prices: pd.Series, period: int) -> pd.Series:
-        """Calculate Triple Exponential Moving Average (TEMA)"""
-        
-        try:
-            ema1 = prices.ewm(span=period).mean()
-            ema2 = ema1.ewm(span=period).mean()
-            ema3 = ema2.ewm(span=period).mean()
-            
-            tema = 3 * ema1 - 3 * ema2 + ema3
-            
-            return tema
-            
-        except Exception as e:
-            logger.error(f"TEMA calculation failed: {e}")
-            return pd.Series(index=prices.index, dtype=float)
-    
-    def _calculate_macd(self, prices: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
-        """Calculate MACD indicator"""
-        
-        try:
-            ema_fast = prices.ewm(span=self.config.macd_fast).mean()
-            ema_slow = prices.ewm(span=self.config.macd_slow).mean()
-            
-            macd_line = ema_fast - ema_slow
-            macd_signal = macd_line.ewm(span=self.config.macd_signal).mean()
-            macd_histogram = macd_line - macd_signal
-            
-            return macd_line, macd_signal, macd_histogram
-            
-        except Exception as e:
-            logger.error(f"MACD calculation failed: {e}")
-            empty_series = pd.Series(index=prices.index, dtype=float)
-            return empty_series, empty_series, empty_series
-    
-    def _calculate_adx(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate Average Directional Index (ADX)"""
-        
-        try:
-            high = data['high']
-            low = data['low']
-            close = data['close']
-            
-            # Calculate True Range
-            tr1 = high - low
-            tr2 = np.abs(high - close.shift())
-            tr3 = np.abs(low - close.shift())
-            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            
-            # Calculate Directional Movement
-            plus_dm = high.diff()
-            minus_dm = -low.diff()
-            
-            plus_dm[plus_dm < 0] = 0
-            minus_dm[minus_dm < 0] = 0
-            
-            # Smooth the values
-            period = self.config.adx_period
-            tr_smooth = true_range.rolling(period).mean()
-            plus_dm_smooth = plus_dm.rolling(period).mean()
-            minus_dm_smooth = minus_dm.rolling(period).mean()
-            
-            # Calculate Directional Indicators
-            plus_di = 100 * (plus_dm_smooth / tr_smooth)
-            minus_di = 100 * (minus_dm_smooth / tr_smooth)
-            
-            # Calculate ADX
-            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
-            adx = dx.rolling(period).mean()
-            
-            return adx
-            
-        except Exception as e:
-            logger.error(f"ADX calculation failed: {e}")
-            return pd.Series(index=data.index, dtype=float)
-    
-    def _calculate_atr(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate Average True Range (ATR)"""
-        
-        try:
-            high = data['high']
-            low = data['low']
-            close = data['close']
-            
-            tr1 = high - low
-            tr2 = np.abs(high - close.shift())
-            tr3 = np.abs(low - close.shift())
-            
-            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            atr = true_range.rolling(self.config.atr_period).mean()
-            
-            return atr
-            
-        except Exception as e:
-            logger.error(f"ATR calculation failed: {e}")
-            return pd.Series(index=data.index, dtype=float)
+    # NOTE: Indicators are PRE-CALCULATED by ProcessingPipelineOrchestrator.
+    # This section extracts indicators from enriched DataFrame columns.
+    # NO indicator calculation methods are allowed per Rule 3.
     
     # ========================================
     # TREND ANALYSIS METHODS
@@ -715,18 +532,35 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                 self.trend_data[symbol] = self._analyze_symbol_trend(symbol)
     
     def _analyze_symbol_trend(self, symbol: str) -> Dict[str, Any]:
-        """Analyze trend for a specific symbol"""
+        """
+        Analyze trend for a specific symbol using PRE-CALCULATED indicators (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads indicators from enriched DataFrame columns, not calculated here.
+        """
         try:
-            indicators = self.indicators[symbol]
+            if symbol not in self.market_data or len(self.market_data[symbol]) == 0:
+                return {
+                    'trend_direction': 'neutral',
+                    'trend_strength': TrendStrength.WEAK,
+                    'trend_quality_score': 0,
+                    'trend_duration': 0,
+                    'adx': 0,
+                    'ma_alignment': 0,
+                    'macd_strength': 0,
+                    'momentum': 0
+                }
             
-            # Get latest values
-            fast_ma = indicators['fast_ma'].iloc[-1] if len(indicators['fast_ma']) > 0 else 0
-            slow_ma = indicators['slow_ma'].iloc[-1] if len(indicators['slow_ma']) > 0 else 0
-            macd = indicators['macd'].iloc[-1] if len(indicators['macd']) > 0 else 0
-            macd_signal = indicators['macd_signal'].iloc[-1] if len(indicators['macd_signal']) > 0 else 0
-            adx = indicators['adx'].iloc[-1] if len(indicators['adx']) > 0 else 0
-            momentum = indicators['momentum'].iloc[-1] if len(indicators['momentum']) > 0 else 0
+            # READ indicators from enriched DataFrame (Rule 3 Phase 4)
+            data = self.market_data[symbol]
+            current_data = data.iloc[-1]
+            
+            # Get latest values from enriched DataFrame columns
+            fast_ma = current_data.get('SMA_20', 0.0)
+            slow_ma = current_data.get('SMA_50', 0.0)
+            macd = current_data.get('MACD', 0.0)
+            macd_signal = current_data.get('MACD_signal', 0.0)
+            adx = current_data.get('ADX_14', 0.0)
+            momentum = current_data.get('momentum_short', 0.0)
             
             # Determine trend direction
             trend_direction = 'neutral'
@@ -783,15 +617,19 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
             }
     
     def _calculate_trend_duration(self, symbol: str) -> int:
-        """Calculate how long the current trend has been in place"""
+        """
+        Calculate how long the current trend has been in place using enriched DataFrame (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads MA values from enriched DataFrame columns.
+        """
         try:
-            if symbol not in self.indicators:
+            if symbol not in self.market_data or len(self.market_data[symbol]) < 2:
                 return 0
             
-            indicators = self.indicators[symbol]
-            fast_ma = indicators['fast_ma']
-            slow_ma = indicators['slow_ma']
+            # READ MA values from enriched DataFrame (Rule 3 Phase 4)
+            data = self.market_data[symbol]
+            fast_ma = data.get('SMA_20', pd.Series(dtype=float))
+            slow_ma = data.get('SMA_50', pd.Series(dtype=float))
             
             if len(fast_ma) < 2 or len(slow_ma) < 2:
                 return 0
@@ -836,13 +674,21 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
         return True
     
     def _is_volatility_acceptable(self, symbol: str) -> bool:
-        """Check if volatility is within acceptable range"""
+        """
+        Check if volatility is within acceptable range using enriched DataFrame (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads volatility from enriched DataFrame column.
+        """
         try:
-            if symbol not in self.indicators or 'volatility' in self.indicators[symbol]:
+            if symbol not in self.market_data or len(self.market_data[symbol]) == 0:
                 return True
             
-            volatility_series = self.indicators[symbol]['volatility']
+            # READ volatility from enriched DataFrame (Rule 3 Phase 4)
+            data = self.market_data[symbol]
+            if 'volatility' not in data.columns:
+                return True  # Allow if volatility not available
+            
+            volatility_series = data['volatility']
             if len(volatility_series) < self.config.volatility_lookback:
                 return True
             
@@ -859,13 +705,21 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
             return True
     
     def _get_volatility_adjustment(self, symbol: str) -> float:
-        """Get volatility adjustment factor for position sizing"""
+        """
+        Get volatility adjustment factor for position sizing using enriched DataFrame (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads volatility from enriched DataFrame column.
+        """
         try:
-            if symbol not in self.indicators or 'volatility' not in self.indicators[symbol]:
+            if symbol not in self.market_data or len(self.market_data[symbol]) == 0:
                 return 1.0
             
-            volatility_series = self.indicators[symbol]['volatility']
+            # READ volatility from enriched DataFrame (Rule 3 Phase 4)
+            data = self.market_data[symbol]
+            if 'volatility' not in data.columns:
+                return 1.0
+            
+            volatility_series = data['volatility']
             if len(volatility_series) < 20:
                 return 1.0
             
@@ -876,24 +730,33 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                 return 1.0
             
             # Inverse relationship: higher volatility = smaller position
+            # Use configurable parameters from centralized config (Rule 1)
             vol_ratio = current_vol / avg_vol
-            adjustment = 1.0 / max(vol_ratio, 0.5)  # Cap adjustment
+            adjustment = 1.0 / max(vol_ratio, self.config.volatility_adjustment_min)
             
-            return min(adjustment, 2.0)  # Cap at 2x
+            return min(adjustment, self.config.volatility_adjustment_cap)
             
         except Exception as e:
             logger.error(f"Volatility adjustment calculation failed for {symbol}: {e}")
             return 1.0
     
     def _calculate_signal_confidence(self, symbol: str, signal_type: TrendSignal) -> float:
-        """Calculate signal confidence based on multiple factors"""
+        """
+        Calculate signal confidence based on multiple factors using enriched DataFrame (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads indicators from enriched DataFrame columns.
+        """
         try:
-            if symbol not in self.trend_data or symbol not in self.indicators:
+            if symbol not in self.trend_data or symbol not in self.market_data:
                 return 0.5
             
             trend = self.trend_data[symbol]
-            indicators = self.indicators[symbol]
+            data = self.market_data[symbol]
+            
+            if len(data) == 0:
+                return 0.5
+            
+            current_data = data.iloc[-1]
             
             # Base confidence from trend quality
             trend_quality = trend.get('trend_quality_score', 0)
@@ -907,17 +770,18 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                 TrendStrength.VERY_STRONG: 0.95
             }.get(trend_strength, 0.3)
             
-            # Trend duration confidence
+            # Trend duration confidence - use configurable multiplier from centralized config (Rule 1)
             duration = trend.get('trend_duration', 0)
-            duration_confidence = min(duration / (self.config.min_trend_duration * 2), 1.0)
+            duration_confidence = min(duration / (self.config.min_trend_duration * self.config.duration_confidence_multiplier), 1.0)
             
-            # ADX confidence
+            # ADX confidence - use configurable multiplier from centralized config (Rule 1)
             adx = trend.get('adx', 0)
-            adx_confidence = min(adx / (self.config.adx_threshold * 1.5), 1.0)
+            # Reuse duration_confidence_multiplier for ADX confidence scaling
+            adx_confidence = min(adx / (self.config.adx_threshold * self.config.duration_confidence_multiplier), 1.0)
             
-            # MACD confirmation
-            macd = indicators['macd'].iloc[-1] if len(indicators['macd']) > 0 else 0
-            macd_signal = indicators['macd_signal'].iloc[-1] if len(indicators['macd_signal']) > 0 else 0
+            # MACD confirmation (READ from enriched DataFrame)
+            macd = current_data.get('MACD', 0.0)
+            macd_signal = current_data.get('MACD_signal', 0.0)
             
             if signal_type in [TrendSignal.UPTREND_ENTRY]:
                 macd_confidence = 1.0 if macd > macd_signal else 0.5
@@ -941,12 +805,46 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
     # HELPER METHODS
     # ========================================
     
-    def _update_market_data(self, market_data: Dict[str, pd.DataFrame]) -> None:
-        """Update market data cache"""
+    def _update_market_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Update market data cache and extract indicators from enriched DataFrame (Rule 3 Phase 4)
         
-        for symbol, data in market_data.items():
+        **CRITICAL:** This method extracts PRE-CALCULATED indicators from enriched DataFrame columns.
+        Indicators are provided by ProcessingPipelineOrchestrator, not calculated here.
+        
+        Args:
+            enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators + features]
+        """
+        for symbol, data in enriched_data.items():
             if symbol in self.config.symbols:
+                # Store enriched DataFrame
                 self.market_data[symbol] = data
+                
+                # Extract PRE-CALCULATED indicators from enriched DataFrame columns (Rule 3)
+                # Map enriched DataFrame columns to strategy indicators
+                try:
+                    self.indicators[symbol] = {
+                        # Use SMA_20 as fast MA, SMA_50 as slow MA (from enriched data)
+                        'fast_ma': data.get('SMA_20', pd.Series(dtype=float)) if 'SMA_20' in data.columns else pd.Series(dtype=float),
+                        'slow_ma': data.get('SMA_50', pd.Series(dtype=float)) if 'SMA_50' in data.columns else pd.Series(dtype=float),
+                        
+                        # MACD indicators (pre-calculated)
+                        'macd': data.get('MACD', pd.Series(dtype=float)) if 'MACD' in data.columns else pd.Series(dtype=float),
+                        'macd_signal': data.get('MACD_signal', pd.Series(dtype=float)) if 'MACD_signal' in data.columns else pd.Series(dtype=float),
+                        'macd_histogram': data.get('MACD_histogram', pd.Series(dtype=float)) if 'MACD_histogram' in data.columns else pd.Series(dtype=float),
+                        
+                        # ADX and ATR (pre-calculated)
+                        'adx': data.get('ADX_14', pd.Series(dtype=float)) if 'ADX_14' in data.columns else pd.Series(dtype=float),
+                        'atr': data.get('ATR_14', pd.Series(dtype=float)) if 'ATR_14' in data.columns else pd.Series(dtype=float),
+                        
+                        # Volatility and momentum (from enriched features)
+                        'volatility': data.get('volatility', pd.Series(dtype=float)) if 'volatility' in data.columns else pd.Series(dtype=float),
+                        'momentum': data.get('momentum_short', pd.Series(dtype=float)) if 'momentum_short' in data.columns else pd.Series(dtype=float)
+                    }
+                    logger.debug(f"✅ {symbol}: Extracted indicators from enriched DataFrame (Rule 3 Phase 4)")
+                except Exception as e:
+                    logger.error(f"❌ {symbol}: Failed to extract indicators from enriched DataFrame: {e}")
+                    self.indicators[symbol] = {}
     
     def _initialize_data_structures(self) -> None:
         """Initialize strategy data structures"""
@@ -1008,15 +906,19 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
         return count
     
     def _track_position_entry(self, symbol: str, signal: StrategySignal) -> None:
-        """Track position entry for exit management"""
+        """
+        Track position entry for exit management using enriched DataFrame (Rule 3 Phase 4)
         
+        **CRITICAL:** Reads ATR from enriched DataFrame column.
+        """
         try:
             entry_price = signal.additional_data.get('entry_price', 0)
             
-            # Get ATR for stop loss calculation
-            atr = 0
-            if symbol in self.indicators and 'atr' in self.indicators[symbol]:
-                atr = self.indicators[symbol]['atr'].iloc[-1]
+            # Get ATR for stop loss calculation (READ from enriched DataFrame)
+            atr = 0.0
+            if symbol in self.market_data and len(self.market_data[symbol]) > 0:
+                current_data = self.market_data[symbol].iloc[-1]
+                atr = current_data.get('ATR_14', 0.0)
             
             # Calculate stop loss and profit target
             if signal.signal_type == SignalType.BUY:

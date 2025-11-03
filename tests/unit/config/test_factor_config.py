@@ -24,7 +24,7 @@ class TestFactorConfig:
             'momentum': 0.3, 'value': 0.3, 'quality': 0.2, 'size': 0.2
         }
         assert config.rebalance_frequency == 20
-        assert config.factor_lookback == 252
+        assert config.factor_lookback == 60  # Updated from 252 to 60 (merged from local config)
         assert config.min_factor_score == 0.5
 
     def test_custom_initialization(self):
@@ -103,7 +103,7 @@ class TestFactorConfig:
             'momentum': 0.3, 'value': 0.3, 'quality': 0.2, 'size': 0.2
         }
         assert config.rebalance_frequency == 20
-        assert config.factor_lookback == 252
+        assert config.factor_lookback == 60  # Updated from 252 to 60 (merged from local config)
         assert config.min_factor_score == 0.5
 
     def test_parameter_validation(self):

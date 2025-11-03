@@ -46,13 +46,13 @@ from ...strategy_engine import (
 )
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
-try:
-    from core_engine.config import PairsConfig
-except ImportError:
-    # Configuration must be provided
-    pass
+# REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
+from core_engine.config import PairsConfig
 
 logger = logging.getLogger(__name__)
+
+# ✅ PairsConfig imported from core_engine.config (Rule 1 Section 7)
+# No local config definitions - centralized configuration only
 
 
 class PairStatus(Enum):
@@ -61,34 +61,6 @@ class PairStatus(Enum):
     LONG_SPREAD = "long_spread"      # Long stock1, short stock2
     SHORT_SPREAD = "short_spread"    # Short stock1, long stock2
     MONITORING = "monitoring"
-
-
-@dataclass
-class PairsConfig(StrategyConfig):
-    """Enhanced Pairs Trading Configuration"""
-    
-    # Pair selection parameters
-    min_correlation: float = 0.7            # Minimum correlation for pair selection
-    cointegration_pvalue: float = 0.05      # Maximum p-value for cointegration
-    lookback_period: int = 252              # Lookback period for analysis (1 year)
-    
-    # Spread trading parameters
-    entry_zscore: float = 2.0               # Z-score threshold for entry
-    exit_zscore: float = 0.5                # Z-score threshold for exit
-    stop_loss_zscore: float = 3.5           # Stop loss Z-score
-    
-    # Position sizing
-    max_pairs: int = 5                      # Maximum number of active pairs
-    position_size_pct: float = 0.02         # Position size per pair (2%)
-    
-    # Risk management
-    max_holding_period: int = 30            # Maximum holding period (days)
-    correlation_threshold: float = 0.5      # Minimum correlation to maintain pair
-    
-    # Asset universe for pair selection
-    asset_universe: List[str] = field(default_factory=lambda: [
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
-    ])
 
 
 @dataclass
