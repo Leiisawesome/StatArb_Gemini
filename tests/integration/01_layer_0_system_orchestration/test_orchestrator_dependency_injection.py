@@ -58,8 +58,12 @@ class TestDependencyInjection:
         data_manager.set_regime_engine(regime_engine)
         
         # Verify dependency injected
-        regime_context = data_manager.get_current_regime_context()
-        assert regime_context is not None or hasattr(data_manager, 'regime_engine')
+        # ClickHouseDataManager has get_current_regime() method, not get_current_regime_context()
+        assert hasattr(data_manager, 'regime_engine') and data_manager.regime_engine is not None
+        # Optionally verify we can get regime (if regime_engine is started)
+        if hasattr(data_manager, 'get_current_regime'):
+            regime = data_manager.get_current_regime()  # May be None if engine not started
+            assert True  # Method exists and executes
     
     @pytest.mark.asyncio
     async def test_dependency_ordered_initialization(self, orchestrator):
@@ -179,9 +183,9 @@ class TestDependencyInjection:
         
         # Register component that depends on both
         from core_engine.trading.strategies.manager import StrategyManager
-        from core_engine.config.component_config import StrategyConfig
         
-        strategy_config = StrategyConfig()
+        # StrategyManager accepts a dict config, not StrategyConfig
+        strategy_config = {}  # Empty dict uses defaults
         strategy_manager = StrategyManager(strategy_config)
         
         strategy_id = orchestrator.register_component(

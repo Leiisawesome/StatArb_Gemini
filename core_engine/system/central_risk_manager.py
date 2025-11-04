@@ -1281,7 +1281,7 @@ class CentralRiskManager(ISystemComponent):
             position_value = abs(new_position * price)
             position_pct = position_value / self.portfolio_value
             
-            logger.warning(f"DEBUG: position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.max_position_size:.6f}")
+            logger.debug(f"position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.max_position_size:.6f}")
             return position_pct <= self.max_position_size
             
         except Exception as e:

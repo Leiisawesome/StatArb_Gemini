@@ -29,7 +29,7 @@ Date: November 4, 2025
 import pytest
 import pytest_asyncio
 
-from core_engine.trading.strategies.enhanced_strategy_factory import EnhancedStrategyFactory
+from core_engine.trading.strategies.manager import EnhancedStrategyFactory
 from core_engine.type_definitions.strategy import StrategyType
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 

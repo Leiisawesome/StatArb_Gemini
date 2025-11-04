@@ -87,7 +87,7 @@ class TestHealthMonitorIntegration:
         Expected: Health status returned
         """
         # Get health status
-        health_status = orchestrator.get_system_health()
+        health_status = orchestrator.get_system_status()
         
         # Verify health status available
         assert health_status is not None or isinstance(health_status, dict)

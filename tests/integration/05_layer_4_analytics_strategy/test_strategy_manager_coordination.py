@@ -25,7 +25,7 @@ import pytest_asyncio
 from datetime import datetime
 
 from core_engine.trading.strategies.manager import StrategyManager
-from core_engine.trading.strategies.enhanced_strategy_factory import EnhancedStrategyFactory
+from core_engine.trading.strategies.manager import EnhancedStrategyFactory
 # StrategyConfig is StrategyManagerConfig in manager.py
 from core_engine.type_definitions.strategy import StrategyType
 

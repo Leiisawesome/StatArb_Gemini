@@ -71,7 +71,8 @@ async def orchestrator():
     orchestrator = HierarchicalSystemOrchestrator()
     await orchestrator.initialize()
     yield orchestrator
-    await orchestrator.shutdown()
+    await orchestrator.stop()
+    await orchestrator.shutdown_system()
 
 @pytest_asyncio.fixture(scope="function")
 async def initialized_orchestrator():
@@ -83,7 +84,7 @@ async def initialized_orchestrator():
     await orchestrator.start()
     yield orchestrator
     await orchestrator.stop()
-    await orchestrator.shutdown()
+    await orchestrator.shutdown_system()
 
 # ==============================================================================
 # REGIME ENGINE FIXTURES (Regime-First Principle)
@@ -201,6 +202,48 @@ async def strategy_manager_with_risk(strategy_manager, risk_manager):
     strategy_manager.set_risk_manager(risk_manager)
     yield {'strategy_manager': strategy_manager, 'risk_manager': risk_manager}
 
+@pytest_asyncio.fixture(scope="function")
+async def strategy_manager_with_pipeline(strategy_manager, pipeline_orchestrator, regime_engine):
+    """
+    Create strategy manager with pipeline orchestrator integration.
+    
+    This fixture provides StrategyManager and ProcessingPipelineOrchestrator
+    properly integrated for data pipeline testing.
+    """
+    # Set regime engine on pipeline (if not already set)
+    if hasattr(pipeline_orchestrator, 'set_regime_engine'):
+        pipeline_orchestrator.set_regime_engine(regime_engine)
+    
+    # Link pipeline to strategy manager
+    if hasattr(strategy_manager, 'set_pipeline_orchestrator'):
+        strategy_manager.set_pipeline_orchestrator(pipeline_orchestrator)
+    elif hasattr(strategy_manager, 'pipeline_orchestrator'):
+        strategy_manager.pipeline_orchestrator = pipeline_orchestrator
+    
+    yield {
+        'strategy_manager': strategy_manager,
+        'pipeline_orchestrator': pipeline_orchestrator
+    }
+
+@pytest_asyncio.fixture(scope="function")
+async def strategy_manager_with_regime(strategy_manager, regime_engine):
+    """
+    Create strategy manager with regime engine integration.
+    
+    This fixture provides StrategyManager with RegimeEngine properly integrated
+    for regime-aware testing.
+    """
+    # Set regime engine on strategy manager
+    if hasattr(strategy_manager, 'set_regime_engine'):
+        strategy_manager.set_regime_engine(regime_engine)
+    elif hasattr(strategy_manager, 'regime_engine'):
+        strategy_manager.regime_engine = regime_engine
+    
+    yield {
+        'strategy_manager': strategy_manager,
+        'regime_engine': regime_engine
+    }
+
 # ==============================================================================
 # EXECUTION ENGINE FIXTURES
 # ==============================================================================
@@ -210,7 +253,8 @@ async def execution_engine():
     """
     Create REAL UnifiedExecutionEngine for integration tests.
     """
-    config = ExecutionConfig()
+    # UnifiedExecutionEngine expects Dict[str, Any], not ExecutionConfig
+    config = {}
     engine = UnifiedExecutionEngine(config)
     await engine.initialize()
     yield engine
@@ -222,7 +266,7 @@ async def execution_engine_with_risk(execution_engine, risk_manager):
     Create execution engine with risk manager callback.
     """
     # Set risk manager callback for position updates
-    execution_engine.set_risk_manager_callback(risk_manager)
+    execution_engine.set_position_callbacks(risk_manager_callback=risk_manager)
     yield {'execution_engine': execution_engine, 'risk_manager': risk_manager}
 
 # ==============================================================================
@@ -234,7 +278,8 @@ async def trading_engine():
     """
     Create REAL EnhancedTradingEngine for integration tests.
     """
-    config = ExecutionConfig()
+    # EnhancedTradingEngine expects Dict[str, Any], not ExecutionConfig
+    config = {}
     engine = EnhancedTradingEngine(config)
     await engine.initialize()
     yield engine
@@ -327,8 +372,9 @@ async def complete_system():
     )
     
     # STEP 7: Initialize TradingEngine (order=30)
-    execution_config = ExecutionConfig()
-    trading_engine = EnhancedTradingEngine(execution_config)
+    # EnhancedTradingEngine expects Dict[str, Any], not ExecutionConfig
+    trading_engine_config = {}
+    trading_engine = EnhancedTradingEngine(trading_engine_config)
     trading_engine.set_risk_manager(risk_manager)
     await trading_engine.initialize()
     orchestrator.register_component(
@@ -338,8 +384,10 @@ async def complete_system():
     )
     
     # STEP 8: Initialize ExecutionEngine (order=40)
-    execution_engine = UnifiedExecutionEngine(execution_config)
-    execution_engine.set_risk_manager_callback(risk_manager)
+    # UnifiedExecutionEngine may also expect dict config
+    execution_engine_config = {}
+    execution_engine = UnifiedExecutionEngine(execution_engine_config)
+    execution_engine.set_position_callbacks(risk_manager_callback=risk_manager)
     await execution_engine.initialize()
     orchestrator.register_component(
         "UnifiedExecutionEngine", execution_engine,
@@ -385,7 +433,7 @@ async def complete_system():
     await data_manager.stop()
     await risk_manager.stop()
     await regime_engine.stop()
-    await orchestrator.shutdown()
+    await orchestrator.shutdown_system()
 
 # ==============================================================================
 # TEST DATA GENERATORS

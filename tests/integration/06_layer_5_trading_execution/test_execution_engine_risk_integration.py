@@ -22,7 +22,7 @@ Date: November 4, 2025
 
 import pytest
 import pytest_asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
 from core_engine.system.central_risk_manager import TradingAuthorization, AuthorizationLevel
@@ -111,12 +111,17 @@ class TestExecutionRiskIntegration:
         system = execution_engine_with_risk
         risk_manager = system['risk_manager']
         
+        # Capture initial cash
+        initial_cash = risk_manager.available_cash
+        
         # Simulate execution result
         await risk_manager.update_position('AAPL', 'buy', 100.0, 150.0)
         
         # Verify position updated
         assert risk_manager.current_positions.get('AAPL', 0.0) == 100.0
-        assert risk_manager.available_cash < 100000.0  # Cash decreased
+        # Verify cash decreased (100 shares * $150 = $15,000)
+        assert risk_manager.available_cash < initial_cash
+        assert risk_manager.available_cash == initial_cash - (100.0 * 150.0)  # Cash decreased by trade cost
     
     @pytest.mark.asyncio
     async def test_risk_manager_validates_execution_against_authorization(self, execution_engine_with_risk):

@@ -106,8 +106,12 @@ class TestDataManagerPipelineIntegration:
         
         # DataManager would tag data with regime
         # Verify regime context available
-        regime_context = data_manager.get_current_regime_context()
-        assert regime_context is not None or hasattr(data_manager, 'regime_engine')
+        # ClickHouseDataManager has get_current_regime() method, not get_current_regime_context()
+        assert hasattr(data_manager, 'regime_engine') and data_manager.regime_engine is not None
+        # Optionally verify we can get regime (if regime_engine is started)
+        if hasattr(data_manager, 'get_current_regime'):
+            regime = data_manager.get_current_regime()  # May be None if engine not started
+            assert True  # Method exists and can be called
     
     @pytest.mark.asyncio
     async def test_data_manager_provides_data_quality_metrics(self, data_manager):

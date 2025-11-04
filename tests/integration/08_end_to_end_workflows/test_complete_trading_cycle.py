@@ -266,10 +266,15 @@ class TestCompleteTradingCycle:
         """
         system = complete_system
         
-        # Get initial regime
-        regime_context_1 = await system['regime_engine'].get_current_regime_context()
+        # Get initial regime (not async, so no await needed)
+        regime_context_1 = system['regime_engine'].get_current_regime_context()
         
         # Create request
+        # Use regime value if available, otherwise default
+        regime_value = 'normal_volatility'
+        if regime_context_1 is not None:
+            regime_value = regime_context_1.primary_regime.value if hasattr(regime_context_1.primary_regime, 'value') else str(regime_context_1.primary_regime)
+        
         request = TradingDecisionRequest(
             decision_type=TradingDecisionType.POSITION_ENTRY,
             symbol='AAPL',
@@ -278,7 +283,7 @@ class TestCompleteTradingCycle:
             confidence=0.75,
             strategy_id='test_strategy',
             current_price=150.0,
-            market_regime=regime_context_1.get('primary_regime', 'normal_volatility') if isinstance(regime_context_1, dict) else 'normal_volatility',
+            market_regime=regime_value,
             requesting_component='StrategyManager',
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )

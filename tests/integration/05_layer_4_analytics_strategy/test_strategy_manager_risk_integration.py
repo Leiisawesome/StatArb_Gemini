@@ -32,7 +32,7 @@ from datetime import datetime
 from core_engine.trading.strategies.manager import StrategyManager
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
-from core_engine.config.component_config import StrategyConfig, RiskConfig
+from core_engine.config.component_config import RiskConfig
 
 
 class TestStrategyRiskIntegration:
