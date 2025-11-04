@@ -445,7 +445,7 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
             # Perform cointegration test
             score, p_value, _ = coint(aligned_data[stock1], aligned_data[stock2])
             
-            if p_value <= self.config.cointegration_pvalue:
+            if p_value <= self.config.cointegration_threshold:
                 # Calculate hedge ratio using linear regression
                 from sklearn.linear_model import LinearRegression
                 

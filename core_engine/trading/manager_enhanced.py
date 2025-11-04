@@ -18,13 +18,13 @@ from .order_manager import (
     OrderManager, Order, OrderSide, OrderStatus
 )
 from .execution_handler import (
-    ExecutionHandler, ExecutionStrategy, ExecutionReport, VenueSelection
+    ExecutionHandler, ExecutionStrategy, ExecutionReport
 )
 from .transaction_cost_analyzer import (
     TransactionCostAnalyzer, BenchmarkType
 )
 from .venue_router import (
-    VenueRouter, RoutingStrategy, RoutingPlan
+    VenueRouter, RoutingStrategy, RoutingPlan, RouteOption
 )
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ class TradingManagerEnhanced:
             max_order_value=self.config.get('max_order_value', 500000),
             position_limit_percentage=self.config.get('position_limit_percentage', 5.0),
             default_execution_strategy=ExecutionStrategy(
-                self.config.get('default_execution_strategy', 'smart_routing')
+                self.config.get('default_execution_strategy', 'balanced')
             ),
             default_routing_strategy=RoutingStrategy(
                 self.config.get('default_routing_strategy', 'balanced')
@@ -458,7 +458,7 @@ class TradingManagerEnhanced:
             logger.error(f"Error executing order {order_id}: {e}")
             await self._handle_execution_error(order_id, e)
     
-    def _prepare_venue_selection(self, routing_plan: Optional[RoutingPlan]) -> Optional[VenueSelection]:
+    def _prepare_venue_selection(self, routing_plan: Optional[RoutingPlan]) -> Optional[Dict[str, Any]]:
         """Prepare venue selection from routing plan"""
         if not routing_plan:
             return None
@@ -468,11 +468,11 @@ class TradingManagerEnhanced:
         for route_option in routing_plan.route_options:
             venue_allocations[route_option.venue_id] = route_option.allocation_percentage / 100.0
         
-        return VenueSelection(
-            primary_venue=routing_plan.route_options[0].venue_id if routing_plan.route_options else None,
-            venue_allocations=venue_allocations,
-            routing_strategy=routing_plan.routing_strategy
-        )
+        return {
+            'primary_venue': routing_plan.route_options[0].venue_id if routing_plan.route_options else None,
+            'venue_allocations': venue_allocations,
+            'routing_strategy': routing_plan.routing_strategy
+        }
     
     async def _process_execution_report(self, execution_report: ExecutionReport) -> None:
         """Process execution report and update metrics"""

@@ -1,730 +1,498 @@
 """
 Integration Test Fixtures
-==========================
+=========================
 
-Shared fixtures for integration testing providing:
-- Real component instances (not mocked)
-- Async event loop management
-- Integrated system setup
-- Sample data generators
-- Test utilities
+Comprehensive fixtures for integration testing with REAL components (not mocks).
+All fixtures provide actual component instances for true integration testing.
 
-Author: StatArb_Gemini Integration Testing
-Phase: 8 - Integration Testing
+Author: StatArb_Gemini Integration Test Suite
+Date: November 4, 2025
+Version: 1.0.0
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
+import logging
+import sys
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from typing import Dict, Any, Optional
-import logging
 
-# Configure logging for tests
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Prevent importing problematic modules from main conftest
+sys.modules['tests.performance'] = None
+sys.modules['tests.performance.benchmarks'] = None
+sys.modules['tests.performance.benchmarks.latency_testing'] = None
+
+# Core engine imports
+from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
+from core_engine.system.orchestrator_components import ComponentLayer, AuthorityLevel
+from core_engine.system.central_risk_manager import CentralRiskManager, TradingDecisionRequest, TradingDecisionType
+from core_engine.data.manager import ClickHouseDataManager
+from core_engine.regime.engine import EnhancedRegimeEngine
+from core_engine.trading.strategies.manager import StrategyManager
+from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
+from core_engine.trading.engine import EnhancedTradingEngine
+from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
+from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager
+
+# Configuration imports
+from core_engine.config.component_config import (
+    RiskConfig, DataConfig, RegimeConfig, ExecutionConfig
 )
+# StrategyConfig is in StrategyManagerConfig
+from core_engine.trading.strategies.manager import StrategyManagerConfig
 
-# ========================================
-# Event Loop Fixtures
-# ========================================
+logger = logging.getLogger(__name__)
+
+# ==============================================================================
+# EVENT LOOP FIXTURE
+# ==============================================================================
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """
-    Create event loop for entire test session
-    
-    Scope: session - one loop for all tests
-    This prevents event loop conflicts in async tests
-    """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Create event loop for async tests"""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
+# ==============================================================================
+# SYSTEM ORCHESTRATOR FIXTURES
+# ==============================================================================
 
-@pytest.fixture
-def event_loop_for_test():
+@pytest_asyncio.fixture(scope="function")
+async def orchestrator():
     """
-    Create fresh event loop for a single test
+    Create REAL HierarchicalSystemOrchestrator for integration tests.
     
-    Use when test needs isolated event loop
+    This is a REAL component, not a mock.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    loop.close()
+    orchestrator = HierarchicalSystemOrchestrator()
+    await orchestrator.initialize()
+    yield orchestrator
+    await orchestrator.shutdown()
 
-
-# ========================================
-# Core Component Fixtures
-# ========================================
-
-@pytest.fixture
-async def risk_manager():
+@pytest_asyncio.fixture(scope="function")
+async def initialized_orchestrator():
     """
-    Real CentralRiskManager instance (standalone)
-    
-    Provides:
-    - Risk authorization
-    - Limit enforcement
-    - Trading governance
-    
-    NOTE: This is a standalone instance. If you need an orchestrator
-    with registered risk manager, use the 'orchestrator' fixture which
-    creates both and registers them properly.
+    Create initialized orchestrator with system started.
     """
-    from core_engine.system.central_risk_manager import CentralRiskManager
-    
-    config = {
-        'max_position_size': 0.1,
-        'max_daily_var': 0.05,
-        'max_total_risk': 0.20
-    }
-    
-    rm = CentralRiskManager(config)
-    await rm.initialize()
-    
-    yield rm
-    
-    # Cleanup
-    try:
-        await rm.stop()
-    except Exception as e:
-        logging.warning(f"Risk manager cleanup error: {e}")
+    orchestrator = HierarchicalSystemOrchestrator()
+    await orchestrator.initialize()
+    await orchestrator.start()
+    yield orchestrator
+    await orchestrator.stop()
+    await orchestrator.shutdown()
 
+# ==============================================================================
+# REGIME ENGINE FIXTURES (Regime-First Principle)
+# ==============================================================================
 
-@pytest.fixture
-async def orchestrator(risk_manager):
-    """
-    Real HierarchicalOrchestrator instance with registered CentralRiskManager
-    
-    Provides:
-    - Component registration
-    - Lifecycle management
-    - Authority framework
-    - Properly integrated risk manager
-    
-    IMPORTANT: This fixture depends on risk_manager fixture to ensure
-    proper registration before initialization.
-    """
-    from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrchestrator
-    
-    orch = HierarchicalSystemOrchestrator()
-    
-    # CRITICAL: Register the risk manager BEFORE initializing
-    orch.register_central_risk_manager(risk_manager)
-    logging.info("✅ CentralRiskManager registered with orchestrator")
-    
-    # Now initialize with registered risk manager
-    await orch.initialize()
-    
-    yield orch
-    
-    # Cleanup
-    try:
-        await orch.stop()
-    except Exception as e:
-        logging.warning(f"Orchestrator cleanup error: {e}")
-
-
-@pytest.fixture
-async def data_manager():
-    """
-    Mock DataManager instance for testing
-    
-    Provides:
-    - Data storage methods
-    - Data retrieval methods
-    - Simple in-memory storage
-    """
-    
-    class MockDataManager:
-        def __init__(self):
-            self.data_store = {}
-            self.is_initialized = False
-            self.is_operational = False
-            
-        async def initialize(self):
-            self.is_initialized = True
-            return True
-            
-        async def start(self):
-            self.is_operational = True
-            return True
-            
-        async def stop(self):
-            self.is_operational = False
-            return True
-            
-        async def store_market_data(self, symbol: str, data: pd.DataFrame):
-            """Store market data in memory"""
-            self.data_store[symbol] = data
-            return True
-            
-        async def get_market_data(self, symbol: str) -> Optional[pd.DataFrame]:
-            """Retrieve stored market data"""
-            return self.data_store.get(symbol)
-            
-        def get_status(self) -> Dict[str, Any]:
-            return {
-                'initialized': self.is_initialized,
-                'operational': self.is_operational,
-                'symbols_stored': len(self.data_store)
-            }
-    
-    dm = MockDataManager()
-    await dm.initialize()
-    
-    yield dm
-    
-    # Cleanup
-    try:
-        await dm.stop()
-    except Exception as e:
-        logging.warning(f"Data manager cleanup error: {e}")
-
-
-@pytest.fixture
+@pytest_asyncio.fixture(scope="function")
 async def regime_engine():
     """
-    Real EnhancedRegimeEngine instance
+    Create REAL EnhancedRegimeEngine for integration tests.
     
-    Provides:
-    - Market regime detection
-    - Regime change alerts
-    - Strategy suitability
+    This is the FOUNDATION component (initializes FIRST per Rule 2).
     """
-    from core_engine.regime.engine import EnhancedRegimeEngine
+    config = RegimeConfig()
+    engine = EnhancedRegimeEngine(config)
+    await engine.initialize()
+    await engine.start()
+    yield engine
+    await engine.stop()
+
+# ==============================================================================
+# RISK MANAGER FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def risk_manager():
+    """
+    Create REAL CentralRiskManager for integration tests.
+    
+    This is the GOVERNANCE layer component (Layer 1).
+    """
+    config = RiskConfig()
+    manager = CentralRiskManager(config)
+    await manager.initialize()
+    yield manager
+    await manager.stop()
+
+@pytest_asyncio.fixture(scope="function")
+async def risk_manager_with_orchestrator(orchestrator, risk_manager):
+    """
+    Create risk manager registered with orchestrator.
+    """
+    orchestrator.register_central_risk_manager(risk_manager)
+    yield {'orchestrator': orchestrator, 'risk_manager': risk_manager}
+
+# ==============================================================================
+# DATA MANAGER FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def data_manager():
+    """
+    Create REAL ClickHouseDataManager for integration tests.
+    
+    Note: In tests, this may use mock data or test database.
+    """
+    config = DataConfig()
+    manager = ClickHouseDataManager(config)
+    await manager.initialize()
+    yield manager
+    await manager.stop()
+
+@pytest_asyncio.fixture(scope="function")
+async def data_manager_with_regime(data_manager, regime_engine):
+    """
+    Create data manager with regime engine injected (Regime-First).
+    """
+    data_manager.set_regime_engine(regime_engine)
+    yield {'data_manager': data_manager, 'regime_engine': regime_engine}
+
+# ==============================================================================
+# PIPELINE FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def pipeline_orchestrator():
+    """
+    Create REAL ProcessingPipelineOrchestrator for integration tests.
+    """
+    from core_engine.config.component_config import (
+        IndicatorConfig, FeatureConfig, SignalConfig
+    )
     
     config = {
-        'lookback_window': 60,
-        'volatility_window': 20,
-        'trend_threshold': 0.02,
-        'update_frequency': 300  # seconds (5 minutes)
+        'data_config': DataConfig(),
+        'indicator_config': IndicatorConfig(),
+        'feature_config': FeatureConfig(),
+        'signal_config': SignalConfig()
     }
     
-    re = EnhancedRegimeEngine(config)
-    await re.initialize()
-    
-    yield re
-    
-    # Cleanup
-    try:
-        await re.stop()
-    except Exception as e:
-        logging.warning(f"Regime engine cleanup error: {e}")
+    pipeline = ProcessingPipelineOrchestrator(**config)
+    await pipeline.initialize()
+    yield pipeline
+    await pipeline.stop()
 
+# ==============================================================================
+# STRATEGY MANAGER FIXTURES
+# ==============================================================================
 
-@pytest.fixture
-async def indicator_engine():
-    """
-    Real EnhancedTechnicalIndicators instance
-    
-    Provides:
-    - Technical indicator calculations
-    - Multi-timeframe analysis
-    - Vectorized operations
-    """
-    from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
-    
-    config = {
-        'enable_caching': True,
-        'cache_size': 1000,
-        'supported_indicators': ['sma', 'ema', 'rsi', 'macd', 'bbands']
-    }
-    
-    ie = EnhancedTechnicalIndicators(config)
-    await ie.initialize()
-    
-    yield ie
-    
-    # Cleanup
-    try:
-        await ie.stop()
-    except Exception as e:
-        logging.warning(f"Indicator engine cleanup error: {e}")
-
-
-@pytest.fixture
+@pytest_asyncio.fixture(scope="function")
 async def strategy_manager():
     """
-    Real StrategyManager instance
-    
-    Provides:
-    - Strategy registration
-    - Signal generation
-    - Multi-strategy coordination
+    Create REAL StrategyManager for integration tests.
     """
-    from core_engine.trading.strategies.manager import StrategyManager
-    
-    config = {
-        'max_concurrent_strategies': 3,
-        'enable_enhanced_strategies': False,
-        'auto_discover_strategies': False
-    }
-    
-    sm = StrategyManager(config)
-    await sm.initialize()
-    
-    yield sm
-    
-    # Cleanup
-    try:
-        await sm.stop()
-    except Exception as e:
-        logging.warning(f"Strategy manager cleanup error: {e}")
+    config = {}  # StrategyManager accepts dict config
+    manager = StrategyManager(config)
+    await manager.initialize()
+    yield manager
+    await manager.stop()
 
+@pytest_asyncio.fixture(scope="function")
+async def strategy_manager_with_risk(strategy_manager, risk_manager):
+    """
+    Create strategy manager with risk manager integration.
+    """
+    strategy_manager.set_risk_manager(risk_manager)
+    yield {'strategy_manager': strategy_manager, 'risk_manager': risk_manager}
 
-@pytest.fixture
+# ==============================================================================
+# EXECUTION ENGINE FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
 async def execution_engine():
     """
-    Real UnifiedExecutionEngine instance
-    
-    Provides:
-    - Order execution
-    - Fill monitoring
-    - Execution algorithms
+    Create REAL UnifiedExecutionEngine for integration tests.
     """
-    from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-    
-    config = {
-        'default_algorithm': 'market',
-        'enable_smart_routing': True,
-        'max_order_size': 10000,
-        'mock_broker': True  # Use mock broker for testing
-    }
-    
-    ee = UnifiedExecutionEngine(config)
-    await ee.initialize()
-    
-    yield ee
-    
-    # Cleanup
-    try:
-        await ee.stop()
-    except Exception as e:
-        logging.warning(f"Execution engine cleanup error: {e}")
+    config = ExecutionConfig()
+    engine = UnifiedExecutionEngine(config)
+    await engine.initialize()
+    yield engine
+    await engine.stop()
 
-
-# ========================================
-# Integrated System Fixtures
-# ========================================
-
-@pytest.fixture
-async def basic_integrated_system(orchestrator, risk_manager):
+@pytest_asyncio.fixture(scope="function")
+async def execution_engine_with_risk(execution_engine, risk_manager):
     """
-    Basic integrated system with orchestrator + risk manager
-    
-    Use for: Testing core authorization workflows
+    Create execution engine with risk manager callback.
     """
-    # Register risk manager with orchestrator
+    # Set risk manager callback for position updates
+    execution_engine.set_risk_manager_callback(risk_manager)
+    yield {'execution_engine': execution_engine, 'risk_manager': risk_manager}
+
+# ==============================================================================
+# TRADING ENGINE FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def trading_engine():
+    """
+    Create REAL EnhancedTradingEngine for integration tests.
+    """
+    config = ExecutionConfig()
+    engine = EnhancedTradingEngine(config)
+    await engine.initialize()
+    yield engine
+    await engine.stop()
+
+# ==============================================================================
+# ANALYTICS MANAGER FIXTURES
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def analytics_manager():
+    """
+    Create REAL EnhancedAnalyticsManager for integration tests.
+    """
+    from core_engine.config.component_config import AnalyticsConfig
+    config = AnalyticsConfig()
+    manager = EnhancedAnalyticsManager(config)
+    await manager.initialize()
+    yield manager
+    await manager.stop()
+
+# ==============================================================================
+# COMPLETE SYSTEM FIXTURE
+# ==============================================================================
+
+@pytest_asyncio.fixture(scope="function")
+async def complete_system():
+    """
+    Create COMPLETE integrated system with all components.
+    
+    This fixture provides a fully integrated system for end-to-end testing.
+    Components are initialized in correct order (Regime-First).
+    """
+    # STEP 1: Initialize RegimeEngine FIRST (order=5) - Rule 2
+    regime_config = RegimeConfig()
+    regime_engine = EnhancedRegimeEngine(regime_config)
+    await regime_engine.initialize()
+    await regime_engine.start()
+    
+    # STEP 2: Initialize Orchestrator
+    orchestrator = HierarchicalSystemOrchestrator()
+    await orchestrator.initialize()
+    
+    # STEP 3: Initialize RiskManager (order=25) - Governance
+    risk_config = RiskConfig()
+    risk_manager = CentralRiskManager(risk_config)
+    await risk_manager.initialize()
     orchestrator.register_central_risk_manager(risk_manager)
     
-    await orchestrator.initialize_system()
+    # STEP 4: Initialize DataManager (order=10) - with regime context
+    data_config = DataConfig()
+    data_manager = ClickHouseDataManager(data_config)
+    data_manager.set_regime_engine(regime_engine)
+    await data_manager.initialize()
+    orchestrator.register_component(
+        "ClickHouseDataManager", data_manager,
+        ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
+        initialization_order=10
+    )
     
-    yield {
-        'orchestrator': orchestrator,
-        'risk_manager': risk_manager
+    # STEP 5: Initialize Pipeline (order=15)
+    from core_engine.config.component_config import (
+        IndicatorConfig, FeatureConfig, SignalConfig
+    )
+    pipeline_config = {
+        'data_config': data_config,
+        'indicator_config': IndicatorConfig(),
+        'feature_config': FeatureConfig(),
+        'signal_config': SignalConfig()
     }
-    
-    # Cleanup handled by individual fixtures
-
-
-@pytest.fixture
-async def data_processing_system(orchestrator, risk_manager, data_manager, 
-                                  regime_engine, indicator_engine):
-    """
-    System with data processing components
-    
-    Use for: Testing data pipeline integration
-    """
-    from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
-    
-    # Register components
-    orchestrator.register_central_risk_manager(risk_manager)
-    
+    pipeline = ProcessingPipelineOrchestrator(**pipeline_config)
+    pipeline.set_regime_engine(regime_engine)
+    await pipeline.initialize()
     orchestrator.register_component(
-        name="DataManager",
-        component=data_manager,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.OPERATIONAL
+        "ProcessingPipelineOrchestrator", pipeline,
+        ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
+        initialization_order=15
     )
     
+    # STEP 6: Initialize StrategyManager (order=20)
+    strategy_config = {}  # StrategyManager accepts dict config
+    strategy_manager = StrategyManager(strategy_config)
+    strategy_manager.set_risk_manager(risk_manager)
+    strategy_manager.set_regime_engine(regime_engine)
+    await strategy_manager.initialize()
     orchestrator.register_component(
-        name="RegimeEngine",
-        component=regime_engine,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.STRATEGIC
+        "StrategyManager", strategy_manager,
+        ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
+        initialization_order=20
     )
     
+    # STEP 7: Initialize TradingEngine (order=30)
+    execution_config = ExecutionConfig()
+    trading_engine = EnhancedTradingEngine(execution_config)
+    trading_engine.set_risk_manager(risk_manager)
+    await trading_engine.initialize()
     orchestrator.register_component(
-        name="IndicatorEngine",
-        component=indicator_engine,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.OPERATIONAL
+        "EnhancedTradingEngine", trading_engine,
+        ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
+        initialization_order=30
     )
     
-    await orchestrator.initialize_system()
+    # STEP 8: Initialize ExecutionEngine (order=40)
+    execution_engine = UnifiedExecutionEngine(execution_config)
+    execution_engine.set_risk_manager_callback(risk_manager)
+    await execution_engine.initialize()
+    orchestrator.register_component(
+        "UnifiedExecutionEngine", execution_engine,
+        ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
+        initialization_order=40
+    )
     
-    yield {
+    # STEP 9: Initialize AnalyticsManager (order=35)
+    from core_engine.config.component_config import AnalyticsConfig
+    analytics_config = AnalyticsConfig()
+    analytics_manager = EnhancedAnalyticsManager(analytics_config)
+    await analytics_manager.initialize()
+    orchestrator.register_component(
+        "EnhancedAnalyticsManager", analytics_manager,
+        ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
+        initialization_order=35
+    )
+    
+    # Start system
+    await orchestrator.start()
+    
+    system = {
         'orchestrator': orchestrator,
+        'regime_engine': regime_engine,
         'risk_manager': risk_manager,
         'data_manager': data_manager,
-        'regime_engine': regime_engine,
-        'indicator_engine': indicator_engine
-    }
-
-
-@pytest.fixture
-async def full_trading_system(orchestrator, risk_manager, data_manager, 
-                               regime_engine, indicator_engine, 
-                               strategy_manager, execution_engine):
-    """
-    Complete trading system with all components
-    
-    Use for: End-to-end workflow testing
-    """
-    from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
-    
-    # Register risk manager (Layer 2 - Governance)
-    orchestrator.register_central_risk_manager(risk_manager)
-    
-    # Register data layer (Layer 3)
-    orchestrator.register_component(
-        name="DataManager",
-        component=data_manager,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.OPERATIONAL
-    )
-    
-    # Register processing layer (Layer 4)
-    orchestrator.register_component(
-        name="RegimeEngine",
-        component=regime_engine,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.STRATEGIC
-    )
-    
-    orchestrator.register_component(
-        name="IndicatorEngine",
-        component=indicator_engine,
-        layer=ComponentLayer.SUPPORT,
-        authority_level=AuthorityLevel.OPERATIONAL
-    )
-    
-    # Register strategy layer (Layer 5)
-    orchestrator.register_component(
-        name="StrategyManager",
-        component=strategy_manager,
-        layer=ComponentLayer.EXECUTION,
-        authority_level=AuthorityLevel.STRATEGIC
-    )
-    
-    # Register execution layer (Layer 7)
-    orchestrator.register_component(
-        name="ExecutionEngine",
-        component=execution_engine,
-        layer=ComponentLayer.EXECUTION,
-        authority_level=AuthorityLevel.TACTICAL
-    )
-    
-    # Set component dependencies
-    risk_manager.set_controlled_components(
-        strategy_manager=strategy_manager,
-        regime_engine=regime_engine
-    )
-    
-    strategy_manager.risk_manager = risk_manager
-    strategy_manager.data_manager = data_manager
-    
-    execution_engine.risk_manager = risk_manager
-    
-    # Initialize system
-    await orchestrator.initialize_system()
-    
-    yield {
-        'orchestrator': orchestrator,
-        'risk_manager': risk_manager,
-        'data_manager': data_manager,
-        'regime_engine': regime_engine,
-        'indicator_engine': indicator_engine,
+        'pipeline': pipeline,
         'strategy_manager': strategy_manager,
-        'execution_engine': execution_engine
+        'trading_engine': trading_engine,
+        'execution_engine': execution_engine,
+        'analytics_manager': analytics_manager
     }
     
-    # Shutdown handled by orchestrator
-    try:
-        await orchestrator.shutdown_system()
-    except Exception as e:
-        logging.warning(f"System shutdown error: {e}")
-
-
-# ========================================
-# Data Fixtures
-# ========================================
-
-@pytest.fixture
-def sample_market_data():
-    """
-    Generate sample OHLCV market data
+    yield system
     
-    Returns: DataFrame with 100 rows of realistic market data
-    """
-    dates = pd.date_range('2024-01-01 09:30', periods=100, freq='1min')
-    
-    # Generate realistic price movements
-    base_price = 150.0
-    returns = np.random.randn(100) * 0.001  # 0.1% volatility
-    prices = base_price * (1 + returns).cumprod()
-    
-    return pd.DataFrame({
-        'timestamp': dates,
-        'symbol': 'AAPL',
-        'open': prices + np.random.randn(100) * 0.1,
-        'high': prices + np.abs(np.random.randn(100)) * 0.2,
-        'low': prices - np.abs(np.random.randn(100)) * 0.2,
-        'close': prices,
-        'volume': np.random.randint(900000, 1100000, 100)
-    })
+    # Cleanup in reverse order
+    await orchestrator.stop()
+    await analytics_manager.stop()
+    await execution_engine.stop()
+    await trading_engine.stop()
+    await strategy_manager.stop()
+    await pipeline.stop()
+    await data_manager.stop()
+    await risk_manager.stop()
+    await regime_engine.stop()
+    await orchestrator.shutdown()
 
+# ==============================================================================
+# TEST DATA GENERATORS
+# ==============================================================================
 
 @pytest.fixture
-def multi_symbol_market_data():
+def create_enriched_data():
     """
-    Generate market data for multiple symbols
+    Create enriched market data for strategy testing.
     
-    Returns: Dict[symbol -> DataFrame]
+    Returns DataFrame with OHLCV + indicators + features.
     """
-    symbols = ['AAPL', 'MSFT', 'GOOGL']
-    data = {}
-    
-    dates = pd.date_range('2024-01-01 09:30', periods=100, freq='1min')
-    
-    for symbol in symbols:
-        base_price = np.random.uniform(100, 300)
-        returns = np.random.randn(100) * 0.001
-        prices = base_price * (1 + returns).cumprod()
+    def _create(symbols: List[str] = ['AAPL'], rows: int = 200) -> Dict[str, pd.DataFrame]:
+        """Create enriched data for symbols"""
+        enriched = {}
         
-        data[symbol] = pd.DataFrame({
-            'timestamp': dates,
-            'symbol': symbol,
-            'open': prices + np.random.randn(100) * 0.1,
-            'high': prices + np.abs(np.random.randn(100)) * 0.2,
-            'low': prices - np.abs(np.random.randn(100)) * 0.2,
-            'close': prices,
-            'volume': np.random.randint(900000, 1100000, 100)
-        })
-    
-    return data
-
-
-@pytest.fixture
-def sample_trading_signal():
-    """
-    Generate sample trading signal
-    
-    Returns: Dict with signal details
-    """
-    return {
-        'symbol': 'AAPL',
-        'action': 'BUY',
-        'size': 100,
-        'strategy_id': 'momentum_strategy',
-        'confidence': 0.75,
-        'timestamp': datetime.now(),
-        'metadata': {
-            'indicator': 'SMA_crossover',
-            'timeframe': '5min'
-        }
-    }
-
-
-@pytest.fixture
-def sample_trading_decision_request():
-    """
-    Generate sample TradingDecisionRequest
-    
-    Returns: TradingDecisionRequest object
-    """
-    from core_engine.system.central_risk_manager import TradingDecisionRequest
-    
-    return TradingDecisionRequest(
-        requesting_component='test_strategy',
-        proposed_action='BUY',
-        symbol='AAPL',
-        size=100,
-        price=150.0,
-        justification='Momentum signal triggered',
-        risk_assessment={
-            'estimated_var': 0.02,
-            'position_concentration': 0.05
-        }
-    )
-
-
-# ========================================
-# Utility Fixtures
-# ========================================
-
-@pytest.fixture
-def test_timeout():
-    """
-    Standard timeout for integration tests
-    
-    Returns: Timeout in seconds
-    """
-    return 10.0  # 10 seconds for most integration tests
-
-
-@pytest.fixture
-def long_test_timeout():
-    """
-    Extended timeout for complex tests
-    
-    Returns: Timeout in seconds
-    """
-    return 30.0  # 30 seconds for complex workflows
-
-
-@pytest.fixture
-async def async_test_helper():
-    """
-    Helper utilities for async testing
-    
-    Provides:
-    - Wait for condition
-    - Timeout wrapper
-    - Task management
-    """
-    class AsyncTestHelper:
-        @staticmethod
-        async def wait_for_condition(condition_func, timeout=5.0, interval=0.1):
-            """Wait for condition to become True"""
-            elapsed = 0.0
-            while elapsed < timeout:
-                if await condition_func():
-                    return True
-                await asyncio.sleep(interval)
-                elapsed += interval
-            return False
+        for symbol in symbols:
+            dates = pd.date_range(start='2024-01-01', periods=rows, freq='1min')
+            np.random.seed(42)  # For reproducibility
+            
+            # Generate OHLCV data
+            base_price = 100.0
+            prices = []
+            for i in range(rows):
+                change = np.random.normal(0, 0.01)
+                base_price *= (1 + change)
+                prices.append(base_price)
+            
+            df = pd.DataFrame({
+                'timestamp': dates,
+                'open': prices,
+                'high': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
+                'low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
+                'close': prices,
+                'volume': np.random.randint(1000, 10000, rows)
+            })
+            
+            # Add indicators (simplified)
+            df['SMA_10'] = df['close'].rolling(10).mean()
+            df['SMA_20'] = df['close'].rolling(20).mean()
+            df['RSI_14'] = 50.0  # Simplified RSI
+            df['MACD'] = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
+            df['ADX_14'] = 20.0  # Simplified ADX
+            df['ATR_14'] = df['high'].rolling(14).max() - df['low'].rolling(14).min()
+            
+            # Add features
+            df['returns_1'] = df['close'].pct_change(1)
+            df['momentum_score'] = (df['close'] - df['close'].shift(10)) / df['close'].shift(10)
+            df['volatility_ratio'] = df['returns_1'].rolling(20).std() / df['returns_1'].rolling(60).std()
+            df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
+            
+            # Add signals
+            df['signal_type'] = 'HOLD'
+            df['signal_strength'] = 0
+            df['confidence'] = 0.5
+            
+            enriched[symbol] = df
         
-        @staticmethod
-        async def run_with_timeout(coro, timeout=5.0):
-            """Run coroutine with timeout"""
-            try:
-                return await asyncio.wait_for(coro, timeout=timeout)
-            except asyncio.TimeoutError:
-                logging.warning(f"Coroutine timed out after {timeout}s")
-                raise
-        
-        @staticmethod
-        def get_pending_tasks():
-            """Get all pending tasks"""
-            return [task for task in asyncio.all_tasks() 
-                   if not task.done()]
-        
-        @staticmethod
-        async def cancel_all_tasks():
-            """Cancel all pending tasks"""
-            tasks = AsyncTestHelper.get_pending_tasks()
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        return enriched
     
-    return AsyncTestHelper()
-
+    return _create
 
 @pytest.fixture
-def component_status_checker():
+def create_trading_decision_request():
     """
-    Utility to check component status
-    
-    Provides:
-    - Check initialization status
-    - Check operational status
-    - Wait for status change
+    Create TradingDecisionRequest for risk authorization tests.
     """
-    class ComponentStatusChecker:
-        @staticmethod
-        def is_initialized(component) -> bool:
-            """Check if component is initialized"""
-            return getattr(component, 'is_initialized', False)
-        
-        @staticmethod
-        def is_operational(component) -> bool:
-            """Check if component is operational"""
-            return getattr(component, 'is_operational', False)
-        
-        @staticmethod
-        async def wait_for_initialization(component, timeout=5.0):
-            """Wait for component to initialize"""
-            elapsed = 0.0
-            while elapsed < timeout:
-                if ComponentStatusChecker.is_initialized(component):
-                    return True
-                await asyncio.sleep(0.1)
-                elapsed += 0.1
-            return False
+    def _create(
+        symbol: str = 'AAPL',
+        side: str = 'buy',
+        quantity: float = 100.0,
+        confidence: float = 0.75,
+        strategy_id: str = 'test_strategy'
+    ) -> TradingDecisionRequest:
+        return TradingDecisionRequest(
+            decision_type=TradingDecisionType.POSITION_ENTRY,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            confidence=confidence,
+            strategy_id=strategy_id,
+            requesting_component='StrategyManager'
+        )
     
-    return ComponentStatusChecker()
+    return _create
 
+# ==============================================================================
+# HELPER FIXTURES
+# ==============================================================================
 
-# ========================================
-# Markers for Test Organization
-# ========================================
-
-def pytest_configure(config):
-    """Register custom markers"""
-    config.addinivalue_line(
-        "markers", "integration: Integration test requiring multiple components"
-    )
-    config.addinivalue_line(
-        "markers", "workflow: End-to-end workflow test"
-    )
-    config.addinivalue_line(
-        "markers", "async_test: Test with async operations"
-    )
-    config.addinivalue_line(
-        "markers", "slow: Slow-running test (> 5s)"
-    )
-    config.addinivalue_line(
-        "markers", "system: Full system test"
-    )
-
-
-# ========================================
-# Hooks for Test Monitoring
-# ========================================
-
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
+@pytest.fixture
+def wait_for_condition():
     """
-    Hook to track test results
-    
-    Logs test failures with detailed information
+    Wait for async condition with timeout.
     """
-    outcome = yield
-    rep = outcome.get_result()
+    async def _wait(
+        condition_fn,
+        timeout: float = 5.0,
+        interval: float = 0.1,
+        error_msg: str = "Condition not met"
+    ):
+        start = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - start < timeout:
+            if await condition_fn() if asyncio.iscoroutinefunction(condition_fn) else condition_fn():
+                return True
+            await asyncio.sleep(interval)
+        raise TimeoutError(error_msg)
     
-    if rep.when == "call" and rep.failed:
-        logging.error(f"❌ Test failed: {item.nodeid}")
-        if hasattr(rep, 'longrepr'):
-            logging.error(f"Error details: {rep.longrepr}")
+    return _wait
 
-
-@pytest.fixture(autouse=True)
-def log_test_execution(request):
-    """
-    Automatically log test execution
-    
-    Logs test start and completion
-    """
-    test_name = request.node.nodeid
-    logging.info(f"▶️  Starting test: {test_name}")
-    
-    yield
-    
-    logging.info(f"✅ Completed test: {test_name}")

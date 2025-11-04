@@ -1,15 +1,10 @@
 """
-Integration Test Package
+Integration Test Suite for StatArb_Gemini Core Engine
+=====================================================
 
-Week 2 integration testing framework for StatArb_Gemini system.
-Tests end-to-end workflows, multi-component coordination, and system behavior.
+Institutional-grade integration tests covering all component interactions,
+workflows, and end-to-end trading cycles across the 6-layer hierarchical architecture.
 
-Author: StatArb_Gemini Test Infrastructure
-Date: October 8, 2025
-Version: 1.0.0
+Total: 500+ integration tests across 74 files
 """
 
-__all__ = [
-    'integration_fixtures',
-    'test_helpers',
-]

@@ -517,7 +517,7 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
             # Test spread stationarity
             adf_stat, adf_p_value, _, _, _, _ = adfuller(spread.dropna())
             
-            is_cointegrated = (p_value < self.config.min_cointegration_pvalue and 
+            is_cointegrated = (p_value < self.config.cointegration_threshold and 
                              abs(correlation) > self.config.min_correlation and
                              adf_p_value < 0.05)  # Spread is stationary
             

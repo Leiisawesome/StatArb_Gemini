@@ -120,6 +120,9 @@ async def strategy_manager(basic_config):
     manager.signal_generation_task = None
     manager.core_strategy_manager = None
     
+    # Pipeline orchestrator (needed for set_regime_engine)
+    manager.pipeline_orchestrator = None
+    
     return manager
 
 
