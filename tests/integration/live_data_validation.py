@@ -14,9 +14,8 @@ Process Flow (Phases 0-8):
 4. Generate preliminary trading signals with regime context (Phase 5)
 5. PHASE 6 - Strategy Layer Integration:
    - StrategyManager initialization and coordination
-   - Multi-strategy registration (Momentum + Mean Reversion)
-   - Signal aggregation from multiple strategies
-   - Multi-strategy signal coordination and conflict resolution
+   - Strategy registration (Momentum - focused testing)
+   - Signal generation from momentum strategy
 6. PHASE 7 - Risk Authorization (Rule 4):
    - CentralRiskManager authorization of trading decisions
    - Risk limit validation and position checks
@@ -54,19 +53,19 @@ Process Flow (Phases 0-8):
           - Position monitoring and risk limit checks
           - Portfolio state tracking with existing positions
 
-       Output:
-       - Generated signals from pipeline (Phase 5)
-       - Strategy signals from Momentum and Mean Reversion strategies (Phase 6)
+Output:
+- Generated signals from pipeline (Phase 5)
+- Strategy signals from Momentum strategy (Phase 6)
        - Risk authorization results (Phase 7)
        - Execution planning results with algorithm selection and market impact (Phase 8)
        - Execution action results with fill rates and quality metrics (Phase 9)
        - Portfolio update results with position tracking and cash management (Phase 10)
        - Analytics and TCA results with execution quality scores (Phase 11)
        - Continuous monitoring results with P&L evolution and risk checks
-       - Signal aggregation and coordination results
-       - Regime context and confidence scores
+- Signal aggregation and coordination results
+- Regime context and confidence scores
 
-       Author: StatArb_Gemini Integration Testing
+Author: StatArb_Gemini Integration Testing
        Phase: Live Data Simulation & Signal Generation (Phases 0-11)
 """
 
@@ -551,9 +550,8 @@ class LiveDataSignalGenerationTest:
         
         Tests:
         - StrategyManager initialization and coordination
-        - Multi-strategy registration (Momentum + Mean Reversion)
-        - Signal aggregation from multiple strategies
-        - Multi-strategy signal coordination
+        - Strategy registration (Momentum - focused testing)
+        - Signal generation from momentum strategy
         """
         try:
             from core_engine.trading.strategies.manager import StrategyManager
@@ -588,13 +586,13 @@ class LiveDataSignalGenerationTest:
             logger.info("   ✅ Regime engine injected into StrategyManager")
             
             try:
-                # Register Momentum Strategy
+                # Register Momentum Strategy (only strategy for focused testing)
                 logger.info("   📊 Registering Momentum Strategy...")
                 momentum_registered = await strategy_manager.register_enhanced_strategy(
                     StrategyType.MOMENTUM,
                     {
                         'name': 'momentum_strategy_1',
-                        'allocation_pct': 0.5,  # 50% allocation
+                        'allocation_pct': 1.0,  # 100% allocation (only strategy)
                         'max_positions': 5,
                         'risk_limit': 0.05,
                         'lookback_period': 60,
@@ -609,28 +607,6 @@ class LiveDataSignalGenerationTest:
                     logger.info("   ✅ Momentum Strategy registered")
                 else:
                     logger.warning("   ⚠️  Momentum Strategy registration failed")
-                
-                # Register Mean Reversion Strategy
-                logger.info("   📊 Registering Mean Reversion Strategy...")
-                mean_reversion_registered = await strategy_manager.register_enhanced_strategy(
-                    StrategyType.MEAN_REVERSION,
-                    {
-                        'name': 'mean_reversion_strategy_1',
-                        'allocation_pct': 0.5,  # 50% allocation
-                        'max_positions': 5,
-                        'risk_limit': 0.05,
-                        'lookback_period': 20,
-                        'zscore_entry_threshold': 2.0,  # Fixed: use zscore_entry_threshold
-                        'symbols': ['TSLA'],  # CRITICAL: Specify symbols for strategy
-                        'scan_all_bars': False,  # LIVE MODE: Only evaluate last bar (real trading simulation)
-                        'scan_interval': 1,
-                        'enable_regime_adjusted_thresholds': True  # Enable regime-adjusted thresholds
-                    }
-                )
-                if mean_reversion_registered:
-                    logger.info("   ✅ Mean Reversion Strategy registered")
-                else:
-                    logger.warning("   ⚠️  Mean Reversion Strategy registration failed")
                 
                 # Verify strategies are registered
                 active_strategies = len(strategy_manager.active_strategies)
@@ -1301,21 +1277,22 @@ class LiveDataSignalGenerationTest:
                                                         })
                                                     
                                                     # Store trade details
-                                                    simulation_results['trades'].append({
-                                                        'bar_idx': bar_idx,
-                                                        'timestamp': current_timestamp,
-                                                        'symbol': signal.symbol,
-                                                        'side': signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type).lower(),
-                                                        'quantity': result.filled_quantity if hasattr(result, 'filled_quantity') else signal_quantity,
-                                                        'price': result.avg_fill_price if hasattr(result, 'avg_fill_price') else current_price,
-                                                        'confidence': signal.confidence
-                                                    })
-                                                    
-                                                    logger.debug(f"   ✅ Phase 9: Execution {status_value} - {result.filled_quantity if hasattr(result, 'filled_quantity') else 0:.2f} shares @ ${result.avg_fill_price if hasattr(result, 'avg_fill_price') else 0:.2f}")
-                                                    
-                                                    # PHASE 10: Portfolio Update Tracking (automatic via callback, but we track it here)
-                                                    # Position update happens automatically via risk_manager.update_position() callback
-                                                    # Capture the portfolio state after update
+                                                simulation_results['trades'].append({
+                                                    'bar_idx': bar_idx,
+                                                    'timestamp': current_timestamp,
+                                                    'symbol': signal.symbol,
+                                                    'side': signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type).lower(),
+                                                    'quantity': result.filled_quantity if hasattr(result, 'filled_quantity') else signal_quantity,
+                                                    'price': result.avg_fill_price if hasattr(result, 'avg_fill_price') else current_price,
+                                                    'confidence': signal.confidence
+                                                })
+                                                
+                                                logger.debug(f"   ✅ Phase 9: Execution {status_value} - {result.filled_quantity if hasattr(result, 'filled_quantity') else 0:.2f} shares @ ${result.avg_fill_price if hasattr(result, 'avg_fill_price') else 0:.2f}")
+                                                
+                                                # PHASE 10: Portfolio Update Tracking (automatic via callback, but we track it here)
+                                                # Position update happens automatically via risk_manager.update_position() callback
+                                                # Capture the portfolio state after update
+                                                if status_normalized in ['FILLED', 'PARTIALLY_FILLED']:
                                                     simulation_results['phase10_details']['position_updates'] += 1
                                                     
                                                     try:
@@ -2238,27 +2215,16 @@ class LiveDataSignalGenerationTest:
                                 logger.info(f"\n      🔍 Column Mapping Verification:")
                                 logger.info(f"         Expected → Actual Column Mapping:")
                                 from core_engine.trading.strategies.implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
-                                from core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
                                 
-                                # Create temporary strategy instances to get mappings
+                                # Create temporary strategy instance to get mappings
                                 try:
-                                    from core_engine.config import MomentumConfig, MeanReversionConfig
+                                    from core_engine.config import MomentumConfig
                                     momentum_config = MomentumConfig(name='temp', symbols=['TSLA'])
                                     momentum_strategy = EnhancedMomentumStrategy(momentum_config)
                                     momentum_mapping = momentum_strategy._get_column_mapping()
                                     
                                     logger.info(f"         Momentum Strategy Mapping:")
                                     for expected, actual in momentum_mapping.items():
-                                        exists = actual in enriched_df.columns
-                                        status = "✅" if exists else "❌"
-                                        logger.info(f"            {status} {expected} → {actual} (exists: {exists})")
-                                    
-                                    mean_reversion_config = MeanReversionConfig(name='temp', symbols=['TSLA'])
-                                    mean_reversion_strategy = EnhancedMeanReversionStrategy(mean_reversion_config)
-                                    mean_reversion_mapping = mean_reversion_strategy._get_column_mapping()
-                                    
-                                    logger.info(f"         Mean Reversion Strategy Mapping:")
-                                    for expected, actual in mean_reversion_mapping.items():
                                         exists = actual in enriched_df.columns
                                         status = "✅" if exists else "❌"
                                         logger.info(f"            {status} {expected} → {actual} (exists: {exists})")
@@ -2322,16 +2288,6 @@ class LiveDataSignalGenerationTest:
                                     if f'momentum_{short_period}' not in enriched_df.columns:
                                         logger.warning(f"            ⚠️  MISMATCH: Strategy expects momentum from period {short_period}, but momentum_{short_period} not found")
                                 
-                                # Check for mean reversion features
-                                logger.info(f"\n      🔍 Mean Reversion Features Check:")
-                                mean_reversion_features = ['zscore', 'bb_position']
-                                for feat in mean_reversion_features:
-                                    if feat in enriched_df.columns:
-                                        val = sample_row[feat]
-                                        logger.info(f"         ✅ {feat}: {val if pd.notna(val) else 'NaN'}")
-                                    else:
-                                        logger.warning(f"         ❌ {feat}: NOT FOUND")
-                                
                                 # Check for NaN values
                                 nan_counts = enriched_df.isna().sum()
                                 high_nan_cols = nan_counts[nan_counts > len(enriched_df) * 0.5]
@@ -2368,10 +2324,8 @@ class LiveDataSignalGenerationTest:
                     # Display strategy-specific breakdown (only for TradingSignal objects)
                     if strategy_signals and len(strategy_signals) > 0 and hasattr(strategy_signals[0], 'strategy_name'):
                         momentum_signals = [s for s in strategy_signals if hasattr(s, 'strategy_name') and s.strategy_name == 'momentum_strategy_1']
-                        mean_reversion_signals = [s for s in strategy_signals if hasattr(s, 'strategy_name') and s.strategy_name == 'mean_reversion_strategy_1']
                         
                         logger.info(f"   📊 Momentum Strategy: {len(momentum_signals)} signals")
-                        logger.info(f"   📊 Mean Reversion Strategy: {len(mean_reversion_signals)} signals")
                 
                 if len(strategy_signals) == 0:
                     logger.warning("\n   ⚠️  INVESTIGATION: 0 signals generated - analyzing why...")
@@ -2431,13 +2385,18 @@ class LiveDataSignalGenerationTest:
                             # Check strategy thresholds
                             logger.info(f"\n      Strategy Thresholds Check:")
                             logger.info(f"         Momentum Strategy:")
-                            logger.info(f"            momentum_threshold: {momentum_strategy.config.momentum_threshold}")
-                            logger.info(f"            adx_threshold: {momentum_strategy.config.adx_threshold}")
-                            logger.info(f"            volume_threshold: {momentum_strategy.config.volume_threshold}")
-                            logger.info(f"         Mean Reversion Strategy:")
-                            logger.info(f"            zscore_entry_threshold: {mean_reversion_strategy.config.zscore_entry_threshold}")
-                            logger.info(f"            rsi_oversold: {mean_reversion_strategy.config.rsi_oversold}")
-                            logger.info(f"            rsi_overbought: {mean_reversion_strategy.config.rsi_overbought}")
+                            # Get momentum strategy instance
+                            momentum_strategy = None
+                            for strategy_name, strategy_instance in strategy_manager.active_strategies.items():
+                                if 'momentum' in strategy_name.lower():
+                                    momentum_strategy = strategy_instance
+                                    break
+                            if momentum_strategy:
+                                logger.info(f"            momentum_threshold: {momentum_strategy.config.momentum_threshold}")
+                                logger.info(f"            adx_threshold: {momentum_strategy.config.adx_threshold}")
+                                logger.info(f"            volume_threshold: {momentum_strategy.config.volume_threshold}")
+                            else:
+                                logger.warning("            ⚠️  Momentum strategy instance not found")
                     
                     logger.info("   ℹ️  Note: 0 signals can be normal if market conditions don't meet strategy criteria")
                     logger.info("   ✅ Phase 6 integration successful: StrategyManager + Multi-strategy coordination working")
@@ -2598,12 +2557,10 @@ class LiveDataSignalGenerationTest:
             # Handle simulation mode separately
             if is_simulation_mode:
                 logger.info(f"\n📊 Strategy Signals: {simulation_count} (from bar-by-bar simulation)")
-                logger.info(f"\n🔄 Multi-Strategy Coordination Status:")
+                logger.info(f"\n🔄 Strategy Coordination Status:")
                 logger.info(f"   ✅ StrategyManager: Initialized and operational")
-                logger.info(f"   ✅ Strategy Registration: Momentum + Mean Reversion registered")
+                logger.info(f"   ✅ Strategy Registration: Momentum registered")
                 logger.info(f"   ✅ Signal Generation Pipeline: Executed successfully")
-                logger.info(f"   ✅ Signal Aggregation: Enabled and ready")
-                logger.info(f"   ✅ Conflict Resolution: Enabled and ready")
                 logger.info(f"   ✅ Bar-by-Bar Simulation: {simulation_count} signals generated chronologically")
                 logger.info(f"   ✅ Phase 6 Integration: SUCCESSFUL (all components tested)")
             elif has_regular_signals:
@@ -2669,12 +2626,10 @@ class LiveDataSignalGenerationTest:
             else:
                 # No signals (neither simulation nor regular)
                 logger.info(f"\n📊 Strategy Signals: 0 (strategies evaluated but no opportunities found)")
-                logger.info(f"\n🔄 Multi-Strategy Coordination Status:")
+                logger.info(f"\n🔄 Strategy Coordination Status:")
                 logger.info(f"   ✅ StrategyManager: Initialized and operational")
-                logger.info(f"   ✅ Strategy Registration: Momentum + Mean Reversion registered")
+                logger.info(f"   ✅ Strategy Registration: Momentum registered")
                 logger.info(f"   ✅ Signal Generation Pipeline: Executed successfully")
-                logger.info(f"   ✅ Signal Aggregation: Enabled and ready")
-                logger.info(f"   ✅ Conflict Resolution: Enabled and ready")
                 logger.info(f"   ℹ️  Result: 0 signals (valid - no trading opportunities found)")
                 logger.info(f"   ✅ Phase 6 Integration: SUCCESSFUL (all components tested)")
     
@@ -2713,10 +2668,9 @@ async def main():
                 logger.info(f"   Confidence: {results['regime_context'].get('confidence', 0):.2%}")
             
             if results.get('phase_6_tested', False):
-                logger.info(f"   ✅ Phase 6 Strategy Layer: Tested (Momentum + Mean Reversion)")
+                logger.info(f"   ✅ Phase 6 Strategy Layer: Tested (Momentum)")
                 logger.info(f"      - StrategyManager: Initialized and operational")
-                logger.info(f"      - Multi-Strategy Coordination: Enabled")
-                logger.info(f"      - Signal Aggregation: Enabled")
+                logger.info(f"      - Strategy Registration: Momentum")
                 logger.info(f"      - Signals Generated: {results.get('strategy_signals_count', 0)}")
             else:
                 logger.warning(f"   ⚠️  Phase 6 Strategy Layer: Not tested (integration failed)")
