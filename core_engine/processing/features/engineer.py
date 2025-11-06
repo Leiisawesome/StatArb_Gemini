@@ -694,6 +694,21 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """Create volatility-based features"""
         # Bollinger Band features
         if 'bb_position' in df.columns:
+            # Calculate zscore from Bollinger Bands (for mean reversion strategies)
+            # zscore = (close - BB_middle) / (BB_width / 2)
+            # This can also be derived from bb_position: zscore = (bb_position - 0.5) * 2
+            if 'bb_width' in df.columns and 'bb_middle' in df.columns:
+                # Calculate zscore: (close - middle) / (width / 2)
+                # Avoid division by zero
+                bb_half_width = df['bb_width'] * df['bb_middle'] / 2.0
+                mask = bb_half_width > 0.001
+                df['zscore'] = 0.0
+                df.loc[mask, 'zscore'] = (df.loc[mask, 'close'] - df.loc[mask, 'bb_middle']) / (df.loc[mask, 'bb_width'] * df.loc[mask, 'bb_middle'] / 2.0)
+                # Alternative: derive from bb_position (normalized 0-1 to -2 to +2)
+                # df['zscore'] = (df['bb_position'] - 0.5) * 2
+            else:
+                # Fallback: derive from bb_position if BB components not available
+                df['zscore'] = (df['bb_position'] - 0.5) * 2
             df['bb_squeeze'] = (df['bb_width'] < df['bb_width'].rolling(20).quantile(0.2)).astype(int)
             df['bb_breakout_up'] = ((df['close'] > df['bb_upper']) & 
                                    (df['close'].shift(1) <= df['bb_upper'].shift(1))).astype(int)

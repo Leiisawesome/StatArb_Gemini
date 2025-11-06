@@ -33,7 +33,7 @@ Version: 1.0.0 (Phase 2.3 Enhancement)
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
@@ -237,6 +237,52 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # ABSTRACT METHOD IMPLEMENTATIONS
     # ========================================
     
+    def _get_column_mapping(self) -> Dict[str, str]:
+        """
+        Get mapping from expected column names to actual column names in enriched DataFrame
+        
+        Returns:
+            Dict mapping expected names to actual names
+        """
+        return {
+            # Moving averages
+            'SMA_20': 'sma_20',  # Actual from indicator engine
+            # Momentum indicators
+            'RSI_14': 'rsi',     # Actual from indicator engine
+            'ATR_14': 'atr',     # Actual from indicator engine
+            # Bollinger Bands (same names)
+            'bb_upper': 'bb_upper',
+            'bb_lower': 'bb_lower',
+            'bb_middle': 'bb_middle',
+            # Volume (same name)
+            'volume_ratio': 'volume_ratio'
+        }
+    
+    def _get_column_name(self, expected_name: str, data: pd.DataFrame) -> str:
+        """
+        Get actual column name from DataFrame, checking both expected and mapped names
+        
+        Args:
+            expected_name: Expected column name (e.g., 'RSI_14')
+            data: DataFrame to search in
+            
+        Returns:
+            Actual column name if found, otherwise expected_name
+        """
+        # First check if expected name exists (backward compatibility)
+        if expected_name in data.columns:
+            return expected_name
+        
+        # Check mapped name
+        mapping = self._get_column_mapping()
+        if expected_name in mapping:
+            mapped_name = mapping[expected_name]
+            if mapped_name in data.columns:
+                return mapped_name
+        
+        # Return expected name (will cause error in validation if not found)
+        return expected_name
+    
     def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
         """
         Validate that data is enriched with required indicators (Rule 3 Phase 4)
@@ -244,33 +290,50 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         This method ensures the data has passed through the ProcessingPipelineOrchestrator
         and contains all indicators required by the mean reversion strategy.
         
+        Uses flexible column name mapping to handle both expected and actual column names.
+        
         Args:
             enriched_data: Dict[symbol, enriched DataFrame]
         
         Raises:
             ValueError: If data is missing required indicators
         """
-        required_indicators = [
-            'SMA_20',           # Moving average (Bollinger Band middle)
-            'RSI_14',           # RSI for overbought/oversold
-            'bb_upper',         # Bollinger Band upper
-            'bb_lower',         # Bollinger Band lower
-            'bb_middle',        # Bollinger Band middle
-            'ATR_14',           # Average True Range
-            'volume_ratio'      # Volume indicator
-        ]
+        # Required indicators with flexible naming
+        required_indicators = {
+            'SMA_20': ['sma_20', 'SMA_20'],       # Required
+            'RSI_14': ['rsi', 'RSI_14'],         # Required
+            'bb_upper': ['bb_upper'],            # Required
+            'bb_lower': ['bb_lower'],            # Required
+            'bb_middle': ['bb_middle'],          # Required
+            'ATR_14': ['atr', 'ATR_14'],         # Required
+            'volume_ratio': ['volume_ratio']     # Required
+        }
         
         for symbol, data in enriched_data.items():
             if data.empty:
                 raise ValueError(f"{symbol} has empty DataFrame")
             
-            missing = [col for col in required_indicators if col not in data.columns]
+            missing = []
+            for expected_name, possible_names in required_indicators.items():
+                # Check if any of the possible names exist
+                found = any(name in data.columns for name in possible_names)
+                if not found:
+                    missing.append(expected_name)
+            
             if missing:
-                available_cols = list(data.columns[:20])
+                available_cols = list(data.columns[:30])  # Show first 30 columns
+                # Find similar column names
+                similar = {}
+                for missing_col in missing:
+                    mapping = self._get_column_mapping()
+                    if missing_col in mapping:
+                        similar[missing_col] = mapping[missing_col]
+                
                 raise ValueError(
                     f"{symbol} missing required indicators: {missing}. "
+                    f"Expected mappings: {similar}. "
                     f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
-                    f"Available columns: {available_cols}"
+                    f"Available columns: {available_cols[:20]}..."
                 )
             
             logger.debug(f"✅ {symbol} enriched data validated: {len(required_indicators)} indicators present")
@@ -383,6 +446,183 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # SIGNAL GENERATION METHODS
     # ========================================
     
+    def _get_regime_adjusted_thresholds(self, symbol: str) -> Dict[str, float]:
+        """
+        Get regime-adjusted thresholds based on current market regime
+        
+        Args:
+            symbol: Symbol to get regime-adjusted thresholds for
+            
+        Returns:
+            Dict with adjusted threshold values
+        """
+        # Get base thresholds
+        base_thresholds = {
+            'zscore_entry_threshold': self.config.zscore_entry_threshold,
+            'rsi_oversold': self.config.rsi_oversold,
+            'rsi_overbought': self.config.rsi_overbought
+        }
+        
+        # If regime adjustment is disabled, return base thresholds
+        if not self.config.enable_regime_adjusted_thresholds:
+            return base_thresholds
+        
+        # Get current regime context
+        regime_context = self.get_current_regime_context()
+        if not regime_context:
+            return base_thresholds
+        
+        # Determine if regime is unfavorable for mean reversion
+        # Unfavorable: extreme_volatility, crisis, trending markets
+        # Favorable: range_bound, choppy, normal_volatility
+        regime_name = getattr(regime_context, 'primary_regime', None)
+        volatility_regime = getattr(regime_context, 'volatility_regime', None)
+        
+        unfavorable_regimes = ['extreme_volatility', 'crisis', 'trending']
+        
+        is_unfavorable = (
+            (regime_name and any(unfavorable in str(regime_name).lower() for unfavorable in unfavorable_regimes)) or
+            (volatility_regime and 'extreme' in str(volatility_regime).lower())
+        )
+        
+        # Apply adjustment factor if unfavorable (reduce thresholds for easier entry)
+        if is_unfavorable:
+            adjustment = self.config.regime_adjustment_factor
+            adjusted_thresholds = {
+                'zscore_entry_threshold': base_thresholds['zscore_entry_threshold'] * adjustment,
+                'rsi_oversold': base_thresholds['rsi_oversold'] * (1 + (1 - adjustment)),  # Increase oversold threshold
+                'rsi_overbought': base_thresholds['rsi_overbought'] * adjustment  # Decrease overbought threshold
+            }
+            
+            logger.debug(f"[{symbol}] Regime-adjusted thresholds applied: {adjustment:.2f}x "
+                        f"(Z-score: {base_thresholds['zscore_entry_threshold']:.2f} -> {adjusted_thresholds['zscore_entry_threshold']:.2f})")
+            
+            return adjusted_thresholds
+        
+        return base_thresholds
+    
+    async def _evaluate_bar_at_index(self, symbol: str, idx: int) -> Optional[StrategySignal]:
+        """
+        Evaluate a specific bar at index and generate signal if conditions are met
+        
+        Args:
+            symbol: Symbol to evaluate
+            idx: Index of the bar to evaluate (use -1 for current bar)
+            
+        Returns:
+            StrategySignal if conditions met, None otherwise
+        """
+        try:
+            # Get data at index
+            data = self.market_data[symbol]
+            if idx < 0:
+                idx = len(data) + idx  # Convert negative index
+            
+            if idx < self.config.lookback_period or idx >= len(data):
+                return None
+            
+            current_row = data.iloc[idx]
+            
+            # READ pre-calculated indicators from enriched DataFrame with forward-fill for NaN handling
+            # CRITICAL: When processing rolling windows chronologically, bars might have NaN
+            # if they're at the edge of the lookback period. Use forward-fill to get last valid value.
+            if 'zscore' in data.columns:
+                zscore_series = data['zscore'].ffill()
+                zscore = zscore_series.iloc[idx] if idx < len(zscore_series) and not pd.isna(zscore_series.iloc[idx]) else (zscore_series.dropna().iloc[-1] if len(zscore_series.dropna()) > 0 else 0.0)
+            else:
+                zscore = current_row.get('zscore', 0.0)
+            
+            rsi_col = self._get_column_name('RSI_14', data)
+            if rsi_col in data.columns:
+                rsi_series = data[rsi_col].ffill()
+                rsi = rsi_series.iloc[idx] if idx < len(rsi_series) and not pd.isna(rsi_series.iloc[idx]) else (rsi_series.dropna().iloc[-1] if len(rsi_series.dropna()) > 0 else 50.0)
+            else:
+                rsi = current_row.get(rsi_col, current_row.get('rsi', 50.0))
+            
+            if 'bb_position' in data.columns:
+                bb_position_series = data['bb_position'].ffill()
+                bb_position = bb_position_series.iloc[idx] if idx < len(bb_position_series) and not pd.isna(bb_position_series.iloc[idx]) else (bb_position_series.dropna().iloc[-1] if len(bb_position_series.dropna()) > 0 else 0.5)
+            else:
+                bb_position = current_row.get('bb_position', 0.5)
+            
+            # Handle any remaining NaN values (fallback)
+            zscore = zscore if not pd.isna(zscore) else 0.0
+            rsi = rsi if not pd.isna(rsi) else 50.0
+            bb_position = bb_position if not pd.isna(bb_position) else 0.5
+            
+            # Get regime-adjusted thresholds
+            thresholds = self._get_regime_adjusted_thresholds(symbol)
+            zscore_threshold = thresholds['zscore_entry_threshold']
+            rsi_oversold = thresholds['rsi_oversold']
+            rsi_overbought = thresholds['rsi_overbought']
+            
+            # Apply regime filter
+            if self.config.enable_regime_filter:
+                if not self._is_regime_favorable(symbol):
+                    return None
+            
+            # Check for oversold condition (BUY signal)
+            if (zscore < -zscore_threshold and 
+                rsi < rsi_oversold and 
+                bb_position < 0.2):
+                
+                confidence = self._calculate_signal_confidence(symbol, MeanReversionSignal.OVERSOLD_BUY)
+                
+                if confidence > 0.6:
+                    signal = StrategySignal(
+                        strategy_id=self.strategy_id,
+                        symbol=symbol,
+                        signal_type=SignalType.BUY,
+                        strength=min(abs(zscore) / zscore_threshold, 1.0),
+                        confidence=confidence,
+                        target_weight=self.config.base_position_pct,  # Use target_weight for percentage
+                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
+                        timestamp=current_row.get('timestamp', datetime.now()) if isinstance(current_row, pd.Series) else datetime.now(),
+                        additional_data={
+                            'signal_reason': 'oversold_mean_reversion',
+                            'zscore': zscore,
+                            'rsi': rsi,
+                            'bb_position': bb_position,
+                            'entry_price': current_row['close'] if isinstance(current_row, pd.Series) else current_row.get('close', 0),
+                            'bar_index': idx
+                        }
+                    )
+                    return signal
+            
+            # Check for overbought condition (SELL signal)
+            elif (zscore > zscore_threshold and 
+                  rsi > rsi_overbought and 
+                  bb_position > 0.8):
+                
+                confidence = self._calculate_signal_confidence(symbol, MeanReversionSignal.OVERBOUGHT_SELL)
+                
+                if confidence > 0.6:
+                    signal = StrategySignal(
+                        strategy_id=self.strategy_id,
+                        symbol=symbol,
+                        signal_type=SignalType.SELL,
+                        strength=min(abs(zscore) / zscore_threshold, 1.0),
+                        confidence=confidence,
+                        target_weight=self.config.base_position_pct,  # Use target_weight for percentage
+                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
+                        timestamp=current_row.get('timestamp', datetime.now()) if isinstance(current_row, pd.Series) else datetime.now(),
+                        additional_data={
+                            'signal_reason': 'overbought_mean_reversion',
+                            'zscore': zscore,
+                            'rsi': rsi,
+                            'bb_position': bb_position,
+                            'entry_price': current_row['close'] if isinstance(current_row, pd.Series) else current_row.get('close', 0),
+                            'bar_index': idx
+                        }
+                    )
+                    return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"[{symbol}] Error evaluating bar at index {idx}: {e}")
+            return None
+    
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
         """
         Generate signals for a specific symbol using PRE-CALCULATED indicators (Rule 3 Phase 4)
@@ -402,12 +642,67 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return signals
             
             data = self.market_data[symbol]
+            data_length = len(data)
+            
+            # Check if we should scan all bars (historical mode) or just current bar (live mode)
+            if self.config.scan_all_bars and data_length > self.config.lookback_period:
+                # Historical scanning mode: scan through all bars
+                logger.info(f"[{symbol}] 📊 Historical scanning mode: scanning {data_length} bars "
+                           f"(evaluating every {self.config.scan_interval} bars)")
+                
+                start_idx = self.config.lookback_period
+                end_idx = data_length
+                scan_interval = max(1, self.config.scan_interval)
+                
+                bars_evaluated = 0
+                for idx in range(start_idx, end_idx, scan_interval):
+                    signal = await self._evaluate_bar_at_index(symbol, idx)
+                    if signal:
+                        signals.append(signal)
+                    bars_evaluated += 1
+                
+                logger.info(f"[{symbol}] 📊 Historical scan complete: {bars_evaluated} bars evaluated, "
+                           f"{len(signals)} signals generated")
+                return signals
+            
+            # Live mode: Evaluate only current bar (default behavior)
+            logger.debug(f"[{symbol}] Live mode: evaluating current bar only")
+            
             current_row = data.iloc[-1]
             
-            # READ pre-calculated indicators from enriched DataFrame
-            zscore = current_row.get('zscore', 0.0)
-            rsi = current_row.get('RSI_14', 50.0)
-            bb_position = current_row.get('bb_position', 0.5)
+            # READ pre-calculated indicators from enriched DataFrame with forward-fill for NaN handling
+            # CRITICAL: When processing rolling windows chronologically, the last bar might have NaN
+            # if it's at the edge of the lookback period. Use forward-fill to get last valid value.
+            if 'zscore' in data.columns:
+                zscore_series = data['zscore'].ffill()
+                zscore = zscore_series.iloc[-1] if not pd.isna(zscore_series.iloc[-1]) else (zscore_series.dropna().iloc[-1] if len(zscore_series.dropna()) > 0 else 0.0)
+            else:
+                zscore = current_row.get('zscore', 0.0)
+            
+            # Use column mapping to get RSI value
+            rsi_col = self._get_column_name('RSI_14', data)
+            if rsi_col in data.columns:
+                rsi_series = data[rsi_col].ffill()
+                rsi = rsi_series.iloc[-1] if not pd.isna(rsi_series.iloc[-1]) else (rsi_series.dropna().iloc[-1] if len(rsi_series.dropna()) > 0 else 50.0)
+            else:
+                rsi = current_row.get(rsi_col, current_row.get('rsi', 50.0))
+            
+            if 'bb_position' in data.columns:
+                bb_position_series = data['bb_position'].ffill()
+                bb_position = bb_position_series.iloc[-1] if not pd.isna(bb_position_series.iloc[-1]) else (bb_position_series.dropna().iloc[-1] if len(bb_position_series.dropna()) > 0 else 0.5)
+            else:
+                bb_position = current_row.get('bb_position', 0.5)
+            
+            # Handle any remaining NaN values (fallback)
+            zscore = zscore if not pd.isna(zscore) else 0.0
+            rsi = rsi if not pd.isna(rsi) else 50.0
+            bb_position = bb_position if not pd.isna(bb_position) else 0.5
+            
+            # Get regime-adjusted thresholds
+            thresholds = self._get_regime_adjusted_thresholds(symbol)
+            zscore_threshold = thresholds['zscore_entry_threshold']
+            rsi_oversold = thresholds['rsi_oversold']
+            rsi_overbought = thresholds['rsi_overbought']
             
             # Apply regime filter
             if self.config.enable_regime_filter:
@@ -415,8 +710,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     return signals
             
             # Check for oversold condition (BUY signal)
-            if (zscore < -self.config.zscore_entry_threshold and 
-                rsi < self.config.rsi_oversold and 
+            if (zscore < -zscore_threshold and 
+                rsi < rsi_oversold and 
                 bb_position < 0.2):  # Below lower Bollinger Band
                 
                 confidence = self._calculate_signal_confidence(symbol, MeanReversionSignal.OVERSOLD_BUY)
@@ -426,9 +721,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         strategy_id=self.strategy_id,
                         symbol=symbol,
                         signal_type=SignalType.BUY,
-                        strength=min(abs(zscore) / self.config.zscore_entry_threshold, 1.0),
+                        strength=min(abs(zscore) / zscore_threshold, 1.0),
                         confidence=confidence,
-                        target_quantity=self.config.base_position_pct,
+                        target_weight=self.config.base_position_pct,  # Use target_weight for percentage
+                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
                         timestamp=datetime.now(),
                         additional_data={
                             'signal_reason': 'oversold_mean_reversion',
@@ -444,8 +740,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     self._track_position_entry(symbol, signal)
             
             # Check for overbought condition (SELL signal)
-            elif (zscore > self.config.zscore_entry_threshold and 
-                  rsi > self.config.rsi_overbought and 
+            elif (zscore > zscore_threshold and 
+                  rsi > rsi_overbought and 
                   bb_position > 0.8):  # Above upper Bollinger Band
                 
                 confidence = self._calculate_signal_confidence(symbol, MeanReversionSignal.OVERBOUGHT_SELL)
@@ -455,9 +751,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         strategy_id=self.strategy_id,
                         symbol=symbol,
                         signal_type=SignalType.SELL,
-                        strength=min(abs(zscore) / self.config.zscore_entry_threshold, 1.0),
+                        strength=min(abs(zscore) / zscore_threshold, 1.0),
                         confidence=confidence,
-                        target_quantity=self.config.base_position_pct,
+                        target_weight=self.config.base_position_pct,  # Use target_weight for percentage
+                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
                         timestamp=datetime.now(),
                         additional_data={
                             'signal_reason': 'overbought_mean_reversion',
@@ -618,8 +915,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             zscore = current_row.get('zscore', 0.0)
             zscore_confidence = min(abs(zscore) / (self.config.zscore_entry_threshold * 1.5), 1.0)
             
-            # RSI confirmation
-            rsi = current_row.get('RSI_14', 50.0)
+            # RSI confirmation (use column mapping)
+            rsi_col = self._get_column_name('RSI_14', data)
+            rsi = current_row.get(rsi_col, current_row.get('rsi', 50.0))
             if signal_type == MeanReversionSignal.OVERSOLD_BUY:
                 rsi_confidence = max(0, (50 - rsi) / 20)  # Higher confidence for lower RSI
             else:  # OVERBOUGHT_SELL

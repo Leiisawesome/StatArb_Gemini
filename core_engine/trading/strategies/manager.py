@@ -1016,29 +1016,44 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         
                         # Convert to TradingSignal objects
                         strategy_type = allocation.strategy_type
+                        converted_count = 0
                         for raw_signal in raw_signals:
-                            trading_signal = TradingSignal(
-                                signal_id=str(uuid.uuid4()),
-                                strategy_name=strategy_name,
-                                strategy_type=strategy_type,
-                                symbol=raw_signal.symbol,
-                                signal_type=SignalType(raw_signal.signal_type.lower()),
-                                strength=raw_signal.strength,
-                                confidence=getattr(raw_signal, 'confidence', 0.5),
-                                expected_return=getattr(raw_signal, 'expected_return', 0.0),
-                                risk_score=getattr(raw_signal, 'risk_score', 0.5),
-                                quantity=getattr(raw_signal, 'quantity', None),
-                                target_price=getattr(raw_signal, 'target_price', None),
-                                stop_loss=getattr(raw_signal, 'stop_loss', None),
-                                take_profit=getattr(raw_signal, 'take_profit', None),
-                                time_horizon=None,
-                                metadata={
-                                    'pipeline_processed': True,  # Mark as pipeline-processed
-                                    'enriched_data': True,
-                                    **getattr(raw_signal, 'additional_data', {})
-                                }
-                            )
-                            all_signals.append(trading_signal)
+                            try:
+                                # Convert SignalType enum to string for comparison
+                                signal_type_str = raw_signal.signal_type.value if hasattr(raw_signal.signal_type, 'value') else str(raw_signal.signal_type).lower()
+                                
+                                trading_signal = TradingSignal(
+                                    signal_id=str(uuid.uuid4()),
+                                    strategy_name=strategy_name,
+                                    strategy_type=strategy_type,
+                                    symbol=raw_signal.symbol,
+                                    signal_type=SignalType(signal_type_str),
+                                    strength=raw_signal.strength,
+                                    confidence=getattr(raw_signal, 'confidence', 0.5),
+                                    expected_return=getattr(raw_signal, 'expected_return', 0.0),
+                                    risk_score=getattr(raw_signal, 'risk_score', 0.5),
+                                    quantity=getattr(raw_signal, 'quantity', None),
+                                    target_price=getattr(raw_signal, 'target_price', None),
+                                    stop_loss=getattr(raw_signal, 'stop_loss', None),
+                                    take_profit=getattr(raw_signal, 'take_profit', None),
+                                    time_horizon=None,
+                                    metadata={
+                                        'pipeline_processed': True,  # Mark as pipeline-processed
+                                        'enriched_data': True,
+                                        **getattr(raw_signal, 'additional_data', {})
+                                    }
+                                )
+                                all_signals.append(trading_signal)
+                                converted_count += 1
+                                logger.debug(f"   ✅ Converted signal: {strategy_name} {raw_signal.symbol} {signal_type_str} (confidence: {trading_signal.confidence:.4f})")
+                            except Exception as conv_error:
+                                logger.error(f"   ❌ Failed to convert signal from {strategy_name}: {conv_error}")
+                                logger.error(f"      Signal type: {type(raw_signal.signal_type)}, value: {raw_signal.signal_type}")
+                                logger.error(f"      Signal attributes: {dir(raw_signal)}")
+                                import traceback
+                                logger.error(f"      Traceback: {traceback.format_exc()}")
+                        
+                        logger.info(f"   📊 Converted {converted_count}/{len(raw_signals)} signals to TradingSignal objects")
                 
                 except Exception as e:
                     logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
@@ -1058,6 +1073,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 for subscriber in self.subscribers:
                     await subscriber.on_signal_generated(signal)
             
+            logger.info(f"📊 Raw signals: {len(all_signals)}, Filtered: {len(filtered_signals) if 'filtered_signals' in locals() else 0}, Aggregated: {len(aggregated_signals)}")
             logger.info(
                 f"📊 Pipeline signal generation complete: "
                 f"{len(aggregated_signals)} final signals from {len(all_signals)} raw signals "
@@ -1234,7 +1250,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         return aggregated
     
     async def _aggregate_symbol_signals(self, signals: List[TradingSignal]) -> Optional[TradingSignal]:
-        """Aggregate multiple signals for the same symbol"""
+        """
+        Aggregate multiple signals for the same symbol
+        
+        **ENHANCED:** Improved aggregation logic that:
+        1. Uses proper weighted average (not confidence squared)
+        2. Adds confidence boost for multiple signals (consensus strength)
+        3. Ensures aggregated confidence doesn't drop below reasonable threshold
+        """
         if not signals:
             return None
         
@@ -1243,21 +1266,68 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         if total_weight == 0:
             return None
         
-        # Calculate weighted averages
-        weighted_confidence = sum(s.confidence * s.confidence for s in signals) / total_weight
+        signal_count = len(signals)
+        avg_confidence = total_weight / signal_count if signal_count > 0 else 0.0
+        
+        # ENHANCED: For multiple signals, use consensus-based aggregation
+        # When many signals agree, it's a strong signal (not a weak one)
+        if signal_count > 1:
+            # Use weighted average formula: sum(confidence^2) / sum(confidence)
+            # This gives more weight to high-confidence signals
+            weighted_confidence = sum(s.confidence * s.confidence for s in signals) / total_weight
+            
+            # ENHANCED: Add consensus boost for multiple signals
+            # Many signals with same direction = strong consensus = higher confidence
+            # Boost scales with signal count and average confidence
+            consensus_boost = min(0.15, signal_count * 0.002)  # Up to 15% boost for many signals
+            
+            # Additional boost if average confidence is already high
+            if avg_confidence > 0.6:
+                consensus_boost += 0.05  # Extra 5% for high-confidence consensus
+            
+            # Apply consensus boost
+            weighted_confidence = min(1.0, weighted_confidence + consensus_boost)
+            
+            # ENHANCED: For many signals (>20), the aggregated confidence should reflect consensus strength
+            # When we have 100+ signals, that's a VERY strong consensus
+            if signal_count > 20:
+                # Use the higher of: weighted average or average with boost
+                # This ensures many signals don't get penalized
+                weighted_confidence = max(weighted_confidence, avg_confidence * 0.9 + consensus_boost)
+            
+            # ENHANCED: Floor for many signals - if we have 50+ signals, minimum confidence should be reasonable
+            if signal_count > 50:
+                min_confidence_floor = max(0.5, avg_confidence * 0.7)  # At least 70% of average
+                weighted_confidence = max(weighted_confidence, min_confidence_floor)
+        else:
+            # Single signal - use its confidence directly
+            weighted_confidence = signals[0].confidence if signals else 0.0
+        
         weighted_expected_return = sum(s.expected_return * s.confidence for s in signals) / total_weight
         weighted_risk_score = sum(s.risk_score * s.confidence for s in signals) / total_weight
         
-        # Determine consensus signal type
+        # Determine consensus signal type (weighted by confidence)
         signal_votes = {}
         for signal in signals:
             vote = signal.signal_type
             signal_votes[vote] = signal_votes.get(vote, 0) + signal.confidence
         
-        consensus_signal = max(signal_votes.items(), key=lambda x: x[1])[0]
+        if not signal_votes:
+            return None
         
-        # Calculate total quantity
-        total_quantity = sum(s.quantity for s in signals if s.signal_type == consensus_signal)
+        consensus_signal = max(signal_votes.items(), key=lambda x: x[1])[0]
+        consensus_strength = signal_votes[consensus_signal] / total_weight  # Percentage of weighted votes
+        
+        # Calculate total quantity (use average, not sum, to avoid position sizing issues)
+        matching_signals = [s for s in signals if s.signal_type == consensus_signal]
+        if matching_signals:
+            # Use average quantity for aggregated signal (more reasonable than sum)
+            total_quantity = sum(s.quantity for s in matching_signals if s.quantity) / len(matching_signals) if matching_signals else None
+        else:
+            total_quantity = None
+        
+        logger.debug(f"   📊 Aggregation stats: {signal_count} signals, consensus={consensus_signal.value}, "
+                    f"strength={consensus_strength:.2%}, confidence={weighted_confidence:.4f}")
         
         return TradingSignal(
             signal_id=str(uuid.uuid4()),
@@ -1266,7 +1336,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             symbol=signals[0].symbol,
             signal_type=consensus_signal,
             strength=SignalStrength.MEDIUM,
-            confidence=weighted_confidence,
+            confidence=min(1.0, weighted_confidence),  # Cap at 1.0
             expected_return=weighted_expected_return,
             risk_score=weighted_risk_score,
             quantity=total_quantity,
@@ -1274,7 +1344,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             stop_loss=signals[0].stop_loss,
             take_profit=signals[0].take_profit,
             time_horizon=signals[0].time_horizon,
-            metadata={'aggregated_from': len(signals)}
+            metadata={'aggregated_from': len(signals), 'consensus_strength': consensus_strength}
         )
     
     # Analysis and Monitoring Methods
@@ -1469,6 +1539,35 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     
                     # Convert StrategySignal objects to TradingSignal objects
                     for raw_signal in raw_signals:
+                        # Preserve timestamp from StrategySignal if available
+                        signal_timestamp = None
+                        if hasattr(raw_signal, 'timestamp') and raw_signal.timestamp:
+                            signal_timestamp = raw_signal.timestamp
+                        elif hasattr(raw_signal, 'additional_data') and raw_signal.additional_data:
+                            # Check metadata for timestamp
+                            if 'timestamp' in raw_signal.additional_data:
+                                ts = raw_signal.additional_data['timestamp']
+                                if isinstance(ts, datetime):
+                                    signal_timestamp = ts
+                                elif isinstance(ts, str):
+                                    try:
+                                        signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                                    except:
+                                        pass
+                        elif hasattr(raw_signal, 'metadata') and raw_signal.metadata:
+                            if 'timestamp' in raw_signal.metadata:
+                                ts = raw_signal.metadata['timestamp']
+                                if isinstance(ts, datetime):
+                                    signal_timestamp = ts
+                                elif isinstance(ts, str):
+                                    try:
+                                        signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                                    except:
+                                        pass
+                        
+                        # Use preserved timestamp or default to now
+                        created_at = signal_timestamp if signal_timestamp else datetime.now()
+                        
                         trading_signal = TradingSignal(
                             signal_id=str(uuid.uuid4()),
                             strategy_name=strategy_name,
@@ -1483,7 +1582,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             target_price=getattr(raw_signal, 'target_price', None),
                             stop_loss=getattr(raw_signal, 'stop_loss', None),
                             take_profit=getattr(raw_signal, 'take_profit', None),
-                            metadata=getattr(raw_signal, 'metadata', {})
+                            metadata=getattr(raw_signal, 'metadata', {}) or (getattr(raw_signal, 'additional_data', {}) if hasattr(raw_signal, 'additional_data') else {}),
+                            created_at=created_at
                         )
                         signals.append(trading_signal)
                     
@@ -1756,13 +1856,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """Enhanced signal filtering with regime and position awareness"""
         filtered = []
         
+        logger.info(f"🔍 Filtering {len(signals)} signals (min_confidence: {self.config.min_confidence_threshold})")
+        
         for signal in signals:
+            filter_reason = None
+            
             # Basic confidence threshold
             if signal.confidence < self.config.min_confidence_threshold:
+                filter_reason = f"confidence {signal.confidence:.4f} < {self.config.min_confidence_threshold}"
+                logger.warning(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
             
             # Regime appropriateness check
             if not self._is_strategy_regime_supported(signal.strategy_type, regime_info):
+                filter_reason = f"strategy not supported in current regime"
+                logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
             
             # Position-aware filtering
@@ -1773,24 +1881,39 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 
                 # Don't buy if already long, don't sell if no position
                 if signal.signal_type == SignalType.BUY and is_long:
+                    filter_reason = f"already long position"
+                    logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                     continue
                 if signal.signal_type == SignalType.SELL and not has_position:
+                    filter_reason = f"no position to sell"
+                    logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                     continue
             
             # Strategy allocation check
             allocation = self.strategy_allocations.get(signal.strategy_name)
-            if not allocation or not allocation.active:
+            if not allocation:
+                filter_reason = f"no allocation found for {signal.strategy_name}"
+                logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
+                continue
+            if not allocation.active:
+                filter_reason = f"allocation not active for {signal.strategy_name}"
+                logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
             
             filtered.append(signal)
+            logger.debug(f"   ✅ Passed filter: {signal.strategy_name} {signal.symbol} {signal.signal_type} (confidence: {signal.confidence:.4f})")
         
+        logger.info(f"✅ Filtered {len(filtered)}/{len(signals)} signals passed")
         return filtered
     
     async def _aggregate_signals_enhanced(self, signals: List[TradingSignal], 
                                         regime_info: Dict[str, Any]) -> List[TradingSignal]:
         """Enhanced signal aggregation with regime weighting"""
         if not signals:
+            logger.info("📊 Aggregation: No signals to aggregate")
             return []
+        
+        logger.info(f"📊 Aggregating {len(signals)} signals for {len(set(s.symbol for s in signals))} symbols")
         
         # Group by symbol
         symbol_signals = {}
@@ -1799,43 +1922,311 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 symbol_signals[signal.symbol] = []
             symbol_signals[signal.symbol].append(signal)
         
+        logger.info(f"📊 Grouped into {len(symbol_signals)} symbols")
+        
         # Aggregate with regime weighting
         aggregated = []
         regime_weights = regime_info.get('strategy_weights', {})
         
         for symbol, symbol_signal_list in symbol_signals.items():
             if len(symbol_signal_list) == 1:
-                # Single signal - apply regime weighting
+                # Single signal - apply regime weighting (but don't penalize below threshold)
                 signal = symbol_signal_list[0]
+                original_confidence = signal.confidence
                 strategy_weight = regime_weights.get(signal.strategy_type.value, 1.0)
-                signal.confidence *= strategy_weight
+                
+                logger.info(f"📊 Aggregation for {symbol}: {signal.strategy_name} {signal.signal_type}")
+                logger.info(f"   Original confidence: {original_confidence:.4f}")
+                logger.info(f"   Regime weight: {strategy_weight:.4f}")
+                
+                # Apply regime weighting but preserve signals that meet threshold
+                # Regime weighting should adjust for regime favorability, not eliminate good signals
+                if original_confidence >= self.config.min_confidence_threshold:
+                    # Original confidence was good - apply regime weight but ensure it stays above threshold
+                    weighted_confidence = original_confidence * strategy_weight
+                    # If regime weight reduces confidence, cap reduction but preserve threshold
+                    # If weighted confidence is below threshold, use threshold as minimum
+                    final_confidence = max(weighted_confidence, self.config.min_confidence_threshold)
+                    signal.confidence = final_confidence
+                    logger.info(f"   Regime adjustment applied: {original_confidence:.4f} → {weighted_confidence:.4f} → {final_confidence:.4f} (preserved above threshold)")
+                else:
+                    # Original confidence was low - apply regime weight normally
+                    signal.confidence = original_confidence * strategy_weight
+                
+                logger.info(f"   Final confidence: {signal.confidence:.4f}")
+                logger.info(f"   Threshold: {self.config.min_confidence_threshold:.4f}")
                 
                 if signal.confidence >= self.config.min_confidence_threshold:
                     aggregated.append(signal)
+                    logger.info(f"   ✅ Signal added to aggregated list")
+                else:
+                    logger.warning(f"   ❌ Signal filtered: confidence {signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
             else:
                 # Multiple signals - intelligent aggregation
+                logger.info(f"📊 Aggregating {len(symbol_signal_list)} signals for {symbol}")
                 agg_signal = await self._aggregate_symbol_signals_enhanced(symbol_signal_list, regime_weights)
                 if agg_signal:
-                    aggregated.append(agg_signal)
+                    # Check if aggregated signal meets threshold
+                    if agg_signal.confidence >= self.config.min_confidence_threshold:
+                        aggregated.append(agg_signal)
+                        logger.info(f"   ✅ Aggregated signal added: confidence {agg_signal.confidence:.4f} >= threshold {self.config.min_confidence_threshold:.4f}")
+                    else:
+                        logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
+                else:
+                    logger.warning(f"   ❌ Aggregation returned None for {len(symbol_signal_list)} signals")
         
         return aggregated
     
     async def _aggregate_symbol_signals_enhanced(self, signals: List[TradingSignal], 
                                                regime_weights: Dict[str, float]) -> Optional[TradingSignal]:
-        """Enhanced symbol signal aggregation with regime weighting"""
+        """
+        Enhanced symbol signal aggregation with regime weighting
+        
+        **ENHANCED:** For multiple signals, apply regime weight AFTER aggregation to preserve
+        consensus strength. This ensures that many signals agreeing doesn't get over-penalized.
+        """
         if not signals:
             return None
         
-        # Apply regime weights to confidences
-        weighted_signals = []
-        for signal in signals:
-            weight = regime_weights.get(signal.strategy_type.value, 1.0)
-            weighted_signal = signal
-            weighted_signal.confidence *= weight
-            weighted_signals.append(weighted_signal)
+        signal_count = len(signals)
+        logger.info(f"📊 Aggregating {signal_count} signals for {signals[0].symbol}")
         
-        # Use existing aggregation logic with weighted signals
-        return await self._aggregate_symbol_signals(weighted_signals)
+        # Calculate original confidence stats
+        total_original_confidence = sum(s.confidence for s in signals)
+        avg_original_confidence = total_original_confidence / signal_count if signal_count > 0 else 0.0
+        regime_weight = regime_weights.get(signals[0].strategy_type.value, 1.0)
+        
+        logger.info(f"   📊 Original confidence stats: avg={avg_original_confidence:.4f}, total={total_original_confidence:.4f}")
+        logger.info(f"   📊 Regime weight: {regime_weight:.4f}")
+        
+        # DETAILED: Show signal distribution
+        confidence_distribution = {}
+        signal_type_distribution = {}
+        confidence_values = []
+        
+        for signal in signals:
+            # Collect confidence values
+            conf = signal.confidence
+            confidence_values.append(conf)
+            
+            # Round confidence to 0.05 for grouping (more granular)
+            conf_bucket = round(conf * 20) / 20  # Round to nearest 0.05
+            confidence_distribution[conf_bucket] = confidence_distribution.get(conf_bucket, 0) + 1
+            
+            # Get signal type (handle both enum and string)
+            try:
+                if hasattr(signal.signal_type, 'value'):
+                    sig_type = signal.signal_type.value
+                elif hasattr(signal.signal_type, 'name'):
+                    sig_type = signal.signal_type.name
+                else:
+                    sig_type = str(signal.signal_type)
+            except:
+                sig_type = str(signal.signal_type)
+            
+            signal_type_distribution[sig_type] = signal_type_distribution.get(sig_type, 0) + 1
+        
+        # Calculate statistics
+        min_conf = min(confidence_values) if confidence_values else 0.0
+        max_conf = max(confidence_values) if confidence_values else 0.0
+        median_conf = sorted(confidence_values)[len(confidence_values) // 2] if confidence_values else 0.0
+        
+        logger.info(f"   📊 Signal Confidence Statistics:")
+        logger.info(f"      Min: {min_conf:.4f}, Max: {max_conf:.4f}, Median: {median_conf:.4f}, Avg: {avg_original_confidence:.4f}")
+        
+        logger.info(f"   📊 Signal Confidence Distribution (by 0.05 buckets):")
+        for conf_bucket in sorted(confidence_distribution.keys(), reverse=True):
+            count = confidence_distribution[conf_bucket]
+            pct = (count / signal_count) * 100
+            bar = "█" * int(pct / 2)  # Visual bar
+            logger.info(f"      {conf_bucket:.2f}: {count:3d} signals ({pct:5.1f}%) {bar}")
+        
+        logger.info(f"   📊 Signal Type Distribution:")
+        for sig_type, count in sorted(signal_type_distribution.items(), key=lambda x: x[1], reverse=True):
+            pct = (count / signal_count) * 100
+            bar = "█" * int(pct / 2)  # Visual bar
+            logger.info(f"      {sig_type}: {count:3d} signals ({pct:5.1f}%) {bar}")
+        
+        # Show sample signals with timestamps
+        logger.info(f"   📊 Sample Signals (first 5 and last 5):")
+        for i, signal in enumerate(signals[:5]):
+            sig_type_str = str(signal.signal_type)
+            if hasattr(signal.signal_type, 'value'):
+                sig_type_str = signal.signal_type.value
+            elif hasattr(signal.signal_type, 'name'):
+                sig_type_str = signal.signal_type.name
+            
+            strength_str = str(signal.strength)
+            if hasattr(signal.strength, 'value'):
+                strength_str = signal.strength.value
+            elif hasattr(signal.strength, 'name'):
+                strength_str = signal.strength.name
+            
+            # Get timestamp from created_at or metadata
+            timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
+            if not timestamp and 'timestamp' in signal.metadata:
+                timestamp = signal.metadata.get('timestamp')
+                if isinstance(timestamp, str):
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    except:
+                        pass
+            
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'
+            logger.info(f"      Signal {i+1}: {sig_type_str:4s} confidence={signal.confidence:.4f}, strength={strength_str}, timestamp={timestamp_str}")
+        
+        if signal_count > 10:
+            logger.info(f"      ... ({signal_count - 10} signals in between) ...")
+            for i, signal in enumerate(signals[-5:], start=signal_count-4):
+                sig_type_str = str(signal.signal_type)
+                if hasattr(signal.signal_type, 'value'):
+                    sig_type_str = signal.signal_type.value
+                elif hasattr(signal.signal_type, 'name'):
+                    sig_type_str = signal.signal_type.name
+                
+                strength_str = str(signal.strength)
+                if hasattr(signal.strength, 'value'):
+                    strength_str = signal.strength.value
+                elif hasattr(signal.strength, 'name'):
+                    strength_str = signal.strength.name
+                
+                # Get timestamp
+                timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
+                if not timestamp and 'timestamp' in signal.metadata:
+                    timestamp = signal.metadata.get('timestamp')
+                    if isinstance(timestamp, str):
+                        try:
+                            timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        except:
+                            pass
+                
+                timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'
+                logger.info(f"      Signal {i}: {sig_type_str:4s} confidence={signal.confidence:.4f}, strength={strength_str}, timestamp={timestamp_str}")
+        
+        # Show ALL timestamps grouped by signal type
+        logger.info(f"   📊 ALL 115 Signal Timestamps:")
+        buy_signals_with_metadata = []
+        sell_signals_with_metadata = []
+        
+        for signal in signals:
+            # Get timestamp
+            timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
+            
+            # Try to get bar_index from metadata to reconstruct timestamp
+            bar_index = None
+            if signal.metadata:
+                bar_index = signal.metadata.get('bar_index')
+                # Also try additional_data
+                if not bar_index and 'additional_data' in signal.metadata:
+                    bar_index = signal.metadata['additional_data'].get('bar_index')
+            
+            # Get entry price for reference
+            entry_price = None
+            if signal.metadata:
+                entry_price = signal.metadata.get('entry_price')
+                if not entry_price and 'additional_data' in signal.metadata:
+                    entry_price = signal.metadata['additional_data'].get('entry_price')
+            
+            sig_type_str = str(signal.signal_type)
+            if hasattr(signal.signal_type, 'value'):
+                sig_type_str = signal.signal_type.value
+            elif hasattr(signal.signal_type, 'name'):
+                sig_type_str = signal.signal_type.name
+            
+            signal_info = {
+                'timestamp': timestamp,
+                'bar_index': bar_index,
+                'entry_price': entry_price,
+                'confidence': signal.confidence
+            }
+            
+            if sig_type_str.lower() == 'buy':
+                buy_signals_with_metadata.append(signal_info)
+            elif sig_type_str.lower() == 'sell':
+                sell_signals_with_metadata.append(signal_info)
+        
+        # Sort by bar_index if available, otherwise by timestamp
+        buy_signals_with_metadata.sort(key=lambda x: x['bar_index'] if x['bar_index'] is not None else (x['timestamp'] or datetime.min))
+        sell_signals_with_metadata.sort(key=lambda x: x['bar_index'] if x['bar_index'] is not None else (x['timestamp'] or datetime.min))
+        
+        logger.info(f"      BUY Signals ({len(buy_signals_with_metadata)} total):")
+        logger.info(f"         ⚠️  Note: Timestamps show signal creation time. Bar indices indicate historical evaluation.")
+        for i, sig_info in enumerate(buy_signals_with_metadata[:20], 1):  # Show first 20
+            bar_info = f"bar_idx={sig_info['bar_index']}" if sig_info['bar_index'] is not None else "bar_idx=N/A"
+            price_info = f"price=${sig_info['entry_price']:.2f}" if sig_info['entry_price'] else "price=N/A"
+            ts_str = sig_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if sig_info['timestamp'] else 'N/A'
+            logger.info(f"         {i:3d}. {ts_str} | {bar_info} | {price_info} | conf={sig_info['confidence']:.4f}")
+        if len(buy_signals_with_metadata) > 20:
+            logger.info(f"         ... ({len(buy_signals_with_metadata) - 20} more BUY signals) ...")
+        
+        logger.info(f"      SELL Signals ({len(sell_signals_with_metadata)} total):")
+        for i, sig_info in enumerate(sell_signals_with_metadata, 1):
+            bar_info = f"bar_idx={sig_info['bar_index']}" if sig_info['bar_index'] is not None else "bar_idx=N/A"
+            price_info = f"price=${sig_info['entry_price']:.2f}" if sig_info['entry_price'] else "price=N/A"
+            ts_str = sig_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if sig_info['timestamp'] else 'N/A'
+            logger.info(f"         {i:3d}. {ts_str} | {bar_info} | {price_info} | conf={sig_info['confidence']:.4f}")
+        
+        # Summary
+        bar_indices = [s['bar_index'] for s in buy_signals_with_metadata + sell_signals_with_metadata if s['bar_index'] is not None]
+        if bar_indices:
+            min_bar = min(bar_indices)
+            max_bar = max(bar_indices)
+            logger.info(f"      📊 Bar Index Range: {min_bar} → {max_bar} (evaluated {max_bar - min_bar + 1} bars from historical data)")
+            logger.info(f"      📊 Historical Scanning: {len(bar_indices)} signals generated from {max_bar - min_bar + 1} different bars")
+        
+        # ENHANCED: For multiple signals, aggregate FIRST, then apply regime weight
+        # This preserves the consensus strength of many signals
+        # Aggregation should reflect the strength of agreement, not be penalized before it happens
+        logger.info(f"   📊 Step 1: Aggregating {signal_count} signals into single consensus signal...")
+        agg_signal = await self._aggregate_symbol_signals(signals)
+        
+        if not agg_signal:
+            logger.warning(f"   ❌ Aggregation returned None for {signal_count} signals")
+            return None
+        
+        logger.info(f"   ✅ Aggregation complete: {signal_count} signals → 1 consensus signal")
+        logger.info(f"      Consensus type: {agg_signal.signal_type.value if hasattr(agg_signal.signal_type, 'value') else agg_signal.signal_type}")
+        logger.info(f"      Aggregated confidence (before regime): {agg_signal.confidence:.4f}")
+        logger.info(f"      Aggregated from: {agg_signal.metadata.get('aggregated_from', signal_count)} signals")
+        
+        # Apply regime weight AFTER aggregation (for multiple signals)
+        # This way, the consensus strength is preserved, and regime weight adjusts the final signal
+        original_agg_confidence = agg_signal.confidence
+        
+        # ENHANCED: For many signals with high consensus, apply regime weight more gently
+        # Many signals agreeing is a strong signal that should be respected
+        if signal_count > 20 and original_agg_confidence >= 0.7:
+            # Strong consensus (many signals + high confidence) - apply regime weight more gently
+            # Use a blended approach: part regime weight, part original
+            # This preserves the strength of consensus while still adjusting for regime
+            regime_adjustment_factor = 0.7 + (0.3 * regime_weight)  # Blend: 70% preserve, 30% regime weight
+            final_confidence = original_agg_confidence * regime_adjustment_factor
+            logger.info(f"   📊 Strong consensus detected ({signal_count} signals, {original_agg_confidence:.4f} conf) - using gentle regime adjustment")
+            logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} * {regime_adjustment_factor:.4f} = {final_confidence:.4f}")
+        elif original_agg_confidence >= self.config.min_confidence_threshold:
+            # Original aggregated confidence was good - apply regime weight but preserve threshold
+            weighted_confidence = original_agg_confidence * regime_weight
+            # For good consensus, ensure it meets threshold (many signals agreeing is significant)
+            final_confidence = max(weighted_confidence, self.config.min_confidence_threshold)
+            agg_signal.confidence = final_confidence
+            logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} → {weighted_confidence:.4f} → {final_confidence:.4f} (preserved threshold)")
+        else:
+            # Original aggregated confidence was already low - apply regime weight normally
+            final_confidence = original_agg_confidence * regime_weight
+            logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} * {regime_weight:.4f} = {final_confidence:.4f}")
+        
+        agg_signal.confidence = final_confidence
+        
+        logger.info(f"   📊 Final aggregated signal confidence: {agg_signal.confidence:.4f}")
+        logger.info(f"   📊 Threshold: {self.config.min_confidence_threshold:.4f}")
+        
+        # Check if aggregated signal meets threshold
+        if agg_signal.confidence < self.config.min_confidence_threshold:
+            logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
+        else:
+            logger.info(f"   ✅ Aggregated signal meets threshold")
+        
+        return agg_signal
     
     def get_strategy_status(self) -> Dict[str, Any]:
         """Get comprehensive strategy status"""

@@ -208,6 +208,20 @@ class MomentumConfig(BaseStrategyConfig):
     momentum_threshold_low_multiplier: float = 0.5
     """Multiplier for low momentum threshold (exhaustion detection). Default: 0.5"""
     
+    # Historical scanning mode (for backtesting)
+    scan_all_bars: bool = False
+    """Scan all bars in historical data (for backtesting). Default: False (live mode - current bar only)"""
+    
+    scan_interval: int = 1
+    """Evaluate every N bars when scanning (1 = every bar, 5 = every 5 bars). Default: 1"""
+    
+    # Regime-adjusted thresholds
+    enable_regime_adjusted_thresholds: bool = True
+    """Enable regime-adjusted thresholds. Default: True"""
+    
+    regime_adjustment_factor: float = 0.8
+    """Multiplier for thresholds in unfavorable regimes (0.8 = 20% reduction). Default: 0.8"""
+    
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -313,6 +327,20 @@ class MeanReversionConfig(BaseStrategyConfig):
     
     confidence_weight_regime: float = 0.1
     """Weight for regime confidence. Default: 0.1"""
+    
+    # Historical scanning mode (for backtesting)
+    scan_all_bars: bool = False
+    """Scan all bars in historical data (for backtesting). Default: False (live mode - current bar only)"""
+    
+    scan_interval: int = 1
+    """Evaluate every N bars when scanning (1 = every bar, 5 = every 5 bars). Default: 1"""
+    
+    # Regime-adjusted thresholds
+    enable_regime_adjusted_thresholds: bool = True
+    """Enable regime-adjusted thresholds. Default: True"""
+    
+    regime_adjustment_factor: float = 0.85
+    """Multiplier for thresholds in unfavorable regimes (0.85 = 15% reduction). Default: 0.85"""
     
     # Backward compatibility aliases
     @property

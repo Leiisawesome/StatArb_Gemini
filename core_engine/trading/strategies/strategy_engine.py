@@ -114,8 +114,9 @@ class StrategySignal:
     strength: float = 0.0    # Signal strength
     
     # Position sizing
-    target_quantity: float = 0.0
-    target_weight: Optional[float] = None
+    target_quantity: float = 0.0  # Absolute share quantity (if quantity_type is ABSOLUTE)
+    target_weight: Optional[float] = None  # Portfolio weight/percentage (0.0-1.0) (if quantity_type is PERCENTAGE)
+    quantity_type: str = "PERCENTAGE"  # "PERCENTAGE" or "ABSOLUTE" - indicates what target_quantity represents
     position_side: str = "long"  # long, short
     
     # Price information
