@@ -99,6 +99,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         self._lock = threading.Lock()
         
         self.logger.info(f"🚀 Enhanced Feature Engineer initialized with component ID: {self.component_id}")
+        self.liquidity_engine: Optional[Any] = None
+        self.current_liquidity: Optional[Dict[str, Any]] = None
+        self._base_normalization_method = self.config.normalization_method
+        self._base_lookback_periods = list(self.config.lookback_periods)
     
     # ========================================
     # ORCHESTRATOR INTEGRATION
@@ -119,6 +123,11 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         
         self.logger.info(f"✅ EnhancedFeatureEngineer registered with orchestrator: {self.component_id}")
         return self.component_id
+    
+    def set_liquidity_engine(self, liquidity_engine: Any) -> None:
+        """Inject liquidity engine reference for downstream adjustments"""
+        self.liquidity_engine = liquidity_engine
+        self.logger.debug("✅ Liquidity engine reference set for feature engineer")
     
     # ========================================
     # PHASE 3: REGIME AWARENESS (RULE 2 - IRegimeAware Interface)
@@ -246,6 +255,39 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         else:
             self.logger.debug("✅ Regime engine properly configured")
         return is_valid
+    
+    def adapt_to_liquidity(self, liquidity_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Adjust feature engineering parameters based on liquidity conditions"""
+        adjustments = {
+            'score': liquidity_context.get('overall_score'),
+            'liquidity_regime': getattr(liquidity_context.get('liquidity_regime'), 'value', liquidity_context.get('liquidity_regime'))
+        }
+        if not getattr(self.config, 'enable_liquidity_adjustments', True):
+            adjustments['mode'] = 'disabled'
+            self.current_liquidity = liquidity_context
+            return adjustments
+        
+        score = liquidity_context.get('overall_score', 70.0)
+        if score is None:
+            score = 70.0
+        
+        if score <= 40:
+            self.config.normalization_method = 'robust'
+            self.config.lookback_periods = [max(p, p + 5) for p in self._base_lookback_periods]
+            adjustments['mode'] = 'low_liquidity'
+        elif score >= 80:
+            self.config.normalization_method = self._base_normalization_method
+            self.config.lookback_periods = [max(3, int(p * 0.8)) for p in self._base_lookback_periods]
+            adjustments['mode'] = 'high_liquidity'
+        else:
+            self.config.normalization_method = self._base_normalization_method
+            self.config.lookback_periods = list(self._base_lookback_periods)
+            adjustments['mode'] = 'normal'
+        
+        self.current_liquidity = liquidity_context
+        adjustments['normalization_method'] = self.config.normalization_method
+        adjustments['lookback_periods'] = self.config.lookback_periods
+        return adjustments
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

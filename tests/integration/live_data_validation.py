@@ -442,6 +442,13 @@ class LiveDataSignalGenerationTest:
                 logger.info(f"      Features: {len(features_df)} rows, {len(features_df.columns)} columns")
                 logger.info(f"      Signals DataFrame: {len(signals_df)} rows, {len(signals_df.columns)} columns")
                 
+                liquidity_columns = ['liquidity_score', 'liquidity_regime', 'liquidity_confidence']
+                missing_liquidity = [col for col in liquidity_columns if col not in features_df.columns]
+                if missing_liquidity:
+                    logger.warning(f"   ⚠️  Liquidity-aware columns missing from features DataFrame: {missing_liquidity}")
+                else:
+                    logger.info("   💧 Liquidity-aware features detected (liquidity_score/liquidity_regime/liquidity_confidence)")
+                
                 # Generate TradingSignal objects from signals DataFrame
                 # (Signal generator is already part of orchestrator, but we need the actual TradingSignal objects)
                 signal_generator = EnhancedSignalGenerator(signal_config)

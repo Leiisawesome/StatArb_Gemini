@@ -173,6 +173,11 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         
         self.logger.info(f"🚀 Enhanced Technical Indicators initialized with component ID: {self.component_id}")
         self.logger.info(f"📊 Loaded {len(self._supported_indicators)} indicators")
+        self.liquidity_engine: Optional[Any] = None
+        self.current_liquidity: Optional[Dict[str, Any]] = None
+        self._base_bb_std = getattr(self.config, 'bb_std', getattr(self.config, 'bollinger_std', 2.0))
+        self._base_bb_period = getattr(self.config, 'bb_period', getattr(self.config, 'bollinger_period', 20))
+        self._base_volume_sma_period = getattr(self.config, 'volume_sma_period', 20)
     
     def _initialize_indicator_registry(self) -> List[str]:
         """Initialize registry of supported indicators"""
@@ -222,6 +227,11 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         
         self.logger.info(f"✅ EnhancedTechnicalIndicators registered with orchestrator: {self.component_id}")
         return self.component_id
+    
+    def set_liquidity_engine(self, liquidity_engine: Any) -> None:
+        """Inject liquidity engine reference for liquidity-aware adjustments"""
+        self.liquidity_engine = liquidity_engine
+        self.logger.debug("✅ Liquidity engine reference set for indicators")
     
     # ========================================
     # PHASE 3: REGIME AWARENESS (RULE 2 - IRegimeAware Interface)
@@ -348,6 +358,61 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         else:
             self.logger.debug("✅ Regime engine properly configured")
         return is_valid
+    
+    def adapt_to_liquidity(self, liquidity_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Adjust indicator parameters based on liquidity conditions"""
+        adjustments = {
+            'score': liquidity_context.get('overall_score'),
+            'liquidity_regime': getattr(liquidity_context.get('liquidity_regime'), 'value', liquidity_context.get('liquidity_regime'))
+        }
+        if not getattr(self.config, 'enable_liquidity_adjustments', True):
+            adjustments['mode'] = 'disabled'
+            self.current_liquidity = liquidity_context
+            return adjustments
+        
+        score = liquidity_context.get('overall_score', 70.0)
+        if score is None:
+            score = 70.0
+        
+        # Restore defaults first
+        self.config.bb_std = self._base_bb_std
+        if hasattr(self.config, 'bollinger_std'):
+            self.config.bollinger_std = self._base_bb_std
+        self.config.bb_period = self._base_bb_period
+        if hasattr(self.config, 'bollinger_period'):
+            self.config.bollinger_period = self._base_bb_period
+        self.config.volume_sma_period = self._base_volume_sma_period
+        
+        if score <= 40:
+            new_std = min(self._base_bb_std * 1.2, 3.0)
+            new_period = max(self._base_bb_period, int(self._base_bb_period * 1.2))
+            self.config.bb_std = new_std
+            if hasattr(self.config, 'bollinger_std'):
+                self.config.bollinger_std = new_std
+            self.config.bb_period = new_period
+            if hasattr(self.config, 'bollinger_period'):
+                self.config.bollinger_period = new_period
+            self.config.volume_sma_period = max(self._base_volume_sma_period, int(self._base_volume_sma_period * 1.5))
+            adjustments['mode'] = 'low_liquidity'
+        elif score >= 80:
+            new_std = max(self._base_bb_std * 0.9, 1.5)
+            new_period = max(5, int(self._base_bb_period * 0.9))
+            self.config.bb_std = new_std
+            if hasattr(self.config, 'bollinger_std'):
+                self.config.bollinger_std = new_std
+            self.config.bb_period = new_period
+            if hasattr(self.config, 'bollinger_period'):
+                self.config.bollinger_period = new_period
+            self.config.volume_sma_period = max(5, int(self._base_volume_sma_period * 0.8))
+            adjustments['mode'] = 'high_liquidity'
+        else:
+            adjustments['mode'] = 'normal'
+        
+        self.current_liquidity = liquidity_context
+        adjustments['bb_std'] = self.config.bb_std
+        adjustments['bb_period'] = self.config.bb_period
+        adjustments['volume_sma_period'] = self.config.volume_sma_period
+        return adjustments
     
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""

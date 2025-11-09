@@ -568,6 +568,9 @@ class IndicatorConfig:
     enable_volume: bool = True
     """Enable volume indicators (OBV, VWAP, etc.). Default: True"""
     
+    enable_liquidity_adjustments: bool = True
+    """Enable liquidity-based indicator parameter adjustments. Default: True"""
+    
     # Specific indicator parameters
     sma_periods: List[int] = field(default_factory=lambda: [20, 50, 200])
     """SMA periods. Default: [20, 50, 200]"""
@@ -670,6 +673,9 @@ class FeatureConfig:
     
     normalization_method: str = "robust"
     """Normalization method ('standard', 'robust', 'minmax'). Default: 'robust'"""
+    
+    enable_liquidity_adjustments: bool = True
+    """Enable liquidity-based feature adaptation. Default: True"""
     
     # Cross-sectional features
     enable_cross_sectional: bool = True

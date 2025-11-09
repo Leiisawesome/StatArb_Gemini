@@ -27,6 +27,7 @@ from core_engine.system.interfaces import ISystemComponent, IRegimeAware, Regime
 
 # Import will be available after components exist
 from core_engine.data.manager import ClickHouseDataManager
+from core_engine.data.liquidity_engine import LiquidityAssessmentEngine
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
@@ -66,6 +67,7 @@ class EnrichedMarketData:
     processing_timestamp: datetime
     pipeline_version: str = "1.0.0"
     regime_context: Optional[RegimeContext] = None
+    liquidity_context: Optional[Dict[str, Any]] = None
     
     # Statistics
     raw_rows: int = 0
@@ -130,7 +132,8 @@ class EnrichedMarketData:
             'signal_columns': self.signal_columns,
             'processing_timestamp': self.processing_timestamp.isoformat(),
             'pipeline_version': self.pipeline_version,
-            'enrichment_valid': self.validate_enrichment()
+            'enrichment_valid': self.validate_enrichment(),
+            'has_liquidity_context': self.liquidity_context is not None
         }
 
 
@@ -172,7 +175,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         data_config: Optional[Any] = None,
         indicator_config: Optional[Any] = None,
         feature_config: Optional[Any] = None,
-        signal_config: Optional[Any] = None
+        signal_config: Optional[Any] = None,
+        liquidity_config: Optional[Any] = None
     ):
         """
         Initialize pipeline orchestrator
@@ -196,6 +200,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             self.indicator_config = indicator_config or IndicatorConfig()
             self.feature_config = feature_config or FeatureConfig()
             self.signal_config = signal_config or SignalConfig()
+            self.liquidity_config = liquidity_config or {}
         else:
             self.data_config = data_config or {}
             self.indicator_config = indicator_config or {}
@@ -207,10 +212,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.indicators_engine: Optional[Any] = None
         self.feature_engineer: Optional[Any] = None
         self.signal_generator: Optional[Any] = None
+        self.liquidity_engine: Optional[Any] = None
         
         # Regime awareness (IRegimeAware)
         self.regime_engine: Optional[Any] = None
         self.current_regime_context: Optional[RegimeContext] = None
+        self.liquidity_sequence: Dict[str, List[Dict[str, Any]]] = {}
+        self.liquidity_by_timestamp: Dict[str, Dict[datetime, Dict[str, Any]]] = {}
         
         # Processing cache
         self.enriched_data_cache: Dict[str, EnrichedMarketData] = {}
@@ -250,6 +258,14 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             if hasattr(self.data_manager, 'initialize'):
                 await self.data_manager.initialize()
             logger.debug("✅ DataManager initialized")
+            
+            # Initialize Liquidity Engine (Phase 1.5)
+            logger.debug("Phase 1.5: Initializing LiquidityAssessmentEngine...")
+            self.liquidity_engine = LiquidityAssessmentEngine(self.liquidity_config)
+            if hasattr(self.liquidity_engine, 'initialize'):
+                await self.liquidity_engine.initialize()
+            self.set_liquidity_engine(self.liquidity_engine)
+            logger.debug("✅ LiquidityAssessmentEngine initialized")
             
             # Initialize Indicators Engine (Phase 2)
             logger.debug("Phase 2: Initializing TechnicalIndicators...")
@@ -291,6 +307,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.error("Cannot start: not initialized")
             return False
         
+        if self.liquidity_engine and hasattr(self.liquidity_engine, 'start'):
+            await self.liquidity_engine.start()
+        
         self.is_operational = True
         logger.info("✅ Pipeline orchestrator operational")
         return True
@@ -302,10 +321,15 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         Returns:
             True if stop successful
         """
+        if self.liquidity_engine and hasattr(self.liquidity_engine, 'stop'):
+            await self.liquidity_engine.stop()
+        
         self.is_operational = False
         
         # Clear cache
         self.enriched_data_cache.clear()
+        self.liquidity_sequence.clear()
+        self.liquidity_by_timestamp.clear()
         
         logger.info("Pipeline orchestrator stopped")
         return True
@@ -397,6 +421,29 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.debug("✅ Regime engine injected into signal generator")
         
         logger.info("✅ Regime engine injected into pipeline (Rule 2 - Regime-First)")
+    
+    def set_liquidity_engine(self, liquidity_engine: Any) -> None:
+        """
+        Inject liquidity engine for liquidity-aware processing
+        
+        Args:
+            liquidity_engine: LiquidityAssessmentEngine instance
+        """
+        self.liquidity_engine = liquidity_engine
+        
+        if self.indicators_engine and hasattr(self.indicators_engine, 'set_liquidity_engine'):
+            self.indicators_engine.set_liquidity_engine(liquidity_engine)
+            logger.debug("✅ Liquidity engine injected into indicators engine")
+        
+        if self.feature_engineer and hasattr(self.feature_engineer, 'set_liquidity_engine'):
+            self.feature_engineer.set_liquidity_engine(liquidity_engine)
+            logger.debug("✅ Liquidity engine injected into feature engineer")
+        
+        if self.signal_generator and hasattr(self.signal_generator, 'set_liquidity_engine'):
+            self.signal_generator.set_liquidity_engine(liquidity_engine)
+            logger.debug("✅ Liquidity engine injected into signal generator")
+        
+        logger.info("✅ Liquidity engine injected into pipeline")
     
     async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
         """
@@ -766,6 +813,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 
                 symbol_data = raw_data[symbol].copy()
                 symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
+                liquidity_sequence = self._assess_liquidity(symbol, symbol_data)
+                liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
                 
                 try:
                     # PHASE 0: Process regime FIRST (store bar-by-bar regime sequence as "beacon light")
@@ -837,6 +886,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                             f"   📊 Config adapted for regime: {regime_analysis.primary_regime.value} "
                                             f"(single regime, {len(regime_sequence)} bars)"
                                         )
+                                if liquidity_context_first:
+                                    if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
+                                        self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
+                                    if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
+                                        self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
                                 
                                 # Standard processing (entire DataFrame at once)
                                 phase2_start = datetime.now()
@@ -847,6 +901,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                 features_df = await self._engineer_features(indicators_df)
                                 phase3_time = (datetime.now() - phase3_start).total_seconds()
                                 
+                                features_df = self._merge_liquidity_features(features_df, symbol)
+                                
                                 phase4_start = datetime.now()
                                 signals_df = await self._generate_signals(features_df)
                                 phase4_time = (datetime.now() - phase4_start).total_seconds()
@@ -854,6 +910,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                             logger.debug(f"   ⚠️  {symbol}: No regime sequence available - using standard processing")
                             
                             # No regime data - standard processing without adaptation
+                            if liquidity_context_first:
+                                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
+                                    self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
+                                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
+                                    self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
                             phase2_start = datetime.now()
                             indicators_df = await self._calculate_indicators(symbol_data)
                             phase2_time = (datetime.now() - phase2_start).total_seconds()
@@ -862,12 +923,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                             features_df = await self._engineer_features(indicators_df)
                             phase3_time = (datetime.now() - phase3_start).total_seconds()
                             
+                            features_df = self._merge_liquidity_features(features_df, symbol)
+                            
                             phase4_start = datetime.now()
                             signals_df = await self._generate_signals(features_df)
                             phase4_time = (datetime.now() - phase4_start).total_seconds()
                     
                     # If regime_engine not available, use standard processing
                     if not self.regime_engine:
+                        if liquidity_context_first:
+                            if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
+                                self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
+                            if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
+                                self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
                         phase2_start = datetime.now()
                         indicators_df = await self._calculate_indicators(symbol_data)
                         phase2_time = (datetime.now() - phase2_start).total_seconds()
@@ -875,6 +943,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         phase3_start = datetime.now()
                         features_df = await self._engineer_features(indicators_df)
                         phase3_time = (datetime.now() - phase3_start).total_seconds()
+                        
+                        features_df = self._merge_liquidity_features(features_df, symbol)
                         
                         phase4_start = datetime.now()
                         signals_df = await self._generate_signals(features_df)
@@ -893,7 +963,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         features=features_df,
                         signals=signals_df,
                         processing_timestamp=datetime.now(),
-                        regime_context=self.current_regime_context
+            regime_context=self.current_regime_context,
+            liquidity_context=self._get_latest_liquidity_context(symbol)
                     )
                     
                     # Validate enrichment
@@ -1253,6 +1324,141 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         return segments
     
+    def _assess_liquidity(
+        self,
+        symbol: str,
+        symbol_data: pd.DataFrame
+    ) -> List[Dict[str, Any]]:
+        """Run liquidity assessment for each bar and persist the sequence"""
+        if symbol_data.empty or not self.liquidity_engine:
+            self.liquidity_sequence[symbol] = []
+            self.liquidity_by_timestamp[symbol] = {}
+            return []
+        
+        sequence: List[Dict[str, Any]] = []
+        timestamp_map: Dict[datetime, Dict[str, Any]] = {}
+        
+        for idx, row in symbol_data.iterrows():
+            market_row = row.to_dict()
+            metrics = {}
+            try:
+                metrics = self.liquidity_engine.assess_liquidity_score(symbol, market_row)
+            except Exception as exc:
+                logger.warning(f"⚠️  Liquidity assessment failed for {symbol} (row {idx}): {exc}")
+                metrics = {}
+            
+            timestamp = row.get('timestamp')
+            if isinstance(timestamp, pd.Timestamp):
+                timestamp_dt = timestamp.to_pydatetime()
+            else:
+                timestamp_dt = timestamp
+            
+            metrics = metrics or {}
+            metrics['timestamp'] = timestamp_dt
+            metrics['bar_index'] = idx
+            
+            regime_value = metrics.get('liquidity_regime')
+            if hasattr(regime_value, 'value'):
+                metrics['liquidity_regime'] = regime_value.value
+            
+            sequence.append(metrics)
+            if timestamp_dt is not None:
+                timestamp_map[timestamp_dt] = metrics
+        
+        self.liquidity_sequence[symbol] = sequence
+        self.liquidity_by_timestamp[symbol] = timestamp_map
+        return sequence
+    
+    def _merge_liquidity_features(self, features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Attach liquidity metrics to the enriched features DataFrame"""
+        if features_df.empty:
+            return features_df
+        
+        sequence = self.liquidity_sequence.get(symbol, [])
+        if not sequence:
+            features_df = features_df.copy()
+            for col in [
+                'liquidity_score',
+                'liquidity_confidence',
+                'liquidity_regime',
+                'liquidity_risk_score',
+                'liquidity_slippage_risk',
+                'liquidity_bid_ask_spread_bps',
+                'liquidity_effective_spread_bps',
+                'liquidity_market_depth',
+                'liquidity_volume_ratio'
+            ]:
+                if col not in features_df.columns:
+                    features_df[col] = np.nan
+            return features_df
+        
+        liquidity_df = pd.DataFrame(sequence)
+        if 'timestamp' not in liquidity_df.columns:
+            return features_df
+        
+        liquidity_df = liquidity_df.drop_duplicates(subset=['timestamp'], keep='last')
+        liquidity_df['timestamp'] = pd.to_datetime(liquidity_df['timestamp'])
+        
+        rename_map = {
+            'overall_score': 'liquidity_score',
+            'confidence': 'liquidity_confidence',
+            'liquidity_regime': 'liquidity_regime',
+            'liquidity_risk_score': 'liquidity_risk_score',
+            'slippage_risk': 'liquidity_slippage_risk',
+            'bid_ask_spread_bps': 'liquidity_bid_ask_spread_bps',
+            'effective_spread_bps': 'liquidity_effective_spread_bps',
+            'market_depth': 'liquidity_market_depth',
+            'volume_ratio': 'liquidity_volume_ratio'
+        }
+        
+        columns_present = ['timestamp'] + [col for col in rename_map.keys() if col in liquidity_df.columns]
+        liquidity_df = liquidity_df[columns_present].rename(columns=rename_map)
+        
+        features_df = features_df.copy()
+        features_df['timestamp'] = pd.to_datetime(features_df['timestamp'])
+        merged_df = features_df.merge(liquidity_df, on='timestamp', how='left')
+        expected_cols = [
+            'liquidity_score',
+            'liquidity_confidence',
+            'liquidity_regime',
+            'liquidity_risk_score',
+            'liquidity_slippage_risk',
+            'liquidity_bid_ask_spread_bps',
+            'liquidity_effective_spread_bps',
+            'liquidity_market_depth',
+            'liquidity_volume_ratio'
+        ]
+        for col in expected_cols:
+            if col not in merged_df.columns:
+                merged_df[col] = np.nan
+        return merged_df
+    
+    def get_liquidity_sequence(self, symbol: str) -> List[Dict[str, Any]]:
+        """Retrieve stored liquidity sequence for a symbol"""
+        return self.liquidity_sequence.get(symbol, [])
+    
+    def get_liquidity_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[Dict[str, Any]]:
+        """Get liquidity metrics for a specific timestamp (or nearest earlier)"""
+        if symbol not in self.liquidity_by_timestamp:
+            return None
+        
+        if isinstance(timestamp, pd.Timestamp):
+            timestamp = timestamp.to_pydatetime()
+        
+        symbol_map = self.liquidity_by_timestamp[symbol]
+        if timestamp in symbol_map:
+            return symbol_map[timestamp]
+        
+        symbol_timestamps = sorted(symbol_map.keys())
+        for ts in reversed(symbol_timestamps):
+            if ts <= timestamp:
+                return symbol_map[ts]
+        return None
+    
+    def _get_latest_liquidity_context(self, symbol: str) -> Optional[Dict[str, Any]]:
+        sequence = self.liquidity_sequence.get(symbol, [])
+        return sequence[-1] if sequence else None
+    
     async def _process_regime_segments(
         self,
         symbol_data: pd.DataFrame,
@@ -1301,6 +1507,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     timestamp=first_timestamp
                 )
             
+            liquidity_context = None
+            if not segment_data.empty:
+                seg_timestamp = segment_data.iloc[0]['timestamp']
+                if isinstance(seg_timestamp, pd.Timestamp):
+                    seg_timestamp = seg_timestamp.to_pydatetime()
+                liquidity_context = self.get_liquidity_at_timestamp(symbol, seg_timestamp)
+            
             # Adapt config for this segment's regime
             if regime_analysis:
                 regime_name = regime_analysis.primary_regime.value if hasattr(regime_analysis.primary_regime, 'value') else str(regime_analysis.primary_regime)
@@ -1316,6 +1529,12 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 # Adapt feature engineer config
                 if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
                     await self.feature_engineer.adapt_to_regime(regime_analysis)
+            
+            if liquidity_context:
+                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
+                    self.indicators_engine.adapt_to_liquidity(liquidity_context)
+                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
+                    self.feature_engineer.adapt_to_liquidity(liquidity_context)
             
             # Process segment through pipeline
             # PHASE 2: Calculate indicators for this segment
@@ -1346,6 +1565,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         # PHASE 4: Generate signals (process entire combined DataFrame)
         # Signals are already filtered bar-by-bar in _filter_signals()
+        features_df = self._merge_liquidity_features(features_df, symbol)
         signals_df = await self._generate_signals(features_df)
         
         # Track processing times

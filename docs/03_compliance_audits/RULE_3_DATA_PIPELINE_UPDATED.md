@@ -1,10 +1,13 @@
 # Rule 3: Unified Data Flow Pipeline and Processing Patterns
 
-**Version:** 2.1 (Enhanced with Signal Type Distinction Clarification)  
-**Date:** November 2, 2025  
+**Version:** 2.2 (Regime + Liquidity Aware Pipeline)  
+**Date:** November 9, 2025  
 **Status:** ACTIVE - MANDATORY COMPLIANCE
 
-**Enhancements in v2.1:**
+**Enhancements in v2.2:**
+- 🔵 **NEW:** LiquidityAssessmentEngine wired into ProcessingPipelineOrchestrator
+- 🔵 **NEW:** Liquidity-aware indicator/feature adaptation and enrichment columns
+- 🔴 **CRITICAL (v2.1):** Explicit TradingSignal vs StrategySignal distinction (Phase 4 vs Phase 5)
 - 🔴 **CRITICAL:** Explicit TradingSignal vs StrategySignal distinction (Phase 4 vs Phase 5)
 - 🔴 **CRITICAL:** Clarified that strategies DO NOT consume TradingSignal objects
 - Signal type documentation with implementation evidence
@@ -17,6 +20,10 @@
 The core_engine implements a **strict, unified data flow pipeline** that ALL components MUST follow. This pipeline ensures **data consistency**, **eliminates code duplication**, and provides **single source of truth** for all processing operations.
 
 **Key Principle:** Data flows through a standardized pipeline. Components **consume processed data** rather than processing raw data themselves.
+
+**Context Awareness:**  
+1. **Regime-First (Rule 2):** All computations adapt to the current regime via `EnhancedRegimeEngine`.  
+2. **Liquidity-Informed (v2.2):** Liquidity conditions are assessed bar-by-bar via `LiquidityAssessmentEngine`, influencing indicator parameters, feature normalization, and introducing liquidity metrics into the enriched dataframe.
 
 ---
 
@@ -41,7 +48,7 @@ The core_engine implements a **strict, unified data flow pipeline** that ALL com
                         **Raw OHLCV DataFrame**
                                      ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 2: INDICATORS LAYER (Rule 3.2)                                        │
+│ PHASE 2: INDICATORS LAYER (Rule 3.2)  ⭐ UPDATED                             │
 │ Component: EnhancedTechnicalIndicators                                      │
 │           (core_engine/processing/indicators/engine.py)                     │
 │ Responsibility: Calculate 29+ technical indicators                          │
@@ -54,6 +61,9 @@ The core_engine implements a **strict, unified data flow pipeline** that ALL com
 │ • Volatility: ATR_14, Bollinger Bands, Keltner, Donchian, Hist Vol         │
 │ • Volume: OBV, Volume_MA, VWAP, MFI, A/D Line                              │
 │                                                                              │
+│ Liquidity Integration (v2.2):                                               │
+│ • Pipeline injects per-bar liquidity scores BEFORE indicator computation    │
+│ • `adapt_to_liquidity()` adjusts Bollinger width, ATR lookbacks, volume SMA │
 │ Methods: calculate_indicators(market_data: pd.DataFrame) -> pd.DataFrame    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      ↓
@@ -61,7 +71,7 @@ The core_engine implements a **strict, unified data flow pipeline** that ALL com
                 (OHLCV + 29+ indicator columns)
                                      ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3: FEATURE ENGINEERING LAYER (Rule 3.3)                               │
+│ PHASE 3: FEATURE ENGINEERING LAYER (Rule 3.3)  ⭐ UPDATED                    │
 │ Component: EnhancedFeatureEngineer                                          │
 │           (core_engine/processing/features/engineer.py)                     │
 │ Responsibility: Engineer 50+ ML-ready features                              │
@@ -76,11 +86,14 @@ The core_engine implements a **strict, unified data flow pipeline** that ALL com
 │ • Volume: volume_ratio, obv_trend, volume_price_correlation                │
 │ • Cross-Asset: relative_strength, correlation, beta                        │
 │                                                                              │
+│ Liquidity Integration (v2.2):                                               │
+│ • `adapt_to_liquidity()` tightens/loosens normalization + lookbacks         │
+│ • Liquidity metrics appended as `liquidity_score`, `liquidity_regime`, etc. │
 │ Methods: create_features(indicators_df: pd.DataFrame) -> pd.DataFrame       │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      ↓
                 **Feature-Rich DataFrame**
-                (OHLCV + Indicators + 50+ features)
+                (OHLCV + Indicators + 50+ features + Liquidity metrics)
                                      ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ PHASE 4: SIGNAL GENERATION LAYER (Rule 3.4) ⭐ UPDATED                      │
@@ -162,6 +175,22 @@ The core_engine implements a **strict, unified data flow pipeline** that ALL com
 ---
 
 ## CRITICAL: Signal Type Distinction (v2.1) 🔴
+
+### Liquidity Assessment (v2.2) 🔵
+
+**Component:** `LiquidityAssessmentEngine` (`core_engine/data/liquidity_engine.py`)  
+**Integration Point:** `ProcessingPipelineOrchestrator.process_market_data`  
+**Persistence:**  
+- `pipeline.liquidity_sequence[symbol]` — ordered list of bar-level liquidity metrics  
+- `pipeline.get_liquidity_at_timestamp()` — nearest bar lookup (mirrors regime helper)  
+- `EnrichedMarketData.liquidity_context` — latest snapshot, attached to each symbol’s payload  
+
+**Downstream Effects:**  
+1. `EnhancedTechnicalIndicators.adapt_to_liquidity()` widens/narrows Bollinger bands, adjusts ATR/volume lookbacks.  
+2. `EnhancedFeatureEngineer.adapt_to_liquidity()` alters normalization schemes / lookback periods.  
+3. Liquidity-derived columns (`liquidity_score`, `liquidity_regime`, `liquidity_confidence`, spreads, depth, volume_ratio) are appended to the enriched dataframe for strategy consumption.  
+
+**Compliance Reminder:** Any strategy, signal engine, or analytics component can now call `pipeline.get_liquidity_at_timestamp(symbol, timestamp)` to retrieve the precise liquidity snapshot used during enrichment—mirroring the existing regime-access pattern.
 
 ### TradingSignal (Phase 4 Output)
 
