@@ -223,6 +223,9 @@ class CentralRiskManager(ISystemComponent):
         self.strategy_allocations: Dict[str, float] = {}
         self.current_var: float = 0.0
         
+        # ✅ FIX: Store current market prices for accurate portfolio valuation
+        self.current_prices: Dict[str, float] = {}  # symbol -> last known price
+        
         # Portfolio value and cash (PHASE 1 ENHANCEMENT: Use initial_capital from config)
         initial_capital = config.get('initial_capital', 1000000.0) if isinstance(config, dict) else 1000000.0
         self.portfolio_value: float = initial_capital
@@ -1086,8 +1089,10 @@ class CentralRiskManager(ISystemComponent):
                         authorization.authorization_level = AuthorizationLevel.REJECTED
                         authorization.rejection_reason = f"COMPLIANCE: {compliance_result.rejection_reason}"
                         
+                        # Enhanced rejection logging with full trade details
+                        position_value = request.quantity * (request.current_price if request.current_price > 0 else 100.0)
                         logger.warning(f"🚨 Trade rejected - Compliance violation: {compliance_result.rejection_reason}")
-                        logger.info(f"   Violation type: {compliance_result.violation_type}")
+                        logger.warning(f"   📋 TRADE DETAILS: {request.symbol} {request.side} {request.quantity:,.2f} shares @ ${request.current_price if request.current_price > 0 else 100.0:,.2f} = ${position_value:,.2f} (Confidence: {request.confidence:.1%}, Strategy: {request.strategy_id})")
                         
                         return authorization
                     
@@ -1281,8 +1286,9 @@ class CentralRiskManager(ISystemComponent):
             position_value = abs(new_position * price)
             position_pct = position_value / self.portfolio_value
             
-            logger.debug(f"position_check - symbol={request.symbol}, quantity={request.quantity}, price=${price:.2f}, position_value=${position_value:.2f}, pct={position_pct:.6f}, limit={self.max_position_size:.6f}")
-            return position_pct <= self.max_position_size
+            passed = position_pct <= self.max_position_size
+            
+            return passed
             
         except Exception as e:
             logger.error(f"Error checking position limits: {e}")
@@ -1302,7 +1308,9 @@ class CentralRiskManager(ISystemComponent):
             position_value = abs(new_position * price)
             concentration = position_value / self.portfolio_value
             
-            return concentration <= self.position_concentration_limit
+            passed = concentration <= self.position_concentration_limit
+            
+            return passed
             
         except Exception as e:
             logger.error(f"Error checking concentration limits: {e}")
@@ -1707,6 +1715,10 @@ class CentralRiskManager(ISystemComponent):
             # Update position
             self.current_positions[symbol] = new_position
             
+            # ✅ FIX: Store current price for portfolio valuation
+            if price > 0:
+                self.current_prices[symbol] = price
+            
             # Calculate position value
             position_value = new_position * price if price > 0 else 0.0
             
@@ -1800,6 +1812,9 @@ class CentralRiskManager(ISystemComponent):
             prices: Dict of symbol -> current price
             timestamp: Price timestamp (defaults to now)
         """
+        # ✅ FIX: Store prices for portfolio value calculation
+        self.current_prices.update(prices)
+        
         if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
             try:
                 if timestamp is None:
@@ -1812,6 +1827,9 @@ class CentralRiskManager(ISystemComponent):
                 logger.debug(f"✅ Market prices updated for {len(prices)} symbols (Sprint 1)")
             except Exception as e:
                 logger.warning(f"⚠️ Market price update failed: {e}")
+        
+        # ✅ FIX: Update portfolio metrics after price update
+        self._update_portfolio_metrics()
     
     @property
     def authorization_audit_trail(self) -> List[Dict[str, Any]]:
@@ -1850,7 +1868,18 @@ class CentralRiskManager(ISystemComponent):
         try:
             for symbol, position in self.current_positions.items():
                 if position != 0:
-                    await self._check_position_limits(symbol, position)
+                    # ✅ FIX: Create proper TradingDecisionRequest for position limit check
+                    # The method expects a request object, not (symbol, position) args
+                    position_request = TradingDecisionRequest(
+                        decision_type=TradingDecisionType.POSITION_ENTRY,
+                        symbol=symbol,
+                        side='buy' if position > 0 else 'sell',
+                        quantity=abs(position),
+                        confidence=1.0,  # Monitoring existing position
+                        current_price=100.0,  # Placeholder (not used for limit check)
+                        requesting_component='PositionMonitor'
+                    )
+                    self._check_position_limits(position_request)
         except Exception as e:
             logger.error(f"Position monitoring error: {e}")
     
@@ -1925,12 +1954,23 @@ class CentralRiskManager(ISystemComponent):
         Update portfolio value based on positions + cash (Rule 7.3, Phase 10)
         
         Portfolio Value = Sum(Position Values) + Available Cash
+        
+        ✅ FIX: Now uses actual market prices instead of hardcoded $100/share
         """
         try:
-            # Calculate total position value
-            # Note: This assumes $100/share as default if no price tracking
-            # In production, would use real-time prices
-            position_value = sum(abs(pos) * 100.0 for pos in self.current_positions.values())
+            # Calculate total position value using ACTUAL market prices
+            position_value = 0.0
+            for symbol, position_qty in self.current_positions.items():
+                if position_qty != 0:
+                    # Use stored market price, fallback to $100 if not available
+                    price = self.current_prices.get(symbol, 100.0)
+                    position_value += abs(position_qty) * price
+                    
+                    # Debug log for tracking
+                    if symbol in self.current_prices:
+                        logger.debug(f"   {symbol}: {position_qty:,.2f} shares @ ${price:,.2f} = ${abs(position_qty) * price:,.2f}")
+                    else:
+                        logger.warning(f"⚠️  {symbol}: No price available, using fallback ${price}/share")
             
             # Portfolio value = positions + cash
             self.portfolio_value = position_value + self.available_cash
@@ -1939,7 +1979,7 @@ class CentralRiskManager(ISystemComponent):
             self._update_risk_metrics()
             
             logger.debug(
-                f"📊 Portfolio Metrics: "
+                f"📊 Portfolio Metrics Updated: "
                 f"Positions=${position_value:,.2f}, "
                 f"Cash=${self.available_cash:,.2f}, "
                 f"Total=${self.portfolio_value:,.2f}"

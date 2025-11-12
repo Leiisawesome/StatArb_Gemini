@@ -93,12 +93,22 @@ class BacktestConfig:
     # Risk settings (core_engine/config/component_config.py: RiskConfig)
     initial_capital: float = 1_000_000.0
     max_position_size: float = 0.10
+    """Maximum position size as % of portfolio. Default: 0.10 (10%). Must be <= max_concentration."""
     max_total_exposure: float = 1.0
-    max_concentration: float = 0.15
+    max_concentration: float = 0.20
+    """Maximum concentration per position. Default: 0.20 (20%). Single-symbol backtests need max_position_size < this."""
     allow_shorts: bool = False
     max_daily_var: float = 0.05
     max_drawdown: float = 0.20
     min_signal_confidence: float = 0.6
+    
+    # Risk authorization thresholds (for CentralRiskManager)
+    auto_approval_threshold: float = 0.08
+    """Auto-approve trades with risk impact < 8%. Default: 0.08 (8%)"""
+    elevated_review_threshold: float = 0.15
+    """Elevated review for risk impact 8-15%. Default: 0.15 (15%)"""
+    emergency_threshold: float = 0.25
+    """Emergency threshold - reject if risk impact > 25%. Default: 0.25 (25%)"""
     
     # Regime-adjusted multipliers (Rule 2 - Regime-First)
     enable_regime_adjustments: bool = True
