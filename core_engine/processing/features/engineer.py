@@ -635,6 +635,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Momentum features
         df = self._create_momentum_features(df)
         
+        # Composite momentum features (Phase 4A - Option A)
+        df = self._create_composite_momentum_features(df)
+        
         # Volatility features
         df = self._create_volatility_features(df)
         
@@ -731,6 +734,211 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             df[f'{col}_normalized'] = df[col] / df[col].rolling(20).std()
         
         return df
+    
+    def _create_composite_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create composite momentum features (Phase 4A - Option A)
+        
+        Combines multiple momentum indicators into robust composite signals:
+        - composite_z: MAD-based Z-score aggregation (outlier-resistant)
+        - composite_pct: Percentile ranking (0-100 scale)
+        
+        Uses 10 momentum indicators for comprehensive momentum assessment:
+        1. Short-term momentum (10-day)
+        2. Medium-term momentum (20-day)
+        3. Long-term momentum (50-day)
+        4. RSI (Relative Strength Index)
+        5. MACD histogram
+        6. Stochastic K
+        7. ROC (Rate of Change)
+        8. ADX (Trend Strength)
+        9. Trend strength (directional consistency)
+        10. Volume ratio (confirmation)
+        
+        Returns:
+            DataFrame with composite_z and composite_pct columns added
+        """
+        
+        try:
+            # Initialize composite features with default values
+            df['composite_z'] = 0.0
+            df['composite_pct'] = 50.0  # Neutral percentile
+            
+            # Minimum data requirement
+            if len(df) < 50:
+                self.logger.debug("Insufficient data for composite features (need 50+ bars)")
+                return df
+            
+            # Step 1: Collect 10 momentum indicators
+            momentum_indicators = []
+            indicator_names = []
+            
+            # 1. Short-term momentum (10-day)
+            if 'momentum_10' in df.columns:
+                momentum_indicators.append(df['momentum_10'])
+                indicator_names.append('momentum_10')
+            
+            # 2. Medium-term momentum (20-day)
+            if 'momentum_20' in df.columns:
+                momentum_indicators.append(df['momentum_20'])
+                indicator_names.append('momentum_20')
+            
+            # 3. Long-term momentum (50-day)
+            if 'momentum_50' in df.columns:
+                momentum_indicators.append(df['momentum_50'])
+                indicator_names.append('momentum_50')
+            
+            # 4. RSI (centered at 0)
+            if 'rsi_normalized' in df.columns:
+                momentum_indicators.append(df['rsi_normalized'])
+                indicator_names.append('rsi_normalized')
+            elif 'rsi' in df.columns:
+                # Center RSI: (RSI - 50) / 50  → range: -1 to +1
+                momentum_indicators.append((df['rsi'] - 50) / 50)
+                indicator_names.append('rsi_centered')
+            
+            # 5. MACD histogram (momentum divergence)
+            if 'macd_divergence' in df.columns:
+                # Normalize MACD divergence by recent volatility
+                macd_std = df['macd_divergence'].rolling(20).std()
+                normalized_macd = np.where(macd_std > 0, df['macd_divergence'] / macd_std, 0)
+                momentum_indicators.append(pd.Series(normalized_macd, index=df.index))
+                indicator_names.append('macd_normalized')
+            elif 'macd_histogram' in df.columns:
+                macd_std = df['macd_histogram'].rolling(20).std()
+                normalized_macd_hist = np.where(macd_std > 0, df['macd_histogram'] / macd_std, 0)
+                momentum_indicators.append(pd.Series(normalized_macd_hist, index=df.index))
+                indicator_names.append('macd_hist_normalized')
+            
+            # 6. Stochastic K (centered at 50)
+            if 'stoch_k' in df.columns:
+                momentum_indicators.append((df['stoch_k'] - 50) / 50)
+                indicator_names.append('stoch_k_centered')
+            
+            # 7. ROC (Rate of Change)
+            if 'roc_10' in df.columns:
+                momentum_indicators.append(df['roc_10'] / 100)  # Convert from % to decimal
+                indicator_names.append('roc_10')
+            elif 'roc' in df.columns:
+                momentum_indicators.append(df['roc'] / 100)
+                indicator_names.append('roc')
+            
+            # 8. ADX (trend strength, normalized)
+            if 'adx_normalized' in df.columns:
+                # ADX shows trend strength (not direction), use with directional momentum
+                momentum_indicators.append(df['adx_normalized'])
+                indicator_names.append('adx_normalized')
+            elif 'adx' in df.columns:
+                momentum_indicators.append(df['adx'] / 100)
+                indicator_names.append('adx_scaled')
+            
+            # 9. Trend strength (directional consistency)
+            if 'trend_strength' in df.columns:
+                momentum_indicators.append(df['trend_strength'])
+                indicator_names.append('trend_strength')
+            
+            # 10. Volume ratio (momentum confirmation)
+            if 'volume_ratio' in df.columns:
+                # Center volume ratio: (ratio - 1) → 0 means average volume
+                momentum_indicators.append(df['volume_ratio'] - 1.0)
+                indicator_names.append('volume_ratio_centered')
+            
+            # Requirement: Need at least 5 indicators for robust composite
+            if len(momentum_indicators) < 5:
+                self.logger.warning(f"Insufficient indicators for composite: {len(momentum_indicators)}/10 available")
+                return df
+            
+            self.logger.debug(f"Building composite from {len(momentum_indicators)} indicators: {indicator_names}")
+            
+            # Step 2: Calculate MAD-based Z-scores for each indicator (outlier-resistant)
+            z_scores = []
+            for indicator in momentum_indicators:
+                z_score = self._calculate_mad_zscore(indicator)
+                z_scores.append(z_score)
+            
+            # Step 3: Weight and aggregate Z-scores
+            # Equal weighting for simplicity (can be adjusted based on strategy performance)
+            weights = np.ones(len(z_scores)) / len(z_scores)
+            
+            # Calculate weighted composite Z-score
+            composite_z_values = np.zeros(len(df))
+            for z_score, weight in zip(z_scores, weights):
+                composite_z_values += z_score.fillna(0).values * weight
+            
+            df['composite_z'] = composite_z_values
+            
+            # Step 4: Calculate composite percentile (0-100 scale)
+            # Use rolling window for percentile calculation (adaptive)
+            window = min(252, len(df))  # Up to 1 year of data
+            df['composite_pct'] = df['composite_z'].rolling(window, min_periods=50).apply(
+                lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
+            )
+            
+            # Fill NaN with neutral values
+            df['composite_z'] = df['composite_z'].fillna(0.0)
+            df['composite_pct'] = df['composite_pct'].fillna(50.0)
+            
+            self.logger.debug(f"Composite features created: z_range=[{df['composite_z'].min():.2f}, {df['composite_z'].max():.2f}], "
+                            f"pct_range=[{df['composite_pct'].min():.1f}, {df['composite_pct'].max():.1f}]")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating composite momentum features: {e}")
+            # Ensure columns exist with default values
+            if 'composite_z' not in df.columns:
+                df['composite_z'] = 0.0
+            if 'composite_pct' not in df.columns:
+                df['composite_pct'] = 50.0
+        
+        return df
+    
+    def _calculate_mad_zscore(self, series: pd.Series) -> pd.Series:
+        """
+        Calculate MAD-based Z-score (Median Absolute Deviation)
+        
+        More robust than standard Z-score for data with outliers.
+        Z-score = (X - median) / (1.4826 * MAD)
+        where MAD = median(|X - median|)
+        
+        Args:
+            series: Pandas Series of indicator values
+            
+        Returns:
+            Series of MAD-based Z-scores
+        """
+        try:
+            # Use rolling window for adaptive calculation
+            window = min(252, len(series))  # Up to 1 year
+            
+            def mad_zscore_window(x):
+                """Calculate MAD Z-score for a window"""
+                if len(x) < 20:
+                    return np.nan
+                
+                median = np.median(x)
+                mad = np.median(np.abs(x - median))
+                
+                # Avoid division by zero
+                if mad < 1e-8:
+                    # Use standard deviation fallback
+                    std = np.std(x)
+                    if std < 1e-8:
+                        return 0.0
+                    return (x.iloc[-1] - np.mean(x)) / std
+                
+                # MAD-based Z-score (1.4826 is scaling factor for normal distribution)
+                z_score = (x.iloc[-1] - median) / (1.4826 * mad)
+                return z_score
+            
+            z_scores = series.rolling(window, min_periods=20).apply(mad_zscore_window, raw=False)
+            return z_scores.fillna(0.0)
+            
+        except Exception as e:
+            self.logger.warning(f"Error calculating MAD Z-score: {e}, using fallback")
+            # Fallback to standard Z-score
+            mean = series.rolling(window, min_periods=20).mean()
+            std = series.rolling(window, min_periods=20).std()
+            z_score = (series - mean) / std.replace(0, 1)  # Avoid division by zero
+            return z_score.fillna(0.0)
     
     def _create_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create volatility-based features"""

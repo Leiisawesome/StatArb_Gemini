@@ -857,6 +857,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                     symbol=symbol
                                 )
                                 
+                                # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
+                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
+                                
                                 # Track processing times (approximate - distributed across segments)
                                 phase2_time = 0.1  # Placeholder - actual time distributed across segments
                                 phase3_time = 0.1
@@ -906,6 +909,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                 phase4_start = datetime.now()
                                 signals_df = await self._generate_signals(features_df)
                                 phase4_time = (datetime.now() - phase4_start).total_seconds()
+                                
+                                # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
+                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                         else:
                             logger.debug(f"   ⚠️  {symbol}: No regime sequence available - using standard processing")
                             
@@ -928,6 +934,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                             phase4_start = datetime.now()
                             signals_df = await self._generate_signals(features_df)
                             phase4_time = (datetime.now() - phase4_start).total_seconds()
+                            
+                            # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
+                            if regime_sequence:
+                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                     
                     # If regime_engine not available, use standard processing
                     if not self.regime_engine:
@@ -949,6 +959,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         phase4_start = datetime.now()
                         signals_df = await self._generate_signals(features_df)
                         phase4_time = (datetime.now() - phase4_start).total_seconds()
+                    
+                    # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness (if regime_sequence available)
+                    if regime_sequence:
+                        signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                     
                     self.processing_times['indicators'].append(phase2_time)
                     self.processing_times['features'].append(phase3_time)
@@ -1432,6 +1446,142 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             if col not in merged_df.columns:
                 merged_df[col] = np.nan
         return merged_df
+    
+    def _add_regime_columns(self, signals_df: pd.DataFrame, symbol: str, regime_sequence: List[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Add regime information columns to signals DataFrame (Phase 4C)
+        
+        This enables Type 2 (Explicit) regime awareness in strategies by providing
+        primary_regime and volatility_regime columns for each bar.
+        
+        Args:
+            signals_df: DataFrame with processed signals
+            symbol: Trading symbol
+            regime_sequence: List of regime dictionaries with timestamps
+            
+        Returns:
+            DataFrame with added regime columns:
+            - primary_regime: str (e.g., 'bull_market', 'bear_high_volatility', 'range_bound')
+            - volatility_regime: str (e.g., 'high_volatility', 'normal_volatility', 'low_volatility')
+            - regime_confidence: float (0-1, confidence in regime detection)
+        """
+        # DEBUG Phase 4C: Log regime sequence info
+        logger.info(f"🔍 Phase 4C: _add_regime_columns called for {symbol}")
+        logger.info(f"   Regime sequence length: {len(regime_sequence) if regime_sequence else 0}")
+        if regime_sequence:
+            logger.info(f"   First regime: {regime_sequence[0] if regime_sequence else 'N/A'}")
+            logger.info(f"   Last regime: {regime_sequence[-1] if regime_sequence else 'N/A'}")
+        
+        if signals_df.empty or not regime_sequence:
+            # Add default columns if no regime data
+            logger.warning(f"⚠️  {symbol}: Empty signals_df or regime_sequence - using defaults")
+            signals_df = signals_df.copy()
+            signals_df['primary_regime'] = 'normal_volatility'
+            signals_df['volatility_regime'] = 'normal_volatility'
+            signals_df['regime_confidence'] = 0.0
+            return signals_df
+        
+        try:
+            # Convert regime sequence to DataFrame
+            regime_df = pd.DataFrame(regime_sequence)
+            
+            # DEBUG Phase 4C: Log regime_df columns
+            logger.info(f"🔍 Phase 4C: Regime DataFrame columns: {list(regime_df.columns)}")
+            logger.info(f"   Regime DataFrame shape: {regime_df.shape}")
+            if len(regime_df) > 0:
+                logger.info(f"   Sample regime entry: {regime_df.iloc[0].to_dict()}")
+            
+            if 'timestamp' not in regime_df.columns:
+                logger.warning(f"⚠️  {symbol}: No timestamp in regime sequence, cannot add regime columns")
+                signals_df = signals_df.copy()
+                signals_df['primary_regime'] = 'normal_volatility'
+                signals_df['volatility_regime'] = 'normal_volatility'
+                signals_df['regime_confidence'] = 0.0
+                return signals_df
+            
+            # Ensure timestamps are datetime
+            regime_df['timestamp'] = pd.to_datetime(regime_df['timestamp'])
+            
+            # CRITICAL FIX: Map 'regime' column to 'primary_regime' if it exists
+            # The regime sequence uses 'regime' but we need 'primary_regime'
+            if 'regime' in regime_df.columns and 'primary_regime' not in regime_df.columns:
+                regime_df['primary_regime'] = regime_df['regime']
+                logger.info(f"✅ {symbol}: Mapped 'regime' → 'primary_regime'")
+            
+            # If no volatility_regime column exists, default to 'normal_volatility'
+            # (This happens when regime sequence only has combined regime like 'choppy')
+            if 'volatility_regime' not in regime_df.columns:
+                regime_df['volatility_regime'] = 'normal_volatility'
+                logger.info(f"✅ {symbol}: Added default 'volatility_regime' = 'normal_volatility'")
+            
+            # Keep only required columns
+            regime_cols = ['timestamp', 'primary_regime', 'volatility_regime', 'confidence']
+            available_cols = ['timestamp'] + [col for col in regime_cols[1:] if col in regime_df.columns]
+            regime_df = regime_df[available_cols].copy()
+            
+            # Rename confidence to regime_confidence
+            if 'confidence' in regime_df.columns:
+                regime_df = regime_df.rename(columns={'confidence': 'regime_confidence'})
+            
+            # Ensure signals_df has timestamp index as column for merging
+            signals_df = signals_df.copy()
+            if 'timestamp' not in signals_df.columns:
+                signals_df['timestamp'] = pd.to_datetime(signals_df.index)
+            else:
+                signals_df['timestamp'] = pd.to_datetime(signals_df['timestamp'])
+            
+            # CRITICAL FIX Phase 4C: Check if regime columns already exist (avoid duplicate merge)
+            if 'primary_regime' in signals_df.columns:
+                logger.warning(f"⚠️  {symbol}: primary_regime column already exists in signals_df - skipping merge")
+                logger.info(f"   Existing regime distribution: {signals_df['primary_regime'].value_counts().to_dict()}")
+                return signals_df  # Return as-is, regime data already added
+            
+            # Merge regime data with signals (forward fill for bars between regime changes)
+            merged_df = pd.merge_asof(
+                signals_df.sort_values('timestamp'),
+                regime_df.sort_values('timestamp'),
+                on='timestamp',
+                direction='backward'  # Use most recent regime for each bar
+            )
+            
+            # DEBUG Phase 4C: Log merge results
+            logger.info(f"🔍 Phase 4C: After merge, merged_df columns: {list(merged_df.columns)}")
+            if 'primary_regime' in merged_df.columns:
+                regime_dist = merged_df['primary_regime'].value_counts().to_dict()
+                logger.info(f"   Primary regime distribution AFTER merge: {regime_dist}")
+            
+            # Fill any remaining NaNs with defaults
+            if 'primary_regime' not in merged_df.columns:
+                merged_df['primary_regime'] = 'normal_volatility'
+            else:
+                merged_df['primary_regime'] = merged_df['primary_regime'].fillna('normal_volatility')
+            
+            if 'volatility_regime' not in merged_df.columns:
+                merged_df['volatility_regime'] = 'normal_volatility'
+            else:
+                merged_df['volatility_regime'] = merged_df['volatility_regime'].fillna('normal_volatility')
+            
+            if 'regime_confidence' not in merged_df.columns:
+                merged_df['regime_confidence'] = 0.0
+            else:
+                merged_df['regime_confidence'] = merged_df['regime_confidence'].fillna(0.0)
+            
+            # Restore original index if it was timestamp-based
+            if signals_df.index.name is not None and 'timestamp' in signals_df.columns:
+                merged_df = merged_df.set_index('timestamp')
+            
+            logger.debug(f"✅ {symbol}: Added regime columns to {len(merged_df)} bars")
+            
+            return merged_df
+            
+        except Exception as e:
+            logger.error(f"❌ {symbol}: Error adding regime columns: {e}")
+            # Return original DataFrame with default regime columns
+            signals_df = signals_df.copy()
+            signals_df['primary_regime'] = 'normal_volatility'
+            signals_df['volatility_regime'] = 'normal_volatility'
+            signals_df['regime_confidence'] = 0.0
+            return signals_df
     
     def get_liquidity_sequence(self, symbol: str) -> List[Dict[str, Any]]:
         """Retrieve stored liquidity sequence for a symbol"""

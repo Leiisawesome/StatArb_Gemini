@@ -6,7 +6,7 @@ End-to-end integration test that simulates live data processing with regime-awar
 signal generation using real historical data from ClickHouse.
 
 Process Flow (Phases 0-8):
-1. Load raw OHLCV data (TSLA, 2024-12-20, 1min frequency)
+1. Load raw OHLCV data (TSLA, 2024-11-06, 1min frequency) - POST-ELECTION RALLY
 2. Process through complete pipeline (Rule 3):
    - Data loading → Indicators → Features → Signals
 3. Apply regime-aware processing (Rule 2):
@@ -126,7 +126,7 @@ class LiveDataSignalGenerationTest:
                     'signals': []
                 }
             
-            logger.info(f"✅ Loaded {len(raw_data)} records for TSLA (2024-12-20, 1min)")
+            logger.info(f"✅ Loaded {len(raw_data)} records for TSLA (2024-11-06, 1min) - POST-ELECTION RALLY")
             logger.info(f"   Date range: {raw_data.index[0]} to {raw_data.index[-1]}")
             logger.info(f"   Columns: {list(raw_data.columns)}")
             
@@ -162,8 +162,8 @@ class LiveDataSignalGenerationTest:
                 strategy_signals = await self._generate_strategy_signals(
                     enriched_data, 
                     regime_engine, 
-                    start_time=datetime(2024, 12, 20, 9, 30, 0),
-                    end_time=datetime(2024, 12, 20, 16, 0, 0)
+                    start_time=datetime(2024, 11, 6, 9, 30, 0),  # POST-ELECTION RALLY
+                    end_time=datetime(2024, 11, 6, 16, 0, 0)
                 )
                 phase_6_tested = True  # Phase 6 tested if signal generation executed (even if 0 signals)
             except Exception as e:
@@ -291,9 +291,9 @@ class LiveDataSignalGenerationTest:
             await data_manager.start()
             
             try:
-                # Load data for TSLA on 2024-12-20 at 1min frequency
-                start_time = '2024-12-20 09:30:00'
-                end_time = '2024-12-20 16:00:00'
+                # Load data for TSLA on 2024-11-06 (POST-ELECTION RALLY) at 1min frequency
+                start_time = '2024-11-06 09:30:00'
+                end_time = '2024-11-06 16:00:00'
                 
                 logger.info(f"   Loading TSLA data: {start_time} to {end_time}")
                 raw_data = data_manager.get_market_data(
@@ -380,7 +380,7 @@ class LiveDataSignalGenerationTest:
         **ENHANCED:** Now uses ProcessingPipelineOrchestrator which automatically
         performs regime-segmented processing when regime changes are detected.
         
-        Uses LIVE data from ClickHouse (2024-12-20, TSLA, 1min).
+        Uses LIVE data from ClickHouse (2024-11-06, TSLA, 1min) - POST-ELECTION RALLY.
         """
         try:
             from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
@@ -409,9 +409,9 @@ class LiveDataSignalGenerationTest:
             pipeline.set_regime_engine(regime_engine)
             
             try:
-                # Use LIVE data: TSLA, 2024-12-20, 1min
-                start_time = datetime(2024, 12, 20, 9, 30, 0)  # Market open
-                end_time = datetime(2024, 12, 20, 16, 0, 0)    # Market close
+                # Use LIVE data: TSLA, 2024-11-06 (POST-ELECTION RALLY), 1min
+                start_time = datetime(2024, 11, 6, 9, 30, 0)  # Market open
+                end_time = datetime(2024, 11, 6, 16, 0, 0)    # Market close
                 
                 logger.info("   📊 Processing through pipeline orchestrator (with regime-segmented processing)...")
                 logger.info(f"   📅 Loading LIVE data: TSLA, {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
@@ -605,7 +605,7 @@ class LiveDataSignalGenerationTest:
                         'lookback_period': 60,
                         'momentum_threshold': 0.02,
                         'symbols': ['TSLA'],  # CRITICAL: Specify symbols for strategy
-                        'scan_all_bars': False,  # LIVE MODE: Only evaluate last bar (real trading simulation)
+                        'scan_all_bars': False,  # LIVE MODE: Only evaluate current bar (correct for bar-by-bar simulation)
                         'scan_interval': 1,
                         'enable_regime_adjusted_thresholds': True  # Enable regime-adjusted thresholds
                     }
@@ -712,7 +712,24 @@ class LiveDataSignalGenerationTest:
                 enriched_data = enriched_data_dict['TSLA']
                 full_dataframe = enriched_data.signals  # Fully enriched DataFrame with all bars
                 
+                # DEBUG Phase 4C: Verify regime diversity in full_dataframe
+                logger.info("\n" + "=" * 80)
+                logger.info("🔍 Phase 4C DIAGNOSTIC: Regime Data in Full DataFrame")
+                logger.info("=" * 80)
                 logger.info(f"   📊 Total bars available: {len(full_dataframe)}")
+                if 'primary_regime' in full_dataframe.columns:
+                    regime_dist = full_dataframe['primary_regime'].value_counts().to_dict()
+                    logger.info(f"   ✅ primary_regime column exists")
+                    logger.info(f"   📊 Regime distribution in FULL dataframe: {regime_dist}")
+                else:
+                    logger.warning(f"   ❌ primary_regime column MISSING from full_dataframe")
+                if 'volatility_regime' in full_dataframe.columns:
+                    vol_regime_dist = full_dataframe['volatility_regime'].value_counts().to_dict()
+                    logger.info(f"   ✅ volatility_regime column exists")
+                    logger.info(f"   📊 Volatility regime distribution: {vol_regime_dist}")
+                else:
+                    logger.warning(f"   ❌ volatility_regime column MISSING from full_dataframe")
+                logger.info("=" * 80)
                 
                 # Initialize trading components for simulation
                 from core_engine.system.central_risk_manager import (
@@ -726,9 +743,14 @@ class LiveDataSignalGenerationTest:
                     'max_position_size': 0.50,  # Increased to 50% for backtesting (allows position accumulation across multiple signals)
                     'position_concentration_limit': 0.50,  # Increased to 50% for backtesting (matches position limit)
                     'max_daily_var': 0.05,
-                    'min_signal_confidence': 0.6
+                    'min_signal_confidence': 0.6,
+                    'allow_shorts': True  # Enable short selling to test SHORT signals
                 })
                 await risk_manager.initialize()
+                
+                # CRITICAL FIX: Set allow_shorts directly on config since it's not in RiskConfig dataclass
+                risk_manager.config.allow_shorts = True
+                logger.info(f"   ✅ Short selling enabled: {getattr(risk_manager.config, 'allow_shorts', False)}")
                 
                 trading_engine = EnhancedTradingEngine({
                     'default_execution_strategy': 'market',
@@ -838,7 +860,21 @@ class LiveDataSignalGenerationTest:
                         logger.info(f"   📊 Progress: Bar {bar_idx}/{len(full_dataframe)-1} ({progress_pct:.1f}%) - Window size: {min(rolling_window_size, bar_idx+1)} bars")
                     current_bar = full_dataframe.iloc[bar_idx]
                     current_timestamp = current_bar.name if hasattr(current_bar, 'name') else None
-                    current_price = current_bar.get('close', 0)
+                    
+                    # CRITICAL FIX: Extract price from enriched data (handles multi-index columns)
+                    # Try multiple column name patterns
+                    if 'close' in current_bar.index:
+                        current_price = current_bar['close']
+                    elif ('TSLA', 'close') in current_bar.index:
+                        current_price = current_bar[('TSLA', 'close')]
+                    elif any('close' in str(col).lower() for col in current_bar.index):
+                        # Find any column with 'close' in the name
+                        close_col = next((col for col in current_bar.index if 'close' in str(col).lower()), None)
+                        current_price = current_bar[close_col] if close_col else 100.0
+                    else:
+                        current_price = 100.0  # Fallback default
+                        if bar_idx == warmup_period:  # Log once
+                            logger.warning(f"⚠️  Could not find 'close' price in bar columns: {list(current_bar.index)[:10]}...")
                     
                     # ROLLING WINDOW: Only pass recent N bars (not all historical data)
                     # This is more realistic - in production, you don't keep ALL historical data

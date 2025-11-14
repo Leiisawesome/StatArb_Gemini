@@ -210,7 +210,8 @@ class MomentumConfig(BaseStrategyConfig):
     
     # Historical scanning mode (for backtesting)
     scan_all_bars: bool = False
-    """Scan all bars in historical data (for backtesting). Default: False (live mode - current bar only)"""
+    """Scan all bars in historical data when True (backtesting mode). Default: False (live mode - evaluates current bar only). 
+    Set to True for backtesting to scan entire historical dataset."""
     
     scan_interval: int = 1
     """Evaluate every N bars when scanning (1 = every bar, 5 = every 5 bars). Default: 1"""
@@ -221,6 +222,42 @@ class MomentumConfig(BaseStrategyConfig):
     
     regime_adjustment_factor: float = 0.8
     """Multiplier for thresholds in unfavorable regimes (0.8 = 20% reduction). Default: 0.8"""
+    
+    # ATR-based risk management (Exit Logic)
+    atr_initial_stop_multiple: float = 1.8
+    """ATR multiple for initial stop loss. Default: 1.8x ATR (hard stop to limit losses)"""
+    
+    atr_trailing_activation: float = 0.75
+    """Profit in ATR multiples to activate trailing stop. Default: 0.75x ATR (lock in profits when position moves favorably)"""
+    
+    atr_trailing_distance: float = 0.8
+    """Trailing stop distance in ATR multiples. Default: 0.8x ATR (protect profits while allowing breathing room)"""
+    
+    # Composite signal exits (Exit Logic)
+    composite_z_exit: float = 0.7
+    """Composite Z-score threshold to trigger exit. Default: 0.7 (momentum deterioration signal)"""
+    
+    composite_pct_exit: float = 55.0
+    """Composite percentile threshold to trigger exit. Default: 55.0 (relative weakness signal)"""
+    
+    # Volume-based exits (Exit Logic)
+    volume_failure_multiplier: float = 0.9
+    """Volume ratio to trigger volume-failure exit. Default: 0.9x average (no follow-through)"""
+    
+    volume_failure_window: int = 20
+    """Lookback window for volume failure check. Default: 20 bars"""
+    
+    # Time-based exits (Exit Logic)
+    time_stop_minutes: int = 90
+    """Maximum holding period in minutes. Default: 90 minutes (1.5 hours max hold)"""
+    
+    # Composite signal entry thresholds
+    composite_z_entry: float = 0.5
+    """Entry Z-score threshold for composite momentum signal. Default: 0.5 (requires moderate momentum strength for entry)."""
+    
+    composite_pct_entry: float = 70.0
+    """Entry percentile threshold for composite momentum signal. Default: 70.0 (top 30% momentum required for entry).
+    Format: 0-100 percentage scale (70.0 = 70th percentile)."""
     
     def __post_init__(self):
         """Validate momentum configuration parameters"""
@@ -236,6 +273,31 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"position_base_multiplier must be (0, 1.0], got {self.position_base_multiplier}")
         if not 0 < self.momentum_multiplier_cap <= 5.0:
             raise ValueError(f"momentum_multiplier_cap must be (0, 5.0], got {self.momentum_multiplier_cap}")
+        
+        # Validate exit logic parameters
+        if self.atr_initial_stop_multiple <= 0:
+            raise ValueError(f"atr_initial_stop_multiple must be positive, got {self.atr_initial_stop_multiple}")
+        if self.atr_trailing_activation <= 0:
+            raise ValueError(f"atr_trailing_activation must be positive, got {self.atr_trailing_activation}")
+        if self.atr_trailing_distance <= 0:
+            raise ValueError(f"atr_trailing_distance must be positive, got {self.atr_trailing_distance}")
+        if self.composite_z_exit < 0:
+            raise ValueError(f"composite_z_exit must be non-negative, got {self.composite_z_exit}")
+        if not 0 <= self.composite_pct_exit <= 100:
+            raise ValueError(f"composite_pct_exit must be [0, 100], got {self.composite_pct_exit}")
+        if self.volume_failure_multiplier <= 0:
+            raise ValueError(f"volume_failure_multiplier must be positive, got {self.volume_failure_multiplier}")
+        if self.volume_failure_window <= 0:
+            raise ValueError(f"volume_failure_window must be positive, got {self.volume_failure_window}")
+        if self.time_stop_minutes <= 0:
+            raise ValueError(f"time_stop_minutes must be positive, got {self.time_stop_minutes}")
+        
+        # Validate entry logic parameters
+        if self.composite_z_entry < 0:
+            raise ValueError(f"composite_z_entry must be non-negative, got {self.composite_z_entry}")
+        if not 0 <= self.composite_pct_entry <= 100:
+            raise ValueError(f"composite_pct_entry must be [0, 100], got {self.composite_pct_entry}")
+
 
 
 @dataclass
