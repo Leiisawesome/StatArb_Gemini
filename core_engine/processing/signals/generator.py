@@ -1386,19 +1386,37 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             signal_regime = None
             if self.regime_engine:
                 # Use injected regime engine to get regime at signal's timestamp
-                signal_regime = self.regime_engine.get_regime_at_timestamp(
+                candidate_regime = self.regime_engine.get_regime_at_timestamp(
                     symbol=signal.symbol,
                     timestamp=signal.timestamp
                 )
+                if self._is_valid_regime_context(candidate_regime):
+                    signal_regime = candidate_regime
             
-            # Fallback to current_regime if timestamp lookup fails
-            if signal_regime is None:
-                signal_regime = self.current_regime
+            # Fallback to current_regime if timestamp lookup fails or context invalid
+            if not self._is_valid_regime_context(signal_regime):
+                signal_regime = self.current_regime if self._is_valid_regime_context(self.current_regime) else None
             
             if signal_regime and hasattr(signal_regime, 'primary_regime'):
-                regime_name = signal_regime.primary_regime.value if (hasattr(signal_regime.primary_regime, 'value')) else signal_regime.primary_regime
-                volatility_regime = getattr(signal_regime, 'volatility_regime', 'normal_volatility')
-                regime_confidence = getattr(signal_regime, 'confidence', 0.5)
+                regime_name = self._coerce_str(
+                    signal_regime.primary_regime.value if hasattr(signal_regime.primary_regime, 'value') else signal_regime.primary_regime,
+                    default='unknown'
+                )
+                volatility_source = getattr(signal_regime, 'volatility_regime', None)
+                if volatility_source in (None, '', 'unknown'):
+                    volatility_source = getattr(signal_regime, 'primary_regime', volatility_source)
+                volatility_source = getattr(volatility_source, 'value', volatility_source)
+                if (not volatility_source or volatility_source == 'normal_volatility') and isinstance(regime_name, str):
+                    if 'volatility' in regime_name:
+                        volatility_source = regime_name
+                volatility_regime = self._coerce_str(
+                    volatility_source,
+                    default='normal_volatility'
+                )
+                regime_confidence = getattr(signal_regime, 'confidence', None)
+                if regime_confidence is None:
+                    regime_confidence = getattr(signal_regime, 'regime_confidence', 0.5)
+                regime_confidence = self._coerce_numeric(regime_confidence, default=0.5)
                 
                 # Adjust signal confidence based on regime confidence
                 regime_adjustment_factor *= regime_confidence
@@ -1406,8 +1424,11 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 # Volatility-based threshold adjustments
                 if volatility_regime == 'high_volatility' or volatility_regime == 'extreme_volatility':
                     # Stricter filtering in high/extreme volatility regimes
-                    regime_adjustment_factor *= 0.8
-                    self.logger.debug(f"High volatility regime: reducing signal confidence by 20%")
+                    reduction = 0.8 if volatility_regime == 'high_volatility' else 0.6
+                    regime_adjustment_factor *= reduction
+                    self.logger.debug(
+                        f"{volatility_regime} regime: reducing signal confidence by {(1 - reduction) * 100:.0f}%"
+                    )
                 elif volatility_regime == 'low_volatility':
                     # Relaxed filtering in low volatility regimes
                     regime_adjustment_factor *= 1.1
@@ -1425,7 +1446,10 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 # Using 0.8 ensures signals with confidence 0.65+ can still pass 0.6 threshold after adjustments
                 # Example: 0.65 × 0.8 = 0.52 (too low), but with higher base confidence (0.7+) → 0.7 × 0.8 = 0.56
                 # Combined with enhanced confidence scaling, signals should pass
-                regime_adjustment_factor = max(0.8, regime_adjustment_factor)
+                min_factor = 0.8
+                if volatility_regime == 'extreme_volatility':
+                    min_factor = 0.5
+                regime_adjustment_factor = max(min_factor, regime_adjustment_factor)
                 
                 # Apply regime adjustments to confidence
                 adjusted_confidence = signal.confidence * regime_adjustment_factor
@@ -1454,6 +1478,22 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 signal.metadata['volatility_regime'] = volatility_regime
                 signal.metadata['regime_confidence'] = regime_confidence
                 signal.metadata['regime_at_signal_timestamp'] = True  # Flag indicating bar-by-bar lookup
+                if volatility_regime == 'extreme_volatility':
+                    original_size = signal.position_size
+                    signal.position_size = min(signal.position_size, 0.02)
+                    signal.metadata['position_size_adjustment'] = {
+                        'reason': 'extreme_volatility_cap',
+                        'original_size': original_size,
+                        'adjusted_size': signal.position_size
+                    }
+                elif volatility_regime == 'high_volatility':
+                    original_size = signal.position_size
+                    signal.position_size = min(signal.position_size, 0.05)
+                    signal.metadata['position_size_adjustment'] = {
+                        'reason': 'high_volatility_cap',
+                        'original_size': original_size,
+                        'adjusted_size': signal.position_size
+                    }
             
             filtered.append(signal)
         
@@ -1783,6 +1823,50 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 "weak": len([s for s in signals if s.strength == SignalStrength.WEAK])
             }
         }
+
+    @staticmethod
+    def _coerce_numeric(value: Any, default: float = 1.0) -> float:
+        """
+        Safely convert mock/test doubles or arbitrary objects to a float.
+        """
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _coerce_str(value: Any, default: str = "unknown") -> str:
+        """
+        Safely convert mock/test doubles or arbitrary objects to string.
+        """
+        try:
+            if value is None:
+                return default
+            if isinstance(value, str):
+                return value
+            if hasattr(value, "value"):
+                return str(value.value)
+            return str(value)
+        except Exception:
+            return default
+
+    def _is_valid_regime_context(self, context: Any) -> bool:
+        """
+        Determine if the provided context looks like a usable regime context.
+        """
+        if context is None:
+            return False
+        primary = getattr(context, 'primary_regime', None)
+        if primary is None:
+            return False
+        primary_value = getattr(primary, 'value', primary)
+        if isinstance(primary_value, str):
+            return True
+        if isinstance(primary_value, Enum):
+            return True
+        return False
     
     # ========================================
     # STANDARDIZED DATA CONSUMPTION METHODS

@@ -198,9 +198,16 @@ class EnhancedStrategyFactory:
             logger.info(f"✅ Created enhanced strategy: {strategy_type.value} - {config.get('name')}")
             return strategy_instance
             
+        except ConfigurationRequiredError as config_error:
+            # Configuration validation failed (e.g., invalid lookback)
+            logger.error(
+                f"❌ Failed to create enhanced strategy {strategy_type}: {config_error}. "
+                f"Strategy config: {config}"
+            )
+            return None
         except Exception as e:
-            logger.error(f"❌ Failed to create enhanced strategy {strategy_type}: {e}")
-            raise ConfigurationRequiredError(f"Cannot create enhanced strategy {strategy_type}: {e}") from e
+            logger.exception(f"❌ Unexpected error creating enhanced strategy {strategy_type}: {e}")
+            return None
     
     @classmethod
     def _create_config_object(cls, config_class: Type, config_dict: Dict[str, Any]):

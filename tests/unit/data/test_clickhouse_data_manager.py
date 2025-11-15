@@ -84,9 +84,8 @@ class TestClickHouseDataManagerBasics:
         from core_engine.exceptions import ClickHouseConnectionError
         
         # This should fail fast during __init__ when ClickHouse is unavailable
-        # Patch _test_connection before instantiation - use patch on the class
-        # Make sure to patch before creating the instance
-        with patch.object(ClickHouseDataManager, '_test_connection', return_value=False, autospec=True):
+        # Patch at module level to ensure it works even when tests run together
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=False):
             with pytest.raises(ClickHouseConnectionError):
                 # Exception should be raised during __init__, not initialize()
                 manager = ClickHouseDataManager(data_config)

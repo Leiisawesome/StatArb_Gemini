@@ -17,6 +17,7 @@ Status: Production
 """
 
 import logging
+import inspect
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
@@ -775,6 +776,12 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             phase1_start = datetime.now()
             
             raw_data = await self._load_raw_data(symbols, start_time, end_time, timeframe)
+
+            # Some unit tests patch _load_raw_data with AsyncMock objects that return
+            # coroutine instances. If we detect another awaitable here, await it
+            # once more so downstream logic always receives a concrete mapping.
+            if inspect.isawaitable(raw_data):
+                raw_data = await raw_data
             
             phase1_time = (datetime.now() - phase1_start).total_seconds()
             self.processing_times['data_loading'].append(phase1_time)

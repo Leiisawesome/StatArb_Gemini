@@ -24,6 +24,44 @@ warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
 
+class SignalTypeWrapper(str):
+    """
+    Wrapper that behaves like a string for storage/serialization while
+    retaining the original SignalType enum for comparisons.
+    """
+
+    __slots__ = ("_enum",)
+
+    def __new__(cls, enum_value, str_value: Optional[str] = None):
+        if str_value is None:
+            if hasattr(enum_value, "value"):
+                str_value = str(enum_value.value).upper()
+            else:
+                str_value = str(enum_value).upper()
+        obj = super().__new__(cls, str_value)
+        obj._enum = enum_value
+        return obj
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return str(self) == other
+        return self._enum == other
+
+    def __hash__(self):
+        return hash(str(self))
+
+    @property
+    def enum(self):
+        return self._enum
+
+    @property
+    def value(self):
+        return str(self)
+
+    def __reduce__(self):
+        return (self.__class__, (self._enum, str(self)))
+
+
 class CombinationMethod(Enum):
     """Signal combination methods"""
     SIMPLE_AVERAGE = "simple_average"
@@ -968,36 +1006,8 @@ class SignalCombiner:
                 original_signal_type_enum = result_signal.signal_type
                 signal_type_str = original_signal_type_enum.value.upper() if hasattr(original_signal_type_enum, 'value') else str(original_signal_type_enum).upper()
                 
-                # Create a wrapper class that supports both enum and string comparison
-                # Define outside inner function for proper closure
-                class _SignalTypeWrapper:
-                    """Wrapper to support both enum and string comparison for signal_type"""
-                    def __init__(self, enum_value, str_value):
-                        self._enum = enum_value
-                        self._str = str_value
-                    
-                    def __eq__(self, other):
-                        """Compare with both enum and string"""
-                        if isinstance(other, str):
-                            return self._str == other
-                        return self._enum == other
-                    
-                    def __ne__(self, other):
-                        return not self.__eq__(other)
-                    
-                    def __str__(self):
-                        return self._str
-                    
-                    def __repr__(self):
-                        return repr(self._enum)
-                    
-                    @property
-                    def value(self):
-                        """Access enum value property"""
-                        return self._enum.value if hasattr(self._enum, 'value') else self._str
-                
                 # Replace signal_type with wrapper that supports string comparison
-                result_signal.signal_type = _SignalTypeWrapper(original_signal_type_enum, signal_type_str)
+                result_signal.signal_type = SignalTypeWrapper(original_signal_type_enum, signal_type_str)
                 
                 return result_signal
             return None

@@ -471,10 +471,44 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             enriched_data_dict: Dict[symbol, enriched DataFrame with indicators/features]
         """
         
+        # First, sync with Risk Manager: clear exit_pending positions if they're closed or stale
+        if self.risk_manager:
+            symbols_to_clear = []
+            for symbol in list(self.position_tracker.keys()):
+                pos = self.position_tracker[symbol]
+                if pos.get('exit_pending', False):
+                    # Check for stale exit_pending (timeout after 10 bars)
+                    current_bar = len(enriched_data_dict.get(symbol, []))
+                    exit_signal_bar = pos.get('exit_signal_bar', current_bar)
+                    bars_since_exit = current_bar - exit_signal_bar
+                    
+                    if bars_since_exit > 10:
+                        logger.warning(f"⚠️  {symbol} exit_pending timeout ({bars_since_exit} bars) - force clearing")
+                        symbols_to_clear.append(symbol)
+                        continue
+                    
+                    # Check if Risk Manager still has this position
+                    try:
+                        position_state = self.risk_manager.get_position_state(symbol)
+                        if position_state is None or position_state.quantity == 0:
+                            logger.info(f"✅ {symbol} position closed confirmed by Risk Manager - clearing tracking")
+                            symbols_to_clear.append(symbol)
+                    except Exception as e:
+                        logger.warning(f"⚠️  {symbol} failed to query Risk Manager position state: {e}")
+            
+            # Clear confirmed closed positions
+            for symbol in symbols_to_clear:
+                self._clear_position_tracking(symbol)
+        
         # Make a copy of position keys to avoid modification during iteration
         symbols_with_positions = list(self.position_tracker.keys())
         
         for symbol in symbols_with_positions:
+            # Skip positions that are already pending exit
+            if self.position_tracker[symbol].get('exit_pending', False):
+                logger.debug(f"⏭️  {symbol} has exit_pending=True, skipping exit check")
+                continue
+            
             if symbol not in enriched_data_dict:
                 logger.warning(f"⚠️  {symbol} position exists but no enriched data available")
                 continue
@@ -509,11 +543,21 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     try:
                         await self.risk_manager.process_signal(exit_signal)
                         logger.info(f"✅ {symbol} exit signal submitted to risk manager")
+                        
+                        # Mark position as exit_pending instead of immediately clearing
+                        # This allows Risk Manager to find the position when processing the exit
+                        if symbol in self.position_tracker:
+                            self.position_tracker[symbol]['exit_pending'] = True
+                            self.position_tracker[symbol]['exit_signal_bar'] = len(enriched_data)
+                            logger.info(f"⚠️  {symbol} position marked as exit_pending - will clear after Risk Manager confirmation")
+                        
                     except Exception as e:
                         logger.error(f"❌ {symbol} exit signal submission failed: {e}")
-                
-                # Clear position tracking after exit
-                self._clear_position_tracking(symbol)
+                        # If submission fails, still clear position to avoid stale tracking
+                        self._clear_position_tracking(symbol)
+                else:
+                    # No risk manager - clear immediately (backward compatibility)
+                    self._clear_position_tracking(symbol)
     
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
         """Calculate position size for a given signal"""
@@ -774,9 +818,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         signals = []
         
         try:
-            # Skip if already have position
+            # Skip if already have position or exit is pending
             if symbol in self.position_tracker:
-                logger.info(f"⏭️  [{symbol}] Skipping - already have position")
+                is_exit_pending = self.position_tracker[symbol].get('exit_pending', False)
+                if is_exit_pending:
+                    logger.info(f"⏭️  [{symbol}] Skipping - exit pending for existing position")
+                else:
+                    logger.info(f"⏭️  [{symbol}] Skipping - already have position")
                 return signals
             
             # Get current indicators and momentum data

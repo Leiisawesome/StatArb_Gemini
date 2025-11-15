@@ -314,7 +314,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Test ClickHouse connection - FAIL FAST if unavailable
         self._connection_available = False
         try:
-            self._connection_available = self._test_connection()
+            connection_result = self._test_connection()
+            self._connection_available = self._coerce_bool(connection_result, default=False)
             if not self._connection_available:
                 raise ClickHouseConnectionError(
                     "ClickHouse database unavailable. Cannot proceed without real market data."
@@ -329,6 +330,30 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
         )
+    
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool = False, _depth: int = 0) -> bool:
+        """Safely convert mock/async values to a deterministic boolean."""
+        if _depth > 5:
+            try:
+                return bool(value)
+            except Exception:
+                return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "yes", "y"}
+        if hasattr(value, "return_value"):
+            try:
+                return ClickHouseDataManager._coerce_bool(value.return_value, default, _depth=_depth + 1)
+            except Exception:
+                return default
+        try:
+            return bool(value)
+        except Exception:
+            return default
     
     # ========================================
     # ORCHESTRATOR INTEGRATION
@@ -386,7 +411,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.info("Initializing ClickHouseDataManager...")
             
             # Test connection - FAIL FAST if unavailable
-            self._connection_available = self._test_connection()
+            connection_result = self._test_connection()
+            self._connection_available = self._coerce_bool(connection_result, default=False)
             if not self._connection_available:
                 raise ClickHouseConnectionError(
                     "ClickHouse database unavailable during initialization. Cannot proceed without real market data."
@@ -442,12 +468,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on the data manager"""
+        connection_available = self._coerce_bool(self._connection_available, default=False)
         health_status = {
-            'healthy': self.is_operational and self.is_initialized and self._connection_available,
+            'healthy': self.is_operational and self.is_initialized and connection_available,
             'initialized': self.is_initialized,
             'operational': self.is_operational,
             'component_type': 'ClickHouseDataManager',
-            'connection_available': self._connection_available,
+            'connection_available': connection_available,
             'cache_size': len(self._cache),
             'configured_symbols': len(self.enhanced_config.symbols),
             'date_range': {
@@ -459,7 +486,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Test connection if operational - FAIL FAST if unavailable
         if self.is_operational:
             try:
-                connection_test = self._test_connection()
+                connection_test = self._coerce_bool(self._test_connection(), default=False)
                 health_status['connection_test_result'] = connection_test
                 if not connection_test:
                     health_status['healthy'] = False

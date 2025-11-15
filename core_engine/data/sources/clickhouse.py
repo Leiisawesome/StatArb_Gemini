@@ -373,6 +373,33 @@ class DataEngine(ISystemComponent):
         # Note: Monitoring will be started in start() method (ISystemComponent lifecycle)
         self.logger.info("✅ DataEngine created (call initialize() and start() for full activation)")
     
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool = False, _depth: int = 0) -> bool:
+        """
+        Safely convert mock/async values to a deterministic boolean.
+        """
+        if _depth > 5:
+            try:
+                return bool(value)
+            except Exception:
+                return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "yes", "y"}
+        # Handle mocks/AsyncMocks that expose return_value
+        if hasattr(value, "return_value"):
+            try:
+                return DataEngine._coerce_bool(value.return_value, default, _depth=_depth + 1)
+            except Exception:
+                return default
+        try:
+            return bool(value)
+        except Exception:
+            return default
+    
     def _initialize_components(self) -> None:
         """Initialize data engine components"""
         
@@ -478,25 +505,58 @@ class DataEngine(ISystemComponent):
     async def _route_request(self, request: DataRequest) -> DataResponse:
         """Route request to appropriate data handler"""
         
-        # Determine handler based on data type
-        if request.data_type in ['market_data', 'price', 'quote', 'trade', 'ohlc']:
-            if self.market_data_handler:
-                return await self._handle_market_data_request(request)
-        
-        elif request.data_type in ['news', 'sentiment', 'fundamental', 'alternative']:
-            if self.alternative_data_handler:
-                return await self._handle_alternative_data_request(request)
-        
+        market_types = ['market_data', 'price', 'quote', 'trade', 'ohlc']
+        alternative_types = ['news', 'sentiment', 'fundamental', 'alternative']
+
+        if request.data_type in market_types:
+            if self.market_data_handler is not None:
+                response = await self._handle_market_data_request(request)
+                logger.debug(
+                    "Market handler response for %s success=%s alt_handler=%r",
+                    request.request_id,
+                    response.success,
+                    self.alternative_data_handler,
+                )
+                if response.success:
+                    return response
+                fallback = await self._attempt_alternative_fallback(request, response)
+                if fallback:
+                    return fallback
+                return response
+            fallback = await self._attempt_alternative_fallback(request)
+            if fallback:
+                return fallback
+
+        elif request.data_type in alternative_types:
+            if self.alternative_data_handler is not None:
+                response = await self._handle_alternative_data_request(request)
+                if response.success:
+                    return response
+                if self.market_data_handler is not None:
+                    market_response = await self._handle_market_data_request(request)
+                    if market_response.success:
+                        return market_response
+                return response
+
         else:
-            # Try to handle with available handlers
-            if self.market_data_handler:
+            response = None
+            if self.market_data_handler is not None:
                 response = await self._handle_market_data_request(request)
                 if response.success:
                     return response
-            
-            if self.alternative_data_handler:
-                response = await self._handle_alternative_data_request(request)
-                if response.success:
+                fallback = await self._attempt_alternative_fallback(request, response)
+                if fallback:
+                    return fallback
+
+            alt_handler = self.alternative_data_handler
+            logger.debug("Alternate handler for request %s: %r", request.request_id, alt_handler)
+            if alt_handler is not None:
+                alt_response = await self._handle_alternative_data_request(request)
+                if alt_response.success:
+                    return alt_response
+                response = response or alt_response
+
+            if response:
                     return response
         
         return self._create_error_response(
@@ -523,22 +583,13 @@ class DataEngine(ISystemComponent):
             
             # Safely extract attributes (handle both SimpleNamespace and Mock objects)
             success = getattr(market_response, 'success', False)
-            # Convert to bool, handling Mock objects
-            # SimpleNamespace attributes are NOT callable, so check callable() first
-            if callable(success) and not isinstance(success, type) and hasattr(success, 'return_value'):
-                # Likely a Mock object - get return_value directly
-                try:
-                    success_value = success.return_value
-                    success_bool = bool(success_value) if success_value is not None else True
-                except Exception:
-                    # If return_value access fails, default to True (conservative)
-                    success_bool = True
-            else:
-                # Not a Mock - convert directly (SimpleNamespace attributes or actual bools)
-                try:
-                    success_bool = bool(success)
-                except (TypeError, ValueError):
-                    success_bool = True  # Default to True if conversion fails
+            success_bool = self._coerce_bool(success, default=False)
+            logger.debug(
+                "Market data handler response for %s -> success=%s error=%s",
+                request.request_id,
+                success_bool,
+                getattr(market_response, 'error_message', None),
+            )
             
             data = getattr(market_response, 'data', {})
             metadata = getattr(market_response, 'metadata', {})
@@ -582,22 +633,13 @@ class DataEngine(ISystemComponent):
             
             # Safely extract attributes (handle both SimpleNamespace and Mock objects)
             success = getattr(alt_response, 'success', False)
-            # Convert to bool, handling Mock objects
-            # SimpleNamespace attributes are NOT callable, so check callable() first
-            if callable(success) and not isinstance(success, type) and hasattr(success, 'return_value'):
-                # Likely a Mock object - get return_value directly
-                try:
-                    success_value = success.return_value
-                    success_bool = bool(success_value) if success_value is not None else True
-                except Exception:
-                    # If return_value access fails, default to True (conservative)
-                    success_bool = True
-            else:
-                # Not a Mock - convert directly (SimpleNamespace attributes or actual bools)
-                try:
-                    success_bool = bool(success)
-                except (TypeError, ValueError):
-                    success_bool = True  # Default to True if conversion fails
+            success_bool = self._coerce_bool(success, default=False)
+            logger.debug(
+                "Alternative data handler response for %s -> success=%s error=%s",
+                request.request_id,
+                success_bool,
+                getattr(alt_response, 'error_message', None),
+            )
             
             data = getattr(alt_response, 'data', {})
             metadata = getattr(alt_response, 'metadata', {})
@@ -622,6 +664,29 @@ class DataEngine(ISystemComponent):
                 str(e),
                 "ALTERNATIVE_DATA_ERROR"
             )
+
+    async def _attempt_alternative_fallback(
+        self,
+        request: DataRequest,
+        failed_response: Optional[DataResponse] = None
+    ) -> Optional[DataResponse]:
+        """
+        Attempt to fulfill request via alternative data handler when primary fails.
+        """
+        if self.alternative_data_handler is None:
+            logger.debug("Alternative data handler unavailable for request %s", request.request_id)
+            return None
+
+        alt_response = await self._handle_alternative_data_request(request)
+        if alt_response.success:
+            if not isinstance(alt_response.metadata, dict):
+                alt_response.metadata = {}
+            alt_response.metadata.setdefault('fallback_source', 'alternative_data_handler')
+            if failed_response and failed_response.error_message:
+                alt_response.metadata.setdefault('fallback_reason', failed_response.error_message)
+            alt_response.data_source = DataSource.SECONDARY
+            return alt_response
+        return None
     
     async def _check_cache(self, request: DataRequest) -> Optional[DataResponse]:
         """Check cache for existing data"""

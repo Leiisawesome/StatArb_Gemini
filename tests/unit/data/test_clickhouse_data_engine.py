@@ -1327,6 +1327,11 @@ class TestRouteRequestComprehensive:
         original_alt_handler = data_engine.alternative_data_handler
         
         try:
+            # Reset data engine state to ensure test isolation
+            data_engine._statistics = type('obj', (object,), {
+                'total_requests': 0, 'successful_requests': 0, 'failed_requests': 0, 'cached_requests': 0
+            })()
+            
             request = DataRequest(
                 request_id="test_fallback_alt",
                 data_type="unknown_type",
@@ -2213,6 +2218,11 @@ class TestRouteRequestFallbackEdgeCases:
         original_alt_handler = data_engine.alternative_data_handler
         
         try:
+            # Reset data engine state to ensure test isolation
+            data_engine._statistics = type('obj', (object,), {
+                'total_requests': 0, 'successful_requests': 0, 'failed_requests': 0, 'cached_requests': 0
+            })()
+            
             request = DataRequest(
                 request_id="test_fallback_sequence",
                 data_type="unknown",

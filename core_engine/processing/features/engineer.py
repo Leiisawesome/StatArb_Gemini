@@ -660,12 +660,15 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Returns at different horizons
         for period in [1, 2, 3, 5, 10]:
             if len(df) > period:
-                df[f'return_{period}d'] = df['close'].pct_change(period)
+                df[f'return_{period}d'] = df['close'].pct_change(periods=period, fill_method=None)
         
         # Log returns (handle invalid values)
         price_ratio = df['close'] / df['close'].shift(1)
-        # Only calculate log for positive ratios to avoid invalid values
-        df['log_return'] = np.where(price_ratio > 0, np.log(price_ratio), np.nan)
+        positive_mask = price_ratio > 0
+        log_return = pd.Series(np.nan, index=df.index)
+        if positive_mask.any():
+            log_return.loc[positive_mask] = np.log(price_ratio[positive_mask])
+        df['log_return'] = log_return
         
         # OHLC ratios
         df['hl_ratio'] = (df['high'] - df['low']) / df['close']
@@ -685,13 +688,13 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # These are CRITICAL for momentum strategies
         for period in [10, 20, 50]:
             if len(df) > period:
-                df[f'momentum_{period}'] = df['close'].pct_change(period)
+                df[f'momentum_{period}'] = df['close'].pct_change(periods=period, fill_method=None)
         
         # Trend strength (based on price consistency)
         # Measures how consistently price moves in one direction
         if len(df) >= 20:
             # Calculate trend strength as the ratio of cumulative return to cumulative absolute return
-            returns_20 = df['close'].pct_change().rolling(20)
+            returns_20 = df['close'].pct_change(fill_method=None).rolling(20)
             cumulative_return = returns_20.sum()
             cumulative_abs_return = returns_20.apply(lambda x: x.abs().sum())
             
@@ -1023,7 +1026,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             return df
         
         # Volume momentum
-        df['volume_change'] = df['volume'].pct_change()
+        df['volume_change'] = df['volume'].pct_change(fill_method=None)
         df['volume_acceleration'] = df['volume_change'].diff()
         
         # Volume-price relationship
@@ -1035,7 +1038,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         
         # OBV features
         if 'obv' in df.columns:
-            df['obv_momentum'] = df['obv'].pct_change()
+            df['obv_momentum'] = df['obv'].pct_change(fill_method=None)
             df['obv_divergence'] = np.sign(df['return_1d']) != np.sign(df['obv_momentum'])
         
         return df
@@ -1053,7 +1056,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         
         # Moving average slope
         for col in sma_cols[:2]:  # Only for shorter periods to avoid overfitting
-            df[f'{col}_slope'] = df[col].pct_change()
+            df[f'{col}_slope'] = df[col].pct_change(fill_method=None)
         
         # Golden/Death cross signals
         if 'sma_20' in df.columns and 'sma_50' in df.columns:

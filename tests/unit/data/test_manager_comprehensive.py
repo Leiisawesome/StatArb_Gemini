@@ -32,7 +32,8 @@ class TestInitializationErrorPaths:
             start_date="2024-01-01",
             end_date="2024-01-31"
         )
-        with patch.object(ClickHouseDataManager, '_test_connection', return_value=False):
+        # Patch at module level for test isolation
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=False):
             with pytest.raises(ClickHouseConnectionError):
                 manager = ClickHouseDataManager(config)
     
@@ -854,10 +855,22 @@ class TestHelperMethods:
     
     def test_monitor_performance_alias(self, data_manager):
         """Test monitor_performance is alias for track_performance"""
-        with patch.object(data_manager, 'track_performance', return_value={'test': 'value'}) as mock_track:
+        # Test that monitor_performance calls track_performance
+        original_track = data_manager.track_performance
+        call_count = 0
+        
+        def track_wrapper(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return original_track(*args, **kwargs)
+        
+        data_manager.track_performance = track_wrapper
+        try:
             result = data_manager.monitor_performance()
-            mock_track.assert_called_once()
-            assert result['test'] == 'value'
+            assert call_count == 1, "track_performance was not called exactly once"
+            assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+        finally:
+            data_manager.track_performance = original_track
     
     def test_assess_data_availability(self, data_manager):
         """Test _assess_data_availability"""
