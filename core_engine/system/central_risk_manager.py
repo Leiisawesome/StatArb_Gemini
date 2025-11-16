@@ -1683,27 +1683,41 @@ class CentralRiskManager(ISystemComponent):
             current_position = self.current_positions.get(symbol, 0.0)
             previous_cash = self.available_cash
             
+            # AUDIT FIX #2: Calculate transaction costs (commission + slippage)
+            # Commission: $1.00 per trade (retail typical) or 0.50 bps minimum
+            commission = max(1.0, quantity * price * 0.00005)  # Greater of $1 or 0.50 bps
+            
+            # Slippage: Already included in fill price (from adverse selection)
+            # But add explicit tracking for analytics
+            # Typical: 0.50-1.00 bps for TSLA
+            slippage_bps = 0.5  # Already applied in fill price, just tracking here
+            slippage_cost = quantity * price * (slippage_bps / 10000)
+            
+            total_transaction_cost = commission + slippage_cost
+            
             # Calculate new position and cash impact
             if side.lower() == 'buy':
                 new_position = current_position + quantity
-                cash_change = -(quantity * price)  # Cash decreases
+                cash_change = -(quantity * price)  # Cash decreases for purchase
+                cash_change -= total_transaction_cost  # Subtract transaction costs
                 self.available_cash += cash_change
                 
                 logger.info(
                     f"💰 BUY: {symbol} {quantity} @ ${price:.2f} | "
                     f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
-                    f"(${cash_change:,.2f})"
+                    f"(${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f} (comm: ${commission:.2f}, slip: ${slippage_cost:.2f})"
                 )
                 
             elif side.lower() == 'sell':
                 new_position = current_position - quantity
-                cash_change = +(quantity * price)  # Cash increases
+                cash_change = +(quantity * price)  # Cash increases from sale
+                cash_change -= total_transaction_cost  # Subtract transaction costs
                 self.available_cash += cash_change
                 
                 logger.info(
                     f"💰 SELL: {symbol} {quantity} @ ${price:.2f} | "
                     f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
-                    f"(+${cash_change:,.2f})"
+                    f"(+${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f} (comm: ${commission:.2f}, slip: ${slippage_cost:.2f})"
                 )
             else:
                 logger.warning(f"Unknown side: {side}")
@@ -1722,7 +1736,7 @@ class CentralRiskManager(ISystemComponent):
             # Calculate position value
             position_value = new_position * price if price > 0 else 0.0
             
-            # Record position change in history
+            # Record position change in history (including transaction costs)
             position_change = {
                 'timestamp': timestamp,
                 'symbol': symbol,
@@ -1734,7 +1748,10 @@ class CentralRiskManager(ISystemComponent):
                 'position_value': position_value,
                 'cash_change': cash_change,
                 'previous_cash': previous_cash,
-                'new_cash': self.available_cash
+                'new_cash': self.available_cash,
+                'commission': commission,
+                'slippage_cost': slippage_cost,
+                'total_transaction_cost': total_transaction_cost
             }
             self.position_history.append(position_change)
             
@@ -1959,21 +1976,26 @@ class CentralRiskManager(ISystemComponent):
         """
         try:
             # Calculate total position value using ACTUAL market prices
+            # AUDIT FIX #4: Properly handle SHORT positions as liabilities
             position_value = 0.0
             for symbol, position_qty in self.current_positions.items():
                 if position_qty != 0:
                     # Use stored market price, fallback to $100 if not available
                     price = self.current_prices.get(symbol, 100.0)
-                    position_value += abs(position_qty) * price
+                    # CRITICAL: Use signed quantity - SHORT positions are negative liabilities!
+                    # LONG: +100 shares @ $50 = +$5,000 (asset)
+                    # SHORT: -100 shares @ $50 = -$5,000 (liability)
+                    position_value += position_qty * price
                     
                     # Debug log for tracking
                     if symbol in self.current_prices:
-                        logger.debug(f"   {symbol}: {position_qty:,.2f} shares @ ${price:,.2f} = ${abs(position_qty) * price:,.2f}")
+                        position_type = "LONG" if position_qty > 0 else "SHORT"
+                        logger.debug(f"   {symbol} {position_type}: {position_qty:,.2f} shares @ ${price:,.2f} = ${position_qty * price:,.2f}")
                     else:
                         logger.warning(f"⚠️  {symbol}: No price available, using fallback ${price}/share")
             
-            # Portfolio value = positions + cash
-            self.portfolio_value = position_value + self.available_cash
+            # Portfolio value = cash + position_value (where SHORT positions are negative)
+            self.portfolio_value = self.available_cash + position_value
             
             # Update risk metrics after portfolio value changes
             self._update_risk_metrics()

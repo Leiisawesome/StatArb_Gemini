@@ -445,10 +445,46 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 except Exception as e:
                     raise ConfigurationRequiredError(f"Failed to get market price: {e}")
             
-            result.filled_quantity = quantity
-            result.remaining_quantity = 0.0
+            # AUDIT FIX #6: Simulate realistic partial fills based on order size
+            # Larger orders relative to market volume have lower fill rates
+            filled_quantity = quantity
+            fill_rate = 1.0  # Default to 100% fill
+            
+            if self.test_mode and request.algorithm_params and 'simulate_partial_fills' in request.algorithm_params:
+                # Calculate order value in dollars
+                order_value = quantity * fill_price
+                
+                # Partial fill logic based on order size:
+                # - Small orders (<$10k): 99-100% fill rate
+                # - Medium orders ($10k-$50k): 97-99% fill rate  
+                # - Large orders ($50k-$100k): 95-97% fill rate
+                # - Very large orders (>$100k): 90-95% fill rate
+                
+                import random
+                random.seed(int(request.authorization.authorized_at.timestamp() * 1000))  # Deterministic based on authorized_at
+                
+                if order_value < 10000:
+                    fill_rate = random.uniform(0.99, 1.0)
+                elif order_value < 50000:
+                    fill_rate = random.uniform(0.97, 0.99)
+                elif order_value < 100000:
+                    fill_rate = random.uniform(0.95, 0.97)
+                else:
+                    fill_rate = random.uniform(0.90, 0.95)
+                
+                filled_quantity = quantity * fill_rate
+                
+                if fill_rate < 1.0:
+                    logger.info(f"Partial fill simulation: {filled_quantity:.2f}/{quantity:.2f} shares ({fill_rate*100:.1f}% fill rate, order value: ${order_value:,.0f})")
+            
+            result.filled_quantity = filled_quantity
+            result.remaining_quantity = quantity - filled_quantity
             result.avg_fill_price = fill_price
-            result.status = ExecutionStatus.FILLED
+            # AUDIT FIX #6: Set status based on fill rate
+            if result.remaining_quantity > 0.01:  # Threshold to avoid floating point issues
+                result.status = ExecutionStatus.PARTIALLY_FILLED
+            else:
+                result.status = ExecutionStatus.FILLED
             result.completed_at = datetime.now()
             result.execution_time = (result.completed_at - result.started_at).total_seconds()
             
@@ -456,9 +492,10 @@ class MarketAlgorithm(IExecutionAlgorithm):
             if not hasattr(result, 'fills') or result.fills is None:
                 result.fills = []
             
+            # AUDIT FIX #6: Record actual filled quantity (may be partial)
             result.fills.append({
                 'timestamp': result.completed_at,
-                'quantity': quantity,
+                'quantity': filled_quantity,  # Use filled_quantity instead of requested quantity
                 'price': fill_price,
                 'venue': 'SIMULATED_EXCHANGE' if self.test_mode else 'MOCK_EXCHANGE'
             })
@@ -479,7 +516,11 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 result.market_impact = estimated_impact_bps * fill_price * quantity / 10000
                 result.total_cost = result.commission_cost + result.market_impact
             
-            logger.info(f"Market execution completed: {quantity} @ {fill_price:.4f} (test_mode={self.test_mode})")
+            # AUDIT FIX #6: Log partial fills
+            if result.remaining_quantity > 0.01:
+                logger.info(f"Market execution PARTIALLY FILLED: {filled_quantity:.2f}/{quantity:.2f} @ {fill_price:.4f} (test_mode={self.test_mode})")
+            else:
+                logger.info(f"Market execution completed: {quantity:.2f} @ {fill_price:.4f} (test_mode={self.test_mode})")
             return result
             
         except Exception as e:

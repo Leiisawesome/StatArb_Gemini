@@ -765,6 +765,10 @@ class LiveDataSignalGenerationTest:
                 })
                 execution_engine.set_position_callbacks(risk_manager_callback=risk_manager)
                 
+                # AUDIT FIX #1: Store initial portfolio value to prevent compounding position sizing
+                # Define this BEFORE simulation_results so it's accessible in bar processing loop
+                initial_portfolio_value = 100000.0
+                
                 # Track simulation results (store as instance variable for access in run_test)
                 simulation_results = {
                     'total_bars': len(full_dataframe),
@@ -956,15 +960,16 @@ class LiveDataSignalGenerationTest:
                                         percentage = target_weight if target_weight is not None else (target_quantity_raw if target_quantity_raw is not None else 0.0)
                                         
                                         if percentage > 0:
-                                            # Convert percentage to shares
-                                            portfolio_value = risk_manager.portfolio_value
-                                            signal_quantity = (percentage * portfolio_value) / current_price
+                                            # AUDIT FIX #1: Use INITIAL portfolio value to prevent compounding
+                                            # Convert percentage to shares using FIXED initial capital
+                                            signal_quantity = (percentage * initial_portfolio_value) / current_price
                                             
                                             if is_example_signal:
                                                 logger.info(f"\n   ✅ QUANTITY CONVERSION (PERCENTAGE → SHARES):")
                                                 logger.info(f"      Using {quantity_type} mode")
                                                 logger.info(f"      Percentage: {percentage:.4f} ({percentage*100:.2f}%)")
-                                                logger.info(f"      Converting: {percentage:.4f} * ${portfolio_value:,.2f} / ${current_price:.2f} = {signal_quantity:.2f} shares")
+                                                logger.info(f"      Converting: {percentage:.4f} * ${initial_portfolio_value:,.2f} (INITIAL) / ${current_price:.2f} = {signal_quantity:.2f} shares")
+                                                logger.info(f"      Note: Using initial capital to prevent compounding (current: ${risk_manager.portfolio_value:,.2f})")
                                         else:
                                             # Default: use a small fixed quantity if no percentage specified
                                             signal_quantity = 1.0
@@ -983,14 +988,14 @@ class LiveDataSignalGenerationTest:
                                         # Unknown quantity_type - fallback to heuristic (backward compatibility)
                                         if target_quantity_raw is not None:
                                             if target_quantity_raw < 1.0:
+                                                # AUDIT FIX #1: Use INITIAL portfolio value to prevent compounding
                                                 # Heuristic: < 1.0 is likely percentage
-                                                portfolio_value = risk_manager.portfolio_value
-                                                signal_quantity = (target_quantity_raw * portfolio_value) / current_price
+                                                signal_quantity = (target_quantity_raw * initial_portfolio_value) / current_price
                                                 
                                                 if is_example_signal:
                                                     logger.info(f"\n   ⚠️  HEURISTIC CONVERSION (backward compatibility):")
                                                     logger.info(f"      Unknown quantity_type '{quantity_type}', using heuristic")
-                                                    logger.info(f"      Converting: {target_quantity_raw} * ${portfolio_value:,.2f} / ${current_price:.2f} = {signal_quantity:.2f} shares")
+                                                    logger.info(f"      Converting: {target_quantity_raw} * ${initial_portfolio_value:,.2f} (INITIAL) / ${current_price:.2f} = {signal_quantity:.2f} shares")
                                             else:
                                                 # Heuristic: >= 1.0 is likely absolute shares
                                                 signal_quantity = target_quantity_raw
@@ -1202,9 +1207,21 @@ class LiveDataSignalGenerationTest:
                                         )
                                         
                                         # Add price information for test mode (backtest simulation)
+                                        # AUDIT FIX #3: Add realistic fill price with adverse selection
                                         algorithm_params = execution_plan_dict.get('algorithm_params', {})
                                         algorithm_params['current_price'] = current_price  # Add current price for test mode
-                                        algorithm_params['estimated_fill_price'] = execution_plan_dict.get('estimated_fill_price', current_price)
+                                        
+                                        # Simulate adverse selection: BUY fills slightly above, SELL fills slightly below
+                                        # Typical TSLA spread: 0.50-1.00 bps
+                                        side_lower = auth_side.lower() if isinstance(auth_side, str) else str(auth_side).lower()
+                                        if side_lower == 'buy':
+                                            realistic_fill_price = current_price * 1.0005  # +0.5 bps adverse fill
+                                        elif side_lower == 'sell':
+                                            realistic_fill_price = current_price * 0.9995  # -0.5 bps adverse fill
+                                        else:
+                                            realistic_fill_price = current_price
+                                        
+                                        algorithm_params['estimated_fill_price'] = realistic_fill_price
                                         
                                         execution_request = ExecutionRequest(
                                             authorization=exec_auth,
@@ -1213,7 +1230,7 @@ class LiveDataSignalGenerationTest:
                                             time_horizon=execution_plan_dict.get('time_horizon', 300),
                                             algorithm_params=algorithm_params,  # Include price for test mode
                                             venue_preferences=execution_plan_dict.get('venue_preferences', []),
-                                            strategy_context={'current_price': current_price, 'test_mode': True}  # Add test context
+                                            strategy_context={'current_price': current_price, 'realistic_fill_price': realistic_fill_price, 'test_mode': True}  # Add test context
                                         )
                                         
                                         # Phase 9: Execution Action (ACTION)
@@ -1351,12 +1368,25 @@ class LiveDataSignalGenerationTest:
                                                         current_portfolio_value = risk_manager.portfolio_value
                                                         
                                                         # Calculate cash change (BUY decreases cash, SELL increases cash)
+                                                        # Note: Transaction costs are now applied in risk_manager.update_position()
                                                         if side == 'buy':
                                                             cash_change = -(filled_quantity * fill_price)
                                                         elif side == 'sell':
                                                             cash_change = +(filled_quantity * fill_price)
                                                         else:
                                                             cash_change = 0.0
+                                                        
+                                                        # AUDIT FIX #2: Track transaction costs from position history
+                                                        if hasattr(risk_manager, 'position_history') and risk_manager.position_history:
+                                                            last_trade = risk_manager.position_history[-1]
+                                                            commission = last_trade.get('commission', 0.0)
+                                                            slippage_cost = last_trade.get('slippage_cost', 0.0)
+                                                            total_cost = last_trade.get('total_transaction_cost', 0.0)
+                                                            
+                                                            # Use .get() with default to avoid KeyError
+                                                            simulation_results['phase10_details']['total_commission'] = simulation_results['phase10_details'].get('total_commission', 0.0) + commission
+                                                            simulation_results['phase10_details']['total_slippage'] = simulation_results['phase10_details'].get('total_slippage', 0.0) + slippage_cost
+                                                            simulation_results['phase10_details']['total_transaction_costs'] = simulation_results['phase10_details'].get('total_transaction_costs', 0.0) + total_cost
                                                         
                                                         # Track Phase 10 metrics
                                                         simulation_results['phase10_details']['position_updates_succeeded'] += 1
@@ -1595,10 +1625,14 @@ class LiveDataSignalGenerationTest:
                     simulation_results['bars_evaluated'] += 1
                     
                     # Update portfolio value (mark-to-market)
+                    # AUDIT FIX #4: Properly handle SHORT positions with signed quantities
                     if risk_manager.current_positions:
                         portfolio_value = risk_manager.available_cash
                         for symbol, position in risk_manager.current_positions.items():
-                            portfolio_value += position * current_price
+                            # Use signed position: LONG is +, SHORT is - (liability)
+                            # Get proper price from risk_manager.current_prices
+                            price = risk_manager.current_prices.get(symbol, current_price)
+                            portfolio_value += position * price
                         simulation_results['portfolio_value'] = portfolio_value
                         simulation_results['final_cash'] = risk_manager.available_cash
                 
@@ -2013,6 +2047,17 @@ class LiveDataSignalGenerationTest:
                     logger.info(f"      Final Portfolio Value: ${final_pv:,.2f}")
                     logger.info(f"      Total Cash Change: ${total_cash_change:,.2f}")
                     logger.info(f"      Portfolio Return: {portfolio_return:.2f}%")
+                    
+                    # AUDIT FIX #2: Display transaction costs
+                    total_commission = simulation_results['phase10_details'].get('total_commission', 0.0)
+                    total_slippage = simulation_results['phase10_details'].get('total_slippage', 0.0)
+                    total_costs = simulation_results['phase10_details'].get('total_transaction_costs', 0.0)
+                    if total_costs > 0:
+                        logger.info(f"\n   💸 Transaction Costs (Realistic Simulation):")
+                        logger.info(f"      Total Commissions: ${total_commission:,.2f}")
+                        logger.info(f"      Total Slippage: ${total_slippage:,.2f}")
+                        logger.info(f"      Total Transaction Costs: ${total_costs:,.2f}")
+                        logger.info(f"      Cost Impact on Return: {(total_costs / initial_pv * 100):.2f}%")
                     
                     # Final positions
                     final_positions = simulation_results['phase10_details']['final_positions']
