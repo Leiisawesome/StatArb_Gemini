@@ -92,6 +92,148 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def validate_and_convert_quantity(
+    signal,
+    current_price: float,
+    initial_portfolio_value: float,
+    available_cash: float,
+    min_shares: int = 1,
+    max_shares: int = 10000,
+    max_position_pct: float = 0.10
+) -> int:
+    """
+    Convert strategy signal to integer share quantity with STRICT validation.
+    
+    CRITICAL PRODUCTION FIX: No heuristics, explicit quantity_type required.
+    
+    Args:
+        signal: StrategySignal object with quantity fields
+        current_price: Current price per share
+        initial_portfolio_value: Initial portfolio value for percentage conversion
+        available_cash: Available cash for position sizing
+        min_shares: Minimum shares allowed (default: 1)
+        max_shares: Maximum shares allowed (default: 10000)
+        max_position_pct: Maximum position as % of portfolio (default: 10%)
+    
+    Returns:
+        int: Integer share quantity (floored to prevent over-buying)
+    
+    Raises:
+        ValueError: If quantity_type is missing, invalid, or quantity out of bounds
+    """
+    
+    # REQUIREMENT 1: quantity_type MUST be explicit
+    quantity_type = getattr(signal, 'quantity_type', None)
+    
+    if quantity_type is None or quantity_type not in ['PERCENTAGE', 'ABSOLUTE', 'TARGET_WEIGHT']:
+        raise ValueError(
+            f"Signal missing required 'quantity_type' field or invalid value. "
+            f"Strategy MUST explicitly set quantity_type to 'PERCENTAGE', 'ABSOLUTE', or 'TARGET_WEIGHT'. "
+            f"Got: {quantity_type}"
+        )
+    
+    # REQUIREMENT 2: Extract quantity value based on type
+    if quantity_type == 'PERCENTAGE' or quantity_type == 'TARGET_WEIGHT':
+        # Use target_weight field (percentage of portfolio)
+        target_pct = getattr(signal, 'target_weight', None)
+        
+        if target_pct is None:
+            raise ValueError(
+                f"Signal with quantity_type='{quantity_type}' missing 'target_weight' field. "
+                f"Strategy MUST provide target_weight when using PERCENTAGE/TARGET_WEIGHT."
+            )
+        
+        # Validate percentage is in reasonable range [0.01, 0.20] (1% to 20%)
+        if not (0.0 < target_pct <= 0.20):
+            raise ValueError(
+                f"target_weight={target_pct} out of reasonable range (0.0, 0.20]. "
+                f"Max allowed: {max_position_pct*100}% of portfolio."
+            )
+        
+        # Convert percentage to shares using INITIAL portfolio value (avoid compounding)
+        position_value = target_pct * initial_portfolio_value
+        fractional_shares = position_value / current_price
+        
+    elif quantity_type == 'ABSOLUTE':
+        # Use quantity field (absolute share count)
+        fractional_shares = getattr(signal, 'quantity', None)
+        
+        if fractional_shares is None:
+            raise ValueError(
+                f"Signal with quantity_type='ABSOLUTE' missing 'quantity' field. "
+                f"Strategy MUST provide quantity when using ABSOLUTE."
+            )
+        
+        # Validate absolute quantity is reasonable
+        if not (0.0 < fractional_shares <= max_shares):
+            raise ValueError(
+                f"Absolute quantity={fractional_shares} out of range (0.0, {max_shares}]."
+            )
+    
+    else:
+        # Should never reach here due to check above, but defensive
+        raise ValueError(f"Unknown quantity_type: {quantity_type}")
+    
+    # REQUIREMENT 3: Convert to INTEGER shares (floor to prevent over-buying)
+    integer_shares = int(np.floor(fractional_shares))
+    
+    # REQUIREMENT 4: Apply min/max bounds
+    if integer_shares < min_shares:
+        logger.warning(
+            f"Quantity {integer_shares} < min_shares {min_shares}. "
+            f"Signal rejected (insufficient size)."
+        )
+        return 0  # Signal too small, reject
+    
+    if integer_shares > max_shares:
+        logger.warning(
+            f"Quantity {integer_shares} > max_shares {max_shares}. "
+            f"Capping at {max_shares}."
+        )
+        integer_shares = max_shares
+    
+    # REQUIREMENT 5: Check position size doesn't exceed max % of portfolio
+    position_value = integer_shares * current_price
+    position_pct = position_value / initial_portfolio_value
+    
+    if position_pct > max_position_pct:
+        # Cap at max percentage
+        max_allowed_value = max_position_pct * initial_portfolio_value
+        max_allowed_shares = int(np.floor(max_allowed_value / current_price))
+        
+        logger.warning(
+            f"Position {integer_shares} shares (${position_value:,.2f}, {position_pct:.1%}) "
+            f"exceeds {max_position_pct:.1%} limit. Capping at {max_allowed_shares} shares."
+        )
+        integer_shares = max_allowed_shares
+    
+    # REQUIREMENT 6: Check cash availability
+    required_cash = integer_shares * current_price
+    if required_cash > available_cash:
+        # Adjust to affordable quantity
+        affordable_shares = int(np.floor(available_cash / current_price))
+        
+        logger.warning(
+            f"Quantity {integer_shares} requires ${required_cash:,.2f} but only ${available_cash:,.2f} available. "
+            f"Adjusting to {affordable_shares} shares."
+        )
+        integer_shares = affordable_shares
+    
+    # Final validation
+    if integer_shares < min_shares:
+        logger.warning(
+            f"After adjustments, quantity {integer_shares} < min_shares {min_shares}. Signal rejected."
+        )
+        return 0
+    
+    logger.info(
+        f"✅ QUANTITY VALIDATED: {integer_shares} shares "
+        f"(${integer_shares * current_price:,.2f}, {position_pct:.1%} of portfolio)"
+    )
+    
+    return integer_shares
+
+
 class LiveDataSignalGenerationTest:
     """
     Integration test for live data simulation with regime-aware signal generation
@@ -939,78 +1081,44 @@ class LiveDataSignalGenerationTest:
                                         logger.info(f"   Confidence: {signal.confidence:.4f}")
                                     
                                     # Phase 7: Risk Authorization
-                                    # ROBUST QUANTITY CONVERSION: Check quantity_type and use appropriate field
-                                    quantity_type = getattr(signal, 'quantity_type', 'PERCENTAGE')  # Default to PERCENTAGE for backward compatibility
-                                    target_weight = getattr(signal, 'target_weight', None)
-                                    target_quantity_raw = getattr(signal, 'target_quantity', None)
-                                    quantity_raw = getattr(signal, 'quantity', None)
-                                    
+                                    # CRITICAL PRODUCTION FIX: Use strict quantity validation (no heuristics!)
                                     if is_example_signal:
                                         logger.info(f"\n   📊 PHASE 6 OUTPUT (Strategy Signal):")
-                                        logger.info(f"      quantity_type: {quantity_type}")
-                                        logger.info(f"      target_weight: {target_weight}")
-                                        logger.info(f"      target_quantity (raw): {target_quantity_raw}")
-                                        logger.info(f"      quantity (raw): {quantity_raw}")
+                                        logger.info(f"      quantity_type: {getattr(signal, 'quantity_type', None)}")
+                                        logger.info(f"      target_weight: {getattr(signal, 'target_weight', None)}")
+                                        logger.info(f"      quantity: {getattr(signal, 'quantity', None)}")
                                         logger.info(f"      Current Price: ${current_price:.2f}")
                                         logger.info(f"      Portfolio Value: ${risk_manager.portfolio_value:,.2f}")
+                                        logger.info(f"      Available Cash: ${risk_manager.available_cash:,.2f}")
                                     
-                                    # ROBUST CONVERSION LOGIC: Use quantity_type to determine conversion method
-                                    if quantity_type == "PERCENTAGE":
-                                        # Use target_weight if available (preferred), otherwise fallback to target_quantity
-                                        percentage = target_weight if target_weight is not None else (target_quantity_raw if target_quantity_raw is not None else 0.0)
+                                    # STRICT VALIDATION: Use new validation function (no dangerous heuristics!)
+                                    try:
+                                        signal_quantity = validate_and_convert_quantity(
+                                            signal=signal,
+                                            current_price=current_price,
+                                            initial_portfolio_value=initial_portfolio_value,
+                                            available_cash=risk_manager.available_cash,
+                                            min_shares=1,
+                                            max_shares=10000,
+                                            max_position_pct=0.10
+                                        )
                                         
-                                        if percentage > 0:
-                                            # AUDIT FIX #1: Use INITIAL portfolio value to prevent compounding
-                                            # Convert percentage to shares using FIXED initial capital
-                                            signal_quantity = (percentage * initial_portfolio_value) / current_price
-                                            
+                                        if signal_quantity == 0:
+                                            # Signal rejected (too small or invalid)
                                             if is_example_signal:
-                                                logger.info(f"\n   ✅ QUANTITY CONVERSION (PERCENTAGE → SHARES):")
-                                                logger.info(f"      Using {quantity_type} mode")
-                                                logger.info(f"      Percentage: {percentage:.4f} ({percentage*100:.2f}%)")
-                                                logger.info(f"      Converting: {percentage:.4f} * ${initial_portfolio_value:,.2f} (INITIAL) / ${current_price:.2f} = {signal_quantity:.2f} shares")
-                                                logger.info(f"      Note: Using initial capital to prevent compounding (current: ${risk_manager.portfolio_value:,.2f})")
-                                        else:
-                                            # Default: use a small fixed quantity if no percentage specified
-                                            signal_quantity = 1.0
-                                            if is_example_signal:
-                                                logger.info(f"\n   ⚠️  NO PERCENTAGE SPECIFIED, USING DEFAULT:")
-                                                logger.info(f"      Default quantity: {signal_quantity} shares")
-                                    elif quantity_type == "ABSOLUTE":
-                                        # Use target_quantity directly as absolute share quantity
-                                        signal_quantity = target_quantity_raw if target_quantity_raw is not None else (quantity_raw if quantity_raw is not None else 1.0)
-                                        
-                                        if is_example_signal:
-                                            logger.info(f"\n   ✅ USING ABSOLUTE QUANTITY:")
-                                            logger.info(f"      Using {quantity_type} mode")
-                                            logger.info(f"      target_quantity ({signal_quantity:.2f}) is already in shares")
-                                    else:
-                                        # Unknown quantity_type - fallback to heuristic (backward compatibility)
-                                        if target_quantity_raw is not None:
-                                            if target_quantity_raw < 1.0:
-                                                # AUDIT FIX #1: Use INITIAL portfolio value to prevent compounding
-                                                # Heuristic: < 1.0 is likely percentage
-                                                signal_quantity = (target_quantity_raw * initial_portfolio_value) / current_price
-                                                
-                                                if is_example_signal:
-                                                    logger.info(f"\n   ⚠️  HEURISTIC CONVERSION (backward compatibility):")
-                                                    logger.info(f"      Unknown quantity_type '{quantity_type}', using heuristic")
-                                                    logger.info(f"      Converting: {target_quantity_raw} * ${initial_portfolio_value:,.2f} (INITIAL) / ${current_price:.2f} = {signal_quantity:.2f} shares")
-                                            else:
-                                                # Heuristic: >= 1.0 is likely absolute shares
-                                                signal_quantity = target_quantity_raw
-                                                
-                                                if is_example_signal:
-                                                    logger.info(f"\n   ⚠️  HEURISTIC ABSOLUTE (backward compatibility):")
-                                                    logger.info(f"      Unknown quantity_type '{quantity_type}', using heuristic")
-                                                    logger.info(f"      Using target_quantity ({signal_quantity:.2f}) as absolute shares")
-                                        elif quantity_raw is not None:
-                                            signal_quantity = quantity_raw
-                                        else:
-                                            signal_quantity = 1.0
-                                            if is_example_signal:
-                                                logger.info(f"\n   ⚠️  NO QUANTITY FOUND, USING DEFAULT:")
-                                                logger.info(f"      Default quantity: {signal_quantity} shares")
+                                                logger.info(f"\n   ❌ SIGNAL REJECTED: Quantity validation failed (too small or invalid)")
+                                            continue  # Skip this signal
+                                    
+                                    except ValueError as e:
+                                        # FAIL FAST: Signal has missing/invalid quantity_type
+                                        logger.error(
+                                            f"❌ SIGNAL REJECTED: {e}\n"
+                                            f"   Symbol: {signal.symbol}\n"
+                                            f"   Signal Type: {signal.signal_type}\n"
+                                            f"   Strategy MUST explicitly set quantity_type!"
+                                        )
+                                        simulation_results['phase7_details']['authorization_failures'] += 1
+                                        continue  # Skip this signal
                                     
                                     if is_example_signal:
                                         logger.info(f"\n   📊 PHASE 7 INPUT (TradingDecisionRequest):")
@@ -1035,7 +1143,8 @@ class LiveDataSignalGenerationTest:
                                             'available_cash': risk_manager.available_cash,
                                             'price': current_price,
                                             'portfolio_value': risk_manager.portfolio_value,
-                                            'original_target_quantity': target_quantity_raw,
+                                            'quantity_type': getattr(signal, 'quantity_type', None),
+                                            'target_weight': getattr(signal, 'target_weight', None),
                                             'converted_quantity': signal_quantity
                                         }
                                     )
