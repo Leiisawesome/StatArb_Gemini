@@ -361,9 +361,10 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.BUY,
                         strength=min(composite_score * 2, 1.0),
                         confidence=0.7,
-                        quantity=self.config.base_position_pct,
+                        target_weight=self.config.base_position_pct,  # Use as percentage weight
+                        quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                         timestamp=datetime.now(),
-                        metadata={
+                        additional_data={  # FIXED: metadata -> additional_data
                             'signal_reason': 'factor_ranking',
                             'composite_score': composite_score,
                             'factor_scores': self.factor_scores.get(symbol, {})

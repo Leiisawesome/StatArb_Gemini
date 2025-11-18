@@ -623,9 +623,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=min(abs(zscore) / self.config.entry_zscore, 1.0),
                     confidence=0.8,
-                    quantity=self.config.position_size_pct,
+                    target_weight=self.config.position_size_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'pair_stock': stock2,
                         'zscore': zscore,
@@ -640,9 +642,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=min(abs(zscore) / self.config.entry_zscore, 1.0),
                     confidence=0.8,
-                    quantity=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),
+                    target_weight=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),  # Hedge-adjusted weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'pair_stock': stock1,
                         'zscore': zscore,
@@ -660,9 +664,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=min(abs(zscore) / self.config.entry_zscore, 1.0),
                     confidence=0.8,
-                    quantity=self.config.position_size_pct,
+                    target_weight=self.config.position_size_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'pair_stock': stock2,
                         'zscore': zscore,
@@ -677,9 +683,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=min(abs(zscore) / self.config.entry_zscore, 1.0),
                     confidence=0.8,
-                    quantity=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),
+                    target_weight=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),  # Hedge-adjusted weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'pair_stock': stock1,
                         'zscore': zscore,
@@ -715,9 +723,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=self.config.position_size_pct,
+                    target_weight=self.config.position_size_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'action': 'exit',
                         'exit_reason': exit_reason,
@@ -731,9 +741,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),
+                    target_weight=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),  # Hedge-adjusted weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'action': 'exit',
                         'exit_reason': exit_reason,
@@ -750,9 +762,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=self.config.position_size_pct,
+                    target_weight=self.config.position_size_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'action': 'exit',
                         'exit_reason': exit_reason,
@@ -766,9 +780,11 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),
+                    target_weight=self.config.position_size_pct * abs(pair_metrics.hedge_ratio),  # Hedge-adjusted weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'pair_id': f"{stock1}_{stock2}",
                         'action': 'exit',
                         'exit_reason': exit_reason,

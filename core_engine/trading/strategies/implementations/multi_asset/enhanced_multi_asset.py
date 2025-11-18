@@ -485,7 +485,8 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
                         signal_type=signal_type,
                         strength=min(abs(weight_diff) * 10, 1.0),
                         confidence=0.8,
-                        target_quantity=abs(weight_diff),
+                        target_weight=abs(weight_diff),  # Use as percentage weight
+                        quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                         timestamp=datetime.now(),
                         signal_reason='portfolio_rebalancing',
                         additional_data={

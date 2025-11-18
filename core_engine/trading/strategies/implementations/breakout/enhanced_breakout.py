@@ -308,9 +308,11 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=0.8,
                     confidence=confidence,
-                    quantity=self.config.base_position_pct,
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'signal_reason': 'bullish_breakout',
                         'resistance_level': resistance,
                         'breakout_price': current_price,
@@ -334,9 +336,11 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=0.8,
                     confidence=confidence,
-                    quantity=self.config.base_position_pct,
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'signal_reason': 'bearish_breakout',
                         'support_level': support,
                         'breakout_price': current_price,
@@ -461,9 +465,11 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL if position['signal_type'] == SignalType.BUY else SignalType.BUY,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=position['quantity'],
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'action': 'exit',
                         'exit_reason': reason,
                         'entry_price': position['entry_price']
