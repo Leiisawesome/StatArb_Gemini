@@ -399,10 +399,34 @@ async def compose_backtest_system():
     portfolio_analytics = PortfolioAnalytics(config)
     
     # Register in dependency order
-    orchestrator.register_component("DataManager", data_manager, ComponentLayer.SUPPORT, 1)
-    orchestrator.register_component("RiskManager", risk_manager, ComponentLayer.GOVERNANCE, 2)
-    orchestrator.register_component("BacktestEngine", backtest_engine, ComponentLayer.EXECUTION, 3)
-    orchestrator.register_component("PortfolioAnalytics", portfolio_analytics, ComponentLayer.EXECUTION, 4)
+    orchestrator.register_component(
+        "DataManager",
+        data_manager,
+        layer=ComponentLayer.SUPPORT,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=1
+    )
+    orchestrator.register_component(
+        "RiskManager",
+        risk_manager,
+        layer=ComponentLayer.GOVERNANCE,
+        authority_level=AuthorityLevel.GOVERNANCE_CONTROL,
+        initialization_order=2
+    )
+    orchestrator.register_component(
+        "BacktestEngine",
+        backtest_engine,
+        layer=ComponentLayer.EXECUTION,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=3
+    )
+    orchestrator.register_component(
+        "PortfolioAnalytics",
+        portfolio_analytics,
+        layer=ComponentLayer.EXECUTION,
+        authority_level=AuthorityLevel.OPERATIONAL,
+        initialization_order=4
+    )
     
     return orchestrator
 ```
@@ -423,7 +447,17 @@ def assemble_system_from_config(system_type: str, config: Dict):
     
     for component_name in component_maps[system_type]:
         component = create_component(component_name, config)
-        orchestrator.register_component(component_name, component)
+        # Ensure proper layer, authority, and initialization order are provided per Rule 2
+        layer = infer_component_layer(component_name)
+        authority = infer_authority_level(layer)
+        order = infer_initialization_order(component_name)
+        orchestrator.register_component(
+            component_name,
+            component,
+            layer=layer,
+            authority_level=authority,
+            initialization_order=order
+        )
     
     return orchestrator
 ```
@@ -643,6 +677,7 @@ async def run_live_trading_loop(integration_manager):
     data_manager = integration_manager.get_component('ClickHouseDataManager')
     strategy_manager = integration_manager.get_component('StrategyManager')
     risk_manager = integration_manager.get_component('CentralRiskManager')
+    trading_engine = integration_manager.get_component('EnhancedTradingEngine')
     execution_engine = integration_manager.get_component('UnifiedExecutionEngine')
     analytics_manager = integration_manager.get_component('EnhancedAnalyticsManager')
     
@@ -664,10 +699,13 @@ async def run_live_trading_loop(integration_manager):
                 if authorization.authorization_level != AuthorizationLevel.REJECTED:
                     authorized_trades.append(authorization)
             
-            # Step 5: Execute authorized trades (Rules 6, 7)
+            # Step 5: Plan & execute authorized trades (Rules 6, 7)
             execution_results = []
-            for trade in authorized_trades:
-                result = await execution_engine.execute_authorized_trade(trade)
+            for auth in authorized_trades:
+                # HOW: TradingEngine creates plan
+                plan = await trading_engine.create_execution_plan(auth)
+                # ACTION: UnifiedExecutionEngine executes plan
+                result = await execution_engine.execute_authorized_trade(plan)
                 execution_results.append(result)
             
             # Step 6: Update real-time analytics (Rule 9)

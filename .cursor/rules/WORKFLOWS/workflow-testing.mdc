@@ -1,3 +1,24 @@
+# Testing & Validation Workflow (Tier‑1 Rules 1–7 Coverage)
+
+## Mandatory Tier‑1 Test Suites
+- Rule 2: Regime‑First Initialization
+  - Test that `EnhancedRegimeEngine` registers and initializes first (order=5).
+  - Test regime injection and subscription across pipeline components and StrategyManager.
+- Rule 3: Unified Data Pipeline
+  - Verify end‑to‑end pipeline Data → Indicators → Features → Signals → Strategy.
+  - Assert strategies do not compute indicators/features; enforce via attribute checks.
+  - Validate enriched DataFrame has required indicators/features before strategy steps.
+- Rule 4: Governance and Authorization
+  - Ensure CentralRiskManager authorizes all trades and rejects bypasses.
+  - Optionally test Phase 7A pre‑trade compliance call is executed before authorization.
+- Rule 6: Analytics Integration
+  - Verify analytics components implement ISystemComponent and provide both real‑time and batch APIs, plus regime‑aware methods.
+- Rule 7: Execution Management
+  - Verify TradingEngine creates execution plans (HOW) and UnifiedExecutionEngine executes (ACTION).
+  - Verify position updates are performed exclusively by CentralRiskManager callback.
+
+> Provide fixture layers that fail fast when any of the above rules are violated to keep regressions visible.
+
 ---
 alwaysApply: false
 ---

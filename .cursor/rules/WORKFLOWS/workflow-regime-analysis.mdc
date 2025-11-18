@@ -1,13 +1,13 @@
 ---
 alwaysApply: false
 ---
-# Specialized Regime Analyzer Configuration - Instruction Map
+# Specialized Regime Analyzer Configuration - Instruction Map (Tier‑1 Rules 1–7 Compliant)
 
 This instruction map shows how to compose core_engine components into a specialized regime analysis system for advanced market condition detection, regime transition prediction, and strategy adaptation.
 
 ## Regime Analyzer Component Stack
 
-### Enhanced Regime Analysis Brick Assembly (Rules 8-10)
+### Enhanced Regime Analysis Brick Assembly (Rule 2 emphasis)
 ```
 ┌─────────────────────────────────────┐
 │ Layer 1: System Orchestration      │
@@ -79,6 +79,25 @@ enhanced_regime_data_config = ClickHouseDataConfig(
     enable_data_validation=True,
     enable_regime_data_preprocessing=True
 )
+```
+
+### Regime‑First Initialization (Rule 2) and No‑Execution Disclaimer
+```python
+# Regime‑First explicit registration (Layer 0, order=5)
+orchestrator.register_component(
+    name="EnhancedRegimeEngine",
+    component=enhanced_regime_engine,
+    layer=ComponentLayer.SUPPORT,
+    authority_level=AuthorityLevel.OPERATIONAL,
+    initialization_order=5
+)
+# Inject regime into data/processing components and subscribe to changes
+clickhouse_data_manager.set_regime_engine(enhanced_regime_engine)
+await enhanced_regime_engine.subscribe_component(
+    clickhouse_data_manager,
+    callback=clickhouse_data_manager.on_regime_change
+)
+# This workflow is analytics‑only (no trade execution).
 ```
 
 ### 2. Enhanced Regime Engine Configuration (Rules 8-9)

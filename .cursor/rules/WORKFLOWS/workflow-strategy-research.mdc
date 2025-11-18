@@ -1,3 +1,10 @@
+# Strategy Research Workflow (Tier‑1 Rules 1–7 Compliant)
+
+> Notes:
+> - Regime‑First (Rule 2) applies to research pipelines that leverage regime context: initialize `EnhancedRegimeEngine` first (order=5) and inject into data/processing components.
+> - Strategies under research MUST consume enriched pipeline outputs (Rule 3). No indicator/feature computation inside strategies.
+> - Research workflows are analytics/discovery only; any trial execution must follow Rule 4/7 governance and execution patterns.
+
 ---
 alwaysApply: false
 ---

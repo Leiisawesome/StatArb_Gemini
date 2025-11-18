@@ -1,16 +1,22 @@
 ---
 alwaysApply: false
 ---
-# Live Trading Desk Orchestration - Instruction Map
+# Live Trading Desk Orchestration - Instruction Map (Tier‑1 Rules 1–7 Compliant)
 
 This instruction map shows how to compose core_engine components into a real-time institutional trading desk with live market data, continuous risk monitoring, and automated execution capabilities.
 
+> Tier‑1 Compliance Notes:
+> - Regime‑First is Rule 2 (not “Rule 13”). All references updated accordingly.
+> - Liquidity/microstructure content is advanced; treat as optional beyond Tier‑1 scope.
+> - `LiveDataManager` maps to `ClickHouseDataManager` per Rule 3 (single data authority).
+> - Strategies MUST consume enriched pipeline data (not raw OHLCV) per Rule 3.
+
 ## Live Trading Desk Component Stack
 
-### Enhanced Real-Time Brick Assembly (7-Layer + Production) - UPDATED for Rules 12-13
+### Enhanced Real-Time Brick Assembly (7-Layer + Production) - UPDATED for Rule 2
 ```
 ┌─────────────────────────────────────┐
-│ Layer 0: Regime Detection (Rule 13)│  ← NEW: Foundation Layer
+│ Layer 0: Regime Detection (Rule 2) │  ← Foundation Layer
 │ EnhancedRegimeEngine (order=5)      │  ← Initializes FIRST
 │ RegimeContext Distribution          │  ← Provides context to ALL
 ├─────────────────────────────────────┤
@@ -39,7 +45,7 @@ This instruction map shows how to compose core_engine components into a real-tim
 │ UnifiedExecutionEngine (Live)       │  ← Regime-optimized execution
 │ EnhancedPortfolioManager (Live)     │  ← Real-Time Position Tracking
 ├─────────────────────────────────────┤
-│ Liquidity Management (Rule 12)      │  ← NEW: Liquidity Layer
+│ Liquidity Management (Advanced)     │  ← Advanced (beyond Tier‑1)
 │ LiquidityAssessmentEngine           │  ← Real-time liquidity scoring
 │ MarketImpactModel                   │  ← Almgren-Chriss, Kyle models
 │ OrderBookAnalyzer                   │  ← Live order book analytics
@@ -56,9 +62,9 @@ This instruction map shows how to compose core_engine components into a real-tim
 
 ## Live Trading Configuration Map
 
-### 1. Real-Time Data Configuration
+### 1. Real-Time Data Configuration (Rule 3)
 ```python
-from core_engine.data.manager import LiveDataConfig
+from core_engine.data.manager import ClickHouseDataConfig as LiveDataConfig
 
 # Live market data streaming configuration
 live_data_config = LiveDataConfig(
@@ -119,7 +125,7 @@ live_risk_config = LiveRiskConfig(
 )
 ```
 
-### 3. Real-Time Liquidity Management Configuration (Rule 12)
+### 3. Real-Time Liquidity Management Configuration (Advanced)
 ```python
 from core_engine.liquidity.assessment import LiquidityAssessmentEngine, LiquidityConfig
 from core_engine.liquidity.impact import MarketImpactModel, ImpactConfig
@@ -327,7 +333,7 @@ tca_config = TCAConfig(
 execution_quality_analyzer = ExecutionQualityAnalyzer(tca_config)
 ```
 
-### 4. Live Execution Configuration
+### 4. Live Execution Configuration (Rule 7)
 ```python
 from core_engine.system.unified_execution_engine import LiveExecutionConfig
 
@@ -361,11 +367,11 @@ live_execution_config = LiveExecutionConfig(
 
 ## Live Trading Orchestration Workflow
 
-### Phase 1: Live System Initialization (Regime-First - Rule 13)
+### Phase 1: Live System Initialization (Regime-First - Rule 2)
 ```python
 async def initialize_live_trading_system():
     """
-    Initialize live trading desk with REGIME-FIRST principle (Rule 13)
+    Initialize live trading desk with REGIME-FIRST principle (Rule 2)
     
     CRITICAL: RegimeEngine MUST initialize FIRST (order=5) to provide
     foundational market context to all other components.
@@ -378,7 +384,7 @@ async def initialize_live_trading_system():
         enable_real_time_alerts=True
     )
     
-    # STEP 1: Register Regime Engine FIRST (order=5) - Rule 13
+    # STEP 1: Register Regime Engine FIRST (order=5) - Rule 2
     # This is the foundational Layer 0 component
     live_regime_engine = EnhancedRegimeEngine({
         **regime_config,
@@ -405,6 +411,7 @@ async def initialize_live_trading_system():
     logger.info("✅ Regime Engine initialized (Layer 0 - Foundation)")
     
     # 2. Register live data management (order=10) with regime context
+    # Rule 3: LiveDataManager maps to ClickHouseDataManager (single data authority)
     live_data_manager = ClickHouseDataManager(live_data_config)
     live_data_manager.set_regime_engine(live_regime_engine)  # Inject regime context
     
@@ -454,7 +461,7 @@ async def initialize_live_trading_system():
         critical=True  # CRITICAL - No trading without risk management
     )
     
-    # 6. Register live execution layer
+    # 6. Register live execution layer (Rule 7)
     live_strategy_manager = StrategyManager({
         **strategy_config,
         'live_mode': True,
@@ -566,7 +573,7 @@ async def run_live_strategy_execution(orchestrator):
     real_time_trading_engine = orchestrator.get_component("RealTimeTradingEngine")
     unified_execution_engine = orchestrator.get_component("UnifiedExecutionEngine")
     
-    # Subscribe to live signals
+    # Subscribe to live signals (Rule 5 aggregation precedes authorization)
     async def handle_live_signals(event_data):
         """Handle incoming live trading signals"""
         
@@ -603,12 +610,12 @@ async def run_live_strategy_execution(orchestrator):
                     logger.warning(f"Trade rejected: {authorization.rejection_reason}")
                     continue
                 
-                # 4. Create execution plan
+                # 4. Create execution plan via TradingEngine (HOW per Rule 7)
                 execution_plan = await real_time_trading_engine.create_execution_plan(
                     authorization, current_market_conditions=signal.metadata
                 )
                 
-                # 5. Execute trade
+                # 5. Execute trade via UnifiedExecutionEngine (ACTION per Rule 7)
                 execution_result = await unified_execution_engine.execute_authorized_trade(
                     execution_plan
                 )

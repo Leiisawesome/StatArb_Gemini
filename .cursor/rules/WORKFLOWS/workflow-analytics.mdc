@@ -1,13 +1,13 @@
 ---
 alwaysApply: false
 ---
-# Portfolio Analytics Workflow - Instruction Map
+# Portfolio Analytics Workflow - Instruction Map (Tier‑1 Rules 1–7 Compliant)
 
 This instruction map shows how to compose core_engine components into a comprehensive portfolio analytics system for institutional-grade performance measurement, attribution analysis, and risk assessment.
 
 ## Portfolio Analytics Component Stack
 
-### Enhanced Analytics Brick Assembly (Rules 8-10)
+### Enhanced Analytics Brick Assembly (Rule 6 emphasis; Rule 2 regime context)
 ```
 ┌─────────────────────────────────────┐
 │ Layer 1: System Orchestration      │

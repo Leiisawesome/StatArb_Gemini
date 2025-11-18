@@ -1,13 +1,13 @@
 ---
 alwaysApply: false
 ---
-# Real-Time Risk Monitoring System - Instruction Map
+# Real-Time Risk Monitoring System - Instruction Map (Tier‑1 Rules 1–7 Compliant)
 
 This instruction map shows how to compose core_engine components into a comprehensive real-time risk monitoring and surveillance system for continuous portfolio oversight, limit monitoring, and automated risk response.
 
 ## Risk Monitoring Component Stack
 
-### Enhanced Real-Time Risk Surveillance Assembly (Rules 8-10)
+### Enhanced Real-Time Risk Surveillance Assembly (Rule 4 governance emphasis)
 ```
 ┌─────────────────────────────────────┐
 │ Layer 1: System Orchestration      │
@@ -570,15 +570,20 @@ async def handle_position_violations(orchestrator, violations):
             # Critical violation - immediate action
             logger.critical(f"CRITICAL position violation: {violation.description}")
             
-            # Halt new trading
+            # Halt new trading (Rule 4 governance)
             await central_risk_manager.halt_new_trading()
             
-            # Reduce positions automatically
-            await automated_response_system.reduce_positions(
+            # Reduce positions (must be authorized by CentralRiskManager per Rule 4)
+            authorization = await central_risk_manager.authorize_risk_response(
+                action="reduce_positions",
+                details={"positions": violation.affected_positions, "reduction_pct": 0.20}
+            )
+            if authorization.get("authorized", False):
+                await automated_response_system.reduce_positions(
                 positions=violation.affected_positions,
                 reduction_percentage=0.20,  # 20% immediate reduction
                 execution_urgency="urgent"
-            )
+                )
             
         elif violation.severity == "orange":
             # Elevated violation - semi-automated response

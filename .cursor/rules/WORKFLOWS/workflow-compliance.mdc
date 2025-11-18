@@ -65,6 +65,7 @@ regulatory_breaches = validation_results['regulatory_breaches']
 print(f"Production Ready: {'✅ YES' if production_ready else '❌ NO'}")
 print(f"Compliance Score: {compliance_score:.1f}/100")
 print(f"Regulatory Breaches: {regulatory_breaches}")
+# Rule 4 placement: Compliance checks are Phase 7A (pre‑trade) and precede RiskManager authorization.
 ```
 
 ### Phase 3: Continuous Compliance Monitoring
@@ -231,6 +232,10 @@ risk_manager.set_regulatory_framework(compliance_framework)
 
 # Enable compliance-aware risk decisions
 risk_manager.enable_regulatory_compliance_mode()
+# Enforcement in pipeline:
+#  - Phase 7A: Pre‑trade compliance (ComplianceFramework, RiskComplianceMonitor)
+#  - Phase 7:  CentralRiskManager authorization (single authority)
+#  - Phase 8–10: Execution planning, execution, and position updates per Rule 7
 ```
 
 ## Best Practices

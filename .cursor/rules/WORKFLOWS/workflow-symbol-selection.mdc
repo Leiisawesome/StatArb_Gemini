@@ -1,3 +1,10 @@
+# Symbol Selection & Ranking Workflow (Tier‑1 Rules 1–7 Compliant)
+
+> Notes:
+> - Symbol selection is upstream of strategies. If the workflow triggers strategy evaluation, ensure strategies consume enriched pipeline data (Rule 3) and no execution occurs directly here.
+> - If any execution is referenced, it MUST follow StrategyManager → CentralRiskManager authorization (Rule 4) → TradingEngine (HOW) → UnifiedExecutionEngine (ACTION), with RiskManager performing position updates (Rule 7).
+> - If regime context influences selection, initialize `EnhancedRegimeEngine` first (order=5) and inject regime context (Rule 2).
+
 ---
 alwaysApply: false
 ---

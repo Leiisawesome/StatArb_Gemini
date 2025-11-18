@@ -1,3 +1,22 @@
+# Strategy Testing Workflow (Tier‑1 Rules 1–7 Compliant)
+
+## Tier‑1 Compliance Tests to Include
+- Rule 2 (Regime‑First):
+  - Verify `EnhancedRegimeEngine` initializes first (order=5) and regime context is injected into pipeline components.
+  - Ensure components subscribe to regime changes and adapt correctly.
+- Rule 3 (Unified Data Pipeline):
+  - Assert strategies do not calculate indicators/features (scan for prohibited methods).
+  - Validate enriched data contains required columns (indicators + features) before strategy call.
+  - End‑to‑end: Data → Indicators → Features → Signals → Strategy → Risk Authorization (mocked) → (optional) Execution planning (mocked).
+- Rule 4 (Risk Governance):
+  - Ensure CentralRiskManager is the single authorization point; attempts to bypass are rejected.
+  - Test Phase 7A (pre‑trade compliance) precedes authorization (optional in testing scope).
+- Rule 7 (Execution & Portfolio Update):
+  - Ensure TradingEngine creates the plan (HOW) and UnifiedExecutionEngine executes (ACTION).
+  - Ensure position updates go through CentralRiskManager callback (no direct updates).
+
+> Provide fixtures/mocks that enforce these guarantees and fail fast on violations.
+
 # Strategy Test & Optimization Workflow - Comprehensive Instruction Map
 
 ## 📋 **Executive Summary**

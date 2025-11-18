@@ -1,4 +1,4 @@
-# Strategy Optimization Workflow for Live Trading Preparation
+# Strategy Optimization Workflow for Live Trading Preparation (Tier‑1 Rules 1–7 Compliant)
 
 **Purpose**: Systematic fine-tuning of 10 core_engine strategies using institutional-grade backtesting to create "silver bullets" for live trading deployment.
 
@@ -685,6 +685,8 @@ class RegimeAnalyzer:
 - Optimize regime-specific parameters
 - Validate regime detection accuracy
 - Document regime adaptability
+  - Regime‑First (Rule 2): Ensure `EnhancedRegimeEngine` is initialized first (order=5) and injected into data/processing components used in optimization runs.
+  - Strategies consume enriched data from the standardized pipeline (Rule 3): Data → Indicators → Features → Signals → Strategy; no indicator calculation inside strategies.
 
 ### **4. Transaction Cost Realism**
 - Apply realistic spreads and commissions
@@ -697,6 +699,7 @@ class RegimeAnalyzer:
 - Test drawdown management
 - Verify correlation diversification
 - Ensure portfolio-level risk compliance
+  - All hypothetical “execution” in optimization is simulation; any live execution must route StrategyManager → CentralRiskManager authorization (Rule 4) → TradingEngine (HOW) → UnifiedExecutionEngine (ACTION) with RiskManager position updates (Rule 7).
 
 ---
 

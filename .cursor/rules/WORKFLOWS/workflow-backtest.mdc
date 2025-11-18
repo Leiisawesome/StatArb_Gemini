@@ -7,10 +7,10 @@ This instruction map shows how to compose core_engine components into a comprehe
 
 ## Component Assembly for Backtesting
 
-### Enhanced Core Brick Stack (7-Layer Architecture) - UPDATED for Rules 12-13
+### Enhanced Core Brick Stack (7-Layer Architecture) - UPDATED for Rule 2
 ```
 ┌─────────────────────────────────────┐
-│ Layer 0: Regime Detection (Rule 13)│  ← NEW: Foundation Layer
+│ Layer 0: Regime Detection (Rule 2) │  ← Foundation Layer
 │ EnhancedRegimeEngine (order=5)      │  ← Initializes FIRST
 │ RegimeContext Distribution          │  ← Provides context to ALL
 ├─────────────────────────────────────┤
@@ -69,7 +69,7 @@ backtest_data_config = ClickHouseDataConfig(
 )
 ```
 
-### 2. Enhanced Regime Analysis Configuration (Rule 9)
+### 2. Enhanced Regime Analysis Configuration (Rule 2 & 6 context)
 ```python
 from core_engine.regime.engine import RegimeEngineConfig
 
@@ -305,7 +305,7 @@ backtest_execution_config = {
 }
 ```
 
-### 2.4. Production Configuration (Rule 10)
+### 2.4. Production Configuration (Operational Monitoring)
 ```python
 from core_engine.system.integration_manager import ProductionConfig
 
@@ -352,13 +352,13 @@ backtest_risk_config = RiskManagerConfig(
 
 ## Backtest Orchestration Workflow
 
-### Phase 1: System Initialization - UPDATED for Rule 13 (Regime-First)
+### Phase 1: System Initialization - UPDATED for Rule 2 (Regime-First)
 ```python
 async def initialize_backtest_system():
     """
-    Initialize all components for backtesting with REGIME-FIRST PRINCIPLE (Rule 13)
+    Initialize all components for backtesting with REGIME-FIRST PRINCIPLE (Rule 2)
     
-    CRITICAL: EnhancedRegimeEngine MUST initialize BEFORE all other operational components
+    CRITICAL: EnhancedRegimeEngine MUST initialize BEFORE all other operational components (order=5)
     """
     
     # 1. Create orchestrator and system integration manager
@@ -375,7 +375,7 @@ async def initialize_backtest_system():
     )
     
     # ═══════════════════════════════════════════════════════════════════
-    # 🔥 REGIME-FIRST PRINCIPLE (Rule 13): Initialize Regime Engine FIRST
+    # 🔥 REGIME-FIRST PRINCIPLE (Rule 2): Initialize Regime Engine FIRST
     # ═══════════════════════════════════════════════════════════════════
     
     # 2. LAYER 0: Regime Detection - Foundation Layer (Rule 13)
@@ -383,9 +383,9 @@ async def initialize_backtest_system():
     orchestrator.register_component(
         name="EnhancedRegimeEngine",
         component=regime_engine,
-        layer=ComponentLayer.SUPPORT,  # Actually Layer 0, but uses SUPPORT enum
+        layer=ComponentLayer.SUPPORT,
         authority_level=AuthorityLevel.OPERATIONAL,
-        initialization_order=5  # 🔥 LOWEST ORDER = FIRST TO INITIALIZE
+        initialization_order=5  # FIRST TO INITIALIZE
     )
     
     await regime_engine.initialize()
@@ -464,13 +464,13 @@ async def initialize_backtest_system():
     regime_engine.subscribe_to_regime_changes(feature_engineer.on_regime_change)
     regime_engine.subscribe_to_regime_changes(signal_generator.on_regime_change)
     
-    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, initialization_order=15)
-    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, initialization_order=16)
-    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, initialization_order=17)
+    orchestrator.register_component("IndicatorsEngine", indicators_engine, ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL, initialization_order=15)
+    orchestrator.register_component("FeatureEngineer", feature_engineer, ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL, initialization_order=16)
+    orchestrator.register_component("SignalGenerator", signal_generator, ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL, initialization_order=17)
     
     # Register strategy registry (before strategy validation)
     strategy_registry = StrategyRegistry()
-    orchestrator.register_component("StrategyRegistry", strategy_registry, ComponentLayer.EXECUTION, initialization_order=19)
+    orchestrator.register_component("StrategyRegistry", strategy_registry, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=19)
     
     # 7. Register strategy layer - REGIME-AWARE (Rule 13)
     strategy_manager = StrategyManager(enhanced_strategy_config)
@@ -484,16 +484,16 @@ async def initialize_backtest_system():
     regime_engine.subscribe_to_regime_changes(strategy_manager.on_regime_change)
     regime_engine.subscribe_to_regime_changes(strategy_engine.on_regime_change)
     
-    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, initialization_order=20)
-    orchestrator.register_component("StrategyValidator", strategy_validator, ComponentLayer.EXECUTION, initialization_order=21)
-    orchestrator.register_component("StrategyEngine", strategy_engine, ComponentLayer.EXECUTION, initialization_order=22)
+    orchestrator.register_component("StrategyManager", strategy_manager, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=20)
+    orchestrator.register_component("StrategyValidator", strategy_validator, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=21)
+    orchestrator.register_component("StrategyEngine", strategy_engine, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=22)
     
     # Register trading engine - REGIME-AWARE (Rule 13)
     trading_engine = TradingEngine()
     trading_engine.set_regime_engine(regime_engine)  # Regime-optimized order planning
     regime_engine.subscribe_to_regime_changes(trading_engine.on_regime_change)
     
-    orchestrator.register_component("TradingEngine", trading_engine, ComponentLayer.EXECUTION, initialization_order=30)
+    orchestrator.register_component("TradingEngine", trading_engine, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=30)
     
     # Register enhanced strategies
     for strategy_info in enhanced_strategies_config:
@@ -516,20 +516,20 @@ async def initialize_backtest_system():
     # Subscribe analytics to regime changes
     regime_engine.subscribe_to_regime_changes(enhanced_analytics.on_regime_change)
     
-    orchestrator.register_component("MetricsCalculator", metrics_calculator, ComponentLayer.EXECUTION, initialization_order=32)
-    orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, initialization_order=33)
-    orchestrator.register_component("EnhancedAnalyticsManager", enhanced_analytics, ComponentLayer.EXECUTION, initialization_order=35)
+    orchestrator.register_component("MetricsCalculator", metrics_calculator, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=32)
+    orchestrator.register_component("PerformanceAnalyzer", performance_analyzer, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=33)
+    orchestrator.register_component("EnhancedAnalyticsManager", enhanced_analytics, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=35)
     
     # 8. Register execution and portfolio management (late initialization)
     portfolio_manager = EnhancedPortfolioManager()
     unified_execution_engine = UnifiedExecutionEngine()
     
-    orchestrator.register_component("PortfolioManager", portfolio_manager, ComponentLayer.EXECUTION, initialization_order=38)
-    orchestrator.register_component("UnifiedExecutionEngine", unified_execution_engine, ComponentLayer.EXECUTION, initialization_order=40)
+    orchestrator.register_component("PortfolioManager", portfolio_manager, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=38)
+    orchestrator.register_component("UnifiedExecutionEngine", unified_execution_engine, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=40)
     
     # 9. Register strategy implementations (after all core components)
     base_strategy_enhanced = BaseStrategyEnhanced()
-    orchestrator.register_component("BaseStrategyEnhanced", base_strategy_enhanced, ComponentLayer.EXECUTION, initialization_order=50)
+    orchestrator.register_component("BaseStrategyEnhanced", base_strategy_enhanced, ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL, initialization_order=50)
     
     # 10. Initialize all components in dependency order
     await orchestrator.initialize_all_components()
