@@ -318,15 +318,13 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             
             # Volatility regime
             if self.config.regime_detection:
-                # Use pre-calculated returns if available, otherwise use volatility directly
-                if 'returns_1' in data.columns:
-                    returns = data['returns_1'].dropna()
-                    vol_regime = self._detect_volatility_regime(returns)
-                    vol_data['volatility_regime'] = vol_regime
-                else:
-                    # Fallback: use volatility to detect regime (less accurate but acceptable)
+                # Rule 3 compliance: use pre-calculated volatility from pipeline if available
+                if 'volatility' in data.columns:
                     vol_regime = self._detect_volatility_regime_from_vol(data['volatility'])
                     vol_data['volatility_regime'] = vol_regime
+                else:
+                    # If no pre-calculated volatility provided, default to 'normal'
+                    vol_data['volatility_regime'] = 'normal'
             
             return vol_data
             
@@ -334,31 +332,7 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             logger.error(f"Volatility calculation failed for {symbol}: {e}")
             return {}
     
-    def _detect_volatility_regime(self, returns: pd.Series) -> str:
-        """Detect volatility regime from returns (low, normal, high)"""
-        
-        try:
-            if len(returns) < 60:
-                return 'normal'
-            
-            # Calculate rolling volatility (acceptable - strategy-specific regime detection)
-            rolling_vol = returns.rolling(20).std() * np.sqrt(252)
-            current_vol = rolling_vol.iloc[-1]
-            
-            # Calculate percentiles
-            vol_25th = rolling_vol.quantile(0.25)
-            vol_75th = rolling_vol.quantile(0.75)
-            
-            if current_vol < vol_25th:
-                return 'low'
-            elif current_vol > vol_75th:
-                return 'high'
-            else:
-                return 'normal'
-                
-        except Exception as e:
-            logger.error(f"Volatility regime detection failed: {e}")
-            return 'normal'
+    # Removed return-based rolling volatility calculation to comply with Rule 3
     
     def _detect_volatility_regime_from_vol(self, volatility_series: pd.Series) -> str:
         """Detect volatility regime directly from volatility series (low, normal, high)"""

@@ -872,10 +872,32 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             
             # Step 4: Calculate composite percentile (0-100 scale)
             # Use rolling window for percentile calculation (adaptive)
+            # FIXED: Calculate percentile rank of last value in window (not last rank value)
             window = min(252, len(df))  # Up to 1 year of data
+            
+            def calculate_percentile_rank(series):
+                """
+                Calculate percentile rank of last value in rolling window.
+                
+                Returns the percentage of values in the window that are <= the last value.
+                Range: 0-100 (0 = lowest in window, 100 = highest in window)
+                """
+                if len(series) < 2:
+                    return 50.0  # Neutral percentile for insufficient data
+                # Calculate how many values are <= last value, convert to percentage
+                last_value = series.iloc[-1]
+                percentile = (series <= last_value).sum() / len(series) * 100
+                return percentile
+            
             df['composite_pct'] = df['composite_z'].rolling(window, min_periods=50).apply(
-                lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
+                calculate_percentile_rank,
+                raw=False
             )
+            
+            # Verify composite_pct range is correct
+            pct_min, pct_max = df['composite_pct'].min(), df['composite_pct'].max()
+            if pct_min < 0 or pct_max > 100:
+                self.logger.warning(f"⚠️ composite_pct range [{pct_min:.1f}, {pct_max:.1f}] outside expected [0, 100]")
             
             # Fill NaN with neutral values
             df['composite_z'] = df['composite_z'].fillna(0.0)
