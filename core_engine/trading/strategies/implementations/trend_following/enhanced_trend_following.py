@@ -453,7 +453,8 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.BUY,
                         strength=trend_quality,
                         confidence=confidence,
-                        target_quantity=self.config.base_position_pct,
+                        target_weight=self.config.base_position_pct,  # Use as percentage weight
+                        quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                         timestamp=datetime.now(),
                         additional_data={
                             'signal_reason': 'uptrend_entry',
@@ -488,7 +489,8 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.SELL,
                         strength=trend_quality,
                         confidence=confidence,
-                        target_quantity=self.config.base_position_pct,
+                        target_weight=self.config.base_position_pct,  # Use as percentage weight
+                        quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                         timestamp=datetime.now(),
                         additional_data={
                             'signal_reason': 'downtrend_entry',
@@ -1056,9 +1058,10 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL if position['signal_type'] == SignalType.BUY else SignalType.BUY,
                     strength=1.0,
                     confidence=0.9,
-                    quantity=position['quantity'],
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'action': 'exit',
                         'exit_reason': reason,
                         'entry_price': position['entry_price']

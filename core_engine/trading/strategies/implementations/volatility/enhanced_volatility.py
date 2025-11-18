@@ -403,7 +403,8 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=0.7,
                     confidence=0.75,
-                    target_quantity=self.config.base_position_pct,
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
                     additional_data={
                         'signal_reason': 'low_volatility_expansion',
@@ -424,7 +425,8 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=0.6,
                     confidence=0.7,
-                    target_quantity=self.config.base_position_pct,
+                    target_weight=self.config.base_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
                     additional_data={
                         'signal_reason': 'high_volatility_contraction',

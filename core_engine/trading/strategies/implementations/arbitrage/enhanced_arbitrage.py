@@ -436,7 +436,8 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    target_quantity=self.config.max_position_pct,
+                    target_weight=self.config.max_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now()
                 )
                 signals.append(signal1)
@@ -448,7 +449,8 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    target_quantity=self.config.max_position_pct,
+                    target_weight=self.config.max_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now()
                 )
                 signals.append(signal2)
@@ -463,9 +465,10 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.BUY,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    quantity=self.config.max_position_pct,
+                    target_weight=self.config.max_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'arbitrage_type': opportunity['opportunity_type'].value,
                         'pair_asset': asset2,
                         'discrepancy': opportunity['discrepancy'],
@@ -480,9 +483,10 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
                     signal_type=SignalType.SELL,
                     strength=opportunity['confidence'],
                     confidence=opportunity['confidence'],
-                    quantity=self.config.max_position_pct,
+                    target_weight=self.config.max_position_pct,  # Use as percentage weight
+                    quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                     timestamp=datetime.now(),
-                    metadata={
+                    additional_data={  # FIXED: metadata -> additional_data
                         'arbitrage_type': opportunity['opportunity_type'].value,
                         'pair_asset': asset1,
                         'discrepancy': opportunity['discrepancy'],

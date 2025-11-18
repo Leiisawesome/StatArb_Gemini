@@ -590,7 +590,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                             signal_type=signal_type,
                             strength=abs(zscore) / self.config.entry_zscore_threshold,
                             confidence=confidence,
-                            target_quantity=self.config.base_position_size,
+                            target_weight=self.config.base_position_size,  # Use as percentage weight
+                            quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                             timestamp=datetime.now(),
                             additional_data={
                                 'spread_id': spread_id,
@@ -610,7 +611,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                             signal_type=hedge_signal_type,
                             strength=abs(zscore) / self.config.entry_zscore_threshold,
                             confidence=confidence,
-                            target_quantity=self.config.base_position_size * abs(hedge_ratio),
+                            target_weight=self.config.base_position_size * abs(hedge_ratio),  # Hedge-adjusted weight
+                            quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                             timestamp=datetime.now(),
                             additional_data={
                                 'spread_id': spread_id,
@@ -827,7 +829,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                 signal_type=SignalType.SELL,  # Simplified - should be opposite of entry
                 strength=1.0,
                 confidence=0.9,
-                target_quantity=self.config.base_position_size,  # FIXED: quantity -> target_quantity
+                target_weight=self.config.base_position_size,  # Use as percentage weight
+                quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                 timestamp=datetime.now(),
                 additional_data={  # FIXED: metadata -> additional_data
                     'spread_id': spread_id,
@@ -844,7 +847,8 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
                 signal_type=SignalType.BUY,  # Simplified - should be opposite of entry
                 strength=1.0,
                 confidence=0.9,
-                target_quantity=self.config.base_position_size * abs(spread_metrics.hedge_ratio),  # FIXED: quantity -> target_quantity
+                target_weight=self.config.base_position_size * abs(spread_metrics.hedge_ratio),  # Hedge-adjusted weight
+                quantity_type="PERCENTAGE",  # CRITICAL FIX: Explicit quantity_type
                 timestamp=datetime.now(),
                 additional_data={  # FIXED: metadata -> additional_data
                     'spread_id': spread_id,
