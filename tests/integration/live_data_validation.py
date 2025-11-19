@@ -72,7 +72,7 @@ Author: StatArb_Gemini Integration Testing
 import asyncio
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 import sys
 import uuid
@@ -95,31 +95,54 @@ logger = logging.getLogger(__name__)
 def validate_and_convert_quantity(
     signal,
     current_price: float,
-    initial_portfolio_value: float,
+    portfolio_value: float,
     available_cash: float,
     min_shares: int = 1,
     max_shares: int = 10000,
-    max_position_pct: float = 0.10
+    max_position_pct: float = 0.10,
+    portfolio_value_policy: str = 'initial',
+    initial_portfolio_value: Optional[float] = None
 ) -> int:
     """
     Convert strategy signal to integer share quantity with STRICT validation.
     
     CRITICAL PRODUCTION FIX: No heuristics, explicit quantity_type required.
     
+    PORTFOLIO VALUE POLICY (NEW):
+    =============================
+    Two modes for portfolio value reference:
+    
+    1. 'initial' (BACKTEST MODE - Default):
+       - Uses initial_portfolio_value for ALL position sizing calculations
+       - Prevents compounding (winners don't get bigger positions)
+       - Good for controlled experiments and academic backtests
+       - Consistent position sizing regardless of P&L
+    
+    2. 'dynamic' (PRODUCTION MODE):
+       - Uses current portfolio_value for position sizing calculations
+       - Matches Kelly criterion and optimal f calculations
+       - Industry standard for live trading
+       - Efficient capital utilization (scales with portfolio growth)
+    
+    IMPORTANT: Both validation AND risk manager MUST use SAME policy!
+    
     Args:
         signal: StrategySignal object with quantity fields
         current_price: Current price per share
-        initial_portfolio_value: Initial portfolio value for percentage conversion
+        portfolio_value: Current portfolio value (for 'dynamic' policy)
         available_cash: Available cash for position sizing
         min_shares: Minimum shares allowed (default: 1)
         max_shares: Maximum shares allowed (default: 10000)
         max_position_pct: Maximum position as % of portfolio (default: 10%)
+        portfolio_value_policy: 'initial' (static) or 'dynamic' (current) (default: 'initial')
+        initial_portfolio_value: Initial portfolio value (REQUIRED if policy='initial')
     
     Returns:
         int: Integer share quantity (floored to prevent over-buying)
     
     Raises:
         ValueError: If quantity_type is missing, invalid, or quantity out of bounds
+        ValueError: If policy='initial' but initial_portfolio_value not provided
     """
     
     # REQUIREMENT 1: quantity_type MUST be explicit
@@ -131,6 +154,25 @@ def validate_and_convert_quantity(
             f"Strategy MUST explicitly set quantity_type to 'PERCENTAGE', 'ABSOLUTE', or 'TARGET_WEIGHT'. "
             f"Got: {quantity_type}"
         )
+    
+    # PORTFOLIO VALUE POLICY SELECTION
+    if portfolio_value_policy not in ['initial', 'dynamic']:
+        raise ValueError(
+            f"Invalid portfolio_value_policy: {portfolio_value_policy}. "
+            f"Must be 'initial' (backtest mode) or 'dynamic' (production mode)."
+        )
+    
+    if portfolio_value_policy == 'initial':
+        if initial_portfolio_value is None:
+            raise ValueError(
+                f"portfolio_value_policy='initial' requires initial_portfolio_value parameter. "
+                f"Provide initial portfolio value for backtest mode."
+            )
+        reference_portfolio_value = initial_portfolio_value
+        policy_mode = "BACKTEST (initial)"
+    else:  # dynamic
+        reference_portfolio_value = portfolio_value
+        policy_mode = "PRODUCTION (dynamic)"
     
     # REQUIREMENT 2: Extract quantity value based on type
     if quantity_type == 'PERCENTAGE' or quantity_type == 'TARGET_WEIGHT':
@@ -150,8 +192,8 @@ def validate_and_convert_quantity(
                 f"Max allowed: {max_position_pct*100}% of portfolio."
             )
         
-        # Convert percentage to shares using INITIAL portfolio value (avoid compounding)
-        position_value = target_pct * initial_portfolio_value
+        # Convert percentage to shares using REFERENCE portfolio value (policy-based)
+        position_value = target_pct * reference_portfolio_value
         fractional_shares = position_value / current_price
         
     elif quantity_type == 'ABSOLUTE':
@@ -194,16 +236,17 @@ def validate_and_convert_quantity(
     
     # REQUIREMENT 5: Check position size doesn't exceed max % of portfolio
     position_value = integer_shares * current_price
-    position_pct = position_value / initial_portfolio_value
+    position_pct = position_value / reference_portfolio_value
     
     if position_pct > max_position_pct:
         # Cap at max percentage
-        max_allowed_value = max_position_pct * initial_portfolio_value
+        max_allowed_value = max_position_pct * reference_portfolio_value
         max_allowed_shares = int(np.floor(max_allowed_value / current_price))
         
         logger.warning(
             f"Position {integer_shares} shares (${position_value:,.2f}, {position_pct:.1%}) "
-            f"exceeds {max_position_pct:.1%} limit. Capping at {max_allowed_shares} shares."
+            f"exceeds {max_position_pct:.1%} limit. Capping at {max_allowed_shares} shares "
+            f"({policy_mode} mode)."
         )
         integer_shares = max_allowed_shares
     
@@ -228,7 +271,8 @@ def validate_and_convert_quantity(
     
     logger.info(
         f"✅ QUANTITY VALIDATED: {integer_shares} shares "
-        f"(${integer_shares * current_price:,.2f}, {position_pct:.1%} of portfolio)"
+        f"(${integer_shares * current_price:,.2f}, {position_pct:.1%} of portfolio) "
+        f"[{policy_mode}]"
     )
     
     return integer_shares
@@ -482,15 +526,15 @@ class LiveDataSignalGenerationTest:
                 regime_sequence = regime_result.get('regime_sequence', [])
                 
                 # Get current regime context (most recent regime)
-                if hasattr(regime_engine, 'current_regime') and regime_engine.current_regime:
+                if regime_engine.current_regime:
                     current_regime = regime_engine.current_regime
                     
                     # Enhanced regime context with sequence information
                     regime_context = {
-                        'primary_regime': current_regime.primary_regime.value if hasattr(current_regime.primary_regime, 'value') else str(current_regime.primary_regime),
-                        'volatility_regime': current_regime.volatility_regime.value if hasattr(current_regime.volatility_regime, 'value') else str(current_regime.volatility_regime),
-                        'confidence': float(current_regime.confidence) if hasattr(current_regime, 'confidence') else 0.0,
-                        'regime_id': current_regime.regime_id if hasattr(current_regime, 'regime_id') else None,
+                        'primary_regime': current_regime.primary_regime.value,
+                        'volatility_regime': current_regime.volatility_regime.value,
+                        'confidence': float(current_regime.confidence),
+                        'regime_id': current_regime.regime_id,
                         # CRITICAL: Add regime sequence for regime-aware processing
                         'regime_sequence': regime_sequence,  # Bar-by-bar regime tracking
                         'regime_changes_count': regime_result.get('regime_changes_count', 0),
@@ -600,7 +644,7 @@ class LiveDataSignalGenerationTest:
                 logger.info(f"   ✅ TradingSignals generated: {len(trading_signals)} TradingSignal objects")
                 
                 # Check for regime-segmented processing
-                if hasattr(pipeline, 'regime_engine') and pipeline.regime_engine:
+                if pipeline.regime_engine:
                     logger.info("   ✅ Regime-segmented processing: ENABLED (config adapts per regime segment)")
                 else:
                     logger.info("   ⚠️  Regime-segmented processing: DISABLED (single-segment processing)")
@@ -635,10 +679,10 @@ class LiveDataSignalGenerationTest:
             
             for trading_signal in trading_signals:
                 # Get signal type (BUY/SELL)
-                signal_type = str(trading_signal.signal_type).upper() if hasattr(trading_signal.signal_type, 'value') else str(trading_signal.signal_type).upper()
+                signal_type = str(trading_signal.signal_type.value).upper()
                 
                 # Get strength
-                strength_str = str(trading_signal.strength).upper() if hasattr(trading_signal.strength, 'value') else str(trading_signal.strength).upper()
+                strength_str = str(trading_signal.strength.value).upper()
                 
                 # Get timestamp
                 timestamp = trading_signal.timestamp
@@ -666,12 +710,12 @@ class LiveDataSignalGenerationTest:
                     'confidence': float(trading_signal.confidence),
                     'strength': strength_str,
                     'price': float(trading_signal.price) if trading_signal.price else None,
-                    'target_price': float(trading_signal.target_price) if hasattr(trading_signal, 'target_price') and trading_signal.target_price else None,
-                    'stop_loss': float(trading_signal.stop_loss) if hasattr(trading_signal, 'stop_loss') and trading_signal.stop_loss else None,
-                    'position_size': float(trading_signal.position_size) if hasattr(trading_signal, 'position_size') and trading_signal.position_size else None,
-                    'strategy': trading_signal.strategy if hasattr(trading_signal, 'strategy') else 'unknown',
+                    'target_price': float(trading_signal.target_price) if trading_signal.target_price else None,
+                    'stop_loss': float(trading_signal.stop_loss) if trading_signal.stop_loss else None,
+                    'position_size': float(trading_signal.position_size) if trading_signal.position_size else None,
+                    'strategy': trading_signal.strategy,
                     'regime_context': regime_context,
-                    'metadata': trading_signal.metadata if hasattr(trading_signal, 'metadata') else {},
+                    'metadata': trading_signal.metadata,
                     'raw_data': raw_data
                 }
                 
@@ -803,9 +847,8 @@ class LiveDataSignalGenerationTest:
                 for strategy_name, strategy_instance in strategy_manager.active_strategies.items():
                     logger.info(f"   📊 Strategy: {strategy_name}")
                     logger.info(f"      Type: {type(strategy_instance).__name__}")
-                    logger.info(f"      Config: {strategy_instance.config if hasattr(strategy_instance, 'config') else 'N/A'}")
-                    if hasattr(strategy_instance, 'config'):
-                        logger.info(f"      Strategy Type: {strategy_instance.config.strategy_type if hasattr(strategy_instance.config, 'strategy_type') else 'N/A'}")
+                    logger.info(f"      Config: {strategy_instance.config}")
+                    logger.info(f"      Strategy Type: {strategy_instance.config.strategy_type}")
                 
                 # ========================================================================
                 # TRADING SIMULATION MODE: Process bars chronologically (simulate real trading)
@@ -1096,11 +1139,13 @@ class LiveDataSignalGenerationTest:
                                         signal_quantity = validate_and_convert_quantity(
                                             signal=signal,
                                             current_price=current_price,
-                                            initial_portfolio_value=initial_portfolio_value,
+                                            portfolio_value=risk_manager.portfolio_value,  # Dynamic current value
                                             available_cash=risk_manager.available_cash,
                                             min_shares=1,
                                             max_shares=10000,
-                                            max_position_pct=0.10
+                                            max_position_pct=0.10,
+                                            portfolio_value_policy='initial',  # BACKTEST MODE: Use initial portfolio value
+                                            initial_portfolio_value=initial_portfolio_value  # For backtest consistency
                                         )
                                         
                                         if signal_quantity == 0:
@@ -1123,7 +1168,7 @@ class LiveDataSignalGenerationTest:
                                     if is_example_signal:
                                         logger.info(f"\n   📊 PHASE 7 INPUT (TradingDecisionRequest):")
                                         logger.info(f"      symbol: {signal.symbol}")
-                                        logger.info(f"      side: {signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type).lower()}")
+                                        logger.info(f"      side: {signal.signal_type.value}")
                                         logger.info(f"      quantity: {signal_quantity:.2f} shares")
                                         logger.info(f"      confidence: {signal.confidence:.4f}")
                                         logger.info(f"      current_price: ${current_price:.2f}")
@@ -1132,7 +1177,7 @@ class LiveDataSignalGenerationTest:
                                         request_id=str(uuid.uuid4()),
                                         decision_type=TradingDecisionType.POSITION_ENTRY,
                                         symbol=signal.symbol,
-                                        side=signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type).lower(),
+                                        side=signal.signal_type.value,
                                         quantity=signal_quantity,
                                         confidence=signal.confidence,
                                         strategy_id=getattr(signal, 'strategy_id', 'momentum_strategy_1'),
@@ -1164,11 +1209,11 @@ class LiveDataSignalGenerationTest:
                                         logger.info(f"      Authorized Quantity: {authorization.authorized_quantity:.2f} shares")
                                         logger.info(f"      Authorized Value: ${authorization.authorized_quantity * current_price:,.2f}")
                                         logger.info(f"      Max Quantity: {getattr(authorization, 'max_quantity', authorization.authorized_quantity):.2f} shares")
-                                        if hasattr(authorization, 'rejection_reason') and authorization.rejection_reason:
+                                        if authorization.rejection_reason:
                                             logger.info(f"      Rejection Reason: {authorization.rejection_reason}")
                                     
                                     # Track Phase 7 authorization details
-                                    auth_level = authorization.authorization_level.value if hasattr(authorization.authorization_level, 'value') else str(authorization.authorization_level)
+                                    auth_level = authorization.authorization_level.value
                                     auth_level_key = auth_level if auth_level else 'unknown'
                                     
                                     if authorization.authorization_level != AuthorizationLevel.REJECTED:
@@ -1192,11 +1237,11 @@ class LiveDataSignalGenerationTest:
                                         if is_example_signal:
                                             logger.info(f"\n   📋 PHASE 8 INPUT (TradingAuthorization):")
                                             logger.info(f"      Authorization ID: {authorization.authorization_id}")
-                                            logger.info(f"      Symbol: {authorization.symbol if hasattr(authorization, 'symbol') else signal.symbol}")
-                                            logger.info(f"      Side: {authorization.side if hasattr(authorization, 'side') else signal.signal_type.value}")
+                                            logger.info(f"      Symbol: {authorization.symbol}")
+                                            logger.info(f"      Side: {authorization.side}")
                                             logger.info(f"      Authorized Quantity: {authorization.authorized_quantity:.2f} shares")
                                         
-                                        logger.debug(f"   📋 Phase 8: Creating execution plan for {signal.symbol} {signal.signal_type.value if hasattr(signal.signal_type, 'value') else 'buy'}")
+                                        logger.debug(f"   📋 Phase 8: Creating execution plan for {signal.symbol} {signal.signal_type.value}")
                                         
                                         try:
                                             execution_plan_dict = await trading_engine.create_execution_plan(authorization)
@@ -1349,8 +1394,8 @@ class LiveDataSignalGenerationTest:
                                             logger.info(f"      Symbol: {execution_request.authorization.symbol}")
                                             logger.info(f"      Side: {execution_request.authorization.side}")
                                             logger.info(f"      Quantity: {execution_request.authorization.quantity:.2f} shares")
-                                            logger.info(f"      Algorithm: {execution_request.algorithm.value if hasattr(execution_request.algorithm, 'value') else execution_request.algorithm}")
-                                            logger.info(f"      Urgency: {execution_request.urgency.value if hasattr(execution_request.urgency, 'value') else execution_request.urgency}")
+                                            logger.info(f"      Algorithm: {execution_request.algorithm.value}")
+                                            logger.info(f"      Urgency: {execution_request.urgency.value}")
                                         
                                         logger.debug(f"   🚀 Phase 9: Executing trade for {signal.symbol}")
                                         
@@ -1361,10 +1406,10 @@ class LiveDataSignalGenerationTest:
                                             
                                             from core_engine.system.unified_execution_engine import ExecutionStatus
                                             
-                                            if result and hasattr(result, 'status'):
+                                            if result:
                                                 status = result.status
                                                 if isinstance(status, ExecutionStatus):
-                                                    status_value = status.value if hasattr(status, 'value') else str(status)
+                                                    status_value = status.value
                                                 else:
                                                     status_value = str(status)
                                                 
@@ -1375,10 +1420,10 @@ class LiveDataSignalGenerationTest:
                                                 
                                                 if is_example_signal:
                                                     logger.info(f"\n   🚀 PHASE 9 OUTPUT (ExecutionResult):")
-                                                    logger.info(f"      Execution ID: {result.execution_id if hasattr(result, 'execution_id') else 'N/A'}")
+                                                    logger.info(f"      Execution ID: {result.execution_id}")
                                                     logger.info(f"      Status: {status_value}")
-                                                    logger.info(f"      Filled Quantity: {result.filled_quantity if hasattr(result, 'filled_quantity') else 0:.2f} shares")
-                                                    logger.info(f"      Avg Fill Price: ${result.avg_fill_price if hasattr(result, 'avg_fill_price') else 0:.2f}")
+                                                    logger.info(f"      Filled Quantity: {result.filled_quantity:.2f} shares")
+                                                    logger.info(f"      Avg Fill Price: ${result.avg_fill_price:.2f}")
                                                     # Use correct ExecutionResult field names
                                                     slippage = getattr(result, 'slippage', 0.0)
                                                     total_cost = getattr(result, 'total_cost', 0.0)
@@ -2354,7 +2399,7 @@ class LiveDataSignalGenerationTest:
                 """)
                 
                 # Check if pipeline orchestrator processed data
-                if hasattr(strategy_manager, 'pipeline_orchestrator') and strategy_manager.pipeline_orchestrator:
+                if strategy_manager.pipeline_orchestrator:
                     logger.info("   ✅ Pipeline orchestrator is active")
                     
                     # Try to trace what the pipeline orchestrator would return
@@ -2480,10 +2525,9 @@ class LiveDataSignalGenerationTest:
                                 logger.info(f"            FeatureEngineer creates: momentum_10, momentum_20, momentum_50")
                                 
                                 # Check if there's a mismatch
-                                if hasattr(momentum_strategy.config, 'short_period'):
-                                    short_period = momentum_strategy.config.short_period
-                                    if f'momentum_{short_period}' not in enriched_df.columns:
-                                        logger.warning(f"            ⚠️  MISMATCH: Strategy expects momentum from period {short_period}, but momentum_{short_period} not found")
+                                short_period = momentum_strategy.config.short_period
+                                if f'momentum_{short_period}' not in enriched_df.columns:
+                                    logger.warning(f"            ⚠️  MISMATCH: Strategy expects momentum from period {short_period}, but momentum_{short_period} not found")
                                 
                                 # Check for NaN values
                                 nan_counts = enriched_df.isna().sum()
@@ -2616,23 +2660,23 @@ class LiveDataSignalGenerationTest:
                     strategy_signal_dicts = []
                     for trading_signal in strategy_signals:
                         signal_dict = {
-                            'timestamp': trading_signal.created_at if hasattr(trading_signal, 'created_at') else datetime.now(),
+                            'timestamp': trading_signal.created_at,
                             'symbol': trading_signal.symbol,
-                            'signal_type': trading_signal.signal_type.value.upper() if hasattr(trading_signal.signal_type, 'value') else str(trading_signal.signal_type).upper(),
+                            'signal_type': trading_signal.signal_type.value.upper(),
                             'confidence': float(trading_signal.confidence),
-                            'strength': trading_signal.strength.value.upper() if hasattr(trading_signal.strength, 'value') else str(trading_signal.strength).upper(),
+                            'strength': trading_signal.strength.value.upper(),
                             'price': None,  # TradingSignal doesn't have price directly
                             'target_price': float(trading_signal.target_price) if trading_signal.target_price else None,
                             'stop_loss': float(trading_signal.stop_loss) if trading_signal.stop_loss else None,
                             'position_size': float(trading_signal.quantity) if trading_signal.quantity else None,
                             'strategy': trading_signal.strategy_name,
-                            'strategy_type': trading_signal.strategy_type.value if hasattr(trading_signal.strategy_type, 'value') else str(trading_signal.strategy_type),
+                            'strategy_type': trading_signal.strategy_type.value,
                             'regime_context': None,  # Will be added from regime_context parameter
-                            'metadata': trading_signal.metadata if hasattr(trading_signal, 'metadata') else {},
+                            'metadata': trading_signal.metadata,
                             'raw_data': {},
                             'signal_id': trading_signal.signal_id,
-                            'expected_return': float(trading_signal.expected_return) if hasattr(trading_signal, 'expected_return') else None,
-                            'risk_score': float(trading_signal.risk_score) if hasattr(trading_signal, 'risk_score') else None
+                            'expected_return': float(trading_signal.expected_return) if trading_signal.expected_return else None,
+                            'risk_score': float(trading_signal.risk_score) if trading_signal.risk_score else None
                         }
                         strategy_signal_dicts.append(signal_dict)
                 
