@@ -782,12 +782,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             trend_strength = trend_strength if not pd.isna(trend_strength) else 0
             
             # ========================================
-            # NEW: Use COMPOSITE SIGNAL ENTRY (Phase 4A)
+            # NEW: Use COMPOSITE SIGNAL ENTRY (Phase 4A + CRITICAL FIXES)
             # This makes historical scanning consistent with live mode
             # ========================================
             
-            # Check composite entry conditions (Phase 4A)
-            should_enter, signal_type = self._check_composite_entry(symbol, current_data)
+            # Check composite entry conditions (Phase 4A + CRITICAL FIXES)
+            # Pass enriched_data and idx for micro-structure analysis
+            should_enter, signal_type = self._check_composite_entry(
+                symbol, current_data, 
+                enriched_data=data, 
+                current_idx=idx
+            )
             
             if should_enter and signal_type:
                 # Generate signal based on composite entry
@@ -930,8 +935,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             
             logger.debug(f"[{symbol}] 🔍 About to call _check_composite_entry with composite_z={current_data.get('composite_z', 'N/A')}")
             
-            # Check composite entry conditions
-            should_enter, signal_type = self._check_composite_entry(symbol, current_data)
+            # Check composite entry conditions (CRITICAL FIXES applied)
+            # Pass enriched_data and idx for micro-structure analysis
+            should_enter, signal_type = self._check_composite_entry(
+                symbol, current_data,
+                enriched_data=data,
+                current_idx=len(data) - 1  # Current bar is last in data
+            )
             
             if should_enter and signal_type:
                 # Generate signal based on composite entry
@@ -1635,37 +1645,50 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     def _check_composite_entry(
         self,
         symbol: str,
-        current_bar: pd.Series
+        current_bar: pd.Series,
+        enriched_data: pd.DataFrame = None,
+        current_idx: int = None
     ) -> Tuple[bool, Optional[SignalType]]:
         """
-        Check composite signal entry conditions (Phase 4A + Phase 4B)
+        Check composite signal entry conditions with CRITICAL FIXES applied
         
-        Uses composite_z and composite_pct for entry (aligned with exit logic).
-        Entry thresholds are STRONGER than exit thresholds to create hysteresis.
+        CRITICAL FIX #1: Entry/Exit Symmetry
+        - Lowered entry threshold from 1.75 to 1.0-1.25 (symmetric with exit)
         
-        **Phase 4B Enhancement: Type 2 Explicit Regime Awareness**
-        - Thresholds now adapt based on market regime (asymmetric risk management)
-        - Bear regimes: Easier SHORT, Harder LONG (avoid catching falling knives)
-        - Bull regimes: Easier LONG, Harder SHORT (avoid fighting the trend)
-        - High volatility: Stricter on both sides (avoid noise)
+        CRITICAL FIX #2: Pre-Inflection Entry Triggers
+        - Added momentum inflection detection (slope & acceleration)
+        - Added volatility compression → expansion detection
         
-        Entry Logic:
-        - LONG entry: composite_z > regime_adjusted_long_threshold AND
-                     composite_pct > composite_pct_entry (92)
-        - SHORT entry: composite_z < -regime_adjusted_short_threshold AND
-                      composite_pct < (100 - composite_pct_entry) (8)
+        CRITICAL FIX #3: Lower Z-score Threshold
+        - Entry at 1.0-1.25 instead of 1.75 (catches moves earlier)
+        
+        CRITICAL FIX #4: Price-Path Awareness
+        - Added higher lows detection (bullish structure)
+        - Added pivot validation
+        - Added basing pattern detection
+        
+        CRITICAL FIX #5: Faster Trend Indicator
+        - Supplement ADX with momentum slope (3-period regression)
+        
+        Entry Logic (NEW):
+        - LONG entry: 
+            * composite_z > 1.0 (lowered from 1.75)
+            * composite_pct > 70 (lowered from 92)
+            * momentum_slope > 0 (trending up)
+            * momentum_accel > 0 (accelerating) OR inflection detected
+            * price structure = 'higher_lows' OR pivot confirmed
         
         Args:
             symbol: Trading symbol
-            current_bar: Current bar data with composite signals and regime info
+            current_bar: Current bar data with composite signals
+            enriched_data: Full enriched DataFrame (for micro-structure analysis)
+            current_idx: Current bar index (for micro-structure analysis)
             
         Returns:
             Tuple[should_enter, signal_type]
-            - should_enter: True if entry conditions met
-            - signal_type: SignalType.BUY (LONG) or SignalType.SELL (SHORT) or None
         """
         
-        logger.debug(f"🚀 [{symbol}] ==== ENTERING _check_composite_entry method ====")
+        logger.debug(f"🚀 [{symbol}] ==== ENTERING _check_composite_entry (CRITICAL FIXES APPLIED) ====")
         
         # FIXED: HIGH #3 - Narrow exception handling for specific errors
         try:
@@ -1707,32 +1730,116 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             logger.debug(f"🔧 [{symbol}] Normalizing composite_pct from {composite_pct} to {composite_pct * 100}%")
             composite_pct = composite_pct * 100.0
         
+        # CRITICAL FIX #1 & #3: Lowered thresholds for earlier entry (1.0 instead of 1.75)
+        BASE_LONG_THRESHOLD = 1.0  # Was 1.75
+        BASE_SHORT_THRESHOLD = 1.0  # Was 1.75
+        BASE_PCT_THRESHOLD = 70.0  # Was 92.0 (too high, enters at top of move)
+        
         # Phase 4B: Get regime-adjusted thresholds (Type 2 Explicit Regime Awareness)
         logger.debug(f"🔍 [{symbol}] About to get regime-adjusted thresholds...")
         thresholds = self._get_regime_adjusted_thresholds(current_bar)
         logger.debug(f"🔍 [{symbol}] Got thresholds: {thresholds}")
-        long_threshold = thresholds['long_threshold']
-        short_threshold = thresholds['short_threshold']
+        
+        # Apply regime adjustments to NEW lower base thresholds
+        regime_multiplier = thresholds.get('regime_multiplier', 1.0)
+        long_threshold = BASE_LONG_THRESHOLD * regime_multiplier
+        short_threshold = BASE_SHORT_THRESHOLD * regime_multiplier
+        pct_threshold = BASE_PCT_THRESHOLD
         adjustment_reason = thresholds['adjustment_reason']
         
-        # 🔍 DIAGNOSTIC: Log ALL threshold checks (not just high values)
-        logger.debug(f"🔍 [{symbol}] ENTRY CHECK:")
-        logger.debug(f"   composite_z={composite_z}")
-        logger.debug(f"   composite_pct={composite_pct}")
-        logger.debug(f"   long_threshold={long_threshold} (reason: {adjustment_reason})")
-        logger.debug(f"   short_threshold={short_threshold}")
-        logger.debug(f"   LONG condition: {composite_z} > {long_threshold}? {composite_z > long_threshold}")
-        logger.debug(f"   SHORT condition: {composite_z} < {-short_threshold}? {composite_z < -short_threshold}")
+        # CRITICAL FIX #2: Pre-Inflection Detection
+        inflection_data = None
+        if enriched_data is not None and current_idx is not None:
+            inflection_data = self._detect_momentum_inflection(
+                symbol, enriched_data, current_idx, lookback=5
+            )
+            logger.debug(f"🔍 [{symbol}] Inflection: detected={inflection_data.get('inflection_detected')}, "
+                        f"type={inflection_data.get('inflection_type')}, "
+                        f"slope={inflection_data.get('momentum_slope'):.4f}, "
+                        f"accel={inflection_data.get('momentum_accel'):.4f}")
         
-        # LONG entry: Strong upward momentum (both Z-score AND percentile confirmation)
+        # CRITICAL FIX #4: Price Structure Detection
+        structure_data = None
+        if enriched_data is not None and current_idx is not None:
+            structure_data = self._detect_price_structure(
+                symbol, enriched_data, current_idx, lookback=5
+            )
+            logger.debug(f"🔍 [{symbol}] Structure: type={structure_data.get('structure_type')}, "
+                        f"quality={structure_data.get('structure_quality'):.2f}, "
+                        f"pivot={structure_data.get('pivot_confirmed')}, "
+                        f"basing={structure_data.get('basing_detected')}")
+        
+        # CRITICAL FIX #5: Fast Momentum Slope (replaces slow ADX)
+        momentum_slope = 0.0
+        if enriched_data is not None and current_idx is not None:
+            momentum_slope = self._calculate_momentum_slope(
+                symbol, enriched_data, current_idx, lookback=3
+            )
+            logger.debug(f"🔍 [{symbol}] Momentum slope: {momentum_slope:.4f}")
+        
+        # 🔍 DIAGNOSTIC: Log ALL threshold checks (not just high values)
+        logger.debug(f"🔍 [{symbol}] ENTRY CHECK (CRITICAL FIXES APPLIED):")
+        logger.debug(f"   composite_z={composite_z:.4f}")
+        logger.debug(f"   composite_pct={composite_pct:.1f}%")
+        logger.debug(f"   long_threshold={long_threshold:.4f} (BASE={BASE_LONG_THRESHOLD}, was 1.75)")
+        logger.debug(f"   short_threshold={short_threshold:.4f}")
+        logger.debug(f"   pct_threshold={pct_threshold:.1f}% (was 92.0%)")
+        logger.debug(f"   momentum_slope={momentum_slope:.4f}")
+        logger.debug(f"   LONG condition: {composite_z:.4f} > {long_threshold:.4f}? {composite_z > long_threshold}")
+        logger.debug(f"   SHORT condition: {composite_z:.4f} < {-short_threshold:.4f}? {composite_z < -short_threshold}")
+        
+        # LONG entry: Composite threshold + structure + momentum
         long_condition_met = (
             composite_z > long_threshold and
-            composite_pct > self.config.composite_pct_entry
+            composite_pct > pct_threshold and
+            momentum_slope > 0  # NEW: Momentum must be trending up
         )
+        
+        # Add inflection boost (allows earlier entry if inflection detected)
+        if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bullish':
+            logger.info(f"🟢 [{symbol}] BULLISH INFLECTION DETECTED - boosting entry confidence")
+            long_condition_met = (
+                composite_z > long_threshold * 0.8 and  # 20% lower threshold if inflection
+                composite_pct > pct_threshold * 0.9 and  # 10% lower percentile
+                inflection_data.get('momentum_accel', 0) > 0
+            )
+        
+        # Add structure validation (prefer higher lows or pivot confirmation)
+        if structure_data:
+            structure_confirms_long = (
+                structure_data.get('structure_type') == 'higher_lows' or
+                structure_data.get('pivot_confirmed') or
+                structure_data.get('basing_detected')
+            )
+            if not structure_confirms_long:
+                logger.debug(f"⚠️  [{symbol}] LONG: Weak price structure, reducing confidence")
+                long_condition_met = long_condition_met and composite_z > long_threshold * 1.2  # Require stronger signal
+        
+        # SHORT entry: Composite threshold + structure + momentum
         short_condition_met = (
             composite_z < -short_threshold and
-            composite_pct < (100 - self.config.composite_pct_entry)
+            composite_pct < (100 - pct_threshold) and
+            momentum_slope < 0  # NEW: Momentum must be trending down
         )
+        
+        # Add inflection boost for shorts
+        if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bearish':
+            logger.info(f"🔴 [{symbol}] BEARISH INFLECTION DETECTED - boosting entry confidence")
+            short_condition_met = (
+                composite_z < -short_threshold * 0.8 and
+                composite_pct < (100 - pct_threshold * 0.9) and
+                inflection_data.get('momentum_accel', 0) < 0
+            )
+        
+        # Add structure validation for shorts
+        if structure_data:
+            structure_confirms_short = (
+                structure_data.get('structure_type') == 'lower_highs' or
+                structure_data.get('pivot_confirmed')
+            )
+            if not structure_confirms_short:
+                logger.debug(f"⚠️  [{symbol}] SHORT: Weak price structure, reducing confidence")
+                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
         
         if long_condition_met:
             logger.info(
@@ -1801,9 +1908,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         if should_exit:
             return True, exit_reason
         
-        # Priority 2: Composite signal exits (momentum deterioration)
+        # Priority 2: Composite signal exits (momentum deterioration - CRITICAL FIXES applied)
         should_exit, exit_reason = self._check_composite_exits(
-            symbol, pos_info, current_bar
+            symbol, pos_info, current_bar,
+            enriched_data=enriched_data,
+            current_idx=enriched_data.index.get_loc(bar_timestamp) if bar_timestamp in enriched_data.index else None
         )
         if should_exit:
             return True, exit_reason
@@ -1897,19 +2006,30 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         self,
         symbol: str,
         pos_info: Dict[str, Any],
-        current_bar: pd.Series
+        current_bar: pd.Series,
+        enriched_data: pd.DataFrame = None,
+        current_idx: int = None
     ) -> Tuple[bool, Optional[str]]:
         """
-        Check composite signal exit conditions (Phase 3)
+        Check composite signal exit conditions with CRITICAL FIX #1 applied
         
-        Exit triggers:
-        1. Composite Z-score falls below exit threshold
-        2. Composite percentile falls below exit threshold
+        CRITICAL FIX #1: Entry/Exit Symmetry
+        - Exit threshold NOW SYMMETRIC with entry threshold
+        - Entry at Z=1.0, Exit at Z=0.6 (0.6x entry, was 0.3x before)
+        - Added momentum acceleration check (must be negative to exit)
+        
+        Exit triggers (SYMMETRIC with entry):
+        1. Composite Z-score falls below 0.6 (60% of entry threshold 1.0)
+        2. Composite percentile falls below 40% (was 30%, now higher)
+        3. Momentum acceleration < 0 (NEW: momentum must be decelerating)
+        4. Momentum slope < 0 (NEW: momentum must be trending down)
         
         Args:
             symbol: Trading symbol
             pos_info: Position information
             current_bar: Current bar data
+            enriched_data: Full enriched DataFrame (for momentum acceleration)
+            current_idx: Current bar index (for momentum acceleration)
             
         Returns:
             Tuple[should_exit, exit_reason]
@@ -1929,25 +2049,62 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         direction = pos_info['direction']
         
+        # CRITICAL FIX #1: Symmetric exit thresholds
+        # Entry is at Z=1.0, Exit at Z=0.6 (maintains 40% buffer zone)
+        EXIT_Z_THRESHOLD = 0.6  # Was 0.5, now 0.6 (60% of entry threshold 1.0)
+        EXIT_PCT_THRESHOLD = 40.0  # Was 30%, now 40% (more conservative)
+        
+        # CRITICAL FIX #2: Get momentum acceleration for exit validation
+        momentum_accel = 0.0
+        momentum_slope = 0.0
+        if enriched_data is not None and current_idx is not None:
+            inflection_data = self._detect_momentum_inflection(
+                symbol, enriched_data, current_idx, lookback=5
+            )
+            momentum_accel = inflection_data.get('momentum_accel', 0.0)
+            momentum_slope = inflection_data.get('momentum_slope', 0.0)
+        
+        logger.debug(f"🔍 [{symbol}] Exit check: Z={composite_z:.4f}, "
+                    f"pct={composite_pct:.1f}%, accel={momentum_accel:.4f}, "
+                    f"slope={momentum_slope:.4f}")
+        
         # LONG position: exit if momentum deteriorates
         if direction == 1:
-            if composite_z < self.config.composite_z_exit:
-                logger.info(f"📉 {symbol} LONG composite_z exit: {composite_z:.2f} < {self.config.composite_z_exit:.2f}")
-                return True, "composite_z_exit"
+            # Primary exit: Z-score decay + momentum deceleration
+            if composite_z < EXIT_Z_THRESHOLD and momentum_accel < 0:
+                logger.info(f"📉 {symbol} LONG composite_z exit: {composite_z:.2f} < {EXIT_Z_THRESHOLD:.2f} "
+                           f"AND momentum_accel < 0 ({momentum_accel:.4f})")
+                return True, "composite_z_momentum_decay"
             
-            if composite_pct < self.config.composite_pct_exit:
-                logger.info(f"📉 {symbol} LONG composite_pct exit: {composite_pct:.1f} < {self.config.composite_pct_exit:.1f}")
-                return True, "composite_pct_exit"
+            # Secondary exit: Percentile decay + momentum turning down
+            if composite_pct < EXIT_PCT_THRESHOLD and momentum_slope < 0:
+                logger.info(f"📉 {symbol} LONG composite_pct exit: {composite_pct:.1f} < {EXIT_PCT_THRESHOLD:.1f} "
+                           f"AND momentum_slope < 0 ({momentum_slope:.4f})")
+                return True, "composite_pct_momentum_decay"
+            
+            # Aggressive exit: Both Z and percentile weak + strong deceleration
+            if composite_z < EXIT_Z_THRESHOLD * 1.2 and composite_pct < EXIT_PCT_THRESHOLD * 1.2 and momentum_accel < -0.002:
+                logger.info(f"📉 {symbol} LONG aggressive exit: weak signals + strong deceleration")
+                return True, "composite_aggressive_decay"
         
-        # SHORT position: exit if momentum strengthens
+        # SHORT position: exit if momentum strengthens (opposite)
         elif direction == -1:
-            if composite_z > -self.config.composite_z_exit:  # Opposite for shorts
-                logger.info(f"📈 {symbol} SHORT composite_z exit: {composite_z:.2f} > {-self.config.composite_z_exit:.2f}")
-                return True, "composite_z_exit"
+            # Primary exit: Z-score rises + momentum accelerates upward
+            if composite_z > -EXIT_Z_THRESHOLD and momentum_accel > 0:
+                logger.info(f"📈 {symbol} SHORT composite_z exit: {composite_z:.2f} > {-EXIT_Z_THRESHOLD:.2f} "
+                           f"AND momentum_accel > 0 ({momentum_accel:.4f})")
+                return True, "composite_z_momentum_reversal"
             
-            if composite_pct > (100 - self.config.composite_pct_exit):  # Opposite for shorts
-                logger.info(f"📈 {symbol} SHORT composite_pct exit: {composite_pct:.1f} > {100 - self.config.composite_pct_exit:.1f}")
-                return True, "composite_pct_exit"
+            # Secondary exit: Percentile rises + momentum turning up
+            if composite_pct > (100 - EXIT_PCT_THRESHOLD) and momentum_slope > 0:
+                logger.info(f"📈 {symbol} SHORT composite_pct exit: {composite_pct:.1f} > {100 - EXIT_PCT_THRESHOLD:.1f} "
+                           f"AND momentum_slope > 0 ({momentum_slope:.4f})")
+                return True, "composite_pct_momentum_reversal"
+            
+            # Aggressive exit: Both weak + strong upward acceleration
+            if composite_z > -EXIT_Z_THRESHOLD * 1.2 and composite_pct > (100 - EXIT_PCT_THRESHOLD * 1.2) and momentum_accel > 0.002:
+                logger.info(f"📈 {symbol} SHORT aggressive exit: weak signals + strong upward acceleration")
+                return True, "composite_aggressive_reversal"
         
         return False, None
     
@@ -2122,3 +2279,297 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 for symbol, pos in self.position_tracker.items()  # Phase 2.5: Use NEW tracking
             }
         }
+    
+    # ========================================
+    # CRITICAL FIX #1-3: MICRO-STRUCTURE & PRE-INFLECTION DETECTION
+    # ========================================
+    
+    def _detect_momentum_inflection(
+        self,
+        symbol: str,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+        lookback: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Detect momentum inflection points (pre-acceleration triggers)
+        
+        CRITICAL FIX #2: Pre-Inflection Entry Triggers
+        
+        Detects:
+        1. Momentum slope changes (derivative sign flip)
+        2. Momentum acceleration (2nd derivative positive)
+        3. Volatility compression → expansion transitions
+        
+        Returns:
+            Dict with:
+            - inflection_detected: bool
+            - inflection_type: 'bullish' or 'bearish'
+            - momentum_slope: float (1st derivative)
+            - momentum_accel: float (2nd derivative)
+            - vol_expansion: bool
+        """
+        
+        try:
+            if current_idx < lookback + 2:
+                return {
+                    'inflection_detected': False,
+                    'inflection_type': None,
+                    'momentum_slope': 0.0,
+                    'momentum_accel': 0.0,
+                    'vol_expansion': False
+                }
+            
+            # Get momentum series (use short-term momentum for faster response)
+            momentum_col = f'momentum_{self.config.short_period}'
+            if momentum_col not in enriched_data.columns:
+                # Fallback to composite_z
+                momentum_series = enriched_data['composite_z'].iloc[current_idx - lookback:current_idx + 1]
+            else:
+                momentum_series = enriched_data[momentum_col].iloc[current_idx - lookback:current_idx + 1]
+            
+            if len(momentum_series) < 3:
+                return {
+                    'inflection_detected': False,
+                    'inflection_type': None,
+                    'momentum_slope': 0.0,
+                    'momentum_accel': 0.0,
+                    'vol_expansion': False
+                }
+            
+            # Calculate 1st derivative (momentum slope)
+            momentum_slope = momentum_series.diff().iloc[-1]
+            
+            # Calculate 2nd derivative (momentum acceleration)
+            momentum_accel = momentum_series.diff().diff().iloc[-1]
+            
+            # Detect volatility compression → expansion
+            vol_col = 'volatility_10' if 'volatility_10' in enriched_data.columns else 'ATR_14'
+            if vol_col in enriched_data.columns:
+                vol_series = enriched_data[vol_col].iloc[current_idx - lookback:current_idx + 1]
+                vol_current = vol_series.iloc[-1]
+                vol_avg = vol_series.iloc[:-1].mean()
+                vol_expansion = vol_current > vol_avg * 1.15  # 15% expansion threshold
+            else:
+                vol_expansion = False
+            
+            # Inflection detection logic
+            inflection_detected = False
+            inflection_type = None
+            
+            # BULLISH INFLECTION: Momentum was negative/flat, now accelerating upward
+            if momentum_accel > 0.001 and momentum_slope > 0:
+                prev_momentum = momentum_series.iloc[-3:-1].mean()
+                current_momentum = momentum_series.iloc[-1]
+                
+                # Check if momentum flipped from negative to positive (true inflection)
+                if prev_momentum <= 0 and current_momentum > 0:
+                    inflection_detected = True
+                    inflection_type = 'bullish'
+                # Or if momentum was weak and now strengthening rapidly
+                elif abs(prev_momentum) < 0.5 and current_momentum > prev_momentum * 1.5:
+                    inflection_detected = True
+                    inflection_type = 'bullish'
+            
+            # BEARISH INFLECTION: Momentum was positive/flat, now decelerating downward
+            elif momentum_accel < -0.001 and momentum_slope < 0:
+                prev_momentum = momentum_series.iloc[-3:-1].mean()
+                current_momentum = momentum_series.iloc[-1]
+                
+                # Check if momentum flipped from positive to negative
+                if prev_momentum >= 0 and current_momentum < 0:
+                    inflection_detected = True
+                    inflection_type = 'bearish'
+                # Or if momentum was strong and now weakening rapidly
+                elif abs(prev_momentum) > 0.5 and current_momentum < prev_momentum * 0.5:
+                    inflection_detected = True
+                    inflection_type = 'bearish'
+            
+            logger.debug(f"[{symbol}] Inflection check: slope={momentum_slope:.4f}, "
+                        f"accel={momentum_accel:.4f}, detected={inflection_detected}, "
+                        f"type={inflection_type}")
+            
+            return {
+                'inflection_detected': inflection_detected,
+                'inflection_type': inflection_type,
+                'momentum_slope': float(momentum_slope),
+                'momentum_accel': float(momentum_accel),
+                'vol_expansion': vol_expansion
+            }
+            
+        except Exception as e:
+            logger.error(f"[{symbol}] Inflection detection failed: {e}")
+            return {
+                'inflection_detected': False,
+                'inflection_type': None,
+                'momentum_slope': 0.0,
+                'momentum_accel': 0.0,
+                'vol_expansion': False
+            }
+    
+    def _detect_price_structure(
+        self,
+        symbol: str,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+        lookback: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Detect price micro-structure patterns (higher lows, lower highs, pivots)
+        
+        CRITICAL FIX #4: Price-Path Awareness
+        
+        Detects:
+        1. Higher lows sequence (bullish structure)
+        2. Lower highs sequence (bearish structure)
+        3. Pivot lows/highs validation
+        4. Micro-pullback detection
+        
+        Returns:
+            Dict with:
+            - structure_type: 'higher_lows', 'lower_highs', 'ranging', 'choppy'
+            - structure_quality: float (0-1, higher = cleaner structure)
+            - pivot_confirmed: bool
+            - last_pivot_distance: float (ATR units from current price)
+        """
+        
+        try:
+            if current_idx < lookback + 2:
+                return {
+                    'structure_type': 'unknown',
+                    'structure_quality': 0.0,
+                    'pivot_confirmed': False,
+                    'last_pivot_distance': 0.0,
+                    'basing_detected': False
+                }
+            
+            # Get price data
+            price_data = enriched_data.iloc[current_idx - lookback:current_idx + 1]
+            lows = price_data['low'].values
+            highs = price_data['high'].values
+            closes = price_data['close'].values
+            
+            # Detect higher lows (bullish structure)
+            higher_lows_count = 0
+            for i in range(1, len(lows)):
+                if lows[i] > lows[i-1]:
+                    higher_lows_count += 1
+            
+            # Detect lower highs (bearish structure)
+            lower_highs_count = 0
+            for i in range(1, len(highs)):
+                if highs[i] < highs[i-1]:
+                    lower_highs_count += 1
+            
+            # Determine structure type
+            structure_quality = 0.0
+            if higher_lows_count >= lookback * 0.6:  # 60% higher lows
+                structure_type = 'higher_lows'
+                structure_quality = higher_lows_count / (lookback - 1)
+            elif lower_highs_count >= lookback * 0.6:  # 60% lower highs
+                structure_type = 'lower_highs'
+                structure_quality = lower_highs_count / (lookback - 1)
+            elif higher_lows_count == lower_highs_count:
+                structure_type = 'ranging'
+                structure_quality = 0.5
+            else:
+                structure_type = 'choppy'
+                structure_quality = 0.3
+            
+            # Detect pivot validation (local extrema)
+            current_price = closes[-1]
+            recent_low = lows.min()
+            recent_high = highs.max()
+            
+            # Pivot confirmed if current price is near recent high (for longs)
+            # or near recent low (for shorts)
+            pivot_confirmed = False
+            if structure_type == 'higher_lows' and current_price > recent_high * 0.98:
+                pivot_confirmed = True
+            elif structure_type == 'lower_highs' and current_price < recent_low * 1.02:
+                pivot_confirmed = True
+            
+            # Calculate distance from last pivot in ATR units
+            atr = price_data['ATR_14'].iloc[-1] if 'ATR_14' in price_data.columns else (recent_high - recent_low)
+            if structure_type == 'higher_lows':
+                last_pivot_distance = (current_price - recent_low) / atr if atr > 0 else 0
+            else:
+                last_pivot_distance = (recent_high - current_price) / atr if atr > 0 else 0
+            
+            # Detect basing (consolidation before breakout)
+            price_range = (highs.max() - lows.min()) / closes.mean()
+            basing_detected = price_range < 0.02  # Less than 2% range = basing
+            
+            logger.debug(f"[{symbol}] Structure: type={structure_type}, quality={structure_quality:.2f}, "
+                        f"pivot={pivot_confirmed}, basing={basing_detected}")
+            
+            return {
+                'structure_type': structure_type,
+                'structure_quality': float(structure_quality),
+                'pivot_confirmed': pivot_confirmed,
+                'last_pivot_distance': float(last_pivot_distance),
+                'basing_detected': basing_detected
+            }
+            
+        except Exception as e:
+            logger.error(f"[{symbol}] Price structure detection failed: {e}")
+            return {
+                'structure_type': 'unknown',
+                'structure_quality': 0.0,
+                'pivot_confirmed': False,
+                'last_pivot_distance': 0.0,
+                'basing_detected': False
+            }
+    
+    def _calculate_momentum_slope(
+        self,
+        symbol: str,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+        lookback: int = 3
+    ) -> float:
+        """
+        Calculate fast momentum slope (replaces slow ADX)
+        
+        CRITICAL FIX #5: Faster Trend Indicator
+        
+        Uses simple linear regression of momentum over lookback period
+        Returns slope coefficient (positive = upward momentum, negative = downward)
+        """
+        
+        try:
+            if current_idx < lookback:
+                return 0.0
+            
+            # Get momentum series
+            momentum_col = f'momentum_{self.config.short_period}'
+            if momentum_col not in enriched_data.columns:
+                # Fallback to composite_z
+                if 'composite_z' in enriched_data.columns:
+                    momentum_series = enriched_data['composite_z'].iloc[current_idx - lookback + 1:current_idx + 1]
+                else:
+                    return 0.0
+            else:
+                momentum_series = enriched_data[momentum_col].iloc[current_idx - lookback + 1:current_idx + 1]
+            
+            if len(momentum_series) < 2:
+                return 0.0
+            
+            # Simple linear regression: y = mx + b (we only need slope m)
+            x = np.arange(len(momentum_series))
+            y = momentum_series.values
+            
+            # Calculate slope using least squares
+            x_mean = x.mean()
+            y_mean = y.mean()
+            
+            numerator = ((x - x_mean) * (y - y_mean)).sum()
+            denominator = ((x - x_mean) ** 2).sum()
+            
+            slope = numerator / denominator if denominator != 0 else 0.0
+            
+            return float(slope)
+            
+        except Exception as e:
+            logger.error(f"[{symbol}] Momentum slope calculation failed: {e}")
+            return 0.0
