@@ -754,20 +754,38 @@ class InstitutionalBacktestEngine:
             start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
             
-            # ENHANCEMENT: Add trading hours for intraday data
-            # If we're loading intraday data (1min, 5min, 15min), ensure we have
-            # proper trading hours to get a full day of data
+            # ENHANCEMENT: Dynamic Market Hours (Asset-Class Aware)
+            # Use MarketCalendar to determine correct session times
+            from core_engine.data.market_calendar import MarketCalendar, AssetClass
+            calendar = MarketCalendar()
+            
+            # Determine asset class (assume homogeneous for now or take first)
+            first_symbol = self.config.symbols[0] if self.config.symbols else "SPY"
+            asset_class = calendar.get_asset_class(first_symbol)
+            
+            logger.info(f"   Asset Class Detected: {asset_class.name} (from {first_symbol})")
+            
             if self.config.interval in ['1min', '5min', '15min', '1h']:
-                # For single-day backtests, set to market hours (09:30 - 16:00 ET)
-                if start_dt.date() == end_dt.date():
-                    logger.info(f"   Single-day backtest detected - using market hours (09:30-16:00)")
-                    start_dt = start_dt.replace(hour=9, minute=30, second=0)
-                    end_dt = end_dt.replace(hour=16, minute=0, second=0)
-                else:
-                    # Multi-day backtest: set start to market open, end to market close
-                    logger.info(f"   Multi-day backtest - adjusting to market hours")
-                    start_dt = start_dt.replace(hour=9, minute=30, second=0)
-                    end_dt = end_dt.replace(hour=16, minute=0, second=0)
+                # Get session times for this asset class
+                # Note: For start_dt, we want the open time of that day
+                session_open, _ = calendar.get_session_times(start_dt, asset_class)
+                
+                # Set start time to session open
+                start_dt = start_dt.replace(
+                    hour=session_open.hour, 
+                    minute=session_open.minute, 
+                    second=session_open.second
+                )
+                
+                # Set end time to session close (on the end date)
+                _, end_session_close = calendar.get_session_times(end_dt, asset_class)
+                end_dt = end_dt.replace(
+                    hour=end_session_close.hour, 
+                    minute=end_session_close.minute, 
+                    second=end_session_close.second
+                )
+                
+                logger.info(f"   Trading Hours Adjusted: {start_dt} -> {end_dt}")
             
             logger.info(f"   Data range: {start_dt} to {end_dt}")
             

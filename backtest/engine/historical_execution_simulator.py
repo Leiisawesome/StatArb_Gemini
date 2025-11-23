@@ -262,9 +262,29 @@ class HistoricalExecutionSimulator:
                 market_price, volatility, regime_context
             )
             
-            # Step 4: Calculate commission
-            commission_dollars = quantity * self.commission_per_share
-            commission_bps = (commission_dollars / (quantity * market_price)) * 10000
+            # Step 4: Calculate commission (Asset-Class Aware)
+            # Determine asset class from symbol or config
+            try:
+                from core_engine.data.market_calendar import MarketCalendar
+                calendar = MarketCalendar()
+                asset_class = calendar.get_asset_class(symbol)
+                asset_class_name = asset_class.name
+            except ImportError:
+                asset_class_name = 'US_EQUITY'  # Fallback
+
+            if asset_class_name == 'CRYPTO':
+                # Crypto commission: percentage based (e.g., 10 bps = 0.1%)
+                # Maker/Taker model could be added here
+                commission_rate_bps = self.config.get('crypto_commission_bps', 10.0)
+                commission_bps = commission_rate_bps
+                commission_dollars = (commission_bps / 10000) * (quantity * market_price)
+            else:
+                # Equity commission: per-share based (e.g., $0.005/share)
+                commission_dollars = quantity * self.commission_per_share
+                if market_price > 0:
+                    commission_bps = (commission_dollars / (quantity * market_price)) * 10000
+                else:
+                    commission_bps = 0.0
             
             # Step 5: Calculate total cost in bps
             total_cost_bps = spread_cost_bps + market_impact_bps + slippage_bps + commission_bps
