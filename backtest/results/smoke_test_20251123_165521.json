@@ -1,0 +1,17 @@
+{
+  "experiment_name": "Smoke_Test",
+  "experiment_type": "smoke_test",
+  "run_timestamp": "2025-11-23T16:55:21.877732",
+  "duration_seconds": 0.7856638431549072,
+  "performance": {
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0
+  },
+  "custom_metrics": {},
+  "engine_results": {},
+  "success": false,
+  "error_message": "Engine not initialized. Call initialize() first."
+}

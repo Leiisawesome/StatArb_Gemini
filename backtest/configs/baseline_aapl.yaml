@@ -1,0 +1,55 @@
+# Baseline Backtest - AAPL Mean Reversion
+# ========================================
+# Standard production-like backtest for AAPL.
+
+experiment_name: "Baseline_AAPL_MeanReversion"
+experiment_type: "baseline"
+
+# Market data
+symbols: ["AAPL"]
+interval: "1min"
+start_date: "2023-01-01"
+end_date: "2024-12-31"
+
+# Portfolio
+initial_capital: 5000000
+allow_shorts: true
+max_position_size: 0.05        # Conservative 5%
+max_concentration: 0.10
+
+# Strategy configuration
+strategies:
+  - type: "mean_reversion"
+    name: "MR_20_Conservative"
+    allocation_pct: 1.0
+    parameters:
+      lookback: 20
+      z_entry: 2.0
+      z_exit: 0.5
+      max_holding_period: 60   # minutes
+
+# Risk management
+min_signal_confidence: 0.60
+regime_risk_multipliers:
+  low_volatility: 1.0
+  normal_volatility: 1.0
+  high_volatility: 0.7
+  extreme_volatility: 0.4
+
+# Transaction costs (realistic)
+base_spread_bps: 0.5
+commission_per_share: 0.0005
+impact_model:
+  type: "almgren_chriss"
+  temporary_impact_coef: 0.1
+  permanent_impact_coef: 0.5
+
+# Execution
+default_execution_strategy: "adaptive"
+max_participation_rate: 0.05   # Conservative 5%
+
+# Output
+save_trade_log: true
+save_regime_log: true
+generate_charts: true
+

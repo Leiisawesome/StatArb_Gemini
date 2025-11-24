@@ -1,0 +1,93 @@
+[
+  {
+    "scenario": "clean_data",
+    "error_type": null,
+    "error_rate": 0.0,
+    "description": "Baseline: no data errors",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 1.0
+  },
+  {
+    "scenario": "missing_data_low",
+    "error_type": "missing",
+    "error_rate": 0.01,
+    "description": "1% missing data points",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.95
+  },
+  {
+    "scenario": "missing_data_high",
+    "error_type": "missing",
+    "error_rate": 0.05,
+    "description": "5% missing data points",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.7499999999999998
+  },
+  {
+    "scenario": "outliers_low",
+    "error_type": "outliers",
+    "error_rate": 0.005,
+    "description": "0.5% price outliers",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.95
+  },
+  {
+    "scenario": "outliers_high",
+    "error_type": "outliers",
+    "error_rate": 0.02,
+    "description": "2% price outliers",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.8
+  },
+  {
+    "scenario": "stale_data",
+    "error_type": "stale",
+    "error_rate": 0.03,
+    "description": "3% stale quotes (repeated prices)",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.94
+  },
+  {
+    "scenario": "mixed_errors",
+    "error_type": "mixed",
+    "error_rate": 0.05,
+    "description": "Mixed: 5% combined errors",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "execution_errors": 0,
+    "data_quality_score": 0.2499999999999999
+  }
+]

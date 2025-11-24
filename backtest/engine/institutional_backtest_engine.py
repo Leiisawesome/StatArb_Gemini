@@ -3157,6 +3157,8 @@ class InstitutionalBacktestEngine:
                                     'strength': getattr(s, 'strength', 0.5),
                                     'timestamp': getattr(s, 'timestamp', None),
                                     'target_quantity': getattr(s, 'target_quantity', 0),
+                                    'target_weight': getattr(s, 'target_weight', None),  # CRITICAL FIX: Extract target_weight
+                                    'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),  # CRITICAL FIX: Extract quantity_type
                                     'additional_data': getattr(s, 'additional_data', {})
                                 } for s in strategy_signals])
                                 logger.info(f"   ✅ Generated {len(signals_df)} signals from fallback enriched features")
@@ -3282,6 +3284,11 @@ class InstitutionalBacktestEngine:
                 signal_type = signal_row.get('signal', 'HOLD')
                 confidence = signal_row.get('confidence', 0.5)
                 
+                # CRITICAL FIX: Extract target_weight and quantity_type from signal
+                target_weight = signal_row.get('target_weight', None)
+                quantity_type = signal_row.get('quantity_type', 'ABSOLUTE')
+                target_quantity = signal_row.get('target_quantity', 0)
+                
                 # Only process BUY/SELL signals (skip HOLD)
                 if signal_type in ['buy', 'sell'] and confidence >= 0.6:
                     
@@ -3299,24 +3306,61 @@ class InstitutionalBacktestEngine:
                     if signal_type == 'buy' and current_position <= 0:
                         # Enter long position
                         side = 'buy'
-                        # Calculate quantity based on position size percentage and current price
-                        # Use first strategy's config if available, otherwise use default max_position_size
-                        if self.config.strategies and len(self.config.strategies) > 0:
-                            position_size_pct = self.config.strategies[0].get('max_position_size', self.config.max_position_size)
-                        else:
-                            position_size_pct = self.config.max_position_size
                         
-                        # CRITICAL FIX: Use actual portfolio value from config, not hardcoded $1M
-                        portfolio_value = self.config.initial_capital  # Use configured capital
-                        dollar_amount = position_size_pct * portfolio_value
-                        quantity = dollar_amount / current_price
-                        quantity = max(1, int(quantity))  # At least 1 share, round down
-                    elif signal_type == 'sell' and current_position >= 0:
-                        # Enter short position or close long
+                        # CRITICAL FIX: Convert percentage to shares if signal uses percentage-based sizing
+                        if quantity_type == "PERCENTAGE" and target_weight is not None and target_weight > 0:
+                            # Use signal's target_weight (percentage of portfolio)
+                            # Get current portfolio value from risk manager or use initial capital
+                            portfolio_value = self.risk_manager.portfolio_value if (
+                                self.risk_manager and hasattr(self.risk_manager, 'portfolio_value')
+                            ) else self.config.initial_capital
+                            
+                            dollar_amount = target_weight * portfolio_value
+                            quantity = dollar_amount / current_price
+                            quantity = max(1, int(quantity))  # At least 1 share, round down
+                            
+                            logger.debug(f"   💰 Percentage-based sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                        
+                        elif target_quantity > 0:
+                            # Use absolute quantity from signal
+                            quantity = max(1, int(target_quantity))
+                            logger.debug(f"   💰 Absolute sizing: {quantity} shares")
+                        
+                        else:
+                            # Fallback: Use strategy config or global max_position_size
+                            if self.config.strategies and len(self.config.strategies) > 0:
+                                # Try to get from strategy parameters first
+                                strategy_params = self.config.strategies[0].get('parameters', {})
+                                base_position_pct = strategy_params.get('base_position_pct', None)
+                                
+                                if base_position_pct is not None:
+                                    position_size_pct = base_position_pct
+                                else:
+                                    # Fallback to strategy-level max_position_size
+                                    position_size_pct = self.config.strategies[0].get('max_position_size', self.config.max_position_size)
+                            else:
+                                position_size_pct = self.config.max_position_size
+                            
+                            portfolio_value = self.config.initial_capital
+                            dollar_amount = position_size_pct * portfolio_value
+                            quantity = dollar_amount / current_price
+                            quantity = max(1, int(quantity))
+                            
+                            logger.debug(f"   💰 Fallback sizing: {position_size_pct:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                    
+                    elif signal_type == 'sell' and current_position > 0:
+                        # Close long position
                         side = 'sell'
-                        quantity = max(100, abs(current_position))
+                        quantity = abs(int(current_position))  # Sell entire position
+                        logger.debug(f"   💰 Closing position: {quantity} shares")
+                    
+                    elif signal_type == 'sell' and current_position == 0:
+                        # Skip sell signal if no position
+                        logger.debug(f"   ⚠️  Skipping SELL signal for {symbol}: no position to close")
+                        continue
+                    
                     else:
-                        continue  # Skip if already in position
+                        continue  # Skip if already in position or invalid condition
                     
                     # Request authorization from CentralRiskManager (BRICK #8)
                     if self.risk_manager:

@@ -1,0 +1,5 @@
+scenario,correlation_adjustment,description,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,portfolio_volatility,diversification_ratio
+normal_correlations,1.0,Historical correlation levels,0.0,0.0,0.0,0,0.0,0.0,1.0
+high_correlations,1.5,Crisis-level correlations (0.8-0.9),0.0,0.0,0.0,0,0.0,0.0,1.0
+correlation_breakdown,2.0,"Diversification fails, all correlations spike",0.0,0.0,0.0,0,0.0,0.0,1.0
+perfect_correlation,3.0,All assets move in lockstep,0.0,0.0,0.0,0,0.0,0.0,1.0

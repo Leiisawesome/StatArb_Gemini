@@ -1,0 +1,8 @@
+scenario,error_type,error_rate,description,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,execution_errors,data_quality_score
+clean_data,,0.0,Baseline: no data errors,0.0,0.0,0.0,0,0.0,0,1.0
+missing_data_low,missing,0.01,1% missing data points,0.0,0.0,0.0,0,0.0,0,0.95
+missing_data_high,missing,0.05,5% missing data points,0.0,0.0,0.0,0,0.0,0,0.7499999999999998
+outliers_low,outliers,0.005,0.5% price outliers,0.0,0.0,0.0,0,0.0,0,0.95
+outliers_high,outliers,0.02,2% price outliers,0.0,0.0,0.0,0,0.0,0,0.8
+stale_data,stale,0.03,3% stale quotes (repeated prices),0.0,0.0,0.0,0,0.0,0,0.94
+mixed_errors,mixed,0.05,Mixed: 5% combined errors,0.0,0.0,0.0,0,0.0,0,0.2499999999999999

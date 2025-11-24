@@ -1,0 +1,57 @@
+# Parameter Sweep - Quick Test (Small Grid)
+# ==========================================
+# 2x2x2 = 8 combinations for quick validation
+
+experiment_name: "Parameter_Sweep_Quick_Test"
+experiment_type: "parameter_sweep"
+
+symbols: ["AAPL"]
+interval: "1min"
+start_date: "2024-01-03"
+end_date: "2024-01-03"
+
+initial_capital: 1000000
+allow_shorts: false
+max_position_size: 0.10
+max_concentration: 0.15
+
+strategy:
+  type: "mean_reversion"
+  name: "MR_Sweep_Quick"
+  allocation_pct: 1.0
+  parameters:
+    lookback: 20
+    bollinger_period: 20
+    bollinger_std: 2.0
+    stop_loss_atr_multiple: 2.0
+    max_holding_period: 10
+    scan_all_bars: true
+    scan_interval: 1
+    enable_regime_filter: false
+    zscore_entry_threshold: 2.0
+    zscore_exit_threshold: 0.5
+    rsi_oversold: 40
+    rsi_overbought: 60
+    base_position_pct: 0.02
+
+# SMALL PARAMETER GRID (8 combinations)
+# Total: 2 x 2 x 2 = 8 combinations
+# Expected runtime: ~3-5 minutes
+parameter_grid:
+  zscore_entry_threshold: [1.5, 2.0]
+  zscore_exit_threshold: [0.5, 0.7]
+  base_position_pct: [0.02, 0.03]
+
+min_signal_confidence: 0.50
+regime_risk_multipliers:
+  low_volatility: 1.0
+  normal_volatility: 1.0
+  high_volatility: 0.7
+
+# Transaction costs (using valid BacktestConfig parameters)
+commission_per_trade: 0.005
+max_spread_bps: 25.0
+
+log_level: "WARNING"
+save_trade_log: false
+

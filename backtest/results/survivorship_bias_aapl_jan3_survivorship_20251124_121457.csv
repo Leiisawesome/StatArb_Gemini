@@ -1,0 +1,5 @@
+scenario,failure_rate,description,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,simulated_failures,failure_loss_pct
+no_failures,0.0,Baseline: no delistings,0.0,0.0,0.0,0,0.0,0,0.0
+single_delisting,0.05,5% of positions fail,0.0,0.0,0.0,0,0.0,0,0.0
+multiple_failures,0.1,10% of positions fail,0.0,0.0,0.0,0,0.0,0,0.0
+crisis_failures,0.25,Crisis: 25% of positions fail,0.0,0.0,0.0,0,0.0,0,0.0

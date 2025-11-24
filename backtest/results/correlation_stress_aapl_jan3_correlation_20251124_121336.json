@@ -1,0 +1,50 @@
+[
+  {
+    "scenario": "normal_correlations",
+    "correlation_adjustment": 1.0,
+    "description": "Historical correlation levels",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "portfolio_volatility": 0.0,
+    "diversification_ratio": 1.0
+  },
+  {
+    "scenario": "high_correlations",
+    "correlation_adjustment": 1.5,
+    "description": "Crisis-level correlations (0.8-0.9)",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "portfolio_volatility": 0.0,
+    "diversification_ratio": 1.0
+  },
+  {
+    "scenario": "correlation_breakdown",
+    "correlation_adjustment": 2.0,
+    "description": "Diversification fails, all correlations spike",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "portfolio_volatility": 0.0,
+    "diversification_ratio": 1.0
+  },
+  {
+    "scenario": "perfect_correlation",
+    "correlation_adjustment": 3.0,
+    "description": "All assets move in lockstep",
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "portfolio_volatility": 0.0,
+    "diversification_ratio": 1.0
+  }
+]

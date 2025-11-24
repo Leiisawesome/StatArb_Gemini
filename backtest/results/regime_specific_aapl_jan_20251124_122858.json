@@ -1,0 +1,61 @@
+{
+  "experiment_name": "Regime_Specific_AAPL_Jan",
+  "experiment_type": "regime_specific_testing",
+  "run_timestamp": "2025-11-24T12:28:58.360391",
+  "duration_seconds": 381.26354598999023,
+  "performance": {
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0
+  },
+  "custom_metrics": {
+    "regimes_tested": 3,
+    "best_regime": "low_volatility",
+    "best_regime_sharpe": 0.0,
+    "worst_regime": "low_volatility",
+    "worst_regime_sharpe": 0.0,
+    "regime_performance_spread": 0.0,
+    "regime_consistency": 1.0
+  },
+  "engine_results": {
+    "regime_results": [
+      {
+        "regime": "low_volatility",
+        "periods_count": 1,
+        "total_days": 1,
+        "total_return_pct": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown_pct": 0.0,
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "avg_trade_return": 0.0
+      },
+      {
+        "regime": "normal_volatility",
+        "periods_count": 1,
+        "total_days": 1,
+        "total_return_pct": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown_pct": 0.0,
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "avg_trade_return": 0.0
+      },
+      {
+        "regime": "high_volatility",
+        "periods_count": 1,
+        "total_days": 1,
+        "total_return_pct": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown_pct": 0.0,
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "avg_trade_return": 0.0
+      }
+    ]
+  },
+  "success": true,
+  "error_message": null
+}

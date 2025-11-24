@@ -1,0 +1,54 @@
+{
+  "experiment_name": "Walk_Forward_Quick_Test",
+  "experiment_type": "walk_forward_analysis",
+  "run_timestamp": "2025-11-24T11:37:05.100520",
+  "duration_seconds": 1228.952321767807,
+  "performance": {
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0
+  },
+  "custom_metrics": {
+    "num_windows": 2,
+    "train_days": 1,
+    "test_days": 1,
+    "consistent_windows": 0,
+    "parameter_stability": 1.0,
+    "oos_performance_ratio": 0.0,
+    "walk_forward_efficiency": 0.0
+  },
+  "engine_results": {
+    "walk_forward_windows": [
+      {
+        "window": 1,
+        "train_period": "2024-01-02 to 2024-01-03",
+        "test_period": "2024-01-03 to 2024-01-04",
+        "best_parameters": {
+          "zscore_entry_threshold": 1.5,
+          "base_position_pct": 0.02
+        },
+        "test_return_pct": 0.0,
+        "test_sharpe": 0.0,
+        "test_drawdown": 0.0,
+        "test_trades": 0
+      },
+      {
+        "window": 2,
+        "train_period": "2024-01-03 to 2024-01-04",
+        "test_period": "2024-01-04 to 2024-01-05",
+        "best_parameters": {
+          "zscore_entry_threshold": 1.5,
+          "base_position_pct": 0.02
+        },
+        "test_return_pct": 0.0,
+        "test_sharpe": 0.0,
+        "test_drawdown": 0.0,
+        "test_trades": 0
+      }
+    ]
+  },
+  "success": true,
+  "error_message": null
+}

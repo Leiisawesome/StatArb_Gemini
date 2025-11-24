@@ -1,0 +1,300 @@
+{
+  "simulations": [
+    {
+      "simulation": 1,
+      "parameters": {
+        "zscore_entry_threshold": 2.301850588527909,
+        "zscore_exit_threshold": 0.5129358258477028,
+        "base_position_pct": 0.03809199645273554,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 2,
+      "parameters": {
+        "zscore_entry_threshold": 1.902191889395469,
+        "zscore_exit_threshold": 0.38160023101612506,
+        "base_position_pct": 0.02843641156459994,
+        "lookback": 15
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 3,
+      "parameters": {
+        "zscore_entry_threshold": 1.5744888484763537,
+        "zscore_exit_threshold": 0.41565775157672075,
+        "base_position_pct": 0.03440044930812971,
+        "lookback": 25
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 4,
+      "parameters": {
+        "zscore_entry_threshold": 1.694762375535655,
+        "zscore_exit_threshold": 0.3777684380371541,
+        "base_position_pct": 0.04453076439358557,
+        "lookback": 30
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 5,
+      "parameters": {
+        "zscore_entry_threshold": 1.952679258398502,
+        "zscore_exit_threshold": 0.48366330341680985,
+        "base_position_pct": 0.03195923848014049,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 6,
+      "parameters": {
+        "zscore_entry_threshold": 1.7973710712987399,
+        "zscore_exit_threshold": 0.6609894788731121,
+        "base_position_pct": 0.03400474459027501,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 7,
+      "parameters": {
+        "zscore_entry_threshold": 1.6155845600273746,
+        "zscore_exit_threshold": 0.6280507325478263,
+        "base_position_pct": 0.04260926692823191,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 8,
+      "parameters": {
+        "zscore_entry_threshold": 1.9475230507338943,
+        "zscore_exit_threshold": 0.6622887783367295,
+        "base_position_pct": 0.028154632971442314,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 9,
+      "parameters": {
+        "zscore_entry_threshold": 2.340384315090658,
+        "zscore_exit_threshold": 0.5988058599138792,
+        "base_position_pct": 0.04657122206876153,
+        "lookback": 15
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 10,
+      "parameters": {
+        "zscore_entry_threshold": 2.32300390719299,
+        "zscore_exit_threshold": 0.6789730099941697,
+        "base_position_pct": 0.04179031070419778,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 11,
+      "parameters": {
+        "zscore_entry_threshold": 2.4621643454794495,
+        "zscore_exit_threshold": 0.6164814513773451,
+        "base_position_pct": 0.042016145306386796,
+        "lookback": 30
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 12,
+      "parameters": {
+        "zscore_entry_threshold": 1.5749926629079498,
+        "zscore_exit_threshold": 0.3553289619182856,
+        "base_position_pct": 0.022103782621482153,
+        "lookback": 15
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 13,
+      "parameters": {
+        "zscore_entry_threshold": 2.402894183012153,
+        "zscore_exit_threshold": 0.4501482217266568,
+        "base_position_pct": 0.047123360268454886,
+        "lookback": 30
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 14,
+      "parameters": {
+        "zscore_entry_threshold": 2.1940013827688354,
+        "zscore_exit_threshold": 0.6887672135504523,
+        "base_position_pct": 0.0477679993254844,
+        "lookback": 30
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 15,
+      "parameters": {
+        "zscore_entry_threshold": 1.693385737787969,
+        "zscore_exit_threshold": 0.4364054704268602,
+        "base_position_pct": 0.010493186030259886,
+        "lookback": 25
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 16,
+      "parameters": {
+        "zscore_entry_threshold": 1.5411605229631893,
+        "zscore_exit_threshold": 0.5814939644811502,
+        "base_position_pct": 0.047183130613394464,
+        "lookback": 15
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 17,
+      "parameters": {
+        "zscore_entry_threshold": 1.554122203833475,
+        "zscore_exit_threshold": 0.3296841100564562,
+        "base_position_pct": 0.0392066082827926,
+        "lookback": 25
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 18,
+      "parameters": {
+        "zscore_entry_threshold": 2.0991661172723552,
+        "zscore_exit_threshold": 0.36511691403456764,
+        "base_position_pct": 0.034401689344706624,
+        "lookback": 30
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 19,
+      "parameters": {
+        "zscore_entry_threshold": 1.762221705429805,
+        "zscore_exit_threshold": 0.5884263980010994,
+        "base_position_pct": 0.013962627780954438,
+        "lookback": 20
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    },
+    {
+      "simulation": 20,
+      "parameters": {
+        "zscore_entry_threshold": 1.52845119764747,
+        "zscore_exit_threshold": 0.3910801905800949,
+        "base_position_pct": 0.026307185210407247,
+        "lookback": 15
+      },
+      "total_return_pct": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown_pct": 0.0,
+      "total_trades": 0,
+      "win_rate": 0.0
+    }
+  ],
+  "analysis": {
+    "mean_return_pct": 0.0,
+    "median_return_pct": 0.0,
+    "return_std_pct": 0.0,
+    "mean_sharpe": 0.0,
+    "worst_drawdown": 0.0,
+    "mean_trades": 0.0,
+    "mean_win_rate": 0.0,
+    "successful_sims": 20,
+    "percentile_5_return": 0.0,
+    "percentile_95_return": 0.0,
+    "prob_positive": 0.0,
+    "var_95": 0.0,
+    "best_return_pct": 0.0,
+    "worst_return_pct": 0.0
+  }
+}

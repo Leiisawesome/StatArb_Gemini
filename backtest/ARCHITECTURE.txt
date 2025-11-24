@@ -1,0 +1,167 @@
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                 DESK-GRADE EXPERIMENT SUITE ARCHITECTURE                  ║
+║                     (Zero Re-Implementation Design)                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          ORCHESTRATION LAYER                              │
+│                     (Clean Scripts - No Custom Logic)                     │
+└───────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+    ┌──────────────────────────────────────────────────────────────┐
+    │                    run_suite.py (CLI)                        │
+    │  • List experiments                                          │
+    │  • Run single experiment                                     │
+    │  • Run full suite                                            │
+    └──────────────────────────────────────────────────────────────┘
+                                     ↓
+    ┌──────────────────────────────────────────────────────────────┐
+    │              Experiment Classes (Orchestration)              │
+    │                                                              │
+    │  smoke_test.py          baseline_backtest.py                │
+    │  parameter_sweep.py     walk_forward.py                     │
+    │  monte_carlo.py         regime_sensitivity.py               │
+    │  liquidity_stress.py    execution_comparison.py             │
+    │                                                              │
+    │  All inherit from: BaseExperiment                           │
+    └──────────────────────────────────────────────────────────────┘
+                                     ↓
+    ┌──────────────────────────────────────────────────────────────┐
+    │              BaseExperiment (Abstract Base)                  │
+    │  • run() → ExperimentResult                                 │
+    │  • print_summary()                                          │
+    │  • save_results()                                           │
+    │  • _extract_performance_metrics()                           │
+    └──────────────────────────────────────────────────────────────┘
+                                     ↓
+    ┌──────────────────────────────────────────────────────────────┐
+    │                  Config System (YAML)                        │
+    │  • base_config.yaml (defaults)                              │
+    │  • experiment-specific.yaml (overrides)                     │
+    │  • Deep merge support                                        │
+    └──────────────────────────────────────────────────────────────┘
+                                     ↓
+┌───────────────────────────────────────────────────────────────────────────┐
+│                            ⬛ BLACK BOX ⬛                                  │
+│                   InstitutionalBacktestEngine                             │
+│                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │  Phase 0-1: Data Loading (ClickHouseDataManager)                   │ │
+│  │  Phase 2-4: Processing Pipeline (Indicators → Features → Signals)  │ │
+│  │  Phase 5:   Strategy Execution (10 strategies)                     │ │
+│  │  Phase 6-7: Risk Authorization (CentralRiskManager)                │ │
+│  │  Phase 8-9: Execution (TradingEngine → ExecutionEngine)            │ │
+│  │  Phase 10:  Portfolio Update (Position management)                 │ │
+│  │  Phase 11:  Analytics & TCA                                        │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                           │
+│  ⚠️  EXPERIMENTS MUST NOT RE-IMPLEMENT ANY ENGINE LOGIC                  │
+└───────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌───────────────────────────────────────────────────────────────────────────┐
+│                            OUTPUT LAYER                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+    ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+    │ Console Summary  │  │  JSON Results    │  │  CSV Summary     │
+    │  Sharpe: 1.42    │  │  Full metadata   │  │  Cross-run       │
+    │  Max DD: -0.87%  │  │  + engine output │  │  comparison      │
+    └──────────────────┘  └──────────────────┘  └──────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         DESIGN CONTRACT                                   ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+✅ MUST DO:
+  • Use InstitutionalBacktestEngine as black box
+  • Load config from YAML (no hardcoded params)
+  • Inherit from BaseExperiment
+  • Return ExperimentResult
+  • Save structured output (JSON + CSV)
+
+❌ MUST NOT DO:
+  • Re-implement signal generation
+  • Re-implement execution logic
+  • Re-implement risk management
+  • Calculate indicators directly
+  • Update positions outside engine
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                        DATA FLOW                                          ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+User Request
+     ↓
+CLI (run_suite.py)
+     ↓
+Experiment Class (e.g., smoke_test.py)
+     ↓
+YAML Config Loaded
+     ↓
+InstitutionalBacktestEngine(config)  ← BLACK BOX
+     ↓
+await engine.initialize()
+     ↓
+await engine.run_backtest()
+     ↓
+ExperimentResult Created
+     ↓
+print_summary() + save_results()
+     ↓
+JSON + CSV Output
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     FILE ORGANIZATION                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+backtest/
+├── experiments/           # Orchestration scripts
+│   ├── base_experiment.py    # Abstract base
+│   ├── smoke_test.py         # Experiment 1
+│   └── (future experiments)
+│
+├── configs/               # YAML configurations
+│   ├── base_config.yaml      # Defaults
+│   ├── smoke_test.yaml       # Smoke test
+│   └── baseline_aapl.yaml    # Baseline
+│
+├── utils/                 # Shared utilities
+│   └── config_loader.py      # YAML loader
+│
+├── results/               # Output directory
+│   ├── *.json                # Individual results
+│   └── experiment_summary.csv # All runs
+│
+├── engine/                # ⬛ BLACK BOX (DON'T TOUCH)
+│   ├── institutional_backtest_engine.py
+│   ├── historical_execution_simulator.py
+│   └── strategy_optimizer.py
+│
+├── run_suite.py           # Master CLI
+├── QUICK_START.md         # Quick guide
+└── ARCHITECTURE.txt       # This file
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                          BENEFITS                                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+1. Clean Separation
+   - Engine logic isolated in institutional_backtest_engine.py
+   - Experiments are pure orchestration (< 150 lines each)
+   - No duplication of trading logic
+
+2. Maintainability
+   - Easy to add new experiments (template + config)
+   - Config changes don't require code changes
+   - Clear responsibility boundaries
+
+3. Reproducibility
+   - All parameters in version-controlled YAML
+   - Structured output for analysis
+   - Audit trail for every run
+
+4. Consistency
+   - All experiments follow same interface
+   - Standardized output format
+   - Predictable behavior
+

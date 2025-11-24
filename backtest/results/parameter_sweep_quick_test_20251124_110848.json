@@ -1,0 +1,17 @@
+{
+  "experiment_name": "Parameter_Sweep_Quick_Test",
+  "experiment_type": "parameter_sweep",
+  "run_timestamp": "2025-11-24T11:08:48.349257",
+  "duration_seconds": 8.7738037109375e-05,
+  "performance": {
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0
+  },
+  "custom_metrics": {},
+  "engine_results": {},
+  "success": false,
+  "error_message": "BacktestConfig.__init__() missing 1 required positional argument: 'backtest_name'"
+}

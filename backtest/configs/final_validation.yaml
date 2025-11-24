@@ -1,0 +1,49 @@
+# Final Validation Test - Moderate Thresholds
+# ============================================
+# Relaxed enough to generate trades, but still realistic
+
+experiment_name: "Final_Validation_AAPL_Jan3"
+experiment_type: "baseline_backtest"
+
+symbols: ["AAPL"]
+interval: "1min"
+start_date: "2024-01-03"
+end_date: "2024-01-03"
+
+initial_capital: 1000000
+allow_shorts: false
+max_position_size: 0.10
+max_concentration: 0.15
+
+strategy:
+  type: "mean_reversion"
+  name: "MR_Moderate"
+  allocation_pct: 1.0
+  parameters:
+    lookback: 20
+    zscore_entry_threshold: 1.5      # Relaxed to 1.5 std devs (was 2.0)
+    zscore_exit_threshold: 0.5
+    rsi_oversold: 40                  # Relaxed to 40 (was 30)
+    rsi_overbought: 60                # Relaxed to 60 (was 70)
+    bollinger_period: 20
+    bollinger_std: 2.0
+    base_position_pct: 0.02           # 2% = $20K position
+    max_position_pct: 0.05
+    stop_loss_atr_multiple: 2.0
+    max_holding_period: 10
+    scan_all_bars: true
+    scan_interval: 1
+    enable_regime_filter: false
+
+min_signal_confidence: 0.50           # Relaxed to 50% (was 60%)
+regime_risk_multipliers:
+  low_volatility: 1.0
+  normal_volatility: 1.0
+  high_volatility: 0.7
+
+base_spread_bps: 0.5
+commission_per_share: 0.0005
+
+log_level: "INFO"
+save_trade_log: true
+

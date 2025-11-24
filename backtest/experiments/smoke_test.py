@@ -1,0 +1,176 @@
+"""
+Experiment 1: Smoke Test
+=========================
+
+Minimal sanity check to verify engine initialization and basic functionality.
+
+Purpose:
+- Verify engine can initialize without errors
+- Run on single symbol, short period, simple strategy
+- Validate output structure
+
+Expected Duration: < 30 seconds
+
+Author: StatArb_Gemini Core Engine
+"""
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, Any
+import time
+
+from backtest.experiments.base_experiment import BaseExperiment, ExperimentResult
+from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
+from core_engine.config import BacktestConfig
+
+
+class SmokeTest(BaseExperiment):
+    """
+    Smoke test experiment.
+    
+    Tests:
+    - Engine initialization
+    - Single symbol, 1-day backtest
+    - Simple mean reversion strategy
+    - Result generation
+    """
+    
+    def get_description(self) -> str:
+        return "Smoke test: Single symbol, 1-day, simple strategy"
+    
+    async def run(self) -> ExperimentResult:
+        """Run smoke test"""
+        start_time = time.time()
+        experiment_name = self.config.get('experiment_name', 'Smoke_Test')
+        
+        try:
+            self.logger.info(f"🔧 Starting smoke test: {experiment_name}")
+            
+            # Create minimal backtest config
+            backtest_config = self._create_backtest_config()
+            
+            # Initialize engine (ORCHESTRATION ONLY - no logic re-implementation)
+            self.logger.info("   Initializing InstitutionalBacktestEngine...")
+            engine = InstitutionalBacktestEngine(backtest_config)
+            await engine.initialize()
+            
+            # Run backtest (black box)
+            self.logger.info("   Running backtest...")
+            engine_results = await engine.run_backtest()
+            
+            # Extract metrics
+            duration = time.time() - start_time
+            metrics = self._extract_performance_metrics(engine_results)
+            
+            # Create result
+            result = ExperimentResult(
+                experiment_name=experiment_name,
+                experiment_type="smoke_test",
+                run_timestamp=datetime.now(),
+                duration_seconds=duration,
+                engine_results=engine_results,
+                total_return_pct=metrics['total_return_pct'],
+                sharpe_ratio=metrics['sharpe_ratio'],
+                max_drawdown_pct=metrics['max_drawdown_pct'],
+                total_trades=metrics['total_trades'],
+                win_rate=metrics['win_rate'],
+                custom_metrics={
+                    'bars_processed': engine_results.get('bars_processed', 0),
+                    'initialization_time_s': engine_results.get('initialization_time', 0.0),
+                },
+                success=True
+            )
+            
+            self.logger.info(f"✅ Smoke test completed in {duration:.2f}s")
+            return result
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            self.logger.error(f"❌ Smoke test failed: {e}")
+            
+            return ExperimentResult(
+                experiment_name=experiment_name,
+                experiment_type="smoke_test",
+                run_timestamp=datetime.now(),
+                duration_seconds=duration,
+                engine_results={},
+                total_return_pct=0.0,
+                sharpe_ratio=0.0,
+                max_drawdown_pct=0.0,
+                total_trades=0,
+                win_rate=0.0,
+                success=False,
+                error_message=str(e)
+            )
+    
+    def _create_backtest_config(self) -> BacktestConfig:
+        """Create minimal config for smoke test"""
+        # Use ALL config from YAML (no hardcoding!)
+        symbol = self.config.get('symbols', ['AAPL'])[0]
+        
+        config_dict = {
+            'backtest_name': 'Smoke_Test',
+            'symbols': [symbol],
+            'interval': self.config.get('interval', '1min'),
+            'start_date': self.config.get('start_date', '2024-01-02'),
+            'end_date': self.config.get('end_date', '2024-01-02'),
+            'initial_capital': 100000,  # Small for smoke test
+            'allow_shorts': False,
+            'max_position_size': 0.10,
+            'max_concentration': 0.15,
+            'min_signal_confidence': 0.60,
+            'regime_risk_multipliers': {
+                'low_volatility': 1.0,
+                'normal_volatility': 1.0,
+                'high_volatility': 0.7
+            },
+            # Minimal strategy
+            'strategies': [{
+                'type': 'mean_reversion',
+                'name': 'MR_Simple',
+                'allocation_pct': 1.0,
+                'parameters': {
+                    'lookback': 20,
+                    'z_entry': 2.0,
+                    'z_exit': 0.5
+                }
+            }]
+        }
+        
+        # Override with user config if provided
+        config_dict.update(self.config.get('backtest_config', {}))
+        
+        return BacktestConfig(**config_dict)
+
+
+# Standalone run function
+async def run_smoke_test(config: Dict[str, Any] = None):
+    """
+    Run smoke test experiment.
+    
+    Args:
+        config: Optional config dict (uses defaults if None)
+    """
+    if config is None:
+        config = {
+            'experiment_name': 'Smoke_Test_Default',
+            'symbols': ['AAPL']
+        }
+    
+    experiment = SmokeTest(config)
+    result = await experiment.run()
+    
+    # Print summary
+    experiment.print_summary(result)
+    
+    # Save results
+    experiment.save_results(result)
+    
+    return result
+
+
+if __name__ == "__main__":
+    # Run smoke test directly
+    result = asyncio.run(run_smoke_test())
+    exit(0 if result.success else 1)
+

@@ -1,13 +1,15 @@
 """
-Backtest Utilities Module
-=========================
+Experiment Suite Utilities
+===========================
 
-Utility functions and helpers for backtesting.
+Shared utilities for experiment orchestration.
 
-Components:
-- Validation utilities
-- Helper functions
+Author: StatArb_Gemini Core Engine
 """
 
-__all__ = []  # Will be populated as components are built
+from .config_loader import load_config, save_config
 
+__all__ = [
+    'load_config',
+    'save_config',
+]

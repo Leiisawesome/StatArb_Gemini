@@ -1,0 +1,40 @@
+# Smoke Test Configuration
+# =========================
+# Minimal config for quick sanity check.
+
+experiment_name: "Smoke_Test"
+experiment_type: "smoke_test"
+
+# Single symbol, 1 day
+symbols: ["TSLA"]
+interval: "1min"
+start_date: "2024-12-20"  # Valid data date
+end_date: "2024-12-20"    # Same day (1 day test)
+
+# Small capital for quick test
+initial_capital: 100000
+allow_shorts: false
+
+# Simple strategy with RELAXED thresholds for testing
+strategies:
+  - type: "mean_reversion"
+    name: "MR_Simple"
+    allocation_pct: 1.0
+    parameters:
+      lookback: 20
+      zscore_entry_threshold: 1.5          # RELAXED from 2.0 to 1.5
+      zscore_exit_threshold: 0.5
+      scan_all_bars: true                   # Enable historical scanning
+      scan_interval: 1                      # Check every bar
+      enable_regime_filter: false           # Disable regime filtering
+      rsi_oversold: 40                      # RELAXED from 30 to 40
+      rsi_overbought: 60                    # RELAXED from 70 to 60
+
+# Minimal risk management
+min_signal_confidence: 0.50  # RELAXED from 0.60 to 0.50
+max_position_size: 0.20      # Higher for testing
+
+# Disable some features for speed
+save_trade_log: false
+save_regime_log: false
+
