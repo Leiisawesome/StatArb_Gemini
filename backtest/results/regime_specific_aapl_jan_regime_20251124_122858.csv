@@ -1,4 +1,0 @@
-regime,periods_count,total_days,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,avg_trade_return
-low_volatility,1,1,0.0,0.0,0.0,0,0.0,0.0
-normal_volatility,1,1,0.0,0.0,0.0,0,0.0,0.0
-high_volatility,1,1,0.0,0.0,0.0,0,0.0,0.0

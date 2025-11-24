@@ -1,0 +1,71 @@
+# Mean Reversion Diagnostic - Ultra-Relaxed Parameters
+# =====================================================
+# Extreme relaxation to verify the strategy CAN generate profitable trades.
+# If this fails, there's a deeper logic issue.
+
+experiment_name: "MR_Diagnostic_UltraRelaxed"
+experiment_type: "baseline_backtest"
+
+# Single day of KNOWN volatile data
+symbols: ["TSLA"]  # Use TSLA for higher volatility
+interval: "1min"
+start_date: "2024-12-20"  # Known volatile day (from previous tests)
+end_date: "2024-12-20"
+
+# Portfolio settings
+initial_capital: 1000000
+allow_shorts: true
+max_position_size: 0.15   # Larger positions
+max_concentration: 0.20
+
+# Strategy with ULTRA-RELAXED parameters
+strategy:
+  type: "mean_reversion"
+  name: "MR_Diagnostic"
+  allocation_pct: 1.0
+  parameters:
+    # Ultra-relaxed entry conditions
+    lookback: 20
+    zscore_entry_threshold: 1.0    # VERY aggressive (was 2.0)
+    zscore_exit_threshold: 0.2     # Exit early (was 0.5)
+    
+    # Relaxed RSI thresholds
+    rsi_period: 14
+    rsi_oversold: 45               # Much higher (was 30)
+    rsi_overbought: 55             # Much lower (was 70)
+    
+    # Bollinger Bands
+    bollinger_period: 20
+    bollinger_std: 2.0
+    
+    # ATR for stops
+    atr_period: 14
+    stop_loss_atr_multiple: 3.0    # Wider stops
+    
+    # Position sizing - AGGRESSIVE
+    base_position_pct: 0.05        # 5% per trade (was 2%)
+    max_position_pct: 0.10         # Up to 10%
+    volatility_target: 0.15
+    
+    # Time-based exit
+    max_holding_period: 20         # Longer hold (was 10)
+    
+    # Scanning configuration
+    scan_all_bars: true            # CRITICAL
+    scan_interval: 1               # Every bar
+    enable_regime_filter: false    # Disable filtering
+    
+    # Confidence thresholds - RELAXED
+    confidence_weight_zscore: 0.5
+    confidence_weight_rsi: 0.3
+    confidence_weight_bollinger: 0.2
+    confidence_weight_regime: 0.0  # Ignore regime
+
+# Risk management - RELAXED for diagnostic
+min_signal_confidence: 0.30        # Much lower (was 0.60)
+
+# Expected Outcome:
+# - If NO trades: Logic bug in strategy
+# - If trades but 0% return: Entry/exit timing issue
+# - If positive return: Proves strategy CAN work, just needs tuning
+

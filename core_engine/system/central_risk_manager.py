@@ -1288,6 +1288,19 @@ class CentralRiskManager(ISystemComponent):
             
             passed = position_pct <= self.max_position_size
             
+            # 🔍 DIAGNOSTIC LOGGING
+            if not passed:
+                logger.warning(
+                    f"🚫 Position limit check FAILED: {request.symbol} {request.side} {request.quantity}\n"
+                    f"   Current position: {current_position:.2f}\n"
+                    f"   New position: {new_position:.2f}\n"
+                    f"   Price: ${price:.2f}\n"
+                    f"   Position value: ${position_value:,.2f}\n"
+                    f"   Position %: {position_pct:.2%}\n"
+                    f"   Limit: {self.max_position_size:.2%}\n"
+                    f"   Portfolio value: ${self.portfolio_value:,.2f}"
+                )
+            
             return passed
             
         except Exception as e:
@@ -1309,6 +1322,19 @@ class CentralRiskManager(ISystemComponent):
             concentration = position_value / self.portfolio_value
             
             passed = concentration <= self.position_concentration_limit
+            
+            # 🔍 DIAGNOSTIC LOGGING
+            if not passed:
+                logger.warning(
+                    f"🚫 Concentration limit check FAILED: {request.symbol} {request.side} {request.quantity}\n"
+                    f"   Current position: {current_position:.2f}\n"
+                    f"   New position: {new_position:.2f}\n"
+                    f"   Price: ${price:.2f}\n"
+                    f"   Position value: ${position_value:,.2f}\n"
+                    f"   Concentration: {concentration:.2%}\n"
+                    f"   Limit: {self.position_concentration_limit:.2%}\n"
+                    f"   Portfolio value: ${self.portfolio_value:,.2f}"
+                )
             
             return passed
             

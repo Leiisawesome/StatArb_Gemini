@@ -63,6 +63,9 @@ from .multi_strategy_coordinator import (
 from ...system.interfaces import ISystemComponent, IRegimeAware
 from core_engine.exceptions import ConfigurationRequiredError
 
+# Import TradingDecisionRequest for Phase 6→7 conversion (Rule 4)
+from ...system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
+
 # Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
 from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
 
@@ -95,10 +98,15 @@ class TradingSignal:
     expected_return: float
     risk_score: float
     quantity: float
-    target_price: Optional[float]
-    stop_loss: Optional[float]
-    take_profit: Optional[float]
-    time_horizon: Optional[timedelta]
+    
+    # Position sizing fields (CRITICAL for percentage-based sizing)
+    target_weight: Optional[float] = None  # Target portfolio weight (0.05 = 5%)
+    quantity_type: str = "ABSOLUTE"  # "PERCENTAGE" or "ABSOLUTE"
+    
+    target_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    time_horizon: Optional[timedelta] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
 
@@ -961,12 +969,40 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         **KEY CHANGE:** Process data through pipeline ONCE, then all strategies
         consume the SAME enriched data.
         
+        **ARCHITECTURAL NOTE (Rule 4 - Approach 3: Continuous Signal Stream):**
+        Strategies are STATELESS and generate signals based ONLY on market state.
+        They do NOT receive current_positions for signal generation.
+        
+        Why this design?
+        - ✅ Strategies focus on alpha logic (WHAT to trade based on market conditions)
+        - ✅ Risk Manager handles position awareness (WHETHER to execute)
+        - ✅ Risk Manager filters redundant signals (e.g., BUY when already long)
+        - ✅ Clean separation of concerns (Strategy=WHAT, RiskManager=WHETHER)
+        - ✅ Stateless strategies are easier to test and backtest
+        
+        Position awareness flow:
+        1. Strategy generates signal: "Market is oversold" → BUY signal
+        2. Strategy generates signal: "Market at mean" → CLOSE signal
+        3. StrategyManager aggregates signals (this method)
+        4. Risk Manager checks positions:
+           - BUY signal + already have position → REJECT (redundant)
+           - CLOSE signal + no position → REJECT (redundant)
+           - BUY signal + no position → AUTHORIZE (valid)
+           - CLOSE signal + have position → AUTHORIZE (valid)
+        
+        current_positions parameter:
+        - Reserved for filtering/aggregation logic in StrategyManager
+        - NOT passed to strategy.generate_signals() per Approach 3 design
+        - Risk Manager performs final position-aware filtering
+        
+        See: docs/08_analysis/WHY_STRATEGY_TRACKS_POSITIONS.md (Approach 3)
+        
         Args:
             symbols: List of symbols to process
             start_time: Start time for data
             end_time: End time for data
             timeframe: Data timeframe (default: 1min)
-            current_positions: Current positions for position-aware generation
+            current_positions: Current positions for filtering/aggregation
         
         Returns:
             List[TradingSignal]: Aggregated signals from all strategies
@@ -1029,6 +1065,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 # Convert SignalType enum to string for comparison
                                 signal_type_str = raw_signal.signal_type.value if hasattr(raw_signal.signal_type, 'value') else str(raw_signal.signal_type).lower()
                                 
+                                # ✅ CRITICAL FIX: Extract target_weight and quantity_type
+                                # Strategies use target_weight (percentage) instead of quantity (shares)
+                                target_quantity = getattr(raw_signal, 'target_quantity', None)
+                                target_weight = getattr(raw_signal, 'target_weight', None)
+                                quantity_type = getattr(raw_signal, 'quantity_type', 'ABSOLUTE')
+                                
+                                # Determine quantity field based on type
+                                if quantity_type == 'PERCENTAGE' and target_weight is not None:
+                                    quantity = None  # Will be calculated by engine from target_weight
+                                else:
+                                    quantity = target_quantity if target_quantity is not None else getattr(raw_signal, 'quantity', None)
+                                
                                 trading_signal = TradingSignal(
                                     signal_id=str(uuid.uuid4()),
                                     strategy_name=strategy_name,
@@ -1039,7 +1087,12 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     confidence=getattr(raw_signal, 'confidence', 0.5),
                                     expected_return=getattr(raw_signal, 'expected_return', 0.0),
                                     risk_score=getattr(raw_signal, 'risk_score', 0.5),
-                                    quantity=getattr(raw_signal, 'quantity', None),
+                                    quantity=quantity,
+                                    
+                                    # ✅ CRITICAL FIX: Add position sizing fields
+                                    target_weight=target_weight,
+                                    quantity_type=quantity_type,
+                                    
                                     target_price=getattr(raw_signal, 'target_price', None),
                                     stop_loss=getattr(raw_signal, 'stop_loss', None),
                                     take_profit=getattr(raw_signal, 'take_profit', None),
@@ -1047,12 +1100,15 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     metadata={
                                         'pipeline_processed': True,  # Mark as pipeline-processed
                                         'enriched_data': True,
+                                        # ✅ Store in metadata for downstream access
+                                        'target_weight': target_weight,
+                                        'quantity_type': quantity_type,
                                         **getattr(raw_signal, 'additional_data', {})
                                     }
                                 )
                                 all_signals.append(trading_signal)
                                 converted_count += 1
-                                logger.debug(f"   ✅ Converted signal: {strategy_name} {raw_signal.symbol} {signal_type_str} (confidence: {trading_signal.confidence:.4f})")
+                                logger.debug(f"   ✅ Converted signal: {strategy_name} {raw_signal.symbol} {signal_type_str} (confidence: {trading_signal.confidence:.4f}, weight: {target_weight})")
                             except Exception as conv_error:
                                 logger.error(f"   ❌ Failed to convert signal from {strategy_name}: {conv_error}")
                                 logger.error(f"      Signal type: {type(raw_signal.signal_type)}, value: {raw_signal.signal_type}")
@@ -2977,7 +3033,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         self,
         signals: List[EnhancedSignal],
         regime_context: Optional[Dict[str, Any]] = None
-    ) -> List['TradingDecisionRequest']:
+    ) -> List[TradingDecisionRequest]:
         """
         Convert EnhancedSignal objects to TradingDecisionRequest objects
         
@@ -2990,8 +3046,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         Returns:
             List of TradingDecisionRequest ready for risk authorization
         """
-        from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
-        
         try:
             # Get current regime if not provided
             if regime_context is None and self.regime_engine:
@@ -3069,7 +3123,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     async def aggregate_signals_and_create_requests(
         self,
         strategy_signals: Dict[str, List[EnhancedSignal]]
-    ) -> List['TradingDecisionRequest']:
+    ) -> List[TradingDecisionRequest]:
         """
         Complete Phase 6 flow: Aggregate signals and convert to trading requests
         

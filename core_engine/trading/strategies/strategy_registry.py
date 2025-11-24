@@ -29,7 +29,7 @@ except ImportError:
     # Fallback definitions
     StrategyTemplate = None
     StrategyDeployment = None
-from .strategy_validator import ValidationResult, ValidationLevel, StrategyValidator
+from .strategy_validator import ValidationResult, ValidationLevel, ValidationStatus, StrategyValidator
 
 # Import ISystemComponent for orchestrator integration
 try:

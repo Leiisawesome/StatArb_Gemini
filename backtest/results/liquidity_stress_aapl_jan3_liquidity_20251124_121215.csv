@@ -1,5 +1,0 @@
-scenario,volume_multiplier,spread_multiplier,slippage_multiplier,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,avg_slippage_bps,avg_execution_cost_bps
-baseline,1.0,1.0,1.0,0.0,0.0,0.0,0,0.0,0.0,0.0
-low_liquidity,0.5,2.0,1.5,0.0,0.0,0.0,0,0.0,0.0,0.0
-crisis_liquidity,0.25,4.0,3.0,0.0,0.0,0.0,0,0.0,0.0,0.0
-flash_crash,0.1,10.0,5.0,0.0,0.0,0.0,0,0.0,0.0,0.0

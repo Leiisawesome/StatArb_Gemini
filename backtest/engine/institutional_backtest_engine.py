@@ -2184,7 +2184,8 @@ class InstitutionalBacktestEngine:
             compliance_config = {
                 # Account settings
                 'account_type': 'margin',
-                'account_equity': 100000.0,
+                'account_equity': self.config.initial_capital,  # ✅ FIX: Use actual initial_capital
+                'portfolio_value': self.config.initial_capital,  # ✅ FIX: Add explicit portfolio_value
                 
                 # Regulatory settings (for backtest)
                 'enable_restricted_check': False,     # Disable for backtest

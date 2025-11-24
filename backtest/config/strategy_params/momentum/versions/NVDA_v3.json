@@ -1,9 +1,0 @@
-{
-  "strategy_type": "momentum",
-  "symbol": "NVDA",
-  "parameters": {
-    "lookback_period": 60
-  },
-  "saved_at": "2025-10-17T19:33:03.133767",
-  "version": 3
-}

@@ -633,9 +633,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         signals = []
         
         try:
-            # Skip if already have position
-            if symbol in self.active_positions:
-                return signals
+            # 🔧 TEMPORARY FIX: Position check disabled for Phase 1 testing
+            # The strategy's internal active_positions is NOT synchronized with
+            # Risk Manager's actual portfolio (see CRITICAL_POSITION_TRACKING_DISCONNECT.md)
+            # 
+            # TODO (Production): Implement proper position update callbacks
+            # if symbol in self.active_positions:
+            #     return signals
             
             # Get enriched data with pre-calculated indicators
             if symbol not in self.market_data:

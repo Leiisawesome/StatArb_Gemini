@@ -1,0 +1,64 @@
+# Mean Reversion Optimization - Phase 1: Relaxation Testing
+# ============================================================
+# Systematic parameter sweep to find optimal thresholds.
+# Goal: Relax overly conservative parameters to generate more signals.
+
+experiment_name: "MR_Optimization_Phase1_Relaxation"
+experiment_type: "parameter_sweep"
+
+# Test period: 1 week of volatile data
+symbols: ["AAPL"]
+interval: "1min"
+start_date: "2024-01-02"  # Tuesday
+end_date: "2024-01-05"    # Friday (4 trading days)
+
+# Portfolio settings
+initial_capital: 1000000
+allow_shorts: true
+max_position_size: 0.10
+max_concentration: 0.15
+
+# Base strategy configuration
+strategy:
+  type: "mean_reversion"
+  name: "MR_Optimization_Phase1"
+  allocation_pct: 1.0
+  parameters:
+    # Fixed parameters (not swept)
+    lookback: 20
+    bollinger_period: 20
+    bollinger_std: 2.0
+    rsi_period: 14
+    atr_period: 14
+    max_holding_period: 10
+    stop_loss_atr_multiple: 2.0
+    
+    # Scanning configuration (critical for historical testing)
+    scan_all_bars: true
+    scan_interval: 1
+    enable_regime_filter: false  # Disable for pure parameter testing
+    
+    # Placeholders (will be overridden by parameter_grid)
+    zscore_entry_threshold: 2.0
+    zscore_exit_threshold: 0.5
+    rsi_oversold: 30
+    rsi_overbought: 70
+    base_position_pct: 0.02
+
+# Parameter Grid for Optimization (27 combinations)
+parameter_grid:
+  # Entry threshold: Test more aggressive entries
+  zscore_entry_threshold: [1.5, 2.0, 2.5]
+  
+  # Exit threshold: Test earlier/later exits
+  zscore_exit_threshold: [0.3, 0.5, 0.7]
+  
+  # RSI thresholds: Relax to capture more signals
+  rsi_oversold: [35, 40, 45]
+
+# Expected Outcomes:
+# - 27 backtests total
+# - Duration: ~20-30 minutes
+# - Identify top 5 parameter sets by Sharpe Ratio
+# - Target: Sharpe > 0.5, Win Rate > 52%, Trades > 10/day
+
