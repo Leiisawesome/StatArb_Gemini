@@ -3159,15 +3159,17 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"Phase 6 aggregation and conversion failed: {e}")
             return []
     
-    async def generate_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
+    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None, 
+                             current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[EnhancedSignal]:
         """Generate signals using multi-strategy coordination"""
         try:
             if not self.enable_multi_strategy or not self.signal_aggregator:
                 # Fallback to traditional signal generation
                 return await self._generate_traditional_signals(symbols)
             
-            # Get market data (placeholder - would get from data manager)
-            market_data = await self._get_market_data(symbols)
+            # Get market data (use provided or fetch)
+            if market_data is None:
+                market_data = await self._get_market_data(symbols)
             
             # Collect signals from all strategies
             strategy_signals = await self.collect_all_signals(market_data)

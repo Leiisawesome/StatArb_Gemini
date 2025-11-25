@@ -2859,20 +2859,36 @@ class InstitutionalBacktestEngine:
                 if 'timestamp' not in data_for_processing.columns:
                     data_for_processing = data_for_processing.reset_index()
                 
-                # Step 1: Calculate all indicators
+                # Store full data count for reference
+                full_data_count = len(data_for_processing)
+                
+                # Step 1: Calculate all indicators (using full history for proper context)
                 self.pre_calculated_indicators = None
                 if self.indicators_engine:
                     self.pre_calculated_indicators = self.indicators_engine.calculate_indicators(data_for_processing)
                     logger.info(f"   ✅ Indicators calculated: {len(self.pre_calculated_indicators)} bars")
                 
-                # Step 2: Engineer all features
+                # Step 2: Engineer all features (using full history for proper context)
                 self.pre_calculated_features = None
                 if self.feature_engineer and self.pre_calculated_indicators is not None:
                     self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
-                    logger.error(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
-                    logger.error(f"   DEBUG: Type of pre_calculated_features: {type(self.pre_calculated_features)}")
-                    if isinstance(self.pre_calculated_features, list):
-                        logger.error(f"   DEBUG: First element type: {type(self.pre_calculated_features[0]) if self.pre_calculated_features else 'Empty list'}")
+                    
+                    # Now filter to trading hours only (after warmup)
+                    if hasattr(self, 'simulation_start_dt') and self.pre_calculated_features is not None:
+                        if isinstance(self.pre_calculated_features, pd.DataFrame):
+                            if 'timestamp' in self.pre_calculated_features.columns:
+                                timestamp_col = pd.to_datetime(self.pre_calculated_features['timestamp'])
+                                start_dt = pd.Timestamp(self.simulation_start_dt).tz_localize(timestamp_col.dt.tz) if timestamp_col.dt.tz and not pd.Timestamp(self.simulation_start_dt).tz else pd.Timestamp(self.simulation_start_dt)
+                                mask = timestamp_col >= start_dt
+                            else:
+                                index_tz = self.pre_calculated_features.index.tz if hasattr(self.pre_calculated_features.index, 'tz') else None
+                                start_dt = pd.Timestamp(self.simulation_start_dt).tz_localize(index_tz) if index_tz and not pd.Timestamp(self.simulation_start_dt).tz else pd.Timestamp(self.simulation_start_dt)
+                                mask = pd.to_datetime(self.pre_calculated_features.index) >= start_dt
+                            warmup_count = len(self.pre_calculated_features) - mask.sum()
+                            self.pre_calculated_features = self.pre_calculated_features[mask].copy()
+                            logger.info(f"   📊 Filtered to trading hours: {len(self.pre_calculated_features)} bars (excluded {warmup_count} warmup bars)")
+                    
+                    logger.info(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
                 
                 # Step 3: Generate all signals (optional - strategy can also generate on-the-fly)
                 self.pre_calculated_signals = None
@@ -2904,6 +2920,7 @@ class InstitutionalBacktestEngine:
             bars_processed = 0
             bars_with_signals = 0
             bars_with_trades = 0
+            pre_calc_index = 0  # Track index in pre_calculated_features (which excludes warmup)
             
             # Record initial position state
             if self.risk_manager:
@@ -2935,13 +2952,38 @@ class InstitutionalBacktestEngine:
                     ts_compare = pd.Timestamp(timestamp)
                     sim_start_compare = pd.Timestamp(self.simulation_start_dt)
                     
-                    if ts_compare.tzinfo is not None and sim_start_compare.tzinfo is None:
-                        ts_compare = ts_compare.tz_localize(None)
-                    elif ts_compare.tzinfo is None and sim_start_compare.tzinfo is not None:
-                        ts_compare = ts_compare.tz_localize(sim_start_compare.tzinfo)
+                    # Normalize both to same timezone (or remove timezone for comparison)
+                    if ts_compare.tzinfo is not None:
+                        ts_compare_normalized = ts_compare.tz_localize(None)
+                    else:
+                        ts_compare_normalized = ts_compare
                         
-                    if ts_compare < sim_start_compare:
-                        continue
+                    if sim_start_compare.tzinfo is not None:
+                        sim_start_compare_normalized = sim_start_compare.tz_localize(None)
+                    else:
+                        sim_start_compare_normalized = sim_start_compare
+                        
+                    # Compare dates, not just datetime (to handle intraday data)
+                    if ts_compare_normalized.date() < sim_start_compare_normalized.date():
+                        continue  # Skip warmup bars
+                
+                # Filter to regular trading hours only (9:30 AM - 4:00 PM ET)
+                # This ensures we only process regular market hours, not pre-market or after-hours
+                ts_time = pd.Timestamp(timestamp)
+                if hasattr(ts_time, 'hour'):
+                    # Convert to ET timezone if needed
+                    if ts_time.tzinfo is not None:
+                        ts_et = ts_time.tz_convert('America/New_York')
+                    else:
+                        ts_et = ts_time
+                    
+                    # Skip pre-market (before 9:30 AM) and after-hours (after 4:00 PM)
+                    hour_minute = ts_et.hour * 60 + ts_et.minute
+                    market_open = 9 * 60 + 30  # 9:30 AM = 570 minutes
+                    market_close = 16 * 60  # 4:00 PM = 960 minutes
+                    
+                    if hour_minute < market_open or hour_minute >= market_close:
+                        continue  # Skip pre-market and after-hours
                 
                 self.current_bar_index = idx
                 
@@ -2956,6 +2998,7 @@ class InstitutionalBacktestEngine:
                     bar_result = await self._process_single_bar(bar, timestamp, idx)
                     
                     bars_processed += 1
+                    pre_calc_index += 1  # Increment pre-calc index for next bar
                     if bar_result.get('signals_generated', 0) > 0:
                         bars_with_signals += 1
                     if bar_result.get('trades_executed', 0) > 0:
@@ -3100,13 +3143,28 @@ class InstitutionalBacktestEngine:
                 # Get pre-calculated features for current bar
                 # Pre-calculated data has been calculated with full historical context
                 try:
-                    # Get the row corresponding to current bar index
-                    if bar_index < len(self.pre_calculated_features):
-                        features_row = self.pre_calculated_features.iloc[bar_index:bar_index+1]
-                        
+                    # Match by timestamp instead of index to handle filtered bars correctly
+                    bar_timestamp = pd.Timestamp(timestamp)
+                    
+                    # Find matching row in pre_calculated_features
+                    if 'timestamp' in self.pre_calculated_features.columns:
+                        mask = pd.to_datetime(self.pre_calculated_features['timestamp']) == bar_timestamp
+                        features_row = self.pre_calculated_features[mask]
+                    elif hasattr(self.pre_calculated_features.index, 'equals'):
+                        # Use index if timestamp not in columns
+                        mask = self.pre_calculated_features.index == bar_timestamp
+                        features_row = self.pre_calculated_features[mask]
+                    else:
+                        # Fallback to iloc if we can't match by timestamp
+                        if pre_calc_index < len(self.pre_calculated_features):
+                            features_row = self.pre_calculated_features.iloc[pre_calc_index:pre_calc_index+1]
+                        else:
+                            features_row = pd.DataFrame()  # Empty if out of bounds
+                    
+                    if not features_row.empty:
                         # ✅ CRITICAL FIX: Convert pre-calculated features to expected format
                         # Ensure features_row is a DataFrame with correct columns
-                        if not features_row.empty and 'timestamp' in features_row.columns:
+                        if 'timestamp' in features_row.columns:
                             # Rename timestamp column to avoid conflicts
                             features_row = features_row.rename(columns={'timestamp': 'regime_timestamp'})
                         
@@ -3120,9 +3178,13 @@ class InstitutionalBacktestEngine:
                         
                         # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
                         # Strategy receives pre-calculated indicators (no recalculation needed)
+                        # Get current positions for strategy context
+                        current_positions = self.risk_manager.current_positions if self.risk_manager else {}
+                        
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
-                            {symbol: features_row for symbol in self.config.symbols}
+                            {symbol: features_row for symbol in self.config.symbols},
+                            current_positions
                         )
                         
                         if bar_index < 3:
@@ -3137,8 +3199,15 @@ class InstitutionalBacktestEngine:
                                 logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals from enriched features!")
                         else:
                             pass
+                    else:
+                        # No matching timestamp found in pre_calculated_features
+                        # Fall back to on-the-fly calculation
+                        use_pre_calculated = False
+                        logger.warning(f"⚠️  Pre-calculated features not found for timestamp {bar_timestamp}, falling back to on-the-fly")
+                        
                 except Exception as e:
                     use_pre_calculated = False
+                    logger.warning(f"⚠️  Pre-calculation access failed: {e}, falling back to on-the-fly")
             
             # Fallback to on-the-fly calculation if pre-calculated data not available
             if not use_pre_calculated:
@@ -3172,9 +3241,13 @@ class InstitutionalBacktestEngine:
                         logger.warning(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
                         
                         # Pass enriched features to strategy (not raw OHLCV)
+                        # Get current positions for strategy context
+                        current_positions = self.risk_manager.current_positions if self.risk_manager else {}
+                        
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
-                            {symbol: enriched_features_fallback for symbol in self.config.symbols}
+                            {symbol: enriched_features_fallback for symbol in self.config.symbols},
+                            current_positions
                         )
                         
                         # Strategy returns List[Signal], convert to DataFrame
