@@ -1,8 +1,0 @@
-timestamp,experiment_name,experiment_type,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,duration_seconds,success
-2025-11-25T18:23:37.775046,Smoke_Test_Default,smoke_test,0.0,0.0,0.0,0,0.0,6.86111307144165,True
-2025-11-25T18:26:02.314373,Smoke_Test_Default,smoke_test,0.0,0.0,0.0,0,0.0,3.7554562091827393,True
-2025-11-25T18:28:07.424136,Smoke_Test_Default,smoke_test,0.0,0.0,0.0,0,0.0,3.90142822265625,True
-2025-11-25T18:29:16.125475,Smoke_Test_Default,smoke_test,0.0,0.0,0.0,0,0.0,3.752556085586548,True
-2025-11-25T18:33:08.096917,Smoke_Test,smoke_test,0.0,0.0,0.0,0,0.0,1.7881393432617188e-05,False
-2025-11-25T18:33:45.664797,Smoke_Test,smoke_test,0.0,0.0,0.0,0,0.0,9.597716331481934,True
-2025-11-25T18:37:50.550497,Smoke_Test,smoke_test,0.0,0.0,0.0,0,0.0,9.544391870498657,True

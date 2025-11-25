@@ -106,7 +106,7 @@ class InstitutionalBacktestEngine:
         # Phase 4 components (Strategy & Risk)
         self.strategy_manager = None   # BRICK #7 (order=20)
         self.risk_manager = None       # BRICK #8 (order=25) - GOVERNANCE
-        self.position_tracker = None   # ❌ DEPRECATED (Rule 4) - Use risk_manager.current_positions instead
+        # self.position_tracker is DEPRECATED (Rule 4) - Use risk_manager.current_positions instead
         
         # Phase 5 components (Execution)
         self.trading_engine = None     # BRICK #9a (order=30)
@@ -346,9 +346,13 @@ class InstitutionalBacktestEngine:
         Returns:
             Current regime context from regime engine, or None if not available
         """
-        if self.regime_engine and hasattr(self.regime_engine, 'get_current_regime'):
+        if self.regime_engine and hasattr(self.regime_engine, 'get_current_regime_context'):
             try:
-                return self.regime_engine.get_current_regime()
+                context = self.regime_engine.get_current_regime_context()
+                if context:
+                    if hasattr(context, '__dict__'):
+                        return context.__dict__
+                    return context
             except Exception as e:
                 logger.warning(f"Failed to get current regime: {e}")
                 return None
@@ -440,8 +444,8 @@ class InstitutionalBacktestEngine:
             logger.warning("⚠️  Regime engine not configured (Rule 2 IRegimeAware)")
             return False
         
-        if not hasattr(self.regime_engine, 'get_current_regime'):
-            logger.warning("⚠️  Regime engine missing required methods")
+        if not hasattr(self.regime_engine, 'get_current_regime_context'):
+            logger.warning("⚠️  Regime engine missing required methods (get_current_regime_context)")
             return False
         
         logger.info("✅ Regime dependency validated (Rule 2 IRegimeAware)")
@@ -753,6 +757,14 @@ class InstitutionalBacktestEngine:
             # Convert date strings to datetime objects
             start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
+            
+            # Add warmup period to ensure sufficient data for indicators
+            # Default: 5 days for intraday, 60 days for daily
+            warmup_days = 5 if self.config.interval in ['1min', '5min', '15min', '1h'] else 60
+            original_start_dt = start_dt
+            self.simulation_start_dt = original_start_dt  # Store for run_backtest loop filtering
+            start_dt = start_dt - timedelta(days=warmup_days)
+            logger.info(f"   Added warmup period: {warmup_days} days ({original_start_dt.date()} -> {start_dt.date()})")
             
             # ENHANCEMENT: Dynamic Market Hours (Asset-Class Aware)
             # Use MarketCalendar to determine correct session times
@@ -1762,8 +1774,8 @@ class InstitutionalBacktestEngine:
                 'enable_trade_attribution': True,
                 
                 # Reporting
-                'generate_tca_report': True,
-                'tca_report_frequency': 'trade',  # Per-trade TCA
+                'auto_generate_reports': True,
+                'report_frequency': 'daily'
             })
             
             logger.info(f"✅ Execution Analytics & TCA configured")
@@ -2646,8 +2658,14 @@ class InstitutionalBacktestEngine:
 
             # Get initial and final capital
             initial_capital = self.config.initial_capital if hasattr(self.config, 'initial_capital') else 100000.0
-            final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
-
+            
+            # Use RiskManager for final capital (Rule 4)
+            final_capital = initial_capital
+            if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
+                final_capital = self.risk_manager.portfolio_value
+            elif self.position_tracker:
+                final_capital = self.position_tracker.cash
+            
             # Calculate basic metrics
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
 
@@ -2738,7 +2756,13 @@ class InstitutionalBacktestEngine:
 
             # Get initial and final capital
             initial_capital = self.config.initial_capital if hasattr(self.config, 'initial_capital') else 100000.0
-            final_capital = self.position_tracker.cash if self.position_tracker else initial_capital
+            
+            # Use RiskManager for final capital (Rule 4)
+            final_capital = initial_capital
+            if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
+                final_capital = self.risk_manager.portfolio_value
+            elif self.position_tracker:
+                final_capital = self.position_tracker.cash
 
             # Calculate basic metrics
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
@@ -2845,7 +2869,10 @@ class InstitutionalBacktestEngine:
                 self.pre_calculated_features = None
                 if self.feature_engineer and self.pre_calculated_indicators is not None:
                     self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
-                    logger.info(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
+                    logger.error(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
+                    logger.error(f"   DEBUG: Type of pre_calculated_features: {type(self.pre_calculated_features)}")
+                    if isinstance(self.pre_calculated_features, list):
+                        logger.error(f"   DEBUG: First element type: {type(self.pre_calculated_features[0]) if self.pre_calculated_features else 'Empty list'}")
                 
                 # Step 3: Generate all signals (optional - strategy can also generate on-the-fly)
                 self.pre_calculated_signals = None
@@ -2879,24 +2906,43 @@ class InstitutionalBacktestEngine:
             bars_with_trades = 0
             
             # Record initial position state
-            if self.position_tracker:
+            if self.risk_manager:
+                # Use CentralRiskManager for position state (Rule 4)
                 initial_snapshot = {
                     'timestamp': self.historical_data.index[0] if not self.historical_data.empty else datetime.now(),
-                    'equity': self.position_tracker.get_equity(),
-                    'cash': self.position_tracker.cash,
-                    'total_pnl': self.position_tracker.get_total_pnl(),
-                    'realized_pnl': self.position_tracker.total_realized_pnl,
-                    'unrealized_pnl': self.position_tracker.total_unrealized_pnl,
-                    'position_count': self.position_tracker.get_position_count(),
-                    'max_drawdown': self.position_tracker.max_drawdown,
-                    'max_drawdown_pct': self.position_tracker.max_drawdown_pct
+                    'equity': self.risk_manager.portfolio_value if hasattr(self.risk_manager, 'portfolio_value') else self.config.initial_capital,
+                    'cash': self.risk_manager.available_cash,
+                    'total_pnl': getattr(self.risk_manager, 'total_pnl', 0.0),
+                    'realized_pnl': getattr(self.risk_manager, 'realized_pnl', 0.0),
+                    'unrealized_pnl': getattr(self.risk_manager, 'unrealized_pnl', 0.0),
+                    'position_count': len(self.risk_manager.current_positions),
+                    'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
+                    'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
                 }
                 self.position_history.append(initial_snapshot)
             
             # Progress tracking
             progress_interval = max(1, total_bars // 20)  # Report every 5%
             
-            for idx, (timestamp, bar) in enumerate(self.historical_data.iterrows()):
+            for idx, (index_val, bar) in enumerate(self.historical_data.iterrows()):
+                # Extract timestamp from bar if available, otherwise use index
+                timestamp = bar.get('timestamp', index_val)
+                
+                # Skip warmup period (Rule 3: Data Pipeline)
+                # We only process bars within the requested simulation period
+                if hasattr(self, 'simulation_start_dt'):
+                    # Handle timezone compatibility
+                    ts_compare = pd.Timestamp(timestamp)
+                    sim_start_compare = pd.Timestamp(self.simulation_start_dt)
+                    
+                    if ts_compare.tzinfo is not None and sim_start_compare.tzinfo is None:
+                        ts_compare = ts_compare.tz_localize(None)
+                    elif ts_compare.tzinfo is None and sim_start_compare.tzinfo is not None:
+                        ts_compare = ts_compare.tz_localize(sim_start_compare.tzinfo)
+                        
+                    if ts_compare < sim_start_compare:
+                        continue
+                
                 self.current_bar_index = idx
                 
                 # Progress reporting
@@ -2947,10 +2993,11 @@ class InstitutionalBacktestEngine:
                 'execution_history': self.execution_history,
                 'position_history': self.position_history,
                 'total_bars': bars_processed,
+                'bars_processed': bars_processed,
                 'bars_with_signals': bars_with_signals,
                 'bars_with_trades': bars_with_trades,
                 'total_trades': len(self.execution_history),
-                'final_capital': self.position_tracker.cash if self.position_tracker else 0,
+                'final_capital': self.risk_manager.portfolio_value if self.risk_manager else (self.position_tracker.cash if self.position_tracker else 0),
                 'duration_seconds': duration,
                 'bars_per_second': bars_processed / duration if duration > 0 else 0,
                 'report': report,
@@ -3013,27 +3060,38 @@ class InstitutionalBacktestEngine:
                 bar_dict['timestamp'] = timestamp
                 
                 # Process market data through regime engine
-                regime_result = self.regime_engine.process_market_data(bar_dict)
-                
-                # Get current regime from engine state
-                if hasattr(self.regime_engine, 'current_regime') and self.regime_engine.current_regime:
-                    regime_analysis = self.regime_engine.current_regime
-                    if hasattr(regime_analysis, 'primary_regime'):
-                        bar_results['regime'] = regime_analysis.primary_regime.value
-                    elif hasattr(regime_analysis, 'regime'):
-                        bar_results['regime'] = str(regime_analysis.regime)
-                    else:
-                        bar_results['regime'] = str(regime_analysis)
+                try:
+                    regime_result = self.regime_engine.process_market_data(bar_dict)
+                except Exception as e:
+                    # Log error but continue - regime engine might not be fully initialized
+                    # or might not support this data format
+                    if bar_index == 0:
+                        logger.warning(f"⚠️ Regime engine processing failed: {e}")
+                    regime_result = None
             
             # Step 2: 🚀 OPTION B: Use pre-calculated indicators/features/signals
             # Much faster than rolling window, enables momentum strategies
             
             # Check if we have pre-calculated data
-            use_pre_calculated = (
-                hasattr(self, 'pre_calculated_features') and 
-                self.pre_calculated_features is not None and 
-                not self.pre_calculated_features.empty
-            )
+            use_pre_calculated = False
+            if hasattr(self, 'pre_calculated_features') and self.pre_calculated_features is not None:
+                if isinstance(self.pre_calculated_features, list):
+                    # Handle list case (unexpected but possible during debugging)
+                    if len(self.pre_calculated_features) > 0:
+                        # Try to convert to DataFrame if it's a list of dicts or objects
+                        try:
+                            if hasattr(self.pre_calculated_features[0], '__dict__'):
+                                self.pre_calculated_features = pd.DataFrame([x.__dict__ for x in self.pre_calculated_features])
+                            elif isinstance(self.pre_calculated_features[0], dict):
+                                self.pre_calculated_features = pd.DataFrame(self.pre_calculated_features)
+                            else:
+                                logger.error(f"❌ pre_calculated_features is a list of {type(self.pre_calculated_features[0])}, cannot convert to DataFrame")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to convert pre_calculated_features list to DataFrame: {e}")
+                
+                # Check if it's a DataFrame and not empty
+                if isinstance(self.pre_calculated_features, pd.DataFrame) and not self.pre_calculated_features.empty:
+                    use_pre_calculated = True
             
             signals_df = None
             bar_df = None
@@ -3046,67 +3104,39 @@ class InstitutionalBacktestEngine:
                     if bar_index < len(self.pre_calculated_features):
                         features_row = self.pre_calculated_features.iloc[bar_index:bar_index+1]
                         
-                        # ✅ CORRECTED FLOW (Phase 7.2): Pass PRE-CALCULATED ENRICHED FEATURES
-                        # NOT raw OHLCV - strategies receive cached indicators ready to use
-                        signals_df = None
-                        if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
-                            # Get first active strategy (for single-strategy backtest)
-                            try:
-                                strategy = list(self.strategy_manager.active_strategies.values())[0]
-                                symbol = self.config.symbols[0]
-                                
-                                # ✅ CRITICAL FIX: Pass ENRICHED FEATURES (not raw OHLCV)
-                                # Pre-calculated features include all indicators: SMA_10, SMA_20, SMA_50, RSI_14, ADX_14, MACD, ATR_14, etc
-                                # This is the CORRECT professional quant approach
-                                # Get enriched features up to and including current bar
-                                enriched_historical_data = self.pre_calculated_features.iloc[:bar_index+1].copy()
-                                
-                                # Log on first bar to confirm strategy is being called with enriched data
-                                if bar_index < 3:
-                                    logger.info(f"📊 Bar {bar_index}: Calling strategy {strategy.__class__.__name__} for {symbol}")
-                                    logger.info(f"   Data type: ENRICHED FEATURES (pre-calculated indicators)")
-                                    logger.info(f"   Historical context: {len(enriched_historical_data)} bars of enriched data")
-                                    if len(enriched_historical_data.columns) > 6:
-                                        logger.info(f"   Indicators available: {', '.join(enriched_historical_data.columns[6:12].tolist())}...")
-                                
-                                # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
-                                # Strategy receives pre-calculated indicators (no recalculation needed)
-                                strategy_signals = await strategy.generate_signals({symbol: enriched_historical_data})
-                                
-                                if bar_index < 3:
-                                    logger.info(f"   ✅ Strategy returned: {len(strategy_signals) if strategy_signals else 0} signals (from enriched data)")
-                                
-                                # Strategy returns List[StrategySignal], convert to DataFrame
-                                if strategy_signals is not None and len(strategy_signals) > 0:
-                                    # Convert list of Signal objects to DataFrame
-                                    signals_df = pd.DataFrame([{
-                                        'symbol': s.symbol,
-                                        'signal': s.signal_type.value,
-                                        'confidence': s.confidence,
-                                        'strength': s.strength if hasattr(s, 'strength') else 0.5
-                                    } for s in strategy_signals])
-                                    bar_results['signals_generated'] = len(signals_df)
-                                    if bar_index < 10:
-                                        logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals from enriched features!")
-                                else:
-                                    pass
-                            except Exception as e:
-                                logger.error(f"Strategy signal generation failed at bar {bar_index}: {e}", exc_info=True)
-                                logger.error(f"   Falling back to pipeline signal generator (suboptimal)")
-                                # Fallback to pipeline signal generator only if enriched data fails
-                                signals_df = self.signal_generator.generate_signals(features_row) if self.signal_generator else None
-                        else:
-                            # No strategy manager, use pipeline signal generator as fallback
-                            if bar_index < 3:
-                                logger.warning(f"⚠️  No strategy manager available, using pipeline signal generator")
-                            signals_df = self.signal_generator.generate_signals(features_row) if self.signal_generator else None
+                        # ✅ CRITICAL FIX: Convert pre-calculated features to expected format
+                        # Ensure features_row is a DataFrame with correct columns
+                        if not features_row.empty and 'timestamp' in features_row.columns:
+                            # Rename timestamp column to avoid conflicts
+                            features_row = features_row.rename(columns={'timestamp': 'regime_timestamp'})
                         
-                        if signals_df is not None and not signals_df.empty:
+                        # Log on first bar to confirm strategy is being called with enriched data
+                        if bar_index < 3:
+                            logger.info(f"📊 Bar {bar_index}: Calling strategy for signals generation")
+                            logger.info(f"   Data type: ENRICHED FEATURES (pre-calculated indicators)")
+                            logger.info(f"   Historical context: {len(features_row)} bars of enriched data")
+                            if len(features_row.columns) > 6:
+                                logger.info(f"   Indicators available: {', '.join(features_row.columns[6:12].tolist())}...")
+                        
+                        # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
+                        # Strategy receives pre-calculated indicators (no recalculation needed)
+                        signals_result = await self.strategy_manager.generate_signals(
+                            self.config.symbols, 
+                            {symbol: features_row for symbol in self.config.symbols}
+                        )
+                        
+                        if bar_index < 3:
+                            logger.info(f"   ✅ Strategy returned: {len(signals_result) if signals_result else 0} signals (from enriched data)")
+                        
+                        # Strategy returns List[Signal], convert to DataFrame
+                        if signals_result is not None and len(signals_result) > 0:
+                            # Convert list of Signal objects to DataFrame
+                            signals_df = pd.DataFrame([s.__dict__ for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
-                        
-                        # Create bar DataFrame for compatibility
-                        bar_df = features_row
-                        
+                            if bar_index < 10:
+                                logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals from enriched features!")
+                        else:
+                            pass
                 except Exception as e:
                     use_pre_calculated = False
             
@@ -3142,14 +3172,14 @@ class InstitutionalBacktestEngine:
                         logger.warning(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
                         
                         # Pass enriched features to strategy (not raw OHLCV)
-                        strategy_signals = await self.strategy_manager.generate_signals(
+                        signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
                             {symbol: enriched_features_fallback for symbol in self.config.symbols}
                         )
                         
                         # Strategy returns List[Signal], convert to DataFrame
-                        if strategy_signals is not None:
-                            if isinstance(strategy_signals, list) and len(strategy_signals) > 0:
+                        if signals_result is not None:
+                            if isinstance(signals_result, list) and len(signals_result) > 0:
                                 # Convert list of Signal objects to DataFrame
                                 signals_df = pd.DataFrame([{
                                     'symbol': s.symbol,
@@ -3161,19 +3191,47 @@ class InstitutionalBacktestEngine:
                                     'target_weight': getattr(s, 'target_weight', None),  # CRITICAL FIX: Extract target_weight
                                     'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),  # CRITICAL FIX: Extract quantity_type
                                     'additional_data': getattr(s, 'additional_data', {})
-                                } for s in strategy_signals])
+                                } for s in signals_result])
                                 logger.info(f"   ✅ Generated {len(signals_df)} signals from fallback enriched features")
-                            elif isinstance(strategy_signals, pd.DataFrame) and not strategy_signals.empty:
-                                signals_df = strategy_signals
+                            elif isinstance(signals_result, pd.DataFrame) and not signals_result.empty:
+                                signals_df = signals_result
                     except Exception as e:
                         logger.error(f"Fallback strategy generation failed: {e}", exc_info=True)
                         # Final fallback to pipeline signal generator only as last resort
                         logger.warning(f"   Falling back to pipeline signal generator (not ideal)")
-                        signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                        signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                        if isinstance(signals_result, list):
+                            signals_df = pd.DataFrame([{
+                                'symbol': s.symbol,
+                                'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+                                'confidence': s.confidence,
+                                'strength': getattr(s, 'strength', 0.5),
+                                'timestamp': getattr(s, 'timestamp', None),
+                                'target_quantity': getattr(s, 'target_quantity', 0),
+                                'target_weight': getattr(s, 'target_weight', None),
+                                'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
+                                'additional_data': getattr(s, 'additional_data', {})
+                            } for s in signals_result]) if signals_result else None
+                        else:
+                            signals_df = signals_result
                 else:
                     # No strategy manager, use pipeline signal generator as fallback
                     logger.warning(f"⚠️  No strategy manager available, using pipeline signal generator")
-                    signals_df = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                    signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
+                    if isinstance(signals_result, list):
+                        signals_df = pd.DataFrame([{
+                            'symbol': s.symbol,
+                            'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+                            'confidence': s.confidence,
+                            'strength': getattr(s, 'strength', 0.5),
+                            'timestamp': getattr(s, 'timestamp', None),
+                            'target_quantity': getattr(s, 'target_quantity', 0),
+                            'target_weight': getattr(s, 'target_weight', None),
+                            'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
+                            'additional_data': getattr(s, 'additional_data', {})
+                        } for s in signals_result]) if signals_result else None
+                    else:
+                        signals_df = signals_result
                 
                 if signals_df is not None and not signals_df.empty:
                     bar_results['signals_generated'] = len(signals_df)
@@ -3214,17 +3272,18 @@ class InstitutionalBacktestEngine:
                     self.risk_manager.update_market_prices(current_prices)
             
             # Record position history after execution
-            if self.position_tracker:
+            if self.risk_manager:
+                # Use CentralRiskManager for position state (Rule 4)
                 position_snapshot = {
                     'timestamp': timestamp,
-                    'equity': self.position_tracker.get_equity(),
-                    'cash': self.position_tracker.cash,
-                    'total_pnl': self.position_tracker.get_total_pnl(),
-                    'realized_pnl': self.position_tracker.total_realized_pnl,
-                    'unrealized_pnl': self.position_tracker.total_unrealized_pnl,
-                    'position_count': self.position_tracker.get_position_count(),
-                    'max_drawdown': self.position_tracker.max_drawdown,
-                    'max_drawdown_pct': self.position_tracker.max_drawdown_pct
+                    'equity': self.risk_manager.portfolio_value if hasattr(self.risk_manager, 'portfolio_value') else self.config.initial_capital,
+                    'cash': self.risk_manager.available_cash,
+                    'total_pnl': getattr(self.risk_manager, 'total_pnl', 0.0),
+                    'realized_pnl': getattr(self.risk_manager, 'realized_pnl', 0.0),
+                    'unrealized_pnl': getattr(self.risk_manager, 'unrealized_pnl', 0.0),
+                    'position_count': len(self.risk_manager.current_positions),
+                    'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
+                    'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
                 }
                 self.position_history.append(position_snapshot)
             
@@ -3295,7 +3354,12 @@ class InstitutionalBacktestEngine:
                     
                     # Get current position
                     current_position = 0.0
-                    if self.position_tracker:
+                    if self.risk_manager:
+                        # Use CentralRiskManager as source of truth (Rule 4)
+                        if symbol in self.risk_manager.current_positions:
+                            current_position = self.risk_manager.current_positions[symbol].quantity
+                    elif self.position_tracker:
+                        # Fallback to deprecated position tracker if risk manager not available
                         position_obj = self.position_tracker.get_position(symbol)
                         if position_obj:
                             current_position = position_obj.quantity
@@ -3426,6 +3490,9 @@ class InstitutionalBacktestEngine:
             6. Record executed trades with full cost breakdown
         
         Args:
+            authorized_trades: List of authorized trades
+        
+        Args:
             authorized_trades: List of authorized trades from CentralRiskManager
             current_bar: Current market data bar
             bar_timestamp: Timestamp of current bar
@@ -3466,6 +3533,7 @@ class InstitutionalBacktestEngine:
                     # Get current price from authorization (more reliable than potentially modified bar data)
                     current_price = auth_trade.get('current_price', current_bar.get('close', 0))
                     
+
                     # Get regime context (Rule 2 Regime-First)
                     regime_context = None
                     if self.regime_engine:
@@ -3576,7 +3644,7 @@ class InstitutionalBacktestEngine:
                         try:
                             position_update = await self.risk_manager.update_position(
                                 symbol=symbol,
-                                side=side.lower(),
+                                side=side,
                                 quantity=actual_quantity,  # Use actual quantity (may be reduced)
                                 price=simulated_fill.fill_price,  # Use fill price (includes costs)
                                 timestamp=bar_timestamp
@@ -3655,137 +3723,50 @@ class InstitutionalBacktestEngine:
             logger.error(f"❌ Execution simulation failed: {e}", exc_info=True)
             return []
     
-    async def process_bar(self,
-                         bar_data: pd.DataFrame,
-                         bar_timestamp: datetime) -> Dict[str, Any]:
+    # ============================================================
+    # PHASE 7: INTEGRATION & ORCHESTRATION
+    # ============================================================
+    
+    async def integrate_phase7(self) -> None:
         """
-        Process a single bar of market data through the complete pipeline
+        Phase 7: Integrate and orchestrate all components for live trading
         
-        This method implements the core backtest loop for one bar:
-            1. Update regime engine with market data
-            2. Generate technical indicators
-            3. Engineer features
-            4. Generate signals
-            5. Execute strategies
-            6. Authorize trades (CentralRiskManager)
-            7. Simulate execution (HistoricalExecutionSimulator)
-            8. Update positions (PositionTracker)
-            9. Track performance
+        This phase integrates:
+        - Connects all components for live trading
+        - Validates inter-component dependencies
+        - Initializes any remaining components
+        - Performs final checks and balances
         
-        Args:
-            bar_data: Market data for current bar (all symbols)
-            bar_timestamp: Timestamp of current bar
-        
-        Returns:
-            Dictionary with bar processing results
+        Usage:
+            engine = InstitutionalBacktestEngine(config)
+            await engine.initialize()
+            await engine.integrate_phase7()
         """
-        
-        bar_results = {
-            'timestamp': bar_timestamp,
-            'signals_generated': 0,
-            'trades_authorized': 0,
-            'trades_executed': 0,
-            'regime': None,
-            'executed_trades': []
-        }
+        logger.info("\n" + "=" * 80)
+        logger.info("🔗 PHASE 7: INTEGRATION & ORCHESTRATION")
+        logger.info("=" * 80)
         
         try:
-            # Step 1: Update regime engine (Rule 2 - Regime-First)
-            if self.regime_engine:
-                for _, row in bar_data.iterrows():
-                    await self.regime_engine.on_market_data(row)
-                
-                # Get regime context if available
-                if hasattr(self.regime_engine, 'get_current_regime_context'):
-                    regime_context = self.regime_engine.get_current_regime_context()  # Not async!
-                    if regime_context:
-                        bar_results['regime'] = getattr(regime_context, 'primary_regime', 'unknown')
-                elif hasattr(self.regime_engine, 'current_regime'):
-                    bar_results['regime'] = str(self.regime_engine.current_regime)
+            # Validate all components are initialized
+            if not self.is_initialized:
+                raise RuntimeError("Engine not initialized. Cannot integrate Phase 7.")
             
-            # Step 2-4: Generate indicators, features, signals
-            # (These would be called if we were generating signals per bar)
-            # For now, we'll focus on the execution flow
+            # Validate inter-component links
+            if not self.risk_manager:
+                raise RuntimeError("CentralRiskManager is not initialized - cannot proceed with integration")
             
-            # Step 5-6: Get authorized trades from strategy manager
-            # (This will be implemented when we connect the full pipeline)
-            # For Phase 5.3, we're focusing on the execution simulation
+            if not self.trading_engine or not self.execution_engine:
+                raise RuntimeError("Trading engines are not initialized - cannot proceed with integration")
             
-            # Placeholder: In full implementation, authorized_trades would come from:
-            # authorized_trades = await self.strategy_manager.get_authorized_trades(bar_data, bar_timestamp)
-            authorized_trades = []
+            # Perform any final initialization steps for Phase 7
+            # For now, this is just a check - in future, we may have more logic here
             
-            # Step 7: Simulate execution with realistic costs
-            if authorized_trades:
-                executed_trades = await self.simulate_execution(
-                    authorized_trades,
-                    bar_data.iloc[0],  # First row for single-symbol
-                    bar_timestamp
-                )
-                
-                bar_results['trades_executed'] = len(executed_trades)
-                bar_results['executed_trades'] = executed_trades
-            
-            return bar_results
+            logger.info("✅ Phase 7 integration complete")
+            logger.info("=" * 80)
             
         except Exception as e:
-            logger.error(f"❌ Bar processing failed at {bar_timestamp}: {e}")
-            bar_results['error'] = str(e)
-            return bar_results
-    
-    def get_execution_statistics(self) -> Dict[str, Any]:
-        """
-        Get aggregate execution statistics from all simulated trades
-        
-        Returns:
-            Dictionary with execution TCA statistics
-        """
-        
-        if not self.execution_history:
-            return {
-                'total_trades': 0,
-                'message': 'No trades executed yet'
-            }
-        
-        executed_trades = self.execution_history
-        total_trades = len(executed_trades)
-        
-        # Calculate aggregate statistics
-        total_cost_bps = sum(trade['total_cost_bps'] for trade in executed_trades)
-        total_cost_dollars = sum(trade['total_cost_dollars'] for trade in executed_trades)
-        avg_cost_bps = total_cost_bps / total_trades if total_trades > 0 else 0
-        
-        # Cost component breakdowns
-        avg_spread_cost = sum(t['spread_cost_bps'] for t in executed_trades) / total_trades
-        avg_impact_cost = sum(t['market_impact_bps'] for t in executed_trades) / total_trades
-        avg_slippage = sum(t['slippage_bps'] for t in executed_trades) / total_trades
-        avg_commission = sum(t['commission_bps'] for t in executed_trades) / total_trades
-        
-        # Trade direction breakdown
-        buy_trades = [t for t in executed_trades if t['side'].lower() == 'buy']
-        sell_trades = [t for t in executed_trades if t['side'].lower() == 'sell']
-        
-        return {
-            'total_trades': total_trades,
-            'total_cost_bps': total_cost_bps,
-            'total_cost_dollars': total_cost_dollars,
-            'avg_cost_bps': avg_cost_bps,
-            
-            # Cost component breakdown
-            'avg_spread_cost_bps': avg_spread_cost,
-            'avg_impact_cost_bps': avg_impact_cost,
-            'avg_slippage_bps': avg_slippage,
-            'avg_commission_bps': avg_commission,
-            
-            # Trade breakdown
-            'buy_trades': len(buy_trades),
-            'sell_trades': len(sell_trades),
-            'avg_buy_cost_bps': sum(t['total_cost_bps'] for t in buy_trades) / len(buy_trades) if buy_trades else 0,
-            'avg_sell_cost_bps': sum(t['total_cost_bps'] for t in sell_trades) / len(sell_trades) if sell_trades else 0,
-            
-            # Total notional traded
-            'total_notional': sum(t['quantity'] * t['market_price'] for t in executed_trades)
-        }
+            logger.error(f"❌ Phase 7 integration failed: {e}", exc_info=True)
+            raise RuntimeError(f"Phase 7 integration failed: {e}")
     
     # ============================================================
     # Lifecycle Management

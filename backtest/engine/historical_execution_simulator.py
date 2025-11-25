@@ -24,6 +24,17 @@ from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
 import logging
+import sys
+from pathlib import Path
+
+# Add parent directories to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from backtest.exceptions import (
+    BacktestExecutionError,
+    BacktestDataError,
+    format_backtest_error
+)
 
 logger = logging.getLogger(__name__)
 
@@ -263,14 +274,50 @@ class HistoricalExecutionSimulator:
             )
             
             # Step 4: Calculate commission (Asset-Class Aware)
-            # Determine asset class from symbol or config
+            # ❌ REMOVED FALLBACK: Asset class determination is REQUIRED for correct commission calculation
+            # Asset class MUST be explicitly determined - no fallback to 'US_EQUITY'
             try:
                 from core_engine.data.market_calendar import MarketCalendar
                 calendar = MarketCalendar()
                 asset_class = calendar.get_asset_class(symbol)
                 asset_class_name = asset_class.name
-            except ImportError:
-                asset_class_name = 'US_EQUITY'  # Fallback
+            except ImportError as e:
+                error_msg = format_backtest_error(
+                    error_type="Missing Dependency",
+                    message="MarketCalendar not available for asset class determination.",
+                    context={
+                        'symbol': symbol,
+                        'required_for': 'Commission calculation',
+                        'import_error': str(e)
+                    },
+                    suggestion=(
+                        "MarketCalendar is REQUIRED for correct commission calculation.\n"
+                        "  1. Ensure core_engine.data.market_calendar is available\n"
+                        "  2. Check PYTHONPATH includes core_engine module\n"
+                        "  3. Install missing dependencies"
+                    )
+                )
+                logger.error(f"❌ {error_msg}")
+                raise BacktestDataError(error_msg) from e
+            except Exception as e:
+                error_msg = format_backtest_error(
+                    error_type="Asset Class Determination Failed",
+                    message=f"Cannot determine asset class for {symbol}.",
+                    context={
+                        'symbol': symbol,
+                        'required_for': 'Commission calculation',
+                        'error': str(e),
+                        'error_type': type(e).__name__
+                    },
+                    suggestion=(
+                        "Asset class is REQUIRED for commission calculation. Check:\n"
+                        "  1. Symbol format is valid\n"
+                        "  2. MarketCalendar configuration\n"
+                        "  3. Asset class mapping data"
+                    )
+                )
+                logger.error(f"❌ {error_msg}")
+                raise BacktestDataError(error_msg) from e
 
             if asset_class_name == 'CRYPTO':
                 # Crypto commission: percentage based (e.g., 10 bps = 0.1%)
@@ -348,12 +395,32 @@ class HistoricalExecutionSimulator:
             return fill
             
         except Exception as e:
-            logger.error(f"Error simulating fill for {symbol}: {e}", exc_info=True)
-            # Return fallback fill with conservative costs
-            return self._create_fallback_fill(
-                symbol, side, quantity, decision_price, market_data,
-                authorization_id, strategy_id
+            # ❌ REMOVED FALLBACK: No silent failures in backtest
+            # Backtest MUST fail cleanly to expose data/configuration issues
+            error_msg = format_backtest_error(
+                error_type="Execution Simulation Failed",
+                message=f"Failed to simulate fill for {symbol} {side} {quantity} shares.",
+                context={
+                    'symbol': symbol,
+                    'side': side,
+                    'quantity': quantity,
+                    'decision_price': decision_price,
+                    'market_price': market_data.get('close', 'N/A'),
+                    'authorization_id': authorization_id,
+                    'strategy_id': strategy_id,
+                    'error': str(e),
+                    'error_type': type(e).__name__
+                },
+                suggestion=(
+                    "Debug the execution simulation logic. Check:\n"
+                    "  1. Market data completeness (price, volume, volatility)\n"
+                    "  2. Regime context validity\n"
+                    "  3. Liquidity score calculation\n"
+                    "  4. Execution cost model parameters"
+                )
             )
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            raise BacktestExecutionError(error_msg) from e
     
     def _calculate_spread_cost(self,
                               symbol: str,
@@ -513,47 +580,10 @@ class HistoricalExecutionSimulator:
         
         return fill_price
     
-    def _create_fallback_fill(self,
-                             symbol: str,
-                             side: str,
-                             quantity: float,
-                             decision_price: float,
-                             market_data: Dict[str, Any],
-                             authorization_id: str,
-                             strategy_id: str) -> SimulatedFill:
-        """Create a conservative fallback fill if simulation fails"""
-        
-        market_price = market_data.get('close', decision_price)
-        decision_time = market_data.get('timestamp', datetime.now())
-        
-        # Conservative costs (worst case)
-        conservative_cost_bps = 20.0  # 20 bps total
-        fill_price = self._calculate_fill_price(side, market_price, conservative_cost_bps)
-        
-        costs = ExecutionCosts(
-            spread_cost_bps=10.0,
-            market_impact_bps=5.0,
-            slippage_bps=3.0,
-            commission_bps=2.0,
-            total_cost_bps=conservative_cost_bps,
-            fill_model="fallback"
-        )
-        
-        return SimulatedFill(
-            symbol=symbol,
-            side=side,
-            quantity=quantity,
-            fill_price=fill_price,
-            decision_price=decision_price,
-            market_price=market_price,
-            decision_time=decision_time,
-            execution_time=decision_time,
-            costs=costs,
-            implementation_shortfall_bps=conservative_cost_bps,
-            fill_id=f"fallback_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            authorization_id=authorization_id,
-            strategy_id=strategy_id
-        )
+    # ❌ REMOVED: _create_fallback_fill() method
+    # Rationale: Backtests should FAIL CLEANLY, not silently degrade with fallback values.
+    # If execution simulation fails, the backtest should stop and expose the issue,
+    # not continue with fabricated "conservative" costs that produce invalid results.
     
     def calculate_execution_quality_score(self, fill: SimulatedFill) -> float:
         """
