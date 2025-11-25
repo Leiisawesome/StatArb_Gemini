@@ -65,7 +65,7 @@ class BaselineBacktest(BaseExperiment):
             
             # Extract additional custom metrics
             custom_metrics = {
-                'bars_processed': engine_results.get('bars_processed', 0),
+                'bars_processed': engine_results.get('total_bars', 0),
                 'bars_with_signals': engine_results.get('bars_with_signals', 0),
                 'bars_with_trades': engine_results.get('bars_with_trades', 0),
                 'signal_to_trade_ratio': (
@@ -79,7 +79,7 @@ class BaselineBacktest(BaseExperiment):
                 'initialization_time_s': engine_results.get('initialization_time', 0.0),
                 'execution_time_s': duration,
                 'processing_speed_bars_per_sec': (
-                    engine_results.get('bars_processed', 0) / max(0.001, duration)
+                    engine_results.get('total_bars', 0) / max(0.001, duration)
                 ),
             }
             
@@ -122,17 +122,40 @@ class BaselineBacktest(BaseExperiment):
             )
     
     def _create_backtest_config(self) -> BacktestConfig:
-        """Create backtest config from experiment config"""
+        """Create backtest config from YAML configuration"""
         
-        # Extract config values
-        symbols = self.config.get('symbols', ['AAPL'])
-        start_date = self.config.get('start_date', '2024-01-01')
-        end_date = self.config.get('end_date', '2024-12-31')
-        interval = self.config.get('interval', '1min')
-        initial_capital = self.config.get('initial_capital', 1000000)
+        # Build config from YAML (prefer YAML over defaults)
+        config_dict = {
+            'backtest_name': self.config.get('experiment_name', 'Baseline_Backtest'),
+            'symbols': self.config.get('symbols', ['AAPL']),
+            'interval': self.config.get('interval', '1min'),
+            'start_date': self.config.get('start_date', '2024-01-01'),
+            'end_date': self.config.get('end_date', '2024-12-31'),
+            'initial_capital': self.config.get('initial_capital', 1000000),
+            'allow_shorts': self.config.get('allow_shorts', False),
+            'max_position_size': self.config.get('max_position_size', 0.10),
+            'max_concentration': self.config.get('max_concentration', 0.15),
+            'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
+        }
         
-        # Get strategy config
-        strategy_config = self.config.get('strategy', {
+        # Add regime risk multipliers if provided
+        if 'regime_risk_multipliers' in self.config:
+            config_dict['regime_risk_multipliers'] = self.config['regime_risk_multipliers']
+        else:
+            config_dict['regime_risk_multipliers'] = {
+                'low_volatility': 1.0,
+                'normal_volatility': 1.0,
+                'high_volatility': 0.7
+            }
+        
+        # Add strategy from YAML if provided (note: single strategy)
+        if 'strategy' in self.config:
+            config_dict['strategies'] = [self.config['strategy']]
+        elif 'strategies' in self.config:
+            config_dict['strategies'] = self.config['strategies']
+        else:
+            # Fallback strategy
+            config_dict['strategies'] = [{
             'type': 'mean_reversion',
             'name': 'MR_Baseline',
             'allocation_pct': 1.0,
@@ -146,30 +169,7 @@ class BaselineBacktest(BaseExperiment):
                 'rsi_oversold': 30,
                 'rsi_overbought': 70
             }
-        })
-        
-        config_dict = {
-            'backtest_name': self.config.get('experiment_name', 'Baseline_Backtest'),
-            'symbols': symbols if isinstance(symbols, list) else [symbols],
-            'interval': interval,
-            'start_date': start_date,
-            'end_date': end_date,
-            'initial_capital': initial_capital,
-            'allow_shorts': self.config.get('allow_shorts', False),
-            'max_position_size': self.config.get('max_position_size', 0.10),
-            'max_concentration': self.config.get('max_concentration', 0.15),
-            'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
-            'regime_risk_multipliers': self.config.get('regime_risk_multipliers', {
-                'low_volatility': 1.0,
-                'normal_volatility': 1.0,
-                'high_volatility': 0.7
-            }),
-            'strategies': [strategy_config]
-        }
-        
-        # Merge with additional backtest config if provided
-        backtest_override = self.config.get('backtest_config', {})
-        config_dict.update(backtest_override)
+            }]
         
         return BacktestConfig(**config_dict)
 
@@ -180,9 +180,24 @@ async def run_baseline_backtest(config: Dict[str, Any] = None):
     Run baseline backtest experiment.
     
     Args:
-        config: Optional config dict (uses defaults if None)
+        config: Optional config dict. If None, loads from baseline_backtest.yaml
     """
     if config is None:
+        # Load from YAML configuration file
+        from backtest.utils.config_loader import load_config
+        from pathlib import Path
+        
+        try:
+            # Get path to baseline_backtest.yaml
+            config_path = Path(__file__).parent.parent / 'configs' / 'baseline_backtest.yaml'
+            config = load_config(str(config_path))
+            print(f"✅ Loaded configuration from baseline_backtest.yaml")
+            print(f"   Experiment: {config.get('experiment_name')}")
+            print(f"   Symbols: {config.get('symbols', [])}")
+            print(f"   Period: {config.get('start_date')} → {config.get('end_date')}")
+        except Exception as e:
+            print(f"⚠️  Could not load baseline_backtest.yaml: {e}")
+            print(f"   Using default configuration")
         config = {
             'experiment_name': 'Baseline_Backtest_Default',
             'symbols': ['AAPL'],

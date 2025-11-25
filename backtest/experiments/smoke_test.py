@@ -75,7 +75,7 @@ class SmokeTest(BaseExperiment):
                 total_trades=metrics['total_trades'],
                 win_rate=metrics['win_rate'],
                 custom_metrics={
-                    'bars_processed': engine_results.get('bars_processed', 0),
+                    'bars_processed': engine_results.get('total_bars', 0),
                     'initialization_time_s': engine_results.get('initialization_time', 0.0),
                 },
                 success=True
@@ -104,28 +104,37 @@ class SmokeTest(BaseExperiment):
             )
     
     def _create_backtest_config(self) -> BacktestConfig:
-        """Create minimal config for smoke test"""
-        # Use ALL config from YAML (no hardcoding!)
-        symbol = self.config.get('symbols', ['AAPL'])[0]
-        
+        """Create backtest config from YAML configuration"""
+        # Build config from YAML (prefer YAML over defaults)
         config_dict = {
-            'backtest_name': 'Smoke_Test',
-            'symbols': [symbol],
+            'backtest_name': self.config.get('experiment_name', 'Smoke_Test'),
+            'symbols': self.config.get('symbols', ['AAPL']),
             'interval': self.config.get('interval', '1min'),
             'start_date': self.config.get('start_date', '2024-01-02'),
             'end_date': self.config.get('end_date', '2024-01-02'),
-            'initial_capital': 100000,  # Small for smoke test
-            'allow_shorts': False,
-            'max_position_size': 0.10,
-            'max_concentration': 0.15,
-            'min_signal_confidence': 0.60,
-            'regime_risk_multipliers': {
+            'initial_capital': self.config.get('initial_capital', 100000),
+            'allow_shorts': self.config.get('allow_shorts', False),
+            'max_position_size': self.config.get('max_position_size', 0.10),
+            'max_concentration': self.config.get('max_concentration', 0.20),
+            'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
+        }
+        
+        # Add regime risk multipliers if provided
+        if 'regime_risk_multipliers' in self.config:
+            config_dict['regime_risk_multipliers'] = self.config['regime_risk_multipliers']
+        else:
+            config_dict['regime_risk_multipliers'] = {
                 'low_volatility': 1.0,
                 'normal_volatility': 1.0,
                 'high_volatility': 0.7
-            },
-            # Minimal strategy
-            'strategies': [{
+            }
+        
+        # Add strategies from YAML if provided
+        if 'strategies' in self.config:
+            config_dict['strategies'] = self.config['strategies']
+        else:
+            # Fallback minimal strategy
+            config_dict['strategies'] = [{
                 'type': 'mean_reversion',
                 'name': 'MR_Simple',
                 'allocation_pct': 1.0,
@@ -135,10 +144,9 @@ class SmokeTest(BaseExperiment):
                     'z_exit': 0.5
                 }
             }]
-        }
         
-        # Override with user config if provided
-        config_dict.update(self.config.get('backtest_config', {}))
+        # Note: save_trade_log and save_regime_log are not BacktestConfig params
+        # They would be handled at engine level if needed
         
         return BacktestConfig(**config_dict)
 
@@ -149,13 +157,29 @@ async def run_smoke_test(config: Dict[str, Any] = None):
     Run smoke test experiment.
     
     Args:
-        config: Optional config dict (uses defaults if None)
+        config: Optional config dict. If None, loads from smoke_test.yaml
     """
     if config is None:
-        config = {
-            'experiment_name': 'Smoke_Test_Default',
-            'symbols': ['AAPL']
-        }
+        # Load from YAML configuration file
+        from backtest.utils.config_loader import load_config
+        from pathlib import Path
+        
+        try:
+            # Get path to smoke_test.yaml
+            config_path = Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'
+            config = load_config(str(config_path))
+            print(f"✅ Loaded configuration from smoke_test.yaml")
+            print(f"   Symbols: {config.get('symbols', [])}")
+            print(f"   Period: {config.get('start_date')} → {config.get('end_date')}")
+        except Exception as e:
+            print(f"⚠️  Could not load smoke_test.yaml: {e}")
+            print(f"   Using default configuration")
+            config = {
+                'experiment_name': 'Smoke_Test_Default',
+                'symbols': ['AAPL'],
+                'start_date': '2024-01-02',
+                'end_date': '2024-01-02'
+            }
     
     experiment = SmokeTest(config)
     result = await experiment.run()

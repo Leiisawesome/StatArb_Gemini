@@ -1012,6 +1012,15 @@ class EnhancedRegimeEngine(ISystemComponent):
         """
         return self.current_regime
     
+    def get_current_regime(self) -> Optional[RegimeAnalysis]:
+        """
+        Alias for get_current_regime_context() for backward compatibility
+        
+        Returns:
+            Current RegimeAnalysis or None if no regime detected yet
+        """
+        return self.get_current_regime_context()
+    
     def get_regime_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[RegimeAnalysis]:
         """
         Get regime for a specific timestamp (bar-by-bar lookup)

@@ -1,0 +1,35 @@
+{
+  "experiment_name": "Smoke_Test_Default",
+  "experiment_type": "smoke_test",
+  "run_timestamp": "2025-11-25T18:26:02.314373",
+  "duration_seconds": 3.7554562091827393,
+  "performance": {
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0
+  },
+  "custom_metrics": {
+    "bars_processed": 0,
+    "initialization_time_s": 0.0
+  },
+  "engine_results": {
+    "success": true,
+    "summary": null,
+    "execution_history": [],
+    "position_history": [],
+    "total_bars": 391,
+    "bars_with_signals": 0,
+    "bars_with_trades": 0,
+    "total_trades": 0,
+    "final_capital": 0,
+    "duration_seconds": 0.831212,
+    "bars_per_second": 470.39744373276613,
+    "report": "No trades executed - cannot generate report",
+    "start_time": "2025-11-25 18:26:01.483052",
+    "end_time": "2025-11-25 18:26:02.314264"
+  },
+  "success": true,
+  "error_message": null
+}
