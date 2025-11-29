@@ -79,7 +79,7 @@ from .component_config import (
     # Broker brick configs (Phase 6 - Broker Enhancement)
     BrokerConnectionConfig,
     BrokerSessionConfig,
-    BrokerConfig,
+    BrokerSystemConfig,  # Renamed from BrokerConfig to avoid collision with broker_config.py
     
     # Backward compatibility
     LegacyDataConfig,
@@ -144,7 +144,7 @@ __all__ = [
     'BenchmarkAnalyticsConfig', 'ReportGenerationConfig',
     
     # Broker brick configs (Phase 6 - Broker Enhancement)
-    'BrokerConnectionConfig', 'BrokerSessionConfig', 'BrokerConfig',
+    'BrokerConnectionConfig', 'BrokerSessionConfig', 'BrokerSystemConfig',
     
     # Backward compatibility
     'LegacyDataConfig', 'LegacyRiskConfig', 'LegacyProcessingConfig',

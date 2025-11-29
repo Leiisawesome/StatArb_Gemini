@@ -3,6 +3,34 @@ Analytics Engine - Component Initialization
 Unified imports and component registry for the analytics engine
 """
 
+# === CORE METRICS (Single Source of Truth) ===
+from .core_metrics import (
+    # VaR metrics
+    calculate_var,
+    calculate_cvar,
+    VarMethod,
+    # Risk-adjusted returns
+    calculate_sharpe_ratio,
+    calculate_sortino_ratio,
+    calculate_calmar_ratio,
+    calculate_information_ratio,
+    # Drawdown metrics
+    calculate_drawdown,
+    # Volatility metrics
+    calculate_volatility,
+    calculate_downside_volatility,
+    # Return metrics
+    calculate_annualized_return,
+    calculate_total_return,
+    # Higher moments
+    calculate_skewness,
+    calculate_kurtosis,
+    # Benchmark-relative
+    calculate_beta,
+    calculate_alpha,
+    calculate_tracking_error
+)
+
 from .performance_analyzer import (
     PerformanceAnalyzer,
     PerformanceConfig,
@@ -173,6 +201,32 @@ def create_benchmark_analyzer(config=None):
 
 # Convenience imports for common use cases
 __all__ = [
+    # === CORE METRICS (Single Source of Truth) ===
+    # VaR functions
+    'calculate_var',
+    'calculate_cvar',
+    'VarMethod',
+    # Risk-adjusted returns
+    'calculate_sharpe_ratio',
+    'calculate_sortino_ratio',
+    'calculate_calmar_ratio',
+    'calculate_information_ratio',
+    # Drawdown
+    'calculate_drawdown',
+    # Volatility
+    'calculate_volatility',
+    'calculate_downside_volatility',
+    # Returns
+    'calculate_annualized_return',
+    'calculate_total_return',
+    # Higher moments
+    'calculate_skewness',
+    'calculate_kurtosis',
+    # Benchmark-relative
+    'calculate_beta',
+    'calculate_alpha',
+    'calculate_tracking_error',
+    
     # Core classes
     'EnhancedAnalyticsManager',
     'PerformanceAnalyzer', 

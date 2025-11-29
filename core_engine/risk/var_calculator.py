@@ -16,6 +16,8 @@ from collections import deque
 from scipy import stats
 
 from core_engine.exceptions import ConfigurationRequiredError
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+from core_engine.analytics.core_metrics import calculate_max_drawdown, calculate_beta
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +97,8 @@ class VarCalculator:
         self._covariance_cache = {}
         self._calculation_history = deque(maxlen=1000)
         
-        # Configuration parameters
-        self.confidence_levels = self.config.get('confidence_levels', [self.config.get('default_confidence', 0.95)])
+        # Configuration parameters with proper defaults
+        self.confidence_levels = self.config.get('confidence_levels', [0.95, 0.99, 0.999])
         if not self.confidence_levels:
             raise ConfigurationRequiredError("confidence_levels must be specified in VaR calculator config")
         
@@ -110,11 +112,20 @@ class VarCalculator:
         # Risk-free rate for Sharpe ratio calculations
         self.risk_free_rate = self.config.get('risk_free_rate_annual', 0.02)
         
-        # Stress test scenarios
-        self._stress_scenarios = self.config.get('stress_scenarios', {})
-        # Note: stress_scenarios are optional for VaR calculator
+        # Note: Stress testing is handled by StressTester class - no longer duplicated here
         
         logger.info("VarCalculator initialized")
+    
+    # Property aliases for backward compatibility with tests
+    @property
+    def default_confidence_levels(self) -> List[float]:
+        """Alias for confidence_levels (backward compatibility)."""
+        return self.confidence_levels
+    
+    @property
+    def default_time_horizon(self) -> int:
+        """Alias for time_horizon (backward compatibility)."""
+        return self.time_horizon
     
     
     async def calculate_var(
@@ -436,14 +447,14 @@ class VarCalculator:
             volatility_daily = portfolio_returns.std()
             volatility_annual = volatility_daily * np.sqrt(252)
             
-            # Maximum drawdown
-            max_drawdown = self._calculate_max_drawdown(portfolio_returns)
+            # Maximum drawdown - using canonical core_metrics function
+            max_drawdown = calculate_max_drawdown(portfolio_returns)
             
-            # Beta calculation (if benchmark provided)
+            # Beta calculation (if benchmark provided) - using canonical core_metrics function
             beta = None
             tracking_error = None
             if benchmark_returns is not None:
-                beta = self._calculate_beta(portfolio_returns, benchmark_returns)
+                beta = calculate_beta(portfolio_returns.values, benchmark_returns.values)
                 tracking_error = (portfolio_returns - benchmark_returns).std() * np.sqrt(252)
             
             # Sharpe and Sortino ratios
@@ -480,117 +491,9 @@ class VarCalculator:
             logger.error(f"Error calculating risk metrics: {e}")
             raise
     
-    def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        cumulative_returns = (1 + returns).cumprod()
-        running_max = cumulative_returns.expanding().max()
-        drawdown = (cumulative_returns - running_max) / running_max
-        return drawdown.min()
-    
-    def _calculate_beta(self, portfolio_returns: pd.Series, benchmark_returns: pd.Series) -> float:
-        """Calculate portfolio beta relative to benchmark"""
-        # Align returns
-        aligned_data = pd.DataFrame({
-            'portfolio': portfolio_returns,
-            'benchmark': benchmark_returns
-        }).dropna()
-        
-        if len(aligned_data) < 2:
-            return 1.0
-        
-        covariance = aligned_data['portfolio'].cov(aligned_data['benchmark'])
-        benchmark_variance = aligned_data['benchmark'].var()
-        
-        return covariance / benchmark_variance if benchmark_variance > 0 else 1.0
-    
-    async def stress_test_portfolio(
-        self,
-        positions: Dict[str, Any],
-        scenario_name: str,
-        portfolio_value: float
-    ) -> Dict[str, float]:
-        """Run stress test on portfolio using predefined scenario"""
-        
-        if scenario_name not in self._stress_scenarios:
-            raise ValueError(f"Unknown stress scenario: {scenario_name}")
-        
-        scenario = self._stress_scenarios[scenario_name]
-        
-        try:
-            # Calculate stressed portfolio value
-            stressed_values = {}
-            total_stressed_value = 0
-            
-            for symbol, position in positions.items():
-                current_value = position.get('market_value', 0)
-                
-                # Apply factor shocks based on position characteristics
-                stress_factor = self._get_stress_factor_for_position(position, scenario)
-                stressed_value = current_value * (1 + stress_factor)
-                
-                stressed_values[symbol] = {
-                    'original_value': current_value,
-                    'stressed_value': stressed_value,
-                    'pnl': stressed_value - current_value,
-                    'stress_factor': stress_factor
-                }
-                
-                total_stressed_value += stressed_value
-            
-            # Calculate portfolio-level results
-            portfolio_pnl = total_stressed_value - portfolio_value
-            portfolio_return = portfolio_pnl / portfolio_value if portfolio_value > 0 else 0
-            
-            results = {
-                'portfolio_pnl': portfolio_pnl,
-                'portfolio_return_pct': portfolio_return * 100,
-                'stressed_portfolio_value': total_stressed_value,
-                'position_details': stressed_values
-            }
-            
-            logger.info(f"Stress test '{scenario_name}' completed: PnL = {portfolio_pnl:.2f}")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error running stress test: {e}")
-            raise
-    
-    def _get_stress_factor_for_position(
-        self,
-        position: Dict[str, Any],
-        scenario: StressTestScenario
-    ) -> float:
-        """Get stress factor for individual position based on scenario"""
-        
-        asset_type = position.get('asset_type', 'EQUITY')
-        sector = position.get('sector', 'UNKNOWN')
-        
-        # Map asset types to scenario factors
-        stress_factor = 0.0
-        
-        if asset_type in ['EQUITY', 'STOCK']:
-            stress_factor = scenario.factor_shocks.get('EQUITY', 0.0)
-        elif asset_type in ['BOND', 'FIXED_INCOME']:
-            stress_factor = scenario.factor_shocks.get('RATES', 0.0)
-        elif asset_type == 'COMMODITY':
-            if 'OIL' in scenario.factor_shocks and 'oil' in sector.lower():
-                stress_factor = scenario.factor_shocks.get('OIL', 0.0)
-            else:
-                stress_factor = scenario.factor_shocks.get('COMMODITIES', 0.0)
-        elif asset_type == 'FX':
-            stress_factor = scenario.factor_shocks.get('FX', 0.0)
-        
-        return stress_factor
-    
-    def add_stress_scenario(self, scenario: StressTestScenario) -> None:
-        """Add custom stress test scenario"""
-        self._stress_scenarios[scenario.name] = scenario
-        logger.info(f"Added stress scenario: {scenario.name}")
-    
-    def get_stress_scenarios(self) -> Dict[str, StressTestScenario]:
-        """Get all available stress scenarios"""
-        return self._stress_scenarios.copy()
+    # NOTE: _calculate_max_drawdown and _calculate_beta removed
+    # Now using canonical functions from core_engine.analytics.core_metrics
+    # This eliminates code duplication across the codebase
     
     def get_calculation_history(self) -> List[Dict[str, Any]]:
         """Get VaR calculation history"""

@@ -22,6 +22,12 @@ try:
 except ImportError:
     RegimeConfig = None
 
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+try:
+    from ..analytics.core_metrics import calculate_max_drawdown
+except ImportError:
+    calculate_max_drawdown = None
+
 # Import regime components
 from .regime_detector import RegimeType
 
@@ -268,14 +274,15 @@ class FactorAnalyzer:
             return {}
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         try:
+            if calculate_max_drawdown is not None:
+                return calculate_max_drawdown(returns)
+            # Fallback implementation if import failed
             cumulative = (1 + returns).cumprod()
             running_max = cumulative.expanding().max()
             drawdown = (cumulative - running_max) / running_max
             return drawdown.min()
-            
         except Exception as e:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0
@@ -890,14 +897,15 @@ class CrossAssetAnalyzer:
             return 0.5
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         try:
+            if calculate_max_drawdown is not None:
+                return calculate_max_drawdown(returns)
+            # Fallback implementation if import failed
             cumulative = (1 + returns).cumprod()
             running_max = cumulative.expanding().max()
             drawdown = (cumulative - running_max) / running_max
             return drawdown.min()
-            
         except Exception as e:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0

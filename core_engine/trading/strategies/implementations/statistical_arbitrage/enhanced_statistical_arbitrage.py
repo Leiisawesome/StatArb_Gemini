@@ -127,12 +127,15 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
         super().__init__(config)
         self.config: StatisticalArbitrageConfig = config
         
-        # Strategy-specific state
+        # Strategy-specific state (analysis data - NOT position tracking)
         self.cointegrated_pairs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        # Note: active_spreads tracks spread analysis metrics, not actual positions
+        # Actual position tracking should use PositionBook (SSOT) and Risk Manager
         self.active_spreads: Dict[str, SpreadMetrics] = {}
         self.hedge_ratios: Dict[Tuple[str, str], float] = {}
         self.spread_history: Dict[str, pd.Series] = {}
-        self.entry_times: Dict[str, datetime] = {}
+        # DEPRECATED: entry_times is deprecated. Use PositionBook for position timestamps.
+        self.entry_times: Dict[str, datetime] = {}  # DEPRECATED
         
         # Market data cache
         self.price_data: Dict[str, pd.DataFrame] = {}

@@ -51,18 +51,12 @@ except ImportError:
         def get_status(self) -> Dict[str, Any]:
             pass
 
-# Import strategy types
-from ...type_definitions.strategy import StrategyType
+# Import canonical types from type_definitions (Single Source of Truth)
+from ...type_definitions.strategy import StrategyType, SignalType
 
 logger = logging.getLogger(__name__)
 
-
-class SignalType(Enum):
-    """Signal types"""
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
-    CLOSE = "close"
+# SignalType imported from type_definitions.strategy (canonical source)
 
 
 class ConflictResolutionMethod(Enum):

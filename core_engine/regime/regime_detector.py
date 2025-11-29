@@ -33,30 +33,23 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]: pass
 
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+try:
+    from ..analytics.core_metrics import calculate_max_drawdown
+except ImportError:
+    calculate_max_drawdown = None
+
 # Import centralized configuration (Rule 1, Section 7)
 try:
     from ..config.component_config import RegimeConfig
 except ImportError:
     RegimeConfig = None
 
+# Import canonical RegimeType from type_definitions (Single Source of Truth)
+from ..type_definitions.regime import MarketRegime as RegimeType
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
-
-
-class RegimeType(Enum):
-    """Market regime types"""
-    BULL_MARKET = "bull_market"
-    BEAR_MARKET = "bear_market"
-    SIDEWAYS = "sideways"
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
-    CRISIS = "crisis"
-    RECOVERY = "recovery"
-    EXPANSION = "expansion"
-    CONTRACTION = "contraction"
-    MEAN_REVERSION = "mean_reversion"
-    MOMENTUM = "momentum"
-    UNKNOWN = "unknown"
 
 
 class DetectionMethod(Enum):
@@ -626,14 +619,15 @@ class VolatilityBasedDetector:
             return RegimeType.UNKNOWN
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         try:
+            if calculate_max_drawdown is not None:
+                return calculate_max_drawdown(returns)
+            # Fallback implementation if import failed
             cumulative = (1 + returns).cumprod()
             running_max = cumulative.expanding().max()
             drawdown = (cumulative - running_max) / running_max
             return drawdown.min()
-            
         except Exception as e:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0

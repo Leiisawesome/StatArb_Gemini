@@ -1,7 +1,19 @@
 """
 Position Manager for Portfolio Component
 Handles position tracking, lifecycle management, and position-level operations
+
+⚠️ DEPRECATION NOTICE:
+This module's Position class is DEPRECATED. Use PositionBook (SSOT) instead:
+    from core_engine.trading.position_book import PositionBook, BookPosition
+
+The PositionBook is the Single Source of Truth for all position tracking.
+This module is kept for backward compatibility only.
+
+Migration path:
+    OLD: from core_engine.trading.portfolio.position_manager import Position, PositionManager
+    NEW: from core_engine.trading.position_book import PositionBook, BookPosition
 """
+import warnings
 from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,7 +38,12 @@ class PositionStatus(Enum):
 
 @dataclass
 class Position:
-    """Individual position record"""
+    """
+    DEPRECATED: Individual position record.
+    
+    Use BookPosition from core_engine.trading.position_book instead.
+    This class is kept for backward compatibility only.
+    """
     symbol: str
     position_type: PositionType
     quantity: Decimal
@@ -40,6 +57,14 @@ class Position:
     take_profit: Optional[Decimal] = None
     last_update: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        warnings.warn(
+            "Position from position_manager.py is deprecated. "
+            "Use BookPosition from core_engine.trading.position_book instead.",
+            DeprecationWarning,
+            stacklevel=3
+        )
     
     @property
     def market_value(self) -> Decimal:
@@ -89,10 +114,20 @@ class PositionSummary:
 
 class PositionManager:
     """
-    Manages all trading positions with comprehensive tracking and analysis
+    DEPRECATED: Manages all trading positions.
+    
+    Use PositionBook from core_engine.trading.position_book instead.
+    PositionBook is the Single Source of Truth (SSOT) for position tracking.
+    
+    This class is kept for backward compatibility only.
     """
     
     def __init__(self, config: Dict[str, Any]):
+        warnings.warn(
+            "PositionManager is deprecated. Use PositionBook instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.logger = logging.getLogger(__name__)
         self.config = config
         

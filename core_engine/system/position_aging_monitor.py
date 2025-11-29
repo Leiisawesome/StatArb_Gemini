@@ -33,6 +33,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 
+# Import canonical StrategyType from type_definitions (Single Source of Truth)
+from ..type_definitions.strategy import StrategyType
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,16 +46,7 @@ class PositionAgeCategory(Enum):
     STALE = "stale"           # 80-100% of limit
     EXPIRED = "expired"       # >100% of limit
 
-
-class StrategyType(Enum):
-    """Strategy types with different holding periods"""
-    ARBITRAGE = "arbitrage"
-    MEAN_REVERSION = "mean_reversion"
-    STATISTICAL_ARBITRAGE = "statistical_arbitrage"
-    MOMENTUM = "momentum"
-    BREAKOUT = "breakout"
-    TREND_FOLLOWING = "trend_following"
-    OTHER = "other"
+# StrategyType imported from type_definitions.strategy (canonical source)
 
 
 @dataclass

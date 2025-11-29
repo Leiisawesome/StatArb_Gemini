@@ -29,6 +29,15 @@ except ImportError:
 from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 from ..exceptions import PerformanceDataUnavailableError
 
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+from .core_metrics import (
+    calculate_var,
+    calculate_cvar,
+    calculate_drawdown,
+    calculate_downside_volatility as core_downside_volatility,
+    calculate_volatility as core_volatility,
+)
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -221,7 +230,7 @@ class PerformanceReport:
 
 
 class RiskMetricsCalculator:
-    """Advanced risk metrics calculator"""
+    """Advanced risk metrics calculator - delegates to core_metrics"""
     
     def __init__(self, config: PerformanceConfig):
         self.config = config
@@ -232,69 +241,22 @@ class RiskMetricsCalculator:
         confidence_level: float = 0.95,
         method: str = "historical"
     ) -> float:
-        """Calculate Value at Risk"""
-        
-        if returns.empty:
-            return 0.0
-        
-        if method == "historical":
-            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
-        elif method == "parametric":
-            return stats.norm.ppf(1 - confidence_level, returns.mean(), returns.std())
-        else:
-            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
+        """Calculate Value at Risk - delegates to core_metrics"""
+        return calculate_var(returns, confidence_level, method)
     
     def calculate_cvar(
         self,
         returns: pd.Series,
         confidence_level: float = 0.95
     ) -> float:
-        """Calculate Conditional Value at Risk (Expected Shortfall)"""
-        
-        if returns.empty:
-            return 0.0
-        
-        var = self.calculate_var(returns, confidence_level)
-        return returns[returns <= var].mean()
+        """Calculate Conditional Value at Risk - delegates to core_metrics"""
+        return calculate_cvar(returns, confidence_level)
     
     def calculate_maximum_drawdown(self, returns: pd.Series) -> Tuple[float, int]:
-        """Calculate maximum drawdown and duration"""
-        
+        """Calculate maximum drawdown and duration - delegates to core_metrics"""
         if returns.empty:
             return 0.0, 0
-        
-        # Calculate cumulative returns
-        cumulative = (1 + returns).cumprod()
-        
-        # Calculate running maximum
-        running_max = cumulative.expanding().max()
-        
-        # Calculate drawdown
-        drawdown = (cumulative - running_max) / running_max
-        
-        # Maximum drawdown
-        max_dd = drawdown.min()
-        
-        # Calculate duration of maximum drawdown
-        max_dd_start = drawdown.idxmin()
-        max_dd_series = drawdown.loc[:max_dd_start]
-        
-        # Find when drawdown started
-        dd_start_idx = None
-        for i in range(len(max_dd_series) - 1, -1, -1):
-            if max_dd_series.iloc[i] == 0:
-                dd_start_idx = i
-                break
-        
-        if dd_start_idx is not None:
-            duration = max_dd_start - max_dd_series.index[dd_start_idx]
-            if hasattr(duration, 'days'):
-                duration = duration.days
-            else:
-                duration = int(duration)
-        else:
-            duration = len(max_dd_series)
-        
+        _, max_dd, duration = calculate_drawdown(returns)
         return abs(max_dd), duration
     
     def calculate_downside_volatility(
@@ -302,17 +264,12 @@ class RiskMetricsCalculator:
         returns: pd.Series,
         minimum_acceptable_return: float = 0.0
     ) -> float:
-        """Calculate downside volatility (semi-standard deviation)"""
-        
-        if returns.empty:
-            return 0.0
-        
-        downside_returns = returns[returns < minimum_acceptable_return]
-        
-        if len(downside_returns) == 0:
-            return 0.0
-        
-        return downside_returns.std() * np.sqrt(self.config.trading_days_per_year)
+        """Calculate downside volatility - delegates to core_metrics"""
+        return core_downside_volatility(
+            returns, 
+            target_return=minimum_acceptable_return,
+            periods_per_year=self.config.trading_days_per_year
+        )
     
     def calculate_omega_ratio(
         self,
@@ -2691,60 +2648,18 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         return float(cumulative_return)
     
     def calculate_volatility(self, returns: pd.Series) -> float:
-        """Calculate annualized volatility from returns series"""
-        if returns.empty or len(returns) < 2:
-            return 0.0
-        
-        # Calculate annualized volatility (assuming daily returns)
-        volatility = returns.std() * np.sqrt(252)
-        return float(volatility)
+        """Calculate annualized volatility - delegates to core_metrics"""
+        return core_volatility(returns, periods_per_year=252)
     
     def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
-        """Calculate Sortino ratio (return vs downside deviation)"""
-        if returns.empty or len(returns) < 2:
-            return 0.0
-        
-        # Calculate excess returns
-        excess_returns = returns - risk_free_rate / 252  # Daily risk-free rate
-        
-        # Calculate downside deviation (only negative returns)
-        downside_returns = returns[returns < 0]
-        if len(downside_returns) == 0:
-            return float('inf') if excess_returns.mean() > 0 else 0.0
-        
-        downside_deviation = downside_returns.std() * np.sqrt(252)
-        
-        if downside_deviation == 0:
-            return 0.0
-        
-        # Calculate Sortino ratio
-        sortino_ratio = excess_returns.mean() * 252 / downside_deviation
-        return float(sortino_ratio)
+        """Calculate Sortino ratio - delegates to core_metrics"""
+        from .core_metrics import calculate_sortino_ratio as core_sortino
+        return core_sortino(returns, risk_free_rate=risk_free_rate, periods_per_year=252)
     
     def calculate_calmar_ratio(self, returns: pd.Series) -> float:
-        """Calculate Calmar ratio (annual return / max drawdown)"""
-        if returns.empty:
-            return 0.0
-        
-        # Calculate annual return
-        annual_return = returns.mean() * 252
-        
-        # Calculate maximum drawdown using risk calculator
-        try:
-            max_drawdown, _ = self.risk_calculator.calculate_maximum_drawdown(returns)
-        except Exception:
-            # Fallback: calculate max drawdown directly
-            cumulative = (1 + returns).cumprod()
-            running_max = cumulative.expanding().max()
-            drawdown = (cumulative - running_max) / running_max
-            max_drawdown = drawdown.min()
-        
-        if max_drawdown == 0:
-            return float('inf') if annual_return > 0 else 0.0
-        
-        # Calculate Calmar ratio
-        calmar_ratio = annual_return / abs(max_drawdown)
-        return float(calmar_ratio)
+        """Calculate Calmar ratio - delegates to core_metrics"""
+        from .core_metrics import calculate_calmar_ratio as core_calmar
+        return core_calmar(returns, periods_per_year=252)
     
     def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
         """

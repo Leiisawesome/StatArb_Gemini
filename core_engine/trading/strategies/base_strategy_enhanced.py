@@ -19,13 +19,18 @@ Version: 1.0.0 (Phase 2.3 Enhancement)
 
 import logging
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 import pandas as pd
 import numpy as np
+
+# Type checking imports for PositionBook integration
+if TYPE_CHECKING:
+    from ..position_book import IPositionBook
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -133,7 +138,17 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         
+        # ========================================
+        # POSITION BOOK INTEGRATION (SSOT)
+        # ========================================
+        # PositionBook is the Single Source of Truth for all position tracking.
+        # Strategies should use this for READ-ONLY position queries.
+        self._position_book: Optional['IPositionBook'] = None
+        
         # Strategy data
+        # DEPRECATED: self._positions is deprecated. Use PositionBook via self._position_book instead.
+        # Position tracking is the responsibility of Risk Manager and PositionBook (SSOT).
+        # This field is kept for backward compatibility but will be removed in a future version.
         self._positions: Dict[str, StrategyPosition] = {}
         self._signals: List[StrategySignal] = []
         self._market_data: Dict[str, pd.DataFrame] = {}
@@ -428,15 +443,54 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     
     @abstractmethod
     async def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate trading signals based on market data"""
+        """
+        Generate trading signals based on market data.
+        
+        This is the PRIMARY responsibility of a strategy - analyzing market data
+        and generating buy/sell/hold signals.
+        
+        Args:
+            market_data: Dict of symbol -> enriched DataFrame with indicators
+            
+        Returns:
+            List of StrategySignal objects
+        """
     
     @abstractmethod
     async def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
-        """Update existing positions based on market data"""
+        """
+        DEPRECATED: Position tracking should be handled by PositionBook (SSOT).
+        
+        This method is deprecated. Position management is the responsibility
+        of the Risk Manager and PositionBook. Strategies should focus on
+        signal generation only.
+        
+        For backward compatibility, subclasses may still implement this method,
+        but new strategies should not use internal position tracking.
+        
+        Migration path:
+        - Use self._position_book.get_position(symbol) for read-only queries
+        - Remove internal position tracking (self.active_positions, etc.)
+        - Let Risk Manager handle position sizing, stops, and targets
+        """
     
     @abstractmethod
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
+        """
+        DEPRECATED: Position sizing should be handled by Risk Manager.
+        
+        This method is deprecated. Position sizing is the responsibility
+        of the Risk Manager, not the strategy. The Risk Manager uses
+        PositionBook (SSOT) for position state and applies sizing rules.
+        
+        For backward compatibility, subclasses may still implement this method,
+        but new strategies should delegate sizing to Risk Manager.
+        
+        Migration path:
+        - Set signal.target_weight or signal.target_quantity in generate_signals()
+        - Let Risk Manager apply position sizing rules
+        - Remove internal position size calculations
+        """
     
     # ========================================
     # STRATEGY LIFECYCLE HOOKS (OVERRIDE AS NEEDED)
@@ -620,6 +674,64 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         logger.info(f"🔗 Risk Manager linked to strategy {self.strategy_id}")
     
     # ========================================
+    # POSITION BOOK INTEGRATION (SSOT)
+    # ========================================
+    
+    def set_position_book(self, position_book: 'IPositionBook') -> None:
+        """
+        Set PositionBook for read-only position queries.
+        
+        The PositionBook is the Single Source of Truth (SSOT) for all position
+        tracking. Strategies can use this for read-only queries to check
+        existing positions when generating signals.
+        
+        Args:
+            position_book: IPositionBook instance for position queries
+        """
+        self._position_book = position_book
+        logger.info(f"📚 PositionBook linked to strategy {self.strategy_id}")
+    
+    def _has_position(self, symbol: str) -> bool:
+        """
+        Check if there's an existing position for a symbol (read-only query).
+        
+        Uses PositionBook (SSOT) for position state instead of internal tracking.
+        
+        Args:
+            symbol: Symbol to check
+            
+        Returns:
+            True if position exists with non-zero quantity, False otherwise
+        """
+        if self._position_book:
+            pos = self._position_book.get_position(symbol)
+            return pos is not None and pos.net_quantity != 0
+        # Fallback to deprecated internal tracking
+        if symbol in self._positions:
+            return self._positions[symbol].quantity != 0
+        return False
+    
+    def _get_position_quantity(self, symbol: str) -> float:
+        """
+        Get current position quantity for a symbol (read-only query).
+        
+        Uses PositionBook (SSOT) for position state instead of internal tracking.
+        
+        Args:
+            symbol: Symbol to query
+            
+        Returns:
+            Net quantity (positive for long, negative for short, 0 if no position)
+        """
+        if self._position_book:
+            pos = self._position_book.get_position(symbol)
+            return pos.net_quantity if pos else 0.0
+        # Fallback to deprecated internal tracking
+        if symbol in self._positions:
+            return self._positions[symbol].quantity
+        return 0.0
+    
+    # ========================================
     # REGIME AWARENESS (IRegimeAware Interface)
     # ========================================
     
@@ -717,7 +829,19 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     # ========================================
     
     def get_active_positions(self) -> Dict[str, StrategyPosition]:
-        """Get all active positions"""
+        """
+        DEPRECATED: Get all active positions.
+        
+        This method is deprecated. Use PositionBook (SSOT) for position queries instead:
+            positions = self._position_book.get_all_positions()
+        
+        Kept for backward compatibility only.
+        """
+        warnings.warn(
+            "get_active_positions() is deprecated. Use PositionBook for position queries.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return {k: v for k, v in self._positions.items() if v.quantity != 0}
     
     def get_recent_signals(self, count: int = 10) -> List[StrategySignal]:
@@ -726,6 +850,17 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get comprehensive performance summary"""
+        # Get position count from PositionBook if available, otherwise fallback
+        active_pos_count = 0
+        total_pos_count = 0
+        if self._position_book:
+            all_positions = self._position_book.get_all_positions()
+            active_pos_count = len([p for p in all_positions.values() if p.net_quantity != 0])
+            total_pos_count = len(all_positions)
+        else:
+            active_pos_count = len([p for p in self._positions.values() if p.quantity != 0])
+            total_pos_count = len(self._positions)
+        
         return {
             'strategy_id': self.strategy_id,
             'strategy_type': self.strategy_type.value,
@@ -749,7 +884,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
                 'health_checks_performed': self.health_checks_performed
             },
             'positions': {
-                'active_positions': len(self.get_active_positions()),
-                'total_positions': len(self._positions)
+                'active_positions': active_pos_count,
+                'total_positions': total_pos_count
             }
         }

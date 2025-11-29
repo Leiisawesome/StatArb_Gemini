@@ -17,6 +17,9 @@ import warnings
 from collections import deque
 import uuid
 
+# Import canonical types from type_definitions (Single Source of Truth)
+from ...type_definitions.strategy import StrategyType, SignalType
+
 # Import ISystemComponent for orchestrator integration
 try:
     from ...system.interfaces import ISystemComponent
@@ -59,35 +62,8 @@ class StrategyState(Enum):
     WARMING_UP = "warming_up"
 
 
-class StrategyType(Enum):
-    """Strategy types"""
-    MEAN_REVERSION = "mean_reversion"
-    MOMENTUM = "momentum"
-    PAIRS_TRADING = "pairs_trading"
-    ARBITRAGE = "arbitrage"
-    MARKET_MAKING = "market_making"
-    TREND_FOLLOWING = "trend_following"
-    STATISTICAL_ARBITRAGE = "statistical_arbitrage"
-    MULTI_FACTOR = "multi_factor"
-    MACHINE_LEARNING = "machine_learning"
-    VOLATILITY = "volatility"
-    BREAKOUT = "breakout"
-    FACTOR = "factor"
-    MULTI_ASSET = "multi_asset"
-    CUSTOM = "custom"
-
-
-class SignalType(Enum):
-    """Trading signal types"""
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
-    CLOSE_LONG = "close_long"
-    CLOSE_SHORT = "close_short"
-    REDUCE_LONG = "reduce_long"
-    REDUCE_SHORT = "reduce_short"
-    INCREASE_LONG = "increase_long"
-    INCREASE_SHORT = "increase_short"
+# StrategyType imported from type_definitions.strategy (canonical source)
+# SignalType imported from type_definitions.strategy (canonical source)
 
 
 class RiskLevel(Enum):
@@ -271,7 +247,11 @@ class BaseStrategy(ABC):
     """
     Abstract base class for all trading strategies
     
-    Defines the interface that all strategies must implement
+    Defines the interface that all strategies must implement.
+    
+    IMPORTANT: Position tracking is DEPRECATED in strategies.
+    Use PositionBook (SSOT) for position state via Risk Manager.
+    Strategies should focus on signal generation only.
     """
     
     def __init__(self, config: StrategyConfig):
@@ -280,7 +260,9 @@ class BaseStrategy(ABC):
         self.state = StrategyState.INACTIVE
         
         # Strategy data
-        self._positions: Dict[str, StrategyPosition] = {}
+        # DEPRECATED: self._positions is deprecated. Use PositionBook (SSOT) instead.
+        # Position tracking should be handled by Risk Manager, not strategies.
+        self._positions: Dict[str, StrategyPosition] = {}  # DEPRECATED
         self._signals: List[StrategySignal] = []
         self._metrics = StrategyMetrics()
         
@@ -300,11 +282,20 @@ class BaseStrategy(ABC):
     
     @abstractmethod
     def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
-        """Generate trading signals - must be implemented by subclasses"""
+        """
+        Generate trading signals - must be implemented by subclasses.
+        
+        This is the PRIMARY responsibility of a strategy.
+        """
     
     @abstractmethod
     def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
-        """Update position tracking - must be implemented by subclasses"""
+        """
+        DEPRECATED: Update position tracking.
+        
+        Position tracking should be handled by PositionBook (SSOT) and Risk Manager.
+        This method is kept for backward compatibility only.
+        """
     
     def start(self) -> bool:
         """Start strategy execution"""

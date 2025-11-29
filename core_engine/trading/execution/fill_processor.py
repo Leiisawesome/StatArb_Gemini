@@ -539,7 +539,23 @@ class TradeReconciler:
 
 
 class PositionManager:
-    """Manages position updates from trade executions"""
+    """
+    ⚠️ DEPRECATED: This class is a legacy duplicate of position tracking.
+    
+    Use core_engine.trading.position_book.PositionBook instead.
+    PositionBook is the Single Source of Truth (SSOT) for all position state.
+    
+    This class will be removed in a future version.
+    
+    Migration:
+        from core_engine.trading import PositionBook, Fill, FillSide
+        
+        position_book = PositionBook(initial_cash=1_000_000)
+        position_book.on_fill(fill)  # Updates position state
+        position = position_book.get_position('AAPL')  # Get position
+    
+    Original docstring: Manages position updates from trade executions
+    """
     
     def __init__(self):
         self._positions = defaultdict(lambda: defaultdict(float))

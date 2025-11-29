@@ -2,6 +2,11 @@
 Core Engine Portfolio Types
 
 Lightweight portfolio management for standalone core_engine.
+
+⚠️ NOTE: For full position tracking, use PositionBook (SSOT):
+    from core_engine.trading.position_book import PositionBook, BookPosition
+
+This module provides simplified types for basic portfolio operations.
 """
 
 from dataclasses import dataclass
@@ -11,7 +16,12 @@ from datetime import datetime
 
 @dataclass
 class Position:
-    """Individual position representation"""
+    """
+    Lightweight position representation for basic portfolio operations.
+    
+    For full position tracking with fills, P&L, and history,
+    use BookPosition from core_engine.trading.position_book instead.
+    """
     symbol: str
     quantity: float
     average_price: float

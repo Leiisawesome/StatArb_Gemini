@@ -144,8 +144,8 @@ class ProtocolMessage:
 
 
 @dataclass
-class SessionState:
-    """Protocol session state"""
+class ProtocolSessionState:
+    """Protocol session state - tracks connection and sequence information"""
     session_id: str
     protocol_type: ProtocolType
     
@@ -265,7 +265,7 @@ class FIXProtocolHandler(ProtocolHandlerInterface):
             )
             
             # Create session state
-            self._session_state = SessionState(
+            self._session_state = ProtocolSessionState(
                 session_id=f"FIX_{uuid.uuid4().hex[:8]}",
                 protocol_type=ProtocolType.FIX
             )

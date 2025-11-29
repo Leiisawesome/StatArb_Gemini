@@ -69,21 +69,13 @@ from ...system.central_risk_manager import TradingDecisionRequest, TradingDecisi
 # Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
 from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
 
+# Import canonical SignalType and SignalStrength from type_definitions
+from ...type_definitions.strategy import SignalType, SignalStrength
+
 logger = logging.getLogger(__name__)
 
-class SignalType(Enum):
-    """Signal types"""
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
-    CLOSE = "close"
-
-class SignalStrength(Enum):
-    """Signal strength levels"""
-    WEAK = "weak"
-    MEDIUM = "medium"
-    STRONG = "strong"
-    VERY_STRONG = "very_strong"
+# SignalType imported from type_definitions.strategy (canonical source)
+# SignalStrength imported from type_definitions.strategy (canonical source)
 
 @dataclass
 class TradingSignal:

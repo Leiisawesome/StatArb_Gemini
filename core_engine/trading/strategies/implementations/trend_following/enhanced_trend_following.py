@@ -95,12 +95,23 @@ class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
         self.indicators: Dict[str, Dict[str, pd.Series]] = {}
         self.trend_data: Dict[str, Dict[str, Any]] = {}
         
-        # Position tracking
-        self.active_positions: Dict[str, Dict[str, Any]] = {}
-        self.entry_prices: Dict[str, float] = {}
-        self.stop_losses: Dict[str, float] = {}
-        self.trailing_stops: Dict[str, float] = {}
-        self.profit_targets: Dict[str, float] = {}
+        # ========================================
+        # DEPRECATED: Position Tracking Fields
+        # ========================================
+        # These fields are DEPRECATED. Position tracking should be handled by
+        # PositionBook (SSOT) and Risk Manager, not by strategies.
+        # 
+        # Migration path:
+        # - Use self._position_book.get_position(symbol) for read-only queries
+        # - Use self._has_position(symbol) helper method
+        # - Let Risk Manager handle stop-losses, trailing stops, and profit targets
+        # 
+        # These fields are kept for backward compatibility only.
+        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
+        self.entry_prices: Dict[str, float] = {}  # DEPRECATED
+        self.stop_losses: Dict[str, float] = {}  # DEPRECATED
+        self.trailing_stops: Dict[str, float] = {}  # DEPRECATED
+        self.profit_targets: Dict[str, float] = {}  # DEPRECATED
         
         # Performance tracking
         self.trade_history: List[Dict[str, Any]] = []

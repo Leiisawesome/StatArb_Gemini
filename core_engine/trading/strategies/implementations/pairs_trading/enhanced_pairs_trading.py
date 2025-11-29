@@ -109,8 +109,10 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
         super().__init__(config)
         self.config: PairsConfig = config
         
-        # Strategy-specific state
+        # Strategy-specific state (analysis data - NOT position tracking)
         self.market_data: Dict[str, pd.DataFrame] = {}
+        # Note: selected_pairs and active_pairs track pair analysis metrics
+        # Actual position tracking should use PositionBook (SSOT) and Risk Manager
         self.selected_pairs: Dict[str, PairMetrics] = {}
         self.active_pairs: Dict[str, PairMetrics] = {}
         

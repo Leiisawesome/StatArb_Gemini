@@ -2,6 +2,11 @@
 Core Engine Strategy Types
 
 Lightweight strategy interfaces for standalone core_engine.
+
+This module provides canonical type definitions for:
+- StrategyType: All strategy type classifications
+- SignalType: All trading signal action types
+- SignalStrength: Signal confidence levels
 """
 
 from abc import ABC, abstractmethod
@@ -12,8 +17,22 @@ from datetime import datetime
 import pandas as pd
 
 
+# =============================================================================
+# CANONICAL STRATEGY TYPE ENUM (Single Source of Truth)
+# =============================================================================
+
 class StrategyType(Enum):
-    """Strategy type enumeration"""
+    """
+    Canonical strategy type enumeration.
+    
+    Single source of truth for all strategy type classifications.
+    Consolidates definitions from:
+    - type_definitions/strategy.py (original)
+    - config/strategies.py
+    - trading/strategies/strategy_engine.py
+    - system/position_aging_monitor.py
+    """
+    # Core strategy types
     MEAN_REVERSION = "mean_reversion"
     MOMENTUM = "momentum"
     PAIRS_TRADING = "pairs_trading"
@@ -24,7 +43,59 @@ class StrategyType(Enum):
     TREND_FOLLOWING = "trend_following"
     BREAKOUT = "breakout"
     VOLATILITY = "volatility"
+    
+    # Extended types from strategy_engine.py
+    MARKET_MAKING = "market_making"
+    MULTI_FACTOR = "multi_factor"
+    MACHINE_LEARNING = "machine_learning"
+    
+    # Generic/fallback types
     CUSTOM = "custom"
+    OTHER = "other"
+
+
+# =============================================================================
+# CANONICAL SIGNAL TYPE ENUM (Single Source of Truth)
+# =============================================================================
+
+class SignalType(Enum):
+    """
+    Canonical trading signal type enumeration.
+    
+    Single source of truth for all trading signal actions.
+    Consolidates definitions from:
+    - trading/strategies/strategy_engine.py (most complete)
+    - trading/strategies/manager.py
+    - trading/strategies/multi_strategy_coordinator.py
+    - processing/signals/generator.py
+    """
+    # Basic signals
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
+    CLOSE = "close"
+    
+    # Position-specific signals (from strategy_engine.py)
+    CLOSE_LONG = "close_long"
+    CLOSE_SHORT = "close_short"
+    REDUCE_LONG = "reduce_long"
+    REDUCE_SHORT = "reduce_short"
+    INCREASE_LONG = "increase_long"
+    INCREASE_SHORT = "increase_short"
+
+
+class SignalStrength(Enum):
+    """
+    Canonical signal strength enumeration.
+    
+    Standardized signal confidence levels.
+    """
+    VERY_WEAK = "very_weak"
+    WEAK = "weak"
+    MEDIUM = "medium"      # Backward compatibility alias
+    MODERATE = "moderate"
+    STRONG = "strong"
+    VERY_STRONG = "very_strong"
 
 
 @dataclass

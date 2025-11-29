@@ -16,6 +16,12 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+from .core_metrics import (
+    calculate_drawdown,
+    calculate_sharpe_ratio,
+)
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -326,16 +332,11 @@ class BenchmarkDataManager:
             return BenchmarkType.CUSTOM
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         if returns.empty:
             return 0.0
-        
-        cumulative = (1 + returns).cumprod()
-        running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
-        
-        return abs(drawdown.min())
+        _, max_dd, _ = calculate_drawdown(returns)
+        return abs(max_dd)
     
     def _assess_data_quality(self, returns: pd.Series) -> float:
         """Assess data quality"""
@@ -452,16 +453,11 @@ class PerformanceComparator:
         return result
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         if returns.empty:
             return 0.0
-        
-        cumulative = (1 + returns).cumprod()
-        running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
-        
-        return abs(drawdown.min())
+        _, max_dd, _ = calculate_drawdown(returns)
+        return abs(max_dd)
     
     def _calculate_capture_ratios(
         self,
@@ -669,15 +665,12 @@ class RollingAnalyzer:
         return pd.DataFrame(rolling_results).set_index('date')
     
     def _calculate_sharpe(self, returns: pd.Series) -> float:
-        """Calculate Sharpe ratio"""
-        
-        if returns.std() == 0:
-            return 0.0
-        
-        risk_free_rate = self.config.risk_free_rate / 252
-        excess_returns = returns - risk_free_rate
-        
-        return excess_returns.mean() / returns.std() * np.sqrt(252)
+        """Calculate Sharpe ratio - delegates to core_metrics"""
+        return calculate_sharpe_ratio(
+            returns, 
+            risk_free_rate=self.config.risk_free_rate,
+            periods_per_year=252
+        )
 
 
 class BenchmarkAnalyzer:

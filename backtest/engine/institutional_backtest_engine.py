@@ -41,6 +41,9 @@ from core_engine.system.hierarchical_orchestrator import (
     AuthorityLevel
 )
 
+# Position tracking (SSOT - Phase 2 PositionBook Integration)
+from core_engine.trading.position_book import PositionBook, IPositionBook, Fill
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,6 +92,14 @@ class InstitutionalBacktestEngine:
         # Orchestrator (BRICK #0 - System Control)
         self.orchestrator = HierarchicalSystemOrchestrator()
         
+        # ✅ PHASE 2: PositionBook as SINGLE SOURCE OF TRUTH for positions
+        # All components query this instead of maintaining their own position state
+        self.position_book: IPositionBook = PositionBook(
+            initial_cash=config.initial_capital,
+            default_commission_per_share=config.commission_per_share if hasattr(config, 'commission_per_share') else 0.005
+        )
+        logger.info(f"📘 PositionBook initialized with ${config.initial_capital:,.2f} initial capital (SSOT)")
+        
         # Component registry (will be populated during initialization)
         self.components: Dict[str, Any] = {}
         self.component_ids: Dict[str, str] = {}
@@ -106,7 +117,8 @@ class InstitutionalBacktestEngine:
         # Phase 4 components (Strategy & Risk)
         self.strategy_manager = None   # BRICK #7 (order=20)
         self.risk_manager = None       # BRICK #8 (order=25) - GOVERNANCE
-        # self.position_tracker is DEPRECATED (Rule 4) - Use risk_manager.current_positions instead
+        # ✅ PHASE 2: Position tracking now via self.position_book (SSOT)
+        # CentralRiskManager reads from position_book, does not maintain separate state
         
         # Phase 5 components (Execution)
         self.trading_engine = None     # BRICK #9a (order=30)
@@ -1353,6 +1365,10 @@ class InstitutionalBacktestEngine:
             
             # Create risk manager instance (it will create RiskManagerConfig internally)
             self.risk_manager = CentralRiskManager(risk_manager_config_dict)
+            
+            # ✅ PHASE 2: Inject PositionBook as SSOT
+            self.risk_manager.set_position_book(self.position_book)
+            logger.info("📘 PositionBook injected into CentralRiskManager (SSOT Phase 2)")
             
             # CRITICAL: Inject controlled components (Rule 4)
             # The risk manager controls StrategyManager and requires RegimeEngine

@@ -26,6 +26,20 @@ from .strategies.multi_strategy_coordinator import (
 from .portfolio.manager_enhanced import EnhancedPortfolioManager
 from .portfolio.cash_manager import CashManager
 
+# Position Book (Single Source of Truth)
+from .position_book import (
+    PositionBook,
+    IPositionBook,
+    BookPosition,
+    PositionUpdate,
+    PortfolioSnapshot,
+    Fill,
+    FillSide,
+    PositionSide,
+    PositionStatus,
+    PositionEventType,
+)
+
 # Execution
 from .execution.execution_engine import ExecutionEngine
 
@@ -44,6 +58,18 @@ __all__ = [
     # Portfolio Layer
     'EnhancedPortfolioManager',
     'CashManager',
+    
+    # Position Book (Single Source of Truth)
+    'PositionBook',
+    'IPositionBook',
+    'BookPosition',
+    'PositionUpdate',
+    'PortfolioSnapshot',
+    'Fill',
+    'FillSide',
+    'PositionSide',
+    'PositionStatus',
+    'PositionEventType',
     
     # Execution Layer
     'ExecutionEngine',

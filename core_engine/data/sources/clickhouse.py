@@ -98,8 +98,12 @@ class DataPriority(Enum):
     BATCH = "batch"
 
 
-class DataSource(Enum):
-    """Data source types"""
+class DataSourcePriority(Enum):
+    """Data source priority types - defines which data source to try first
+    
+    Note: Renamed from DataSource to avoid conflict with 
+    market_data.DataSource (which defines source origins like EXCHANGE, VENDOR, etc.)
+    """
     PRIMARY = "primary"
     SECONDARY = "secondary"
     BACKUP = "backup"
@@ -219,7 +223,7 @@ class DataRequest:
     
     # Request metadata
     priority: DataPriority = DataPriority.NORMAL
-    source_preference: List[DataSource] = field(default_factory=lambda: [DataSource.PRIMARY])
+    source_preference: List[DataSourcePriority] = field(default_factory=lambda: [DataSourcePriority.PRIMARY])
     
     # Caching
     use_cache: bool = True
@@ -257,7 +261,7 @@ class DataResponse:
     validation_results: Optional[List[ValidationResult]] = None
     
     # Source information
-    data_source: DataSource = DataSource.PRIMARY
+    data_source: DataSourcePriority = DataSourcePriority.PRIMARY
     source_timestamp: Optional[datetime] = None
     
     # Performance metrics
@@ -602,7 +606,7 @@ class DataEngine(ISystemComponent):
                 success=success_bool,
                 data=data,
                 metadata=metadata if isinstance(metadata, dict) else {},
-                data_source=DataSource.PRIMARY,
+                data_source=DataSourcePriority.PRIMARY,
                 source_timestamp=timestamp if isinstance(timestamp, datetime) else datetime.now(),
                 error_message=error_message
             )
@@ -652,7 +656,7 @@ class DataEngine(ISystemComponent):
                 success=success_bool,
                 data=data,
                 metadata=metadata if isinstance(metadata, dict) else {},
-                data_source=DataSource.PRIMARY,
+                data_source=DataSourcePriority.PRIMARY,
                 source_timestamp=timestamp if isinstance(timestamp, datetime) else datetime.now(),
                 error_message=error_message
             )
@@ -684,7 +688,7 @@ class DataEngine(ISystemComponent):
             alt_response.metadata.setdefault('fallback_source', 'alternative_data_handler')
             if failed_response and failed_response.error_message:
                 alt_response.metadata.setdefault('fallback_reason', failed_response.error_message)
-            alt_response.data_source = DataSource.SECONDARY
+            alt_response.data_source = DataSourcePriority.SECONDARY
             return alt_response
         return None
     

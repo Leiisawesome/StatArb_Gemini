@@ -1,25 +1,122 @@
 """
-Core Engine Regime Types
+Core Engine Regime Types - Canonical Definitions
 
-Lightweight market regime detection for standalone core_engine.
+Single source of truth for all market regime types across the system.
+All regime modules should import from here to avoid duplication.
+
+Professional Grade Market Regime Classification System
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import pandas as pd
 import numpy as np
 
 
-class RegimeState(Enum):
-    """Market regime states"""
-    BULL = "bull"
-    BEAR = "bear"
-    SIDEWAYS = "sideways"
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
-    UNKNOWN = "unknown"
+class MarketRegime(Enum):
+    """
+    Canonical market regime classifications - Professional Grade
+    
+    This is the SINGLE SOURCE OF TRUTH for regime types.
+    All other modules should import from here.
+    
+    Design Philosophy:
+    - Compound states (direction + volatility) for precision
+    - Legacy values for backward compatibility
+    - Strategy-relevant classifications
+    """
+    
+    # === DIRECTIONAL + VOLATILITY REGIMES (Primary) ===
+    BULL_LOW_VOL = "bull_low_volatility"           # Strong uptrend, calm conditions
+    BULL_HIGH_VOL = "bull_high_volatility"         # Strong uptrend, volatile conditions
+    BEAR_LOW_VOL = "bear_low_volatility"           # Downtrend, controlled decline
+    BEAR_HIGH_VOL = "bear_high_volatility"         # Downtrend, panic conditions
+    
+    # === VOLATILITY-ONLY REGIMES ===
+    LOW_VOLATILITY = "low_volatility"              # Low vol, no directional bias
+    NORMAL_VOLATILITY = "normal_volatility"        # Average market conditions
+    HIGH_VOLATILITY = "high_volatility"            # Elevated volatility
+    EXTREME_VOLATILITY = "extreme_volatility"      # Crisis-level volatility
+    
+    # === TREND REGIMES ===
+    STRONG_TRENDING = "strong_trending"            # Clear directional momentum
+    WEAK_TRENDING = "weak_trending"                # Mild directional bias
+    RANGE_BOUND = "range_bound"                    # Sideways consolidation
+    CHOPPY = "choppy"                              # Erratic, no clear direction
+    
+    # === MARKET STRESS REGIMES ===
+    CRISIS = "crisis"                              # Extreme stress, flight to safety
+    RECOVERY = "recovery"                          # Post-crisis stabilization
+    EUPHORIA = "euphoria"                          # Excessive optimism, bubble risk
+    
+    # === STRATEGY-RELEVANT REGIMES ===
+    MEAN_REVERSION = "mean_reversion"              # Mean reversion favorable
+    MOMENTUM = "momentum"                          # Momentum favorable
+    
+    # === LEGACY COMPATIBILITY (map to compound states) ===
+    BULL_MARKET = "bull_market"                    # Alias for general bull
+    BEAR_MARKET = "bear_market"                    # Alias for general bear
+    SIDEWAYS = "sideways"                          # Alias for range_bound
+    TRENDING = "trending"                          # Alias for strong_trending
+    UNKNOWN = "unknown"                            # Undetermined regime
+    
+    # === ADDITIONAL LEGACY VALUES (for test compatibility) ===
+    TRENDING_UP = "trending_up"                    # Legacy: upward trend
+    TRENDING_DOWN = "trending_down"                # Legacy: downward trend
+    CRISIS_MODE = "crisis_mode"                    # Legacy: alias for CRISIS
+    
+    @classmethod
+    def from_volatility(cls, vol_level: str) -> 'MarketRegime':
+        """Get regime from volatility level string"""
+        mapping = {
+            'low': cls.LOW_VOLATILITY,
+            'normal': cls.NORMAL_VOLATILITY,
+            'high': cls.HIGH_VOLATILITY,
+            'extreme': cls.EXTREME_VOLATILITY,
+            'crisis': cls.CRISIS
+        }
+        return mapping.get(vol_level.lower(), cls.NORMAL_VOLATILITY)
+    
+    @classmethod
+    def from_direction_and_vol(cls, direction: str, volatility: str) -> 'MarketRegime':
+        """Get compound regime from direction and volatility"""
+        if volatility in ('extreme', 'crisis'):
+            return cls.CRISIS
+        
+        if direction == 'bull':
+            return cls.BULL_HIGH_VOL if volatility == 'high' else cls.BULL_LOW_VOL
+        elif direction == 'bear':
+            return cls.BEAR_HIGH_VOL if volatility == 'high' else cls.BEAR_LOW_VOL
+        else:
+            return cls.RANGE_BOUND
+    
+    def is_high_risk(self) -> bool:
+        """Check if regime indicates elevated risk"""
+        return self in (
+            self.BEAR_HIGH_VOL, self.CRISIS, self.EXTREME_VOLATILITY,
+            self.HIGH_VOLATILITY, self.CHOPPY
+        )
+    
+    def is_trending(self) -> bool:
+        """Check if regime favors trend-following"""
+        return self in (
+            self.BULL_LOW_VOL, self.BULL_HIGH_VOL, self.BEAR_LOW_VOL,
+            self.STRONG_TRENDING, self.MOMENTUM, self.TRENDING
+        )
+    
+    def is_mean_reverting(self) -> bool:
+        """Check if regime favors mean reversion"""
+        return self in (
+            self.RANGE_BOUND, self.SIDEWAYS, self.MEAN_REVERSION,
+            self.LOW_VOLATILITY, self.NORMAL_VOLATILITY
+        )
+
+
+# === LEGACY ALIAS for backward compatibility ===
+RegimeType = MarketRegime  # Alias for code using RegimeType
+RegimeState = MarketRegime  # Alias for code using RegimeState
 
 
 @dataclass

@@ -23,21 +23,13 @@ except ImportError:
 
 
 # ============================================================================
-# STRATEGY TYPE ENUM
+# STRATEGY TYPE ENUM - Import from canonical source
 # ============================================================================
 
-class StrategyType(Enum):
-    """Strategy types"""
-    MOMENTUM = "momentum"
-    MEAN_REVERSION = "mean_reversion"
-    STATISTICAL_ARBITRAGE = "statistical_arbitrage"
-    FACTOR = "factor"
-    MULTI_ASSET = "multi_asset"
-    TREND_FOLLOWING = "trend_following"
-    BREAKOUT = "breakout"
-    PAIRS_TRADING = "pairs_trading"
-    VOLATILITY = "volatility"
-    ARBITRAGE = "arbitrage"
+# Import StrategyType from type_definitions (Single Source of Truth)
+from core_engine.type_definitions.strategy import StrategyType
+
+# StrategyType is now imported from type_definitions.strategy
 
 
 # ============================================================================

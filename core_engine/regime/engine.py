@@ -32,42 +32,11 @@ from core_engine.exceptions import ConfigurationRequiredError
 # Import centralized configuration (Rule 1, Section 7)
 from ..config.component_config import RegimeConfig
 
+# Import canonical MarketRegime from type_definitions (Single Source of Truth)
+from ..type_definitions.regime import MarketRegime
+
 logger = logging.getLogger(__name__)
 
-class MarketRegime(Enum):
-    """Advanced market regime classifications - Professional Grade"""
-    
-    # === DIRECTIONAL + VOLATILITY REGIMES ===
-    BULL_LOW_VOL = "bull_low_volatility"           # Strong uptrend, calm conditions
-    BULL_HIGH_VOL = "bull_high_volatility"         # Strong uptrend, volatile conditions
-    BEAR_LOW_VOL = "bear_low_volatility"           # Downtrend, controlled decline
-    BEAR_HIGH_VOL = "bear_high_volatility"         # Downtrend, panic conditions
-    
-    # === TREND STRENGTH REGIMES ===
-    STRONG_TRENDING = "strong_trending"            # Clear directional momentum
-    WEAK_TRENDING = "weak_trending"                # Mild directional bias
-    RANGE_BOUND = "range_bound"                    # Sideways consolidation
-    CHOPPY = "choppy"                              # Erratic, no clear direction
-    
-    # === MARKET STRESS REGIMES ===
-    CRISIS_MODE = "crisis_mode"                    # Extreme stress, flight to safety
-    RECOVERY_MODE = "recovery_mode"                # Post-crisis stabilization
-    EUPHORIA_MODE = "euphoria_mode"                # Excessive optimism, bubble conditions
-    COMPLACENCY_MODE = "complacency_mode"          # Low volatility, overconfidence
-    
-    # === LIQUIDITY & FLOW REGIMES ===
-    LIQUIDITY_CRUNCH = "liquidity_crunch"          # Poor market liquidity
-    HIGH_LIQUIDITY = "high_liquidity"              # Abundant market liquidity
-    ROTATION_MODE = "rotation_mode"                # Sector/style rotation active
-    
-    # === LEGACY COMPATIBILITY ===
-    BULL_MARKET = "bull_market"                    # Legacy: General bull market
-    BEAR_MARKET = "bear_market"                    # Legacy: General bear market
-    SIDEWAYS = "sideways"                          # Legacy: Sideways movement
-    HIGH_VOLATILITY = "high_volatility"            # Legacy: High volatility
-    LOW_VOLATILITY = "low_volatility"              # Legacy: Low volatility
-    TRENDING = "trending"                          # Legacy: Trending
-    MEAN_REVERTING = "mean_reverting"              # Legacy: Mean reverting
 
 @dataclass
 class TimeframeRegime:
@@ -81,8 +50,8 @@ class TimeframeRegime:
     transition_probability: float
 
 @dataclass
-class TransitionPrediction:
-    """ML-based regime transition prediction"""
+class MLTransitionPrediction:
+    """ML-based regime transition prediction (internal to engine.py)"""
     current_regime: MarketRegime
     predicted_regime: MarketRegime
     transition_probability: float               # 0-1 probability of transition
@@ -121,7 +90,7 @@ class RegimeAnalysis:
     regime_hierarchy: Dict[str, float] = None    # Timeframe importance weights
     
     # === ML-BASED TRANSITION PREDICTIONS ===
-    transition_predictions: Dict[str, TransitionPrediction] = None  # Predictions by horizon
+    transition_predictions: Dict[str, MLTransitionPrediction] = None  # Predictions by horizon
     ml_transition_probability: float = 0.0       # ML-enhanced transition probability
     transition_confidence: float = 0.0           # Confidence in transition prediction
     predicted_next_regime: Optional[MarketRegime] = None  # Most likely next regime

@@ -54,7 +54,9 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         self.correlation_matrix: Optional[pd.DataFrame] = None
         self.current_weights: Dict[str, float] = {}
         self.target_weights: Dict[str, float] = {}
-        self.active_positions: Dict[str, Dict[str, Any]] = {}
+        # DEPRECATED: active_positions is deprecated. Use PositionBook (SSOT) instead.
+        # Position tracking should be handled by Risk Manager, not strategies.
+        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
         
         # Portfolio metrics
         self.portfolio_returns: List[float] = []

@@ -67,6 +67,8 @@ class TestStrategyManagerIRegimeAware:
         engine.get_current_regime = AsyncMock(return_value=RegimeContext(
             primary_regime=RegimeType.TRENDING_UP,
             regime_confidence=0.85,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=30.0,
             volatility_regime='normal_volatility'
         ))
         return engine
@@ -77,6 +79,8 @@ class TestStrategyManagerIRegimeAware:
         return RegimeContext(
             primary_regime=RegimeType.TRENDING_UP,
             regime_confidence=0.85,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=30.0,
             volatility_regime='normal_volatility'
         )
     
@@ -86,6 +90,8 @@ class TestStrategyManagerIRegimeAware:
         return RegimeContext(
             primary_regime=RegimeType.RANGE_BOUND,
             regime_confidence=0.75,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=45.0,
             volatility_regime='low_volatility'
         )
     
@@ -95,6 +101,8 @@ class TestStrategyManagerIRegimeAware:
         return RegimeContext(
             primary_regime=RegimeType.HIGH_VOLATILITY,
             regime_confidence=0.80,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=15.0,
             volatility_regime='high_volatility'
         )
     
@@ -364,6 +372,8 @@ class TestStrategyManagerRegimeIntegration:
         new_regime = RegimeContext(
             primary_regime=RegimeType.TRENDING_UP,
             regime_confidence=0.85,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=30.0,
             volatility_regime='normal_volatility'
         )
         

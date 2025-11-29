@@ -27,6 +27,18 @@ except ImportError:
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
 from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+
+# Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
+from .core_metrics import (
+    calculate_var,
+    calculate_cvar,
+    calculate_sharpe_ratio,
+    calculate_sortino_ratio,
+    calculate_drawdown,
+    calculate_calmar_ratio,
+    calculate_volatility,
+    calculate_downside_volatility,
+)
 from ..exceptions import PerformanceDataUnavailableError, ConfigurationRequiredError
 
 warnings.filterwarnings('ignore')
@@ -323,35 +335,12 @@ class RiskMetricsCalculator:
         return self.config.trading_days_per_year  # Simplified
     
     def _calculate_var(self, returns: pd.Series, confidence_level: float, method: str) -> float:
-        """Calculate Value at Risk"""
-        
-        if returns.empty:
-            return 0.0
-        
-        if method == 'historical':
-            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
-        elif method == 'parametric':
-            return stats.norm.ppf(1 - confidence_level, returns.mean(), returns.std())
-        elif method == 'monte_carlo':
-            # Simplified Monte Carlo
-            np.random.seed(42)
-            simulated = np.random.normal(
-                returns.mean(), 
-                returns.std(), 
-                self.config.monte_carlo_simulations
-            )
-            return np.percentile(simulated, (1 - confidence_level) * 100)
-        else:
-            return np.percentile(returns.dropna(), (1 - confidence_level) * 100)
+        """Calculate Value at Risk - delegates to core_metrics"""
+        return calculate_var(returns, confidence_level, method, self.config.monte_carlo_simulations)
     
     def _calculate_cvar(self, returns: pd.Series, confidence_level: float) -> float:
-        """Calculate Conditional Value at Risk"""
-        
-        if returns.empty:
-            return 0.0
-        
-        var = self._calculate_var(returns, confidence_level, 'historical')
-        return returns[returns <= var].mean()
+        """Calculate Conditional Value at Risk - delegates to core_metrics"""
+        return calculate_cvar(returns, confidence_level)
 
 
 class RiskAdjustedMetricsCalculator:
@@ -446,16 +435,11 @@ class RiskAdjustedMetricsCalculator:
         return metrics
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        
+        """Calculate maximum drawdown - delegates to core_metrics"""
         if returns.empty:
             return 0.0
-        
-        cumulative = (1 + returns).cumprod()
-        running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
-        
-        return abs(drawdown.min())
+        _, max_dd, _ = calculate_drawdown(returns)
+        return abs(max_dd)
     
     def _calculate_omega_ratio(self, returns: pd.Series, threshold: float) -> float:
         """Calculate Omega ratio"""
@@ -1528,15 +1512,12 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
             raise PerformanceDataUnavailableError(f"Failed to calculate statistical metrics: {e}") from e
     
     def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown"""
+        """Calculate maximum drawdown - delegates to core_metrics"""
         if returns.empty:
             return 0.0
-        
         try:
-            cumulative = (1 + returns).cumprod()
-            running_max = cumulative.expanding().max()
-            drawdown = (cumulative - running_max) / running_max
-            return drawdown.min()
+            _, max_dd, _ = calculate_drawdown(returns)
+            return max_dd
         except Exception:
             return 0.0
     

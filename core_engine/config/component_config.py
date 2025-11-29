@@ -173,41 +173,8 @@ class PerformanceConfig:
 # DOMAIN CONFIGS: Using Composition Pattern
 # ============================================================================
 
-@dataclass
-class DataConfig:
-    """
-    Data management configuration (ENHANCED)
-    
-    Original config expanded with canonical parameters from consolidation.
-    """
-    # Data source
-    symbols: Optional[List[str]] = None
-    """List of symbols to trade. Default: None (all available)"""
-    
-    
-    start_date: str = "2024-12-20"
-    """Start date for historical data. Format: YYYY-MM-DD"""
-    
-    end_date: str = "2024-12-20"
-    """End date for historical data. Format: YYYY-MM-DD"""
-    
-    # Performance (composition)
-    enable_caching: bool = True
-    """Enable data caching. Default: True"""
-    
-    cache_ttl: int = 3600
-    """Cache TTL in seconds. Default: 1 hour"""
-    
-    # Data quality
-    enable_validation: bool = True
-    """Enable data validation. Default: True"""
-    
-    min_data_points: int = 100
-    """Minimum required data points. Default: 100"""
-    
-    # Update frequency
-    update_frequency: str = '1min'
-    """Data update frequency. Default: '1min'"""
+# NOTE: DataConfig is now defined in the CENTRALIZED CONFIGS section below (line ~1748)
+# The comprehensive version uses composition pattern with sub-configs.
 
 
 @dataclass
@@ -271,6 +238,11 @@ class RiskConfig:
     def var_percentile(self) -> float:
         """Backward compatibility: access risk_limits.var_percentile"""
         return self.risk_limits.var_percentile
+    
+    @property
+    def min_signal_confidence(self) -> float:
+        """Backward compatibility: access risk_limits.confidence_threshold"""
+        return self.risk_limits.confidence_threshold
     
     @property
     def stop_loss_pct(self) -> float:
@@ -1299,60 +1271,13 @@ class RegimeConfig:
             raise ValueError(f"max_workers must be [1, 16], got {self.max_workers}")
 
 
-@dataclass
-class AnalyticsConfig:
-    """
-    Analytics configuration
-    
-    Consolidated from 14 analytics configs:
-    - AnalyticsConfig (original)
-    - AttributionConfig
-    - BenchmarkConfig
-    - MetricConfig
-    - PerformanceConfig
-    - Plus 9 from analytics/performance/
-    """
-    # Performance tracking
-    enable_performance_tracking: bool = True
-    """Enable performance tracking. Default: True"""
-    
-    enable_attribution_analysis: bool = True
-    """Enable attribution analysis. Default: True"""
-    
-    # Risk-adjusted metrics
-    confidence_level: float = 0.95
-    """Confidence level for VaR/CVaR. Default: 95%"""
-    
-    risk_free_rate: float = 0.02
-    """Risk-free rate for Sharpe ratio. Default: 2% annual"""
-    
-    # Benchmarking
-    default_benchmark: str = 'SPY'
-    """Default benchmark symbol. Default: 'SPY'"""
-    
-    enable_benchmark_tracking: bool = True
-    """Enable benchmark tracking. Default: True"""
-    
-    # Reporting
-    report_frequency: str = 'daily'
-    """Report generation frequency. Default: 'daily'"""
-    
-    enable_drawdown_tracking: bool = True
-    """Enable drawdown tracking. Default: True"""
-    
-    # Metrics
-    lookback_period: int = 252
-    """Lookback period for metrics (trading days). Default: 252 (1 year)"""
-    
-    enable_metrics: bool = True
-    """Enable metrics calculation. Default: True"""
-    
-    # Performance
-    enable_caching: bool = True
-    """Enable analytics result caching. Default: True"""
-    
-    cache_ttl: int = 3600
-    """Cache TTL in seconds. Default: 1 hour"""
+# NOTE: AnalyticsConfig is now defined in the CENTRALIZED CONFIGS section below (line ~2117)
+# The comprehensive version uses composition pattern with sub-configs for:
+# - PerformanceAnalyticsConfig
+# - MetricsCalculatorConfig
+# - AttributionAnalyticsConfig
+# - BenchmarkAnalyticsConfig
+# - ReportGenerationConfig
 
 
 @dataclass
@@ -1442,16 +1367,6 @@ class PortfolioConfig:
     
     rebalance_threshold: float = 0.05
     """Rebalance if allocation drift exceeds threshold. Default: 5%"""
-
-
-# ============================================================================
-# BACKWARD COMPATIBILITY ALIASES
-# ============================================================================
-
-# Maintain backward compatibility during transition
-LegacyDataConfig = DataConfig
-LegacyRiskConfig = RiskConfig
-LegacyProcessingConfig = ProcessingConfig
 
 
 # ============================================================================
@@ -2395,9 +2310,12 @@ class BrokerSessionConfig:
 
 
 @dataclass
-class BrokerConfig:
+class BrokerSystemConfig:
     """
-    Centralized broker configuration
+    Centralized broker SYSTEM configuration
+    
+    NOTE: This is distinct from broker_config.py::BrokerConfig which handles
+    broker credentials and API settings. This handles system-level broker configs.
     
     Consolidated from: broker/broker_manager.py BrokerConfig
     Main configuration for the entire broker system.
@@ -2482,6 +2400,17 @@ class BrokerConfig:
             raise ValueError(f"failover_threshold must be (0, 1.0], got {self.failover_threshold}")
 
 
+# ============================================================================
+# BACKWARD COMPATIBILITY ALIASES
+# ============================================================================
+
+# Maintain backward compatibility during transition
+# These aliases must be defined AFTER the actual classes are defined
+LegacyDataConfig = DataConfig
+LegacyRiskConfig = RiskConfig
+LegacyProcessingConfig = ProcessingConfig
+
+
 # Export data configs
 __all__ = [
     # ... existing exports ...
@@ -2502,5 +2431,5 @@ __all__ = [
     # Broker brick configs (Phase 6 - Broker Enhancement)
     'BrokerConnectionConfig',
     'BrokerSessionConfig',
-    'BrokerConfig',
+    'BrokerSystemConfig',  # Renamed from BrokerConfig to avoid collision
 ]

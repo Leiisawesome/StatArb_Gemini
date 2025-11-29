@@ -229,7 +229,7 @@ class TestInitialization:
         # Check internal state
         assert hasattr(var_calculator, '_lock')
         assert hasattr(var_calculator, '_calculation_history')
-        assert hasattr(var_calculator, '_stress_scenarios')
+        # Note: _stress_scenarios removed - stress testing consolidated into StressTester class
     
     def test_custom_configuration(self, custom_var_calculator):
         """Test custom configuration initialization."""
@@ -240,32 +240,9 @@ class TestInitialization:
         assert custom_var_calculator.mc_simulations == 5000
         assert custom_var_calculator.risk_free_rate == 0.03
     
-    def test_default_stress_scenarios_loaded(self, var_calculator):
-        """Test default stress scenarios are loaded."""
-        scenarios = var_calculator.get_stress_scenarios()
-        
-        # Check all 3 default scenarios exist
-        assert 'crisis_2008' in scenarios
-        assert 'covid_2020' in scenarios
-        assert 'rate_shock' in scenarios
-        
-        # Verify 2008 crisis scenario
-        crisis_2008 = scenarios['crisis_2008']
-        assert crisis_2008.name == "2008_Financial_Crisis"
-        assert crisis_2008.factor_shocks['EQUITY'] == -0.40
-        assert crisis_2008.factor_shocks['CREDIT'] == 0.05
-        assert crisis_2008.volatility_multipliers['EQUITY'] == 2.0
-        
-        # Verify COVID-2020 scenario
-        covid = scenarios['covid_2020']
-        assert covid.name == "COVID_2020"
-        assert covid.factor_shocks['EQUITY'] == -0.35
-        assert covid.factor_shocks['OIL'] == -0.60
-        
-        # Verify rate shock scenario
-        rate_shock = scenarios['rate_shock']
-        assert rate_shock.name == "Interest_Rate_Shock"
-        assert rate_shock.factor_shocks['RATES'] == 0.02
+    # NOTE: test_default_stress_scenarios_loaded removed
+    # Stress testing functionality has been consolidated into StressTester class
+    # VarCalculator no longer maintains stress scenarios (reduces code duplication)
 
 
 # ============================================================================
@@ -676,107 +653,12 @@ class TestComprehensiveRiskMetrics:
 
 
 # ============================================================================
-# Category 9: Stress Testing (4 tests)
+# Category 9: Stress Testing - REMOVED
 # ============================================================================
-
-class TestStressTesting:
-    """Test stress testing functionality."""
-    
-    @pytest.mark.asyncio
-    async def test_2008_crisis_scenario(self, var_calculator, sample_positions):
-        """Test 2008 financial crisis stress scenario."""
-        portfolio_value = sum(pos['market_value'] for pos in sample_positions.values())
-        
-        results = await var_calculator.stress_test_portfolio(
-            positions=sample_positions,
-            scenario_name='crisis_2008',
-            portfolio_value=portfolio_value
-        )
-        
-        assert 'portfolio_pnl' in results
-        assert 'portfolio_return_pct' in results
-        assert 'stressed_portfolio_value' in results
-        assert 'position_details' in results
-        
-        # Portfolio should lose value (negative PnL)
-        assert results['portfolio_pnl'] < 0
-        assert results['portfolio_return_pct'] < 0
-        
-        # Check position details
-        assert len(results['position_details']) == 4
-        
-        # Equity positions (AAPL, XOM) should lose value
-        aapl_detail = results['position_details']['AAPL']
-        assert aapl_detail['pnl'] < 0
-        assert aapl_detail['stress_factor'] == -0.40
-    
-    @pytest.mark.asyncio
-    async def test_covid_2020_scenario(self, var_calculator, sample_positions):
-        """Test COVID-19 March 2020 stress scenario."""
-        portfolio_value = 250000.0
-        
-        results = await var_calculator.stress_test_portfolio(
-            positions=sample_positions,
-            scenario_name='covid_2020',
-            portfolio_value=portfolio_value
-        )
-        
-        # Portfolio should lose value
-        assert results['portfolio_pnl'] < 0
-        
-        # Check position details exist
-        assert 'AAPL' in results['position_details']
-        assert 'XOM' in results['position_details']
-    
-    @pytest.mark.asyncio
-    async def test_rate_shock_scenario(self, var_calculator, sample_positions):
-        """Test interest rate shock stress scenario."""
-        portfolio_value = 250000.0
-        
-        results = await var_calculator.stress_test_portfolio(
-            positions=sample_positions,
-            scenario_name='rate_shock',
-            portfolio_value=portfolio_value
-        )
-        
-        # Bond positions should be affected by rate shock
-        tlt_detail = results['position_details']['TLT']
-        assert 'stress_factor' in tlt_detail
-        # Note: In the rate_shock scenario, RATES factor is +0.02 (positive)
-        # So bonds will actually gain value in this scenario as coded
-        # This represents the scenario definition, not realistic bond behavior
-        assert tlt_detail['stress_factor'] == 0.02
-    
-    @pytest.mark.asyncio
-    async def test_custom_stress_scenario(self, var_calculator, sample_positions):
-        """Test adding and using custom stress scenario."""
-        # Add custom scenario
-        custom_scenario = StressTestScenario(
-            name="Tech Bubble",
-            description="Tech sector crash",
-            factor_shocks={
-                'EQUITY': -0.50,
-                'RATES': -0.01,
-                'COMMODITIES': 0.10
-            },
-            volatility_multipliers={'EQUITY': 3.0}
-        )
-        
-        var_calculator.add_stress_scenario(custom_scenario)
-        
-        # Verify scenario was added
-        scenarios = var_calculator.get_stress_scenarios()
-        assert 'Tech Bubble' in scenarios
-        
-        # Run stress test with custom scenario
-        results = await var_calculator.stress_test_portfolio(
-            positions=sample_positions,
-            scenario_name='Tech Bubble',
-            portfolio_value=250000.0
-        )
-        
-        assert results['portfolio_pnl'] < 0
-        assert 'position_details' in results
+# NOTE: Stress testing functionality has been consolidated into StressTester class
+# VarCalculator no longer maintains stress_test_portfolio(), add_stress_scenario(),
+# or get_stress_scenarios() methods. This eliminates code duplication.
+# See tests/unit/risk/test_stress_tester_comprehensive.py for stress testing tests.
 
 
 # ============================================================================

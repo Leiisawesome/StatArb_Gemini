@@ -33,18 +33,11 @@ logger = logging.getLogger(__name__)
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 from core_engine.config import SignalConfig
 
-class SignalType(Enum):
-    """Types of trading signals"""
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
-    CLOSE = "close"
+# Import canonical types from type_definitions (Single Source of Truth)
+from core_engine.type_definitions.strategy import SignalType, SignalStrength
 
-class SignalStrength(Enum):
-    """Signal strength levels"""
-    WEAK = 1
-    MODERATE = 2
-    STRONG = 3
+# SignalType imported from type_definitions.strategy (canonical source)
+# SignalStrength imported from type_definitions.strategy (canonical source)
 
 @dataclass
 class TradingSignal:

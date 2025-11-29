@@ -19,6 +19,8 @@ from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor
 import warnings
 
+from core_engine.processing.indicators.talib_indicators import calculate_rsi
+
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
@@ -278,7 +280,7 @@ class MomentumAlphaStrategy(AlphaStrategy):
                 'price_momentum_60d': (prices.iloc[-1] / prices.iloc[-61] - 1) if len(prices) >= 61 else 0,
                 'volume_momentum': df['volume'].rolling(20).mean().iloc[-1] / df['volume'].rolling(60).mean().iloc[-1] - 1 if 'volume' in df.columns and len(df) >= 60 else 0,
                 'volatility': prices.pct_change().rolling(20).std().iloc[-1] * np.sqrt(252) if len(prices) >= 20 else 0,
-                'rsi': self._calculate_rsi(prices, 14),
+                'rsi': self._get_rsi_value(prices, 14),
                 'price_trend': np.polyfit(range(20), prices.tail(20).values, 1)[0] if len(prices) >= 20 else 0
             }
             
@@ -286,19 +288,12 @@ class MomentumAlphaStrategy(AlphaStrategy):
         
         return pd.DataFrame(features_list).set_index('symbol')
     
-    def _calculate_rsi(self, prices: pd.Series, window: int = 14) -> float:
-        """Calculate RSI"""
+    def _get_rsi_value(self, prices: pd.Series, window: int = 14) -> float:
+        """Get RSI value using canonical implementation"""
         if len(prices) < window + 1:
             return 50.0
-        
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        
-        return rsi.iloc[-1] if not rsi.empty else 50.0
+        rsi_series = calculate_rsi(prices, window)
+        return rsi_series.iloc[-1] if not rsi_series.empty and not pd.isna(rsi_series.iloc[-1]) else 50.0
     
     async def fit_model(
         self,

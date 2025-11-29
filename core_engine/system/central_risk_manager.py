@@ -21,7 +21,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -38,6 +38,11 @@ from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
 from ..config.component_config import RiskConfig
+
+# PHASE 2 (PositionBook Integration): Type hints only to avoid circular import
+# Actual import is deferred to runtime in set_position_book() and update_position()
+if TYPE_CHECKING:
+    from ..trading.position_book import IPositionBook, Fill
 
 logger = logging.getLogger(__name__)
 
@@ -213,24 +218,39 @@ class CentralRiskManager(ISystemComponent):
         # Sprint 1: Real-time P&L tracking (GAP 4-5)
         self.pnl_tracker: Optional[Any] = None  # Real-time P&L monitoring
         
+        # ✅ PHASE 2 (PositionBook Integration): Position tracking SSOT
+        # When position_book is set, we delegate position queries to it
+        # and no longer maintain local position state
+        self._position_book: Optional["IPositionBook"] = None
+        
         # Authorization tracking
         self.pending_requests: Dict[str, TradingDecisionRequest] = {}
         self.active_authorizations: Dict[str, TradingAuthorization] = {}
         self.authorization_history: List[TradingAuthorization] = []
         
-        # Risk state
-        self.current_positions: Dict[str, float] = {}
+        # ========================================================================
+        # ⚠️ PHASE 4 DEPRECATION NOTICE: Legacy Position State
+        # These fields are kept for backward compatibility during PositionBook migration.
+        # When PositionBook is set via set_position_book(), these are kept in sync
+        # via subscription callback, but PositionBook is the SSOT.
+        # 
+        # NEW CODE SHOULD USE:
+        #   - get_current_position(symbol) or position_book.get_position(symbol)
+        #   - get_all_positions() or position_book.get_all_positions()
+        #   - position_book.get_cash_balance() instead of available_cash
+        # ========================================================================
+        self.current_positions: Dict[str, float] = {}  # DEPRECATED: Use get_current_position()
         self.strategy_allocations: Dict[str, float] = {}
         self.current_var: float = 0.0
         
-        # ✅ FIX: Store current market prices for accurate portfolio valuation
+        # Market prices for portfolio valuation (still needed for MTM)
         self.current_prices: Dict[str, float] = {}  # symbol -> last known price
         
-        # Portfolio value and cash (PHASE 1 ENHANCEMENT: Use initial_capital from config)
+        # Portfolio value and cash (synced from PositionBook when available)
         initial_capital = config.get('initial_capital', 1000000.0) if isinstance(config, dict) else 1000000.0
         self.portfolio_value: float = initial_capital
-        self.available_cash: float = initial_capital  # Start with full cash
-        self.position_history: List[Dict[str, Any]] = []  # Track all position changes
+        self.available_cash: float = initial_capital  # DEPRECATED: Use position_book.get_cash_balance()
+        self.position_history: List[Dict[str, Any]] = []  # DEPRECATED: PositionBook tracks fill history
         
         # Risk limits and audit trails (FIXED: Missing initialization)
         self.risk_limits: Dict[str, float] = {
@@ -421,6 +441,59 @@ class CentralRiskManager(ISystemComponent):
         if pnl_tracker:
             self.pnl_tracker = pnl_tracker
             logger.info("✅ RealTimePnLTracker integrated with Central Risk Manager (GAP 4-5, Sprint 1)")
+    
+    # ========================================================================
+    # PHASE 2: POSITIONBOOK INTEGRATION (SSOT for Positions)
+    # ========================================================================
+    
+    def set_position_book(self, position_book: "IPositionBook") -> None:
+        """
+        Inject PositionBook as the Single Source of Truth for positions
+        
+        When set, this CentralRiskManager will:
+        - Query PositionBook for current positions (get_position)
+        - Query PositionBook for cash balance (cash_balance)
+        - Delegate position updates to PositionBook (on_fill)
+        - Subscribe to position events for P&L tracking
+        
+        Args:
+            position_book: IPositionBook instance (typically from InstitutionalBacktestEngine)
+        """
+        self._position_book = position_book
+        
+        # Sync initial state from PositionBook to legacy fields
+        # This allows gradual migration - old code using self.available_cash still works
+        self.available_cash = float(position_book.get_cash_balance())
+        
+        # Register for position updates to keep local state in sync
+        def _on_position_update(update):
+            """Callback to sync PositionBook changes to legacy state"""
+            try:
+                symbol = update.symbol  # Use symbol directly from update, not from position
+                self.available_cash = float(position_book.get_cash_balance())
+                
+                if update.position is not None:
+                    self.current_positions[symbol] = float(update.position.quantity)
+                    if update.position.quantity != 0 and update.fill.price > 0:
+                        self.current_prices[symbol] = float(update.fill.price)
+                else:
+                    # Position closed - set to zero
+                    self.current_positions[symbol] = 0.0
+            except Exception as e:
+                logger.warning(f"Error in position update handler: {e}")
+        
+        position_book.subscribe(_on_position_update)
+        
+        logger.info("✅ PositionBook integrated with Central Risk Manager (SSOT Phase 2)")
+    
+    @property
+    def position_book(self) -> Optional["IPositionBook"]:
+        """Get the PositionBook if set, None otherwise"""
+        return self._position_book
+    
+    def has_position_book(self) -> bool:
+        """Check if PositionBook is configured"""
+        return self._position_book is not None
     
     # ========================================
     # IREGIMEAWARE INTERFACE IMPLEMENTATION
@@ -1691,6 +1764,9 @@ class CentralRiskManager(ISystemComponent):
         
         AUTHORITY: SINGLE SOURCE OF TRUTH for position updates (Rule 4)
         
+        ✅ PHASE 2: When PositionBook is configured, delegates to position_book.on_fill()
+        The PositionBook becomes the SSOT and this method syncs local state.
+        
         Args:
             symbol: Trading symbol
             side: 'buy' or 'sell'
@@ -1705,7 +1781,91 @@ class CentralRiskManager(ISystemComponent):
         try:
             if timestamp is None:
                 timestamp = datetime.now()
+            
+            # ============================================================
+            # PHASE 2: PositionBook Integration - Use SSOT when available
+            # ============================================================
+            if self._position_book is not None:
+                # Runtime import to avoid circular dependency
+                from decimal import Decimal
+                from core_engine.trading.position_book import Fill, FillSide
                 
+                # Calculate commission (same logic as legacy path)
+                commission = max(1.0, quantity * price * 0.00005)
+                
+                # Convert side string to enum
+                fill_side = FillSide.BUY if side.lower() == 'buy' else FillSide.SELL
+                
+                fill = Fill(
+                    fill_id=f"fill_{timestamp.strftime('%Y%m%d%H%M%S%f')}",
+                    symbol=symbol,
+                    side=fill_side,
+                    quantity=Decimal(str(quantity)),
+                    price=Decimal(str(price)),
+                    commission=Decimal(str(commission)),
+                    timestamp=timestamp
+                )
+                
+                # Delegate to PositionBook (SSOT)
+                position_update = self._position_book.on_fill(fill)
+                
+                # The subscription callback in set_position_book already syncs:
+                # - self.current_positions
+                # - self.available_cash  
+                # - self.current_prices
+                # So we just need to update portfolio metrics
+                
+                self._update_portfolio_metrics()
+                
+                # Sprint 1: Update P&L tracking (GAP 4-5)
+                if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                    try:
+                        if side.lower() == 'buy':
+                            await self.pnl_tracker.update_position_entry(
+                                symbol=symbol,
+                                quantity=quantity,
+                                entry_price=price,
+                                strategy_id=None,
+                                timestamp=timestamp
+                            )
+                        elif side.lower() == 'sell':
+                            await self.pnl_tracker.update_position_close(
+                                symbol=symbol,
+                                quantity=quantity,
+                                exit_price=price,
+                                strategy_id=None,
+                                timestamp=timestamp
+                            )
+                    except Exception as e:
+                        logger.warning(f"⚠️ P&L tracker update failed: {e}")
+                
+                # Return compatible result
+                # Handle case where position is fully closed (position is None)
+                book_position = position_update.position
+                new_quantity = Decimal('0') if book_position is None else book_position.quantity
+                
+                logger.info(
+                    f"📘 PositionBook Update: {symbol} → {float(new_quantity):.2f} shares | "
+                    f"Realized P&L: ${float(position_update.realized_pnl):,.2f} | "
+                    f"Cash: ${float(self._position_book.get_cash_balance()):,.2f}"
+                )
+                
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'previous_position': float(position_update.previous_quantity),
+                    'new_position': float(new_quantity),
+                    'position_value': float(new_quantity * Decimal(str(price))),
+                    'cash_change': float(position_update.cash_change),
+                    'available_cash': float(self._position_book.get_cash_balance()),
+                    'portfolio_value': self.portfolio_value,
+                    'timestamp': timestamp,
+                    'realized_pnl': float(position_update.realized_pnl)
+                }
+            
+            # ============================================================
+            # LEGACY PATH: Direct position tracking (backward compatibility)
+            # ============================================================
             current_position = self.current_positions.get(symbol, 0.0)
             previous_cash = self.available_cash
             
@@ -1837,11 +1997,25 @@ class CentralRiskManager(ISystemComponent):
             }
     
     def get_current_position(self, symbol: str) -> float:
-        """Get current position for symbol"""
+        """Get current position for symbol
+        
+        ✅ PHASE 2: Queries PositionBook when available
+        """
+        if self._position_book is not None:
+            position = self._position_book.get_position(symbol)
+            return float(position.quantity) if position else 0.0
         return self.current_positions.get(symbol, 0.0)
     
     def get_all_positions(self) -> Dict[str, float]:
-        """Get all current positions"""
+        """Get all current positions
+        
+        ✅ PHASE 2: Queries PositionBook when available
+        """
+        if self._position_book is not None:
+            return {
+                symbol: float(pos.quantity) 
+                for symbol, pos in self._position_book.get_all_positions().items()
+            }
         return self.current_positions.copy()
     
     async def update_market_prices(self, prices: Dict[str, float], timestamp: Optional[datetime] = None):

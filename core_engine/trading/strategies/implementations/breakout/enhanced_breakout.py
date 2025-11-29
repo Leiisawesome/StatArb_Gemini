@@ -51,7 +51,9 @@ class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
         # Strategy-specific state
         self.market_data: Dict[str, pd.DataFrame] = {}
         self.indicators: Dict[str, Dict[str, pd.Series]] = {}
-        self.active_positions: Dict[str, Dict[str, Any]] = {}
+        # DEPRECATED: active_positions is deprecated. Use PositionBook (SSOT) instead.
+        # Position tracking should be handled by Risk Manager, not strategies.
+        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
         
         logger.info(f"🧠 Enhanced Breakout Strategy {self.strategy_id} initialized")
     

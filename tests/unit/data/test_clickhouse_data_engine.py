@@ -24,7 +24,7 @@ from core_engine.data.sources.clickhouse import (
     DataResponse,
     DataEngineMode,
     DataPriority,
-    DataSource,
+    DataSourcePriority,
     DataEngineStatistics
 )
 
@@ -137,10 +137,11 @@ class TestInitialization:
         )
         
         # Mock component classes to avoid import errors
-        with patch('core_engine.data.sources.clickhouse.MarketDataHandler', new=Mock) as mock_md, \
-             patch('core_engine.data.sources.clickhouse.AlternativeDataHandler', new=Mock) as mock_ad, \
-             patch('core_engine.data.sources.clickhouse.DataValidator', new=Mock) as mock_val, \
-             patch('core_engine.data.sources.clickhouse.CacheManager', new=Mock) as mock_cache, \
+        # Note: Using MagicMock instances instead of Mock class to avoid side effects
+        with patch('core_engine.data.sources.clickhouse.MarketDataHandler') as mock_md, \
+             patch('core_engine.data.sources.clickhouse.AlternativeDataHandler') as mock_ad, \
+             patch('core_engine.data.sources.clickhouse.DataValidator') as mock_val, \
+             patch('core_engine.data.sources.clickhouse.CacheManager') as mock_cache, \
              patch('core_engine.data.sources.clickhouse.FeedManager') as mock_feed:
             
             mock_md_instance = Mock()
@@ -440,7 +441,7 @@ class TestRequestRouting:
             # Use isinstance check to verify it's a DataResponse (not Mock)
             assert isinstance(response, DataResponse)
             assert response.success is True
-            assert response.data_source == DataSource.PRIMARY
+            assert response.data_source == DataSourcePriority.PRIMARY
             mock_handler.get_data.assert_called_once()
     
     @pytest.mark.asyncio
@@ -480,7 +481,7 @@ class TestRequestRouting:
             # Use isinstance check to verify it's a DataResponse, not Mock
             assert isinstance(response, DataResponse)
             assert response.success is True
-            assert response.data_source == DataSource.PRIMARY
+            assert response.data_source == DataSourcePriority.PRIMARY
     
     @pytest.mark.asyncio
     async def test_route_request_no_handler(self, data_engine):
@@ -1270,7 +1271,7 @@ class TestGetDataComprehensive:
                 data={'AAPL': 150.0},
                 metadata={},
                 source_timestamp=datetime.now(),
-                data_source=DataSource.PRIMARY
+                data_source=DataSourcePriority.PRIMARY
             )
         engine._route_request = mock_route
         

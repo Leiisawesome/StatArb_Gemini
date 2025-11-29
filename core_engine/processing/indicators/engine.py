@@ -822,116 +822,30 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         return df
     
     def _calculate_rsi(self, close: pd.Series, period: int) -> pd.Series:
-        """Calculate Relative Strength Index"""
-        delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
+        """Calculate Relative Strength Index - uses TA-Lib when available"""
+        from .talib_indicators import calculate_rsi
+        return calculate_rsi(close, period)
     
     def _calculate_macd(self, close: pd.Series, fast: int, slow: int, signal: int) -> Tuple[pd.Series, pd.Series, pd.Series]:
-        """Calculate MACD"""
-        ema_fast = close.ewm(span=fast).mean()
-        ema_slow = close.ewm(span=slow).mean()
-        
-        macd = ema_fast - ema_slow
-        macd_signal = macd.ewm(span=signal).mean()
-        macd_histogram = macd - macd_signal
-        
-        return macd, macd_signal, macd_histogram
+        """Calculate MACD - uses TA-Lib when available"""
+        from .talib_indicators import calculate_macd
+        return calculate_macd(close, fast, slow, signal)
     
     def _calculate_stochastic(self, high: pd.Series, low: pd.Series, close: pd.Series, 
                             k_period: int, d_period: int) -> Tuple[pd.Series, pd.Series]:
-        """Calculate Stochastic Oscillator"""
-        lowest_low = low.rolling(window=k_period).min()
-        highest_high = high.rolling(window=k_period).max()
-        
-        stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low)
-        stoch_d = stoch_k.rolling(window=d_period).mean()
-        
-        return stoch_k, stoch_d
+        """Calculate Stochastic Oscillator - uses TA-Lib when available"""
+        from .talib_indicators import calculate_stochastic
+        return calculate_stochastic(high, low, close, k_period, d_period)
     
     def _calculate_atr(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int) -> pd.Series:
-        """Calculate Average True Range"""
-        high_low = high - low
-        high_close = np.abs(high - close.shift())
-        low_close = np.abs(low - close.shift())
-        
-        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-        atr = true_range.rolling(window=period).mean()
-        
-        return atr
+        """Calculate Average True Range - uses TA-Lib when available"""
+        from .talib_indicators import calculate_atr
+        return calculate_atr(high, low, close, period)
     
     def _calculate_adx(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
-        """
-        Calculate ADX (Average Directional Index), +DI, and -DI
-        
-        ADX measures trend strength regardless of direction (0-100 scale):
-        - ADX < 20: Weak/No trend
-        - ADX 20-40: Strong trend
-        - ADX > 40: Very strong trend
-        
-        +DI and -DI indicate trend direction
-        
-        Args:
-            high: High prices
-            low: Low prices  
-            close: Close prices
-            period: ADX period (default 14)
-            
-        Returns:
-            Tuple of (adx, plus_di, minus_di) Series
-        """
-        # Calculate True Range
-        high_low = high - low
-        high_close = np.abs(high - close.shift())
-        low_close = np.abs(low - close.shift())
-        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-        
-        # Calculate Directional Movement
-        plus_dm = pd.Series(0.0, index=high.index)
-        minus_dm = pd.Series(0.0, index=high.index)
-        
-        high_diff = high.diff()
-        low_diff = -low.diff()
-        
-        # +DM when high diff > low diff and > 0
-        plus_dm_mask = (high_diff > low_diff) & (high_diff > 0)
-        plus_dm[plus_dm_mask] = high_diff[plus_dm_mask]
-        
-        # -DM when low diff > high diff and > 0
-        minus_dm_mask = (low_diff > high_diff) & (low_diff > 0)
-        minus_dm[minus_dm_mask] = low_diff[minus_dm_mask]
-        
-        # Smooth the values using Wilder's smoothing (exponential moving average)
-        alpha = 1.0 / period
-        
-        # Smoothed True Range
-        atr_smooth = true_range.ewm(alpha=alpha, adjust=False).mean()
-        
-        # Smoothed Directional Movements
-        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False).mean()
-        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False).mean()
-        
-        # Calculate Directional Indicators
-        plus_di = 100 * plus_dm_smooth / atr_smooth
-        minus_di = 100 * minus_dm_smooth / atr_smooth
-        
-        # Calculate DX (Directional Index)
-        di_sum = plus_di + minus_di
-        di_diff = np.abs(plus_di - minus_di)
-        
-        # Avoid division by zero
-        dx = pd.Series(0.0, index=high.index)
-        mask = di_sum > 0.01
-        dx[mask] = 100 * di_diff[mask] / di_sum[mask]
-        
-        # Calculate ADX (smoothed DX)
-        adx = dx.ewm(alpha=alpha, adjust=False).mean()
-        
-        return adx, plus_di, minus_di
+        """Calculate ADX - uses TA-Lib when available"""
+        from .talib_indicators import calculate_adx
+        return calculate_adx(high, low, close, period)
     
     def get_indicator_summary(self, df: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """Get summary of indicators for a specific symbol"""

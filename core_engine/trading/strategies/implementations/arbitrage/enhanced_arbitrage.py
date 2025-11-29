@@ -81,6 +81,8 @@ class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
         # Strategy-specific state
         self.market_data: Dict[str, pd.DataFrame] = {}
         self.price_data: Dict[str, float] = {}
+        # Note: arbitrage_opportunities tracks detected opportunities, not positions
+        # Position tracking should use PositionBook (SSOT) and Risk Manager
         self.arbitrage_opportunities: Dict[str, Dict[str, Any]] = {}
         
         # Performance tracking

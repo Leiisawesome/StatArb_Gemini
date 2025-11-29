@@ -88,13 +88,24 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         self.indicators: Dict[str, Dict[str, pd.Series]] = {}
         self.momentum_data: Dict[str, Dict[str, float]] = {}
         
-        # ===== Enhanced position tracking (Phase 2 - CLEANED in Phase 2.5) =====
-        self.position_tracker: Dict[str, Dict[str, Any]] = {}
-        self._pos_lock = asyncio.Lock()  # FIXED: LOW #13 - Async concurrency control
+        # ========================================
+        # DEPRECATED: Position Tracking Fields
+        # ========================================
+        # position_tracker is DEPRECATED. Position tracking should be handled by
+        # PositionBook (SSOT) and Risk Manager, not by strategies.
+        # 
+        # Migration path:
+        # - Use self._position_book.get_position(symbol) for read-only queries
+        # - Use self._has_position(symbol) helper method
+        # - Let Risk Manager handle trailing stops and high water marks
+        # 
+        # This field is kept for backward compatibility only.
+        self.position_tracker: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
+        self._pos_lock = asyncio.Lock()  # DEPRECATED: Used with position_tracker
         """
-        Enhanced position tracking with bar timestamps and high water marks
+        DEPRECATED: Enhanced position tracking with bar timestamps and high water marks
         
-        Structure:
+        This should be migrated to PositionBook (SSOT). Structure:
         {
             'SYMBOL': {
                 'direction': 1 or -1,  # 1=LONG, -1=SHORT
