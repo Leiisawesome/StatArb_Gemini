@@ -58,6 +58,7 @@ def sample_trading_request() -> TradingDecisionRequest:
         quantity=100.0,
         expected_return=0.05,
         confidence=0.8,
+        current_price=150.0,  # Required for position limit checks
         market_regime="normal_volatility",
         regime_confidence=0.9,
         urgency=ExecutionUrgency.NORMAL
@@ -254,18 +255,19 @@ class TestCentralRiskManager:
     # POSITION MANAGEMENT TESTS
     # ========================================
     
-    def test_position_tracking(self, risk_manager):
+    @pytest.mark.asyncio
+    async def test_position_tracking(self, risk_manager):
         """Test position tracking functionality"""
         
         # Test initial state
         assert risk_manager.get_current_position("AAPL") == 0.0
         
         # Test position update
-        risk_manager.update_position("AAPL", "buy", 100.0, 150.0)
+        await risk_manager.update_position("AAPL", "buy", 100.0, 150.0)
         assert risk_manager.get_current_position("AAPL") == 100.0
         
         # Test sell position
-        risk_manager.update_position("AAPL", "sell", 50.0, 155.0)
+        await risk_manager.update_position("AAPL", "sell", 50.0, 155.0)
         assert risk_manager.get_current_position("AAPL") == 50.0
         
         # Test get all positions
@@ -566,6 +568,7 @@ class TestCentralRiskManagerIntegration:
             side="buy",
             quantity=100.0,
             confidence=0.8,
+            current_price=150.0,
             market_regime="normal_volatility"
         )
         

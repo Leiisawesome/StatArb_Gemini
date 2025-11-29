@@ -6,23 +6,11 @@ Multi-strategy coordination and management components.
 
 Author: StatArb_Gemini Architecture (Phase 4)
 Date: October 23, 2025
-Version: 2.0.0
-"""
+Version: 2.1.0
 
-# === POSITION SIZING (Single Source of Truth) ===
-from .position_sizing import (
-    # Pure functions
-    calculate_position_size,
-    calculate_fixed_fraction_size,
-    calculate_volatility_adjusted_size,
-    calculate_kelly_size,
-    calculate_atr_based_size,
-    calculate_signal_weighted_size,
-    # Class-based
-    PositionSizer,
-    SizingConfig,
-    SizingMethod
-)
+Note: Position sizing has been moved to Risk Manager (core_engine/risk/).
+      Strategies should only generate signals, not size positions.
+"""
 
 # Strategy Management
 from .manager import StrategyManager
@@ -50,17 +38,6 @@ from .implementations.volatility.enhanced_volatility import EnhancedVolatilitySt
 from .implementations.arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy
 
 __all__ = [
-    # Position Sizing (Single Source of Truth)
-    'calculate_position_size',
-    'calculate_fixed_fraction_size',
-    'calculate_volatility_adjusted_size',
-    'calculate_kelly_size',
-    'calculate_atr_based_size',
-    'calculate_signal_weighted_size',
-    'PositionSizer',
-    'SizingConfig',
-    'SizingMethod',
-    
     # Core Management
     'StrategyManager',
     'EnhancedBaseStrategy',
@@ -85,4 +62,4 @@ __all__ = [
     'EnhancedArbitrageStrategy',
 ]
 
-__version__ = '2.0.0'
+__version__ = '2.1.0'

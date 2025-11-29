@@ -235,8 +235,8 @@ class TestStrategyEdgeCases:
         await strategy.initialize()
         await strategy.start()
         
-        # Empty dataframe
-        empty_data = pd.DataFrame()
+        # Empty dataframe wrapped in Dict (enriched_data format)
+        empty_data = {'EMPTY': pd.DataFrame()}
         
         # Should not crash
         signals = await strategy.generate_signals(empty_data)
@@ -253,8 +253,9 @@ class TestStrategyEdgeCases:
         await strategy.initialize()
         await strategy.start()
         
-        # Only 10 days of data (less than lookback)
-        small_data = StrategyTestFixtures.create_mock_market_data(days=10)
+        # Only 10 days of data (less than lookback), wrapped in Dict
+        small_df = StrategyTestFixtures.create_mock_market_data(days=10)
+        small_data = {'AAPL': small_df}
         
         # Should handle gracefully
         signals = await strategy.generate_signals(small_data)

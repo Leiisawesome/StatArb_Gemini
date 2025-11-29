@@ -474,23 +474,37 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         - Let Risk Manager handle position sizing, stops, and targets
         """
     
-    @abstractmethod
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
         """
         DEPRECATED: Position sizing should be handled by Risk Manager.
         
-        This method is deprecated. Position sizing is the responsibility
-        of the Risk Manager, not the strategy. The Risk Manager uses
-        PositionBook (SSOT) for position state and applies sizing rules.
+        ⚠️  This method is DEPRECATED and should NOT be used.
         
-        For backward compatibility, subclasses may still implement this method,
-        but new strategies should delegate sizing to Risk Manager.
+        Position sizing is the responsibility of the Risk Manager,
+        not the strategy. The Risk Manager uses PositionBook (SSOT)
+        for position state and applies sizing rules.
         
-        Migration path:
-        - Set signal.target_weight or signal.target_quantity in generate_signals()
-        - Let Risk Manager apply position sizing rules
-        - Remove internal position size calculations
+        This default implementation returns 0.0 (no position).
+        Subclasses may override for backward compatibility, but
+        new strategies should NOT implement position sizing.
+        
+        Correct approach:
+        - Set signal.confidence in generate_signals()
+        - Let Risk Manager apply position sizing via TradingDecisionRequest
+        - See core_engine/risk/ for proper sizing integration
+        
+        Returns:
+            float: Always returns 0.0 - sizing delegated to Risk Manager
         """
+        import warnings
+        warnings.warn(
+            f"Strategy.calculate_position_size() is deprecated. "
+            f"Position sizing should be handled by Risk Manager. "
+            f"This method returns 0.0 - use Risk Manager for actual sizing.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return 0.0
     
     # ========================================
     # STRATEGY LIFECYCLE HOOKS (OVERRIDE AS NEEDED)

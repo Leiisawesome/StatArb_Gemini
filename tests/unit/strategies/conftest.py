@@ -109,20 +109,35 @@ class StrategyTestFixtures:
 
 @pytest.fixture
 def market_data_uptrend():
-    """Fixture for uptrending market data"""
-    return StrategyTestFixtures.create_mock_market_data(trend='uptrend')
+    """Fixture for uptrending market data as Dict[str, DataFrame]
+    
+    Strategies expect enriched_data in Dict format: {symbol: DataFrame}
+    """
+    df = StrategyTestFixtures.create_mock_market_data(trend='uptrend')
+    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
+    return {symbol: df}
 
 
 @pytest.fixture
 def market_data_downtrend():
-    """Fixture for downtrending market data"""
-    return StrategyTestFixtures.create_mock_market_data(trend='downtrend')
+    """Fixture for downtrending market data as Dict[str, DataFrame]
+    
+    Strategies expect enriched_data in Dict format: {symbol: DataFrame}
+    """
+    df = StrategyTestFixtures.create_mock_market_data(trend='downtrend')
+    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
+    return {symbol: df}
 
 
 @pytest.fixture
 def market_data_sideways():
-    """Fixture for sideways/range-bound market data"""
-    return StrategyTestFixtures.create_mock_market_data(trend='sideways')
+    """Fixture for sideways/range-bound market data as Dict[str, DataFrame]
+    
+    Strategies expect enriched_data in Dict format: {symbol: DataFrame}
+    """
+    df = StrategyTestFixtures.create_mock_market_data(trend='sideways')
+    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
+    return {symbol: df}
 
 
 @pytest.fixture

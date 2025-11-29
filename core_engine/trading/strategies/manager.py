@@ -61,7 +61,6 @@ from .multi_strategy_coordinator import (
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration (Rule 1, Rule 2)
 from ...system.interfaces import ISystemComponent, IRegimeAware
-from core_engine.exceptions import ConfigurationRequiredError
 
 # Import TradingDecisionRequest for Phase 6→7 conversion (Rule 4)
 from ...system.central_risk_manager import TradingDecisionRequest, TradingDecisionType

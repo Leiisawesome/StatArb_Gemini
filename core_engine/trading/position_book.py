@@ -452,7 +452,9 @@ class PositionBook(IPositionBook):
     def __init__(
         self,
         initial_cash: Union[Decimal, float] = Decimal('100000'),
-        book_id: str = ""
+        book_id: str = "",
+        default_commission_per_share: Union[Decimal, float] = Decimal('0.005'),
+        default_slippage_bps: Union[Decimal, float] = Decimal('0.5')
     ):
         """
         Initialize PositionBook.
@@ -460,10 +462,16 @@ class PositionBook(IPositionBook):
         Args:
             initial_cash: Starting cash balance
             book_id: Optional identifier for this book
+            default_commission_per_share: Default commission per share for fills without explicit commission
+            default_slippage_bps: Default slippage in basis points for fills without explicit slippage
         """
         self._book_id = book_id or str(uuid.uuid4())
         self._initial_capital = Decimal(str(initial_cash))
         self._cash_balance = Decimal(str(initial_cash))
+        
+        # Default costs for fills
+        self._default_commission_per_share = Decimal(str(default_commission_per_share))
+        self._default_slippage_bps = Decimal(str(default_slippage_bps))
         
         # Position storage
         self._positions: Dict[str, BookPosition] = {}
@@ -482,7 +490,8 @@ class PositionBook(IPositionBook):
         # Event subscribers
         self._subscribers: List[Callable[[PositionUpdate], None]] = []
         
-        logger.info(f"PositionBook initialized: id={self._book_id}, initial_cash=${initial_cash:,.2f}")
+        logger.info(f"PositionBook initialized: id={self._book_id}, initial_cash=${initial_cash:,.2f}, "
+                   f"commission=${self._default_commission_per_share}/share, slippage={self._default_slippage_bps}bps")
     
     # =========================================================================
     # PROPERTIES

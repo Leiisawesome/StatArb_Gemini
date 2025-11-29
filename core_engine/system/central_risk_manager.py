@@ -33,7 +33,6 @@ from .unified_execution_engine import (
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
 from .interfaces import ISystemComponent
-from core_engine.exceptions import ConfigurationRequiredError
 from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
@@ -750,12 +749,12 @@ class CentralRiskManager(ISystemComponent):
         
         if components:
             self.risk_callbacks.extend(components)
-            self.logger.info(f"✅ Risk callbacks registered for {len(components)} components")
+            logger.info(f"✅ Risk callbacks registered for {len(components)} components")
     
     def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
         """Callback method for risk limit breaches"""
         try:
-            self.logger.warning(f"🚨 Risk limit breach detected: {risk_data}")
+            logger.warning(f"🚨 Risk limit breach detected: {risk_data}")
             
             # Notify all registered components
             if hasattr(self, 'risk_callbacks'):
@@ -764,18 +763,18 @@ class CentralRiskManager(ISystemComponent):
                         if hasattr(callback, 'on_risk_alert'):
                             callback.on_risk_alert(risk_data)
                     except Exception as e:
-                        self.logger.error(f"Risk callback notification failed: {e}")
+                        logger.error(f"Risk callback notification failed: {e}")
             
             return {'risk_breach_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
             
         except Exception as e:
-            self.logger.error(f"Risk limit breach callback failed: {e}")
+            logger.error(f"Risk limit breach callback failed: {e}")
             return {'error': str(e)}
     
     def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
         """Callback method for emergency shutdown"""
         try:
-            self.logger.critical(f"🚨 Emergency shutdown callback: {shutdown_reason}")
+            logger.critical(f"🚨 Emergency shutdown callback: {shutdown_reason}")
             
             # Trigger emergency shutdown
             self.emergency_shutdown()
@@ -787,12 +786,12 @@ class CentralRiskManager(ISystemComponent):
                         if hasattr(callback, 'on_emergency_shutdown'):
                             callback.on_emergency_shutdown(shutdown_reason)
                     except Exception as e:
-                        self.logger.error(f"Emergency shutdown callback failed: {e}")
+                        logger.error(f"Emergency shutdown callback failed: {e}")
             
             return {'emergency_shutdown_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
             
         except Exception as e:
-            self.logger.error(f"Emergency shutdown callback failed: {e}")
+            logger.error(f"Emergency shutdown callback failed: {e}")
             return {'error': str(e)}
     
     # ========================================
@@ -805,7 +804,7 @@ class CentralRiskManager(ISystemComponent):
             self.event_subscribers = []
         
         self.event_subscribers.append(subscriber)
-        self.logger.info(f"✅ Event subscriber registered with RiskManager: {type(subscriber).__name__}")
+        logger.info(f"✅ Event subscriber registered with RiskManager: {type(subscriber).__name__}")
     
     def notify_regime_change(self, regime_analysis):
         """Notify subscribers of regime changes (for risk management)"""
@@ -816,12 +815,12 @@ class CentralRiskManager(ISystemComponent):
                         if hasattr(subscriber, 'on_regime_change'):
                             subscriber.on_regime_change(regime_analysis)
                     except Exception as e:
-                        self.logger.error(f"Event notification failed: {e}")
+                        logger.error(f"Event notification failed: {e}")
             
             return {'regime_change_notified': True, 'subscribers_notified': len(getattr(self, 'event_subscribers', []))}
             
         except Exception as e:
-            self.logger.error(f"Regime change notification failed: {e}")
+            logger.error(f"Regime change notification failed: {e}")
             return {'error': str(e)}
     
     # ========================================
@@ -832,12 +831,12 @@ class CentralRiskManager(ISystemComponent):
         """Set analytics callback"""
         self.analytics_callback = analytics_callback
         if analytics_callback:
-            self.logger.info("✅ Analytics callback registered with RiskManager")
+            logger.info("✅ Analytics callback registered with RiskManager")
     
     def on_performance_update(self, performance_data: Dict[str, Any]):
         """Callback method for performance updates"""
         try:
-            self.logger.info(f"📈 Risk performance update: {performance_data.get('component', 'unknown')}")
+            logger.info(f"📈 Risk performance update: {performance_data.get('component', 'unknown')}")
             
             # Process performance data from risk perspective
             if hasattr(self, 'analytics_callback') and self.analytics_callback:
@@ -846,13 +845,13 @@ class CentralRiskManager(ISystemComponent):
             return {'performance_update_processed': True}
             
         except Exception as e:
-            self.logger.error(f"Performance update callback failed: {e}")
+            logger.error(f"Performance update callback failed: {e}")
             return {'error': str(e)}
     
     def notify_analytics(self, analytics_data: Dict[str, Any]):
         """Notify analytics data"""
         try:
-            self.logger.info("📊 Risk analytics notification")
+            logger.info("📊 Risk analytics notification")
             
             # Process analytics data from risk perspective
             if hasattr(self, 'analytics_callback') and self.analytics_callback:
@@ -861,7 +860,7 @@ class CentralRiskManager(ISystemComponent):
             return {'analytics_notification_processed': True}
             
         except Exception as e:
-            self.logger.error(f"Analytics notification failed: {e}")
+            logger.error(f"Analytics notification failed: {e}")
             return {'error': str(e)}
     
     # ========================================
@@ -878,14 +877,14 @@ class CentralRiskManager(ISystemComponent):
             ]
             
             if operation in authorized_operations:
-                self.logger.info(f"✅ Risk operation authorized: {operation}")
+                logger.info(f"✅ Risk operation authorized: {operation}")
                 return True
             else:
-                self.logger.warning(f"❌ Risk operation not authorized: {operation}")
+                logger.warning(f"❌ Risk operation not authorized: {operation}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Authorization failed: {e}")
+            logger.error(f"Authorization failed: {e}")
             return False
     
     def check_authority_level(self, required_level: str) -> bool:
@@ -907,14 +906,14 @@ class CentralRiskManager(ISystemComponent):
             authorized = component_level >= required_level_num
             
             if authorized:
-                self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
+                logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
             else:
-                self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
+                logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
             
             return authorized
             
         except Exception as e:
-            self.logger.error(f"Authority level check failed: {e}")
+            logger.error(f"Authority level check failed: {e}")
             return False
     
     def validate_permissions(self, permission: str, context: Dict[str, Any] = None) -> bool:
@@ -927,14 +926,14 @@ class CentralRiskManager(ISystemComponent):
             ]
             
             if permission in allowed_permissions:
-                self.logger.info(f"✅ Permission validated: {permission}")
+                logger.info(f"✅ Permission validated: {permission}")
                 return True
             else:
-                self.logger.warning(f"❌ Permission denied: {permission}")
+                logger.warning(f"❌ Permission denied: {permission}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Permission validation failed: {e}")
+            logger.error(f"Permission validation failed: {e}")
             return False
     
     # ========================================
@@ -945,20 +944,20 @@ class CentralRiskManager(ISystemComponent):
         """Log authorization events for audit trail"""
         try:
             # In real implementation, this would log to audit system
-            self.logger.info(f"📋 Authorization logged: {authorization_event.get('operation', 'unknown')}")
+            logger.info(f"📋 Authorization logged: {authorization_event.get('operation', 'unknown')}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Authorization logging failed: {e}")
+            logger.error(f"Authorization logging failed: {e}")
             return False
     
     def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
         """Audit specific authorization"""
-        if not self.audit_trail:
+        if not self.authorization_audit:
             raise ConfigurationRequiredError("Audit trail not available - cannot perform authorization audit")
         
         # Find authorization in audit trail
-        for entry in self.audit_trail:
+        for entry in self.authorization_audit:
             if entry.get('authorization_id') == authorization_id:
                 return {
                     'authorization_id': authorization_id,
@@ -2666,7 +2665,8 @@ class CentralRiskManager(ISystemComponent):
         """
         try:
             value = position_request.get('value', 0)
-            position_request.get('quantity', 0)
+            quantity = position_request.get('quantity', 0)  # Used for future enhancements
+            _ = quantity  # Suppress unused variable warning
             
             # Simple risk scoring based on position size
             risk_score = min(value / 1000000.0, 1.0)  # Scale to 0-1

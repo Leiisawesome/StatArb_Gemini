@@ -196,17 +196,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.orchestrator: Optional[Any] = None
         
         # Load configurations
-        if True:  # Config is always available now
-            self.data_config = data_config or DataConfig()
-            self.indicator_config = indicator_config or IndicatorConfig()
-            self.feature_config = feature_config or FeatureConfig()
-            self.signal_config = signal_config or SignalConfig()
-            self.liquidity_config = liquidity_config or {}
-        else:
-            self.data_config = data_config or {}
-            self.indicator_config = indicator_config or {}
-            self.feature_config = feature_config or {}
-            self.signal_config = signal_config or {}
+        self.data_config = data_config or DataConfig()
+        self.indicator_config = indicator_config or IndicatorConfig()
+        self.feature_config = feature_config or FeatureConfig()
+        self.signal_config = signal_config or SignalConfig()
+        self.liquidity_config = liquidity_config or {}
         
         # Pipeline components (initialized in initialize())
         self.data_manager: Optional[Any] = None
@@ -223,7 +217,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         # Processing cache
         self.enriched_data_cache: Dict[str, EnrichedMarketData] = {}
-        self.cache_ttl = 300  # 5 minutes
+        self.CACHE_TTL_SECONDS = 300  # 5 minutes
         self.last_cache_clear = datetime.now()
         
         # Performance metrics
@@ -691,8 +685,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         outliers = ((df[col] < (q1 - 3 * iqr)) | (df[col] > (q3 + 3 * iqr))).sum()
                         if outliers > 0:
                             metrics['outliers'][col] = int(outliers)
-                except Exception:
-                    pass  # Skip if calculation fails
+                except Exception as e:
+                    logger.debug(f"Outlier calculation failed for {col}: {e}")
         
         # Calculate quality score (0.0 to 1.0)
         quality_score = 1.0
@@ -824,6 +818,14 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
                 
                 try:
+                    # Initialize processing variables to avoid undefined variable risk
+                    indicators_df = pd.DataFrame()
+                    features_df = pd.DataFrame()
+                    signals_df = pd.DataFrame()
+                    phase2_time = 0.0
+                    phase3_time = 0.0
+                    phase4_time = 0.0
+                    
                     # PHASE 0: Process regime FIRST (store bar-by-bar regime sequence as "beacon light")
                     # Regime acts as metadata reference, not as segment boundaries
                     dominant_regime_analysis = None
@@ -858,19 +860,22 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                 )
                                 
                                 # Process segments with config adaptation per segment
+                                # Track time for segment processing
+                                segment_start = datetime.now()
                                 indicators_df, features_df, signals_df = await self._process_regime_segments(
                                     symbol_data=symbol_data,
                                     regime_segments=regime_segments,
                                     symbol=symbol
                                 )
+                                segment_time = (datetime.now() - segment_start).total_seconds()
                                 
                                 # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
                                 signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                                 
-                                # Track processing times (approximate - distributed across segments)
-                                phase2_time = 0.1  # Placeholder - actual time distributed across segments
-                                phase3_time = 0.1
-                                phase4_time = 0.1
+                                # Distribute time across stages (approximate)
+                                phase2_time = segment_time * 0.4
+                                phase3_time = segment_time * 0.4
+                                phase4_time = segment_time * 0.2
                             else:
                                 # Single regime - adapt config once, then process normally
                                 logger.debug(f"   📊 {symbol}: Single regime - adapting config once")
@@ -896,79 +901,28 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                                             f"   📊 Config adapted for regime: {regime_analysis.primary_regime.value} "
                                             f"(single regime, {len(regime_sequence)} bars)"
                                         )
-                                if liquidity_context_first:
-                                    if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
-                                        self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
-                                    if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
-                                        self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
                                 
-                                # Standard processing (entire DataFrame at once)
-                                phase2_start = datetime.now()
-                                indicators_df = await self._calculate_indicators(symbol_data)
-                                phase2_time = (datetime.now() - phase2_start).total_seconds()
-                                
-                                phase3_start = datetime.now()
-                                features_df = await self._engineer_features(indicators_df)
-                                phase3_time = (datetime.now() - phase3_start).total_seconds()
-                                
-                                features_df = self._merge_liquidity_features(features_df, symbol)
-                                
-                                phase4_start = datetime.now()
-                                signals_df = await self._generate_signals(features_df)
-                                phase4_time = (datetime.now() - phase4_start).total_seconds()
+                                # Use helper method for standard processing
+                                indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
+                                    await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
                                 
                                 # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
                                 signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                         else:
                             logger.debug(f"   ⚠️  {symbol}: No regime sequence available - using standard processing")
                             
-                            # No regime data - standard processing without adaptation
-                            if liquidity_context_first:
-                                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
-                                    self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
-                                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
-                                    self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
-                            phase2_start = datetime.now()
-                            indicators_df = await self._calculate_indicators(symbol_data)
-                            phase2_time = (datetime.now() - phase2_start).total_seconds()
-                            
-                            phase3_start = datetime.now()
-                            features_df = await self._engineer_features(indicators_df)
-                            phase3_time = (datetime.now() - phase3_start).total_seconds()
-                            
-                            features_df = self._merge_liquidity_features(features_df, symbol)
-                            
-                            phase4_start = datetime.now()
-                            signals_df = await self._generate_signals(features_df)
-                            phase4_time = (datetime.now() - phase4_start).total_seconds()
-                            
-                            # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
-                            if regime_sequence:
-                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
+                            # No regime data - use helper method for standard processing
+                            indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
+                                await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
                     
                     # If regime_engine not available, use standard processing
                     if not self.regime_engine:
-                        if liquidity_context_first:
-                            if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
-                                self.indicators_engine.adapt_to_liquidity(liquidity_context_first)
-                            if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
-                                self.feature_engineer.adapt_to_liquidity(liquidity_context_first)
-                        phase2_start = datetime.now()
-                        indicators_df = await self._calculate_indicators(symbol_data)
-                        phase2_time = (datetime.now() - phase2_start).total_seconds()
-                        
-                        phase3_start = datetime.now()
-                        features_df = await self._engineer_features(indicators_df)
-                        phase3_time = (datetime.now() - phase3_start).total_seconds()
-                        
-                        features_df = self._merge_liquidity_features(features_df, symbol)
-                        
-                        phase4_start = datetime.now()
-                        signals_df = await self._generate_signals(features_df)
-                        phase4_time = (datetime.now() - phase4_start).total_seconds()
+                        indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
+                            await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
                     
                     # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness (if regime_sequence available)
-                    if regime_sequence:
+                    # Note: Only add if not already added in regime processing blocks above
+                    if regime_sequence and 'primary_regime' not in signals_df.columns:
                         signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
                     
                     self.processing_times['indicators'].append(phase2_time)
@@ -984,9 +938,12 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         features=features_df,
                         signals=signals_df,
                         processing_timestamp=datetime.now(),
-            regime_context=self.current_regime_context,
-            liquidity_context=self._get_latest_liquidity_context(symbol)
+                        regime_context=self.current_regime_context,
+                        liquidity_context=self._get_latest_liquidity_context(symbol)
                     )
+                    
+                    # Populate cache for future retrieval
+                    self.enriched_data_cache[symbol] = enriched_data[symbol]
                     
                     # Validate enrichment
                     if not enriched_data[symbol].validate_enrichment():
@@ -1020,6 +977,52 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"❌ Pipeline processing failed: {e}", exc_info=True)
             return {}
+    
+    async def _process_pipeline_stages(
+        self,
+        symbol_data: pd.DataFrame,
+        symbol: str,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, float, float, float]:
+        """
+        Process data through pipeline stages 2-4 (Indicators → Features → Signals)
+        
+        This helper extracts the common processing logic to avoid code duplication.
+        
+        Args:
+            symbol_data: Raw OHLCV DataFrame (already sorted and indexed)
+            symbol: Trading symbol
+            liquidity_context: Optional liquidity context for adaptation
+            
+        Returns:
+            Tuple of (indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time)
+        """
+        # Adapt to liquidity if available
+        if liquidity_context:
+            if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
+                self.indicators_engine.adapt_to_liquidity(liquidity_context)
+            if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
+                self.feature_engineer.adapt_to_liquidity(liquidity_context)
+        
+        # Phase 2: Calculate indicators
+        phase2_start = datetime.now()
+        indicators_df = await self._calculate_indicators(symbol_data)
+        phase2_time = (datetime.now() - phase2_start).total_seconds()
+        
+        # Phase 3: Engineer features
+        phase3_start = datetime.now()
+        features_df = await self._engineer_features(indicators_df)
+        phase3_time = (datetime.now() - phase3_start).total_seconds()
+        
+        # Merge liquidity features
+        features_df = self._merge_liquidity_features(features_df, symbol)
+        
+        # Phase 4: Generate signals
+        phase4_start = datetime.now()
+        signals_df = await self._generate_signals(features_df)
+        phase4_time = (datetime.now() - phase4_start).total_seconds()
+        
+        return indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time
     
     # ================================================================
     # Internal Pipeline Stages
@@ -1473,11 +1476,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             - regime_confidence: float (0-1, confidence in regime detection)
         """
         # DEBUG Phase 4C: Log regime sequence info
-        logger.info(f"🔍 Phase 4C: _add_regime_columns called for {symbol}")
-        logger.info(f"   Regime sequence length: {len(regime_sequence) if regime_sequence else 0}")
+        logger.debug(f"Phase 4C: _add_regime_columns called for {symbol}")
+        logger.debug(f"   Regime sequence length: {len(regime_sequence) if regime_sequence else 0}")
         if regime_sequence:
-            logger.info(f"   First regime: {regime_sequence[0] if regime_sequence else 'N/A'}")
-            logger.info(f"   Last regime: {regime_sequence[-1] if regime_sequence else 'N/A'}")
+            logger.debug(f"   First regime: {regime_sequence[0] if regime_sequence else 'N/A'}")
+            logger.debug(f"   Last regime: {regime_sequence[-1] if regime_sequence else 'N/A'}")
         
         if signals_df.empty or not regime_sequence:
             # Add default columns if no regime data
@@ -1493,10 +1496,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             regime_df = pd.DataFrame(regime_sequence)
             
             # DEBUG Phase 4C: Log regime_df columns
-            logger.info(f"🔍 Phase 4C: Regime DataFrame columns: {list(regime_df.columns)}")
-            logger.info(f"   Regime DataFrame shape: {regime_df.shape}")
+            logger.debug(f"Phase 4C: Regime DataFrame columns: {list(regime_df.columns)}")
+            logger.debug(f"   Regime DataFrame shape: {regime_df.shape}")
             if len(regime_df) > 0:
-                logger.info(f"   Sample regime entry: {regime_df.iloc[0].to_dict()}")
+                logger.debug(f"   Sample regime entry: {regime_df.iloc[0].to_dict()}")
             
             if 'timestamp' not in regime_df.columns:
                 logger.warning(f"⚠️  {symbol}: No timestamp in regime sequence, cannot add regime columns")

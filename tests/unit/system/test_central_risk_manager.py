@@ -90,6 +90,7 @@ def buy_request_with_cash():
         market_regime="low_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.10,
+        current_price=100.0,  # Required for risk calculation
         urgency=ExecutionUrgency.NORMAL,
         max_execution_time=3600,
         requesting_component="test",
@@ -115,6 +116,7 @@ def buy_request_insufficient_cash():
         market_regime="low_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.10,
+        current_price=100.0,  # Required for risk calculation
         metadata={
             'available_cash': 5000.0,  # Only $5k available (need $10k)
             'price': 100.0
@@ -136,6 +138,7 @@ def sell_request_with_position():
         market_regime="low_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.10,
+        current_price=100.0,  # Required for risk calculation
         metadata={
             'price': 100.0
         }
@@ -156,6 +159,7 @@ def sell_request_no_position():
         market_regime="low_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.10,
+        current_price=100.0,  # Required for risk calculation
         metadata={
             'price': 100.0
         }
@@ -176,6 +180,7 @@ def low_confidence_request():
         market_regime="low_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.10,
+        current_price=100.0,  # Required for risk calculation
         metadata={
             'available_cash': 950000.0,
             'price': 100.0
@@ -197,6 +202,7 @@ def high_volatility_request():
         market_regime="high_volatility",
         regime_confidence=0.9,
         volatility_estimate=0.35,  # High volatility
+        current_price=100.0,  # Required for risk calculation
         metadata={
             'available_cash': 950000.0,
             'price': 100.0
@@ -363,6 +369,7 @@ class TestSignalConfidence:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             portfolio_impact=0.005,  # Low impact
             metadata={
                 'available_cash': 950000.0,
@@ -390,6 +397,7 @@ class TestSignalConfidence:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             metadata={
                 'available_cash': 950000.0,
                 'price': 100.0
@@ -435,6 +443,7 @@ class TestRiskAssessment:
             symbol="AAPL",
             side="buy",
             quantity=20000.0,  # Huge position (20,000 * $100 = $2M > 10% of $1M portfolio)
+            current_price=100.0,  # Required for risk calculation
             metadata={'price': 100.0}
         )
         
@@ -489,6 +498,7 @@ class TestQuantityCalculation:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             metadata={
                 'available_cash': 15000.0,  # Only afford 150 shares
                 'price': 100.0
@@ -523,6 +533,7 @@ class TestQuantityCalculation:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             metadata={'price': 100.0}
         )
         
@@ -588,19 +599,21 @@ class TestQuantityCalculation:
 class TestPositionTracking:
     """Test position tracking and monitoring"""
     
-    def test_update_position_buy(self, initialized_risk_manager):
+    @pytest.mark.asyncio
+    async def test_update_position_buy(self, initialized_risk_manager):
         """Test position update for BUY"""
         initialized_risk_manager.current_positions["AAPL"] = 50.0
         
-        initialized_risk_manager.update_position("AAPL", "buy", 25.0, 100.0)
+        await initialized_risk_manager.update_position("AAPL", "buy", 25.0, 100.0)
         
         assert initialized_risk_manager.current_positions["AAPL"] == 75.0
     
-    def test_update_position_sell(self, initialized_risk_manager):
+    @pytest.mark.asyncio
+    async def test_update_position_sell(self, initialized_risk_manager):
         """Test position update for SELL"""
         initialized_risk_manager.current_positions["AAPL"] = 100.0
         
-        initialized_risk_manager.update_position("AAPL", "sell", 30.0, 100.0)
+        await initialized_risk_manager.update_position("AAPL", "sell", 30.0, 100.0)
         
         assert initialized_risk_manager.current_positions["AAPL"] == 70.0
     
@@ -771,6 +784,7 @@ class TestIntegrationScenarios:
                 market_regime="low_volatility",
                 regime_confidence=0.9,
                 volatility_estimate=0.10,
+                current_price=100.0,  # Required for risk calculation
                 metadata={'available_cash': 950000.0, 'price': 100.0}
             )
             for i in range(5)
@@ -802,11 +816,12 @@ class TestIntegrationScenarios:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             metadata={'available_cash': 950000.0, 'price': 100.0}
         )
         
         auth1 = await initialized_risk_manager.authorize_trading_decision(request1)
-        initialized_risk_manager.update_position("AAPL", "buy", auth1.authorized_quantity, 100.0)
+        await initialized_risk_manager.update_position("AAPL", "buy", auth1.authorized_quantity, 100.0)
         
         # Trade 2: Buy another 50 shares
         request2 = TradingDecisionRequest(
@@ -819,11 +834,12 @@ class TestIntegrationScenarios:
             market_regime="low_volatility",
             regime_confidence=0.9,
             volatility_estimate=0.10,
+            current_price=100.0,  # Required for risk calculation
             metadata={'available_cash': 940000.0, 'price': 100.0}
         )
         
         auth2 = await initialized_risk_manager.authorize_trading_decision(request2)
-        initialized_risk_manager.update_position("AAPL", "buy", auth2.authorized_quantity, 100.0)
+        await initialized_risk_manager.update_position("AAPL", "buy", auth2.authorized_quantity, 100.0)
         
         # Verify total position
         total_position = initialized_risk_manager.get_current_position("AAPL")

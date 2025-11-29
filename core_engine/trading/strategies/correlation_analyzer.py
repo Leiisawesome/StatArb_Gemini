@@ -33,7 +33,7 @@ Version: 1.0
 import logging
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 from collections import defaultdict, deque
@@ -141,6 +141,82 @@ class StrategyCorrelationAnalyzer:
         self.logger.info(f"   Correlation Window: {self.correlation_window_days} days")
         self.logger.info(f"   Analysis Frequency: {self.analysis_frequency_hours} hours")
         self.logger.info(f"   High Correlation Alert: >{self.moderate_threshold:.1%}")
+        
+        # Strategy returns storage (for update_strategy_returns compatibility)
+        self.strategy_returns: Dict[str, Any] = {}
+        
+        # Strategy metrics storage (for update_strategy_metrics compatibility)
+        self.strategy_metrics: Dict[str, Dict[str, Any]] = {}
+    
+    def update_strategy_returns(self, strategy_returns: Dict[str, Any]) -> None:
+        """
+        Batch update strategy returns from a dictionary
+        
+        This method provides backward compatibility with tests that expect
+        batch updates of strategy returns.
+        
+        Args:
+            strategy_returns: Dict mapping strategy_id to Series of returns
+                             Format: {'strategy_1': pd.Series, 'strategy_2': pd.Series, ...}
+        """
+        self.strategy_returns = strategy_returns.copy()
+        
+        # Also record individual returns for correlation analysis
+        for strategy_id, returns_series in strategy_returns.items():
+            if hasattr(returns_series, 'items'):
+                # It's a Series with index
+                for timestamp, return_value in returns_series.items():
+                    self.record_strategy_return(strategy_id, return_value, timestamp)
+            elif hasattr(returns_series, '__iter__'):
+                # It's an iterable of values
+                for return_value in returns_series:
+                    self.record_strategy_return(strategy_id, return_value)
+        
+        self.logger.info(f"📊 Updated returns for {len(strategy_returns)} strategies")
+    
+    def add_strategy_return(self, strategy_id: str, returns: Any) -> None:
+        """
+        Add returns for a single strategy
+        
+        Args:
+            strategy_id: Strategy identifier
+            returns: Series or array of returns
+        """
+        self.strategy_returns[strategy_id] = returns
+        
+        # Also record for correlation analysis
+        if hasattr(returns, 'items'):
+            for timestamp, return_value in returns.items():
+                self.record_strategy_return(strategy_id, return_value, timestamp)
+        elif hasattr(returns, '__iter__'):
+            for return_value in returns:
+                self.record_strategy_return(strategy_id, return_value)
+        
+        self.logger.debug(f"📝 Added returns for {strategy_id}")
+    
+    def remove_strategy(self, strategy_id: str) -> None:
+        """
+        Remove strategy from tracking
+        
+        Args:
+            strategy_id: Strategy identifier to remove
+        """
+        if strategy_id in self.strategy_returns:
+            del self.strategy_returns[strategy_id]
+        if strategy_id in self.returns_history:
+            del self.returns_history[strategy_id]
+        self.logger.info(f"🗑️  Removed strategy {strategy_id} from correlation tracking")
+    
+    def update_strategy_metrics(self, strategy_id: str, metrics: Dict[str, Any]) -> None:
+        """
+        Update performance metrics for a strategy
+        
+        Args:
+            strategy_id: Strategy identifier
+            metrics: Dict of performance metrics (e.g., sharpe_ratio, max_drawdown, etc.)
+        """
+        self.strategy_metrics[strategy_id] = metrics.copy()
+        self.logger.debug(f"📊 Updated metrics for {strategy_id}: {list(metrics.keys())}")
     
     def record_strategy_return(
         self,
@@ -162,6 +238,75 @@ class StrategyCorrelationAnalyzer:
         self.returns_history[strategy_id].append((timestamp, return_value))
         
         self.logger.debug(f"📝 Recorded return for {strategy_id}: {return_value:.4f}")
+    
+    def generate_diversification_report(self) -> DiversificationReport:
+        """
+        Generate diversification report (synchronous wrapper)
+        
+        Returns:
+            DiversificationReport with correlation analysis
+        """
+        import asyncio
+        
+        # Use existing strategy_returns if available, otherwise use returns_history
+        strategies = list(self.strategy_returns.keys()) or list(self.returns_history.keys())
+        strategy_count = len(strategies)
+        
+        if strategy_count < 2:
+            return DiversificationReport(
+                timestamp=datetime.now(),
+                diversification_score=100.0,  # Perfect diversification with <2 strategies
+                strategy_count=strategy_count,
+                recommendations=["Need at least 2 strategies for correlation analysis"]
+            )
+        
+        # Calculate diversification score based on strategy returns
+        diversification_score = self.calculate_diversification_score() if strategy_count >= 2 else 100.0
+        
+        return DiversificationReport(
+            timestamp=datetime.now(),
+            diversification_score=diversification_score,
+            strategy_count=strategy_count,
+            recommendations=self._generate_basic_recommendations(strategy_count)
+        )
+    
+    def _generate_basic_recommendations(self, strategy_count: int) -> List[str]:
+        """Generate basic recommendations based on strategy count"""
+        recommendations = []
+        if strategy_count < 3:
+            recommendations.append("Consider adding more strategies for better diversification")
+        return recommendations
+    
+    def calculate_diversification_score(self) -> float:
+        """
+        Calculate diversification score based on strategy returns correlation
+        
+        Returns:
+            Diversification score from 0 to 100 (higher = better diversification)
+        """
+        import pandas as pd
+        
+        # Get returns from strategy_returns if available
+        returns_data = {}
+        for strategy_id, returns in self.strategy_returns.items():
+            if hasattr(returns, '__len__') and len(returns) > 0:
+                returns_data[strategy_id] = returns
+        
+        if len(returns_data) < 2:
+            return 100.0  # Perfect diversification with <2 strategies
+        
+        try:
+            # Create DataFrame of returns
+            returns_df = pd.DataFrame(returns_data)
+            
+            # Calculate correlation matrix
+            corr_matrix = returns_df.corr().values
+            
+            # Use internal calculation method
+            return self._calculate_diversification_score(corr_matrix)
+        except Exception as e:
+            self.logger.warning(f"Could not calculate diversification score: {e}")
+            return 50.0  # Default moderate score on error
     
     async def analyze_strategy_correlations(self) -> DiversificationReport:
         """

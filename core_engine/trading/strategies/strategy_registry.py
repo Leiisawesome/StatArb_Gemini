@@ -22,13 +22,7 @@ import warnings
 from collections import deque
 
 # Import strategy components
-from .strategy_engine import BaseStrategy, StrategyConfig
-try:
-    from .strategy_manager import StrategyTemplate, StrategyDeployment
-except ImportError:
-    # Fallback definitions
-    StrategyTemplate = None
-    StrategyDeployment = None
+from .strategy_engine import BaseStrategy, StrategyConfig, StrategyType
 from .strategy_validator import ValidationResult, ValidationLevel, ValidationStatus, StrategyValidator
 
 # Import ISystemComponent for orchestrator integration
@@ -61,6 +55,121 @@ except ImportError:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# DEPLOYMENT AND TEMPLATE DATACLASSES
+# =============================================================================
+
+class DeploymentMode(Enum):
+    """Strategy deployment modes"""
+    PAPER_TRADING = "paper_trading"
+    LIVE_TRADING = "live_trading"
+    SIMULATION = "simulation"
+    BACKTESTING = "backtesting"
+    RESEARCH = "research"
+
+
+class ResourceType(Enum):
+    """Strategy resource types"""
+    CPU = "cpu"
+    MEMORY = "memory"
+    NETWORK = "network"
+    STORAGE = "storage"
+    DATA_FEEDS = "data_feeds"
+    COMPUTE = "compute"
+
+
+@dataclass
+class StrategyDependency:
+    """Strategy dependency specification"""
+    
+    dependency_id: str = ""
+    dependency_type: str = ""  # service, data, strategy, etc.
+    required: bool = True
+    version: Optional[str] = None
+    configuration: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StrategyResource:
+    """Strategy resource requirements"""
+    
+    resource_type: ResourceType = ResourceType.CPU
+    amount: float = 0.0
+    unit: str = ""
+    priority: int = 1  # 1=low, 5=high
+    shared: bool = True
+
+
+@dataclass
+class StrategyDeployment:
+    """Strategy deployment configuration"""
+    
+    deployment_id: str = ""
+    strategy_id: str = ""
+    deployment_mode: DeploymentMode = DeploymentMode.PAPER_TRADING
+    
+    # Environment settings
+    environment: str = "development"  # development, staging, production
+    instance_count: int = 1
+    auto_scale: bool = False
+    
+    # Resource allocation
+    resources: List[StrategyResource] = field(default_factory=list)
+    max_cpu_usage: float = 50.0  # Percentage
+    max_memory_usage: float = 512.0  # MB
+    
+    # Network settings
+    network_access: bool = True
+    api_endpoints: List[str] = field(default_factory=list)
+    
+    # Data access
+    data_sources: List[str] = field(default_factory=list)
+    data_permissions: Dict[str, str] = field(default_factory=dict)
+    
+    # Monitoring
+    enable_monitoring: bool = True
+    monitoring_interval: int = 60  # seconds
+    alert_thresholds: Dict[str, float] = field(default_factory=dict)
+    
+    # Deployment metadata
+    deployed_at: Optional[datetime] = None
+    deployed_by: str = ""
+    deployment_version: str = "1.0.0"
+
+
+@dataclass
+class StrategyTemplate:
+    """Strategy template for easy strategy creation"""
+    
+    template_id: str = ""
+    template_name: str = ""
+    template_type: StrategyType = StrategyType.CUSTOM
+    description: str = ""
+    
+    # Template configuration
+    default_config: StrategyConfig = field(default_factory=StrategyConfig)
+    parameter_schema: Dict[str, Any] = field(default_factory=dict)
+    required_parameters: List[str] = field(default_factory=list)
+    
+    # Code template
+    strategy_class: Optional[Type[BaseStrategy]] = None
+    code_template: str = ""
+    
+    # Dependencies and resources
+    dependencies: List[StrategyDependency] = field(default_factory=list)
+    resources: List[StrategyResource] = field(default_factory=list)
+    
+    # Metadata
+    created_at: datetime = field(default_factory=datetime.now)
+    created_by: str = ""
+    version: str = "1.0.0"
+    tags: List[str] = field(default_factory=list)
+
+
+# =============================================================================
+# REGISTRY ENUMS AND STATUS
+# =============================================================================
 
 class RegistryStatus(Enum):
     """Strategy registry status"""
