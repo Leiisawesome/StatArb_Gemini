@@ -80,6 +80,9 @@ class EnhancedSignal:
     strategy_id: str
     strategy_type: str
     price: Optional[float] = None
+    # CRITICAL FIX: Add position sizing parameters for percentage-based sizing
+    target_weight: Optional[float] = None  # Portfolio weight (e.g., 0.02 = 2%)
+    quantity_type: str = "ABSOLUTE"  # "PERCENTAGE" or "ABSOLUTE"
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def copy(self) -> 'EnhancedSignal':
@@ -94,6 +97,8 @@ class EnhancedSignal:
             strategy_id=self.strategy_id,
             strategy_type=self.strategy_type,
             price=self.price,
+            target_weight=self.target_weight,
+            quantity_type=self.quantity_type,
             metadata=self.metadata.copy()
         )
 
@@ -387,6 +392,9 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 strategy_id=strategy_id,
                 strategy_type=registration.strategy_type.value,
                 price=getattr(raw_signal, 'price', None),
+                # CRITICAL FIX: Preserve position sizing parameters
+                target_weight=getattr(raw_signal, 'target_weight', None),
+                quantity_type=getattr(raw_signal, 'quantity_type', 'ABSOLUTE'),
                 metadata={
                     'strategy_priority': registration.priority,
                     'strategy_allocation': registration.allocation_pct,

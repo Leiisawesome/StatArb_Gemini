@@ -1674,7 +1674,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             confidence=getattr(raw_signal, 'confidence', 0.5),
                             expected_return=getattr(raw_signal, 'expected_return', 0.0),
                             risk_score=getattr(raw_signal, 'risk_score', 0.5),
-                            quantity=getattr(raw_signal, 'quantity', None),
+                            quantity=getattr(raw_signal, 'target_quantity', None),  # FIXED: Use target_quantity from StrategySignal
+                            # CRITICAL FIX: Preserve position sizing parameters for percentage-based sizing
+                            target_weight=getattr(raw_signal, 'target_weight', None),  # Portfolio weight (e.g., 0.02 = 2%)
+                            quantity_type=getattr(raw_signal, 'quantity_type', 'ABSOLUTE'),  # "PERCENTAGE" or "ABSOLUTE"
                             target_price=getattr(raw_signal, 'target_price', None),
                             stop_loss=getattr(raw_signal, 'stop_loss', None),
                             take_profit=getattr(raw_signal, 'take_profit', None),
