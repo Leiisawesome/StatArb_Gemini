@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
+from collections import deque
 import warnings
 import threading
 import uuid
@@ -221,8 +222,14 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             }
         }
         
-        # Signal history for tracking
-        self.signal_history: List[TradingSignal] = []
+        # Signal history for tracking (bounded to prevent memory leak in long-running processes)
+        # P1 Performance Fix: Use deque with maxlen instead of unbounded list
+        self._signal_history: deque = deque(maxlen=10000)
+    
+    @property
+    def signal_history(self) -> List[TradingSignal]:
+        """Return signal history as list for backward compatibility."""
+        return list(self._signal_history)
         
         # Threading
         self._lock = threading.Lock()
@@ -474,7 +481,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             await self._stop_monitoring()
             
             # Clear signal history
-            self.signal_history.clear()
+            self._signal_history.clear()
             
             # Update status
             self.is_operational = False
@@ -695,8 +702,8 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
         # Filter and validate signals
         filtered_signals = self._filter_signals(all_signals, df)
         
-        # Store in history
-        self.signal_history.extend(filtered_signals)
+        # Store in history (using bounded deque)
+        self._signal_history.extend(filtered_signals)
         
         self.logger.info(f"Generated {len(filtered_signals)} signals from {len(all_signals)} raw signals")
         return filtered_signals
