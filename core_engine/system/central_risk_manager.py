@@ -472,14 +472,17 @@ class CentralRiskManager(ISystemComponent):
                 self.available_cash = float(position_book.get_cash_balance())
                 
                 if update.position is not None:
-                    self.current_positions[symbol] = float(update.position.quantity)
+                    new_qty = float(update.position.quantity)
+                    self.current_positions[symbol] = new_qty
+                    logger.debug(f"📘 current_positions[{symbol}] = {new_qty:.4f}")
                     if update.position.quantity != 0 and update.fill.price > 0:
                         self.current_prices[symbol] = float(update.fill.price)
                 else:
                     # Position closed - set to zero
                     self.current_positions[symbol] = 0.0
+                    logger.debug(f"📘 current_positions[{symbol}] = 0.0 (position closed)")
             except Exception as e:
-                logger.warning(f"Error in position update handler: {e}")
+                logger.warning(f"Error in position update handler: {e}", exc_info=True)
         
         position_book.subscribe(_on_position_update)
         
@@ -1349,7 +1352,12 @@ class CentralRiskManager(ISystemComponent):
         
         try:
             current_position = self.current_positions.get(request.symbol, 0.0)
-            new_position = current_position + request.quantity
+            
+            # Calculate new position based on side
+            if request.side.lower() == 'sell':
+                new_position = current_position - request.quantity
+            else:
+                new_position = current_position + request.quantity
             
             # Use actual current price for position value calculation
             if request.current_price <= 0:
@@ -1384,7 +1392,12 @@ class CentralRiskManager(ISystemComponent):
         
         try:
             current_position = self.current_positions.get(request.symbol, 0.0)
-            new_position = current_position + request.quantity
+            
+            # Calculate new position based on side
+            if request.side.lower() == 'sell':
+                new_position = current_position - request.quantity
+            else:
+                new_position = current_position + request.quantity
             
             # Use actual current price for position value calculation
             if request.current_price <= 0:
@@ -1537,8 +1550,12 @@ class CentralRiskManager(ISystemComponent):
             
             # CRITICAL FIX: Position-aware SELL order capping with exact precision
             elif request.side.lower() == 'sell':
-                # Use current_position from request if provided, otherwise check internal state
-                current_position = request.current_position if request.current_position is not None else self.current_positions.get(request.symbol, 0.0)
+                # ALWAYS use internal position tracking for SELL orders (most authoritative source)
+                # request.current_position may be stale or default to 0.0
+                current_position = self.current_positions.get(request.symbol, 0.0)
+                
+                # DEBUG: Log the position check
+                logger.debug(f"🔍 SELL check: self.current_positions.get('{request.symbol}')={current_position}")
                 
                 if current_position <= 0 and not getattr(self.config, 'allow_shorts', False):
                     # No position to sell and short selling not allowed

@@ -130,6 +130,9 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self.strategy_type = getattr(config, 'strategy_type', StrategyType.STATISTICAL_ARBITRAGE)
         self.state = StrategyState.INACTIVE
         
+        # Instance logger for this strategy
+        self.logger = logging.getLogger(f"{self.__class__.__name__}.{self.strategy_id}")
+        
         # ISystemComponent state management
         self.is_initialized = False
         self.is_operational = False

@@ -1,2 +1,0 @@
-timestamp,experiment_name,experiment_type,total_return_pct,sharpe_ratio,max_drawdown_pct,total_trades,win_rate,duration_seconds,success
-2025-11-29T20:34:28.380205,Smoke_Test,smoke_test,0.0,0.0,0.0,0,0.0,7.297245979309082,True

@@ -145,7 +145,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
         # Configuration
         self.max_concurrent_strategies = self.config.get('max_concurrent_strategies', 10)
         self.min_confidence_threshold = self.config.get('min_confidence_threshold', 0.6)
-        self.enable_dynamic_weighting = self.config.get('enable_dynamic_weighting', True)
+        self.enable_dynamic_weighting = self.config.get('enable_dynamic_weighting', False)  # Disabled by default for stability
         
         self.logger.info(f"🎯 MultiStrategySignalAggregator initialized: {self.component_id}")
     
@@ -242,8 +242,8 @@ class MultiStrategySignalAggregator(ISystemComponent):
             
             # Configure strategy callbacks if supported
             if hasattr(strategy_instance, 'set_signal_callback'):
-                await strategy_instance.set_signal_callback(
-                    lambda signals: self._receive_strategy_signals(strategy_id, signals)
+                strategy_instance.set_signal_callback(
+                    lambda signals, sid=strategy_id: self._receive_strategy_signals(sid, signals)
                 )
             
             self.logger.info(f"✅ Strategy registered: {strategy_id} ({strategy_type.value})")
@@ -314,6 +314,9 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 
                 strategy_weight = self.strategy_weights[strategy_id]
                 
+                # DEBUG: Log strategy weight
+                self.logger.debug(f"📊 Strategy {strategy_id}: weight={strategy_weight}, signals={len(signals)}")
+                
                 # Apply dynamic weighting if enabled
                 if self.enable_dynamic_weighting:
                     performance_multiplier = self.strategy_performance[strategy_id].get('performance_score', 1.0)
@@ -321,9 +324,12 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 
                 for signal in signals:
                     weighted_signal = signal.copy()
-                    weighted_signal.confidence *= strategy_weight
-                    weighted_signal.metadata['strategy_weight'] = strategy_weight
+                    # Store original confidence before weighting
                     weighted_signal.metadata['original_confidence'] = signal.confidence
+                    weighted_signal.metadata['strategy_weight'] = strategy_weight
+                    # Only apply weight if multiple strategies (preserve confidence for single strategy)
+                    if len(strategy_signals) > 1:
+                        weighted_signal.confidence *= strategy_weight
                     weighted_signals.append(weighted_signal)
             
             # Step 2: Group signals by symbol
@@ -354,9 +360,20 @@ class MultiStrategySignalAggregator(ISystemComponent):
         try:
             # Handle different signal formats
             if hasattr(raw_signal, 'signal_type'):
-                signal_type = SignalType(raw_signal.signal_type.lower())
+                st = raw_signal.signal_type
+                # Handle both enum and string formats
+                if isinstance(st, SignalType):
+                    signal_type = st
+                elif isinstance(st, str):
+                    signal_type = SignalType(st.lower())
+                else:
+                    signal_type = SignalType(str(st).lower())
             elif hasattr(raw_signal, 'action'):
-                signal_type = SignalType(raw_signal.action.lower())
+                action = raw_signal.action
+                if isinstance(action, str):
+                    signal_type = SignalType(action.lower())
+                else:
+                    signal_type = SignalType(str(action).lower())
             else:
                 return None
             
@@ -424,6 +441,16 @@ class MultiStrategySignalAggregator(ISystemComponent):
             
         except Exception as e:
             self.logger.error(f"Performance update failed for {strategy_id}: {e}")
+
+    async def _resolve_signal_conflicts(self, signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
+        """Resolve signal conflicts using SignalConflictResolver"""
+        # Initialize conflict resolver if not exists
+        if not hasattr(self, 'conflict_resolver') or self.conflict_resolver is None:
+            self.conflict_resolver = SignalConflictResolver()
+            await self.conflict_resolver.initialize()
+            await self.conflict_resolver.start()
+        
+        return await self.conflict_resolver.resolve_conflicts(signals)
 
 
 class SignalConflictResolver(ISystemComponent):
@@ -686,16 +713,3 @@ class SignalConflictResolver(ISystemComponent):
                 'resolution_method': self.default_resolution_method.value
             }
         )
-
-
-# Integration with existing StrategyManager
-async def _resolve_signal_conflicts(self, signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
-    """Resolve signal conflicts (to be integrated into StrategyManager)"""
-    
-    # Initialize conflict resolver if not exists
-    if not hasattr(self, 'conflict_resolver'):
-        self.conflict_resolver = SignalConflictResolver()
-        await self.conflict_resolver.initialize()
-        await self.conflict_resolver.start()
-    
-    return await self.conflict_resolver.resolve_conflicts(signals)

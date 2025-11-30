@@ -396,6 +396,69 @@ class MeanReversionConfig(BaseStrategyConfig):
     regime_adjustment_factor: float = 0.85
     """Multiplier for thresholds in unfavorable regimes (0.85 = 15% reduction). Default: 0.85"""
     
+    # =========================================
+    # EXHAUSTION-BASED SCORING SYSTEM (v3.0)
+    # =========================================
+    # Based on professional quant alpha logic:
+    # "Mean reversion works when directional moves show exhaustion"
+    
+    # Score thresholds for signal generation
+    exhaustion_score_strong: float = 70.0
+    """Score threshold for strong signals (high confidence). Default: 70"""
+    
+    exhaustion_score_moderate: float = 60.0
+    """Score threshold for moderate signals (lower confidence). Default: 60"""
+    
+    # Factor weights for exhaustion scoring
+    weight_dislocation: float = 0.25
+    """Weight for dislocation factor (distance from fair value). Default: 0.25"""
+    
+    weight_exhaustion: float = 0.30
+    """Weight for exhaustion signals (RSI momentum, volume, MACD). Default: 0.30"""
+    
+    weight_candle_structure: float = 0.15
+    """Weight for candle structure (wick rejection, body size). Default: 0.15"""
+    
+    weight_regime_penalty: float = 0.15
+    """Weight for regime penalty (ADX, volatility, breakout). Default: 0.15"""
+    
+    weight_confluence: float = 0.15
+    """Weight for supporting indicator confluence. Default: 0.15"""
+    
+    # Dislocation thresholds
+    dislocation_strong: float = 2.0
+    """Z-score for strong dislocation signal. Default: 2.0"""
+    
+    dislocation_moderate: float = 1.5
+    """Z-score for moderate dislocation signal. Default: 1.5"""
+    
+    dislocation_minimum: float = 1.0
+    """Minimum z-score to consider (below = no trade). Default: 1.0"""
+    
+    # Exhaustion signal thresholds
+    volume_exhaustion_threshold: float = 1.0
+    """Volume ratio below which move is considered 'weak' (noise). Default: 1.0"""
+    
+    volume_conviction_threshold: float = 2.0
+    """Volume ratio above which move is considered 'conviction' (don't fade). Default: 2.0"""
+    
+    # Candle structure thresholds
+    wick_rejection_threshold: float = 0.4
+    """Wick ratio (vs range) for rejection signal. Default: 0.4 (40%)"""
+    
+    doji_body_threshold: float = 0.003
+    """Body size (vs price) for doji detection. Default: 0.003 (0.3%)"""
+    
+    # Regime penalty thresholds
+    adx_strong_trend: float = 30.0
+    """ADX level indicating strong trend (penalize mean reversion). Default: 30"""
+    
+    adx_moderate_trend: float = 25.0
+    """ADX level indicating moderate trend. Default: 25"""
+    
+    volatility_spike_threshold: float = 2.0
+    """Volatility ratio above which to penalize. Default: 2.0"""
+    
     # Backward compatibility aliases
     @property
     def entry_zscore_threshold(self) -> float:

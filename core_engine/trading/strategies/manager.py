@@ -442,6 +442,28 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             # Initialize multi-strategy coordination if enabled
             if self.enable_multi_strategy:
                 await self._initialize_multi_strategy_coordination()
+                
+                # CRITICAL FIX: Sync already-registered strategies to signal aggregator
+                # (strategies may have been registered before signal_aggregator existed)
+                if self.signal_aggregator and self.active_strategies:
+                    logger.info(f"📊 Syncing {len(self.active_strategies)} pre-registered strategies to signal aggregator...")
+                    for strategy_name, strategy_instance in self.active_strategies.items():
+                        allocation = self.strategy_allocations.get(strategy_name)
+                        if allocation:
+                            try:
+                                await self.signal_aggregator.register_strategy(
+                                    strategy_id=strategy_name,
+                                    strategy_instance=strategy_instance,
+                                    strategy_type=allocation.strategy_type,
+                                    weight=1.0,
+                                    priority=1,
+                                    allocation_pct=allocation.allocation_pct,
+                                    max_positions=allocation.max_positions,
+                                    risk_limit=allocation.risk_limit
+                                )
+                                logger.info(f"   ✅ Synced: {strategy_name}")
+                            except Exception as e:
+                                logger.warning(f"   ⚠️ Failed to sync {strategy_name}: {e}")
             
             # Phase 3: Initialize pipeline orchestrator (Rule 3)
             if self.pipeline_enabled:
@@ -511,6 +533,23 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'max_drawdown': 0.0,
                 'last_signal_time': None
             }
+            
+            # CRITICAL FIX: Register with signal aggregator for multi-strategy coordination
+            if self.signal_aggregator:
+                try:
+                    await self.signal_aggregator.register_strategy(
+                        strategy_id=strategy_name,
+                        strategy_instance=strategy_instance,
+                        strategy_type=strategy_type,
+                        weight=config.get('weight', 1.0),
+                        priority=config.get('priority', 1),
+                        allocation_pct=allocation.allocation_pct,
+                        max_positions=allocation.max_positions,
+                        risk_limit=allocation.risk_limit
+                    )
+                    logger.info(f"✅ Strategy registered with signal aggregator: {strategy_name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Signal aggregator registration failed for {strategy_name}: {e}")
             
             logger.info(f"✅ Enhanced strategy registered: {strategy_name} ({strategy_type.value})")
             return True
@@ -901,6 +940,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             regime_info = await self._get_current_regime_info()
             
             # Generate signals from each active strategy with enhanced logic
+            logger.info(f"🎯 LOOP DEBUG: active_strategies = {list(self.active_strategies.keys())}")
             for strategy_name, strategy in self.active_strategies.items():
                 allocation = self.strategy_allocations.get(strategy_name)
                 if not allocation or not allocation.active:
@@ -1569,8 +1609,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 return signals
             
             # For enhanced strategy instances, use their generate_signals method
+            logger.info(f"🎯 DEBUG: Checking strategy type for {strategy_name}: {type(strategy).__name__}")
             if isinstance(strategy, EnhancedBaseStrategy):
                 try:
+                    logger.info(f"🎯 DEBUG: Calling enhanced strategy.generate_signals for {strategy_name}")
                     # Convert market_data to Dict[str, pd.DataFrame] format expected by enhanced strategies
                     if isinstance(market_data, dict):
                         market_data_dict = market_data
