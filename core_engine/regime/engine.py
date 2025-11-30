@@ -919,15 +919,28 @@ class EnhancedRegimeEngine(ISystemComponent):
         elif directional == "bear" and vol_regime in ["high_volatility", "extreme_volatility"]:
             primary_regime = MarketRegime.BEAR_HIGH_VOL
             confidence = 0.7
-        elif abs(trend) < self.config.trend_threshold / 2:
-            primary_regime = MarketRegime.RANGE_BOUND
-            confidence = 0.75
+        elif directional == "sideways":
+            # Handle sideways/consolidation regimes based on volatility
+            if vol_regime in ["high_volatility", "extreme_volatility"]:
+                # Sideways with high volatility = choppy market
+                primary_regime = MarketRegime.CHOPPY
+                confidence = 0.65
+            else:
+                # Sideways with low/normal volatility = range-bound
+                primary_regime = MarketRegime.RANGE_BOUND
+                confidence = 0.75
         elif vol_regime == "extreme_volatility":
+            # Extreme volatility regardless of direction = choppy
             primary_regime = MarketRegime.CHOPPY
             confidence = 0.65
         else:
-            # No default - raise exception for unknown volatility regime
-            raise ConfigurationRequiredError(f"Unknown volatility regime: {vol_regime}")
+            # Fallback to range-bound for any unhandled case (defensive coding)
+            primary_regime = MarketRegime.RANGE_BOUND
+            confidence = 0.6
+            self.logger.warning(
+                f"Unhandled regime combination: directional={directional}, vol_regime={vol_regime}. "
+                f"Defaulting to RANGE_BOUND."
+            )
         
         # Create regime analysis
         regime_analysis = RegimeAnalysis(
