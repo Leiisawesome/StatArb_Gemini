@@ -136,14 +136,14 @@ class VolatilityRegimeIndicators:
     
     def __init__(self, config: Any = None):
         self.config = config
+        
+        logger.info("Volatility regime indicators initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        
-        logger.info("Volatility regime indicators initialized")
     
     def calculate_volatility_indicators(self, price_data: pd.DataFrame) -> Dict[str, RegimeIndicator]:
         """Calculate volatility regime indicators"""

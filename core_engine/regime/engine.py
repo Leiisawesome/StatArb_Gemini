@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+from collections import deque
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from dataclasses import dataclass
@@ -190,12 +191,14 @@ class EnhancedRegimeEngine(ISystemComponent):
         
         # Current regime state
         self.current_regime: Optional[RegimeAnalysis] = None
-        self.regime_history: List[RegimeAnalysis] = []
+        # P0 Fix: Use bounded deque to prevent memory leak in long-running processes
+        self._regime_history: deque = deque(maxlen=1000)
         
         # CRITICAL: Bar-by-bar regime sequence persistence (for regime-aware processing)
-        # Maps symbol -> List[Dict] with regime for each bar (timestamp-indexed)
-        self.regime_sequence: Dict[str, List[Dict[str, Any]]] = {}
-        # Maps symbol -> Dict[timestamp] -> regime for O(1) lookup
+        # Maps symbol -> deque[Dict] with regime for each bar (timestamp-indexed)
+        # P0 Fix: Use bounded deques to prevent memory leak
+        self.regime_sequence: Dict[str, deque] = {}
+        # Maps symbol -> Dict[timestamp] -> regime for O(1) lookup (bounded by regime_sequence size)
         self.regime_by_timestamp: Dict[str, Dict[datetime, RegimeAnalysis]] = {}
         
         # Market data for regime analysis
@@ -232,6 +235,11 @@ class EnhancedRegimeEngine(ISystemComponent):
         self._lock = threading.Lock()
         
         self.logger.info(f"🚀 Enhanced Regime Engine initialized with component ID: {self.component_id}")
+    
+    @property
+    def regime_history(self) -> List[RegimeAnalysis]:
+        """Return regime history as list for backward compatibility."""
+        return list(self._regime_history)
     
     # ========================================
     # ORCHESTRATOR INTEGRATION
@@ -617,11 +625,9 @@ class EnhancedRegimeEngine(ISystemComponent):
                     
                     # Update current regime
                     self.current_regime = new_regime
-                    self.regime_history.append(new_regime)
+                    self._regime_history.append(new_regime)
                     
-                    # Keep regime history manageable
-                    if len(self.regime_history) > 1000:
-                        self.regime_history = self.regime_history[-1000:]
+                    # Note: deque(maxlen=1000) auto-removes oldest entries
                     
                     # Notify subscribers on regime change
                     if regime_changed and len(self.subscribers) > 0:
@@ -725,7 +731,7 @@ class EnhancedRegimeEngine(ISystemComponent):
                         
                         # Update current regime (this is the regime at THIS bar)
                         self.current_regime = new_regime
-                        self.regime_history.append(new_regime)
+                        self._regime_history.append(new_regime)
                         
                         # Track regime sequence for this period
                         regime_entry = {
@@ -738,8 +744,9 @@ class EnhancedRegimeEngine(ISystemComponent):
                         regime_sequence.append(regime_entry)
                         
                         # CRITICAL: Persist regime sequence for component access
+                        # P0 Fix: Use bounded deque(maxlen=10000) per symbol
                         if symbol not in self.regime_sequence:
-                            self.regime_sequence[symbol] = []
+                            self.regime_sequence[symbol] = deque(maxlen=10000)
                         self.regime_sequence[symbol].append(regime_entry)
                         
                         # CRITICAL: Persist regime by timestamp for O(1) lookup
@@ -747,21 +754,18 @@ class EnhancedRegimeEngine(ISystemComponent):
                             self.regime_by_timestamp[symbol] = {}
                         self.regime_by_timestamp[symbol][timestamp] = new_regime
                         
-                        # Keep regime sequence manageable (last 10000 bars per symbol)
-                        max_sequence_size = 10000
-                        if len(self.regime_sequence[symbol]) > max_sequence_size:
-                            # Remove oldest entries (FIFO)
-                            removed = self.regime_sequence[symbol][:-max_sequence_size]
-                            # Clean up timestamp index
-                            for entry in removed:
-                                old_timestamp = entry.get('timestamp')
-                                if old_timestamp and old_timestamp in self.regime_by_timestamp.get(symbol, {}):
-                                    del self.regime_by_timestamp[symbol][old_timestamp]
-                            self.regime_sequence[symbol] = self.regime_sequence[symbol][-max_sequence_size:]
+                        # Note: regime_sequence uses deque(maxlen=10000) for auto-eviction
+                        # Clean up timestamp index periodically to prevent memory buildup
+                        # Only clean when timestamp dict grows significantly larger than sequence
+                        if len(self.regime_by_timestamp[symbol]) > len(self.regime_sequence[symbol]) * 1.5:
+                            # Get valid timestamps from current sequence
+                            valid_timestamps = {entry.get('timestamp') for entry in self.regime_sequence[symbol]}
+                            # Remove stale timestamp entries
+                            stale_keys = [k for k in self.regime_by_timestamp[symbol] if k not in valid_timestamps]
+                            for k in stale_keys:
+                                del self.regime_by_timestamp[symbol][k]
                         
-                        # Keep regime history manageable
-                        if len(self.regime_history) > 1000:
-                            self.regime_history = self.regime_history[-1000:]
+                        # Note: _regime_history uses deque(maxlen=1000) for auto-eviction
                         
                         # Notify subscribers on regime change (for real-time adaptation)
                         if regime_changed and len(self.subscribers) > 0:
@@ -881,7 +885,7 @@ class EnhancedRegimeEngine(ISystemComponent):
         
         volatility = indicators['volatility']
         trend = indicators['trend']
-        indicators['momentum']
+        momentum = indicators['momentum']  # Used for future enhancements
         trend_strength = indicators['trend_strength']
         
         # Classify volatility regime
@@ -1026,7 +1030,9 @@ class EnhancedRegimeEngine(ISystemComponent):
         Returns:
             List of regime entries, each with timestamp, bar_index, regime, confidence, regime_changed
         """
-        return self.regime_sequence.get(symbol, [])
+        # Convert deque to list for backward compatibility
+        seq = self.regime_sequence.get(symbol)
+        return list(seq) if seq else []
     
     def get_regime_for_dataframe_row(self, symbol: str, row_index: int, dataframe: pd.DataFrame) -> Optional[RegimeAnalysis]:
         """

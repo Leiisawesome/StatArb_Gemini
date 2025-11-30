@@ -218,16 +218,17 @@ class MarkovSwitchingDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+        self.model = None
+        self.fitted = False
+        self.fitted_model = None
+        
+        logger.info("Markov switching detector initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        self.model = None
-        self.fitted = False
-        
-        logger.info("Markov switching detector initialized")
     
     def fit(self, returns: pd.Series) -> bool:
         """Fit Markov switching model"""
@@ -521,13 +522,14 @@ class VolatilityBasedDetector:
     
     def __init__(self, config: Any = None):
         self.config = config
+        
+        logger.info("Volatility-based detector initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        logger.info("Volatility-based detector initialized")
     
     def detect_regime(self, returns: pd.Series, timestamp: datetime) -> Optional[RegimeDetection]:
         """Detect regime based on volatility patterns"""

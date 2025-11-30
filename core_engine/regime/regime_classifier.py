@@ -145,14 +145,14 @@ class FeatureEngineer:
     
     def __init__(self, config: Any = None):
         self.config = config
+        
+        logger.info("Feature engineer initialized")
     
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
-        
-        logger.info("Feature engineer initialized")
     
     def engineer_features(self, price_data: pd.DataFrame,
                          volume_data: Optional[pd.DataFrame] = None,
