@@ -147,6 +147,53 @@ class BaseExperiment(ABC):
                         print(f"  {key:<20} {value:>10.4f}")
                     else:
                         print(f"  {key:<20} {value:>10}")
+            
+            # Print trade list if available
+            if result.engine_results and 'execution_history' in result.engine_results:
+                trades = result.engine_results['execution_history']
+                if trades:
+                    print()
+                    print("Trade List:")
+                    print(f"  {'#':<3} {'Timestamp':<20} {'Symbol':<8} {'Action':<6} {'Qty':>8} {'Price':>10} {'Value':>12} {'P&L':>12}")
+                    print("  " + "-"*82)
+                    
+                    # Track positions per symbol to calculate P&L
+                    positions: Dict[str, List[tuple]] = {}  # symbol -> [(qty, price), ...]
+                    
+                    for i, trade in enumerate(trades, 1):
+                        timestamp = str(trade.get('timestamp', 'N/A'))[:19]
+                        symbol = trade.get('symbol', 'N/A')
+                        action = trade.get('action', trade.get('side', 'N/A'))
+                        quantity = trade.get('quantity', trade.get('qty', 0))
+                        price = trade.get('price', trade.get('fill_price', 0))
+                        value = quantity * price
+                        
+                        # Calculate P&L for sells using FIFO
+                        pnl = 0.0
+                        pnl_str = ""
+                        
+                        if symbol not in positions:
+                            positions[symbol] = []
+                        
+                        if action.lower() == 'buy':
+                            positions[symbol].append((quantity, price))
+                        elif action.lower() == 'sell':
+                            qty_to_sell = quantity
+                            while qty_to_sell > 0 and positions[symbol]:
+                                entry_qty, entry_price = positions[symbol][0]
+                                sold_qty = min(qty_to_sell, entry_qty)
+                                pnl += sold_qty * (price - entry_price)
+                                qty_to_sell -= sold_qty
+                                if sold_qty >= entry_qty:
+                                    positions[symbol].pop(0)
+                                else:
+                                    positions[symbol][0] = (entry_qty - sold_qty, entry_price)
+                            pnl_str = f"${pnl:>+11.2f}"
+                        
+                        if not pnl_str:
+                            pnl_str = " " * 12
+                        
+                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {quantity:>8.0f} ${price:>9.2f} ${value:>11.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
         
