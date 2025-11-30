@@ -115,6 +115,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# CONSTANTS (extracted from magic numbers for clarity)
+# ============================================================================
+MIN_RECORDS_FOR_SYMBOL = 100  # Minimum records required for a symbol to be considered valid
+DEFAULT_CACHE_TTL_SECONDS = 300  # 5 minutes cache TTL
+DEFAULT_QUERY_TIMEOUT_SECONDS = 30  # Query timeout
+CONNECTION_TEST_TIMEOUT_SECONDS = 5  # Connection test timeout
+
+
 @dataclass
 class ClickHouseDataConfig(DataConfig):
     """
@@ -293,6 +302,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         
         # HTTP endpoint for ClickHouse
         self.clickhouse_url = f"http://{self.enhanced_config.clickhouse_host}:{self.enhanced_config.clickhouse_port}"
+        
+        # HTTP session for connection reuse (performance optimization)
+        import requests
+        self._http_session = requests.Session()
         
         # Data cache for performance
         self._cache: Dict[str, Any] = {}
@@ -533,10 +546,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 self.logger.warning(f"Subscriber notification failed: {e}")
     
     def _test_connection(self) -> bool:
-        """Test ClickHouse connection"""
+        """Test ClickHouse connection using reusable HTTP session"""
         try:
-            import requests
-            response = requests.post(self.clickhouse_url, data="SELECT 1", timeout=5)
+            response = self._http_session.post(
+                self.clickhouse_url, 
+                data="SELECT 1", 
+                timeout=CONNECTION_TEST_TIMEOUT_SECONDS
+            )
             if response.status_code == 200 and response.text.strip() == "1":
                 self.logger.info("✅ ClickHouse connection successful")
                 return True
@@ -548,6 +564,16 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             )
             return False
     
+    @staticmethod
+    def _escape_sql_string(value: str) -> str:
+        """Escape single quotes in SQL string to prevent SQL injection"""
+        return value.replace("'", "''")
+    
+    def _escape_symbols(self, symbols: List[str]) -> str:
+        """Escape and join symbols for safe SQL IN clause"""
+        escaped = [self._escape_sql_string(s) for s in symbols]
+        return "', '".join(escaped)
+    
     def _execute_query(self, query: str) -> pd.DataFrame:
         """
         Execute ClickHouse query and return DataFrame with proper timezone handling
@@ -557,15 +583,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         This method ensures all timestamps are properly localized to America/New_York timezone.
         """
         try:
-            import requests
             # Add TSVWithNames format to get proper column names
             formatted_query = f"{query} FORMAT TSVWithNames"
             
-            response = requests.post(
+            response = self._http_session.post(
                 self.clickhouse_url, 
                 data=formatted_query,
                 headers={'Content-Type': 'text/plain'},
-                timeout=30
+                timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
             )
             response.raise_for_status()
             
@@ -605,7 +630,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         FROM {self.enhanced_config.clickhouse_database}.ticks 
         WHERE toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
-        HAVING records >= 100
+        HAVING records >= {MIN_RECORDS_FOR_SYMBOL}
         ORDER BY records DESC
         """
         
@@ -697,8 +722,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
     
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
-        """Build ClickHouse query for market data"""
-        symbols_str = "', '".join(symbols)
+        """Build ClickHouse query for market data with SQL injection protection"""
+        # Escape symbols to prevent SQL injection
+        symbols_str = self._escape_symbols(symbols)
         
         # Convert datetime to string format for timezone-aware querying
         start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -857,7 +883,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     def get_latest_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, float]:
         """Get latest prices for symbols"""
         symbols = symbols or self.enhanced_config.symbols
-        symbols_str = "', '".join(symbols)
+        # Escape symbols to prevent SQL injection
+        symbols_str = self._escape_symbols(symbols)
         
         query = f"""
         SELECT 
@@ -1189,15 +1216,15 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     def calculate_metrics(self, data: Any = None) -> Dict[str, Any]:
         """Calculate data analytics metrics"""
         try:
-            # Get data manager state
-            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            # Get data manager state from correct attributes
+            symbols_count = len(self.enhanced_config.symbols)
             
-            # Calculate data metrics
+            # Calculate data metrics using correct attribute references
             data_metrics = {
                 'symbols_managed': symbols_count,
-                'data_sources_active': 1 if hasattr(self, 'client') and self.client else 0,
-                'cache_enabled': getattr(self, 'enable_caching', False),
-                'connection_status': 'connected' if hasattr(self, 'client') and self.client else 'disconnected',
+                'data_sources_active': 1 if self._connection_available else 0,
+                'cache_enabled': self.enhanced_config.enable_caching,
+                'connection_status': 'connected' if self._connection_available else 'disconnected',
                 'data_quality_score': self._calculate_data_quality_score(),
                 'coverage_metrics': self._calculate_coverage_metrics()
             }
@@ -1226,7 +1253,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'query_performance': self._assess_query_performance(),
                 'data_freshness': self._assess_data_freshness(),
                 'system_health': {
-                    'connection_stable': hasattr(self, 'client') and self.client is not None,
+                    'connection_stable': self._connection_available,
                     'cache_utilization': self._calculate_cache_utilization(),
                     'error_rate': 0.0  # Mock low error rate
                 },
@@ -1311,42 +1338,54 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         return self.track_performance(data)
     
     def _calculate_data_quality_score(self) -> float:
-        """Calculate data quality score (0-100)"""
+        """Calculate data quality score (0-100) based on connection and cache state"""
         try:
-            # Mock data quality assessment
-            if hasattr(self, 'client') and self.client:
-                return 85.0  # High quality when connected
-            else:
-                return 50.0  # Moderate quality when disconnected
+            score = 50.0  # Base score
+            
+            # Connection availability (+35 points)
+            if self._connection_available:
+                score += 35.0
+            
+            # Cache utilization (+15 points)
+            if self.enhanced_config.enable_caching and len(self._cache) > 0:
+                score += 15.0
+            
+            return min(score, 100.0)
                 
         except Exception:
             return 50.0  # Default moderate quality
     
     def _calculate_coverage_metrics(self) -> Dict[str, Any]:
-        """Calculate data coverage metrics"""
+        """Calculate data coverage metrics based on actual cached data"""
         try:
-            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            symbols_count = len(self.enhanced_config.symbols)
+            cached_symbols = len(self._cache)
+            
+            # Calculate completeness based on cache state
+            completeness = (cached_symbols / max(symbols_count, 1)) * 100 if symbols_count > 0 else 0.0
             
             return {
                 'symbols_covered': symbols_count,
-                'coverage_percentage': min(100.0, symbols_count * 10),  # Mock calculation
-                'data_completeness': 90.0  # Mock high completeness
+                'symbols_cached': cached_symbols,
+                'coverage_percentage': min(100.0, symbols_count * 10),
+                'data_completeness': min(completeness, 100.0) if self._connection_available else 0.0
             }
             
         except Exception:
             return {
                 'symbols_covered': 0,
+                'symbols_cached': 0,
                 'coverage_percentage': 0.0,
                 'data_completeness': 0.0
             }
     
     def _assess_data_availability(self) -> str:
-        """Assess data availability"""
+        """Assess data availability based on connection state"""
         try:
-            if hasattr(self, 'client') and self.client:
+            if self._connection_available:
                 return "High"
             else:
-                return "Limited"
+                return "Unavailable"
                 
         except Exception:
             return "Unknown"
@@ -1381,10 +1420,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return 0.0
     
     def _assess_data_health(self) -> str:
-        """Assess overall data health"""
+        """Assess overall data health based on connection and configuration"""
         try:
-            if hasattr(self, 'client') and self.client:
-                symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            if self._connection_available:
+                symbols_count = len(self.enhanced_config.symbols)
                 if symbols_count > 0:
                     return "Healthy"
                 else:
@@ -1396,9 +1435,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return "Unknown"
     
     def _calculate_reliability_score(self) -> float:
-        """Calculate reliability score (0-100)"""
+        """Calculate reliability score (0-100) based on connection state"""
         try:
-            if hasattr(self, 'client') and self.client:
+            if self._connection_available:
                 return 90.0  # High reliability when connected
             else:
                 return 30.0  # Low reliability when disconnected
@@ -1407,11 +1446,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return 50.0  # Default moderate reliability
     
     def _calculate_efficiency_score(self) -> float:
-        """Calculate efficiency score (0-100)"""
+        """Calculate efficiency score (0-100) based on cache, connection, and symbols"""
         try:
-            cache_score = 25.0 if getattr(self, 'enable_caching', False) else 0.0
-            connection_score = 50.0 if hasattr(self, 'client') and self.client else 0.0
-            symbols_score = min(25.0, len(self.symbols) * 2.5) if hasattr(self, 'symbols') else 0.0
+            cache_score = 25.0 if self.enhanced_config.enable_caching else 0.0
+            connection_score = 50.0 if self._connection_available else 0.0
+            symbols_score = min(25.0, len(self.enhanced_config.symbols) * 2.5)
             
             return cache_score + connection_score + symbols_score
             
@@ -1419,17 +1458,17 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return 50.0  # Default moderate efficiency
     
     def _generate_data_recommendations(self) -> List[str]:
-        """Generate data recommendations"""
+        """Generate data recommendations based on current state"""
         try:
             recommendations = []
             
-            if not (hasattr(self, 'client') and self.client):
+            if not self._connection_available:
                 recommendations.append("Establish database connection")
             
-            if not getattr(self, 'enable_caching', False):
+            if not self.enhanced_config.enable_caching:
                 recommendations.append("Enable caching for better performance")
             
-            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            symbols_count = len(self.enhanced_config.symbols)
             if symbols_count == 0:
                 recommendations.append("Configure symbols for data management")
             elif symbols_count < 5:
@@ -1441,10 +1480,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return ["Unable to generate recommendations"]
     
     def _assess_performance_trend(self) -> str:
-        """Assess performance trend"""
+        """Assess performance trend based on connection state"""
         try:
-            # Mock trend assessment
-            if hasattr(self, 'client') and self.client:
+            if self._connection_available:
                 return "Stable"
             else:
                 return "Declining"
@@ -1453,14 +1491,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return "Unknown"
     
     def _generate_data_alerts(self) -> List[str]:
-        """Generate data alerts"""
+        """Generate data alerts based on current state"""
         try:
             alerts = []
             
-            if not (hasattr(self, 'client') and self.client):
+            if not self._connection_available:
                 alerts.append("Database connection lost")
             
-            symbols_count = len(self.symbols) if hasattr(self, 'symbols') else 0
+            symbols_count = len(self.enhanced_config.symbols)
             if symbols_count == 0:
                 alerts.append("No symbols configured")
             
