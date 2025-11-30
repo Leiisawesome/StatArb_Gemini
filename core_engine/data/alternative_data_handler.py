@@ -16,6 +16,13 @@ from collections import defaultdict, deque
 import re
 import hashlib
 
+# Import constants
+from .constants import (
+    DataIntervals,
+    DataRetention,
+    AlternativeDataConfig,
+)
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ..system.interfaces import ISystemComponent
@@ -612,7 +619,7 @@ class AlternativeDataHandler(ISystemComponent):
         is_healthy = (
             self.is_operational and 
             self.is_initialized and
-            error_rate < 0.1 and  # Less than 10% error rate
+            error_rate < AlternativeDataConfig.MAX_ERROR_RATE and  # Error rate threshold
             len(self._processing_tasks) > 0  # Background tasks running
         )
         
@@ -909,32 +916,30 @@ class AlternativeDataHandler(ISystemComponent):
         
         credibility = 0.5  # Base credibility
         
-        # Provider credibility
+        # Provider credibility (use constants)
         provider_scores = {
-            DataProvider.BLOOMBERG_NEWS: 0.95,
-            DataProvider.NEWS_API: 0.8,
-            DataProvider.TWITTER: 0.6,
-            DataProvider.REDDIT: 0.4,
-            DataProvider.CUSTOM_SCRAPER: 0.7
+            DataProvider.BLOOMBERG_NEWS: AlternativeDataConfig.CREDIBILITY_BLOOMBERG,
+            DataProvider.NEWS_API: AlternativeDataConfig.CREDIBILITY_NEWS_API,
+            DataProvider.TWITTER: AlternativeDataConfig.CREDIBILITY_TWITTER,
+            DataProvider.REDDIT: AlternativeDataConfig.CREDIBILITY_REDDIT,
+            DataProvider.CUSTOM_SCRAPER: AlternativeDataConfig.CREDIBILITY_CUSTOM_SCRAPER
         }
         
         credibility = provider_scores.get(data_point.provider, 0.5)
         
         # Author credibility (if available)
         if data_point.author:
-            # Simulate author credibility lookup
-            credibility += 0.1
+            credibility += AlternativeDataConfig.AUTHOR_CREDIBILITY_BONUS
         
         # Content quality indicators
         content_length = len(data_point.raw_content)
-        if content_length > 500:  # Substantial content
-            credibility += 0.1
+        if content_length > AlternativeDataConfig.SUBSTANTIAL_CONTENT_LENGTH:
+            credibility += AlternativeDataConfig.CONTENT_LENGTH_BONUS
         
         # Source URL credibility
         if data_point.source_url:
-            if any(domain in data_point.source_url for domain in 
-                  ['bloomberg.com', 'reuters.com', 'wsj.com', 'ft.com']):
-                credibility += 0.15
+            if any(domain in data_point.source_url for domain in AlternativeDataConfig.TRUSTED_DOMAINS):
+                credibility += AlternativeDataConfig.TRUSTED_DOMAIN_BONUS
         
         return min(1.0, credibility)
     
@@ -1021,7 +1026,7 @@ class AlternativeDataHandler(ISystemComponent):
         
         while True:
             try:
-                await asyncio.sleep(300)  # Scrape every 5 minutes
+                await asyncio.sleep(DataIntervals.WEB_SCRAPING_SECONDS)
                 
                 # Scrape registered targets
                 for target_id in self.web_scraper._scraping_targets:
@@ -1058,9 +1063,9 @@ class AlternativeDataHandler(ISystemComponent):
         
         while True:
             try:
-                await asyncio.sleep(3600)  # Cleanup every hour
+                await asyncio.sleep(DataIntervals.DATA_CLEANUP_SECONDS)
                 
-                cutoff_time = datetime.now() - timedelta(days=7)
+                cutoff_time = datetime.now() - timedelta(days=DataRetention.ALT_DATA_RETENTION_DAYS)
                 
                 with self._lock:
                     # Cleanup by symbol
@@ -1077,7 +1082,7 @@ class AlternativeDataHandler(ISystemComponent):
                 
             except Exception as e:
                 logger.error(f"Error in data cleanup: {e}")
-                await asyncio.sleep(3600)
+                await asyncio.sleep(DataIntervals.DATA_CLEANUP_SECONDS)
     
     async def subscribe_to_data(
         self,

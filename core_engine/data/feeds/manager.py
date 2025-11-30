@@ -14,6 +14,12 @@ import time
 from collections import defaultdict, deque
 import json
 
+# Import constants
+from ..constants import (
+    DataIntervals,
+    FeedConfig,
+)
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ...system.interfaces import ISystemComponent
@@ -401,7 +407,7 @@ class WebSocketFeed(DataFeed):
             for _ in range(int(self.config.connect_timeout)):
                 if self.status in [FeedStatus.CONNECTED, FeedStatus.AUTHENTICATED]:
                     return True
-                await asyncio.sleep(1)
+                await asyncio.sleep(DataIntervals.WS_CONNECTION_WAIT_SECONDS)
             
             return False
             
@@ -660,13 +666,13 @@ class HTTPFeed(DataFeed):
                                      Exception(response.text))
                 
                 # Wait before next poll
-                await asyncio.sleep(1.0)  # 1 second polling interval
+                await asyncio.sleep(DataIntervals.HTTP_POLLING_SECONDS)
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._handle_error("HTTP polling failed", e)
-                await asyncio.sleep(5.0)  # Wait before retry
+                await asyncio.sleep(DataIntervals.WS_RECONNECT_WAIT_SECONDS)  # Wait before retry
 
 
 class FeedManager(ISystemComponent):
@@ -996,7 +1002,7 @@ class FeedManager(ISystemComponent):
         
         while True:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(DataIntervals.HEALTH_CHECK_SECONDS)
                 
                 for feed_id, feed in list(self._feeds.items()):
                     if feed.status == FeedStatus.ERROR:
@@ -1004,7 +1010,7 @@ class FeedManager(ISystemComponent):
                         
                         # Attempt reconnection
                         await self.disconnect_feed(feed_id)
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(DataIntervals.WS_RECONNECT_WAIT_SECONDS)
                         await self.connect_feed(feed_id)
                     
                     elif feed.status == FeedStatus.DISCONNECTED:
@@ -1015,7 +1021,7 @@ class FeedManager(ISystemComponent):
                 break
             except Exception as e:
                 logger.error(f"Error in health check: {e}")
-                await asyncio.sleep(30)
+                await asyncio.sleep(DataIntervals.HEALTH_CHECK_SECONDS)
     
     def get_feed_status(self, feed_id: Optional[str] = None) -> Dict[str, Any]:
         """Get feed status information"""

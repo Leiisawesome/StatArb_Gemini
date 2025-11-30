@@ -14,6 +14,12 @@ import time
 from collections import deque
 import warnings
 
+# Import constants
+from ..constants import (
+    CircuitBreaker,
+    DataIntervals,
+)
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ...system.interfaces import ISystemComponent
@@ -908,7 +914,7 @@ class DataEngine(ISystemComponent):
         was_reset = False
         if (self._circuit_breaker_open and 
             self._circuit_breaker_last_failure and
-            (datetime.now() - self._circuit_breaker_last_failure).total_seconds() > 60):  # 1 minute
+            (datetime.now() - self._circuit_breaker_last_failure).total_seconds() > CircuitBreaker.RESET_TIMEOUT_SECONDS):
             
             self._circuit_breaker_open = False
             self._circuit_breaker_failures = 0
@@ -929,7 +935,7 @@ class DataEngine(ISystemComponent):
             self._circuit_breaker_failures += 1
             
             # Open circuit breaker if too many failures
-            if self._circuit_breaker_failures >= 5:  # Threshold
+            if self._circuit_breaker_failures >= CircuitBreaker.FAILURE_THRESHOLD:
                 self._circuit_breaker_open = True
                 # Set failure time when opening circuit breaker
                 if not self._circuit_breaker_last_failure:
@@ -1018,7 +1024,7 @@ class DataEngine(ISystemComponent):
         
         while True:
             try:
-                await asyncio.sleep(60)  # Check every minute
+                await asyncio.sleep(DataIntervals.PERFORMANCE_MONITORING_SECONDS)
                 
                 # Check component health
                 unhealthy_components = []
@@ -1032,14 +1038,14 @@ class DataEngine(ISystemComponent):
                 
             except Exception as e:
                 logger.error(f"Error in health monitoring: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(DataIntervals.PERFORMANCE_MONITORING_SECONDS)
     
     async def _resource_monitoring(self) -> None:
         """Monitor resource usage"""
         
         while True:
             try:
-                await asyncio.sleep(300)  # Check every 5 minutes
+                await asyncio.sleep(DataIntervals.RESOURCE_MONITORING_SECONDS)
                 
                 # Monitor memory usage, CPU, etc.
                 # This would integrate with system monitoring tools
@@ -1052,7 +1058,7 @@ class DataEngine(ISystemComponent):
                 
             except Exception as e:
                 logger.error(f"Error in resource monitoring: {e}")
-                await asyncio.sleep(300)
+                await asyncio.sleep(DataIntervals.RESOURCE_MONITORING_SECONDS)
     
     def add_data_handler(self, handler: Callable[[FeedMessage], None]) -> None:
         """Add data message handler"""

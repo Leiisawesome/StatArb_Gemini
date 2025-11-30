@@ -15,6 +15,13 @@ import time
 from collections import defaultdict, deque
 from abc import ABC, abstractmethod
 
+# Import constants
+from ..constants import (
+    DataIntervals,
+    DataRetention,
+    MarketDataConfig,
+)
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ...system.interfaces import ISystemComponent
@@ -274,7 +281,7 @@ class SimulatedDataFeed(DataFeedAdapter):
         """Simulate market data"""
         while self._connected:
             try:
-                await asyncio.sleep(0.1)  # 100ms updates
+                await asyncio.sleep(DataIntervals.REALTIME_UPDATE_SECONDS)
                 
                 # Generate data for subscribed symbols
                 for symbol, data_type in self._subscriptions:
@@ -704,12 +711,12 @@ class MarketDataHandler(ISystemComponent):
         # Spread reasonableness check
         if data_point.bid_price and data_point.ask_price:
             if data_point.bid_price >= data_point.ask_price:
-                quality_score *= 0.3
+                quality_score *= MarketDataConfig.QUALITY_PENALTY_BAD_SPREAD
             
             spread_pct = ((data_point.ask_price - data_point.bid_price) / 
                          data_point.bid_price) * 100
-            if spread_pct > 5.0:  # Spread > 5%
-                quality_score *= 0.7
+            if spread_pct > MarketDataConfig.MAX_SPREAD_PERCENT_WARNING:
+                quality_score *= MarketDataConfig.QUALITY_PENALTY_WIDE_SPREAD
         
         # Store quality metrics
         symbol_source_key = f"{data_point.symbol}_{data_point.source.value}"
@@ -914,7 +921,7 @@ class MarketDataHandler(ISystemComponent):
         """Monitor performance metrics"""
         while True:
             try:
-                await asyncio.sleep(60)  # Update every minute
+                await asyncio.sleep(DataIntervals.PERFORMANCE_MONITORING_SECONDS)
                 
                 with self._lock:
                     # Calculate messages per second
@@ -933,37 +940,37 @@ class MarketDataHandler(ISystemComponent):
                 
             except Exception as e:
                 logger.error(f"Error in performance monitoring: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(DataIntervals.PERFORMANCE_MONITORING_SECONDS)
     
     async def _monitor_feed_health(self) -> None:
         """Monitor data feed health"""
         while True:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(DataIntervals.HEALTH_CHECK_SECONDS)
                 
                 for feed_id, feed_config in self._data_feeds.items():
                     if feed_config.is_connected:
                         # Check heartbeat
                         if feed_config.last_heartbeat:
                             time_since_heartbeat = datetime.now() - feed_config.last_heartbeat
-                            if time_since_heartbeat > timedelta(seconds=60):
+                            if time_since_heartbeat > timedelta(seconds=MarketDataConfig.HEARTBEAT_TIMEOUT_SECONDS):
                                 logger.warning(f"Feed {feed_id} heartbeat timeout")
                         
                         # Check error rate
-                        if feed_config.errors_count > 10:
+                        if feed_config.errors_count > MarketDataConfig.HIGH_ERROR_COUNT_THRESHOLD:
                             logger.warning(f"High error count for feed {feed_id}: {feed_config.errors_count}")
                 
             except Exception as e:
                 logger.error(f"Error in feed health monitoring: {e}")
-                await asyncio.sleep(30)
+                await asyncio.sleep(DataIntervals.HEALTH_CHECK_SECONDS)
     
     async def _cleanup_old_data(self) -> None:
         """Cleanup old data to manage memory"""
         while True:
             try:
-                await asyncio.sleep(3600)  # Cleanup every hour
+                await asyncio.sleep(DataIntervals.DATA_CLEANUP_SECONDS)
                 
-                cutoff_time = datetime.now() - timedelta(hours=24)
+                cutoff_time = datetime.now() - timedelta(hours=DataRetention.MARKET_DATA_RETENTION_HOURS)
                 
                 with self._lock:
                     # Cleanup historical data
@@ -978,7 +985,7 @@ class MarketDataHandler(ISystemComponent):
                 
             except Exception as e:
                 logger.error(f"Error in data cleanup: {e}")
-                await asyncio.sleep(3600)
+                await asyncio.sleep(DataIntervals.DATA_CLEANUP_SECONDS)
     
     async def unsubscribe(self, subscription_id: str) -> bool:
         """Unsubscribe from data"""

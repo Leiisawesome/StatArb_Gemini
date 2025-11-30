@@ -15,6 +15,14 @@ import time
 from collections import defaultdict, deque
 import warnings
 
+# Import constants
+from ..constants import (
+    AnomalyDetection,
+    ValidationThresholds,
+    DataIntervals,
+    DataRetention,
+)
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ...system.interfaces import ISystemComponent
@@ -223,10 +231,16 @@ class AnomalyDetector:
         # Historical data for comparison
         self._historical_data = defaultdict(lambda: defaultdict(deque))
         
-        # Anomaly thresholds
-        self.price_spike_threshold = self.config.get('price_spike_threshold', 5.0)  # %
-        self.volume_spike_threshold = self.config.get('volume_spike_threshold', 10.0)  # factor
-        self.outlier_std_threshold = self.config.get('outlier_std_threshold', 3.0)
+        # Anomaly thresholds (use constants as defaults)
+        self.price_spike_threshold = self.config.get(
+            'price_spike_threshold', AnomalyDetection.PRICE_SPIKE_THRESHOLD_PERCENT
+        )
+        self.volume_spike_threshold = self.config.get(
+            'volume_spike_threshold', AnomalyDetection.VOLUME_SPIKE_THRESHOLD_FACTOR
+        )
+        self.outlier_std_threshold = self.config.get(
+            'outlier_std_threshold', AnomalyDetection.OUTLIER_STD_THRESHOLD
+        )
         
         # Moving averages for comparison
         self._moving_averages = defaultdict(lambda: defaultdict(float))
@@ -245,7 +259,7 @@ class AnomalyDetector:
         # Get historical data for comparison
         historical = self._historical_data[symbol][data_type]
         
-        if len(historical) < 5:  # Need minimum history
+        if len(historical) < AnomalyDetection.MIN_HISTORY_POINTS:  # Need minimum history
             # Store data point and return no anomalies
             historical.append(data_point)
             if len(historical) > 100:
@@ -399,7 +413,7 @@ class AnomalyDetector:
                 avg_spread = np.mean(historical_spreads)
                 
                 # Anomalous spread detection
-                if spread_pct > avg_spread * 3:  # 3x normal spread
+                if spread_pct > avg_spread * AnomalyDetection.ABNORMAL_SPREAD_MULTIPLIER:
                     anomalies.append(AnomalyType.SPREAD_ANOMALY)
         
         return anomalies
@@ -423,7 +437,7 @@ class AnomalyDetector:
         # Check for stale data
         if isinstance(current_time, datetime):
             age_seconds = (datetime.now() - current_time).total_seconds()
-            if age_seconds > 60:  # Data older than 1 minute
+            if age_seconds > AnomalyDetection.STALE_DATA_THRESHOLD_SECONDS:
                 anomalies.append(AnomalyType.STALE_DATA)
         
         # Check for sequence gaps
@@ -434,9 +448,9 @@ class AnomalyDetector:
             time_gap = (current_time - last_time).total_seconds()
             
             # Expected update frequency (1 second for real-time data)
-            expected_frequency = 1.0
+            expected_frequency = ValidationThresholds.DEFAULT_REQUIRED_UPDATE_FREQUENCY_SECONDS
             
-            if time_gap > expected_frequency * 10:  # 10x expected frequency
+            if time_gap > expected_frequency * AnomalyDetection.SEQUENCE_GAP_MULTIPLIER:
                 anomalies.append(AnomalyType.SEQUENCE_GAP)
         
         return anomalies
@@ -531,18 +545,18 @@ class DataValidator(ISystemComponent):
         """Create default validation configuration"""
         return ValidationConfiguration(
             data_type="default",
-            max_price_change_pct=20.0,
-            max_spread_pct=5.0,
-            max_spread_bps=500.0,
-            max_volume_spike_factor=10.0,
-            max_data_age_seconds=30.0,
-            required_update_frequency_seconds=1.0,
-            outlier_threshold_std=3.0,
+            max_price_change_pct=ValidationThresholds.DEFAULT_MAX_PRICE_CHANGE_PERCENT,
+            max_spread_pct=ValidationThresholds.DEFAULT_MAX_SPREAD_PERCENT,
+            max_spread_bps=ValidationThresholds.DEFAULT_MAX_SPREAD_BPS,
+            max_volume_spike_factor=ValidationThresholds.DEFAULT_MAX_VOLUME_SPIKE_FACTOR,
+            max_data_age_seconds=ValidationThresholds.DEFAULT_MAX_DATA_AGE_SECONDS,
+            required_update_frequency_seconds=ValidationThresholds.DEFAULT_REQUIRED_UPDATE_FREQUENCY_SECONDS,
+            outlier_threshold_std=AnomalyDetection.OUTLIER_STD_THRESHOLD,
             moving_average_window=20,
             required_fields=['timestamp'],
-            min_completeness_pct=95.0,
+            min_completeness_pct=ValidationThresholds.DEFAULT_MIN_COMPLETENESS_PERCENT,
             enable_cross_validation=True,
-            max_cross_validation_diff_pct=2.0
+            max_cross_validation_diff_pct=ValidationThresholds.DEFAULT_MAX_CROSS_VALIDATION_DIFF_PERCENT
         )
     
     def _initialize_default_validations(self) -> None:
@@ -1007,16 +1021,16 @@ class DataValidator(ISystemComponent):
         
         scores = []
         weights = {
-            'completeness': 0.3,
-            'price_range': 0.2,
-            'spread': 0.15,
-            'volume': 0.1,
-            'timestamp': 0.15,
-            'consistency': 0.1
+            'completeness': ValidationThresholds.COMPLETENESS_WEIGHT,
+            'price_range': ValidationThresholds.PRICE_RANGE_WEIGHT,
+            'spread': ValidationThresholds.SPREAD_WEIGHT,
+            'volume': ValidationThresholds.VOLUME_WEIGHT,
+            'timestamp': ValidationThresholds.TIMESTAMP_WEIGHT,
+            'consistency': ValidationThresholds.CONSISTENCY_WEIGHT
         }
         
         for check, result in validation_results.items():
-            weight = weights.get(check, 0.1)
+            weight = weights.get(check, ValidationThresholds.CONSISTENCY_WEIGHT)
             passed = result.get('passed', False)
             score = 1.0 if passed else 0.0
             
@@ -1159,8 +1173,8 @@ class DataValidator(ISystemComponent):
             source_data = self._cross_validation_data[symbol][source]
             source_data.append(storage_data)
             
-            # Keep only recent data (last 100 points)
-            if len(source_data) > 100:
+            # Keep only recent data
+            if len(source_data) > DataRetention.CROSS_VALIDATION_BUFFER_SIZE:
                 source_data.popleft()
     
     def _update_validation_stats(
@@ -1214,7 +1228,7 @@ class DataValidator(ISystemComponent):
         
         while True:
             try:
-                await asyncio.sleep(300)  # Check every 5 minutes
+                await asyncio.sleep(DataIntervals.VALIDATION_MONITORING_SECONDS)
                 
                 with self._lock:
                     stats = self._validation_stats.copy()
@@ -1223,25 +1237,25 @@ class DataValidator(ISystemComponent):
                 if stats['total_validations'] > 100:
                     failure_rate = stats['failed_validations'] / stats['total_validations']
                     
-                    if failure_rate > 0.1:  # 10% failure rate threshold
+                    if failure_rate > ValidationThresholds.HIGH_FAILURE_RATE_THRESHOLD:
                         logger.warning(f"High validation failure rate: {failure_rate:.1%}")
                     
                     avg_quality = stats['quality_score_average']
-                    if avg_quality < 0.8:  # 80% quality threshold
+                    if avg_quality < ValidationThresholds.MIN_QUALITY_SCORE:
                         logger.warning(f"Low average data quality: {avg_quality:.3f}")
                 
             except Exception as e:
                 logger.error(f"Error in validation monitoring: {e}")
-                await asyncio.sleep(300)
+                await asyncio.sleep(DataIntervals.VALIDATION_MONITORING_SECONDS)
     
     async def _cleanup_old_results(self) -> None:
         """Cleanup old validation results"""
         
         while True:
             try:
-                await asyncio.sleep(3600)  # Cleanup every hour
+                await asyncio.sleep(DataIntervals.VALIDATION_CLEANUP_SECONDS)
                 
-                cutoff_time = datetime.now() - timedelta(days=1)
+                cutoff_time = datetime.now() - timedelta(days=DataRetention.VALIDATION_RETENTION_DAYS)
                 
                 with self._lock:
                     # Cleanup validation results
