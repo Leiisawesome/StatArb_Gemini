@@ -12,17 +12,19 @@ This ensures ALL strategies consume the SAME enriched data,
 eliminating indicator calculation duplication.
 
 Author: StatArb_Gemini Core Engine
-Version: 1.0.0
+Version: 1.1.0
 Status: Production
 """
 
 import logging
 import inspect
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Tuple
+import asyncio
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any, Tuple, Deque
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core_engine.system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
 
@@ -37,6 +39,40 @@ from core_engine.processing.signals.generator import EnhancedSignalGenerator
 from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# PIPELINE CONSTANTS (P2 Fix: Centralized magic numbers)
+# ============================================================================
+
+@dataclass(frozen=True)
+class PipelineConstants:
+    """Centralized constants for pipeline orchestrator."""
+    # Cache settings
+    CACHE_TTL_SECONDS: int = 300  # 5 minutes
+    CACHE_MAX_SIZE: int = 100  # Max cached symbols
+    
+    # Timeout settings (P0 Fix)
+    DATA_LOADING_TIMEOUT_SECONDS: float = 60.0  # 1 minute timeout for data loading
+    INDICATOR_TIMEOUT_SECONDS: float = 30.0
+    FEATURE_TIMEOUT_SECONDS: float = 30.0
+    SIGNAL_TIMEOUT_SECONDS: float = 15.0
+    
+    # Quality thresholds
+    QUALITY_EXCELLENT_THRESHOLD: float = 0.9
+    QUALITY_GOOD_THRESHOLD: float = 0.7
+    MISSING_VALUE_PENALTY_MAX: float = 0.5  # Max 50% penalty
+    OUTLIER_PENALTY_MAX: float = 0.2  # Max 20% penalty
+    
+    # Performance metrics (P1 Fix: Bounded lists)
+    METRICS_HISTORY_SIZE: int = 1000  # Max entries per metric
+    
+    # IQR multiplier for outlier detection
+    OUTLIER_IQR_MULTIPLIER: float = 3.0
+
+
+PIPELINE_CONSTANTS = PipelineConstants()
+
 
 # ============================================================================
 # ENRICHED DATA CONTAINER
@@ -215,18 +251,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.liquidity_sequence: Dict[str, List[Dict[str, Any]]] = {}
         self.liquidity_by_timestamp: Dict[str, Dict[datetime, Dict[str, Any]]] = {}
         
-        # Processing cache
-        self.enriched_data_cache: Dict[str, EnrichedMarketData] = {}
-        self.CACHE_TTL_SECONDS = 300  # 5 minutes
-        self.last_cache_clear = datetime.now()
+        # Processing cache with TTL tracking (P0 Fix: TTL-based eviction)
+        self._cache_entries: Dict[str, Tuple[EnrichedMarketData, datetime]] = {}  # (data, timestamp)
+        self._cache_max_size = PIPELINE_CONSTANTS.CACHE_MAX_SIZE
+        self._cache_ttl = timedelta(seconds=PIPELINE_CONSTANTS.CACHE_TTL_SECONDS)
         
-        # Performance metrics
-        self.processing_times: Dict[str, List[float]] = {
-            'data_loading': [],
-            'indicators': [],
-            'features': [],
-            'signals': [],
-            'total': []
+        # Performance metrics with bounded history (P1 Fix: Prevent memory leak)
+        self._metrics_maxlen = PIPELINE_CONSTANTS.METRICS_HISTORY_SIZE
+        self.processing_times: Dict[str, Deque[float]] = {
+            'data_loading': deque(maxlen=self._metrics_maxlen),
+            'indicators': deque(maxlen=self._metrics_maxlen),
+            'features': deque(maxlen=self._metrics_maxlen),
+            'signals': deque(maxlen=self._metrics_maxlen),
+            'total': deque(maxlen=self._metrics_maxlen)
         }
         self.total_processed = 0
         
@@ -322,7 +359,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.is_operational = False
         
         # Clear cache
-        self.enriched_data_cache.clear()
+        self._cache_entries.clear()
         self.liquidity_sequence.clear()
         self.liquidity_by_timestamp.clear()
         
@@ -336,10 +373,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         Returns:
             Dict with health status of each component
         """
+        # Evict expired cache entries before reporting
+        self._evict_expired_cache()
+        
         health = {
             'orchestrator_healthy': self.is_operational,
             'initialized': self.is_initialized,
-            'cache_size': len(self.enriched_data_cache),
+            'cache_size': len(self._cache_entries),
             'total_processed': self.total_processed
         }
         
@@ -382,12 +422,91 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             'component_name': self.component_name,
             'initialized': self.is_initialized,
             'operational': self.is_operational,
-            'cache_size': len(self.enriched_data_cache),
+            'cache_size': len(self._cache_entries),
             'total_processed': self.total_processed,
             'avg_processing_times_ms': {k: v * 1000 for k, v in avg_times.items()},
             'components_available': True,
             'config_available': True
         }
+    
+    # ================================================================
+    # Cache Management (P0 Fix: TTL-based eviction)
+    # ================================================================
+    
+    def _evict_expired_cache(self) -> int:
+        """
+        Evict expired cache entries based on TTL.
+        
+        Returns:
+            Number of entries evicted
+        """
+        now = datetime.now()
+        expired_keys = [
+            key for key, (_, timestamp) in self._cache_entries.items()
+            if now - timestamp > self._cache_ttl
+        ]
+        
+        for key in expired_keys:
+            del self._cache_entries[key]
+        
+        if expired_keys:
+            logger.debug(f"Cache eviction: {len(expired_keys)} expired entries removed")
+        
+        return len(expired_keys)
+    
+    def _cache_put(self, symbol: str, data: EnrichedMarketData) -> None:
+        """
+        Add entry to cache with TTL tracking and size limit enforcement.
+        
+        Args:
+            symbol: Cache key (symbol name)
+            data: EnrichedMarketData to cache
+        """
+        # Evict expired entries first
+        self._evict_expired_cache()
+        
+        # If cache is at max size, evict oldest entry
+        if len(self._cache_entries) >= self._cache_max_size:
+            oldest_key = min(
+                self._cache_entries.keys(),
+                key=lambda k: self._cache_entries[k][1]
+            )
+            del self._cache_entries[oldest_key]
+            logger.debug(f"Cache eviction: {oldest_key} removed (size limit)")
+        
+        self._cache_entries[symbol] = (data, datetime.now())
+    
+    def _cache_get(self, symbol: str) -> Optional[EnrichedMarketData]:
+        """
+        Get entry from cache if exists and not expired.
+        
+        Args:
+            symbol: Cache key (symbol name)
+            
+        Returns:
+            EnrichedMarketData or None if not cached or expired
+        """
+        if symbol not in self._cache_entries:
+            return None
+        
+        data, timestamp = self._cache_entries[symbol]
+        
+        # Check if expired
+        if datetime.now() - timestamp > self._cache_ttl:
+            del self._cache_entries[symbol]
+            return None
+        
+        return data
+    
+    @property
+    def enriched_data_cache(self) -> Dict[str, EnrichedMarketData]:
+        """
+        Property for backward compatibility - returns cache data without timestamps.
+        
+        Note: Prefer using _cache_get/_cache_put for proper TTL handling.
+        """
+        self._evict_expired_cache()
+        return {key: data for key, (data, _) in self._cache_entries.items()}
     
     # ================================================================
     # IRegimeAware Implementation (Rule 2)
@@ -462,8 +581,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             await self.signal_generator.on_regime_change(new_regime_context)
         
         # Clear cache on regime change (indicators may need recalculation)
-        cache_size = len(self.enriched_data_cache)
-        self.enriched_data_cache.clear()
+        cache_size = len(self._cache_entries)
+        self._cache_entries.clear()
         logger.debug(f"Cache cleared on regime change ({cache_size} entries removed)")
     
     def get_current_regime_context(self) -> Optional[RegimeContext]:
@@ -494,7 +613,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         
         # Clear cache if regime is different
         if regime_context != self.current_regime_context:
-            self.enriched_data_cache.clear()
+            self._cache_entries.clear()
             adaptations['cache_cleared'] = True
         
         return adaptations
@@ -682,11 +801,12 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     q3 = df[col].quantile(0.75)
                     iqr = q3 - q1
                     if iqr > 0:  # Avoid division by zero
-                        outliers = ((df[col] < (q1 - 3 * iqr)) | (df[col] > (q3 + 3 * iqr))).sum()
+                        iqr_mult = PIPELINE_CONSTANTS.OUTLIER_IQR_MULTIPLIER
+                        outliers = ((df[col] < (q1 - iqr_mult * iqr)) | (df[col] > (q3 + iqr_mult * iqr))).sum()
                         if outliers > 0:
                             metrics['outliers'][col] = int(outliers)
                 except Exception as e:
-                    logger.debug(f"Outlier calculation failed for {col}: {e}")
+                    logger.debug("Outlier calculation failed for %s: %s", col, e)
         
         # Calculate quality score (0.0 to 1.0)
         quality_score = 1.0
@@ -694,17 +814,21 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         # Penalize missing values
         if metrics['missing_values']:
             total_missing = sum(v['count'] for v in metrics['missing_values'].values())
-            missing_penalty = min(0.5, total_missing / len(df))  # Max 50% penalty
+            missing_penalty = min(PIPELINE_CONSTANTS.MISSING_VALUE_PENALTY_MAX, total_missing / len(df))
             quality_score *= (1 - missing_penalty)
         
         # Penalize outliers (less severe)
         if metrics['outliers']:
             total_outliers = sum(metrics['outliers'].values())
-            outlier_penalty = min(0.2, total_outliers / len(df))  # Max 20% penalty
+            outlier_penalty = min(PIPELINE_CONSTANTS.OUTLIER_PENALTY_MAX, total_outliers / len(df))
             quality_score *= (1 - outlier_penalty)
         
         metrics['quality_score'] = max(0.0, quality_score)
-        metrics['status'] = 'excellent' if quality_score >= 0.9 else 'good' if quality_score >= 0.7 else 'poor'
+        metrics['status'] = (
+            'excellent' if quality_score >= PIPELINE_CONSTANTS.QUALITY_EXCELLENT_THRESHOLD
+            else 'good' if quality_score >= PIPELINE_CONSTANTS.QUALITY_GOOD_THRESHOLD
+            else 'poor'
+        )
         
         return metrics
     
@@ -832,16 +956,30 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     regime_sequence = []
                     
                     if self.regime_engine:
-                        logger.debug(f"🔄 Phase 0: Processing regime for {symbol} (beacon light approach)")
+                        logger.debug("🔄 Phase 0: Processing regime for %s (beacon light approach)", symbol)
                         regime_result = self.regime_engine.process_market_data(symbol_data)
+                        
+                        # P0 Fix: Validate regime engine output
+                        if not isinstance(regime_result, dict):
+                            logger.warning(
+                                "⚠️  %s: Regime engine returned %s instead of dict, using empty sequence",
+                                symbol, type(regime_result).__name__
+                            )
+                            regime_result = {}
+                        
                         regime_sequence = regime_result.get('regime_sequence', [])
+                        if not isinstance(regime_sequence, list):
+                            logger.warning(
+                                "⚠️  %s: regime_sequence is %s instead of list, using empty",
+                                symbol, type(regime_sequence).__name__
+                            )
+                            regime_sequence = []
                         
                         if regime_sequence:
                             regime_changes_count = regime_result.get('regime_changes_count', 0)
                             logger.debug(
-                                f"   ✅ {symbol}: Regime beacon established - "
-                                f"{len(regime_sequence)} regime states, "
-                                f"{regime_changes_count} regime changes"
+                                "   ✅ %s: Regime beacon established - %d regime states, %d regime changes",
+                                symbol, len(regime_sequence), regime_changes_count
                             )
                             
                             # ENHANCED: Per-regime-change config adaptation
@@ -942,24 +1080,26 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                         liquidity_context=self._get_latest_liquidity_context(symbol)
                     )
                     
-                    # Populate cache for future retrieval
-                    self.enriched_data_cache[symbol] = enriched_data[symbol]
+                    # Populate cache for future retrieval (P0 Fix: TTL-based cache)
+                    self._cache_put(symbol, enriched_data[symbol])
                     
                     # Validate enrichment
                     if not enriched_data[symbol].validate_enrichment():
-                        logger.warning(f"⚠️  {symbol}: enrichment validation failed")
+                        logger.warning("⚠️  %s: enrichment validation failed", symbol)
                     
                     # Log regime info if available
                     regime_info = ""
                     if self.regime_engine and regime_sequence:
-                        regime_info = f" ({len(regime_sequence)} regime states, {regime_result.get('regime_changes_count', 0)} changes)"
+                        regime_info = " ({} regime states, {} changes)".format(
+                            len(regime_sequence), regime_result.get('regime_changes_count', 0)
+                        )
                     logger.info(
-                        f"✅ {symbol} processed: {len(symbol_data)} bars → "
-                        f"{len(signals_df.columns)} total columns{regime_info}"
+                        "✅ %s processed: %d bars → %d total columns%s",
+                        symbol, len(symbol_data), len(signals_df.columns), regime_info
                     )
                     
                 except Exception as e:
-                    logger.error(f"❌ {symbol} processing failed: {e}", exc_info=True)
+                    logger.error("❌ %s processing failed: %s", symbol, e, exc_info=True)
                     continue
             
             # Calculate total processing time
@@ -1036,7 +1176,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         timeframe: str
     ) -> Dict[str, pd.DataFrame]:
         """
-        Phase 1: Load raw OHLCV data
+        Phase 1: Load raw OHLCV data with timeout protection.
+        
+        P0 Fix: Uses asyncio.to_thread to avoid blocking event loop,
+        wrapped with asyncio.wait_for for timeout protection.
         
         Returns:
             Dict[symbol, DataFrame with OHLCV columns]
@@ -1045,14 +1188,22 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.warning("DataManager not available, returning empty data")
             return {symbol: pd.DataFrame() for symbol in symbols}
         
-        try:
-            # Load data through DataManager (Single Data Authority - Rule 3.1)
-            # Note: load_market_data is synchronous, not async
-            raw_data = self.data_manager.load_market_data(
+        def _sync_load() -> Any:
+            """Synchronous data loading (runs in thread pool)."""
+            return self.data_manager.load_market_data(
                 symbols=symbols,
                 start_time=start_time,
                 end_time=end_time,
                 interval=timeframe
+            )
+        
+        try:
+            # P0 Fix: Run sync data loading in thread pool with timeout
+            # This prevents blocking the event loop and adds timeout protection
+            timeout = PIPELINE_CONSTANTS.DATA_LOADING_TIMEOUT_SECONDS
+            raw_data = await asyncio.wait_for(
+                asyncio.to_thread(_sync_load),
+                timeout=timeout
             )
             
             # Convert to dict if single DataFrame
@@ -1069,8 +1220,15 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             
             return raw_data
             
+        except asyncio.TimeoutError:
+            logger.error(
+                "Data loading timed out after %.1f seconds for symbols: %s",
+                PIPELINE_CONSTANTS.DATA_LOADING_TIMEOUT_SECONDS,
+                symbols
+            )
+            return {symbol: pd.DataFrame() for symbol in symbols}
         except Exception as e:
-            logger.error(f"Data loading failed: {e}")
+            logger.error("Data loading failed: %s", e)
             return {symbol: pd.DataFrame() for symbol in symbols}
     
     async def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -1750,32 +1908,31 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
     
     def clear_cache(self) -> int:
         """
-        Clear enriched data cache
+        Clear enriched data cache.
         
         Returns:
             Number of entries cleared
         """
-        count = len(self.enriched_data_cache)
-        self.enriched_data_cache.clear()
-        self.last_cache_clear = datetime.now()
-        logger.info(f"Cache cleared: {count} entries removed")
+        count = len(self._cache_entries)
+        self._cache_entries.clear()
+        logger.info("Cache cleared: %d entries removed", count)
         return count
     
     def get_cached_data(self, symbol: str) -> Optional[EnrichedMarketData]:
         """
-        Get cached enriched data for symbol
+        Get cached enriched data for symbol (with TTL check).
         
         Args:
             symbol: Symbol to retrieve
         
         Returns:
-            EnrichedMarketData or None if not cached
+            EnrichedMarketData or None if not cached or expired
         """
-        return self.enriched_data_cache.get(symbol)
+        return self._cache_get(symbol)
     
     def get_performance_metrics(self) -> Dict[str, Any]:
         """
-        Get pipeline performance metrics
+        Get pipeline performance metrics.
         
         Returns:
             Dict with performance statistics
@@ -1785,11 +1942,16 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             for stage, times in self.processing_times.items()
         }
         
+        # Evict expired entries before reporting
+        self._evict_expired_cache()
+        
         return {
             'total_processed': self.total_processed,
             'avg_processing_times': avg_times,
-            'cache_size': len(self.enriched_data_cache),
-            'last_cache_clear': self.last_cache_clear.isoformat(),
+            'cache_size': len(self._cache_entries),
+            'cache_max_size': self._cache_max_size,
+            'cache_ttl_seconds': self._cache_ttl.total_seconds(),
+            'metrics_history_size': self._metrics_maxlen,
             'processing_counts': {
                 stage: len(times)
                 for stage, times in self.processing_times.items()
@@ -1803,6 +1965,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
 __all__ = [
     'EnrichedMarketData',
-    'ProcessingPipelineOrchestrator'
+    'ProcessingPipelineOrchestrator',
+    'PipelineConstants',
+    'PIPELINE_CONSTANTS',
 ]
 
