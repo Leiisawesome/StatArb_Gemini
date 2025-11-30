@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
 """
-Liquidity Assessment Engine - Stub Implementation
+Liquidity Assessment Engine - EXPERIMENTAL STUB IMPLEMENTATION
+
+⚠️  WARNING: This module is a placeholder stub implementation.
+    It returns hardcoded "normal liquidity" values and should NOT be used
+    for production trading decisions.
+    
+    TODO: Implement real liquidity assessment with:
+    - Order book depth analysis
+    - Volume profile analysis  
+    - Bid-ask spread dynamics
+    - Market impact estimation
+    - Historical liquidity patterns
 """
 
 import logging
 import uuid
+import warnings
 from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
@@ -41,10 +53,16 @@ class LiquidityRegime(Enum):
 
 class LiquidityAssessmentEngine(ISystemComponent):
     """
-    Minimal liquidity assessment engine for backtesting
+    ⚠️  EXPERIMENTAL STUB - Minimal liquidity assessment engine for backtesting
+    
+    This is a placeholder implementation that returns simulated liquidity scores.
+    DO NOT use for production trading decisions.
     
     Implements ISystemComponent for orchestrator integration (Rule 1).
     """
+    
+    # Flag to indicate this is a stub implementation
+    IS_STUB_IMPLEMENTATION = True
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
@@ -54,7 +72,15 @@ class LiquidityAssessmentEngine(ISystemComponent):
         self.is_operational = False
         self.orchestrator: Optional[Any] = None
         
-        self.logger.info("✅ LiquidityAssessmentEngine initialized (stub)")
+        # Emit warning about stub implementation
+        warnings.warn(
+            "LiquidityAssessmentEngine is a STUB implementation returning simulated values. "
+            "Do not use for production trading.",
+            UserWarning,
+            stacklevel=2
+        )
+        
+        self.logger.warning("⚠️  LiquidityAssessmentEngine initialized (STUB - not for production)")
     
     def register_with_orchestrator(self, orchestrator) -> str:
         """Register with orchestrator"""
@@ -114,19 +140,35 @@ class LiquidityAssessmentEngine(ISystemComponent):
     
     def assess_liquidity_score(self, symbol: str, market_data: Dict[str, Any],
                               historical_data: Optional[Any] = None) -> Dict[str, Any]:
-        """Assess liquidity - stub implementation returns normal liquidity"""
+        """
+        Assess liquidity - STUB implementation returns simulated normal liquidity.
+        
+        ⚠️  WARNING: This returns hardcoded values and should NOT be used
+        for production trading decisions.
+        
+        Args:
+            symbol: Trading symbol
+            market_data: Current market data dict with 'volume', 'bid', 'ask' etc.
+            historical_data: Optional historical data for analysis
+            
+        Returns:
+            Dict with liquidity assessment metrics (all simulated)
+        """
+        self.logger.debug(f"STUB: Returning simulated liquidity for {symbol}")
+        
         return {
             'symbol': symbol,
             'timestamp': datetime.now(),
-            'overall_score': 70.0,
-            'liquidity_regime': LiquidityRegime.NORMAL_LIQUIDITY,
-            'confidence': 0.8,
+            'overall_score': 70.0,  # SIMULATED
+            'liquidity_regime': LiquidityRegime.NORMAL_LIQUIDITY,  # SIMULATED
+            'confidence': 0.8,  # SIMULATED - low confidence due to stub
             'avg_daily_volume': market_data.get('volume', 100000),
             'current_volume': market_data.get('volume', 100000),
-            'volume_ratio': 1.0,
-            'bid_ask_spread_bps': 5.0,
-            'effective_spread_bps': 7.0,
-            'market_depth': 50000,
-            'liquidity_risk_score': 30.0,
-            'slippage_risk': 2.5
+            'volume_ratio': 1.0,  # SIMULATED
+            'bid_ask_spread_bps': 5.0,  # SIMULATED
+            'effective_spread_bps': 7.0,  # SIMULATED
+            'market_depth': 50000,  # SIMULATED
+            'liquidity_risk_score': 30.0,  # SIMULATED
+            'slippage_risk': 2.5,  # SIMULATED
+            '_is_simulated': True  # Flag to indicate stub data
         }

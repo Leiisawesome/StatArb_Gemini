@@ -727,8 +727,8 @@ class AlternativeDataHandler(ISystemComponent):
             Data ID
         """
         
-        # Generate data ID
-        data_id = hashlib.md5(f"{raw_content[:100]}{time.time()}".encode()).hexdigest()
+        # Generate data ID using SHA-256 (more secure than MD5)
+        data_id = hashlib.sha256(f"{raw_content[:100]}{time.time()}".encode()).hexdigest()[:32]
         
         # Create data point
         data_point = AlternativeDataPoint(

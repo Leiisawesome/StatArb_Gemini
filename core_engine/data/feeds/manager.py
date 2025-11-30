@@ -479,7 +479,16 @@ class WebSocketFeed(DataFeed):
         self.statistics.total_connections += 1
         
         # Send authentication if required
+        # NOTE: API key is sent in message payload. For production:
+        # - Ensure WebSocket connection uses wss:// (TLS encrypted)
+        # - Consider using token-based auth with short-lived tokens
+        # - Implement key rotation policies
         if self.config.api_key:
+            if not self.config.url.startswith('wss://'):
+                logger.warning(
+                    f"SECURITY: API key being sent over non-TLS WebSocket connection "
+                    f"to {self.config.url}. Use wss:// for production."
+                )
             auth_msg = {
                 "action": "auth",
                 "api_key": self.config.api_key
