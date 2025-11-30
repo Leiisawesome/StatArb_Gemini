@@ -675,6 +675,64 @@ class TransitionPredictor:
         except Exception as e:
             logger.error(f"Error calculating risk implications: {e}")
             return prediction
+    
+    # ========================================
+    # MODEL PERSISTENCE (Phase 2 Architectural Improvement)
+    # ========================================
+    
+    def save_models(self, filepath: str) -> bool:
+        """
+        Save trained transition prediction models to file.
+        
+        Args:
+            filepath: Path to save the model file (e.g., 'transition_models.joblib')
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            model_data = {
+                'models': self.models,
+                'scalers': self.scalers,
+                'feature_names': self.feature_names,
+                'is_trained': self.is_trained,
+                'config': self.config,
+                'save_timestamp': datetime.now().isoformat()
+            }
+            
+            joblib.dump(model_data, filepath)
+            logger.info(f"Transition prediction models saved to {filepath}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving transition models: {e}")
+            return False
+    
+    def load_models(self, filepath: str) -> bool:
+        """
+        Load trained transition prediction models from file.
+        
+        Args:
+            filepath: Path to the model file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            model_data = joblib.load(filepath)
+            
+            self.models = model_data['models']
+            self.scalers = model_data['scalers']
+            self.feature_names = model_data.get('feature_names', [])
+            self.is_trained = model_data['is_trained']
+            
+            load_timestamp = model_data.get('save_timestamp', 'unknown')
+            logger.info(f"Transition prediction models loaded from {filepath} (saved: {load_timestamp})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading transition models: {e}")
+            return False
 
 
 class RebalancingManager:

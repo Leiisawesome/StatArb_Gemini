@@ -1056,3 +1056,70 @@ class EnhancedRegimeEngine(ISystemComponent):
             return None
         
         return self.get_regime_at_timestamp(symbol, timestamp)
+    
+    # ========================================
+    # MODEL PERSISTENCE (Phase 2 Architectural Improvement)
+    # ========================================
+    
+    def save_models(self, filepath: str) -> bool:
+        """
+        Save trained ML models and state to file.
+        
+        Args:
+            filepath: Path to save the model file (e.g., 'regime_engine_models.joblib')
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import joblib
+            
+            model_data = {
+                'transition_models': self.transition_models,
+                'transition_scaler': self.transition_scaler,
+                'models_trained': self.models_trained,
+                'transition_history': list(self.transition_history) if hasattr(self, 'transition_history') else [],
+                'config': {
+                    'lookback_window': self.config.lookback_window,
+                    'volatility_window': self.config.volatility_window,
+                    'trend_threshold': self.config.trend_threshold,
+                    'regime_change_threshold': self.config.regime_change_threshold
+                },
+                'save_timestamp': datetime.now().isoformat()
+            }
+            
+            joblib.dump(model_data, filepath)
+            self.logger.info(f"Regime engine models saved to {filepath}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error saving regime engine models: {e}")
+            return False
+    
+    def load_models(self, filepath: str) -> bool:
+        """
+        Load trained ML models and state from file.
+        
+        Args:
+            filepath: Path to the model file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import joblib
+            
+            model_data = joblib.load(filepath)
+            
+            self.transition_models = model_data['transition_models']
+            self.transition_scaler = model_data['transition_scaler']
+            self.models_trained = model_data['models_trained']
+            self.transition_history = model_data.get('transition_history', [])
+            
+            load_timestamp = model_data.get('save_timestamp', 'unknown')
+            self.logger.info(f"Regime engine models loaded from {filepath} (saved: {load_timestamp})")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error loading regime engine models: {e}")
+            return False
