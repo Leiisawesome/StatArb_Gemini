@@ -144,6 +144,11 @@ class InstitutionalBacktestEngine:
         self.execution_history: List[Dict[str, Any]] = []
         self.position_history: List[Dict[str, Any]] = []
         
+        # CRITICAL FIX: Pending signals queue for next-bar execution
+        # Signals generated at bar N are queued and executed at bar N+1 open
+        # This eliminates look-ahead bias from same-bar execution
+        self.pending_signals: List[Dict[str, Any]] = []
+        
         logger.info(f"✅ InstitutionalBacktestEngine created: {self.backtest_name}")
     
     # ============================================================
@@ -1393,6 +1398,11 @@ class InstitutionalBacktestEngine:
                     pnl_tracker=getattr(self, 'pnl_tracker', None)
                 )
                 logger.info("✅ Institutional components integrated with RiskManager (Sprint 0 & Sprint 1)")
+            
+            # Inject risk_manager back into pnl_tracker (bi-directional link)
+            if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                self.pnl_tracker.set_risk_manager(self.risk_manager)
+                logger.info("✅ RiskManager injected into PnLTracker (bi-directional link)")
             
             # Register with orchestrator (order=25)
             component_id = self.orchestrator.register_component(
@@ -2783,6 +2793,58 @@ class InstitutionalBacktestEngine:
             # Calculate basic metrics
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
 
+            # Calculate win rate from execution history
+            winning_trades = 0
+            losing_trades = 0
+            for trade in self.execution_history:
+                pnl = trade.get('realized_pnl', 0.0) or trade.get('pnl', 0.0)
+                if pnl > 0:
+                    winning_trades += 1
+                elif pnl < 0:
+                    losing_trades += 1
+            
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0.0
+            
+            # Calculate max drawdown from position history
+            max_drawdown = 0.0
+            max_drawdown_pct = 0.0
+            if self.position_history:
+                equity_values = [snap.get('equity', initial_capital) for snap in self.position_history]
+                if equity_values:
+                    peak = equity_values[0]
+                    for equity in equity_values:
+                        if equity > peak:
+                            peak = equity
+                        drawdown = (peak - equity) / peak if peak > 0 else 0
+                        if drawdown > max_drawdown_pct:
+                            max_drawdown_pct = drawdown
+                            max_drawdown = peak - equity
+            
+            # Calculate Sharpe ratio from position history returns
+            sharpe_ratio = 0.0
+            if self.position_history and len(self.position_history) > 1:
+                equity_values = [snap.get('equity', initial_capital) for snap in self.position_history]
+                if len(equity_values) > 1:
+                    import numpy as np
+                    # Calculate returns
+                    returns = []
+                    for i in range(1, len(equity_values)):
+                        if equity_values[i-1] > 0:
+                            ret = (equity_values[i] - equity_values[i-1]) / equity_values[i-1]
+                            returns.append(ret)
+                    
+                    if returns:
+                        returns_arr = np.array(returns)
+                        mean_return = np.mean(returns_arr)
+                        std_return = np.std(returns_arr)
+                        
+                        # Annualize (assume ~390 1-minute bars per day, 252 trading days)
+                        # For intraday data, annualization factor is sqrt(252 * 390)
+                        if std_return > 0:
+                            # Use simple annualization - adjust based on bar frequency
+                            annualization_factor = np.sqrt(252 * 390)  # For 1-minute bars
+                            sharpe_ratio = (mean_return / std_return) * annualization_factor
+
             # Create summary dict
             summary = {
                 "backtest_name": self.backtest_name,
@@ -2791,6 +2853,12 @@ class InstitutionalBacktestEngine:
                 "initial_capital": initial_capital,
                 "final_capital": final_capital,
                 "total_return": total_return,
+                "sharpe_ratio": sharpe_ratio,
+                "max_drawdown": max_drawdown,
+                "max_drawdown_pct": max_drawdown_pct,
+                "win_rate": win_rate,
+                "winning_trades": winning_trades,
+                "losing_trades": losing_trades,
                 "execution_history": self.execution_history,
                 "position_history": self.position_history
             }
@@ -3153,68 +3221,69 @@ class InstitutionalBacktestEngine:
                     use_pre_calculated = True
             
             signals_df = None
-            bar_df = None
+            
+            # Always create bar_df from current bar (needed for price lookup in trade authorization)
+            bar_dict = bar.to_dict()
+            if 'timestamp' in bar_dict:
+                bar_dict.pop('timestamp')
+            bar_df = pd.DataFrame([bar_dict], index=[timestamp])
+            bar_df.index.name = 'timestamp'
+            bar_df = bar_df.reset_index()
             
             if use_pre_calculated:
-                # Get pre-calculated features for current bar
-                # Pre-calculated data has been calculated with full historical context
+                # Get pre-calculated features UP TO AND INCLUDING current bar
+                # Strategy needs historical context, not just the single bar
                 try:
                     # Match by timestamp instead of index to handle filtered bars correctly
                     bar_timestamp = pd.Timestamp(timestamp)
                     
-                    # Find matching row in pre_calculated_features
+                    # Find index of current bar in pre_calculated_features
                     if 'timestamp' in self.pre_calculated_features.columns:
-                        mask = pd.to_datetime(self.pre_calculated_features['timestamp']) == bar_timestamp
-                        features_row = self.pre_calculated_features[mask]
+                        timestamps = pd.to_datetime(self.pre_calculated_features['timestamp'])
+                        current_bar_mask = timestamps == bar_timestamp
+                        if current_bar_mask.any():
+                            # CRITICAL FIX: Use np.argmax to get iloc position, not idxmax which returns label
+                            import numpy as np
+                            current_bar_iloc = np.argmax(current_bar_mask.values)  # Get iloc position
+                            # Pass data up to and including current bar (for historical context)
+                            features_historical = self.pre_calculated_features.iloc[:current_bar_iloc + 1].copy()
+                            
+                        else:
+                            features_historical = pd.DataFrame()
                     elif hasattr(self.pre_calculated_features.index, 'equals'):
                         # Use index if timestamp not in columns
-                        mask = self.pre_calculated_features.index == bar_timestamp
-                        features_row = self.pre_calculated_features[mask]
+                        mask = self.pre_calculated_features.index <= bar_timestamp
+                        features_historical = self.pre_calculated_features[mask].copy()
                     else:
                         # Fallback to iloc if we can't match by timestamp
                         if pre_calc_index < len(self.pre_calculated_features):
-                            features_row = self.pre_calculated_features.iloc[pre_calc_index:pre_calc_index+1]
+                            features_historical = self.pre_calculated_features.iloc[:pre_calc_index+1].copy()
                         else:
-                            features_row = pd.DataFrame()  # Empty if out of bounds
+                            features_historical = pd.DataFrame()  # Empty if out of bounds
                     
-                    if not features_row.empty:
+                    if not features_historical.empty:
                         # ✅ CRITICAL FIX: Convert pre-calculated features to expected format
-                        # Ensure features_row is a DataFrame with correct columns
-                        if 'timestamp' in features_row.columns:
+                        # Ensure features_historical is a DataFrame with correct columns
+                        if 'timestamp' in features_historical.columns:
                             # Rename timestamp column to avoid conflicts
-                            features_row = features_row.rename(columns={'timestamp': 'regime_timestamp'})
-                        
-                        # Log on first bar to confirm strategy is being called with enriched data
-                        if bar_index < 3:
-                            logger.info(f"📊 Bar {bar_index}: Calling strategy for signals generation")
-                            logger.info(f"   Data type: ENRICHED FEATURES (pre-calculated indicators)")
-                            logger.info(f"   Historical context: {len(features_row)} bars of enriched data")
-                            if len(features_row.columns) > 6:
-                                logger.info(f"   Indicators available: {', '.join(features_row.columns[6:12].tolist())}...")
+                            features_historical = features_historical.rename(columns={'timestamp': 'regime_timestamp'})
                         
                         # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
-                        # Strategy receives pre-calculated indicators (no recalculation needed)
+                        # Strategy receives pre-calculated indicators with FULL HISTORICAL CONTEXT
                         # Get current positions for strategy context
                         current_positions = self.risk_manager.current_positions if self.risk_manager else {}
                         
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
-                            {symbol: features_row for symbol in self.config.symbols},
+                            {symbol: features_historical for symbol in self.config.symbols},
                             current_positions
                         )
-                        
-                        if bar_index < 3:
-                            logger.info(f"   ✅ Strategy returned: {len(signals_result) if signals_result else 0} signals (from enriched data)")
                         
                         # Strategy returns List[Signal], convert to DataFrame
                         if signals_result is not None and len(signals_result) > 0:
                             # Convert list of Signal objects to DataFrame
                             signals_df = pd.DataFrame([s.__dict__ for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
-                            if bar_index < 10:
-                                logger.info(f"🎯 Bar {bar_index}: Generated {len(signals_df)} signals from enriched features!")
-                        else:
-                            pass
                     else:
                         # No matching timestamp found in pre_calculated_features
                         # Fall back to on-the-fly calculation
@@ -3325,23 +3394,47 @@ class InstitutionalBacktestEngine:
                 if signals_df is not None and not signals_df.empty:
                     bar_results['signals_generated'] = len(signals_df)
             
-            # Step 3: Strategy signal generation and aggregation (BRICK #7)
-            authorized_trades = []
+            # ================================================================
+            # CRITICAL FIX: NEXT-BAR EXECUTION (Eliminates Look-Ahead Bias)
+            # ================================================================
+            # Step 3a: FIRST execute any pending signals from PREVIOUS bar
+            # These signals were generated at bar N-1 and execute at bar N open
+            executed_trades = []
+            if self.pending_signals:
+                # Get current bar's OPEN price for execution (not close!)
+                open_price = bar.get('open', bar.get('close', 0))
+                
+                # Execute pending signals at current bar's OPEN price
+                executed_trades = await self._execute_pending_signals(
+                    self.pending_signals,
+                    bar,
+                    timestamp,
+                    execution_price=open_price  # Use OPEN price, not close
+                )
+                bar_results['trades_executed'] = len(executed_trades)
+                
+                # Clear pending signals after execution
+                self.pending_signals = []
+            
+            # Step 3b: Generate NEW signals and QUEUE them for next bar
+            # Signals generated at bar N will execute at bar N+1 open
             if signals_df is not None and not signals_df.empty:
+                # Get authorized trades (validation happens now, execution happens next bar)
                 authorized_trades = await self._get_authorized_trades_for_bar(
                     bar_df, signals_df, timestamp
                 )
-            
-            bar_results['trades_authorized'] = len(authorized_trades)
-            
-            # Step 7: Simulate execution if we have authorized trades
-            if authorized_trades:
-                executed_trades = await self.simulate_execution(
-                    authorized_trades,
-                    bar,
-                    timestamp
-                )
-                bar_results['trades_executed'] = len(executed_trades)
+                
+                bar_results['trades_authorized'] = len(authorized_trades)
+                
+                # QUEUE authorized trades for next bar execution (not immediate!)
+                if authorized_trades:
+                    for trade in authorized_trades:
+                        # Store the signal bar's close price for reference (decision price)
+                        trade['signal_bar_close'] = bar.get('close', 0)
+                        trade['signal_bar_index'] = bar_index
+                        trade['signal_timestamp'] = timestamp
+                    
+                    self.pending_signals.extend(authorized_trades)
             
             # ✅ FIXED (Rule 4): Update market prices for unrealized P&L via CentralRiskManager
             # Position tracking is now handled by CentralRiskManager (Rule 4, Section 10)
@@ -3430,7 +3523,17 @@ class InstitutionalBacktestEngine:
             for idx, signal_row in signals_df.iterrows():
                 # Extract signal information
                 symbol = signal_row.get('symbol', self.config.symbols[0])
-                signal_type = signal_row.get('signal', 'HOLD')
+                
+                # Handle signal_type - can be either SignalType enum, string, or 'signal' field
+                signal_type_raw = signal_row.get('signal_type', signal_row.get('signal', 'HOLD'))
+                # Convert to lowercase string for comparison
+                if hasattr(signal_type_raw, 'value'):
+                    signal_type = signal_type_raw.value.lower()  # SignalType enum
+                elif hasattr(signal_type_raw, 'lower'):
+                    signal_type = signal_type_raw.lower()  # string
+                else:
+                    signal_type = str(signal_type_raw).lower()
+                
                 confidence = signal_row.get('confidence', 0.5)
                 
                 # CRITICAL FIX: Extract target_weight and quantity_type from signal
@@ -3445,8 +3548,8 @@ class InstitutionalBacktestEngine:
                     current_position = 0.0
                     if self.risk_manager:
                         # Use CentralRiskManager as source of truth (Rule 4)
-                        if symbol in self.risk_manager.current_positions:
-                            current_position = self.risk_manager.current_positions[symbol].quantity
+                        # current_positions is Dict[str, float], not Dict[str, Position]
+                        current_position = self.risk_manager.current_positions.get(symbol, 0.0)
                     elif self.position_tracker:
                         # Fallback to deprecated position tracker if risk manager not available
                         position_obj = self.position_tracker.get_position(symbol)
@@ -3560,10 +3663,63 @@ class InstitutionalBacktestEngine:
     # EXECUTION FLOW METHODS
     # ============================================================
     
+    async def _execute_pending_signals(self,
+                                       pending_signals: List[Dict[str, Any]],
+                                       current_bar: pd.Series,
+                                       bar_timestamp: datetime,
+                                       execution_price: float) -> List[Dict[str, Any]]:
+        """
+        Execute pending signals from previous bar at current bar's OPEN price.
+        
+        CRITICAL FIX: This eliminates look-ahead bias by ensuring signals
+        generated at bar N are executed at bar N+1's OPEN price, not bar N's
+        close price.
+        
+        Real-world analogy:
+        - At bar N close, you see the price and decide to trade
+        - You submit an order (takes time)
+        - Order fills at bar N+1 open (earliest realistic execution)
+        
+        Args:
+            pending_signals: Signals queued from previous bar
+            current_bar: Current bar data (used for OPEN price)
+            bar_timestamp: Current bar timestamp
+            execution_price: Price to use for execution (typically current bar's OPEN)
+        
+        Returns:
+            List of executed trades
+        """
+        if not pending_signals:
+            return []
+        
+        executed_trades = []
+        
+        try:
+            # Modify each pending signal to use the OPEN price instead of close
+            for signal in pending_signals:
+                # Override the execution price with current bar's OPEN
+                signal['execution_price'] = execution_price
+                signal['execution_timestamp'] = bar_timestamp
+                signal['execution_bar_index'] = self.current_bar_index
+            
+            # Use existing simulate_execution but with modified price
+            executed_trades = await self.simulate_execution(
+                pending_signals,
+                current_bar,
+                bar_timestamp,
+                override_price=execution_price  # Pass the OPEN price
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error executing pending signals: {e}")
+        
+        return executed_trades
+    
     async def simulate_execution(self,
                                  authorized_trades: List[Any],
                                  current_bar: pd.Series,
-                                 bar_timestamp: datetime) -> List[Dict[str, Any]]:
+                                 bar_timestamp: datetime,
+                                 override_price: float = None) -> List[Dict[str, Any]]:
         """
         Simulate realistic trade execution using HistoricalExecutionSimulator
         
@@ -3579,12 +3735,10 @@ class InstitutionalBacktestEngine:
             6. Record executed trades with full cost breakdown
         
         Args:
-            authorized_trades: List of authorized trades
-        
-        Args:
             authorized_trades: List of authorized trades from CentralRiskManager
             current_bar: Current market data bar
             bar_timestamp: Timestamp of current bar
+            override_price: If provided, use this price instead of bar's close (for next-bar execution)
         
         Returns:
             List of executed trades with cost breakdown
@@ -3619,8 +3773,14 @@ class InstitutionalBacktestEngine:
                     side = auth_trade['side']
                     quantity = auth_trade['quantity']
                     
-                    # Get current price from authorization (more reliable than potentially modified bar data)
-                    current_price = auth_trade.get('current_price', current_bar.get('close', 0))
+                    # CRITICAL FIX: Use override_price for next-bar execution
+                    # This eliminates look-ahead bias by using bar N+1 OPEN instead of bar N close
+                    if override_price is not None:
+                        current_price = override_price
+                        decision_price = auth_trade.get('signal_bar_close', override_price)  # Original signal price
+                    else:
+                        current_price = auth_trade.get('current_price', current_bar.get('close', 0))
+                        decision_price = current_price
                     
 
                     # Get regime context (Rule 2 Regime-First)
@@ -3756,6 +3916,11 @@ class InstitutionalBacktestEngine:
                         'decision_price': simulated_fill.decision_price,
                         'market_price': simulated_fill.market_price,
                         'fill_price': simulated_fill.fill_price,
+                        
+                        # NEXT-BAR EXECUTION TRACKING (Look-ahead bias fix)
+                        'signal_timestamp': auth_trade.get('signal_timestamp', bar_timestamp),
+                        'signal_bar_close': auth_trade.get('signal_bar_close', simulated_fill.decision_price),
+                        'execution_delay_bars': 1 if auth_trade.get('signal_bar_index') is not None else 0,
                         
                         # Cost breakdown
                         'total_cost_bps': simulated_fill.costs.total_cost_bps,

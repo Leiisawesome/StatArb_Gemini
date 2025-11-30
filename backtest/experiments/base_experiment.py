@@ -220,14 +220,53 @@ class BaseExperiment(ABC):
             Dict with standard metrics
         """
         # Extract from engine results structure
-        # Adjust keys based on actual engine output
+        # Try 'performance' nested dict first, then 'summary', then fall back to top-level keys
         performance = engine_results.get('performance', {})
+        summary = engine_results.get('summary', {})
+        
+        # Handle total_trades - check all locations
+        total_trades = (
+            performance.get('total_trades') or 
+            summary.get('total_trades') or 
+            engine_results.get('total_trades', 0)
+        )
+        
+        # Handle total_return - check summary first (it stores as decimal, convert to %)
+        # summary['total_return'] is 0.00597 meaning 0.597%
+        total_return_pct = (
+            performance.get('total_return_pct') or
+            (summary.get('total_return', 0.0) * 100) or  # Convert decimal to percentage
+            engine_results.get('total_return_pct', 0.0)
+        )
+        
+        # Handle sharpe_ratio - check summary first
+        sharpe_ratio = (
+            performance.get('sharpe_ratio') or
+            summary.get('sharpe_ratio') or
+            engine_results.get('sharpe_ratio', 0.0)
+        )
+        
+        # Handle max_drawdown_pct - check summary first (stored as decimal, convert to %)
+        max_drawdown_pct = (
+            performance.get('max_drawdown_pct') or
+            (summary.get('max_drawdown_pct', 0.0) * 100) or  # Convert decimal to percentage
+            engine_results.get('max_drawdown_pct', 0.0)
+        )
+        
+        # Handle win_rate - check summary first (stored as decimal, convert to %)
+        win_rate_decimal = (
+            performance.get('win_rate') or
+            summary.get('win_rate') or
+            engine_results.get('win_rate', 0.0)
+        )
+        win_rate = win_rate_decimal * 100 if win_rate_decimal <= 1.0 else win_rate_decimal
         
         return {
-            'total_return_pct': performance.get('total_return_pct', 0.0),
-            'sharpe_ratio': performance.get('sharpe_ratio', 0.0),
-            'max_drawdown_pct': performance.get('max_drawdown_pct', 0.0),
-            'total_trades': performance.get('total_trades', 0),
-            'win_rate': performance.get('win_rate', 0.0) * 100,  # Convert to percentage
+            'total_return_pct': total_return_pct,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown_pct': max_drawdown_pct,
+            'total_trades': total_trades,
+            'win_rate': win_rate,
         }
+
 

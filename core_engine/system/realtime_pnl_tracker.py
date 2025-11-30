@@ -120,6 +120,19 @@ class RealTimePnLTracker:
         self.logger.info("✅ RealTimePnLTracker initialized")
         self.logger.info(f"   Max History Size: {self.max_history_size}")
     
+    def set_risk_manager(self, risk_manager) -> None:
+        """
+        Inject the risk manager after construction.
+        
+        This is needed because in backtest mode, the P&L tracker is created
+        before the CentralRiskManager, so we inject it after both are created.
+        
+        Args:
+            risk_manager: CentralRiskManager instance
+        """
+        self.risk_manager = risk_manager
+        self.logger.info("✅ RiskManager injected into RealTimePnLTracker")
+    
     async def update_market_data(self, symbol: str, price: float, timestamp: datetime):
         """
         Update P&L based on new market price
