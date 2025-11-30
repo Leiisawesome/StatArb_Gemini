@@ -179,7 +179,22 @@ class DataFeed:
 
 
 class DataFeedAdapter(ABC):
-    """Abstract base class for data feed adapters"""
+    """Abstract base class for data feed adapters.
+    
+    .. deprecated:: 2.0.0
+        Use :class:`core_engine.data.feeds.adapters.DataFeedAdapter` instead.
+        The new adapter provides:
+        - Circuit breaker pattern for fault tolerance
+        - Comprehensive connection state management
+        - Standardized lifecycle (ISystemComponent interface)
+        - Factory pattern for creating adapters
+        
+    Migration:
+        from core_engine.data.feeds import FeedAdapterFactory, FeedAdapterConfig
+        
+        config = FeedAdapterConfig(provider="simulated", symbols=["NVDA"])
+        adapter = FeedAdapterFactory.create_adapter(config)
+    """
     
     @abstractmethod
     async def connect(self) -> bool:
@@ -221,7 +236,26 @@ class MarketDataResponse:
 
 
 class SimulatedDataFeed(DataFeedAdapter):
-    """Simulated data feed for testing"""
+    """Simulated data feed for testing.
+    
+    .. deprecated:: 2.0.0
+        Use :class:`core_engine.data.feeds.adapters.SimulatedFeedAdapter` instead.
+        The new adapter provides:
+        - Configurable data generation (rate, variance, data types)
+        - ISystemComponent interface for orchestrator integration
+        - Circuit breaker pattern for fault tolerance
+        - Comprehensive health checks and metrics
+        
+    Migration:
+        from core_engine.data.feeds import FeedAdapterFactory, FeedAdapterConfig
+        
+        config = FeedAdapterConfig(
+            provider="simulated",
+            symbols=["NVDA", "TSLA"],
+            poll_interval_seconds=1.0
+        )
+        adapter = FeedAdapterFactory.create_adapter(config)
+    """
     
     def __init__(self, feed_config: DataFeed):
         self.config = feed_config

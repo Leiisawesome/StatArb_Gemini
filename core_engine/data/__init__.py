@@ -64,7 +64,31 @@ from .sources.market_data import (
 
 from .feeds.manager import (
     FeedConfiguration,  # Per-feed config (instance-level, not system-wide)
-    # FeedManager,  # May need to be added if class exists
+    FeedManager,
+)
+
+from .feeds.adapters import (
+    # Configuration
+    FeedAdapterConfig,
+    
+    # Enums
+    AdapterStatus,
+    FeedProvider,
+    
+    # Data Structures
+    FeedMessage,
+    
+    # Base Classes
+    DataFeedAdapter as BaseFeedAdapter,  # Alias to avoid conflict with sources.market_data.DataFeedAdapter
+    
+    # Concrete Adapters
+    SimulatedFeedAdapter,
+    AlpacaFeedAdapter,
+    PolygonFeedAdapter,
+    InteractiveBrokersFeedAdapter,
+    
+    # Factory
+    FeedAdapterFactory,
 )
 
 # ============================================================================
@@ -128,6 +152,21 @@ __all__ = [
     
     # ===== DATA FEEDS =====
     'FeedConfiguration',
+    'FeedManager',
+    
+    # Feed Adapters - Configuration
+    'FeedAdapterConfig',
+    'AdapterStatus',
+    'FeedProvider',
+    'FeedMessage',
+    
+    # Feed Adapters - Classes
+    'BaseFeedAdapter',  # Alias for DataFeedAdapter from feeds.adapters
+    'SimulatedFeedAdapter',
+    'AlpacaFeedAdapter',
+    'PolygonFeedAdapter',
+    'InteractiveBrokersFeedAdapter',
+    'FeedAdapterFactory',
     
     # ===== DATA VALIDATION =====
     'ValidationConfiguration',  # DEPRECATED
