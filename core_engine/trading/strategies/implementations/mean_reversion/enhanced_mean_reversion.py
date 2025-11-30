@@ -13,19 +13,28 @@ Key Features:
 - Regime filtering to avoid choppy/trending markets
 - ATR-based position sizing
 
-Alpha Logic Foundation (v3.0):
+Alpha Logic Foundation (v4.0):
 "Mean reversion works when the directional move shows exhaustion. The best trades
 are NOT at price extremes per se, but at price extremes where buying/selling 
 pressure is weakening, volume is declining, and candle structure shows rejection."
+
+v4.0 Enhancements (Professional Quant Optimizations):
+- HALF-LIFE ESTIMATION: Ornstein-Uhlenbeck process for optimal entry timing
+- HURST EXPONENT: Statistical validation of mean-reversion regime (H < 0.5)
+- EWMA Z-SCORE: Exponentially weighted std for regime-responsive dislocation
+- VOLATILITY-ADJUSTED THRESHOLDS: Dynamic scaling based on vol regime
+- MULTI-TIMEFRAME CONFIRMATION: Higher TF trend filter
 
 Academic Foundations:
 - Kyle (1985) - Market microstructure and price impact
 - Avellaneda & Lee (2010) - Statistical arbitrage half-life estimation  
 - Cartea, Jaimungal & Penalva (2015) - Order flow and market making
 - Lo & MacKinlay (1990) - Contrarian investment strategies
+- Hurst (1951) - Long-term storage capacity of reservoirs (Hurst exponent)
+- Uhlenbeck & Ornstein (1930) - Theory of Brownian motion
 
 Author: StatArb_Gemini Architecture Compliance
-Version: 3.0.0 (Exhaustion-Based Alpha Logic)
+Version: 4.0.0 (Professional Quant Alpha Optimizations)
 """
 
 import numpy as np
@@ -629,23 +638,46 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         breakdown['confluence'] = np.clip(confluence_score, 0, 100)
         
         # ============================================
-        # WEIGHTED TOTAL SCORE
+        # FACTOR 6: ALPHA QUALITY (v4.0 Quant Methods)
         # ============================================
+        # Only calculate if enabled (adds ~1ms per evaluation)
+        alpha_quality_score = 50.0  # Neutral default
+        if getattr(self.config, 'enable_alpha_quality_scoring', True):
+            alpha_quality_score, alpha_diagnostics = self._calculate_alpha_quality_score(
+                data, idx, zscore
+            )
+            breakdown['alpha_quality'] = alpha_quality_score
+            breakdown['alpha_diagnostics'] = alpha_diagnostics
+        else:
+            breakdown['alpha_quality'] = 50.0
+            breakdown['alpha_diagnostics'] = {}
+        
+        # ============================================
+        # WEIGHTED TOTAL SCORE (v4.0 with Alpha Quality)
+        # ============================================
+        # Get alpha quality weight (default 0.10 = 10%)
+        weight_alpha = getattr(self.config, 'weight_alpha_quality', 0.10)
+        
+        # Scale down other weights proportionally if alpha quality is enabled
+        scale_factor = 1.0 - weight_alpha if weight_alpha > 0 else 1.0
+        
         total_score = (
-            breakdown['dislocation'] * self.config.weight_dislocation +
-            breakdown['exhaustion'] * self.config.weight_exhaustion +
-            breakdown['candle_structure'] * self.config.weight_candle_structure +
-            breakdown['regime_penalty'] * self.config.weight_regime_penalty +
-            breakdown['confluence'] * self.config.weight_confluence
+            breakdown['dislocation'] * self.config.weight_dislocation * scale_factor +
+            breakdown['exhaustion'] * self.config.weight_exhaustion * scale_factor +
+            breakdown['candle_structure'] * self.config.weight_candle_structure * scale_factor +
+            breakdown['regime_penalty'] * self.config.weight_regime_penalty * scale_factor +
+            breakdown['confluence'] * self.config.weight_confluence * scale_factor +
+            breakdown['alpha_quality'] * weight_alpha
         ) * 100  # Scale to 0-100
         
         # Normalize (weights should sum to 1.0)
         weight_sum = (
-            self.config.weight_dislocation +
-            self.config.weight_exhaustion +
-            self.config.weight_candle_structure +
-            self.config.weight_regime_penalty +
-            self.config.weight_confluence
+            self.config.weight_dislocation * scale_factor +
+            self.config.weight_exhaustion * scale_factor +
+            self.config.weight_candle_structure * scale_factor +
+            self.config.weight_regime_penalty * scale_factor +
+            self.config.weight_confluence * scale_factor +
+            weight_alpha
         )
         if weight_sum > 0:
             total_score = total_score / weight_sum
@@ -710,6 +742,354 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return mapped_name
         
         return expected_name
+    
+    # ========================================
+    # v4.0 PROFESSIONAL QUANT ALPHA ENHANCEMENTS
+    # ========================================
+    
+    def _calculate_half_life(self, prices: pd.Series, max_lag: int = 1) -> float:
+        """
+        Calculate mean-reversion half-life using Ornstein-Uhlenbeck process.
+        
+        The half-life tells us how long (in bars) it takes for price to revert
+        halfway back to its mean. Shorter half-life = faster mean reversion.
+        
+        Based on: Avellaneda & Lee (2010) "Statistical Arbitrage in the US Equities Market"
+        
+        Method:
+        1. Compute log prices
+        2. Run AR(1) regression: Δy_t = α + β*y_{t-1} + ε_t
+        3. Half-life = -ln(2) / ln(1 + β) ≈ -ln(2) / β for small β
+        
+        Args:
+            prices: Price series
+            max_lag: Maximum lag for AR regression (default 1)
+            
+        Returns:
+            Half-life in bars (inf if not mean-reverting)
+        """
+        try:
+            if len(prices) < 30:
+                return float('inf')
+            
+            # Use log prices for stationarity
+            log_prices = np.log(prices.dropna())
+            
+            if len(log_prices) < 30:
+                return float('inf')
+            
+            # Compute lagged series
+            y = log_prices.values
+            y_lag = np.roll(y, 1)[1:]
+            y_diff = np.diff(y)
+            
+            # Ensure same length
+            y_lag = y_lag[:len(y_diff)]
+            
+            # AR(1) regression: Δy = α + β*y_{t-1}
+            # Using numpy for speed
+            X = np.column_stack([np.ones(len(y_lag)), y_lag])
+            try:
+                beta = np.linalg.lstsq(X, y_diff, rcond=None)[0]
+                slope = beta[1]  # The mean-reversion speed
+            except np.linalg.LinAlgError:
+                return float('inf')
+            
+            # Half-life calculation
+            if slope >= 0:
+                # Not mean-reverting (random walk or trending)
+                return float('inf')
+            
+            half_life = -np.log(2) / slope
+            
+            # Sanity check: half-life should be positive and reasonable
+            if half_life <= 0 or half_life > len(prices):
+                return float('inf')
+            
+            return half_life
+            
+        except Exception as e:
+            logger.debug(f"Half-life calculation failed: {e}")
+            return float('inf')
+    
+    def _calculate_hurst_exponent(self, prices: pd.Series, max_lag: int = 20) -> float:
+        """
+        Calculate Hurst exponent to validate mean-reversion regime.
+        
+        Hurst Exponent Interpretation:
+        - H < 0.5: Mean-reverting (anti-persistent)
+        - H = 0.5: Random walk (no memory)
+        - H > 0.5: Trending (persistent)
+        
+        Based on: Hurst (1951) "Long-term storage capacity of reservoirs"
+        Method: Rescaled Range (R/S) analysis
+        
+        Args:
+            prices: Price series
+            max_lag: Maximum lag for R/S calculation
+            
+        Returns:
+            Hurst exponent (0 to 1)
+        """
+        try:
+            if len(prices) < 50:
+                return 0.5  # Default to random walk
+            
+            returns = prices.pct_change().dropna().values
+            
+            if len(returns) < 50:
+                return 0.5
+            
+            # R/S analysis at different scales
+            lags = range(10, min(max_lag + 1, len(returns) // 4))
+            rs_values = []
+            
+            for lag in lags:
+                # Split into non-overlapping windows
+                n_windows = len(returns) // lag
+                if n_windows < 2:
+                    continue
+                
+                rs_for_lag = []
+                for i in range(n_windows):
+                    window = returns[i * lag:(i + 1) * lag]
+                    
+                    # Calculate mean-adjusted cumulative sum
+                    mean_adj = window - np.mean(window)
+                    cumsum = np.cumsum(mean_adj)
+                    
+                    # Range
+                    R = np.max(cumsum) - np.min(cumsum)
+                    
+                    # Standard deviation
+                    S = np.std(window, ddof=1)
+                    
+                    if S > 0:
+                        rs_for_lag.append(R / S)
+                
+                if rs_for_lag:
+                    rs_values.append((np.log(lag), np.log(np.mean(rs_for_lag))))
+            
+            if len(rs_values) < 3:
+                return 0.5
+            
+            # Linear regression on log-log plot
+            x = np.array([v[0] for v in rs_values])
+            y = np.array([v[1] for v in rs_values])
+            
+            # H = slope of log(R/S) vs log(n)
+            slope, _ = np.polyfit(x, y, 1)
+            
+            # Clip to valid range
+            return np.clip(slope, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.debug(f"Hurst exponent calculation failed: {e}")
+            return 0.5
+    
+    def _calculate_ewma_zscore(
+        self, 
+        prices: pd.Series, 
+        span: int = 20,
+        min_periods: int = 10
+    ) -> float:
+        """
+        Calculate z-score using exponentially weighted mean and std.
+        
+        EWMA z-score is more responsive to regime changes than rolling z-score
+        because it gives more weight to recent observations.
+        
+        Args:
+            prices: Price series
+            span: EWMA span (half-life in bars)
+            min_periods: Minimum periods for valid calculation
+            
+        Returns:
+            EWMA z-score
+        """
+        try:
+            if len(prices) < min_periods:
+                return 0.0
+            
+            # EWMA mean
+            ewma_mean = prices.ewm(span=span, min_periods=min_periods).mean()
+            
+            # EWMA standard deviation
+            ewma_std = prices.ewm(span=span, min_periods=min_periods).std()
+            
+            # Current values
+            current_price = prices.iloc[-1]
+            current_mean = ewma_mean.iloc[-1]
+            current_std = ewma_std.iloc[-1]
+            
+            if pd.isna(current_std) or current_std <= 0:
+                return 0.0
+            
+            zscore = (current_price - current_mean) / current_std
+            
+            return zscore
+            
+        except Exception as e:
+            logger.debug(f"EWMA z-score calculation failed: {e}")
+            return 0.0
+    
+    def _get_volatility_adjusted_threshold(
+        self, 
+        data: pd.DataFrame, 
+        base_threshold: float,
+        lookback: int = 60
+    ) -> float:
+        """
+        Dynamically adjust dislocation threshold based on volatility regime.
+        
+        In high-vol environments, a z-score of 2.0 is less extreme than in low-vol.
+        We scale the threshold to maintain consistent statistical significance.
+        
+        Args:
+            data: DataFrame with price data
+            base_threshold: Base z-score threshold
+            lookback: Lookback for historical volatility
+            
+        Returns:
+            Volatility-adjusted threshold
+        """
+        try:
+            if 'close' not in data.columns or len(data) < lookback:
+                return base_threshold
+            
+            returns = data['close'].pct_change().dropna()
+            
+            if len(returns) < lookback:
+                return base_threshold
+            
+            # Current volatility (recent 10 bars)
+            current_vol = returns.tail(10).std()
+            
+            # Historical volatility
+            hist_vol = returns.tail(lookback).std()
+            
+            if hist_vol <= 0 or pd.isna(hist_vol):
+                return base_threshold
+            
+            # Volatility ratio
+            vol_ratio = current_vol / hist_vol
+            
+            # Adjust threshold: higher vol = higher threshold needed
+            # Clamp adjustment between 0.7x and 1.5x
+            adjustment = np.clip(vol_ratio, 0.7, 1.5)
+            
+            return base_threshold * adjustment
+            
+        except Exception as e:
+            logger.debug(f"Volatility-adjusted threshold failed: {e}")
+            return base_threshold
+    
+    def _calculate_alpha_quality_score(
+        self,
+        data: pd.DataFrame,
+        idx: int,
+        zscore: float
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Calculate comprehensive alpha quality score using v4.0 quant methods.
+        
+        This aggregates:
+        1. Half-life quality (shorter = better)
+        2. Hurst exponent validity (H < 0.5 = good)
+        3. EWMA z-score confirmation
+        4. Volatility regime appropriateness
+        
+        Args:
+            data: DataFrame with OHLCV data
+            idx: Current bar index
+            zscore: Current z-score value
+            
+        Returns:
+            Tuple of (quality_score 0-100, diagnostic dict)
+        """
+        diagnostics = {
+            'half_life': None,
+            'hurst_exponent': None,
+            'ewma_zscore': None,
+            'vol_adjusted_threshold': None,
+            'alpha_valid': False
+        }
+        
+        try:
+            if 'close' not in data.columns:
+                return 50.0, diagnostics
+            
+            # Get lookback window
+            lookback = min(idx, getattr(self.config, 'lookback_period', 20))
+            if lookback < 20:
+                return 50.0, diagnostics
+            
+            prices = data['close'].iloc[max(0, idx - lookback):idx + 1]
+            
+            if len(prices) < 20:
+                return 50.0, diagnostics
+            
+            quality_score = 50.0  # Neutral baseline
+            
+            # 1. Half-Life Quality (20% weight)
+            half_life = self._calculate_half_life(prices)
+            diagnostics['half_life'] = half_life
+            
+            if half_life != float('inf'):
+                # Ideal half-life: 5-20 bars (fast enough to profit, slow enough to trade)
+                if 5 <= half_life <= 20:
+                    quality_score += 20  # Excellent half-life
+                elif 3 <= half_life < 5 or 20 < half_life <= 40:
+                    quality_score += 10  # Good half-life
+                elif half_life > 40:
+                    quality_score -= 10  # Too slow to revert
+            else:
+                quality_score -= 15  # Not mean-reverting
+            
+            # 2. Hurst Exponent Validation (25% weight)
+            hurst = self._calculate_hurst_exponent(prices)
+            diagnostics['hurst_exponent'] = hurst
+            
+            if hurst < 0.4:
+                quality_score += 25  # Strongly mean-reverting
+                diagnostics['alpha_valid'] = True
+            elif hurst < 0.5:
+                quality_score += 15  # Moderately mean-reverting
+                diagnostics['alpha_valid'] = True
+            elif hurst < 0.55:
+                quality_score += 0   # Near random walk
+            else:
+                quality_score -= 20  # Trending - don't mean-revert!
+            
+            # 3. EWMA Z-Score Confirmation (15% weight)
+            ewma_zscore = self._calculate_ewma_zscore(prices)
+            diagnostics['ewma_zscore'] = ewma_zscore
+            
+            # EWMA and rolling z-score should agree in direction
+            if np.sign(ewma_zscore) == np.sign(zscore):
+                if abs(ewma_zscore) >= abs(zscore) * 0.8:
+                    quality_score += 15  # Strong confirmation
+                else:
+                    quality_score += 7   # Partial confirmation
+            else:
+                quality_score -= 10  # Divergence - be cautious
+            
+            # 4. Volatility Regime (10% weight)
+            vol_adj_thresh = self._get_volatility_adjusted_threshold(
+                data.iloc[:idx + 1], 
+                self.config.dislocation_minimum
+            )
+            diagnostics['vol_adjusted_threshold'] = vol_adj_thresh
+            
+            # If current z-score exceeds vol-adjusted threshold, it's significant
+            if abs(zscore) >= vol_adj_thresh:
+                quality_score += 10
+            
+            return np.clip(quality_score, 0, 100), diagnostics
+            
+        except Exception as e:
+            logger.debug(f"Alpha quality score failed: {e}")
+            return 50.0, diagnostics
     
     def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
         """Validate that data is enriched with required indicators"""

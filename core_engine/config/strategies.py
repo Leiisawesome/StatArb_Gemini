@@ -459,6 +459,57 @@ class MeanReversionConfig(BaseStrategyConfig):
     volatility_spike_threshold: float = 2.0
     """Volatility ratio above which to penalize. Default: 2.0"""
     
+    # =========================================
+    # v4.0 PROFESSIONAL QUANT ALPHA PARAMETERS
+    # =========================================
+    # Advanced statistical methods for alpha validation
+    
+    enable_alpha_quality_scoring: bool = True
+    """Enable v4.0 alpha quality scoring (half-life, Hurst, EWMA). Default: True"""
+    
+    weight_alpha_quality: float = 0.10
+    """Weight for alpha quality factor in scoring. Default: 0.10 (10%)"""
+    
+    # Half-life parameters (Ornstein-Uhlenbeck)
+    half_life_min: float = 3.0
+    """Minimum acceptable half-life in bars. Default: 3"""
+    
+    half_life_max: float = 50.0
+    """Maximum acceptable half-life in bars. Default: 50"""
+    
+    half_life_ideal_min: float = 5.0
+    """Ideal half-life lower bound. Default: 5"""
+    
+    half_life_ideal_max: float = 20.0
+    """Ideal half-life upper bound. Default: 20"""
+    
+    # Hurst exponent parameters
+    hurst_mean_reverting_threshold: float = 0.5
+    """Hurst exponent threshold for mean-reversion. H < this = mean-reverting. Default: 0.5"""
+    
+    hurst_strong_mr_threshold: float = 0.4
+    """Hurst exponent for strong mean-reversion. Default: 0.4"""
+    
+    hurst_trending_threshold: float = 0.55
+    """Hurst exponent above which is considered trending (avoid). Default: 0.55"""
+    
+    # EWMA z-score parameters
+    ewma_span: int = 20
+    """EWMA span for z-score calculation. Default: 20"""
+    
+    ewma_min_periods: int = 10
+    """Minimum periods for valid EWMA. Default: 10"""
+    
+    # Volatility adjustment parameters
+    vol_adj_lookback: int = 60
+    """Lookback for historical volatility comparison. Default: 60"""
+    
+    vol_adj_min_multiplier: float = 0.7
+    """Minimum threshold adjustment multiplier. Default: 0.7"""
+    
+    vol_adj_max_multiplier: float = 1.5
+    """Maximum threshold adjustment multiplier. Default: 1.5"""
+    
     # Backward compatibility aliases
     @property
     def entry_zscore_threshold(self) -> float:
