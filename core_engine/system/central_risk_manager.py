@@ -201,6 +201,9 @@ class CentralRiskManager(ISystemComponent):
                 elevated_review_threshold=config.get('elevated_review_threshold', 0.05),
                 emergency_threshold=config.get('emergency_threshold', 0.10)
             )
+            
+            # Store allow_shorts config (not part of RiskConfig dataclass)
+            self.config.allow_shorts = config.get('allow_shorts', False)
         else:
             raise TypeError(f"Config must be RiskConfig, dict, or None, got {type(config)}")
         

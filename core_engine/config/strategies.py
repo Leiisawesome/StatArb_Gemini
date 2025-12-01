@@ -898,6 +898,13 @@ class PairsConfig(BaseStrategyConfig):
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX'
     ])
     """Asset universe for pairs trading. Default: Major tech stocks"""
+    
+    # SES (Spread Exhaustion Scoring) thresholds
+    ses_entry_threshold: float = 65.0
+    """Minimum SES score for entry. Default: 65.0"""
+    
+    ses_high_confidence_threshold: float = 80.0
+    """SES threshold for high confidence entries. Default: 80.0"""
 
 
 @dataclass

@@ -3297,9 +3297,35 @@ class InstitutionalBacktestEngine:
                         # Get current positions for strategy context
                         current_positions = self.risk_manager.current_positions if self.risk_manager else {}
                         
+                        # ✅ FIX: For multi-symbol strategies, provide CORRECT per-symbol data
+                        # Use self.market_data which contains proper per-symbol historical data
+                        enriched_data_per_symbol = {}
+                        for sym in self.config.symbols:
+                            if sym in self.market_data and len(self.market_data[sym]) > 0:
+                                sym_data = self.market_data[sym].copy()
+                                
+                                # Ensure timestamp index for filtering
+                                if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
+                                    sym_data = sym_data.set_index('timestamp')
+                                
+                                # Filter data up to current bar timestamp
+                                ts_compare = pd.Timestamp(bar_timestamp)
+                                if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None:
+                                    if ts_compare.tz is None:
+                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
+                                elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
+                                    if ts_compare.tz is not None:
+                                        ts_compare = ts_compare.tz_localize(None)
+                                sym_data = sym_data[sym_data.index <= ts_compare]
+                                
+                                enriched_data_per_symbol[sym] = sym_data
+                            else:
+                                # Fallback to pre-calculated features (single symbol mode)
+                                enriched_data_per_symbol[sym] = features_historical
+                        
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
-                            {symbol: features_historical for symbol in self.config.symbols},
+                            enriched_data_per_symbol,
                             current_positions
                         )
                         
@@ -3359,15 +3385,25 @@ class InstitutionalBacktestEngine:
                         for sym in self.config.symbols:
                             if sym in self.market_data and len(self.market_data[sym]) > 0:
                                 # Use actual historical data for this symbol up to current timestamp
-                                sym_data = self.market_data[sym]
+                                sym_data = self.market_data[sym].copy()
+                                
+                                # Ensure timestamp index for filtering
+                                # market_data may have timestamp as column, not index
+                                if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
+                                    sym_data = sym_data.set_index('timestamp')
+                                
                                 # Filter data up to current bar timestamp
                                 if timestamp is not None:
                                     ts_compare = pd.Timestamp(timestamp)
-                                    if sym_data.index.tz is not None and ts_compare.tz is None:
-                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
-                                    elif sym_data.index.tz is None and ts_compare.tz is not None:
-                                        ts_compare = ts_compare.tz_localize(None)
+                                    # Handle timezone compatibility
+                                    if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None:
+                                        if ts_compare.tz is None:
+                                            ts_compare = ts_compare.tz_localize(sym_data.index.tz)
+                                    elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
+                                        if ts_compare.tz is not None:
+                                            ts_compare = ts_compare.tz_localize(None)
                                     sym_data = sym_data[sym_data.index <= ts_compare]
+                                
                                 enriched_data_per_symbol[sym] = sym_data
                             else:
                                 # Fallback to the bar data
@@ -3601,7 +3637,26 @@ class InstitutionalBacktestEngine:
                             current_position = position_obj.quantity
                     
                     # Get current price for position calculations
-                    current_price = bar_df[bar_df['symbol'] == symbol]['close'].iloc[-1] if not bar_df.empty and 'close' in bar_df.columns else 100.0
+                    # For multi-symbol, get price from self.market_data since bar_df may only have primary symbol
+                    if symbol in self.market_data and len(self.market_data[symbol]) > 0:
+                        sym_data = self.market_data[symbol]
+                        if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
+                            sym_data = sym_data.set_index('timestamp')
+                        # Filter up to current timestamp
+                        ts_compare = pd.Timestamp(timestamp)
+                        if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None and ts_compare.tz is None:
+                            ts_compare = ts_compare.tz_localize(sym_data.index.tz)
+                        filtered_data = sym_data[sym_data.index <= ts_compare]
+                        if len(filtered_data) > 0:
+                            current_price = float(filtered_data['close'].iloc[-1])
+                        else:
+                            current_price = 100.0  # Fallback
+                    elif not bar_df.empty and 'close' in bar_df.columns:
+                        # Fallback to bar_df if symbol is in there
+                        symbol_bars = bar_df[bar_df['symbol'] == symbol] if 'symbol' in bar_df.columns else bar_df
+                        current_price = float(symbol_bars['close'].iloc[-1]) if len(symbol_bars) > 0 else 100.0
+                    else:
+                        current_price = 100.0
                     
                     # Determine trade side and quantity
                     if signal_type == 'buy' and current_position <= 0:
@@ -3656,9 +3711,34 @@ class InstitutionalBacktestEngine:
                         logger.debug(f"   💰 Closing position: {quantity} shares")
                     
                     elif signal_type == 'sell' and current_position == 0:
-                        # Skip sell signal if no position
-                        logger.debug(f"   ⚠️  Skipping SELL signal for {symbol}: no position to close")
-                        continue
+                        # Check if shorts are allowed (for pairs trading)
+                        if getattr(self.config, 'allow_shorts', False):
+                            # Open short position
+                            side = 'sell'
+                            # Calculate position size similar to buy side
+                            if quantity_type == "PERCENTAGE" and target_weight is not None and target_weight > 0:
+                                portfolio_value = self.risk_manager.portfolio_value if (
+                                    self.risk_manager and hasattr(self.risk_manager, 'portfolio_value')
+                                ) else self.config.initial_capital
+                                dollar_amount = target_weight * portfolio_value
+                                quantity = dollar_amount / current_price
+                                quantity = max(1, int(quantity))
+                                logger.debug(f"   💰 Short percentage-based sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                            elif target_quantity > 0:
+                                quantity = max(1, int(target_quantity))
+                                logger.debug(f"   💰 Short absolute sizing: {quantity} shares")
+                            else:
+                                # Fallback sizing for shorts
+                                position_size_pct = self.config.max_position_size
+                                portfolio_value = self.config.initial_capital
+                                dollar_amount = position_size_pct * portfolio_value
+                                quantity = dollar_amount / current_price
+                                quantity = max(1, int(quantity))
+                                logger.debug(f"   💰 Short fallback sizing: {position_size_pct:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                        else:
+                            # Skip sell signal if no position and shorts not allowed
+                            logger.debug(f"   ⚠️  Skipping SELL signal for {symbol}: no position to close and shorts not allowed")
+                            continue
                     
                     else:
                         continue  # Skip if already in position or invalid condition
@@ -3695,7 +3775,8 @@ class InstitutionalBacktestEngine:
                                 'confidence': confidence,
                                 'signal_type': signal_type,
                                 'authorization': authorization,
-                                'timestamp': timestamp
+                                'timestamp': timestamp,
+                                'current_price': current_price  # ✅ Store symbol-specific price
                             })
         
         except Exception as e:
@@ -3817,14 +3898,22 @@ class InstitutionalBacktestEngine:
                     side = auth_trade['side']
                     quantity = auth_trade['quantity']
                     
-                    # CRITICAL FIX: Use override_price for next-bar execution
-                    # This eliminates look-ahead bias by using bar N+1 OPEN instead of bar N close
-                    if override_price is not None:
-                        current_price = override_price
-                        decision_price = auth_trade.get('signal_bar_close', override_price)  # Original signal price
-                    else:
-                        current_price = auth_trade.get('current_price', current_bar.get('close', 0))
+                    # CRITICAL FIX: Use symbol-specific price for multi-symbol strategies
+                    # Priority: 1) auth_trade['current_price'] (symbol-specific, set during authorization)
+                    #           2) override_price (next-bar OPEN, for single-symbol)
+                    #           3) current_bar['close'] (fallback)
+                    if 'current_price' in auth_trade and auth_trade['current_price'] is not None:
+                        # Use symbol-specific price from authorization (multi-symbol correct)
+                        current_price = auth_trade['current_price']
                         decision_price = current_price
+                    elif override_price is not None:
+                        # Fallback to next-bar OPEN (single-symbol mode)
+                        current_price = override_price
+                        decision_price = auth_trade.get('signal_bar_close', override_price)
+                    else:
+                        current_price = current_bar.get('close', 0)
+                        decision_price = current_price
+                    
                     
 
                     # Get regime context (Rule 2 Regime-First)

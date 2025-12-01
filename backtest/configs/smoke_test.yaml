@@ -9,7 +9,7 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["BTC","ETH"]
+symbols: ["GLD", "IAU"]
 interval: "1min"
 start_date: "2024-12-18"  # Valid data date
 end_date: "2024-12-18"    # Same day (1 day test)
@@ -80,18 +80,21 @@ strategies:
     allocation_pct: 1.0
     parameters:
       # Asset universe for pair selection
-      asset_universe: ["BTC", "ETH"]
+      asset_universe: ["GLD", "IAU"]
       
       # Pair selection thresholds (RELAXED for smoke test)
-      lookback_period: 60               # REDUCED for smoke test (normally 252)
+      lookback_period: 300              # Increased to get more overlapping bars
       min_correlation: 0.5              # Minimum correlation for pair consideration
       correlation_threshold: 0.4        # Correlation to maintain pair
       cointegration_threshold: 0.15     # RELAXED from 0.05 for testing
       
-      # Entry/exit Z-scores (RELAXED for more signals)
-      entry_zscore: 1.5                 # Entry when zscore exceeds this
-      exit_zscore: 0.5                  # Exit when zscore drops to this
+      # Entry/exit Z-scores (VERY RELAXED for smoke test)
+      entry_zscore: 0.15                # VERY LOW for testing (normally 1.5-2.0)
+      exit_zscore: 0.05                 # Exit when zscore drops to this
       stop_loss_zscore: 3.0
+      
+      # SES thresholds (LOWERED for smoke test)
+      ses_entry_threshold: 50.0         # LOWERED from 65 for testing
       
       # Position management
       max_pairs: 2

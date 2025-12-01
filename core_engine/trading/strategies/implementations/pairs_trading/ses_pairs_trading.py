@@ -359,13 +359,17 @@ class SpreadExhaustionScorer:
         'lead_lag': 0.10
     }
     
-    # Thresholds
-    SES_ENTRY_THRESHOLD = 65  # Minimum SES for entry
-    SES_HIGH_CONFIDENCE = 80  # High confidence threshold
+    # Default thresholds (can be overridden by config)
+    DEFAULT_SES_ENTRY_THRESHOLD = 65  # Minimum SES for entry
+    DEFAULT_SES_HIGH_CONFIDENCE = 80  # High confidence threshold
     
     def __init__(self, config: Optional[PairsConfig] = None):
         self.config = config or PairsConfig()
         self.mr_core = MeanReversionCore()
+        
+        # Use config thresholds if provided, otherwise use defaults
+        self.SES_ENTRY_THRESHOLD = getattr(self.config, 'ses_entry_threshold', self.DEFAULT_SES_ENTRY_THRESHOLD)
+        self.SES_HIGH_CONFIDENCE = getattr(self.config, 'ses_high_confidence_threshold', self.DEFAULT_SES_HIGH_CONFIDENCE)
     
     def calculate_ses(
         self,
@@ -1104,12 +1108,16 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
             elif zscore > self.config.entry_zscore:
                 spread_direction = SpreadDirection.SHORT
             else:
+                logger.debug(
+                    f"⏸️ {pair_id} zscore not extreme: {zscore:.4f} not outside ±{self.config.entry_zscore:.2f}"
+                )
                 continue  # No entry condition
             
-            # Check SES threshold
-            if ses_score < self.ses_scorer.SES_ENTRY_THRESHOLD:
+            # Check SES threshold (use configurable threshold)
+            ses_threshold = self.ses_scorer.SES_ENTRY_THRESHOLD
+            if ses_score < ses_threshold:
                 logger.debug(
-                    f"⏸️ {pair_id} SES too low: {ses_score:.1f} < {self.ses_scorer.SES_ENTRY_THRESHOLD}"
+                    f"⏸️ {pair_id} SES too low: {ses_score:.1f} < {ses_threshold}"
                 )
                 continue
             
@@ -1349,7 +1357,11 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
         
         for symbol in self.config.asset_universe:
             if symbol in self.market_data and len(self.market_data[symbol]) >= self.config.lookback_period:
-                prices = self.market_data[symbol]['close'].tail(self.config.lookback_period)
+                data = self.market_data[symbol]
+                # Ensure timestamp index for proper alignment
+                if 'timestamp' in data.columns and not isinstance(data.index, pd.DatetimeIndex):
+                    data = data.set_index('timestamp')
+                prices = data['close'].tail(self.config.lookback_period)
                 price_data[symbol] = prices
         
         if len(price_data) >= 2:
@@ -1377,8 +1389,17 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
             if stock1 not in self.market_data or stock2 not in self.market_data:
                 return None
             
-            prices1 = self.market_data[stock1]['close'].tail(self.config.lookback_period)
-            prices2 = self.market_data[stock2]['close'].tail(self.config.lookback_period)
+            # Ensure timestamp index for proper alignment
+            data1 = self.market_data[stock1]
+            data2 = self.market_data[stock2]
+            
+            if 'timestamp' in data1.columns and not isinstance(data1.index, pd.DatetimeIndex):
+                data1 = data1.set_index('timestamp')
+            if 'timestamp' in data2.columns and not isinstance(data2.index, pd.DatetimeIndex):
+                data2 = data2.set_index('timestamp')
+            
+            prices1 = data1['close'].tail(self.config.lookback_period)
+            prices2 = data2['close'].tail(self.config.lookback_period)
             
             aligned_data = pd.concat([prices1, prices2], axis=1, join='inner')
             aligned_data.columns = [stock1, stock2]
@@ -1459,6 +1480,7 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
                 pair_metrics.spread_std = spread_series.std()
                 pair_metrics.current_zscore = (current_spread - pair_metrics.spread_mean) / max(pair_metrics.spread_std, 1e-8)
                 
+                
                 # Update EWMA Z-score
                 pair_metrics.ewma_zscore = MeanReversionCore.calculate_ewma_zscore(spread_series)
                 
@@ -1508,11 +1530,24 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
         if stock1 not in self.market_data or stock2 not in self.market_data:
             return None
         
-        prices1 = self.market_data[stock1]['close']
-        prices2 = self.market_data[stock2]['close']
+        data1 = self.market_data[stock1]
+        data2 = self.market_data[stock2]
+        
+        # Ensure timestamp index for alignment
+        if 'timestamp' in data1.columns and not isinstance(data1.index, pd.DatetimeIndex):
+            data1 = data1.set_index('timestamp')
+        if 'timestamp' in data2.columns and not isinstance(data2.index, pd.DatetimeIndex):
+            data2 = data2.set_index('timestamp')
+        
+        prices1 = data1['close']
+        prices2 = data2['close']
         
         aligned = pd.concat([prices1, prices2], axis=1, join='inner')
         aligned.columns = ['p1', 'p2']
+        
+        if len(aligned) == 0:
+            logger.debug(f"No aligned data for {stock1}/{stock2}")
+            return None
         
         spread = aligned['p2'] - pair_metrics.hedge_ratio * aligned['p1']
         
