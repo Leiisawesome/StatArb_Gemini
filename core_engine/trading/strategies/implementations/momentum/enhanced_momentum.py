@@ -959,9 +959,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 confidence = self._calculate_signal_confidence(symbol, 
                     MomentumSignal.BULLISH_MOMENTUM if signal_type == SignalType.BUY else MomentumSignal.BEARISH_MOMENTUM)
                 
-                logger.debug(f"[{symbol}] ✅ Calculated confidence: {confidence:.4f} (threshold: 0.4, {'PASS' if confidence > 0.4 else 'FAIL'})")
+                # Use configurable confidence threshold (default: 0.30)
+                min_confidence = getattr(self.config, 'min_signal_confidence', 0.30)
+                logger.debug(f"[{symbol}] ✅ Calculated confidence: {confidence:.4f} (threshold: {min_confidence}, {'PASS' if confidence > min_confidence else 'FAIL'})")
                 
-                if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
+                if confidence > min_confidence:  # Minimum confidence threshold (configurable)
                     logger.info(f"[{symbol}] 🎯 Creating {signal_type.value} signal with confidence {confidence:.4f}")
                     signal = StrategySignal(
                         strategy_id=self.strategy_id,
@@ -988,7 +990,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     signals.append(signal)
                     logger.debug(f"[{symbol}] ✅ {signal_type.value} signal appended to signals list (total: {len(signals)})")
                 else:
-                    logger.warning(f"[{symbol}] ❌ Confidence too low: {confidence:.4f} <= 0.4 (signal not created)")
+                    logger.debug(f"[{symbol}] ⏭️ Confidence below threshold: {confidence:.4f} <= {min_confidence} (signal skipped)")
             
             logger.debug(f"_generate_symbol_signals returning {len(signals)} signals for {symbol}")
             return signals

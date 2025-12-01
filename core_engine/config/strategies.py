@@ -162,6 +162,10 @@ class MomentumConfig(BaseStrategyConfig):
     max_holding_period: int = 20
     """Maximum holding period in bars. Default: 20"""
     
+    # Signal confidence
+    min_signal_confidence: float = 0.30
+    """Minimum signal confidence threshold. Default: 0.30 (lowered for composite signals)"""
+    
     # Breakout detection
     enable_breakout_detection: bool = True
     """Enable breakout detection. Default: True"""

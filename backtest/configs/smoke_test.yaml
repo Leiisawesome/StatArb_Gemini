@@ -1,6 +1,7 @@
 # Smoke Test Configuration
 # =========================
 # Minimal config for quick sanity check.
+# Supports both mean_reversion and momentum strategies.
 
 experiment_name: "Smoke_Test"
 experiment_type: "smoke_test"
@@ -15,23 +16,58 @@ end_date: "2024-12-18"    # Same day (1 day test)
 initial_capital: 100000
 allow_shorts: false
 
-# Simple strategy with RELAXED thresholds for testing
+# ========================================
+# STRATEGY SELECTION
+# Uncomment ONE strategy block to test
+# ========================================
+
+# OPTION 1: Momentum Strategy
 strategies:
-  - type: "mean_reversion"
-    name: "MR_Simple"
+  - type: "momentum"
+    name: "MOM_Simple"
     allocation_pct: 1.0
     parameters:
-      lookback: 20
-      zscore_entry_threshold: 1.5          # RELAXED from 2.0 to 1.5
-      zscore_exit_threshold: 0.5
-      scan_all_bars: false                  # Disabled - engine calls per-bar
-      scan_interval: 1                      # Check every bar
-      enable_regime_filter: false           # Disable regime filtering
-      rsi_oversold: 40                      # RELAXED from 30 to 40
-      rsi_overbought: 60                    # RELAXED from 70 to 60
+      # Core momentum periods
+      short_period: 10
+      medium_period: 20
+      long_period: 50
+      lookback_period: 60
+      
+      # Entry thresholds (RELAXED for testing)
+      momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
+      adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
+      volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
+      
+      # RSI settings
+      rsi_period: 14
+      rsi_overbought: 75.0                 # RELAXED from 70 to 75
+      rsi_oversold: 25.0                   # RELAXED from 30 to 25
+      
+      # Position sizing
+      base_position_pct: 0.05
+      max_position_pct: 0.10
+      
+      # Scanning mode
+      scan_all_bars: false                 # Disabled - engine calls per-bar
+      scan_interval: 1
+
+# OPTION 2: Mean Reversion Strategy (commented out)
+# strategies:
+#   - type: "mean_reversion"
+#     name: "MR_Simple"
+#     allocation_pct: 1.0
+#     parameters:
+#       lookback: 20
+#       zscore_entry_threshold: 1.5
+#       zscore_exit_threshold: 0.5
+#       scan_all_bars: false
+#       scan_interval: 1
+#       enable_regime_filter: false
+#       rsi_oversold: 40
+#       rsi_overbought: 60
 
 # Minimal risk management
-min_signal_confidence: 0.50  # RELAXED from 0.60 to 0.50
+min_signal_confidence: 0.40  # RELAXED for momentum (uses composite signals)
 max_position_size: 0.40      # Higher for testing
 
 # Disable some features for speed

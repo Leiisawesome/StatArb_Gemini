@@ -277,9 +277,52 @@ class MultiStrategySignalAggregator(ISystemComponent):
             self.logger.error(f"❌ Strategy unregistration failed: {e}")
             return False
     
-    async def collect_all_signals(self, market_data: pd.DataFrame) -> Dict[str, List[EnhancedSignal]]:
-        """Collect signals from all registered strategies"""
+    async def collect_all_signals(self, market_data) -> Dict[str, List[EnhancedSignal]]:
+        """
+        Collect signals from all registered strategies
+        
+        Args:
+            market_data: Either pd.DataFrame or Dict[str, pd.DataFrame]
+                - If DataFrame: will be converted to dict format for enhanced strategies
+                - If Dict: passed directly to strategies
+        """
         strategy_signals = {}
+        
+        # Normalize market_data to dict format for enhanced strategies
+        if isinstance(market_data, pd.DataFrame):
+            # Skip empty DataFrames
+            if market_data.empty:
+                self.logger.debug("collect_all_signals received empty DataFrame, skipping")
+                return {}
+            
+            # Extract symbol from DataFrame if available
+            if 'symbol' in market_data.columns:
+                symbols = market_data['symbol'].unique()
+                enriched_data = {
+                    symbol: market_data[market_data['symbol'] == symbol].copy()
+                    for symbol in symbols
+                }
+            else:
+                # No symbol column - try to infer from first registered strategy's config
+                inferred_symbol = None
+                for _, registration in self.registered_strategies.items():
+                    if hasattr(registration.strategy_instance, 'config'):
+                        config = registration.strategy_instance.config
+                        if hasattr(config, 'symbols') and config.symbols:
+                            inferred_symbol = config.symbols[0]
+                            break
+                
+                if inferred_symbol:
+                    enriched_data = {inferred_symbol: market_data}
+                else:
+                    # Last resort fallback
+                    self.logger.debug("No symbol info available, using fallback key")
+                    enriched_data = {'DEFAULT': market_data}
+        elif isinstance(market_data, dict):
+            enriched_data = market_data
+        else:
+            self.logger.warning(f"Unexpected market_data type: {type(market_data)}")
+            return {}
         
         for strategy_id, registration in self.registered_strategies.items():
             if not registration.is_active:
@@ -288,7 +331,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
             try:
                 # Generate signals from strategy
                 if hasattr(registration.strategy_instance, 'generate_signals'):
-                    raw_signals = await registration.strategy_instance.generate_signals(market_data)
+                    raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
                     
                     # Convert to enhanced signals
                     enhanced_signals = []
