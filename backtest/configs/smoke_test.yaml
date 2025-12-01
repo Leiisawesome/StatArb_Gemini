@@ -8,8 +8,8 @@ experiment_type: "smoke_test"
 # Single symbol, 1 day
 symbols: ["TSLA"]
 interval: "1min"
-start_date: "2024-11-06"  # Valid data date
-end_date: "2024-11-07"    # Same day (1 day test)
+start_date: "2024-12-20"  # Valid data date
+end_date: "2024-12-20"    # Same day (1 day test)
 
 # Small capital for quick test
 initial_capital: 100000
@@ -32,7 +32,7 @@ strategies:
 
 # Minimal risk management
 min_signal_confidence: 0.50  # RELAXED from 0.60 to 0.50
-max_position_size: 0.20      # Higher for testing
+max_position_size: 0.40      # Higher for testing
 
 # Disable some features for speed
 save_trade_log: false
