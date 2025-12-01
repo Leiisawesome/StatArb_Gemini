@@ -193,7 +193,7 @@ class BaseExperiment(ABC):
                         if not pnl_str:
                             pnl_str = " " * 12
                         
-                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {quantity:>8.0f} ${price:>9.2f} ${value:>11.2f} {pnl_str}")
+                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {quantity:>8.2f} ${price:>9.2f} ${value:>11.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
         

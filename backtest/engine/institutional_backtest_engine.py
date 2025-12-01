@@ -2794,6 +2794,8 @@ class InstitutionalBacktestEngine:
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
 
             # Calculate win rate from execution history
+            # FIX: Only count trades with realized P&L (closed positions)
+            # Entry trades without P&L should not affect win rate
             winning_trades = 0
             losing_trades = 0
             for trade in self.execution_history:
@@ -2803,7 +2805,10 @@ class InstitutionalBacktestEngine:
                 elif pnl < 0:
                     losing_trades += 1
             
-            win_rate = winning_trades / total_trades if total_trades > 0 else 0.0
+            # Win rate = wins / (wins + losses), not wins / total_trades
+            # This excludes open positions (entries without exits)
+            closed_trades = winning_trades + losing_trades
+            win_rate = winning_trades / closed_trades if closed_trades > 0 else 0.0
             
             # Calculate max drawdown from position history
             max_drawdown = 0.0
@@ -2838,12 +2843,28 @@ class InstitutionalBacktestEngine:
                         mean_return = np.mean(returns_arr)
                         std_return = np.std(returns_arr)
                         
-                        # Annualize (assume ~390 1-minute bars per day, 252 trading days)
-                        # For intraday data, annualization factor is sqrt(252 * 390)
+                        # FIX: Proper Sharpe ratio for short backtests
+                        # For 1-day backtests, annualization creates unrealistic metrics
                         if std_return > 0:
-                            # Use simple annualization - adjust based on bar frequency
-                            annualization_factor = np.sqrt(252 * 390)  # For 1-minute bars
-                            sharpe_ratio = (mean_return / std_return) * annualization_factor
+                            n_bars = len(returns)
+                            bars_per_day = 390  # 1-minute bars
+                            trading_days = max(1, n_bars / bars_per_day)
+                            
+                            # Calculate raw (non-annualized) Sharpe first
+                            raw_sharpe = mean_return / std_return
+                            
+                            if trading_days <= 1:
+                                # 1-day backtest: NO annualization (report as-is)
+                                # Annualizing a single day is statistically meaningless
+                                sharpe_ratio = raw_sharpe
+                            elif trading_days <= 5:
+                                # Short backtest (2-5 days): minimal annualization
+                                # Use sqrt(trading_days) to scale, not full year
+                                sharpe_ratio = raw_sharpe * np.sqrt(trading_days)
+                            else:
+                                # Longer backtest: standard annualization
+                                annualization_factor = np.sqrt(252 * bars_per_day)
+                                sharpe_ratio = raw_sharpe * annualization_factor
 
             # Create summary dict
             summary = {
