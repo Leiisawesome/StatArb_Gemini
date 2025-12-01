@@ -9,49 +9,49 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["TSLA"]
+symbols: ["BTC","ETH"]
 interval: "1min"
 start_date: "2024-12-18"  # Valid data date
 end_date: "2024-12-18"    # Same day (1 day test)
 
 # Small capital for quick test
 initial_capital: 100000
-allow_shorts: false
+allow_shorts: true  # Pairs trading requires shorting
 
 # ========================================
 # STRATEGY SELECTION
 # Uncomment ONE strategy block to test
 # ========================================
 
-# OPTION 1: Momentum Strategy (ACTIVE)
-strategies:
-  - type: "momentum"
-    name: "MOM_Simple"
-    allocation_pct: 1.0
-    parameters:
-      # Core momentum periods
-      short_period: 10
-      medium_period: 20
-      long_period: 50
-      lookback_period: 60
-      
-      # Entry thresholds (RELAXED for testing)
-      momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
-      adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
-      volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
-      
-      # RSI settings
-      rsi_period: 14
-      rsi_overbought: 75.0                 # RELAXED from 70 to 75
-      rsi_oversold: 25.0                   # RELAXED from 30 to 25
-      
-      # Position sizing
-      base_position_pct: 0.05
-      max_position_pct: 0.10
-      
-      # Scanning mode
-      scan_all_bars: false                 # Disabled - engine calls per-bar
-      scan_interval: 1
+# OPTION 1: Momentum Strategy (commented out)
+# strategies:
+#   - type: "momentum"
+#     name: "MOM_Simple"
+#     allocation_pct: 1.0
+#     parameters:
+#       # Core momentum periods
+#       short_period: 10
+#       medium_period: 20
+#       long_period: 50
+#       lookback_period: 60
+#       
+#       # Entry thresholds (RELAXED for testing)
+#       momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
+#       adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
+#       volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
+#       
+#       # RSI settings
+#       rsi_period: 14
+#       rsi_overbought: 75.0                 # RELAXED from 70 to 75
+#       rsi_oversold: 25.0                   # RELAXED from 30 to 25
+#       
+#       # Position sizing
+#       base_position_pct: 0.05
+#       max_position_pct: 0.10
+#       
+#       # Scanning mode
+#       scan_all_bars: false                 # Disabled - engine calls per-bar
+#       scan_interval: 1
 
 # OPTION 2: Mean Reversion Strategy (commented out)
 # strategies:
@@ -68,37 +68,39 @@ strategies:
 #       rsi_oversold: 40
 #       rsi_overbought: 60
 
-# OPTION 3: SES Pairs Trading Strategy (commented out)
-# NOTE: Pairs trading requires 2+ symbols. Uncomment the asset_universe below.
-# symbols: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Override symbols for pairs
-# allow_shorts: true  # Pairs trading requires shorting
-# strategies:
-#   - type: "ses_pairs_trading"
-#     name: "SES_Pairs"
-#     allocation_pct: 1.0
-#     parameters:
-#       # Asset universe for pair selection
-#       asset_universe: ["AAPL", "MSFT", "GOOGL", "AMZN"]
-#       
-#       # Pair selection thresholds
-#       lookback_period: 60               # REDUCED for smoke test (normally 252)
-#       min_correlation: 0.6              # RELAXED for testing
-#       correlation_threshold: 0.5
-#       cointegration_threshold: 0.10     # RELAXED from 0.05
-#       
-#       # Entry/exit Z-scores
-#       entry_zscore: 1.5                 # RELAXED from 2.0
-#       exit_zscore: 0.5
-#       stop_loss_zscore: 3.0
-#       
-#       # Position management
-#       max_pairs: 2
-#       position_size_pct: 0.05
-#       max_holding_period: 10            # REDUCED for smoke test
-#       
-#       # Scanning mode
-#       scan_all_bars: false
-#       scan_interval: 1
+# OPTION 3: SES Pairs Trading Strategy (ACTIVE)
+# NOTE: Pairs trading requires cointegrated assets. BTC/ETH may not always be
+# cointegrated on a single day. For testing, try:
+# - Longer date range (multi-day) for statistical significance
+# - Assets known to be cointegrated (e.g., SPY/VOO, GLD/IAU)
+# - Crypto pairs that historically show cointegration
+strategies:
+  - type: "ses_pairs_trading"
+    name: "SES_Pairs"
+    allocation_pct: 1.0
+    parameters:
+      # Asset universe for pair selection
+      asset_universe: ["BTC", "ETH"]
+      
+      # Pair selection thresholds (RELAXED for smoke test)
+      lookback_period: 60               # REDUCED for smoke test (normally 252)
+      min_correlation: 0.5              # Minimum correlation for pair consideration
+      correlation_threshold: 0.4        # Correlation to maintain pair
+      cointegration_threshold: 0.15     # RELAXED from 0.05 for testing
+      
+      # Entry/exit Z-scores (RELAXED for more signals)
+      entry_zscore: 1.5                 # Entry when zscore exceeds this
+      exit_zscore: 0.5                  # Exit when zscore drops to this
+      stop_loss_zscore: 3.0
+      
+      # Position management
+      max_pairs: 2
+      position_size_pct: 0.05
+      max_holding_period: 10            # REDUCED for smoke test
+      
+      # Scanning mode
+      scan_all_bars: false
+      scan_interval: 1
 
 # Minimal risk management
 min_signal_confidence: 0.40  # RELAXED for momentum (uses composite signals)

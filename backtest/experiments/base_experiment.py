@@ -268,8 +268,9 @@ class BaseExperiment(ABC):
         """
         # Extract from engine results structure
         # Try 'performance' nested dict first, then 'summary', then fall back to top-level keys
-        performance = engine_results.get('performance', {})
-        summary = engine_results.get('summary', {})
+        # Note: Use 'or {}' to handle None values (get() returns None if key exists with None value)
+        performance = engine_results.get('performance', {}) or {}
+        summary = engine_results.get('summary', {}) or {}
         
         # Handle total_trades - check all locations
         total_trades = (

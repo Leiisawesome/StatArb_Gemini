@@ -739,18 +739,21 @@ class InstitutionalBacktestEngine:
             logger.info("\n📥 Loading historical data...")
             await self._load_historical_data()
             
-            # Consolidate multi-symbol data for single-symbol backtests
+            # Consolidate multi-symbol data for bar-by-bar iteration
+            # We use the first symbol as the primary timeline, but pass all symbols to strategies
             if len(self.market_data) == 1:
                 # Single symbol - use directly
                 symbol = list(self.market_data.keys())[0]
                 self.historical_data = self.market_data[symbol]
                 logger.info(f"✅ Historical data consolidated: {len(self.historical_data)} bars for {symbol}")
             elif len(self.market_data) > 1:
-                # Multi-symbol - concatenate (for now, use first symbol)
-                # TODO: Implement proper multi-symbol data handling
+                # Multi-symbol - use first symbol as primary timeline
+                # Strategies will receive all symbols' data via self.market_data
                 symbol = list(self.market_data.keys())[0]
                 self.historical_data = self.market_data[symbol]
-                logger.warning(f"⚠️ Multi-symbol backtest - using {symbol} data only for now")
+                total_bars = sum(len(df) for df in self.market_data.values())
+                logger.info(f"✅ Multi-symbol backtest: {len(self.market_data)} symbols, {total_bars} total bars")
+                logger.info(f"   Primary timeline: {symbol} ({len(self.historical_data)} bars)")
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize ClickHouseDataManager: {e}", exc_info=True)
@@ -3344,15 +3347,35 @@ class InstitutionalBacktestEngine:
                         # For fallback: create enriched data on-the-fly
                         enriched_features_fallback = features_df.copy()
                         
-                        logger.warning(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
+                        logger.debug(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
                         
                         # Pass enriched features to strategy (not raw OHLCV)
                         # Get current positions for strategy context
                         current_positions = self.risk_manager.current_positions if self.risk_manager else {}
                         
+                        # For multi-symbol strategies (e.g., pairs trading), pass all symbols' historical data
+                        # Each symbol gets its accumulated historical data, not just the current bar
+                        enriched_data_per_symbol = {}
+                        for sym in self.config.symbols:
+                            if sym in self.market_data and len(self.market_data[sym]) > 0:
+                                # Use actual historical data for this symbol up to current timestamp
+                                sym_data = self.market_data[sym]
+                                # Filter data up to current bar timestamp
+                                if timestamp is not None:
+                                    ts_compare = pd.Timestamp(timestamp)
+                                    if sym_data.index.tz is not None and ts_compare.tz is None:
+                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
+                                    elif sym_data.index.tz is None and ts_compare.tz is not None:
+                                        ts_compare = ts_compare.tz_localize(None)
+                                    sym_data = sym_data[sym_data.index <= ts_compare]
+                                enriched_data_per_symbol[sym] = sym_data
+                            else:
+                                # Fallback to the bar data
+                                enriched_data_per_symbol[sym] = enriched_features_fallback
+                        
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
-                            {symbol: enriched_features_fallback for symbol in self.config.symbols},
+                            enriched_data_per_symbol,
                             current_positions
                         )
                         
