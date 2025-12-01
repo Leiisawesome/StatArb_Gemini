@@ -46,6 +46,9 @@ from .implementations import (
     EnhancedArbitrageStrategy, ArbitrageConfig
 )
 
+# Import SES Pairs Trading Strategy (advanced implementation)
+from .implementations.pairs_trading import SESPairsTradingStrategy
+
 # Import StatisticalArbitrageConfig separately
 from .implementations.statistical_arbitrage import StatisticalArbitrageConfig
 
@@ -151,6 +154,7 @@ class EnhancedStrategyFactory:
         StrategyType.TREND_FOLLOWING: EnhancedTrendFollowingStrategy,
         StrategyType.BREAKOUT: EnhancedBreakoutStrategy,
         StrategyType.PAIRS_TRADING: EnhancedPairsTradingStrategy,
+        StrategyType.SES_PAIRS_TRADING: SESPairsTradingStrategy,  # Advanced SES-based pairs
         StrategyType.VOLATILITY: EnhancedVolatilityStrategy,
         StrategyType.ARBITRAGE: EnhancedArbitrageStrategy
     }
@@ -165,6 +169,7 @@ class EnhancedStrategyFactory:
         StrategyType.TREND_FOLLOWING: TrendFollowingConfig,
         StrategyType.BREAKOUT: BreakoutConfig,
         StrategyType.PAIRS_TRADING: PairsConfig,
+        StrategyType.SES_PAIRS_TRADING: PairsConfig,  # SES uses same config as pairs
         StrategyType.VOLATILITY: VolatilityConfig,
         StrategyType.ARBITRAGE: ArbitrageConfig
     }

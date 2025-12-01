@@ -1,12 +1,14 @@
 # Smoke Test Configuration
 # =========================
 # Minimal config for quick sanity check.
-# Supports both mean_reversion and momentum strategies.
+# Supports: momentum, mean_reversion, ses_pairs_trading strategies.
 
 experiment_name: "Smoke_Test"
 experiment_type: "smoke_test"
 
-# Single symbol, 1 day
+# Symbols - adjust based on strategy type:
+# - Single-symbol: ["TSLA"]
+# - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
 symbols: ["TSLA"]
 interval: "1min"
 start_date: "2024-12-18"  # Valid data date
@@ -21,7 +23,7 @@ allow_shorts: false
 # Uncomment ONE strategy block to test
 # ========================================
 
-# OPTION 1: Momentum Strategy
+# OPTION 1: Momentum Strategy (ACTIVE)
 strategies:
   - type: "momentum"
     name: "MOM_Simple"
@@ -65,6 +67,38 @@ strategies:
 #       enable_regime_filter: false
 #       rsi_oversold: 40
 #       rsi_overbought: 60
+
+# OPTION 3: SES Pairs Trading Strategy (commented out)
+# NOTE: Pairs trading requires 2+ symbols. Uncomment the asset_universe below.
+# symbols: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Override symbols for pairs
+# allow_shorts: true  # Pairs trading requires shorting
+# strategies:
+#   - type: "ses_pairs_trading"
+#     name: "SES_Pairs"
+#     allocation_pct: 1.0
+#     parameters:
+#       # Asset universe for pair selection
+#       asset_universe: ["AAPL", "MSFT", "GOOGL", "AMZN"]
+#       
+#       # Pair selection thresholds
+#       lookback_period: 60               # REDUCED for smoke test (normally 252)
+#       min_correlation: 0.6              # RELAXED for testing
+#       correlation_threshold: 0.5
+#       cointegration_threshold: 0.10     # RELAXED from 0.05
+#       
+#       # Entry/exit Z-scores
+#       entry_zscore: 1.5                 # RELAXED from 2.0
+#       exit_zscore: 0.5
+#       stop_loss_zscore: 3.0
+#       
+#       # Position management
+#       max_pairs: 2
+#       position_size_pct: 0.05
+#       max_holding_period: 10            # REDUCED for smoke test
+#       
+#       # Scanning mode
+#       scan_all_bars: false
+#       scan_interval: 1
 
 # Minimal risk management
 min_signal_confidence: 0.40  # RELAXED for momentum (uses composite signals)

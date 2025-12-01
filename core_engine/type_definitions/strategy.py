@@ -36,6 +36,7 @@ class StrategyType(Enum):
     MEAN_REVERSION = "mean_reversion"
     MOMENTUM = "momentum"
     PAIRS_TRADING = "pairs_trading"
+    SES_PAIRS_TRADING = "ses_pairs_trading"  # Advanced SES-based pairs trading
     ARBITRAGE = "arbitrage"
     STATISTICAL_ARBITRAGE = "statistical_arbitrage"
     FACTOR = "factor"
