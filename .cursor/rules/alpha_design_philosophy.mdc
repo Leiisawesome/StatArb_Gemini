@@ -1,0 +1,335 @@
+# Rule 8: Alpha Design Philosophy - The Wolf Framework
+
+**Version:** 1.0  
+**Date:** December 2, 2025  
+**Status:** ACTIVE
+
+---
+
+## Overview
+
+This rule defines the **behavioral philosophy** for alpha design in the StatArb_Gemini system. All trading strategies MUST embody these principles before technical implementation.
+
+**Core Principle:** Think like a predator hunting in the wild. Survive first, profit second.
+
+---
+
+## The Wolf Framework: 10 Behavioral Laws
+
+### Law 1: STALK BEFORE STRIKING
+> *The wolf doesn't chase. It watches. It waits. It lets the prey make the first mistake.*
+
+**Behavior:**
+- Don't react to every signal
+- Watch the setup develop fully
+- Let others show their hand first
+- Enter when the prey is exhausted, not when it's running
+
+**Implementation:**
+```python
+# ❌ BAD: React immediately to signal
+if zscore < -2.0:
+    return BUY_SIGNAL
+
+# ✅ GOOD: Wait for exhaustion confirmation
+if zscore < -2.0 and rsi_rising and momentum_reversing:
+    return BUY_SIGNAL  # Prey is exhausted, safe to strike
+```
+
+---
+
+### Law 2: KNOW THE TERRAIN
+> *A wolf in the forest hunts differently than a wolf on the tundra.*
+
+**Behavior:**
+- Recognize what "season" (regime) the market is in
+- Don't use forest tactics in the tundra
+- Adapt strategy to environment, not environment to strategy
+
+**Implementation:**
+```python
+# Regime-aware strategy selection
+if regime == 'high_volatility':
+    use_wider_stops()
+    reduce_position_size()
+    favor_mean_reversion()  # Overshoots more likely
+    
+elif regime == 'trending':
+    use_tighter_stops()
+    favor_momentum()
+    avoid_mean_reversion()  # Trends persist
+```
+
+---
+
+### Law 3: CONSERVE ENERGY
+> *The wolf doesn't hunt every rabbit. It waits for the wounded elk.*
+
+**Behavior:**
+- Don't trade every setup
+- Wait for HIGH CONVICTION opportunities
+- Small wins drain energy (transaction costs, attention)
+- Quality over quantity
+
+**Implementation:**
+```python
+# ❌ BAD: Take every signal
+min_confidence = 0.50  # Too low
+
+# ✅ GOOD: Wait for high-quality setups
+min_confidence = 0.70
+min_exhaustion_score = 65  # Only strong signals
+max_trades_per_day = 5     # Conserve energy
+```
+
+---
+
+### Law 4: SENSE THE SHIFT
+> *Before the herd stampedes, the wolf feels the ground tremble.*
+
+**Behavior:**
+- Feel momentum changing BEFORE indicators confirm
+- Watch volume, breadth, leaders for early warnings
+- Exit before the door closes, not after
+
+**Implementation:**
+```python
+# Leading indicators (sense the shift)
+leading_signals = [
+    vix_spike_detected,      # Fear rising
+    breadth_deteriorating,   # Leaders weakening
+    volume_declining,        # Conviction fading
+    order_flow_toxic         # Informed selling
+]
+
+if any(leading_signals):
+    raise_alert("Terrain shifting - prepare to disengage")
+```
+
+---
+
+### Law 5: DISENGAGE FAST
+> *A wolf that gets kicked by an elk doesn't keep attacking. It retreats, heals, returns.*
+
+**Behavior:**
+- When wrong, admit it immediately
+- Don't turn a scratch into a fatal wound
+- Live to hunt another day
+
+**Implementation:**
+```python
+# Independent stop-loss (PRIORITY #1 in signal evaluation)
+if pnl_pct <= stop_loss_threshold:
+    # Disengage immediately - don't wait for other signals
+    return FORCED_EXIT_SIGNAL
+
+# Cooldown after loss
+if just_stopped_out:
+    cooldown_bars = 30  # Rest and heal before next hunt
+```
+
+---
+
+### Law 6: DON'T FIGHT THE HERD
+> *When the herd runs, there's usually a reason. Maybe a bigger predator.*
+
+**Behavior:**
+- Respect collective behavior
+- Don't short into a stampede (strong uptrend)
+- Don't buy into a panic (strong downtrend)
+- Sometimes the crowd knows something you don't
+
+**Implementation:**
+```python
+# Trend filter - respect the herd
+if price < sma_50 and sma_20 < sma_50:  # Death cross
+    # Herd is running downhill - don't buy
+    return None  # Skip BUY signals in strong downtrend
+
+if consecutive_stop_losses >= 2:
+    # The herd knows something - stop trading this symbol today
+    return None
+```
+
+---
+
+### Law 7: SIZE THE KILL
+> *A lone wolf doesn't attack a moose. A pack does.*
+
+**Behavior:**
+- Match position size to conviction AND environment
+- Don't oversize in uncertain terrain
+- Survive first, profit second
+
+**Implementation:**
+```python
+# Position sizing formula
+base_size = portfolio_value * base_position_pct
+
+# Adjust for conviction
+conviction_multiplier = confidence / 0.70  # Scale around 70% baseline
+
+# Adjust for terrain (regime)
+terrain_multiplier = {
+    'low_volatility': 1.2,
+    'normal': 1.0,
+    'high_volatility': 0.7,
+    'crisis': 0.4
+}[current_regime]
+
+final_size = base_size * conviction_multiplier * terrain_multiplier
+```
+
+---
+
+### Law 8: REST AFTER THE HUNT
+> *The wolf doesn't hunt again immediately after eating. It digests.*
+
+**Behavior:**
+- After a big win: pause, don't double down immediately
+- After a loss: pause, don't revenge trade
+- Patience is a weapon
+
+**Implementation:**
+```python
+# Post-trade cooldown
+if last_trade_pnl > take_profit_threshold:
+    rest_bars = 15  # Digest the win
+    
+if last_trade_was_stop_loss:
+    rest_bars = 30  # Heal from the loss
+    
+# Max daily activity
+if daily_trades >= max_trades_per_day:
+    return None  # Rest for the day
+```
+
+---
+
+### Law 9: HAVE MULTIPLE EXITS
+> *The wolf always knows three ways out of any situation.*
+
+**Behavior:**
+- Enter with exit plan already defined
+- Know your stop, know your target, know your time limit
+- Never be trapped in a position
+
+**Implementation:**
+```python
+# Every entry must have pre-defined exits
+entry_plan = {
+    'entry_price': current_price,
+    'stop_loss': entry_price * (1 + stop_loss_pct),      # Exit 1: Pain threshold
+    'take_profit': entry_price * (1 + take_profit_pct),  # Exit 2: Greed target
+    'time_limit': entry_bar + max_holding_bars,          # Exit 3: Time decay
+    'signal_exit': 'zscore_mean_reversion'               # Exit 4: Signal-based
+}
+
+# Check ALL exits every bar
+for exit_type, exit_condition in exits.items():
+    if exit_condition_met:
+        execute_exit(exit_type)
+        break
+```
+
+---
+
+### Law 10: REMEMBER EVERYTHING
+> *The wolf remembers which trails lead to prey and which lead to hunters.*
+
+**Behavior:**
+- Track what works and what doesn't
+- Build pattern recognition from experience
+- Each hunt makes you smarter
+
+**Implementation:**
+```python
+# Trade journal - mandatory
+trade_record = {
+    'symbol': symbol,
+    'entry_time': entry_time,
+    'exit_time': exit_time,
+    'entry_reason': signal_reason,
+    'exit_reason': exit_reason,
+    'pnl': realized_pnl,
+    'regime_at_entry': regime,
+    'indicators_at_entry': snapshot,
+    'lessons_learned': []  # Post-trade analysis
+}
+
+# Pattern recognition
+if similar_setup_failed_before:
+    reduce_confidence()
+    
+if similar_setup_succeeded_before:
+    increase_confidence()
+```
+
+---
+
+## Summary: The Wolf's Code
+
+| Law | Principle | Key Question |
+|-----|-----------|--------------|
+| 1 | Stalk Before Striking | Is the prey exhausted or just resting? |
+| 2 | Know The Terrain | What regime am I hunting in? |
+| 3 | Conserve Energy | Is this opportunity worth the energy? |
+| 4 | Sense The Shift | Is the environment about to change? |
+| 5 | Disengage Fast | Am I holding a losing position hoping? |
+| 6 | Don't Fight The Herd | Am I fighting a force bigger than me? |
+| 7 | Size The Kill | Is my position size appropriate for risk? |
+| 8 | Rest After The Hunt | Am I trading from emotion or strategy? |
+| 9 | Have Multiple Exits | Do I know how to get out? |
+| 10 | Remember Everything | What did this trade teach me? |
+
+---
+
+## Integration with Existing Rules
+
+| Wolf Law | Maps To Rule |
+|----------|--------------|
+| Know The Terrain | Rule 2 (Regime-First Architecture) |
+| Disengage Fast | Rule 4 (Risk Governance - Stop Loss) |
+| Don't Fight The Herd | Rule 4 (Trend Filter, Circuit Breakers) |
+| Size The Kill | Rule 4 (Position Sizing, Risk Limits) |
+| Have Multiple Exits | Rule 7 (Execution Management) |
+| Remember Everything | Rule 6 (Analytics & Attribution) |
+
+---
+
+## PROHIBITED Alpha Behaviors
+
+❌ **Sheep Behavior:** Chasing green candles, panic selling red candles
+❌ **Revenge Trading:** Re-entering immediately after stop-loss
+❌ **Hope Trading:** Holding losers hoping they recover
+❌ **Greed Trading:** Not taking profit, wanting more
+❌ **Boredom Trading:** Trading for action, not opportunity
+❌ **Ego Trading:** Refusing to admit being wrong
+❌ **Herd Fighting:** Shorting parabolic moves, buying crashes
+
+---
+
+## Code Review Checklist
+
+Before approving any strategy code:
+
+- [ ] Does it STALK (wait for confirmation) or CHASE (react immediately)?
+- [ ] Does it know its TERRAIN (regime-aware)?
+- [ ] Does it CONSERVE energy (quality over quantity)?
+- [ ] Does it SENSE shifts (leading indicators)?
+- [ ] Does it DISENGAGE fast (proper stop-loss)?
+- [ ] Does it RESPECT the herd (trend filter)?
+- [ ] Does it SIZE appropriately (risk-adjusted)?
+- [ ] Does it REST (cooldown periods)?
+- [ ] Does it have MULTIPLE EXITS (stop, target, time)?
+- [ ] Does it REMEMBER (logging, attribution)?
+
+---
+
+**The wolf survives not by being the strongest, but by being the wisest.**
+
+---
+
+**Last Updated:** December 2, 2025  
+**Status:** ACTIVE (v1.0)  
+**Related:** Rule 2, Rule 4, Rule 6, Rule 7
