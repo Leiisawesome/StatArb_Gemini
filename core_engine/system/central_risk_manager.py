@@ -2037,6 +2037,63 @@ class CentralRiskManager(ISystemComponent):
             }
         return self.current_positions.copy()
     
+    def get_position_details(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get detailed position information including entry price and P&L
+        
+        Used by strategies for PRICE-AWARE decision making.
+        
+        Returns:
+            Dict mapping symbol to position details:
+            {
+                'quantity': float,        # Current position size
+                'entry_price': float,     # Average entry price (cost basis)
+                'current_price': float,   # Current market price
+                'unrealized_pnl': float,  # Unrealized P&L in dollars
+                'pnl_pct': float,         # Unrealized P&L as percentage
+                'is_profitable': bool     # True if position is profitable
+            }
+        """
+        position_details = {}
+        
+        # Get all active positions
+        all_positions = self.get_all_positions()
+        
+        for symbol, quantity in all_positions.items():
+            if abs(quantity) < 0.001:  # Skip zero positions
+                continue
+            
+            # Get entry price from P&L tracker
+            entry_price = 0.0
+            unrealized_pnl = 0.0
+            
+            if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                entry_price = self.pnl_tracker.position_cost_basis.get(symbol, 0.0)
+                unrealized_pnl = self.pnl_tracker.position_pnl.get(symbol, 0.0)
+            
+            # Get current price
+            current_price = self.current_prices.get(symbol, entry_price)
+            
+            # Calculate P&L percentage
+            if entry_price > 0:
+                if quantity > 0:  # Long position
+                    pnl_pct = ((current_price - entry_price) / entry_price) * 100.0
+                else:  # Short position
+                    pnl_pct = ((entry_price - current_price) / entry_price) * 100.0
+            else:
+                pnl_pct = 0.0
+            
+            position_details[symbol] = {
+                'quantity': quantity,
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'unrealized_pnl': unrealized_pnl,
+                'pnl_pct': pnl_pct,
+                'is_profitable': pnl_pct > 0
+            }
+        
+        return position_details
+    
     async def update_market_prices(self, prices: Dict[str, float], timestamp: Optional[datetime] = None):
         """
         Update market prices for real-time P&L tracking (Sprint 1)

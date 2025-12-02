@@ -356,6 +356,45 @@ class MeanReversionConfig(BaseStrategyConfig):
     max_holding_period: int = 10
     """Maximum holding period in bars. Default: 10"""
     
+    # Price-aware exit parameters (NEW)
+    stop_loss_pct: float = -5.0
+    """Stop loss percentage. Exit if unrealized P&L drops below this. Default: -5%"""
+    
+    take_profit_pct: float = 10.0
+    """Take profit percentage. Exit if unrealized P&L exceeds this. Default: +10%"""
+    
+    min_profit_to_exit: float = -2.0
+    """Minimum P&L % to allow z-score based exit. Prevents selling at big loss. Default: -2%"""
+    
+    # Momentum-aware exit parameters (NEW)
+    enable_momentum_exit: bool = True
+    """Enable momentum-aware exit logic. Default: True"""
+    
+    momentum_adx_threshold: float = 20.0
+    """ADX threshold for trend strength. If ADX < this, trend is weak → OK to exit. Default: 20"""
+    
+    momentum_rsi_overbought: float = 70.0
+    """RSI overbought threshold. If RSI > this, momentum exhausted → OK to exit. Default: 70"""
+    
+    momentum_rsi_oversold: float = 30.0
+    """RSI oversold threshold. If RSI < this, momentum exhausted → OK to exit. Default: 30"""
+    
+    momentum_volume_ratio: float = 0.7
+    """Volume ratio threshold. If volume < avg * ratio, momentum fading → OK to exit. Default: 0.7"""
+    
+    momentum_extended_zscore: float = 3.0
+    """Extended z-score threshold. Always exit if |z| > this regardless of momentum. Default: 3.0"""
+    
+    # Momentum-aware entry parameters (NEW)
+    enable_momentum_entry: bool = True
+    """Enable momentum-aware entry logic. Prevents buying into falling knives. Default: True"""
+    
+    extended_zscore_entry_threshold: float = -3.0
+    """Z-score threshold for guaranteed entry. Always enter if z <= this. Default: -3.0"""
+    
+    momentum_volume_ratio_threshold: float = 0.7
+    """Volume ratio threshold for entry/exit decisions. Default: 0.7"""
+    
     # Regime filtering
     enable_regime_filter: bool = True
     """Enable regime filtering. Default: True"""

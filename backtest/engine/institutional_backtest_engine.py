@@ -3294,14 +3294,48 @@ class InstitutionalBacktestEngine:
                         
                         # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
                         # Strategy receives pre-calculated indicators with FULL HISTORICAL CONTEXT
-                        # Get current positions for strategy context
+                        # Get current positions for strategy context (ENHANCED with entry prices)
                         current_positions = self.risk_manager.current_positions if self.risk_manager else {}
                         
-                        # ✅ FIX: For multi-symbol strategies, provide CORRECT per-symbol data
-                        # Use self.market_data which contains proper per-symbol historical data
+                        # ========================================
+                        # PRICE-AWARE POSITION CONTEXT
+                        # ========================================
+                        # Build rich position context with entry prices and unrealized P&L
+                        # Use CURRENT bar's close price for mark-to-market
+                        position_details = {}
+                        if self.risk_manager and hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                            for sym, qty in current_positions.items():
+                                if abs(qty) > 0.001:  # Has position
+                                    entry_price = self.pnl_tracker.position_cost_basis.get(sym, 0.0)
+                                    # Use current bar's close price, not stale cached price
+                                    if not features_historical.empty and 'close' in features_historical.columns:
+                                        current_price_sym = features_historical['close'].iloc[-1]
+                                    else:
+                                        current_price_sym = self.risk_manager.current_prices.get(sym, entry_price)
+                                    unrealized_pnl = (current_price_sym - entry_price) * qty
+                                    pnl_pct = ((current_price_sym - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
+                                    position_details[sym] = {
+                                        'quantity': qty,
+                                        'entry_price': entry_price,
+                                        'current_price': current_price_sym,
+                                        'unrealized_pnl': unrealized_pnl,
+                                        'pnl_pct': pnl_pct,
+                                        'is_profitable': pnl_pct > 0  # Fix: use pnl_pct, not unrealized_pnl
+                                    }
+                        
+                        # ✅ FIX: For strategies, provide ENRICHED data (not raw OHLCV!)
+                        # Use features_historical which contains pre-calculated indicators (Rule 3 compliant)
                         enriched_data_per_symbol = {}
                         for sym in self.config.symbols:
-                            if sym in self.market_data and len(self.market_data[sym]) > 0:
+                            # CRITICAL FIX: Always use enriched features_historical, not raw market_data
+                            # features_historical contains OHLCV + indicators (Rule 3 Phase 2-4)
+                            # self.market_data contains only raw OHLCV (not enriched!)
+                            if not features_historical.empty:
+                                # Use pre-calculated enriched features (correct approach)
+                                enriched_data_per_symbol[sym] = features_historical
+                            elif sym in self.market_data and len(self.market_data[sym]) > 0:
+                                # Fallback to raw market_data only if no enriched data available
+                                # WARNING: This will likely cause strategies to fail validation
                                 sym_data = self.market_data[sym].copy()
                                 
                                 # Ensure timestamp index for filtering
@@ -3319,14 +3353,16 @@ class InstitutionalBacktestEngine:
                                 sym_data = sym_data[sym_data.index <= ts_compare]
                                 
                                 enriched_data_per_symbol[sym] = sym_data
+                                logger.warning(f"⚠️  Using raw market_data for {sym} - enriched features unavailable")
                             else:
-                                # Fallback to pre-calculated features (single symbol mode)
-                                enriched_data_per_symbol[sym] = features_historical
+                                logger.warning(f"⚠️  No data available for {sym}")
+                                enriched_data_per_symbol[sym] = pd.DataFrame()
                         
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
                             enriched_data_per_symbol,
-                            current_positions
+                            current_positions,
+                            position_details=position_details  # Pass rich position context
                         )
                         
                         # Strategy returns List[Signal], convert to DataFrame
@@ -3379,6 +3415,24 @@ class InstitutionalBacktestEngine:
                         # Get current positions for strategy context
                         current_positions = self.risk_manager.current_positions if self.risk_manager else {}
                         
+                        # Build rich position context (fallback path)
+                        position_details = {}
+                        if self.risk_manager and hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                            for sym, qty in current_positions.items():
+                                if abs(qty) > 0.001:
+                                    entry_price = self.pnl_tracker.position_cost_basis.get(sym, 0.0)
+                                    current_price_sym = self.risk_manager.current_prices.get(sym, 0.0)
+                                    unrealized_pnl = self.pnl_tracker.position_pnl.get(sym, 0.0)
+                                    pnl_pct = ((current_price_sym - entry_price) / entry_price * 100) if entry_price > 0 else 0.0
+                                    position_details[sym] = {
+                                        'quantity': qty,
+                                        'entry_price': entry_price,
+                                        'current_price': current_price_sym,
+                                        'unrealized_pnl': unrealized_pnl,
+                                        'pnl_pct': pnl_pct,
+                                        'is_profitable': pnl_pct > 0  # Fix: use pnl_pct, not unrealized_pnl
+                                    }
+                        
                         # For multi-symbol strategies (e.g., pairs trading), pass all symbols' historical data
                         # Each symbol gets its accumulated historical data, not just the current bar
                         enriched_data_per_symbol = {}
@@ -3412,7 +3466,8 @@ class InstitutionalBacktestEngine:
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols, 
                             enriched_data_per_symbol,
-                            current_positions
+                            current_positions,
+                            position_details=position_details  # Pass rich position context
                         )
                         
                         # Strategy returns List[Signal], convert to DataFrame
@@ -3897,6 +3952,32 @@ class InstitutionalBacktestEngine:
                     symbol = auth_trade['symbol']
                     side = auth_trade['side']
                     quantity = auth_trade['quantity']
+                    
+                    # ========================================
+                    # POSITION-AWARE EXECUTION VALIDATION
+                    # ========================================
+                    # Re-check position state at execution time (Rule 4 compliance)
+                    # This prevents stale authorizations from executing incorrectly
+                    if self.risk_manager:
+                        current_position = self.risk_manager.current_positions.get(symbol, 0.0)
+                        allow_shorts = getattr(self.config, 'allow_shorts', False)
+                        
+                        if side.lower() == 'buy' and current_position > 0:
+                            # Already LONG - skip duplicate BUY
+                            logger.info(f"⚠️  Skipping BUY {symbol}: already LONG ({current_position:.2f} shares)")
+                            continue
+                        
+                        elif side.lower() == 'sell':
+                            if current_position <= 0 and not allow_shorts:
+                                # No position to sell and shorts not allowed
+                                logger.info(f"⚠️  Skipping SELL {symbol}: no position to close (shorts not allowed)")
+                                continue
+                            elif current_position > 0:
+                                # Cap sell quantity to actual position
+                                if quantity > current_position:
+                                    logger.info(f"🔒 Adjusting SELL qty for {symbol}: {quantity} → {current_position:.2f}")
+                                    quantity = current_position
+                                    auth_trade['quantity'] = quantity
                     
                     # CRITICAL FIX: Use symbol-specific price for multi-symbol strategies
                     # Priority: 1) auth_trade['current_price'] (symbol-specific, set during authorization)

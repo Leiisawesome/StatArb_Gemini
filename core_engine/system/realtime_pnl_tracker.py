@@ -269,16 +269,20 @@ class RealTimePnLTracker:
             timestamp = datetime.now()
         
         # Update cost basis
-        if symbol in self.position_cost_basis:
-            # Average down/up logic
-            current_position = self.risk_manager.current_positions.get(symbol, 0.0)
+        # Get position BEFORE this entry was added (subtract quantity to get prior position)
+        current_position_after = self.risk_manager.current_positions.get(symbol, 0.0)
+        prior_position = current_position_after - quantity
+        
+        if symbol in self.position_cost_basis and abs(prior_position) > 0.001:
+            # Adding to existing position - use averaging logic
             current_cost = self.position_cost_basis[symbol]
             
             # Calculate new average cost
-            total_cost = (current_cost * current_position) + (entry_price * quantity)
-            new_position = current_position + quantity
-            self.position_cost_basis[symbol] = total_cost / new_position if new_position != 0 else entry_price
+            total_cost = (current_cost * prior_position) + (entry_price * quantity)
+            new_position = prior_position + quantity
+            self.position_cost_basis[symbol] = total_cost / new_position if abs(new_position) > 0.001 else entry_price
         else:
+            # NEW position (prior was 0 or no prior cost basis) - use entry price directly
             self.position_cost_basis[symbol] = entry_price
         
         # Map position to strategy

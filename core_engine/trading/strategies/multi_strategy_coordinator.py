@@ -277,7 +277,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
             self.logger.error(f"❌ Strategy unregistration failed: {e}")
             return False
     
-    async def collect_all_signals(self, market_data) -> Dict[str, List[EnhancedSignal]]:
+    async def collect_all_signals(self, market_data, position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, List[EnhancedSignal]]:
         """
         Collect signals from all registered strategies
         
@@ -285,7 +285,18 @@ class MultiStrategySignalAggregator(ISystemComponent):
             market_data: Either pd.DataFrame or Dict[str, pd.DataFrame]
                 - If DataFrame: will be converted to dict format for enhanced strategies
                 - If Dict: passed directly to strategies
+            position_details: Dict mapping symbol to rich position info:
+                {
+                    'quantity': float,
+                    'entry_price': float,
+                    'current_price': float,
+                    'unrealized_pnl': float,
+                    'pnl_pct': float,
+                    'is_profitable': bool
+                }
         """
+        # Store position details for strategies to access
+        self._position_details = position_details or {}
         strategy_signals = {}
         
         # Normalize market_data to dict format for enhanced strategies
@@ -329,9 +340,17 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 continue
             
             try:
-                # Generate signals from strategy
+                # Generate signals from strategy (with position details for price-aware decisions)
                 if hasattr(registration.strategy_instance, 'generate_signals'):
-                    raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
+                    # Pass position_details if strategy accepts it
+                    import inspect
+                    sig = inspect.signature(registration.strategy_instance.generate_signals)
+                    if 'position_details' in sig.parameters:
+                        raw_signals = await registration.strategy_instance.generate_signals(
+                            enriched_data, position_details=self._position_details
+                        )
+                    else:
+                        raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
                     
                     # Convert to enhanced signals
                     enhanced_signals = []
@@ -488,6 +507,13 @@ class MultiStrategySignalAggregator(ISystemComponent):
             if self.enable_dynamic_weighting and strategy_id in self.strategy_weights:
                 base_weight = self.registered_strategies[strategy_id].weight
                 performance_multiplier = performance['performance_score']
+                # FIX: Ensure minimum weight of 1.0 when no signals generated yet (total_signals == 0)
+                # This prevents zeroing out weights before strategy has had a chance to generate signals
+                if performance['total_signals'] == 0:
+                    performance_multiplier = 1.0  # Keep original weight until signals are generated
+                else:
+                    # Ensure minimum multiplier of 0.1 to never completely zero out a strategy
+                    performance_multiplier = max(0.1, performance_multiplier)
                 self.strategy_weights[strategy_id] = base_weight * performance_multiplier
             
         except Exception as e:

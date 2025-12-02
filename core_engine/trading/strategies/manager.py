@@ -3046,14 +3046,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"❌ Enhanced strategy registration failed: {e}")
             return False
     
-    async def collect_all_signals(self, market_data) -> Dict[str, List[EnhancedSignal]]:
-        """Collect signals from all registered strategies"""
+    async def collect_all_signals(self, market_data, position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, List[EnhancedSignal]]:
+        """
+        Collect signals from all registered strategies
+        
+        Args:
+            market_data: Dict mapping symbol to enriched DataFrame
+            position_details: Dict mapping symbol to rich position info (entry_price, pnl, etc.)
+        """
         if not self.signal_aggregator:
             logger.warning("Signal aggregator not available")
             return {}
         
         try:
-            return await self.signal_aggregator.collect_all_signals(market_data)
+            return await self.signal_aggregator.collect_all_signals(market_data, position_details=position_details)
         except Exception as e:
             logger.error(f"Signal collection failed: {e}")
             return {}
@@ -3201,9 +3207,29 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             return []
     
     async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None, 
-                             current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[EnhancedSignal]:
-        """Generate signals using multi-strategy coordination"""
+                             current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
+                             position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> List[EnhancedSignal]:
+        """
+        Generate signals using multi-strategy coordination
+        
+        Args:
+            symbols: List of symbols to generate signals for
+            market_data: Dict mapping symbol to enriched DataFrame
+            current_positions: Dict mapping symbol to quantity (legacy)
+            position_details: Dict mapping symbol to rich position info:
+                {
+                    'quantity': float,
+                    'entry_price': float,
+                    'current_price': float,
+                    'unrealized_pnl': float,
+                    'pnl_pct': float,
+                    'is_profitable': bool
+                }
+        """
         try:
+            # Store position details for strategies to access
+            self._position_details = position_details or {}
+            
             if not self.enable_multi_strategy or not self.signal_aggregator:
                 # Fallback to traditional signal generation
                 return await self._generate_traditional_signals(symbols)
@@ -3212,8 +3238,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             if market_data is None:
                 market_data = await self._get_market_data(symbols)
             
-            # Collect signals from all strategies
-            strategy_signals = await self.collect_all_signals(market_data)
+            # Collect signals from all strategies (passing position details)
+            strategy_signals = await self.collect_all_signals(market_data, position_details=position_details)
             
             # Aggregate and resolve conflicts
             aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)

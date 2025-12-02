@@ -238,18 +238,31 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # CORE SIGNAL GENERATION
     # ========================================
     
-    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame], 
+                               position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> List[StrategySignal]:
         """
         Generate mean reversion signals from ENRICHED data (Rule 3 Phase 4)
         
         Args:
             enriched_data: Dict[symbol, enriched DataFrame with OHLCV + indicators]
+            position_details: Dict mapping symbol to rich position info:
+                {
+                    'quantity': float,        # Current position size
+                    'entry_price': float,     # Average entry price
+                    'current_price': float,   # Current market price
+                    'unrealized_pnl': float,  # Unrealized P&L in dollars
+                    'pnl_pct': float,         # Unrealized P&L as percentage
+                    'is_profitable': bool     # True if position is profitable
+                }
         
         Returns:
             List[StrategySignal]: Generated mean reversion signals
         """
         start_time = datetime.now()
         signals = []
+        
+        # Store position details for price-aware decisions
+        self._position_details = position_details or {}
         
         # Track call count for debugging
         if not hasattr(self, '_signal_call_count'):
@@ -358,7 +371,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             current_row = data.iloc[idx]
             
             # Get core indicator values
-            zscore = self._get_indicator_value(data, 'zscore', idx, default=0.0)
+            # Calculate zscore using strategy's lookback_period (more accurate than pre-calculated)
+            zscore = self._calculate_strategy_zscore(data, idx)
             
             # Apply regime filter first (fast exit)
             if self.config.enable_regime_filter and not self._is_regime_favorable(symbol):
@@ -406,13 +420,222 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             else:
                 return None
             
+            # ========================================
+            # MOMENTUM-AWARE EXIT LOGIC (NEW)
+            # ========================================
+            # For EXIT signals, check if momentum is exhausted before allowing exit
+            # This prevents exiting too early in strong trends
+            # SELL = exit long position, BUY (when short) = exit short position
+            is_exit_signal = (
+                (signal_type == SignalType.SELL) or  # Exit long
+                (signal_type == SignalType.BUY and hasattr(self, '_position_details') and 
+                 self._position_details.get(symbol, {}).get('quantity', 0) < 0)  # Exit short
+            )
+            
+            if is_exit_signal and getattr(self.config, 'enable_momentum_exit', True):
+                # Get momentum indicators from data (using correct column names)
+                rsi = self._get_indicator_value(data, 'rsi', idx, default=50.0)
+                adx = self._get_indicator_value(data, 'adx', idx, default=25.0)
+                volume = self._get_indicator_value(data, 'volume', idx, default=0)
+                volume_ma = self._get_indicator_value(data, 'volume_sma', idx, default=volume)
+                
+                # Calculate volume ratio (or use pre-calculated if available)
+                volume_ratio_col = self._get_indicator_value(data, 'volume_ratio', idx, default=None)
+                if volume_ratio_col is not None:
+                    volume_ratio = volume_ratio_col
+                else:
+                    volume_ratio = volume / volume_ma if volume_ma > 0 else 1.0
+                
+                # Get thresholds from config
+                adx_threshold = getattr(self.config, 'momentum_adx_threshold', 20.0)
+                rsi_overbought = getattr(self.config, 'momentum_rsi_overbought', 70.0)
+                rsi_oversold = getattr(self.config, 'momentum_rsi_oversold', 30.0)
+                vol_ratio_threshold = getattr(self.config, 'momentum_volume_ratio', 0.7)
+                extended_zscore = getattr(self.config, 'momentum_extended_zscore', 3.0)
+                
+                # Determine direction (SELL = exiting long, BUY with short = exiting short)
+                is_exiting_long = signal_type == SignalType.SELL
+                
+                # Check if we should allow exit
+                momentum_exhausted = False
+                hold_reason = None
+                exit_reason = None
+                
+                # Get previous RSI to check if momentum is reversing
+                rsi_prev = self._get_indicator_value(data, 'rsi', idx - 1, default=rsi) if idx > 0 else rsi
+                rsi_declining = rsi < rsi_prev - 1.0  # RSI dropping by at least 1 point
+                rsi_rising = rsi > rsi_prev + 1.0     # RSI rising by at least 1 point
+                
+                # Always exit if z-score is extremely extended
+                if abs(zscore) >= extended_zscore:
+                    momentum_exhausted = True
+                    exit_reason = f"extended_zscore ({zscore:.2f} >= {extended_zscore})"
+                
+                # Exit if RSI shows exhaustion AND is declining (direction-aware)
+                elif is_exiting_long and rsi >= rsi_overbought and rsi_declining:
+                    momentum_exhausted = True
+                    exit_reason = f"rsi_overbought_declining ({rsi:.1f} >= {rsi_overbought}, prev={rsi_prev:.1f})"
+                elif is_exiting_long and rsi >= rsi_overbought:
+                    # RSI overbought but still rising - HOLD
+                    hold_reason = f"rsi_overbought_but_rising ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
+                elif not is_exiting_long and rsi <= rsi_oversold and rsi_rising:
+                    momentum_exhausted = True
+                    exit_reason = f"rsi_oversold_rising ({rsi:.1f} <= {rsi_oversold}, prev={rsi_prev:.1f})"
+                elif not is_exiting_long and rsi <= rsi_oversold:
+                    # RSI oversold but still falling - HOLD
+                    hold_reason = f"rsi_oversold_but_falling ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
+                
+                # Exit if trend is weak (ADX low)
+                elif adx < adx_threshold:
+                    momentum_exhausted = True
+                    exit_reason = f"weak_trend (ADX {adx:.1f} < {adx_threshold})"
+                
+                # Exit if volume is fading
+                elif volume_ratio < vol_ratio_threshold:
+                    momentum_exhausted = True
+                    exit_reason = f"volume_fading (ratio {volume_ratio:.2f} < {vol_ratio_threshold})"
+                
+                # Momentum still strong - HOLD for extended move
+                else:
+                    hold_reason = f"momentum_strong (ADX={adx:.1f}, RSI={rsi:.1f}, vol_ratio={volume_ratio:.2f})"
+                
+                # Log the decision
+                if momentum_exhausted:
+                    logger.debug(f"[{symbol}] MOMENTUM EXIT ALLOWED: {exit_reason}")
+                else:
+                    logger.debug(f"[{symbol}] MOMENTUM HOLD: {hold_reason}")
+                    return None  # Don't exit yet, momentum still strong
+            
+            # ========================================
+            # MOMENTUM-AWARE ENTRY LOGIC (BUY FILTER)
+            # ========================================
+            # For BUY entries (new long positions), check if downward momentum is exhausted
+            # This prevents buying into "falling knife" scenarios
+            is_entry_signal = (
+                signal_type == SignalType.BUY and 
+                (not hasattr(self, '_position_details') or 
+                 self._position_details.get(symbol, {}).get('quantity', 0) <= 0)
+            )
+            
+            if is_entry_signal and getattr(self.config, 'enable_momentum_entry', True):
+                # Get momentum indicators
+                rsi = self._get_indicator_value(data, 'rsi', idx, default=50.0)
+                adx = self._get_indicator_value(data, 'adx', idx, default=25.0)
+                volume = self._get_indicator_value(data, 'volume', idx, default=0)
+                volume_ma = self._get_indicator_value(data, 'volume_sma', idx, default=volume)
+                
+                # Calculate volume ratio
+                volume_ratio_col = self._get_indicator_value(data, 'volume_ratio', idx, default=None)
+                volume_ratio = volume_ratio_col if volume_ratio_col is not None else (volume / volume_ma if volume_ma > 0 else 1.0)
+                
+                # Get previous RSI to check if momentum is reversing
+                rsi_prev = self._get_indicator_value(data, 'rsi', idx - 1, default=rsi) if idx > 0 else rsi
+                rsi_rising = rsi > rsi_prev + 1.0     # RSI rising by at least 1 point
+                rsi_still_falling = rsi < rsi_prev - 1.0
+                
+                # Thresholds
+                rsi_oversold = getattr(self.config, 'rsi_oversold', 30.0)
+                adx_threshold = getattr(self.config, 'momentum_adx_threshold', 25.0)
+                extended_zscore_entry = getattr(self.config, 'extended_zscore_entry_threshold', -3.0)
+                vol_ratio_threshold = getattr(self.config, 'momentum_volume_ratio_threshold', 0.7)
+                
+                momentum_reversing = False
+                entry_reason = None
+                hold_entry_reason = None
+                
+                # Always enter if z-score is extremely extended (very oversold)
+                if zscore <= extended_zscore_entry:
+                    momentum_reversing = True
+                    entry_reason = f"extended_zscore ({zscore:.2f} <= {extended_zscore_entry})"
+                
+                # Enter if RSI shows exhaustion AND is rising (momentum reversing)
+                elif rsi <= rsi_oversold and rsi_rising:
+                    momentum_reversing = True
+                    entry_reason = f"rsi_oversold_rising ({rsi:.1f} <= {rsi_oversold}, prev={rsi_prev:.1f})"
+                elif rsi <= rsi_oversold and rsi_still_falling:
+                    # RSI oversold but still falling - WAIT for bounce
+                    hold_entry_reason = f"rsi_oversold_but_falling ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
+                
+                # Enter if trend is weak (low ADX = mean reversion more likely)
+                elif adx < adx_threshold:
+                    momentum_reversing = True
+                    entry_reason = f"weak_trend (ADX {adx:.1f} < {adx_threshold})"
+                
+                # For BUY entries: High volume = selling climax (capitulation), OK to enter
+                # Low volume during downtrend = no buying interest, wait
+                elif volume_ratio > 1.5:  # Volume spike = potential capitulation/reversal
+                    momentum_reversing = True
+                    entry_reason = f"volume_spike (ratio {volume_ratio:.2f} > 1.5) - potential capitulation"
+                
+                # Strong downward momentum - WAIT for exhaustion
+                else:
+                    hold_entry_reason = f"momentum_strong (ADX={adx:.1f}, RSI={rsi:.1f}, vol_ratio={volume_ratio:.2f})"
+                
+                # Log the decision
+                if momentum_reversing:
+                    logger.debug(f"[{symbol}] MOMENTUM ENTRY ALLOWED: {entry_reason}")
+                else:
+                    logger.debug(f"[{symbol}] MOMENTUM ENTRY WAIT: {hold_entry_reason}")
+                    return None  # Don't enter yet, downward momentum still strong
+            
+            # ========================================
+            # PRICE-AWARE EXIT LOGIC
+            # ========================================
+            # For SELL signals, check if we have a position and whether exiting makes sense
+            has_details = hasattr(self, '_position_details')
+            details_content = self._position_details if has_details else {}
+            
+            if signal_type == SignalType.SELL and has_details and details_content:
+                pos_info = details_content.get(symbol)
+                
+                if pos_info and pos_info.get('quantity', 0) > 0:
+                    entry_price_pos = pos_info.get('entry_price', 0)
+                    current_price = pos_info.get('current_price', 0)
+                    unrealized_pnl = pos_info.get('unrealized_pnl', 0)
+                    pnl_pct = pos_info.get('pnl_pct', 0)
+                    
+                    # Get price-aware thresholds from config (with defaults)
+                    stop_loss_pct = getattr(self.config, 'stop_loss_pct', -5.0)  # -5% default
+                    take_profit_pct = getattr(self.config, 'take_profit_pct', 10.0)  # +10% default
+                    min_profit_to_exit = getattr(self.config, 'min_profit_to_exit', -2.0)  # Allow -2% loss max
+                    
+                    # Log position context
+                    logger.debug(f"[{symbol}] Price-aware: entry=${entry_price_pos:.2f}, current=${current_price:.2f}, "
+                                f"pnl={pnl_pct:+.2f}%, stop={stop_loss_pct}%")
+                    
+                    # RULE 1: Take profit if exceeds threshold (always exit)
+                    if pnl_pct >= take_profit_pct:
+                        logger.info(f"[{symbol}] ✅ TAKE PROFIT: pnl={pnl_pct:+.2f}% >= {take_profit_pct}%")
+                        # Boost confidence for profitable exits
+                        confidence = min(confidence * 1.2, 1.0)
+                    
+                    # RULE 2: Stop loss if exceeds threshold (always exit)
+                    elif pnl_pct <= stop_loss_pct:
+                        logger.info(f"[{symbol}] ⚠️ STOP LOSS: pnl={pnl_pct:+.2f}% <= {stop_loss_pct}%")
+                        # Still exit but log it
+                    
+                    # RULE 3: Don't sell at significant loss just because z-score says overbought
+                    elif pnl_pct < min_profit_to_exit:
+                        logger.info(f"[{symbol}] ❌ SKIPPING SELL: pnl={pnl_pct:+.2f}% < {min_profit_to_exit}%, "
+                                   f"waiting for better price (entry=${entry_price_pos:.2f})")
+                        return None  # Skip this sell signal
+                    
+                    # RULE 4: Small loss or breakeven - allow exit if z-score strong enough
+                    else:
+                        # Allow exit if z-score is very strong (>2.5) even at small loss
+                        if zscore > self.config.dislocation_strong:
+                            logger.info(f"[{symbol}] ✅ STRONG Z-SCORE EXIT: z={zscore:.2f} > {self.config.dislocation_strong}")
+                        else:
+                            logger.info(f"[{symbol}] ⚠️ MARGINAL EXIT: pnl={pnl_pct:+.2f}%, z={zscore:.2f}")
+            
             # Confidence threshold check
             if confidence <= 0.6:
                 return None
             
-            # DEBUG: Log when we're about to create a signal
-            logger.info(f"[{symbol}] 🎯 CREATING SIGNAL: idx={idx}, zscore={zscore:.3f}, "
-                       f"signal_type={signal_type}, confidence={confidence}, score={score:.1f}")
+            # Log signal creation details
+            strength = min(score / 100.0, 1.0)
+            logger.debug(f"[{symbol}] Signal: {signal_type.value.upper()} zscore={zscore:.3f}, score={score:.1f}, "
+                        f"strength={strength:.2f}, confidence={confidence:.2f}")
             
             # Get timestamp and price
             timestamp = current_row.get('timestamp', datetime.now()) if isinstance(current_row, pd.Series) else datetime.now()
@@ -668,7 +891,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             breakdown['regime_penalty'] * self.config.weight_regime_penalty * scale_factor +
             breakdown['confluence'] * self.config.weight_confluence * scale_factor +
             breakdown['alpha_quality'] * weight_alpha
-        ) * 100  # Scale to 0-100
+        )  # Factors are already 0-100, weights sum to ~1.0, so result is 0-100
         
         # Normalize (weights should sum to 1.0)
         weight_sum = (
@@ -687,6 +910,47 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # ========================================
     # INDICATOR HELPERS
     # ========================================
+    
+    def _calculate_strategy_zscore(self, data: pd.DataFrame, idx: int) -> float:
+        """
+        Calculate z-score using strategy's configured lookback_period
+        
+        This ensures zscore is calculated with the SAME lookback the strategy
+        uses for its trading decisions, rather than relying on pre-calculated
+        features which may use a different lookback.
+        
+        Args:
+            data: DataFrame with at least 'close' column
+            idx: Index to calculate zscore at
+            
+        Returns:
+            Z-score value (standard deviations from mean)
+        """
+        lookback = self.config.lookback_period
+        
+        # Need sufficient history
+        if idx < lookback:
+            return 0.0
+        
+        if 'close' not in data.columns:
+            return self._get_indicator_value(data, 'zscore', idx, default=0.0)
+        
+        # Get lookback window of prices
+        prices = data['close'].iloc[max(0, idx - lookback + 1):idx + 1].values
+        
+        if len(prices) < lookback // 2:  # Need at least half the lookback
+            return 0.0
+        
+        mean_price = float(np.mean(prices))
+        std_price = float(np.std(prices))
+        
+        if std_price < 0.001:  # Avoid division by zero
+            return 0.0
+        
+        current_price = float(data['close'].iloc[idx])
+        zscore = (current_price - mean_price) / std_price
+        
+        return zscore
     
     def _get_indicator_value(
         self, 

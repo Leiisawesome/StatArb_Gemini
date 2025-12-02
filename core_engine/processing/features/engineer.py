@@ -980,13 +980,15 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # Calculate zscore from Bollinger Bands (for mean reversion strategies)
             # zscore = (close - BB_middle) / (BB_width / 2)
             # This can also be derived from bb_position: zscore = (bb_position - 0.5) * 2
-            if 'bb_width' in df.columns and 'bb_middle' in df.columns:
-                # Calculate zscore: (close - middle) / (width / 2)
-                # Avoid division by zero
-                bb_half_width = df['bb_width'] * df['bb_middle'] / 2.0
-                mask = bb_half_width > 0.001
+            if 'bb_middle' in df.columns:
+                # Calculate proper z-score: (close - mean) / std
+                # Use rolling calculation for consistency across all regime settings
+                # bb_middle IS the rolling mean, so we just need rolling std
+                lookback = 20  # Match Bollinger Band period
+                rolling_std = df['close'].rolling(window=lookback, min_periods=5).std()
+                mask = rolling_std > 0.001
                 df['zscore'] = 0.0
-                df.loc[mask, 'zscore'] = (df.loc[mask, 'close'] - df.loc[mask, 'bb_middle']) / (df.loc[mask, 'bb_width'] * df.loc[mask, 'bb_middle'] / 2.0)
+                df.loc[mask, 'zscore'] = (df.loc[mask, 'close'] - df.loc[mask, 'bb_middle']) / rolling_std[mask]
                 # Alternative: derive from bb_position (normalized 0-1 to -2 to +2)
                 # df['zscore'] = (df['bb_position'] - 0.5) * 2
             else:
