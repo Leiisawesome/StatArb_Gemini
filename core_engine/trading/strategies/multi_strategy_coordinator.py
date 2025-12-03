@@ -350,7 +350,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
                             enriched_data, position_details=self._position_details
                         )
                     else:
-                    raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
+                        raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
                     
                     # Convert to enhanced signals
                     enhanced_signals = []

@@ -1,335 +1,712 @@
-# Rule 8: Alpha Design Philosophy - The Wolf Framework
+# Rule 8: Alpha Design Specification (ADS v3.0)
 
-**Version:** 1.0  
-**Date:** December 2, 2025  
+**Version:** 3.0  
+**Date:** December 3, 2025  
 **Status:** ACTIVE
 
 ---
 
 ## Overview
 
-This rule defines the **behavioral philosophy** for alpha design in the StatArb_Gemini system. All trading strategies MUST embody these principles before technical implementation.
-
-**Core Principle:** Think like a predator hunting in the wild. Survive first, profit second.
-
----
-
-## The Wolf Framework: 10 Behavioral Laws
-
-### Law 1: STALK BEFORE STRIKING
-> *The wolf doesn't chase. It watches. It waits. It lets the prey make the first mistake.*
-
-**Behavior:**
-- Don't react to every signal
-- Watch the setup develop fully
-- Let others show their hand first
-- Enter when the prey is exhausted, not when it's running
-
-**Implementation:**
-```python
-# ❌ BAD: React immediately to signal
-if zscore < -2.0:
-    return BUY_SIGNAL
-
-# ✅ GOOD: Wait for exhaustion confirmation
-if zscore < -2.0 and rsi_rising and momentum_reversing:
-    return BUY_SIGNAL  # Prey is exhausted, safe to strike
-```
+Non-negotiable constraints for all alpha modules. Each rule is expressed as:
+- **Principle** → Intent
+- **Specification** → Math and constraints
+- **Implementation** → Enforcement code
 
 ---
 
-### Law 2: KNOW THE TERRAIN
-> *A wolf in the forest hunts differently than a wolf on the tundra.*
+## §1. SIGNAL MATURITY
 
-**Behavior:**
-- Recognize what "season" (regime) the market is in
-- Don't use forest tactics in the tundra
-- Adapt strategy to environment, not environment to strategy
+### Principle
+Only engage when setup has statistically matured.
 
-**Implementation:**
+### Specification
+
+**Signal Maturity Score (SMS):**
+$$
+\text{SMS} = E^{\alpha} \cdot P_{\text{rev}}^{\beta} \cdot (1 + \Delta\text{OFI})^{\gamma} \cdot \text{VC}^{-\delta} \cdot e^{-\lambda t}
+$$
+
+| Variable | Description | Range |
+|----------|-------------|-------|
+| $E$ | Exhaustion (Z-score × P(reversal)) | [0, 1] |
+| $P_{\text{rev}}$ | Reversal probability (logistic) | [0, 1] |
+| $\Delta\text{OFI}$ | Order flow shift | [-1, 1] |
+| $\text{VC}$ | Volatility compression (σ_short/σ_long) | [0.5, 2.0] |
+| $t$ | Bars pending | ≥ 0 |
+| $\lambda$ | Decay rate | 0.05 |
+
+**Regime-Adaptive Exponents:**
+| Regime | α | β | γ | δ |
+|--------|---|---|---|---|
+| Low Vol | 0.30 | 0.40 | 0.20 | 0.10 |
+| Normal | 0.35 | 0.35 | 0.20 | 0.10 |
+| High Vol | 0.40 | 0.25 | 0.25 | 0.10 |
+| Crisis | 0.50 | 0.20 | 0.20 | 0.10 |
+
+**Trade Condition:** $\text{SMS} \geq \tau(\mathbf{R})$
+
+**Stale Signal Kill:** $t > 50$ bars → discard
+
+### Implementation
+
 ```python
-# Regime-aware strategy selection
-if regime == 'high_volatility':
-    use_wider_stops()
-    reduce_position_size()
-    favor_mean_reversion()  # Overshoots more likely
+@dataclass
+class SignalMaturityScore:
+    exhaustion: float
+    reversal_prob: float
+    ofi_shift: float
+    vol_compression: float
+    pending_bars: int
+    decay_rate: float = 0.05
+    max_pending: int = 50
     
-elif regime == 'trending':
-    use_tighter_stops()
-    favor_momentum()
-    avoid_mean_reversion()  # Trends persist
-```
-
----
-
-### Law 3: CONSERVE ENERGY
-> *The wolf doesn't hunt every rabbit. It waits for the wounded elk.*
-
-**Behavior:**
-- Don't trade every setup
-- Wait for HIGH CONVICTION opportunities
-- Small wins drain energy (transaction costs, attention)
-- Quality over quantity
-
-**Implementation:**
-```python
-# ❌ BAD: Take every signal
-min_confidence = 0.50  # Too low
-
-# ✅ GOOD: Wait for high-quality setups
-min_confidence = 0.70
-min_exhaustion_score = 65  # Only strong signals
-max_trades_per_day = 5     # Conserve energy
-```
-
----
-
-### Law 4: SENSE THE SHIFT
-> *Before the herd stampedes, the wolf feels the ground tremble.*
-
-**Behavior:**
-- Feel momentum changing BEFORE indicators confirm
-- Watch volume, breadth, leaders for early warnings
-- Exit before the door closes, not after
-
-**Implementation:**
-```python
-# Leading indicators (sense the shift)
-leading_signals = [
-    vix_spike_detected,      # Fear rising
-    breadth_deteriorating,   # Leaders weakening
-    volume_declining,        # Conviction fading
-    order_flow_toxic         # Informed selling
-]
-
-if any(leading_signals):
-    raise_alert("Terrain shifting - prepare to disengage")
-```
-
----
-
-### Law 5: DISENGAGE FAST
-> *A wolf that gets kicked by an elk doesn't keep attacking. It retreats, heals, returns.*
-
-**Behavior:**
-- When wrong, admit it immediately
-- Don't turn a scratch into a fatal wound
-- Live to hunt another day
-
-**Implementation:**
-```python
-# Independent stop-loss (PRIORITY #1 in signal evaluation)
-if pnl_pct <= stop_loss_threshold:
-    # Disengage immediately - don't wait for other signals
-    return FORCED_EXIT_SIGNAL
-
-# Cooldown after loss
-if just_stopped_out:
-    cooldown_bars = 30  # Rest and heal before next hunt
-```
-
----
-
-### Law 6: DON'T FIGHT THE HERD
-> *When the herd runs, there's usually a reason. Maybe a bigger predator.*
-
-**Behavior:**
-- Respect collective behavior
-- Don't short into a stampede (strong uptrend)
-- Don't buy into a panic (strong downtrend)
-- Sometimes the crowd knows something you don't
-
-**Implementation:**
-```python
-# Trend filter - respect the herd
-if price < sma_50 and sma_20 < sma_50:  # Death cross
-    # Herd is running downhill - don't buy
-    return None  # Skip BUY signals in strong downtrend
-
-if consecutive_stop_losses >= 2:
-    # The herd knows something - stop trading this symbol today
-    return None
-```
-
----
-
-### Law 7: SIZE THE KILL
-> *A lone wolf doesn't attack a moose. A pack does.*
-
-**Behavior:**
-- Match position size to conviction AND environment
-- Don't oversize in uncertain terrain
-- Survive first, profit second
-
-**Implementation:**
-```python
-# Position sizing formula
-base_size = portfolio_value * base_position_pct
-
-# Adjust for conviction
-conviction_multiplier = confidence / 0.70  # Scale around 70% baseline
-
-# Adjust for terrain (regime)
-terrain_multiplier = {
-    'low_volatility': 1.2,
-    'normal': 1.0,
-    'high_volatility': 0.7,
-    'crisis': 0.4
-}[current_regime]
-
-final_size = base_size * conviction_multiplier * terrain_multiplier
-```
-
----
-
-### Law 8: REST AFTER THE HUNT
-> *The wolf doesn't hunt again immediately after eating. It digests.*
-
-**Behavior:**
-- After a big win: pause, don't double down immediately
-- After a loss: pause, don't revenge trade
-- Patience is a weapon
-
-**Implementation:**
-```python
-# Post-trade cooldown
-if last_trade_pnl > take_profit_threshold:
-    rest_bars = 15  # Digest the win
+    EXPONENTS = {
+        'low_vol': (0.30, 0.40, 0.20, 0.10),
+        'normal': (0.35, 0.35, 0.20, 0.10),
+        'high_vol': (0.40, 0.25, 0.25, 0.10),
+        'crisis': (0.50, 0.20, 0.20, 0.10)
+    }
     
-if last_trade_was_stop_loss:
-    rest_bars = 30  # Heal from the loss
+    def compute(self, regime: str = 'normal') -> float:
+        α, β, γ, δ = self.EXPONENTS.get(regime, (0.35, 0.35, 0.20, 0.10))
+        return (
+            (self.exhaustion ** α) *
+            (self.reversal_prob ** β) *
+            ((1 + max(0, self.ofi_shift)) ** γ) *
+            ((1 / max(0.5, self.vol_compression)) ** δ) *
+            np.exp(-self.decay_rate * self.pending_bars)
+        )
     
-# Max daily activity
-if daily_trades >= max_trades_per_day:
-    return None  # Rest for the day
+    def is_mature(self, threshold: float, regime: str) -> bool:
+        return self.pending_bars <= self.max_pending and self.compute(regime) >= threshold
 ```
 
 ---
 
-### Law 9: HAVE MULTIPLE EXITS
-> *The wolf always knows three ways out of any situation.*
+## §2. REGIME ARCHITECTURE
 
-**Behavior:**
-- Enter with exit plan already defined
-- Know your stop, know your target, know your time limit
-- Never be trapped in a position
+### Principle
+All logic conditional on continuous market regime scores.
 
-**Implementation:**
+### Specification
+
+**Regime Vector:**
+$$
+\mathbf{R} = \left( R_{\text{vol}}, R_{\text{trend}}, R_{\text{liq}}, R_{\text{micro}}, \frac{d\mathbf{R}}{dt}, \text{Conf} \right)
+$$
+
+| Component | Range | Description |
+|-----------|-------|-------------|
+| $R_{\text{vol}}$ | [0, 1] | 0=low, 1=extreme volatility |
+| $R_{\text{trend}}$ | [-1, 1] | -1=down, +1=up trend |
+| $R_{\text{liq}}$ | [0, 1] | 0=crisis, 1=abundant liquidity |
+| $R_{\text{micro}}$ | [0, 1] | 0=toxic, 1=stable microstructure |
+| $d\mathbf{R}/dt$ | ℝ | Regime velocity (transition rate) |
+| Conf | [0, 1] | Classification confidence |
+
+**Confidence:** $\text{Conf} = 1 - H(\mathbf{p})$ (normalized entropy)
+
+### Implementation
+
 ```python
-# Every entry must have pre-defined exits
-entry_plan = {
-    'entry_price': current_price,
-    'stop_loss': entry_price * (1 + stop_loss_pct),      # Exit 1: Pain threshold
-    'take_profit': entry_price * (1 + take_profit_pct),  # Exit 2: Greed target
-    'time_limit': entry_bar + max_holding_bars,          # Exit 3: Time decay
-    'signal_exit': 'zscore_mean_reversion'               # Exit 4: Signal-based
-}
-
-# Check ALL exits every bar
-for exit_type, exit_condition in exits.items():
-    if exit_condition_met:
-        execute_exit(exit_type)
-        break
-```
-
----
-
-### Law 10: REMEMBER EVERYTHING
-> *The wolf remembers which trails lead to prey and which lead to hunters.*
-
-**Behavior:**
-- Track what works and what doesn't
-- Build pattern recognition from experience
-- Each hunt makes you smarter
-
-**Implementation:**
-```python
-# Trade journal - mandatory
-trade_record = {
-    'symbol': symbol,
-    'entry_time': entry_time,
-    'exit_time': exit_time,
-    'entry_reason': signal_reason,
-    'exit_reason': exit_reason,
-    'pnl': realized_pnl,
-    'regime_at_entry': regime,
-    'indicators_at_entry': snapshot,
-    'lessons_learned': []  # Post-trade analysis
-}
-
-# Pattern recognition
-if similar_setup_failed_before:
-    reduce_confidence()
+@dataclass
+class RegimeVector:
+    volatility: float      # [0, 1]
+    trend: float           # [-1, 1]
+    liquidity: float       # [0, 1]
+    microstructure: float  # [0, 1]
+    d_volatility: float
+    d_trend: float
+    d_liquidity: float
+    d_microstructure: float
+    confidence: float
     
-if similar_setup_succeeded_before:
-    increase_confidence()
+    def is_transitioning(self, threshold: float = 0.1) -> bool:
+        return any(abs(v) > threshold for v in 
+                   [self.d_volatility, self.d_trend, self.d_liquidity, self.d_microstructure])
+    
+    def effective_volatility(self) -> float:
+        return self.volatility + (0.1 if self.d_volatility > 0 else 0)
+
+class AlphaBase(ABC):
+    @property
+    @abstractmethod
+    def volatility_range(self) -> Tuple[float, float]: pass
+    
+    @property
+    @abstractmethod
+    def min_liquidity(self) -> float: pass
+    
+    @property
+    @abstractmethod
+    def min_confidence(self) -> float: pass
+    
+    def is_compatible(self, r: RegimeVector) -> bool:
+        if r.confidence < self.min_confidence:
+            return False
+        v = r.effective_volatility()
+        return (self.volatility_range[0] <= v <= self.volatility_range[1] and 
+                r.liquidity >= self.min_liquidity)
 ```
 
 ---
 
-## Summary: The Wolf's Code
+## §3. OPPORTUNITY THRESHOLD
 
-| Law | Principle | Key Question |
-|-----|-----------|--------------|
-| 1 | Stalk Before Striking | Is the prey exhausted or just resting? |
-| 2 | Know The Terrain | What regime am I hunting in? |
-| 3 | Conserve Energy | Is this opportunity worth the energy? |
-| 4 | Sense The Shift | Is the environment about to change? |
-| 5 | Disengage Fast | Am I holding a losing position hoping? |
-| 6 | Don't Fight The Herd | Am I fighting a force bigger than me? |
-| 7 | Size The Kill | Is my position size appropriate for risk? |
-| 8 | Rest After The Hunt | Am I trading from emotion or strategy? |
-| 9 | Have Multiple Exits | Do I know how to get out? |
-| 10 | Remember Everything | What did this trade teach me? |
+### Principle
+Trade only when tail-risk-adjusted return exceeds costs.
+
+### Specification
+
+**Expected Risk-Adjusted Return:**
+$$
+\text{ERAR} = \frac{\mathbb{E}[\text{PnL}] - \lambda \cdot \text{CVaR}_{95}}{\text{Cost}} \cdot \Omega_{\text{adj}}
+$$
+
+**Cost Model:**
+$$
+\text{Cost} = C_{\text{spread}} + C_{\text{slip}} \cdot \phi^{0.6} + P_{\text{adv}} \cdot \lambda_K + C_{\text{opp}}
+$$
+
+| Component | Formula |
+|-----------|---------|
+| $C_{\text{slip}}$ | $\sigma \sqrt{Q/\text{ADV}}$ |
+| $C_{\text{opp}}$ | $\mathbb{E}[R_{\text{alt}}] \cdot t_{\text{hold}}$ |
+| $\Omega_{\text{adj}}$ | $\text{clip}(1 + 0.1 \cdot \text{skew}, 0.5, 1.5)$ |
+
+**Trade Condition:** $\text{ERAR} \geq \gamma$
+
+### Implementation
+
+```python
+@dataclass
+class ERAR:
+    expected_pnl: float
+    cvar_95: float
+    skewness: float
+    spread_bps: float
+    participation: float
+    adverse_prob: float
+    kyle_lambda: float
+    holding_days: float
+    alt_return_bps: float
+    tail_lambda: float = 1.0
+    
+    def cost(self) -> float:
+        return (self.spread_bps + 
+                self.kyle_lambda * (self.participation ** 0.6) * 10000 +
+                self.adverse_prob * self.kyle_lambda * 10000 +
+                self.alt_return_bps * self.holding_days / 252)
+    
+    def omega_adj(self) -> float:
+        return np.clip(1 + 0.1 * self.skewness, 0.5, 1.5)
+    
+    def compute(self) -> float:
+        cost = self.cost() / 10000
+        if cost <= 0:
+            return 0.0
+        return ((self.expected_pnl - self.tail_lambda * abs(self.cvar_95)) / cost * self.omega_adj())
+    
+    def should_trade(self, gamma: float) -> bool:
+        return self.compute() >= gamma
+```
 
 ---
 
-## Integration with Existing Rules
+## §4. SHIFT DETECTION
 
-| Wolf Law | Maps To Rule |
-|----------|--------------|
-| Know The Terrain | Rule 2 (Regime-First Architecture) |
-| Disengage Fast | Rule 4 (Risk Governance - Stop Loss) |
-| Don't Fight The Herd | Rule 4 (Trend Filter, Circuit Breakers) |
-| Size The Kill | Rule 4 (Position Sizing, Risk Limits) |
-| Have Multiple Exits | Rule 7 (Execution Management) |
-| Remember Everything | Rule 6 (Analytics & Attribution) |
+### Principle
+Detect regime shifts using multi-asset leading indicators.
+
+### Specification
+
+**Shift Risk Index:**
+$$
+\text{SRI} = w_E \cdot S_{\text{equity}} + w_O \cdot S_{\text{options}} + w_C \cdot S_{\text{credit}} + w_X \cdot S_{\text{cross}}
+$$
+
+**Weights:** $w_E = 0.35, w_O = 0.25, w_C = 0.15, w_X = 0.25$
+
+| Category | Components |
+|----------|------------|
+| Equity | PCA drift, HMM transition prob, liquidity fragility, impact spike |
+| Options | VIX term slope, skew change, IV spike |
+| Credit | HY-IG spread change |
+| Cross-Asset | Correlation spike, volume profile shift |
+
+**Alert Condition:** $\text{SRI} \geq 0.7$
+
+### Implementation
+
+```python
+@dataclass
+class ShiftRiskIndex:
+    # Equity
+    pca_drift: float
+    hmm_prob: float
+    liq_fragility: float
+    impact_spike: float
+    # Options
+    vix_slope: float
+    skew_change: float
+    iv_spike: float
+    # Credit
+    credit_spread: float
+    # Cross-asset
+    corr_spike: float
+    vol_profile: float
+    
+    def equity(self) -> float:
+        return 0.3*self.pca_drift + 0.25*self.hmm_prob + 0.25*self.liq_fragility + 0.2*self.impact_spike
+    
+    def options(self) -> float:
+        vix = 1.0 if self.vix_slope > 0 else abs(self.vix_slope)
+        return 0.4*vix + 0.35*self.skew_change + 0.25*self.iv_spike
+    
+    def cross(self) -> float:
+        return 0.6*self.corr_spike + 0.4*self.vol_profile
+    
+    def compute(self) -> float:
+        return 0.35*self.equity() + 0.25*self.options() + 0.15*self.credit_spread + 0.25*self.cross()
+    
+    def is_critical(self, threshold: float = 0.7) -> bool:
+        return self.compute() >= threshold
+```
 
 ---
 
-## PROHIBITED Alpha Behaviors
+## §5. STOP-LOSS
 
-❌ **Sheep Behavior:** Chasing green candles, panic selling red candles
-❌ **Revenge Trading:** Re-entering immediately after stop-loss
-❌ **Hope Trading:** Holding losers hoping they recover
-❌ **Greed Trading:** Not taking profit, wanting more
-❌ **Boredom Trading:** Trading for action, not opportunity
-❌ **Ego Trading:** Refusing to admit being wrong
-❌ **Herd Fighting:** Shorting parabolic moves, buying crashes
+### Principle
+Loss control is absolute priority. Use forward-looking volatility.
+
+### Specification
+
+**Effective Volatility:**
+$$
+\sigma_{\text{eff}} = \max(\sigma_{\text{realized}}, \sigma_{\text{implied}})
+$$
+
+**Stop Distance:**
+$$
+\text{SL} = k \cdot \sigma_{\text{eff}} \cdot \sqrt{1 + \kappa \cdot \Delta\rho}
+$$
+
+| Parameter | Default |
+|-----------|---------|
+| $k$ | 2.0 |
+| $\kappa$ | 0.5 |
+| Overnight multiplier | 1.5 |
+
+**Cooldown:**
+$$
+T_{\text{cool}} = T_{\text{base}} \cdot \frac{\sigma_{\text{curr}}}{\sigma_{\text{base}}} \cdot M_{\text{reason}} \cdot M_{\text{state}}
+$$
+
+### Implementation
+
+```python
+@dataclass
+class StopLoss:
+    k: float = 2.0
+    realized_vol: float = 0.0
+    implied_vol: float = 0.0
+    corr_change: float = 0.0
+    corr_penalty: float = 0.5
+    overnight_mult: float = 1.5
+    
+    def effective_vol(self) -> float:
+        return max(self.realized_vol, self.implied_vol)
+    
+    def stop_distance(self, entry: float, overnight: bool = False) -> float:
+        base = entry * self.k * self.effective_vol() * np.sqrt(1 + self.corr_penalty * max(0, self.corr_change))
+        return base * self.overnight_mult if overnight else base
+    
+    def check_exit(self, pos, market) -> Optional[str]:
+        self.realized_vol, self.implied_vol = market.realized_vol, market.implied_vol
+        self.corr_change = market.corr_change
+        stop_pct = self.stop_distance(pos.entry, market.is_overnight) / pos.entry
+        if pos.pnl_pct <= -stop_pct:
+            return 'STOP_LOSS'
+        if self.corr_change > 0.3:
+            return 'CORRELATION_BREAKDOWN'
+        return None
+```
 
 ---
 
-## Code Review Checklist
+## §6. TREND AVOIDANCE
 
-Before approving any strategy code:
+### Principle
+Avoid counter-trend positions against confirmed trend.
 
-- [ ] Does it STALK (wait for confirmation) or CHASE (react immediately)?
-- [ ] Does it know its TERRAIN (regime-aware)?
-- [ ] Does it CONSERVE energy (quality over quantity)?
-- [ ] Does it SENSE shifts (leading indicators)?
-- [ ] Does it DISENGAGE fast (proper stop-loss)?
-- [ ] Does it RESPECT the herd (trend filter)?
-- [ ] Does it SIZE appropriately (risk-adjusted)?
-- [ ] Does it REST (cooldown periods)?
-- [ ] Does it have MULTIPLE EXITS (stop, target, time)?
-- [ ] Does it REMEMBER (logging, attribution)?
+### Specification
+
+**Trend Pressure Index:**
+$$
+\text{TPI} = H \cdot \text{AC}_{\text{weighted}} \cdot \text{VolConf} \cdot \text{BreadthConf}
+$$
+
+| Component | Formula |
+|-----------|---------|
+| $H$ | Hurst exponent (>0.5 = trending) |
+| $\text{AC}_w$ | $0.5|\text{AC}(1)| + 0.3|\text{AC}(5)| + 0.2|\text{AC}(20)|$ |
+| VolConf | Up-volume ratio (for uptrend) |
+| BreadthConf | % stocks above MA (for uptrend) |
+
+**Prohibition:** No counter-trend when $\text{TPI} \geq 0.3$
+
+### Implementation
+
+```python
+@dataclass
+class TrendPressure:
+    hurst: float
+    ac_1: float
+    ac_5: float
+    ac_20: float
+    up_vol_ratio: float
+    pct_above_ma: float
+    drift: float
+    
+    def hurst_signal(self) -> float:
+        return max(0, self.hurst - 0.5) * 2
+    
+    def ac_signal(self) -> float:
+        return 0.5*abs(self.ac_1) + 0.3*abs(self.ac_5) + 0.2*abs(self.ac_20)
+    
+    def vol_conf(self) -> float:
+        return self.up_vol_ratio if self.drift > 0 else 1 - self.up_vol_ratio
+    
+    def breadth_conf(self) -> float:
+        return self.pct_above_ma if self.drift > 0 else 1 - self.pct_above_ma
+    
+    def compute(self) -> float:
+        return self.hurst_signal() * self.ac_signal() * self.vol_conf() * self.breadth_conf()
+    
+    def is_strong(self, threshold: float = 0.3) -> bool:
+        return self.compute() >= threshold
+    
+    def direction(self) -> str:
+        return 'up' if self.drift > 0.001 and self.ac_1 > 0 else ('down' if self.drift < -0.001 and self.ac_1 < 0 else 'neutral')
+    
+    def allows_trade(self, side: str) -> bool:
+        if not self.is_strong():
+            return True
+        d = self.direction()
+        return not ((side == 'BUY' and d == 'down') or (side == 'SELL' and d == 'up'))
+```
 
 ---
 
-**The wolf survives not by being the strongest, but by being the wisest.**
+## §7. POSITION SIZING
+
+### Principle
+Size reflects edge uncertainty, liquidity, and drawdown state.
+
+### Specification
+
+**Size Formula:**
+$$
+\text{Size} = \text{Capital} \cdot \alpha \cdot f \cdot \text{KF}_{\text{adj}} \cdot \text{LF} \cdot \text{RF} \cdot \text{DF}
+$$
+
+| Factor | Formula |
+|--------|---------|
+| $f$ | Kelly fraction (0.33) |
+| $\text{KF}_{\text{adj}}$ | $\text{KF} \cdot (1 - \sigma_{\text{edge}}/\mu_{\text{edge}})$ |
+| LF | $1 / (1 + (\phi/\phi_0)^2)$ |
+| DF | $\exp(-\gamma \cdot \text{DD}/\text{DD}_{\max})$ |
+| RF | Regime factor [0.2, 1.2] |
+
+**Kelly:** $\text{KF} = \text{clip}\left(\frac{p(1+b)-1}{b}, 0.02, 0.20\right)$
+
+### Implementation
+
+```python
+@dataclass
+class PositionSizer:
+    capital: float
+    signal: float
+    win_prob: float
+    win_prob_std: float
+    win_loss_ratio: float
+    win_loss_std: float
+    participation: float
+    current_dd: float
+    max_dd: float
+    regime: str
+    
+    kelly_frac: float = 0.33
+    part_threshold: float = 0.05
+    dd_gamma: float = 2.0
+    
+    REGIME = {'low_volatility': 1.2, 'normal': 1.0, 'high_volatility': 0.6, 'extreme_volatility': 0.3, 'crisis': 0.2}
+    
+    def raw_kelly(self) -> float:
+        if self.win_loss_ratio == 0:
+            return 0.02
+        return np.clip((self.win_prob * (1 + self.win_loss_ratio) - 1) / self.win_loss_ratio, 0.02, 0.20)
+    
+    def uncertainty_adj(self) -> float:
+        edge = self.win_prob * self.win_loss_ratio
+        edge_std = np.sqrt((self.win_prob_std * self.win_loss_ratio)**2 + (self.win_prob * self.win_loss_std)**2)
+        return np.clip(1 - edge_std / max(edge, 0.001), 0.3, 1.0) if edge > 0 else 0.0
+    
+    def liquidity_factor(self) -> float:
+        return 1 / (1 + (self.participation / self.part_threshold)**2)
+    
+    def drawdown_factor(self) -> float:
+        return np.exp(-self.dd_gamma * self.current_dd / max(self.max_dd, 0.001))
+    
+    def regime_factor(self) -> float:
+        return self.REGIME.get(self.regime, 1.0)
+    
+    def compute(self) -> float:
+        return (self.capital * self.signal * self.kelly_frac * self.raw_kelly() * 
+                self.uncertainty_adj() * self.liquidity_factor() * self.drawdown_factor() * self.regime_factor())
+```
 
 ---
 
-**Last Updated:** December 2, 2025  
-**Status:** ACTIVE (v1.0)  
+## §8. COOLDOWN
+
+### Principle
+Reduce activity after abnormal PnL patterns or regime mismatch.
+
+### Specification
+
+**Enhanced PVSI:**
+$$
+\text{PVSI} = \frac{\sigma_{\text{recent}}}{\sigma_{\text{baseline}}} \cdot (1 + \lambda_c \cdot L_{\text{excess}}) \cdot (1 + \lambda_m \cdot M)
+$$
+
+| Component | Description |
+|-----------|-------------|
+| $L_{\text{excess}}$ | max(0, consecutive_losses - 3) |
+| $M$ | Regime mismatch rate |
+| $\lambda_c$ | 0.5 |
+| $\lambda_m$ | 0.3 |
+
+**Trigger:** $\text{PVSI} \geq 2.0$
+
+### Implementation
+
+```python
+@dataclass
+class Cooldown:
+    pnl_history: List[float]
+    regime_history: List[str]
+    consecutive_losses: int = 0
+    baseline_window: int = 100
+    recent_window: int = 20
+    threshold: float = 2.0
+    
+    def base_pvsi(self) -> float:
+        if len(self.pnl_history) < self.baseline_window:
+            return 1.0
+        baseline = np.std(self.pnl_history[-self.baseline_window:-self.recent_window])
+        recent = np.std(self.pnl_history[-self.recent_window:])
+        return recent / baseline if baseline > 0 else 1.0
+    
+    def cluster_penalty(self) -> float:
+        return 1 + 0.5 * max(0, self.consecutive_losses - 3)
+    
+    def mismatch_penalty(self) -> float:
+        if len(self.regime_history) < self.baseline_window:
+            return 1.0
+        recent = self.regime_history[-5:]
+        baseline = self.regime_history[-self.baseline_window:-self.recent_window]
+        if not baseline:
+            return 1.0
+        mode = max(set(baseline), key=baseline.count)
+        mismatch = sum(1 for r in recent if r != mode) / len(recent)
+        return 1 + 0.3 * mismatch
+    
+    def compute(self) -> float:
+        return self.base_pvsi() * self.cluster_penalty() * self.mismatch_penalty()
+    
+    def needs_cooldown(self) -> bool:
+        return self.compute() >= self.threshold
+    
+    def update(self, pnl: float, regime: str):
+        self.pnl_history.append(pnl)
+        self.regime_history.append(regime)
+        self.consecutive_losses = self.consecutive_losses + 1 if pnl < 0 else 0
+```
+
+---
+
+## §9. MULTI-EXIT
+
+### Principle
+Multiple termination conditions with dynamic targets.
+
+### Specification
+
+**Exit Triggers (Priority Order):**
+
+| # | Type | Condition | Partial |
+|---|------|-----------|---------|
+| 1 | Vol Stop | PnL ≤ -k × σ_eff | No |
+| 2 | Take Profit | PnL ≥ TP(t) | Yes |
+| 3 | Time Decay | t > t_max | No |
+| 4 | Thesis Invalid | Specific conditions | No |
+| 5 | Liquidity | spread × impact / depth > L_crit | No |
+| 6 | Opportunity | ERAR_alt > 1.5 × ERAR_curr | Yes |
+
+**Dynamic Take-Profit:**
+$$
+\text{TP}(t) = \text{TP}_0 \cdot e^{-t/\tau} + \text{TP}_{\text{floor}}
+$$
+
+### Implementation
+
+```python
+@dataclass
+class MultiExit:
+    stop_k: float = 2.0
+    tp_initial: float = 0.05
+    tp_floor: float = 0.01
+    tp_decay: float = 50
+    max_bars: int = 100
+    opp_mult: float = 1.5
+    
+    def dynamic_tp(self, bars: int) -> float:
+        return self.tp_initial * np.exp(-bars / self.tp_decay) + self.tp_floor
+    
+    def check(self, pos, market, alt_erar: float = None) -> Optional[Dict]:
+        # 1. Vol Stop
+        stop = -self.stop_k * market.effective_vol()
+        if pos.pnl_pct <= stop:
+            return {'type': 'STOP', 'pct': 1.0}
+        
+        # 2. Take Profit
+        tp = self.dynamic_tp(pos.bars)
+        if pos.pnl_pct >= tp:
+            exit_pct = min(1.0, 0.5 + (pos.pnl_pct - tp) * 10)
+            return {'type': 'TAKE_PROFIT', 'pct': exit_pct}
+        
+        # 3. Time
+        if pos.bars >= self.max_bars:
+            return {'type': 'TIME', 'pct': 1.0}
+        
+        # 4. Thesis
+        if not pos.thesis.is_valid(market):
+            return {'type': 'THESIS_INVALID', 'pct': 1.0}
+        
+        # 5. Liquidity
+        if market.spread * market.impact / max(market.depth, 0.001) > 0.8:
+            return {'type': 'LIQUIDITY', 'pct': 1.0}
+        
+        # 6. Opportunity
+        if alt_erar and alt_erar > self.opp_mult * pos.erar:
+            return {'type': 'OPPORTUNITY', 'pct': 0.5}
+        
+        return None
+```
+
+---
+
+## §10. META-LEARNING
+
+### Principle
+Detect edge decay and concept drift; adapt confidence.
+
+### Specification
+
+**Page-Hinkley Drift Test:**
+$$
+\text{PHT}_t = \sum_{i=1}^{t}(x_i - \bar{x} - \delta)
+$$
+
+Drift detected when $\text{PHT}_t - \min_s \text{PHT}_s > \lambda$
+
+**Multi-Scale Performance:**
+- Recent: last 50 trades
+- Medium: last 200 trades
+- Long: last 1000 trades
+
+**Confidence Modifier:**
+$$
+\text{CM} = \text{clip}\left(\frac{\text{Sharpe}_w}{0.5}, 0.3, 1.5\right) \cdot D_{\text{penalty}} \cdot E_{\text{penalty}}
+$$
+
+Where $\text{Sharpe}_w = 0.5 \cdot S_{\text{recent}} + 0.3 \cdot S_{\text{medium}} + 0.2 \cdot S_{\text{long}}$
+
+### Implementation
+
+```python
+@dataclass
+class MetaLearning:
+    trades: List[TradeRecord] = field(default_factory=list)
+    pht: float = 0.0
+    pht_min: float = float('inf')
+    mean: float = 0.0
+    drift_threshold: float = 10.0
+    drift_delta: float = 0.01
+    
+    def record(self, trade):
+        self.trades.append(trade)
+        n = len(self.trades)
+        self.mean = ((n - 1) * self.mean + trade.pnl) / n
+        self.pht += trade.pnl - self.mean - self.drift_delta
+        self.pht_min = min(self.pht_min, self.pht)
+    
+    def drift_detected(self) -> bool:
+        return (self.pht - self.pht_min) > self.drift_threshold
+    
+    def sharpe(self, window: int) -> float:
+        if len(self.trades) < 2:
+            return 0
+        pnls = [t.pnl for t in self.trades[-window:]]
+        return np.mean(pnls) / np.std(pnls) * np.sqrt(252) if np.std(pnls) > 0 else 0
+    
+    def edge_decaying(self) -> bool:
+        s_r, s_m, s_l = self.sharpe(50), self.sharpe(200), self.sharpe(1000)
+        return s_r < s_m * 0.7 and s_m < s_l * 0.7
+    
+    def confidence_modifier(self) -> float:
+        s_w = 0.5 * self.sharpe(50) + 0.3 * self.sharpe(200) + 0.2 * self.sharpe(1000)
+        sharpe_factor = np.clip(s_w / 0.5, 0.3, 1.5)
+        drift_penalty = 0.5 if self.drift_detected() else 1.0
+        decay_penalty = 0.7 if self.edge_decaying() else 1.0
+        return sharpe_factor * drift_penalty * decay_penalty
+```
+
+---
+
+## Summary
+
+| Section | Constraint |
+|---------|------------|
+| §1 | Multiplicative SMS with time decay |
+| §2 | Continuous regime scores with velocity |
+| §3 | CVaR-adjusted ERAR with opportunity cost |
+| §4 | Multi-asset SRI (equity + options + credit) |
+| §5 | Forward-looking vol: max(realized, implied) |
+| §6 | Multi-factor TPI (Hurst + volume + breadth) |
+| §7 | Fractional Kelly with uncertainty + drawdown |
+| §8 | Cluster + mismatch penalties on PVSI |
+| §9 | Dynamic TP + opportunity cost exit |
+| §10 | Page-Hinkley drift + edge decay detection |
+
+---
+
+## Prohibited
+
+- Linear signal combinations
+- Categorical-only regimes
+- Variance-only risk metrics (must include CVaR)
+- Equity-only shift detection
+- Backward-looking stops only
+- Full Kelly sizing
+- Fixed take-profit targets
+- Static clustering
+
+---
+
+**Last Updated:** December 3, 2025  
+**Status:** ACTIVE (v3.0)  
 **Related:** Rule 2, Rule 4, Rule 6, Rule 7

@@ -64,6 +64,9 @@ class LiquidityAssessmentEngine(ISystemComponent):
     # Flag to indicate this is a stub implementation
     IS_STUB_IMPLEMENTATION = True
     
+    # Class-level flag to show warning only once
+    _warning_shown = False
+    
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -72,15 +75,16 @@ class LiquidityAssessmentEngine(ISystemComponent):
         self.is_operational = False
         self.orchestrator: Optional[Any] = None
         
-        # Emit warning about stub implementation
-        warnings.warn(
-            "LiquidityAssessmentEngine is a STUB implementation returning simulated values. "
-            "Do not use for production trading.",
-            UserWarning,
-            stacklevel=2
-        )
-        
-        self.logger.warning("⚠️  LiquidityAssessmentEngine initialized (STUB - not for production)")
+        # Emit warning about stub implementation (only once)
+        if not LiquidityAssessmentEngine._warning_shown:
+            LiquidityAssessmentEngine._warning_shown = True
+            warnings.warn(
+                "LiquidityAssessmentEngine is a STUB implementation returning simulated values. "
+                "Do not use for production trading.",
+                UserWarning,
+                stacklevel=2
+            )
+            self.logger.warning("⚠️  LiquidityAssessmentEngine initialized (STUB - not for production)")
     
     def register_with_orchestrator(self, orchestrator) -> str:
         """Register with orchestrator"""

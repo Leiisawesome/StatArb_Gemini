@@ -81,7 +81,7 @@ strategies:
       rsi_overbought: 65
       
       # Position sizing
-      base_position_pct: 0.05    # 5% of portfolio per trade
+      base_position_pct: 0.1    # 10% of portfolio per trade
       
       # PRICE-AWARE EXIT THRESHOLDS
       stop_loss_pct: -2.0
