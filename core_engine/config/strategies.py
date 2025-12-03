@@ -553,6 +553,37 @@ class MeanReversionConfig(BaseStrategyConfig):
     vol_adj_max_multiplier: float = 1.5
     """Maximum threshold adjustment multiplier. Default: 1.5"""
     
+    # =========================================
+    # ADS v3.0 COMPLIANCE PARAMETERS
+    # =========================================
+    # Per alpha_design_philosophy.mdc (Critical fixes)
+    
+    # §1: Signal Maturity Score (SMS)
+    enable_ads_gates: bool = True
+    """Enable ADS v3.0 SMS and ERAR gates. Default: True"""
+    
+    sms_threshold: float = 0.5
+    """Minimum SMS score to consider signal mature. Default: 0.5
+    SMS uses multiplicative formula: E^α × P_rev^β × (1+ΔOFI)^γ × VC^(-δ) × e^(-λt)"""
+    
+    sms_max_pending: int = 50
+    """Maximum bars a signal can be pending before considered stale. Default: 50"""
+    
+    # §3: Expected Risk-Adjusted Return (ERAR)
+    erar_gamma: float = 0.5
+    """Minimum ERAR threshold for trade. Default: 0.5
+    ERAR = (E[PnL] - λ × CVaR95) / Cost × Ω_adj ≥ gamma"""
+    
+    spread_bps: float = 2.0
+    """Assumed spread cost in basis points. Default: 2.0"""
+    
+    # §8: Cooldown (PVSI)
+    pvsi_threshold: float = 2.0
+    """PVSI threshold to trigger cooldown. Default: 2.0"""
+    
+    pvsi_cooldown_bars: int = 50
+    """Bars to wait during cooldown. Default: 50"""
+    
     # Backward compatibility aliases
     @property
     def entry_zscore_threshold(self) -> float:

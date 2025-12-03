@@ -48,6 +48,20 @@ from ...base_strategy_enhanced import EnhancedBaseStrategy
 from ...strategy_engine import StrategySignal, SignalType
 from core_engine.config import MeanReversionConfig
 
+# ADS v3.0 Components - Critical fixes per alpha_design_philosophy.mdc
+from core_engine.alpha import (
+    SignalMaturityScore,
+    ERAR,
+    Cooldown,
+    PendingSignalContext,
+    PendingSignalQueue,
+    compute_exhaustion,
+    compute_reversal_probability,
+    compute_vol_compression,
+    estimate_expected_pnl,
+    estimate_cvar_95,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +143,31 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         self.trade_history: List[Dict[str, Any]] = []
         self.daily_pnl: List[float] = []
         
+        # ============================================
+        # ADS v3.0 COMPONENTS (Critical Compliance)
+        # ============================================
+        # §1: Pending signal queue with SMS maturation
+        self.pending_signals = PendingSignalQueue(
+            max_pending=getattr(config, 'sms_max_pending', 50)
+        )
+        
+        # §8: Cooldown (PVSI) tracker
+        self.cooldown = Cooldown(
+            threshold=getattr(config, 'pvsi_threshold', 2.0),
+            baseline_window=100,
+            recent_window=20
+        )
+        
+        # ADS configuration
+        self.ads_config = {
+            'sms_threshold': getattr(config, 'sms_threshold', 0.5),
+            'erar_gamma': getattr(config, 'erar_gamma', 0.5),
+            'enable_ads_gates': getattr(config, 'enable_ads_gates', True),
+        }
+        
         logger.info(f"🧠 Enhanced Mean Reversion Strategy {self.strategy_id} initialized")
+        logger.info(f"   ADS v3.0: SMS threshold={self.ads_config['sms_threshold']}, "
+                   f"ERAR gamma={self.ads_config['erar_gamma']}")
     
     # ========================================
     # LIFECYCLE HOOKS
@@ -379,38 +417,148 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return None
             
             # ========================================
-            # EXHAUSTION-BASED SCORING SYSTEM
+            # ADS v3.0 §1: SIGNAL MATURITY SCORE (SMS)
             # ========================================
-            # Calculate exhaustion score
-            score, score_breakdown = self._calculate_exhaustion_score(data, idx, zscore)
+            # Multiplicative formula per alpha_design_philosophy.mdc
             
-            # DEBUG: Log signal evaluation on first few attempts
-            if not hasattr(self, '_eval_log_count'):
-                self._eval_log_count = 0
-            if self._eval_log_count < 20:
-                self._eval_log_count += 1
-                logger.info(f"[{symbol}] Eval #{self._eval_log_count}: idx={idx}, zscore={zscore:.3f}, "
-                           f"dislocation_min={self.config.dislocation_minimum}, score={score:.1f}, "
-                           f"moderate_thresh={self.config.exhaustion_score_moderate}")
-            
-            # Determine signal direction from z-score
+            # Determine signal direction from z-score first
             if abs(zscore) < self.config.dislocation_minimum:
-                if self._eval_log_count <= 30:
-                    logger.info(f"[{symbol}] EXIT: dislocation check failed, abs_zscore={abs(zscore):.3f}")
                 return None  # Not dislocated enough
             
             is_oversold = zscore < -self.config.dislocation_minimum
             is_overbought = zscore > self.config.dislocation_minimum
             
-            # Check score thresholds
-            if score >= self.config.exhaustion_score_strong:
-                confidence = 0.85
-                signal_reason = 'exhaustion_strong'
-            elif score >= self.config.exhaustion_score_moderate:
-                confidence = 0.70
-                signal_reason = 'exhaustion_moderate'
+            # Get indicators for SMS calculation
+            rsi = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx, default=50.0)
+            rsi_prev = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx - 1, default=rsi)
+            volume_ratio = self._get_indicator_value(data, 'volume_ratio', idx, default=1.0)
+            macd_hist = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx, default=0.0)
+            macd_hist_prev = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx - 1, default=0.0)
+            bb_position = self._get_indicator_value(data, 'bb_position', idx, default=0.5)
+            
+            # Calculate volatility compression
+            if 'close' in data.columns and idx >= 20:
+                prices = data['close'].iloc[max(0, idx-20):idx+1]
+                short_vol = prices.tail(5).pct_change().std() if len(prices) >= 5 else 0.02
+                long_vol = prices.pct_change().std() if len(prices) >= 10 else 0.02
+                vol_compression = compute_vol_compression(short_vol, long_vol)
             else:
-                return None  # Score too low
+                vol_compression = 1.0
+            
+            # Compute SMS components
+            exhaustion = compute_exhaustion(
+                zscore=zscore,
+                rsi=rsi,
+                volume_ratio=volume_ratio,
+                macd_histogram=macd_hist,
+                macd_histogram_prev=macd_hist_prev,
+                is_oversold=is_oversold
+            )
+            
+            reversal_prob = compute_reversal_probability(
+                zscore=zscore,
+                rsi=rsi,
+                bb_position=bb_position,
+                is_oversold=is_oversold
+            )
+            
+            # Order flow imbalance shift (use volume ratio as proxy)
+            ofi_shift = (volume_ratio - 1.0) * -0.5 if is_oversold else (volume_ratio - 1.0) * 0.5
+            ofi_shift = np.clip(ofi_shift, -1.0, 1.0)
+            
+            # Get current regime
+            regime_label = self._get_regime_label(symbol)
+            
+            # Create multiplicative SMS
+            sms = SignalMaturityScore(
+                exhaustion=exhaustion,
+                reversal_prob=reversal_prob,
+                ofi_shift=ofi_shift,
+                vol_compression=vol_compression,
+                pending_bars=0,  # Fresh signal
+                decay_rate=0.05,
+                max_pending=getattr(self.config, 'sms_max_pending', 50)
+            )
+            
+            # Compute SMS score
+            sms_score = sms.compute(regime_label)
+            sms_threshold = self.ads_config.get('sms_threshold', 0.5)
+            
+            # DEBUG: Log SMS evaluation
+            if not hasattr(self, '_eval_log_count'):
+                self._eval_log_count = 0
+            if self._eval_log_count < 20:
+                self._eval_log_count += 1
+                logger.info(f"[{symbol}] ADS SMS #{self._eval_log_count}: zscore={zscore:.3f}, "
+                           f"SMS={sms_score:.3f} (E={exhaustion:.3f}, P_rev={reversal_prob:.3f}, "
+                           f"VC={vol_compression:.3f}), threshold={sms_threshold}")
+            
+            # Check SMS threshold
+            if sms_score < sms_threshold:
+                return None  # Signal not mature enough
+            
+            # ========================================
+            # ADS v3.0 §3: ERAR GATE (Risk-Adjusted Return)
+            # ========================================
+            if self.ads_config.get('enable_ads_gates', True):
+                # Estimate expected PnL
+                atr = self._get_indicator_value(data, self._resolve_column_name('ATR_14', data), idx, default=1.0)
+                price = data['close'].iloc[idx] if 'close' in data.columns else 100.0
+                half_life = self._calculate_half_life(data['close'].iloc[max(0, idx-50):idx+1]) if 'close' in data.columns else 10.0
+                
+                expected_pnl = estimate_expected_pnl(
+                    zscore=zscore,
+                    atr=atr,
+                    price=price,
+                    half_life=half_life if half_life != float('inf') else 20.0,
+                    holding_bars=10
+                )
+                
+                # Estimate CVaR95
+                volatility = atr / price if price > 0 else 0.02
+                cvar_95 = estimate_cvar_95(volatility=volatility, holding_days=0.5)
+                
+                # Create ERAR
+                erar = ERAR(
+                    expected_pnl=expected_pnl,
+                    cvar_95=cvar_95,
+                    skewness=0.0,  # Conservative assumption
+                    spread_bps=getattr(self.config, 'spread_bps', 2.0),
+                    participation=0.01,
+                    volatility=volatility,
+                    adverse_prob=0.1,
+                    kyle_lambda=0.0001,
+                    holding_days=0.5,
+                    alt_return_bps=0.5,
+                    tail_lambda=self.ads_config.get('erar_gamma', 0.5)
+                )
+                
+                erar_score = erar.compute()
+                erar_gamma = self.ads_config.get('erar_gamma', 0.5)
+                
+                if not erar.should_trade(gamma=erar_gamma):
+                    if self._eval_log_count <= 30:
+                        logger.debug(f"[{symbol}] ERAR gate blocked: ERAR={erar_score:.3f} < gamma={erar_gamma}")
+                    return None  # Doesn't meet risk-adjusted return threshold
+                
+                if self._eval_log_count <= 20:
+                    logger.info(f"[{symbol}] ERAR passed: {erar_score:.3f} >= {erar_gamma}")
+            
+            # ========================================
+            # LEGACY: Calculate exhaustion score for confidence
+            # ========================================
+            score, score_breakdown = self._calculate_exhaustion_score(data, idx, zscore)
+            
+            # Set confidence based on SMS score
+            if sms_score >= 0.7:
+                confidence = 0.85
+                signal_reason = 'ads_sms_strong'
+            elif sms_score >= 0.5:
+                confidence = 0.70
+                signal_reason = 'ads_sms_moderate'
+            else:
+                confidence = 0.60
+                signal_reason = 'ads_sms_marginal'
             
             # Determine signal type
             if is_oversold:
@@ -1453,6 +1601,37 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         
         regime = self.regime_data[symbol]
         return not regime.get('is_trending', False) and not regime.get('is_high_vol', False)
+    
+    def _get_regime_label(self, symbol: str) -> str:
+        """
+        Get regime label for ADS SMS exponent selection.
+        
+        Maps internal regime data to ADS regime categories:
+        - 'low_vol': Low volatility environment
+        - 'normal': Normal conditions
+        - 'high_vol': High volatility
+        - 'crisis': Extreme volatility/trending
+        
+        Returns:
+            Regime label string for SMS exponent selection
+        """
+        if symbol not in self.regime_data:
+            return 'normal'
+        
+        regime = self.regime_data[symbol]
+        vol_ratio = regime.get('volatility_ratio', 1.0)
+        is_trending = regime.get('is_trending', False)
+        is_high_vol = regime.get('is_high_vol', False)
+        
+        # Map to ADS regime categories
+        if is_trending and is_high_vol:
+            return 'crisis'
+        elif is_high_vol or vol_ratio > 1.5:
+            return 'high_vol'
+        elif vol_ratio < 0.7:
+            return 'low_vol'
+        else:
+            return 'normal'
     
     # ========================================
     # CONFIDENCE CALCULATION
