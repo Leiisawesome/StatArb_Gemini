@@ -12,7 +12,7 @@ experiment_type: "smoke_test"
 symbols: ["TSLA"]
 interval: "1min"
 start_date: "2024-12-16"  # Valid data date
-end_date: "2024-12-16"    # Same day (1 day test)
+end_date: "2024-12-20"    # Same day (1 day test)
 
 # Small capital for quick test
 initial_capital: 100000

@@ -166,8 +166,8 @@ class BacktestConfig:
             try:
                 start = datetime.strptime(self.start_date, "%Y-%m-%d")
                 end = datetime.strptime(self.end_date, "%Y-%m-%d")
-                if end <= start:
-                    errors.append("end_date must be after start_date")
+                if end < start:
+                    errors.append("end_date must be on or after start_date")
             except ValueError as e:
                 errors.append(f"Invalid date format: {e}")
         
@@ -201,11 +201,36 @@ class BacktestConfig:
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'BacktestConfig':
-        """Create config from dictionary"""
+        """Create config from dictionary (supports YAML experiment configs)"""
+        # Map YAML experiment config field names to BacktestConfig fields
+        field_mappings = {
+            'experiment_name': 'backtest_name',
+            'initial_capital': 'initial_capital',
+        }
+        
+        # Fields to ignore (not part of BacktestConfig)
+        ignore_fields = {'experiment_type', 'save_trade_log', 'save_regime_log'}
+        
+        # Create a new dict with mapped fields
+        mapped_dict = {}
+        for key, value in config_dict.items():
+            if key in ignore_fields:
+                continue
+            mapped_key = field_mappings.get(key, key)
+            mapped_dict[mapped_key] = value
+        
         # Convert backtest_mode string to enum if needed
-        if 'backtest_mode' in config_dict and isinstance(config_dict['backtest_mode'], str):
-            config_dict['backtest_mode'] = BacktestMode(config_dict['backtest_mode'])
-        return cls(**config_dict)
+        if 'backtest_mode' in mapped_dict and isinstance(mapped_dict['backtest_mode'], str):
+            mapped_dict['backtest_mode'] = BacktestMode(mapped_dict['backtest_mode'])
+        
+        # Get valid field names from the dataclass
+        import dataclasses
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        
+        # Filter to only valid fields
+        filtered_dict = {k: v for k, v in mapped_dict.items() if k in valid_fields}
+        
+        return cls(**filtered_dict)
     
     @classmethod
     def from_json(cls, json_path: str) -> 'BacktestConfig':

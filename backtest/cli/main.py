@@ -214,8 +214,8 @@ Examples:
         
         # Run backtest
         print("\n🚀 Running backtest...")
-        print(f"   Period: {config.data.start_date} → {config.data.end_date}")
-        print(f"   Symbols: {', '.join(config.data.symbols)}")
+        print(f"   Period: {config.start_date} → {config.end_date}")
+        print(f"   Symbols: {', '.join(config.symbols)}")
         print(f"   Strategies: {len(config.strategies)}")
         print("")
         
@@ -231,7 +231,7 @@ Examples:
             # Generate report
             if not args.no_report:
                 print("\n📊 Generating performance report...")
-                report = await engine.generate_performance_report()
+                report = engine.generate_performance_report()
                 
                 # Save results
                 output_dir = Path(args.output) if args.output else Path('backtest_results')
@@ -426,10 +426,15 @@ Examples:
         return 0
     
     def _load_config_file(self, path: str) -> BacktestConfig:
-        """Load configuration from JSON file"""
+        """Load configuration from JSON or YAML file"""
+        import yaml
         
         with open(path, 'r') as f:
-            config_dict = json.load(f)
+            # Support both YAML and JSON formats
+            if path.endswith(('.yaml', '.yml')):
+                config_dict = yaml.safe_load(f)
+            else:
+                config_dict = json.load(f)
         
         # Convert to BacktestConfig (CENTRALIZED using core_engine)
         # BacktestConfig now flattens all nested configs (Rule 1, Section 7)
