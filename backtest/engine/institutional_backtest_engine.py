@@ -3112,6 +3112,11 @@ class InstitutionalBacktestEngine:
                     if bar_result.get('trades_executed', 0) > 0:
                         bars_with_trades += 1
                     
+                    # Check for EOD liquidation (intraday trading rule)
+                    eod_liquidated = await self._check_eod_liquidation(timestamp, bar)
+                    if eod_liquidated > 0:
+                        bars_with_trades += 1  # Count EOD as a trading bar
+                    
                 except Exception as e:
                     logger.error(f"❌ Error processing bar {idx} at {timestamp}: {e}")
                     # Continue with next bar rather than failing entire backtest
@@ -3168,6 +3173,149 @@ class InstitutionalBacktestEngine:
                 'total_bars': bars_processed if 'bars_processed' in locals() else 0,
                 'total_trades': len(self.execution_history)
             }
+    
+    async def _check_eod_liquidation(self, timestamp: datetime, bar: pd.Series) -> int:
+        """
+        Check if we should perform EOD liquidation and close all positions.
+        
+        Intraday Trading Rule: Close all positions before market close to avoid
+        overnight gap risk. This is critical for intraday mean reversion strategies.
+        
+        Args:
+            timestamp: Current bar timestamp
+            bar: Current bar data (for close price)
+            
+        Returns:
+            Number of positions liquidated
+        """
+        # Get EOD liquidation config from strategy parameters
+        enable_eod = self._get_strategy_param('enable_eod_liquidation', False)
+        if not enable_eod:
+            return 0
+        
+        eod_time_str = self._get_strategy_param('eod_close_time', '15:55')
+        
+        # Parse EOD time
+        try:
+            eod_hour, eod_minute = map(int, eod_time_str.split(':'))
+        except (ValueError, AttributeError):
+            eod_hour, eod_minute = 15, 55  # Default to 15:55
+        
+        # Convert timestamp to comparable format
+        ts = pd.Timestamp(timestamp)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert('America/New_York')
+        
+        current_time_mins = ts.hour * 60 + ts.minute
+        eod_time_mins = eod_hour * 60 + eod_minute
+        
+        # Check if we've reached EOD liquidation time
+        if current_time_mins < eod_time_mins:
+            return 0
+        
+        # Get current positions from CentralRiskManager (Rule 4)
+        if not self.risk_manager:
+            return 0
+        
+        positions = self.risk_manager.current_positions.copy()
+        if not positions:
+            return 0
+        
+        # Only liquidate if we haven't already at this timestamp
+        # Use a flag to prevent multiple liquidations at same bar
+        eod_key = f"eod_liquidated_{ts.date()}"
+        if hasattr(self, '_eod_flags') and self._eod_flags.get(eod_key, False):
+            return 0
+        
+        # Set flag
+        if not hasattr(self, '_eod_flags'):
+            self._eod_flags = {}
+        self._eod_flags[eod_key] = True
+        
+        logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(positions)} positions")
+        
+        liquidated = 0
+        close_price = bar.get('close', bar.get('Close', 0))
+        
+        for symbol, position_qty in positions.items():
+            if position_qty == 0:
+                continue
+            
+            # Create a liquidation sell order
+            side = 'sell' if position_qty > 0 else 'buy'  # Sell longs, buy to cover shorts
+            qty = abs(position_qty)
+            
+            # Simulate the liquidation execution
+            execution = {
+                'timestamp': timestamp,
+                'symbol': symbol,
+                'side': side,
+                'quantity': qty,
+                'requested_quantity': qty,
+                'quantity_reduction': 0,
+                'decision_price': close_price,
+                'market_price': close_price,
+                'fill_price': close_price,
+                'confidence': 1.0,  # EOD liquidation is mandatory
+                'signal_strength': 0.0,
+                'signal_timestamp': timestamp,
+                'signal_bar_close': close_price,
+                'execution_delay_bars': 0,
+                'total_cost_bps': 5.0,  # Assume minimal cost
+                'spread_cost_bps': 2.5,
+                'market_impact_bps': 2.5,
+                'slippage_bps': 0.0,
+                'commission_bps': 0.0,
+                'total_cost_dollars': qty * close_price * 5 / 10000,
+                'permanent_impact_bps': 0.0,
+                'temporary_impact_bps': 2.5,
+                'implementation_shortfall_bps': 0.0,
+                'arrival_cost_bps': 0.0,
+                'realized_pnl': 0.0,  # Will be calculated by risk manager
+                'retry_count': 0,
+                'had_rejections': False,
+                'rejection_count': 0,
+                'authorization_id': f'eod_liq_{timestamp}_{symbol}',
+                'strategy_id': 'EOD_LIQUIDATION',
+                'fill_id': f'eod_fill_{timestamp}_{symbol}',
+                'regime': 'eod_close',
+                'liquidity_score': 100.0
+            }
+            
+            # Update position via CentralRiskManager (Rule 4)
+            await self.risk_manager.update_position(
+                symbol=symbol,
+                side=side,
+                quantity=qty,
+                price=close_price,
+                timestamp=timestamp
+            )
+            
+            self.execution_history.append(execution)
+            liquidated += 1
+            
+            logger.info(f"   💰 EOD: {side.upper()} {qty:.2f} {symbol} @ ${close_price:.2f}")
+        
+        logger.info(f"   ✅ Liquidated {liquidated} positions\n")
+        return liquidated
+    
+    def _get_strategy_param(self, param_name: str, default: any = None) -> any:
+        """
+        Get a parameter from the first active strategy's config.
+        
+        Args:
+            param_name: Parameter name to retrieve
+            default: Default value if not found
+            
+        Returns:
+            Parameter value or default
+        """
+        if hasattr(self.config, 'strategies') and self.config.strategies:
+            strategy = self.config.strategies[0]
+            if isinstance(strategy, dict):
+                params = strategy.get('parameters', {})
+                return params.get(param_name, default)
+        return default
     
     async def _process_single_bar(self,
                                   bar: pd.Series,

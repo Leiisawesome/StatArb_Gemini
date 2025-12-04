@@ -99,6 +99,13 @@ strategies:
       # Legacy (kept for reference but NOT used by exhaustion system)
       zscore_entry_threshold: 1.5       # IGNORED - use dislocation_minimum instead
       zscore_exit_threshold: 0.5
+      
+      # INTRADAY TRADING - EOD LIQUIDATION
+      enable_eod_liquidation: true      # Close all positions before market close
+      eod_close_time: "15:55"           # Time to liquidate (5 min before close)
+      enable_entry_cutoff: true         # Stop new entries near close
+      entry_cutoff_time: "15:30"        # No new entries after this time
+      min_holding_bars: 5               # Minimum bars to hold (avoid churn)
 
 # OPTION 3: SES Pairs Trading Strategy (commented out)
 # NOTE: Pairs trading requires cointegrated assets. BTC/ETH may not always be

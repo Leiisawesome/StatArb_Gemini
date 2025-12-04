@@ -417,6 +417,16 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return None
             
             # ========================================
+            # PROACTIVE STOP-LOSS CHECK (CRITICAL)
+            # ========================================
+            # Check EVERY bar if we have a position that needs stop-loss exit.
+            # This runs BEFORE z-score signal logic to ensure stop-loss fires
+            # even when z-score would generate a BUY (averaging down) signal.
+            stop_loss_signal = self._check_proactive_stop_loss(symbol, data, idx)
+            if stop_loss_signal is not None:
+                return stop_loss_signal
+            
+            # ========================================
             # ADS v3.0 §1: SIGNAL MATURITY SCORE (SMS)
             # ========================================
             # Multiplicative formula per alpha_design_philosophy.mdc
@@ -1602,6 +1612,97 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         except Exception as e:
             logger.error(f"Regime analysis failed for {symbol}: {e}")
             return {'trend_strength': 0, 'volatility_ratio': 1.0, 'is_trending': False, 'is_high_vol': False}
+    
+    def _check_proactive_stop_loss(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        idx: int
+    ) -> Optional[StrategySignal]:
+        """
+        Proactive stop-loss check - runs EVERY bar regardless of z-score.
+        
+        This is CRITICAL for mean reversion: when a trade goes against us,
+        z-score becomes MORE extreme (e.g., more oversold after buying oversold),
+        so the normal signal logic would generate another BUY instead of a SELL.
+        
+        This method checks if we have an open position that exceeds stop-loss
+        and generates a FORCED SELL signal, bypassing z-score logic entirely.
+        
+        Args:
+            symbol: Symbol to check
+            data: Market data with OHLCV
+            idx: Current bar index
+            
+        Returns:
+            StrategySignal if stop-loss triggered, None otherwise
+        """
+        # Check if we have position tracking
+        if not hasattr(self, '_position_details') or not self._position_details:
+            return None
+        
+        pos_info = self._position_details.get(symbol)
+        if not pos_info or pos_info.get('quantity', 0) == 0:
+            return None
+        
+        # Get position details
+        entry_price = pos_info.get('entry_price', 0)
+        quantity = pos_info.get('quantity', 0)
+        
+        if entry_price <= 0:
+            return None
+        
+        # Get current price
+        current_row = data.iloc[idx]
+        current_price = current_row.get('close', current_row.get('Close', 0))
+        
+        if current_price <= 0:
+            return None
+        
+        # Calculate P&L
+        if quantity > 0:  # Long position
+            pnl_pct = (current_price - entry_price) / entry_price * 100
+        else:  # Short position
+            pnl_pct = (entry_price - current_price) / entry_price * 100
+        
+        # Get stop-loss threshold from config
+        stop_loss_pct = getattr(self.config, 'stop_loss_pct', -2.0)
+        
+        # Check if stop-loss triggered
+        if pnl_pct <= stop_loss_pct:
+            # Generate FORCED exit signal
+            signal_type = SignalType.SELL if quantity > 0 else SignalType.BUY
+            
+            # Get timestamp
+            timestamp = current_row.get('timestamp', data.index[idx] if hasattr(data, 'index') else datetime.now())
+            
+            logger.warning(
+                f"⛔ [{symbol}] PROACTIVE STOP-LOSS TRIGGERED @ bar {idx}: "
+                f"P&L={pnl_pct:+.2f}% <= {stop_loss_pct}%, "
+                f"Entry=${entry_price:.2f}, Current=${current_price:.2f}"
+            )
+            
+            return StrategySignal(
+                symbol=symbol,
+                signal_type=signal_type,
+                confidence=1.0,  # High confidence - stop-loss is mandatory
+                strength=0.0,    # Forced exit, not quality-based
+                timestamp=timestamp,
+                signal_price=current_price,
+                entry_price=entry_price,
+                target_quantity=abs(quantity),  # Exit full position
+                quantity_type="ABSOLUTE",
+                strategy_id=getattr(self, 'strategy_id', 'mean_reversion'),
+                signal_source='PROACTIVE_STOP_LOSS',
+                signal_reason=f"Stop-loss triggered: {pnl_pct:+.2f}% <= {stop_loss_pct}%",
+                additional_data={
+                    'current_price': current_price,
+                    'pnl_pct': pnl_pct,
+                    'stop_loss_threshold': stop_loss_pct
+                }
+            )
+        
+        return None
     
     def _is_regime_favorable(self, symbol: str) -> bool:
         """Check if current regime is favorable for mean reversion"""
