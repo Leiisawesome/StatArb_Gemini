@@ -3235,11 +3235,30 @@ class InstitutionalBacktestEngine:
         logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(positions)} positions")
         
         liquidated = 0
-        close_price = bar.get('close', bar.get('Close', 0))
+        # Default close price from current bar (fallback for single-symbol)
+        default_close_price = bar.get('close', bar.get('Close', 0))
         
         for symbol, position_qty in positions.items():
             if position_qty == 0:
                 continue
+            
+            # Get symbol-specific close price (CRITICAL for multi-symbol portfolios)
+            # Each symbol should use its own current market price, not another symbol's price
+            close_price = default_close_price  # Fallback
+            if symbol in self.market_data and len(self.market_data[symbol]) > 0:
+                sym_data = self.market_data[symbol]
+                # Get the most recent price up to current timestamp
+                if 'timestamp' in sym_data.columns:
+                    sym_data_indexed = sym_data.set_index('timestamp')
+                else:
+                    sym_data_indexed = sym_data
+                ts_compare = pd.Timestamp(timestamp)
+                if hasattr(sym_data_indexed.index, 'tz') and sym_data_indexed.index.tz is not None:
+                    if ts_compare.tz is None:
+                        ts_compare = ts_compare.tz_localize(sym_data_indexed.index.tz)
+                filtered = sym_data_indexed[sym_data_indexed.index <= ts_compare]
+                if len(filtered) > 0:
+                    close_price = float(filtered['close'].iloc[-1])
             
             # Create a liquidation sell order
             side = 'sell' if position_qty > 0 else 'buy'  # Sell longs, buy to cover shorts
