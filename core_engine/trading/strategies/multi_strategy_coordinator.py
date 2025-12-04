@@ -75,6 +75,7 @@ class EnhancedSignal:
     symbol: str
     signal_type: SignalType
     confidence: float
+    strength: float  # Signal strength (0-1 scale)
     quantity: float
     timestamp: datetime
     strategy_id: str
@@ -92,6 +93,7 @@ class EnhancedSignal:
             symbol=self.symbol,
             signal_type=self.signal_type,
             confidence=self.confidence,
+            strength=self.strength,
             quantity=self.quantity,
             timestamp=self.timestamp,
             strategy_id=self.strategy_id,
@@ -449,6 +451,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 symbol=getattr(raw_signal, 'symbol', 'UNKNOWN'),
                 signal_type=signal_type,
                 confidence=getattr(raw_signal, 'confidence', 0.5),
+                strength=getattr(raw_signal, 'strength', 0.5),  # Preserve signal strength
                 quantity=getattr(raw_signal, 'quantity', 0.0),
                 timestamp=getattr(raw_signal, 'timestamp', datetime.now()),
                 strategy_id=strategy_id,
@@ -748,6 +751,7 @@ class SignalConflictResolver(ISystemComponent):
         # Weighted average of confidence and quantity
         total_weight = sum(s.metadata.get('strategy_weight', 1.0) for s in signals)
         weighted_confidence = sum(s.confidence * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
+        weighted_strength = sum(s.strength * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
         weighted_quantity = sum(s.quantity * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
         
         # Create aggregated signal
@@ -756,6 +760,7 @@ class SignalConflictResolver(ISystemComponent):
             symbol=signals[0].symbol,
             signal_type=signals[0].signal_type,
             confidence=min(weighted_confidence, 1.0),  # Cap at 1.0
+            strength=min(weighted_strength, 1.0),  # Weighted average strength
             quantity=weighted_quantity,
             timestamp=max(s.timestamp for s in signals),  # Use latest timestamp
             strategy_id="multi_strategy_aggregated",
@@ -765,6 +770,7 @@ class SignalConflictResolver(ISystemComponent):
                 'contributing_strategies': len(signals),
                 'aggregation_method': 'weighted_average',
                 'original_confidences': [s.confidence for s in signals],
+                'original_strengths': [s.strength for s in signals],
                 'resolution_method': self.default_resolution_method.value
             }
         )
@@ -779,6 +785,7 @@ class SignalConflictResolver(ISystemComponent):
             symbol=symbol,
             signal_type=SignalType.HOLD,
             confidence=0.5,
+            strength=0.0,  # Hold signals have no strength
             quantity=0.0,
             timestamp=datetime.now(),
             strategy_id="conflict_resolver",

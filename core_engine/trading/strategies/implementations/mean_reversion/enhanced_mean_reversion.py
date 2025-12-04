@@ -549,15 +549,17 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             score, score_breakdown = self._calculate_exhaustion_score(data, idx, zscore)
             
-            # Set confidence based on SMS score
+            # Set confidence based on SMS score (continuous mapping)
+            # Map SMS (0.0-1.0) to confidence (0.50-0.95) with floor at min threshold
+            sms_min = self.ads_config.get('sms_threshold', 0.5)
+            confidence = max(0.50, min(0.95, 0.50 + sms_score * 0.45))
+            
+            # Determine signal reason for logging
             if sms_score >= 0.7:
-                confidence = 0.85
                 signal_reason = 'ads_sms_strong'
             elif sms_score >= 0.5:
-                confidence = 0.70
                 signal_reason = 'ads_sms_moderate'
             else:
-                confidence = 0.60
                 signal_reason = 'ads_sms_marginal'
             
             # Determine signal type
@@ -780,10 +782,17 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             if confidence <= 0.6:
                 return None
             
+            # Calculate composite signal strength (0-1 scale)
+            # Combines multiple quality factors for more granular strength
+            exhaustion_component = min(score / 100.0, 1.0) * 0.40  # 40% weight
+            sms_component = sms_score * 0.35  # 35% weight - signal maturity
+            zscore_component = min(abs(zscore) / 3.0, 1.0) * 0.25  # 25% weight - z-score magnitude (cap at 3)
+            
+            strength = min(exhaustion_component + sms_component + zscore_component, 1.0)
+            
             # Log signal creation details
-            strength = min(score / 100.0, 1.0)
             logger.debug(f"[{symbol}] Signal: {signal_type.value.upper()} zscore={zscore:.3f}, score={score:.1f}, "
-                        f"strength={strength:.2f}, confidence={confidence:.2f}")
+                        f"strength={strength:.2f} (exh={exhaustion_component:.2f}+sms={sms_component:.2f}+z={zscore_component:.2f}), confidence={confidence:.2f}")
             
             # Get timestamp and price
             timestamp = current_row.get('timestamp', datetime.now()) if isinstance(current_row, pd.Series) else datetime.now()
@@ -809,7 +818,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 strategy_id=self.strategy_id,
                 symbol=symbol,
                 signal_type=signal_type,
-                strength=min(score / 100.0, 1.0),  # Normalize score to 0-1
+                strength=strength,  # Composite strength from exhaustion + SMS + z-score
                 confidence=confidence,
                 target_weight=self.config.base_position_pct,
                 quantity_type="PERCENTAGE",

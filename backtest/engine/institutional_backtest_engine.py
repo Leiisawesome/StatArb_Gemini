@@ -3367,8 +3367,18 @@ class InstitutionalBacktestEngine:
                         
                         # Strategy returns List[Signal], convert to DataFrame
                         if signals_result is not None and len(signals_result) > 0:
-                            # Convert list of Signal objects to DataFrame
-                            signals_df = pd.DataFrame([s.__dict__ for s in signals_result])
+                            # Convert list of Signal objects to DataFrame with explicit field extraction
+                            signals_df = pd.DataFrame([{
+                                'symbol': s.symbol,
+                                'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+                                'confidence': s.confidence,
+                                'strength': getattr(s, 'strength', 0.5),
+                                'timestamp': getattr(s, 'timestamp', None),
+                                'target_weight': getattr(s, 'target_weight', None),
+                                'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
+                                'target_quantity': getattr(s, 'target_quantity', 0),
+                                'additional_data': getattr(s, 'additional_data', {})
+                            } for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
                     else:
                         # No matching timestamp found in pre_calculated_features
@@ -3670,6 +3680,7 @@ class InstitutionalBacktestEngine:
                     signal_type = str(signal_type_raw).lower()
                 
                 confidence = signal_row.get('confidence', 0.5)
+                signal_strength = signal_row.get('signal_strength', signal_row.get('strength', 0))
                 
                 # CRITICAL FIX: Extract target_weight and quantity_type from signal
                 target_weight = signal_row.get('target_weight', None)
@@ -3828,6 +3839,7 @@ class InstitutionalBacktestEngine:
                                 'side': side,
                                 'quantity': authorization.authorized_quantity,
                                 'confidence': confidence,
+                                'signal_strength': signal_strength,
                                 'signal_type': signal_type,
                                 'authorization': authorization,
                                 'timestamp': timestamp,
@@ -4130,6 +4142,10 @@ class InstitutionalBacktestEngine:
                         'decision_price': simulated_fill.decision_price,
                         'market_price': simulated_fill.market_price,
                         'fill_price': simulated_fill.fill_price,
+                        
+                        # Signal quality metrics (for trade analysis)
+                        'confidence': auth_trade.get('confidence', 0.0),
+                        'signal_strength': auth_trade.get('signal_strength', auth_trade.get('strength', 0)),
                         
                         # NEXT-BAR EXECUTION TRACKING (Look-ahead bias fix)
                         'signal_timestamp': auth_trade.get('signal_timestamp', bar_timestamp),

@@ -154,8 +154,8 @@ class BaseExperiment(ABC):
                 if trades:
                     print()
                     print("Trade List:")
-                    print(f"  {'#':<3} {'Timestamp':<20} {'Symbol':<8} {'Action':<6} {'Qty':>8} {'Price':>10} {'Value':>12} {'P&L':>12}")
-                    print("  " + "-"*82)
+                    print(f"  {'#':<3} {'Timestamp':<20} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
+                    print("  " + "-"*90)
                     
                     # Track positions per symbol to calculate P&L
                     positions: Dict[str, List[tuple]] = {}  # symbol -> [(qty, price), ...]
@@ -166,7 +166,22 @@ class BaseExperiment(ABC):
                         action = trade.get('action', trade.get('side', 'N/A'))
                         quantity = trade.get('quantity', trade.get('qty', 0))
                         price = trade.get('price', trade.get('fill_price', 0))
-                        value = quantity * price
+                        
+                        # Extract signal strength and confidence
+                        strength = trade.get('signal_strength', trade.get('strength', 0))
+                        confidence = trade.get('confidence', 0)
+                        
+                        # Format strength (0-1 scale)
+                        if isinstance(strength, (int, float)) and strength > 0:
+                            str_display = f"{strength:>4.2f}"
+                        else:
+                            str_display = "  - "
+                        
+                        # Format confidence as percentage
+                        if confidence > 0:
+                            conf_display = f"{confidence*100:>5.1f}%" if confidence <= 1 else f"{confidence:>5.1f}%"
+                        else:
+                            conf_display = "    - "
                         
                         # Calculate P&L for sells using FIFO
                         pnl = 0.0
@@ -193,7 +208,7 @@ class BaseExperiment(ABC):
                         if not pnl_str:
                             pnl_str = " " * 12
                         
-                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {quantity:>8.2f} ${price:>9.2f} ${value:>11.2f} {pnl_str}")
+                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
         
