@@ -3252,13 +3252,25 @@ class InstitutionalBacktestEngine:
                     sym_data_indexed = sym_data.set_index('timestamp')
                 else:
                     sym_data_indexed = sym_data
+                
+                # Handle timezone comparison (both directions)
                 ts_compare = pd.Timestamp(timestamp)
-                if hasattr(sym_data_indexed.index, 'tz') and sym_data_indexed.index.tz is not None:
-                    if ts_compare.tz is None:
-                        ts_compare = ts_compare.tz_localize(sym_data_indexed.index.tz)
+                index_tz = getattr(sym_data_indexed.index, 'tz', None)
+                ts_tz = ts_compare.tz
+                
+                if index_tz is not None and ts_tz is None:
+                    # Market data is tz-aware, timestamp is tz-naive -> localize timestamp
+                    ts_compare = ts_compare.tz_localize(index_tz)
+                elif index_tz is None and ts_tz is not None:
+                    # Market data is tz-naive, timestamp is tz-aware -> remove tz from timestamp
+                    ts_compare = ts_compare.tz_localize(None)
+                
                 filtered = sym_data_indexed[sym_data_indexed.index <= ts_compare]
                 if len(filtered) > 0:
-                    close_price = float(filtered['close'].iloc[-1])
+                    # Handle both 'close' and 'Close' column names
+                    close_col = 'close' if 'close' in filtered.columns else 'Close'
+                    if close_col in filtered.columns:
+                        close_price = float(filtered[close_col].iloc[-1])
             
             # Create a liquidation sell order
             side = 'sell' if position_qty > 0 else 'buy'  # Sell longs, buy to cover shorts
