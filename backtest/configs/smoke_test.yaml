@@ -68,9 +68,10 @@ strategies:
       enable_regime_filter: false
       
       # EXHAUSTION SCORING THRESHOLDS (ACTUAL entry control)
-      dislocation_minimum: 2.0          # Min z-score to consider (ACTUAL threshold!)
-      dislocation_moderate: 2.0         # For moderate signal scoring
-      dislocation_strong: 2.5           # For strong signal scoring
+      # Higher thresholds = fewer but higher-quality trades (larger price moves)
+      dislocation_minimum: 2.5          # Min z-score to consider (raised from 2.0 for more alpha)
+      dislocation_moderate: 2.5         # For moderate signal scoring
+      dislocation_strong: 3.0           # For strong signal scoring
       
       # Score thresholds for signal generation
       exhaustion_score_moderate: 55.0   # Min score to generate signal (default 60)
