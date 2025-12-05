@@ -2958,28 +2958,65 @@ class InstitutionalBacktestEngine:
             
             # 🚀 OPTION B: Pre-calculate all indicators/features for entire dataset
             # This enables momentum strategies by providing historical context
+            # 🔧 MULTI-SYMBOL SUPPORT: Calculate per-symbol for correct data isolation
             logger.info("🔧 Pre-calculating indicators and features for entire dataset...")
             pre_calc_start = datetime.now()
             
             try:
-                # Ensure timestamp is a column for processing
-                data_for_processing = self.historical_data.copy()
-                if 'timestamp' not in data_for_processing.columns:
-                    data_for_processing = data_for_processing.reset_index()
+                # NEW: Store pre-calculated data PER SYMBOL for multi-symbol support
+                self.pre_calculated_indicators_per_symbol: Dict[str, pd.DataFrame] = {}
+                self.pre_calculated_features_per_symbol: Dict[str, pd.DataFrame] = {}
                 
-                # Store full data count for reference
-                full_data_count = len(data_for_processing)
+                is_multi_symbol = len(self.config.symbols) > 1
                 
-                # Step 1: Calculate all indicators (using full history for proper context)
-                self.pre_calculated_indicators = None
-                if self.indicators_engine:
-                    self.pre_calculated_indicators = self.indicators_engine.calculate_indicators(data_for_processing)
-                    logger.info(f"   ✅ Indicators calculated: {len(self.pre_calculated_indicators)} bars")
-                
-                # Step 2: Engineer all features (using full history for proper context)
-                self.pre_calculated_features = None
-                if self.feature_engineer and self.pre_calculated_indicators is not None:
-                    self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
+                if is_multi_symbol:
+                    logger.info(f"   📊 Multi-symbol mode: calculating indicators for {len(self.config.symbols)} symbols")
+                    
+                    for sym in self.config.symbols:
+                        if sym not in self.market_data or len(self.market_data[sym]) == 0:
+                            logger.warning(f"   ⚠️ No data for {sym}, skipping")
+                            continue
+                        
+                        # Get symbol-specific data
+                        sym_data = self.market_data[sym].copy()
+                        if 'timestamp' not in sym_data.columns:
+                            sym_data = sym_data.reset_index()
+                        
+                        # Calculate indicators for this symbol
+                        if self.indicators_engine:
+                            sym_indicators = self.indicators_engine.calculate_indicators(sym_data)
+                            self.pre_calculated_indicators_per_symbol[sym] = sym_indicators
+                            
+                            # Calculate features for this symbol
+                            if self.feature_engineer:
+                                sym_features = self.feature_engineer.create_features(sym_indicators)
+                                self.pre_calculated_features_per_symbol[sym] = sym_features
+                                logger.info(f"   ✅ {sym}: {len(sym_features)} bars with indicators+features")
+                    
+                    # For backward compatibility, set primary symbol's data
+                    primary_symbol = self.config.symbols[0]
+                    self.pre_calculated_indicators = self.pre_calculated_indicators_per_symbol.get(primary_symbol)
+                    self.pre_calculated_features = self.pre_calculated_features_per_symbol.get(primary_symbol)
+                else:
+                    # Single-symbol mode (original behavior)
+                    # Ensure timestamp is a column for processing
+                    data_for_processing = self.historical_data.copy()
+                    if 'timestamp' not in data_for_processing.columns:
+                        data_for_processing = data_for_processing.reset_index()
+                    
+                    # Store full data count for reference
+                    full_data_count = len(data_for_processing)
+                    
+                    # Step 1: Calculate all indicators (using full history for proper context)
+                    self.pre_calculated_indicators = None
+                    if self.indicators_engine:
+                        self.pre_calculated_indicators = self.indicators_engine.calculate_indicators(data_for_processing)
+                        logger.info(f"   ✅ Indicators calculated: {len(self.pre_calculated_indicators)} bars")
+                    
+                    # Step 2: Engineer all features (using full history for proper context)
+                    self.pre_calculated_features = None
+                    if self.feature_engineer and self.pre_calculated_indicators is not None:
+                        self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
                     
                     # Now filter to trading hours only (after warmup)
                     if hasattr(self, 'simulation_start_dt') and self.pre_calculated_features is not None:
@@ -3503,16 +3540,34 @@ class InstitutionalBacktestEngine:
                                     }
                         
                         # ✅ FIX: For strategies, provide ENRICHED data (not raw OHLCV!)
-                        # Use features_historical which contains pre-calculated indicators (Rule 3 compliant)
+                        # Use pre-calculated features per symbol (Rule 3 compliant)
                         enriched_data_per_symbol = {}
+                        is_multi_symbol = len(self.config.symbols) > 1
+                        
                         for sym in self.config.symbols:
-                            # CRITICAL FIX: Always use enriched features_historical, not raw market_data
-                            # features_historical contains OHLCV + indicators (Rule 3 Phase 2-4)
-                            # self.market_data contains only raw OHLCV (not enriched!)
-                            if not features_historical.empty:
-                                # Use pre-calculated enriched features (correct approach)
+                            # 🔧 MULTI-SYMBOL: Check for per-symbol pre-calculated features first
+                            if hasattr(self, 'pre_calculated_features_per_symbol') and sym in self.pre_calculated_features_per_symbol:
+                                sym_features = self.pre_calculated_features_per_symbol[sym]
+                                if sym_features is not None and len(sym_features) > 0:
+                                    # Filter to current bar timestamp
+                                    ts_compare = pd.Timestamp(bar_timestamp)
+                                    if 'timestamp' in sym_features.columns:
+                                        sym_features_ts = pd.to_datetime(sym_features['timestamp'])
+                                        if sym_features_ts.dt.tz is not None and ts_compare.tz is None:
+                                            ts_compare = ts_compare.tz_localize(sym_features_ts.dt.tz)
+                                        mask = sym_features_ts <= ts_compare
+                                        enriched_data_per_symbol[sym] = sym_features[mask].copy()
+                                    else:
+                                        enriched_data_per_symbol[sym] = sym_features.copy()
+                                    continue
+                            
+                            # Single-symbol backward compatibility: use features_historical
+                            if not is_multi_symbol and not features_historical.empty:
                                 enriched_data_per_symbol[sym] = features_historical
-                            elif sym in self.market_data and len(self.market_data[sym]) > 0:
+                                continue
+                            
+                            # Fallback: use symbol-specific raw market_data
+                            if sym in self.market_data and len(self.market_data[sym]) > 0:
                                 # Fallback to raw market_data only if no enriched data available
                                 # WARNING: This will likely cause strategies to fail validation
                                 sym_data = self.market_data[sym].copy()
