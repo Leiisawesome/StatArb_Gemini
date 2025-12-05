@@ -41,7 +41,6 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
-from enum import Enum
 import logging
 
 from ...base_strategy_enhanced import EnhancedBaseStrategy
@@ -63,13 +62,6 @@ from core_engine.alpha import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MeanReversionSignal(Enum):
-    """Mean reversion signal types"""
-    OVERSOLD_BUY = "oversold_buy"
-    OVERBOUGHT_SELL = "overbought_sell"
-    NEUTRAL = "neutral"
 
 
 class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
@@ -438,12 +430,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             is_oversold = zscore < -self.config.dislocation_minimum
             is_overbought = zscore > self.config.dislocation_minimum
             
-            # Get indicators for SMS calculation
-            rsi = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx, default=50.0)
-            rsi_prev = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx - 1, default=rsi)
-            volume_ratio = self._get_indicator_value(data, 'volume_ratio', idx, default=1.0)
-            macd_hist = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx, default=0.0)
-            macd_hist_prev = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx - 1, default=0.0)
+            # Get indicators for SMS calculation (using DRY helpers)
+            rsi = self._get_rsi(data, idx)
+            rsi_prev = self._get_rsi(data, idx - 1, default=rsi)
+            volume_ratio = self._get_volume_ratio(data, idx)
+            macd_hist = self._get_macd_histogram(data, idx)
+            macd_hist_prev = self._get_macd_histogram(data, idx - 1)
             bb_position = self._get_indicator_value(data, 'bb_position', idx, default=0.5)
             
             # Calculate volatility compression
@@ -511,8 +503,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ADS v3.0 §3: ERAR GATE (Risk-Adjusted Return)
             # ========================================
             if self.ads_config.get('enable_ads_gates', True):
-                # Estimate expected PnL
-                atr = self._get_indicator_value(data, self._resolve_column_name('ATR_14', data), idx, default=1.0)
+                # Estimate expected PnL (using DRY helpers)
+                atr = self._get_atr(data, idx)
                 price = data['close'].iloc[idx] if 'close' in data.columns else 100.0
                 half_life = self._calculate_half_life(data['close'].iloc[max(0, idx-50):idx+1]) if 'close' in data.columns else 10.0
                 
@@ -593,71 +585,52 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             )
             
             if is_exit_signal and getattr(self.config, 'enable_momentum_exit', True):
-                # Get momentum indicators from data (using correct column names)
-                rsi = self._get_indicator_value(data, 'rsi', idx, default=50.0)
-                adx = self._get_indicator_value(data, 'adx', idx, default=25.0)
-                volume = self._get_indicator_value(data, 'volume', idx, default=0)
-                volume_ma = self._get_indicator_value(data, 'volume_sma', idx, default=volume)
-                
-                # Calculate volume ratio (or use pre-calculated if available)
-                volume_ratio_col = self._get_indicator_value(data, 'volume_ratio', idx, default=None)
-                if volume_ratio_col is not None:
-                    volume_ratio = volume_ratio_col
-                else:
-                    volume_ratio = volume / volume_ma if volume_ma > 0 else 1.0
+                # Get momentum indicators (using DRY helpers)
+                exit_rsi = self._get_rsi(data, idx)
+                exit_adx = self._get_adx(data, idx)
+                exit_volume_ratio = self._get_volume_ratio(data, idx)
                 
                 # Get thresholds from config
                 adx_threshold = getattr(self.config, 'momentum_adx_threshold', 20.0)
                 rsi_overbought = getattr(self.config, 'momentum_rsi_overbought', 70.0)
-                rsi_oversold = getattr(self.config, 'momentum_rsi_oversold', 30.0)
                 vol_ratio_threshold = getattr(self.config, 'momentum_volume_ratio', 0.7)
                 extended_zscore = getattr(self.config, 'momentum_extended_zscore', 3.0)
                 
-                # Determine direction (SELL = exiting long, BUY with short = exiting short)
-                is_exiting_long = signal_type == SignalType.SELL
-                
-                # Check if we should allow exit
+                # Check if we should allow exit (only handling long exits - strategy doesn't short)
                 momentum_exhausted = False
                 hold_reason = None
                 exit_reason = None
                 
                 # Get previous RSI to check if momentum is reversing
-                rsi_prev = self._get_indicator_value(data, 'rsi', idx - 1, default=rsi) if idx > 0 else rsi
-                rsi_declining = rsi < rsi_prev - 1.0  # RSI dropping by at least 1 point
-                rsi_rising = rsi > rsi_prev + 1.0     # RSI rising by at least 1 point
+                exit_rsi_prev = self._get_rsi(data, idx - 1, default=exit_rsi) if idx > 0 else exit_rsi
+                rsi_declining = exit_rsi < exit_rsi_prev - 1.0
                 
                 # Always exit if z-score is extremely extended
                 if abs(zscore) >= extended_zscore:
                     momentum_exhausted = True
                     exit_reason = f"extended_zscore ({zscore:.2f} >= {extended_zscore})"
                 
-                # Exit if RSI shows exhaustion AND is declining (direction-aware)
-                elif is_exiting_long and rsi >= rsi_overbought and rsi_declining:
+                # Exit if RSI shows exhaustion AND is declining
+                elif exit_rsi >= rsi_overbought and rsi_declining:
                     momentum_exhausted = True
-                    exit_reason = f"rsi_overbought_declining ({rsi:.1f} >= {rsi_overbought}, prev={rsi_prev:.1f})"
-                elif is_exiting_long and rsi >= rsi_overbought:
+                    exit_reason = f"rsi_overbought_declining ({exit_rsi:.1f} >= {rsi_overbought}, prev={exit_rsi_prev:.1f})"
+                elif exit_rsi >= rsi_overbought:
                     # RSI overbought but still rising - HOLD
-                    hold_reason = f"rsi_overbought_but_rising ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
-                elif not is_exiting_long and rsi <= rsi_oversold and rsi_rising:
-                    momentum_exhausted = True
-                    exit_reason = f"rsi_oversold_rising ({rsi:.1f} <= {rsi_oversold}, prev={rsi_prev:.1f})"
-                elif not is_exiting_long and rsi <= rsi_oversold:
-                    # RSI oversold but still falling - HOLD
-                    hold_reason = f"rsi_oversold_but_falling ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
+                    hold_reason = f"rsi_overbought_but_rising ({exit_rsi:.1f}, prev={exit_rsi_prev:.1f}) - wait for reversal"
                 
                 # Exit if trend is weak (ADX low)
-                elif adx < adx_threshold:
+                elif exit_adx < adx_threshold:
                     momentum_exhausted = True
-                    exit_reason = f"weak_trend (ADX {adx:.1f} < {adx_threshold})"
+                    exit_reason = f"weak_trend (ADX {exit_adx:.1f} < {adx_threshold})"
                 
                 # Exit if volume is fading
-                elif volume_ratio < vol_ratio_threshold:
+                elif exit_volume_ratio < vol_ratio_threshold:
                     momentum_exhausted = True
-                    exit_reason = f"volume_fading (ratio {volume_ratio:.2f} < {vol_ratio_threshold})"
+                    exit_reason = f"volume_fading (ratio {exit_volume_ratio:.2f} < {vol_ratio_threshold})"
                 
                 # Momentum still strong - HOLD for extended move
                 else:
-                    hold_reason = f"momentum_strong (ADX={adx:.1f}, RSI={rsi:.1f}, vol_ratio={volume_ratio:.2f})"
+                    hold_reason = f"momentum_strong (ADX={exit_adx:.1f}, RSI={exit_rsi:.1f}, vol_ratio={exit_volume_ratio:.2f})"
                 
                 # Log the decision
                 if momentum_exhausted:
@@ -678,26 +651,20 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             )
             
             if is_entry_signal and getattr(self.config, 'enable_momentum_entry', True):
-                # Get momentum indicators
-                rsi = self._get_indicator_value(data, 'rsi', idx, default=50.0)
-                adx = self._get_indicator_value(data, 'adx', idx, default=25.0)
-                volume = self._get_indicator_value(data, 'volume', idx, default=0)
-                volume_ma = self._get_indicator_value(data, 'volume_sma', idx, default=volume)
-                
-                # Calculate volume ratio
-                volume_ratio_col = self._get_indicator_value(data, 'volume_ratio', idx, default=None)
-                volume_ratio = volume_ratio_col if volume_ratio_col is not None else (volume / volume_ma if volume_ma > 0 else 1.0)
+                # Get momentum indicators (using DRY helpers)
+                entry_rsi = self._get_rsi(data, idx)
+                entry_adx = self._get_adx(data, idx)
+                entry_volume_ratio = self._get_volume_ratio(data, idx)
                 
                 # Get previous RSI to check if momentum is reversing
-                rsi_prev = self._get_indicator_value(data, 'rsi', idx - 1, default=rsi) if idx > 0 else rsi
-                rsi_rising = rsi > rsi_prev + 1.0     # RSI rising by at least 1 point
-                rsi_still_falling = rsi < rsi_prev - 1.0
+                entry_rsi_prev = self._get_rsi(data, idx - 1, default=entry_rsi) if idx > 0 else entry_rsi
+                rsi_rising = entry_rsi > entry_rsi_prev + 1.0
+                rsi_still_falling = entry_rsi < entry_rsi_prev - 1.0
                 
                 # Thresholds
                 rsi_oversold = getattr(self.config, 'rsi_oversold', 30.0)
                 adx_threshold = getattr(self.config, 'momentum_adx_threshold', 25.0)
                 extended_zscore_entry = getattr(self.config, 'extended_zscore_entry_threshold', -3.0)
-                vol_ratio_threshold = getattr(self.config, 'momentum_volume_ratio_threshold', 0.7)
                 
                 momentum_reversing = False
                 entry_reason = None
@@ -709,27 +676,26 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     entry_reason = f"extended_zscore ({zscore:.2f} <= {extended_zscore_entry})"
                 
                 # Enter if RSI shows exhaustion AND is rising (momentum reversing)
-                elif rsi <= rsi_oversold and rsi_rising:
+                elif entry_rsi <= rsi_oversold and rsi_rising:
                     momentum_reversing = True
-                    entry_reason = f"rsi_oversold_rising ({rsi:.1f} <= {rsi_oversold}, prev={rsi_prev:.1f})"
-                elif rsi <= rsi_oversold and rsi_still_falling:
+                    entry_reason = f"rsi_oversold_rising ({entry_rsi:.1f} <= {rsi_oversold}, prev={entry_rsi_prev:.1f})"
+                elif entry_rsi <= rsi_oversold and rsi_still_falling:
                     # RSI oversold but still falling - WAIT for bounce
-                    hold_entry_reason = f"rsi_oversold_but_falling ({rsi:.1f}, prev={rsi_prev:.1f}) - wait for reversal"
+                    hold_entry_reason = f"rsi_oversold_but_falling ({entry_rsi:.1f}, prev={entry_rsi_prev:.1f}) - wait for reversal"
                 
                 # Enter if trend is weak (low ADX = mean reversion more likely)
-                elif adx < adx_threshold:
+                elif entry_adx < adx_threshold:
                     momentum_reversing = True
-                    entry_reason = f"weak_trend (ADX {adx:.1f} < {adx_threshold})"
+                    entry_reason = f"weak_trend (ADX {entry_adx:.1f} < {adx_threshold})"
                 
                 # For BUY entries: High volume = selling climax (capitulation), OK to enter
-                # Low volume during downtrend = no buying interest, wait
-                elif volume_ratio > 1.5:  # Volume spike = potential capitulation/reversal
+                elif entry_volume_ratio > 1.5:  # Volume spike = potential capitulation/reversal
                     momentum_reversing = True
-                    entry_reason = f"volume_spike (ratio {volume_ratio:.2f} > 1.5) - potential capitulation"
+                    entry_reason = f"volume_spike (ratio {entry_volume_ratio:.2f} > 1.5) - potential capitulation"
                 
                 # Strong downward momentum - WAIT for exhaustion
                 else:
-                    hold_entry_reason = f"momentum_strong (ADX={adx:.1f}, RSI={rsi:.1f}, vol_ratio={volume_ratio:.2f})"
+                    hold_entry_reason = f"momentum_strong (ADX={entry_adx:.1f}, RSI={entry_rsi:.1f}, vol_ratio={entry_volume_ratio:.2f})"
                 
                 # Log the decision
                 if momentum_reversing:
@@ -903,10 +869,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # ============================================
         exhaustion_score = 50.0  # Neutral baseline
         
-        # 2a. RSI Momentum Exhaustion (divergence from price)
-        rsi = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx, default=50.0)
-        rsi_prev = self._get_indicator_value(data, self._resolve_column_name('RSI_14', data), idx - 1, default=50.0)
-        rsi_momentum = rsi - rsi_prev
+        # 2a. RSI Momentum Exhaustion (using DRY helpers)
+        exh_rsi = self._get_rsi(data, idx)
+        exh_rsi_prev = self._get_rsi(data, idx - 1, default=50.0)
+        rsi_momentum = exh_rsi - exh_rsi_prev
         
         if is_oversold and rsi_momentum > 0:
             # Oversold but RSI rising = bullish exhaustion
@@ -915,24 +881,24 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # Overbought but RSI falling = bearish exhaustion  
             exhaustion_score += 20
         
-        # 2b. Volume Exhaustion (extended on weak volume = noise)
-        volume_ratio = self._get_indicator_value(data, 'volume_ratio', idx, default=1.0)
+        # 2b. Volume Exhaustion (using DRY helpers)
+        exh_volume_ratio = self._get_volume_ratio(data, idx)
         
-        if volume_ratio < self.config.volume_exhaustion_threshold and abs_zscore > self.config.dislocation_moderate:
+        if exh_volume_ratio < self.config.volume_exhaustion_threshold and abs_zscore > self.config.dislocation_moderate:
             # Low volume extremity = likely noise, will revert
             exhaustion_score += 15
-        elif volume_ratio > self.config.volume_conviction_threshold and abs_zscore > self.config.dislocation_strong:
+        elif exh_volume_ratio > self.config.volume_conviction_threshold and abs_zscore > self.config.dislocation_strong:
             # High volume breakout = information, don't fade
             exhaustion_score -= 25
         
-        # 2c. MACD Histogram Exhaustion (momentum weakening)
-        macd_hist = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx, default=0.0)
-        macd_hist_prev = self._get_indicator_value(data, self._resolve_column_name('MACD_histogram', data), idx - 1, default=0.0)
+        # 2c. MACD Histogram Exhaustion (using DRY helpers)
+        exh_macd = self._get_macd_histogram(data, idx)
+        exh_macd_prev = self._get_macd_histogram(data, idx - 1)
         
-        if is_oversold and macd_hist > macd_hist_prev:
+        if is_oversold and exh_macd > exh_macd_prev:
             # Histogram turning up in oversold
             exhaustion_score += 15
-        elif not is_oversold and macd_hist < macd_hist_prev:
+        elif not is_oversold and exh_macd < exh_macd_prev:
             # Histogram turning down in overbought
             exhaustion_score += 15
         
@@ -974,12 +940,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # ============================================
         regime_score = 100.0  # Start at max, apply penalties
         
-        # 4a. Trend Strength Penalty (ADX)
-        adx = self._get_indicator_value(data, self._resolve_column_name('ADX', data), idx, default=20.0)
+        # 4a. Trend Strength Penalty (using DRY helpers)
+        exh_adx = self._get_adx(data, idx, default=20.0)
         
-        if adx > self.config.adx_strong_trend:
+        if exh_adx > self.config.adx_strong_trend:
             regime_score -= 40  # Strong trend, mean reversion fails
-        elif adx > self.config.adx_moderate_trend:
+        elif exh_adx > self.config.adx_moderate_trend:
             regime_score -= 20  # Moderate trend
         
         # 4b. Volatility Regime Penalty
@@ -1019,10 +985,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         elif not is_oversold and bb_position > 0.9:
             confluence_score += 15
         
-        # 5c. RSI Extreme Confirmation
-        if is_oversold and rsi < 30:
+        # 5c. RSI Extreme Confirmation (using already-fetched value)
+        if is_oversold and exh_rsi < 30:
             confluence_score += 10
-        elif not is_oversold and rsi > 70:
+        elif not is_oversold and exh_rsi > 70:
             confluence_score += 10
         
         breakdown['confluence'] = np.clip(confluence_score, 0, 100)
@@ -1173,6 +1139,66 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return mapped_name
         
         return expected_name
+    
+    # ========================================
+    # INDICATOR HELPERS (DRY - Single Source)
+    # ========================================
+    
+    def _get_rsi(self, data: pd.DataFrame, idx: int, default: float = 50.0) -> float:
+        """
+        Get RSI value at index with column name resolution.
+        
+        Handles both 'RSI_14' and 'rsi' column naming conventions.
+        """
+        rsi_col = self._resolve_column_name('RSI_14', data)
+        return self._get_indicator_value(data, rsi_col, idx, default=default)
+    
+    def _get_volume_ratio(self, data: pd.DataFrame, idx: int, default: float = 1.0) -> float:
+        """
+        Get volume ratio at index with fallback calculation.
+        
+        Tries 'volume_ratio' column first, then calculates from volume/volume_sma.
+        """
+        # Try pre-calculated column first
+        if 'volume_ratio' in data.columns:
+            value = self._get_indicator_value(data, 'volume_ratio', idx, default=None)
+            if value is not None and not pd.isna(value):
+                return value
+        
+        # Fallback: calculate from volume columns
+        volume = self._get_indicator_value(data, 'volume', idx, default=0)
+        volume_ma = self._get_indicator_value(data, 'volume_sma', idx, default=volume)
+        
+        if volume_ma > 0:
+            return volume / volume_ma
+        return default
+    
+    def _get_macd_histogram(self, data: pd.DataFrame, idx: int, default: float = 0.0) -> float:
+        """
+        Get MACD histogram value at index with column name resolution.
+        
+        Handles both 'MACD_histogram' and 'macd_histogram' conventions.
+        """
+        macd_col = self._resolve_column_name('MACD_histogram', data)
+        return self._get_indicator_value(data, macd_col, idx, default=default)
+    
+    def _get_adx(self, data: pd.DataFrame, idx: int, default: float = 25.0) -> float:
+        """
+        Get ADX value at index with column name resolution.
+        
+        Handles both 'ADX' and 'adx' column naming conventions.
+        """
+        adx_col = self._resolve_column_name('ADX', data)
+        return self._get_indicator_value(data, adx_col, idx, default=default)
+    
+    def _get_atr(self, data: pd.DataFrame, idx: int, default: float = 1.0) -> float:
+        """
+        Get ATR value at index with column name resolution.
+        
+        Handles both 'ATR_14' and 'atr' column naming conventions.
+        """
+        atr_col = self._resolve_column_name('ATR_14', data)
+        return self._get_indicator_value(data, atr_col, idx, default=default)
     
     # ========================================
     # v4.0 PROFESSIONAL QUANT ALPHA ENHANCEMENTS
@@ -1742,59 +1768,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             return 'low_vol'
         else:
             return 'normal'
-    
-    # ========================================
-    # CONFIDENCE CALCULATION
-    # ========================================
-    
-    def _calculate_signal_confidence(self, symbol: str, signal_type: MeanReversionSignal) -> float:
-        """Calculate signal confidence based on multiple factors"""
-        try:
-            if symbol not in self.market_data:
-                return 0.5
-            
-            data = self.market_data[symbol]
-            current_row = data.iloc[-1]
-            
-            # Z-score confidence
-            zscore = current_row.get('zscore', 0.0)
-            zscore_confidence = min(abs(zscore) / (self.config.zscore_entry_threshold * 1.5), 1.0)
-            
-            # RSI confidence
-            rsi_col = self._resolve_column_name('RSI_14', data)
-            rsi = current_row.get(rsi_col, current_row.get('rsi', 50.0))
-            if signal_type == MeanReversionSignal.OVERSOLD_BUY:
-                rsi_confidence = max(0, (50 - rsi) / 20)
-            else:
-                rsi_confidence = max(0, (rsi - 50) / 20)
-            
-            # Bollinger Band confidence
-            bb_position = current_row.get('bb_position', 0.5)
-            if signal_type == MeanReversionSignal.OVERSOLD_BUY:
-                bb_confidence = max(0, (0.5 - bb_position) / 0.5)
-            else:
-                bb_confidence = max(0, (bb_position - 0.5) / 0.5)
-            
-            # Regime confidence
-            regime_confidence = 1.0
-            if self.config.enable_regime_filter and symbol in self.regime_data:
-                regime_confidence = (self.config.regime_confidence_favorable 
-                                   if self._is_regime_favorable(symbol) 
-                                   else self.config.regime_confidence_unfavorable)
-            
-            # Weighted combination
-            total_confidence = (
-                zscore_confidence * self.config.confidence_weight_zscore +
-                rsi_confidence * self.config.confidence_weight_rsi +
-                bb_confidence * self.config.confidence_weight_bollinger +
-                regime_confidence * self.config.confidence_weight_regime
-            )
-            
-            return min(total_confidence, 0.95)
-            
-        except Exception as e:
-            logger.error(f"Signal confidence calculation failed for {symbol}: {e}")
-            return 0.5
     
     # ========================================
     # POSITION SIZING
