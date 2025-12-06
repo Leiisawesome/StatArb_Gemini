@@ -564,11 +564,11 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             else:
                 signal_reason = 'ads_sms_marginal'
             
-            # Determine signal type
+            # Determine signal type (using explicit semantics per Rule 2)
             if is_oversold:
-                signal_type = SignalType.BUY
+                signal_type = SignalType.LONG_ENTRY  # Price low → go long
             elif is_overbought:
-                signal_type = SignalType.SELL
+                signal_type = SignalType.SHORT_ENTRY  # Price high → go short (or close long)
             else:
                 return None
             
@@ -577,11 +577,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             # For EXIT signals, check if momentum is exhausted before allowing exit
             # This prevents exiting too early in strong trends
-            # SELL = exit long position, BUY (when short) = exit short position
+            # SHORT_ENTRY with long position → close long (handled by backtest engine)
+            # LONG_ENTRY with short position → close short (handled by backtest engine)
             is_exit_signal = (
-                (signal_type == SignalType.SELL) or  # Exit long
-                (signal_type == SignalType.BUY and hasattr(self, '_position_details') and 
-                 self._position_details.get(symbol, {}).get('quantity', 0) < 0)  # Exit short
+                (signal_type == SignalType.SHORT_ENTRY) or  # Will close long if has one
+                (signal_type == SignalType.LONG_ENTRY and hasattr(self, '_position_details') and 
+                 self._position_details.get(symbol, {}).get('quantity', 0) < 0)  # Will close short
             )
             
             if is_exit_signal and getattr(self.config, 'enable_momentum_exit', True):
@@ -640,12 +641,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     return None  # Don't exit yet, momentum still strong
             
             # ========================================
-            # MOMENTUM-AWARE ENTRY LOGIC (BUY FILTER)
+            # MOMENTUM-AWARE ENTRY LOGIC (LONG_ENTRY FILTER)
             # ========================================
-            # For BUY entries (new long positions), check if downward momentum is exhausted
+            # For LONG_ENTRY (new long positions), check if downward momentum is exhausted
             # This prevents buying into "falling knife" scenarios
             is_entry_signal = (
-                signal_type == SignalType.BUY and 
+                signal_type == SignalType.LONG_ENTRY and 
                 (not hasattr(self, '_position_details') or 
                  self._position_details.get(symbol, {}).get('quantity', 0) <= 0)
             )
@@ -707,11 +708,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             # PRICE-AWARE EXIT LOGIC
             # ========================================
-            # For SELL signals, check if we have a position and whether exiting makes sense
+            # For SHORT_ENTRY signals (overbought), check position context
+            # SHORT_ENTRY with existing long → closes long (via backtest engine)
             has_details = hasattr(self, '_position_details')
             details_content = self._position_details if has_details else {}
             
-            if signal_type == SignalType.SELL and has_details and details_content:
+            if signal_type == SignalType.SHORT_ENTRY and has_details and details_content:
                 pos_info = details_content.get(symbol)
                 
                 if pos_info and pos_info.get('quantity', 0) > 0:
@@ -1696,8 +1698,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         
         # Check if stop-loss triggered
         if pnl_pct <= stop_loss_pct:
-            # Generate FORCED exit signal
-            signal_type = SignalType.SELL if quantity > 0 else SignalType.BUY
+            # Generate FORCED exit signal (explicit exit types per Rule 2)
+            signal_type = SignalType.LONG_EXIT if quantity > 0 else SignalType.SHORT_EXIT
             
             # Get timestamp
             timestamp = current_row.get('timestamp', data.index[idx] if hasattr(data, 'index') else datetime.now())
