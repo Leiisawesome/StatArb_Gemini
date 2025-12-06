@@ -2,6 +2,12 @@
 Position Reconciliation Engine - Operational Excellence Requirement
 Ensures internal position records match broker positions with automated correction.
 
+Architecture Compliance (Tier-1 Rules):
+- Rule 6: Operations & Recovery - Section 1 (Position Reconciliation)
+  - Broker sync every 5 minutes (accelerated to 1 min on discrepancy)
+  - Discrepancy classification and auto-correction
+  - Integration with Rule 3 (Risk Manager position authority)
+
 Reconciliation Process:
 1. Fetch broker positions via API (every 5 minutes)
 2. Compare with internal CentralRiskManager positions
@@ -17,9 +23,11 @@ Severity Levels:
 - Moderate ($1K-$10K): Alert risk team
 - Severe (>$10K): Auto-correct + alert
 
+Migration: December 2025 - Former Rule 7 Phase 11+ content now Rule 6, Section 1.
+
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging

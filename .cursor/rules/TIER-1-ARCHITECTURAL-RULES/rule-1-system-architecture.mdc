@@ -1,0 +1,806 @@
+---
+description: "Rule 1: System Architecture - Hierarchical Design with Regime-First Principle"
+alwaysApply: false
+---
+# Rule 1: System Architecture
+
+**Version:** 1.0 (Consolidated from former Rules 1 & 2)  
+**Date:** December 6, 2025  
+**Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Migration Note:** This rule consolidates:
+- Former Rule 1: Component Integration Standards
+- Former Rule 2: Hierarchical Architecture with Regime-First Principle
+
+---
+
+## Overview
+
+This rule defines the **complete system architecture** for the StatArb_Gemini core_engine, including:
+- 6-Layer Hierarchical Architecture
+- Regime-First Principle (foundational constraint)
+- Component Integration Standards
+- Lifecycle Management
+- Configuration Management
+- Inter-Component Communication
+
+**Key Principle:** All components integrate through the `HierarchicalSystemOrchestrator` and adapt to market regime context provided by the `EnhancedRegimeEngine`.
+
+---
+
+## Section 1: 6-Layer Hierarchical Architecture
+
+The core_engine is organized into 6 distinct layers with clear separation of concerns:
+
+### Layer 0: System Orchestration (SYSTEM_CONTROL)
+**Authority Level:** SYSTEM_CONTROL - Highest level operational control
+
+**Components:**
+- **HierarchicalSystemOrchestrator**: Component registration, lifecycle management, system coordination
+- **SystemIntegrationManager**: Multi-phase initialization, health monitoring, production integration
+
+**Responsibilities:**
+- Component registration and lifecycle management
+- System-wide coordination and monitoring
+- Configuration management
+- Dependency injection
+
+---
+
+### Layer 1: Governance (GOVERNANCE_CONTROL)
+**Authority Level:** GOVERNANCE_CONTROL - Central trading governance
+
+**Components:**
+- **CentralRiskManager**: Single point of authority for all trading decisions
+
+**Responsibilities:**
+- Trade authorization (REQUIRED for ALL trades)
+- Risk limit enforcement
+- Position management authority
+- Regime-aware risk scaling
+
+**CRITICAL:** NO component can execute trades without CentralRiskManager authorization (see Rule 3)
+
+---
+
+### Layer 2: Data Management (SUPPORT)
+**Authority Level:** OPERATIONAL - Data processing and analysis
+
+**Components:**
+- **ClickHouseDataManager**: Unified data access and management
+- **LiquidityAssessmentEngine**: Liquidity risk assessment
+
+**Responsibilities:**
+- All market data access (NO direct database queries allowed)
+- Data validation and quality control
+- Liquidity filtering and assessment
+- Regime-tagged data distribution
+
+---
+
+### Layer 3: Core Processing (OPERATIONAL)
+**Authority Level:** OPERATIONAL - Signal processing
+
+**Components:**
+- **EnhancedTechnicalIndicators**: 29+ technical indicators
+- **EnhancedFeatureEngineer**: Feature engineering pipeline
+- **EnhancedSignalGenerator**: Signal generation engine
+
+**Responsibilities:**
+- Calculate technical indicators from market data
+- Engineer features for strategy consumption
+- Generate regime-aware trading signals
+- Multi-timeframe signal processing
+
+**Flow:** Data → Indicators → Features → Signals (all regime-aware)
+
+---
+
+### Layer 4: Analytics & Strategy (OPERATIONAL)
+**Authority Level:** OPERATIONAL - Strategy coordination
+
+**Components:**
+- **StrategyManager**: Multi-strategy coordination (WHAT to trade)
+- **StrategyExecutionEngine**: Strategy execution
+- **EnhancedStrategyValidator**: Strategy validation
+- **StrategyRegistry**: Strategy discovery and registration
+- **10 Enhanced Strategy Implementations**: All strategy types
+- **MultiStrategySignalAggregator**: Signal aggregation across strategies
+- **SignalConflictResolver**: Conflict resolution between signals
+- **EnhancedAnalyticsManager**: Central analytics orchestration
+- **EnhancedMetricsCalculator**: Performance and risk metrics
+- **PerformanceAnalyzer**: Comprehensive performance analysis
+
+**Responsibilities:**
+- Determine WHAT to trade (strategy decisions)
+- Coordinate multiple strategies
+- Aggregate and resolve conflicting signals
+- Performance measurement and attribution
+- Risk-adjusted metrics calculation
+
+---
+
+### Layer 5: Trading & Execution (OPERATIONAL under governance)
+**Authority Level:** OPERATIONAL - Execution operations
+
+**Components:**
+- **EnhancedTradingEngine**: Execution planning (HOW to execute)
+- **OrderManagementSystem**: Order lifecycle management (NEW)
+- **UnifiedExecutionEngine**: Trade execution (ACTION)
+- **EnhancedPortfolioManager**: Position management and allocation
+
+**Responsibilities:**
+- Plan HOW to execute trades (execution algorithms)
+- Manage order lifecycle (create, modify, cancel)
+- Execute ACTION (actual trade execution)
+- Manage positions and portfolio allocation
+- Track P&L and position history
+
+**Flow:** Strategy Signals → Risk Authorization → Order Management → Execution → Position Update
+
+---
+
+### Layer 6: Production Monitoring (SYSTEM_CONTROL)
+**Authority Level:** SYSTEM_CONTROL - Production operations
+
+**Components:**
+- **ProductionHealthMonitor**: Real-time health monitoring
+- **GracefulDegradationManager**: Service degradation management
+- **AuditTrailManager**: Comprehensive audit logging
+- **DisasterRecoveryManager**: Backup and recovery procedures
+
+**Responsibilities:**
+- 24/7 health monitoring with alerting
+- Graceful service degradation during issues
+- Complete audit trail for all operations
+- Disaster recovery and business continuity
+
+---
+
+## Section 2: Regime-First Architectural Principle ⭐
+
+### Core Principle
+
+**The EnhancedRegimeEngine is the FOUNDATIONAL LAYER** that provides market regime context for all downstream operations. It MUST initialize FIRST (initialization order = 5) before any other operational component.
+
+### Why Regime-First is Architectural
+
+**Regime detection is not an optional feature** - it is a **structural requirement** of the architecture:
+
+1. **Data Processing** requires regime context for adaptive processing
+2. **Signal Generation** requires regime context for filtering and confidence adjustment
+3. **Strategy Selection** requires regime context for optimal strategy weighting
+4. **Risk Management** requires regime context for dynamic risk limit adjustment
+5. **Execution Planning** requires regime context for algorithm selection
+
+**Without regime context, the system cannot function optimally.**
+
+### Component Initialization Order (MANDATORY)
+
+```python
+# Component Initialization Order
+5:  EnhancedRegimeEngine          # FIRST - Foundational regime context
+10: ClickHouseDataManager          # Second - requires regime context
+12: LiquidityAssessmentEngine      # Third - uses regime context
+15: EnhancedTechnicalIndicators    # Fourth - regime-aware calculations
+16: EnhancedFeatureEngineer        # Fifth - adapts to regime
+17: EnhancedSignalGenerator        # Sixth - filters by regime
+20: StrategyManager                # Seventh - regime-based strategy selection
+25: CentralRiskManager             # Eighth - regime-adjusted risk limits (GOVERNANCE)
+30: EnhancedTradingEngine          # Ninth - regime-optimized execution planning
+32: OrderManagementSystem          # Tenth - order lifecycle management
+35: EnhancedAnalyticsManager       # Eleventh - regime attribution analytics
+40: UnifiedExecutionEngine         # Twelfth - regime-aware execution
+```
+
+### IRegimeAware Interface
+
+**ALL operational components MUST implement IRegimeAware:**
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+class IRegimeAware(ABC):
+    """Interface for components requiring regime awareness"""
+    
+    @abstractmethod
+    def set_regime_engine(self, regime_engine: 'EnhancedRegimeEngine') -> None:
+        """Inject regime engine dependency"""
+        pass
+    
+    @abstractmethod
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change event"""
+        pass
+    
+    @abstractmethod
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        pass
+    
+    @abstractmethod
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Adapt component behavior to current regime"""
+        pass
+    
+    @abstractmethod
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        pass
+```
+
+### Regime Context Distribution
+
+```python
+class RegimeContextDistributor:
+    """Distributes regime context to all system components"""
+    
+    def subscribe(self, component: IRegimeAware) -> str:
+        """Subscribe component to regime context updates"""
+        pass
+    
+    async def distribute_regime_context(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Distribute regime context to all subscribers"""
+        for subscriber in self.subscribers:
+            await subscriber.on_regime_change(regime_context)
+```
+
+### Fast Regime Detection (Enhanced)
+
+**Component:** `FastRegimeDetector`  
+**File:** `core_engine/regime/fast_regime_detector.py`  
+**Detection Lag:** 1-5 minutes (vs 10-60 min traditional)
+
+**4 Fast Indicators:**
+1. **VIX Spike Detection** - Threshold: +20% in 5 minutes
+2. **Market Breadth Collapse** - Threshold: >70% stocks declining
+3. **Order Book Imbalance** - Threshold: >80% sell-side pressure
+4. **Volatility Spike (Intraday)** - Threshold: >3x normal intraday volatility
+
+```python
+async def detect_regime(self):
+    # STEP 1: Check fast indicators (1-5 min detection)
+    fast_signal = await self.fast_detector.check_fast_regime_change()
+    
+    if fast_signal and fast_signal.severity in ['CRISIS', 'HIGH_VOL']:
+        # Override traditional detection with fast signal
+        return await self._apply_fast_regime_change(fast_signal)
+    
+    # STEP 2: Use traditional regime detection (10-60 min lag)
+    return await self._traditional_regime_detection()
+```
+
+---
+
+## Section 3: Component Integration Standards
+
+### 3.1 ISystemComponent Interface
+
+All components managing their own lifecycle MUST implement `ISystemComponent`:
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
+class ISystemComponent(ABC):
+    @abstractmethod
+    async def initialize(self) -> bool:
+        """Initialize component"""
+        pass
+    
+    @abstractmethod
+    async def start(self) -> bool:
+        """Start component operations"""
+        pass
+    
+    @abstractmethod
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        pass
+    
+    @abstractmethod
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check"""
+        pass
+    
+    @abstractmethod
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        pass
+    
+    @abstractmethod
+    async def configure_dependencies(self, orchestrator) -> bool:
+        """Configure component dependencies with orchestrator"""
+        pass
+    
+    @abstractmethod
+    async def validate_configuration(self) -> Dict[str, Any]:
+        """Validate component configuration and return validation results"""
+        pass
+    
+    @abstractmethod
+    async def prepare_for_shutdown(self) -> bool:
+        """Prepare component for graceful shutdown"""
+        pass
+    
+    @abstractmethod
+    async def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get component performance metrics"""
+        pass
+```
+
+### 3.2 Component Registration
+
+Components MUST register with the `HierarchicalSystemOrchestrator`:
+
+```python
+from core_engine.system.hierarchical_orchestrator import (
+    HierarchicalSystemOrchestrator, ComponentLayer, AuthorityLevel
+)
+
+class MyTradingComponent(ISystemComponent):
+    def __init__(self):
+        self.component_id = None
+        self.orchestrator = None
+    
+    def register_with_orchestrator(self, orchestrator: HierarchicalSystemOrchestrator):
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="MyTradingComponent",
+            component=self,
+            layer=ComponentLayer.EXECUTION,  # or SUPPORT, GOVERNANCE
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=20
+        )
+```
+
+### 3.3 Authorization Request Pattern
+
+Any component requiring a privileged operation MUST request authorization:
+
+```python
+async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
+    """Request authorization from orchestrator"""
+    if not self.orchestrator or not self.component_id:
+        return False
+    
+    return await self.orchestrator.request_system_authorization(
+        operation, self.component_id, details
+    )
+```
+
+### 3.4 Layer-Specific Guidelines
+
+#### Support Layer Components
+- **Purpose**: Data processing, analysis, regime assessment
+- **Authority**: OPERATIONAL
+- **Examples**: DataManager, RegimeEngine, IndicatorsEngine
+- **Restrictions**: Cannot initiate trades
+
+#### Governance Layer Components  
+- **Purpose**: Risk management, trading authorization
+- **Authority**: GOVERNANCE_CONTROL
+- **Examples**: CentralRiskManager
+- **Responsibilities**: Authorize all trading decisions
+
+#### Execution Layer Components
+- **Purpose**: Strategy execution, order management
+- **Authority**: OPERATIONAL (under governance control)
+- **Examples**: StrategyManager, TradingEngine, ExecutionEngine
+- **Requirements**: Must request authorization for trades
+
+---
+
+## Section 4: Component Lifecycle Management
+
+### 4.1 Lifecycle Implementation
+
+```python
+class MyTradingComponent(ISystemComponent):
+    async def initialize(self) -> bool:
+        """Component initialization"""
+        try:
+            self.logger.info("Initializing component...")
+            # Initialize component resources
+            return True
+        except Exception as e:
+            self.logger.error(f"Initialization failed: {e}")
+            return False
+    
+    async def start(self) -> bool:
+        """Start component operations"""
+        if not self.is_initialized:
+            return False
+        self.is_operational = True
+        return True
+    
+    async def stop(self) -> bool:
+        """Stop component operations"""
+        self.is_operational = False
+        return True
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Health check implementation"""
+        return {
+            'healthy': self.is_operational,
+            'initialized': self.is_initialized,
+            'component_type': self.__class__.__name__,
+            'health_score': self.calculate_health_score()
+        }
+```
+
+### 4.2 Dependency Injection Pattern
+
+```python
+class EnhancedTradingComponent(ISystemComponent):
+    async def configure_dependencies(self, orchestrator) -> bool:
+        """Configure dependencies with validation"""
+        try:
+            required_deps = ["DataManager", "RiskManager", "RegimeEngine"]
+            for dep in required_deps:
+                if not orchestrator.has_component(dep):
+                    self.logger.error(f"Required dependency {dep} not available")
+                    return False
+            
+            # Inject dependencies
+            self.data_manager = orchestrator.get_component("DataManager")
+            self.risk_manager = orchestrator.get_component("RiskManager")
+            self.regime_engine = orchestrator.get_component("RegimeEngine")
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Dependency configuration failed: {e}")
+            return False
+```
+
+### 4.3 Graceful Shutdown Pattern
+
+```python
+async def prepare_for_shutdown(self) -> bool:
+    """Prepare for graceful shutdown"""
+    try:
+        self.logger.info("Preparing for graceful shutdown...")
+        
+        # Complete ongoing operations
+        if hasattr(self, 'active_operations'):
+            await self.complete_active_operations(timeout=30)
+        
+        # Persist critical state
+        if hasattr(self, 'critical_state'):
+            await self.persist_critical_state()
+        
+        # Notify dependent components
+        if hasattr(self, 'dependent_components'):
+            await self.notify_dependents_of_shutdown()
+        
+        # Clean up resources
+        await self.cleanup_resources()
+        
+        return True
+    except Exception as e:
+        self.logger.error(f"Shutdown preparation failed: {e}")
+        return False
+```
+
+### 4.4 Performance Metrics Pattern
+
+```python
+async def get_performance_metrics(self) -> Dict[str, Any]:
+    """Get comprehensive performance metrics"""
+    return {
+        'operational_metrics': {
+            'uptime_seconds': (datetime.now() - self.start_time).total_seconds(),
+            'operations_per_second': self.operations_count / max(1, self.uptime),
+            'success_rate': self.success_count / max(1, self.operations_count),
+            'error_rate': self.error_count / max(1, self.operations_count)
+        },
+        'resource_metrics': {
+            'memory_usage_mb': self.get_memory_usage(),
+            'cpu_usage_percent': self.get_cpu_usage(),
+            'thread_count': self.get_thread_count()
+        },
+        'health_indicators': {
+            'last_successful_operation': self.last_success_time,
+            'consecutive_errors': self.consecutive_error_count,
+            'health_score': self.calculate_health_score()
+        }
+    }
+```
+
+---
+
+## Section 5: Configuration Management ⭐
+
+### MANDATORY: Centralized Configuration Architecture
+
+**ALL configuration MUST be defined in `core_engine/config/` - Single Source of Truth**
+
+#### Configuration Structure
+
+```
+core_engine/config/
+├── __init__.py              # Export all configs
+├── unified_config.py        # Unified config loader (YAML/JSON/ENV)
+├── system_config.py         # System-wide configuration
+├── component_config.py      # Component-specific configs (14 configs)
+├── strategies.py            # Strategy configurations (11 configs)
+└── broker_config.py         # Broker credentials (secure)
+```
+
+#### CORRECT Pattern: Import from Centralized Location
+
+```python
+# ✅ CORRECT: Import from core_engine.config
+from core_engine.config import (
+    DataConfig, RiskConfig, IndicatorConfig, FeatureConfig,
+    SignalConfig, RegimeConfig, AnalyticsConfig, ExecutionConfig,
+    PortfolioConfig, MomentumConfig, MeanReversionConfig
+)
+
+# Create config instances
+data_config = DataConfig(enable_caching=True, cache_ttl=3600)
+strategy_config = MomentumConfig(lookback_period=60, momentum_threshold=0.02)
+```
+
+#### PROHIBITED Pattern: Scattered Configuration
+
+```python
+# ❌ PROHIBITED: Don't define configs in component files
+@dataclass
+class MyComponentConfig:
+    """This should be in core_engine/config/component_config.py"""
+    some_param: int = 10
+
+# ❌ PROHIBITED: Don't use hardcoded defaults
+class MyComponent:
+    def __init__(self):
+        self.timeout = 30  # Should come from config
+```
+
+#### Configuration Composition Pattern
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class PositionLimits:
+    """Reusable position management config"""
+    max_position_size: float = 0.10
+    max_positions: int = 5
+    
+    def __post_init__(self):
+        if not 0.0 < self.max_position_size <= 1.0:
+            raise ValueError(f"max_position_size must be (0, 1.0]")
+
+@dataclass
+class RiskConfig:
+    """Risk configuration using composition"""
+    position_limits: PositionLimits = field(default_factory=PositionLimits)
+    max_daily_var: float = 0.05
+    stop_loss_pct: float = 0.02
+```
+
+#### Configuration Loading Priority
+
+```
+Priority (highest to lowest):
+1. Environment variables (ENV)
+2. Environment-specific files (config/production.yaml)
+3. Base configuration files (config/base.yaml)
+4. Dataclass defaults (in code)
+```
+
+---
+
+## Section 6: Inter-Component Communication
+
+### 6.1 Orchestrator-Mediated Communication (Preferred)
+
+```python
+# ✅ PREFERRED: Communication through orchestrator
+await self.orchestrator.send_message(
+    target_component="DataManager",
+    message_type="data_request",
+    payload={"symbol": "AAPL", "timeframe": "1min"}
+)
+```
+
+### 6.2 Event-Based Communication (Recommended)
+
+```python
+# ✅ RECOMMENDED: Event-based communication
+await self.orchestrator.publish_event(
+    event_type="market_data_updated",
+    event_data={"symbol": "AAPL", "price": 150.0}
+)
+```
+
+### 6.3 Shared State Access
+
+```python
+# Access shared state through orchestrator
+market_data = await self.orchestrator.get_shared_state("market_data")
+
+# Subscribe to data updates
+await self.orchestrator.subscribe_to_data(
+    data_type="market_data",
+    callback=self.on_market_data_update
+)
+```
+
+### 6.4 Dependency Declaration
+
+```python
+class MyTradingComponent(ISystemComponent):
+    DEPENDENCIES = ["DataManager", "RegimeEngine"]
+    
+    async def initialize(self) -> bool:
+        # Orchestrator ensures dependencies are initialized first
+        self.data_manager = self.orchestrator.get_component("DataManager")
+        self.regime_engine = self.orchestrator.get_component("RegimeEngine")
+        return True
+```
+
+---
+
+## Section 7: Error Handling and Logging Standards
+
+```python
+import logging
+
+class MyTradingComponent:
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    async def safe_operation(self):
+        try:
+            result = await self.perform_operation()
+            self.logger.info("Operation completed successfully")
+            return result
+        except Exception as e:
+            self.logger.error(f"Operation failed: {e}")
+            self.status = "error"
+            self.last_error = str(e)
+            raise
+```
+
+---
+
+## Section 8: Component Testing Standards
+
+### Unit Testing
+
+```python
+import pytest
+from unittest.mock import Mock
+
+class TestMyTradingComponent:
+    def setup_method(self):
+        self.mock_orchestrator = Mock()
+        self.component = MyTradingComponent()
+        self.component.register_with_orchestrator(self.mock_orchestrator)
+    
+    async def test_initialization(self):
+        result = await self.component.initialize()
+        assert result is True
+        assert self.component.is_initialized
+```
+
+### Integration Testing
+
+```python
+async def test_component_integration():
+    orchestrator = HierarchicalSystemOrchestrator()
+    component = MyTradingComponent()
+    
+    component_id = orchestrator.register_component(
+        name="TestComponent",
+        component=component,
+        layer=ComponentLayer.EXECUTION,
+        authority_level=AuthorityLevel.OPERATIONAL
+    )
+    
+    await orchestrator.initialize_all_components()
+    await orchestrator.start_all_components()
+    
+    status = component.get_status()
+    assert status['operational'] is True
+```
+
+---
+
+## Section 9: System Initialization Pattern
+
+```python
+async def initialize_system_with_regime_first():
+    """Initialize system with Regime-First architecture"""
+    
+    orchestrator = HierarchicalSystemOrchestrator()
+    
+    # STEP 1: Initialize EnhancedRegimeEngine FIRST (order=5)
+    regime_engine = EnhancedRegimeEngine(config)
+    orchestrator.register_component(
+        "EnhancedRegimeEngine", regime_engine,
+        ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
+        initialization_order=5  # FIRST!
+    )
+    await regime_engine.initialize()
+    await regime_engine.start()
+    
+    # STEP 2: Initialize DataManager with regime context (order=10)
+    data_manager = ClickHouseDataManager(config)
+    data_manager.set_regime_engine(regime_engine)  # Inject regime context
+    orchestrator.register_component(
+        "DataManager", data_manager,
+        ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
+        initialization_order=10
+    )
+    
+    # STEP 3: Continue with other components in order...
+    # All components receive regime context
+    
+    return orchestrator
+```
+
+---
+
+## PROHIBITED Architectural Patterns
+
+❌ **Direct Component Communication**: Must communicate through orchestrator  
+❌ **Bypassing Registration**: All components must register with orchestrator  
+❌ **Independent Trading**: All trades require RiskManager authorization (Rule 3)  
+❌ **Skipping Regime Context**: Cannot process signals without regime awareness  
+❌ **Direct Database Access**: Must use ClickHouseDataManager (Rule 2)  
+❌ **Strategy Isolation**: Strategies must coordinate through StrategyManager (Rule 3)  
+❌ **Unmanaged Lifecycle**: All components must implement ISystemComponent  
+❌ **Scattered Configs**: Don't define configs outside `core_engine/config/`  
+❌ **Hardcoded Defaults**: Don't embed config values in component code  
+
+---
+
+## Compliance and Validation
+
+### Architectural Compliance Checker
+
+```python
+class ArchitectureComplianceChecker:
+    """Validate compliance with Rule 1"""
+    
+    async def validate_system_architecture(self, orchestrator):
+        """Comprehensive Rule 1 compliance validation"""
+        
+        validation_results = {
+            'regime_first_compliance': self._check_regime_first_initialization(orchestrator),
+            'layer_separation': self._check_layer_separation(orchestrator),
+            'component_registration': self._check_all_components_registered(orchestrator),
+            'regime_awareness': self._check_regime_aware_components(orchestrator),
+            'initialization_order': self._check_initialization_order(orchestrator),
+            'config_centralization': self._check_config_patterns(orchestrator)
+        }
+        
+        all_compliant = all(check['passed'] for check in validation_results.values())
+        
+        return {
+            'rule_1_compliant': all_compliant,
+            'validation_results': validation_results,
+            'violations': [k for k, v in validation_results.items() if not v['passed']]
+        }
+```
+
+---
+
+## Related Rules
+
+- **Rule 2**: Data Pipeline (Phases 1-5) - Data flow through processing stages
+- **Rule 3**: Risk & Compliance Governance (Phases 6-10) - Authorization pipeline
+- **Rule 4**: Analytics & Monitoring - Performance and risk analytics
+- **Rule 5**: Execution & Order Management (Phases 11-16) - Trade execution
+- **Rule 6**: Operations & Recovery - Reconciliation, settlement, DR
+
+---
+
+**Last Updated:** December 6, 2025  
+**Status:** ACTIVE (v1.0 - Consolidated from former Rules 1 & 2)  
+**Migration:** This rule replaces former Rule 1 (Component Integration) and Rule 2 (Hierarchical Architecture)

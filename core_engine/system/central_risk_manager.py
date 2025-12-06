@@ -5,15 +5,24 @@ Central Risk Manager - TradeDesk Architecture Compliance
 Enhanced RiskManager implementing the central governance hub pattern.
 Serves as the single authority for ALL trading decisions in the system.
 
-Architecture Compliance:
+Architecture Compliance (Tier-1 Rules):
+- Rule 1: System Architecture - Component integration, Layer 1 (Governance)
+- Rule 3: Risk & Compliance Governance - Phases 6-10 (Authorization Pipeline)
+- Rule 5: Execution & Order Management - Phase 15 (Position Update Authority)
+- Rule 6: Operations & Recovery - P&L Monitoring, Reconciliation integration
+
+Key Responsibilities:
 - Central hub that encapsulates all trading decisions
 - Controls WHAT (StrategyManager) → HOW (TradingEngine) → ACTION (UnifiedExecutionEngine)
 - No component can execute trades independently
 - All trading decisions flow through RiskManager authorization
 - Regime-aware risk management with direct RegimeEngine integration
+- SINGLE AUTHORITY for position updates (Phase 15)
+
+Migration: December 2025 - Former Rule 4 content now Rule 3.
 
 Author: StatArb_Gemini Architecture Compliance
-Version: 1.0.0 (TradeDesk Architecture)
+Version: 2.0.0 (Rules Migration December 2025)
 """
 
 import asyncio

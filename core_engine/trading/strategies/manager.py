@@ -6,16 +6,26 @@ Strategy Manager - Core Engine (WHAT Component)
 Clean implementation of the strategy manager for core_engine.
 This component determines WHAT trades should be made.
 
-As part of the central Risk Manager hub, this manager:
+Architecture Compliance (Tier-1 Rules):
+- Rule 1: System Architecture - Layer 4 (Analytics & Strategy)
+- Rule 2: Data Pipeline - Phase 5 (Strategy Logic)
+- Rule 3: Risk & Compliance Governance - Phase 6 (Multi-Strategy Coordination)
+  - Signal aggregation across strategies
+  - Conflict resolution for same-symbol signals
+  - Strategy weighting and correlation analysis
+  - Submits TradingDecisionRequest to RiskManager (Phase 7)
+
+Key Responsibilities:
 - Analyzes market data and conditions
 - Determines which strategies to activate
 - Generates trading signals and recommendations
+- Aggregates and resolves multi-strategy conflicts
 - Submits trade requests to Risk Manager for authorization
 
-Migration: Direct implementation using proven strategy patterns.
+Migration: December 2025 - Former Rule 5 content absorbed into Rule 3.
 
 Author: StatArb_Gemini Core Engine Migration  
-Version: 1.0.0 (Clean Production - WHAT Component)
+Version: 2.0.0 (Rules Migration December 2025)
 """
 
 import asyncio

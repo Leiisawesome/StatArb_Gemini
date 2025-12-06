@@ -2,7 +2,13 @@
 Pre-Trade Compliance Checker - Institutional Requirement
 Ensures all trades comply with SEC regulations and internal policies BEFORE execution.
 
-Compliance Checks:
+Architecture Compliance (Tier-1 Rules):
+- Rule 3: Risk & Compliance Governance - Phase 7 (Pre-Trade Compliance)
+  - 7 mandatory compliance checks before authorization
+  - Integration with Phase 8 (Risk Authorization)
+  - Feeds compliance result to CentralRiskManager
+
+Compliance Checks (7 Mandatory per Rule 3):
 1. Restricted Securities List - Internal compliance restrictions
 2. Hard-to-Borrow (Reg SHO) - Share locate requirements for short sales
 3. Insider Blackout Periods - Earnings blackouts, MNPI periods
@@ -11,9 +17,11 @@ Compliance Checks:
 6. Concentration Limits - Position concentration tracking
 7. Watch List Monitoring - Compliance watch list alerts
 
+Migration: December 2025 - Former Rule 4 Phase 7A content now Rule 3, Phase 7.
+
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging

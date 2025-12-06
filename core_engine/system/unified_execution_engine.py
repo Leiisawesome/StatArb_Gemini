@@ -5,20 +5,28 @@ Unified Execution Engine - TradeDesk Architecture Compliance
 Central execution hub that consolidates all execution capabilities under RiskManager control.
 Implements the ACTION layer in the institutional WHAT → HOW → ACTION hierarchy.
 
-This engine serves as the single point of execution authority, ensuring:
-- All execution flows through RiskManager authorization
+Architecture Compliance (Tier-1 Rules):
+- Rule 1: System Architecture - Layer 5 (Trading & Execution)
+- Rule 5: Execution & Order Management - Phase 13 (Execution Action)
+  - Receives orders from OMS (Phase 12)
+  - Executes trades per algorithm (MARKET/TWAP/VWAP/ADAPTIVE)
+  - Reports fills to RiskManager for position update (Phase 15)
+  - Triggers TCA analytics (Phase 16)
+
+Key Responsibilities:
+- All execution flows through RiskManager authorization (Rule 3)
 - Complete trade lifecycle management
 - Institutional-grade execution algorithms
-- Comprehensive execution analytics and reporting
-
-Architecture Compliance:
+- Comprehensive execution analytics and reporting (Rule 4)
 - Operates exclusively under RiskManager authority
 - No independent trading decisions
 - All executions require authorization tokens
 - Complete audit trail and risk integration
 
+Migration: December 2025 - Former Rule 7 content now Rule 5.
+
 Author: StatArb_Gemini Architecture Compliance
-Version: 1.0.0 (TradeDesk Architecture)
+Version: 2.0.0 (Rules Migration December 2025)
 """
 
 import asyncio

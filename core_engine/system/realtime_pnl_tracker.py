@@ -2,6 +2,12 @@
 Real-Time P&L Tracker - Performance Monitoring System
 Tracks mark-to-market P&L, intraday high-water mark, and strategy attribution.
 
+Architecture Compliance (Tier-1 Rules):
+- Rule 6: Operations & Recovery - Section 2 (Real-Time P&L Monitoring)
+  - Tick-level P&L updates on every market data tick
+  - Integration with Rule 3 circuit breakers (Phase 9)
+  - Strategy and position attribution for Rule 4 analytics
+
 P&L Tracking:
 1. Unrealized P&L - Mark-to-market on every price tick
 2. Realized P&L - Updated on position closes
@@ -17,13 +23,15 @@ Update Frequency:
 - Every Second: Update aggregates
 - Daily Reset: Reset intraday metrics
 
-Integration with Circuit Breakers:
-- Feeds daily P&L to circuit breaker loss limit
-- Feeds drawdown to circuit breaker drawdown limit
+Integration with Circuit Breakers (Rule 3, Phase 9):
+- Feeds daily P&L to circuit breaker loss limit (-2%)
+- Feeds drawdown to circuit breaker drawdown limit (-5%)
+
+Migration: December 2025 - Former Rule 7 content now Rule 6, Section 2.
 
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging

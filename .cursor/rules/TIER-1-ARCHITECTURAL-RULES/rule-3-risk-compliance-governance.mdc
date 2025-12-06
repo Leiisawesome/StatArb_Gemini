@@ -1,0 +1,784 @@
+---
+description: "Rule 3: Risk & Compliance Governance - Complete Authorization Pipeline"
+alwaysApply: false
+---
+# Rule 3: Risk & Compliance Governance
+
+**Version:** 1.0 (Consolidated from former Rules 4 & 5)  
+**Date:** December 6, 2025  
+**Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Migration Note:** This rule consolidates:
+- Former Rule 4: Risk Governance and Authorization Pipeline
+- Former Rule 5: Multi-Strategy Coordination Standards
+
+---
+
+## Overview
+
+Rule 3 defines the **complete authorization pipeline** from strategy signals through risk governance to authorized trades. The `CentralRiskManager` serves as the **SINGLE POINT OF AUTHORITY** for ALL trading decisions.
+
+**Key Principle:** ALL trading decisions MUST flow through CentralRiskManager authorization. NO component can execute trades independently.
+
+---
+
+## Complete Authorization Pipeline (Phases 6-10)
+
+This pipeline continues from Rule 2 (Phase 5: Strategy Signals) and feeds into Rule 5 (Phase 11: Execution).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FROM RULE 2: PHASE 5 OUTPUT                                │
+│                   Strategy Signals (List[StrategySignal])                    │
+│                   Multiple strategies generate trading signals               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 6: MULTI-STRATEGY COORDINATION (Rule 3.1)                             │
+│ Component: StrategyManager (core_engine/trading/strategies/manager.py)      │
+│ Authority: OPERATIONAL - Multi-strategy coordination                        │
+│ Responsibility: Aggregate signals, resolve conflicts, prioritize trades     │
+│ Input: Dict[strategy_id, List[StrategySignal]]                              │
+│ Output: List[TradingDecisionRequest]                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 7: PRE-TRADE COMPLIANCE (Rule 3.2) 🔴                                 │
+│ Component: PreTradeComplianceChecker                                        │
+│           (core_engine/system/compliance_checker.py)                        │
+│ Authority: GOVERNANCE_CONTROL - Regulatory compliance                       │
+│ Responsibility: Validate regulatory requirements before authorization       │
+│ Input: TradingDecisionRequest                                               │
+│ Output: ComplianceResult (approved/rejected)                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 8: RISK AUTHORIZATION (Rule 3.3) ⭐                                    │
+│ Component: CentralRiskManager                                               │
+│           (core_engine/system/central_risk_manager.py)                      │
+│ Authority: GOVERNANCE_CONTROL - Single Authority for ALL trades            │
+│ Responsibility: Authorize/reject ALL trading decisions                      │
+│ Input: TradingDecisionRequest + ComplianceResult                            │
+│ Output: TradingAuthorization                                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 9: CIRCUIT BREAKER VALIDATION (Rule 3.4) 🔴                           │
+│ Component: TradingCircuitBreakers                                           │
+│           (core_engine/system/circuit_breakers.py)                          │
+│ Authority: SYSTEM_CONTROL - Catastrophic loss prevention                    │
+│ Responsibility: Final safety check before execution                         │
+│ Input: TradingAuthorization + System State                                  │
+│ Output: CircuitBreakerStatus (can_proceed/halt)                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 10: POST-AUTHORIZATION VALIDATION (Rule 3.5)                          │
+│ Component: CentralRiskManager                                               │
+│ Responsibility: Final limit checks, audit record creation                   │
+│ Input: TradingAuthorization + CircuitBreakerStatus                          │
+│ Output: ValidatedAuthorization (ready for execution)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   TO RULE 5: PHASE 11 INPUT                                  │
+│                   ValidatedAuthorization → Execution Planning               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section 1: Phase 6 - Multi-Strategy Coordination
+
+### Component: StrategyManager
+
+**File:** `core_engine/trading/strategies/manager.py`  
+**Layer:** OPERATIONAL  
+**Responsibility:** Coordinate multiple strategies and aggregate signals
+
+### Signal Aggregation Pattern
+
+```python
+class StrategyManager(ISystemComponent):
+    """Multi-strategy coordinator with signal aggregation"""
+    
+    def __init__(self):
+        self.active_strategies = {}
+        self.strategy_weights = {}
+        self.signal_aggregator = MultiStrategySignalAggregator()
+        self.conflict_resolver = SignalConflictResolver()
+    
+    async def aggregate_strategy_signals(
+        self, 
+        strategy_signals: Dict[str, List[StrategySignal]]
+    ) -> List[TradingDecisionRequest]:
+        """
+        Aggregate signals from multiple strategies
+        
+        Steps:
+        1. Collect all signals with strategy weights
+        2. Group signals by symbol
+        3. Resolve conflicts (conflicting signals for same symbol)
+        4. Create TradingDecisionRequest for each final signal
+        """
+        aggregated_signals = []
+        
+        # Group signals by symbol
+        signals_by_symbol = defaultdict(list)
+        for strategy_id, signals in strategy_signals.items():
+            for signal in signals:
+                signals_by_symbol[signal.symbol].append((strategy_id, signal))
+        
+        # Resolve conflicts and create requests
+        for symbol, symbol_signals in signals_by_symbol.items():
+            resolved_signal = await self.conflict_resolver.resolve_conflicts(
+                symbol_signals
+            )
+            
+            if resolved_signal:
+                request = TradingDecisionRequest(
+                    decision_type=TradingDecisionType.POSITION_ENTRY,
+                    symbol=symbol,
+                    side=resolved_signal.signal_type.value,
+                    quantity=resolved_signal.quantity,
+                    confidence=resolved_signal.confidence,
+                    strategy_id=resolved_signal.metadata.get('strategy_id'),
+                    market_regime=await self._get_current_regime(),
+                    requesting_component='StrategyManager'
+                )
+                aggregated_signals.append(request)
+        
+        return aggregated_signals
+```
+
+### Signal Conflict Resolution
+
+```python
+class SignalConflictResolver:
+    """Resolve conflicts between strategy signals"""
+    
+    async def resolve_conflicts(self, signals: List[Signal]) -> Optional[Signal]:
+        """Resolve conflicting signals for the same symbol"""
+        if not signals:
+            return None
+        
+        if len(signals) == 1:
+            return signals[0]
+        
+        # Separate by signal type
+        buy_signals = [s for s in signals if s.signal_type == SignalType.BUY]
+        sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
+        
+        if buy_signals and sell_signals:
+            # Conflicting signals - use confidence-weighted approach
+            return await self._resolve_conflicting_signals(buy_signals, sell_signals)
+        elif buy_signals:
+            return await self._aggregate_same_direction_signals(buy_signals)
+        elif sell_signals:
+            return await self._aggregate_same_direction_signals(sell_signals)
+        else:
+            return None
+    
+    async def _resolve_conflicting_signals(
+        self, 
+        buy_signals: List[Signal], 
+        sell_signals: List[Signal]
+    ) -> Optional[Signal]:
+        """Resolve conflicting buy/sell signals"""
+        buy_confidence = sum(s.confidence * s.metadata.get('final_weight', 1.0) 
+                           for s in buy_signals)
+        sell_confidence = sum(s.confidence * s.metadata.get('final_weight', 1.0) 
+                            for s in sell_signals)
+        
+        # 10% bias threshold to avoid flip-flopping
+        if buy_confidence > sell_confidence * 1.1:
+            return await self._aggregate_same_direction_signals(buy_signals)
+        elif sell_confidence > buy_confidence * 1.1:
+            return await self._aggregate_same_direction_signals(sell_signals)
+        else:
+            # Too close - generate HOLD signal
+            return Signal(
+                symbol=buy_signals[0].symbol,
+                signal_type=SignalType.HOLD,
+                confidence=0.5,
+                quantity=0,
+                metadata={'resolution_reason': 'conflicting_signals_too_close'}
+            )
+```
+
+### Strategy Correlation Analysis
+
+```python
+class StrategyCorrelationAnalyzer:
+    """Monitor strategy correlation for diversification"""
+    
+    async def calculate_correlation_matrix(self) -> pd.DataFrame:
+        """Calculate daily correlation matrix between strategies"""
+        strategy_returns = {}
+        for strategy_id, strategy in self.strategies.items():
+            returns = await strategy.get_daily_returns()
+            strategy_returns[strategy_id] = returns
+        
+        returns_df = pd.DataFrame(strategy_returns)
+        correlation_matrix = returns_df.corr()
+        
+        # Flag highly correlated pairs (>0.7)
+        high_correlations = []
+        for i, s1 in enumerate(correlation_matrix.columns):
+            for j, s2 in enumerate(correlation_matrix.columns):
+                if i < j and correlation_matrix.loc[s1, s2] > 0.7:
+                    high_correlations.append((s1, s2, correlation_matrix.loc[s1, s2]))
+        
+        if high_correlations:
+            self.logger.warning(f"High strategy correlations detected: {high_correlations}")
+        
+        return correlation_matrix
+```
+
+---
+
+## Section 2: Phase 7 - Pre-Trade Compliance
+
+### Component: PreTradeComplianceChecker
+
+**File:** `core_engine/system/compliance_checker.py`  
+**Authority:** GOVERNANCE_CONTROL  
+**Priority:** CRITICAL - Regulatory compliance
+
+### 7 Mandatory Compliance Checks
+
+```python
+class PreTradeComplianceChecker(ISystemComponent):
+    """Pre-trade regulatory compliance validation"""
+    
+    async def check_pre_trade_compliance(
+        self, 
+        request: TradingDecisionRequest
+    ) -> ComplianceResult:
+        """
+        Perform 7 mandatory compliance checks
+        """
+        checks = [
+            self._check_restricted_securities(request),
+            self._check_hard_to_borrow(request),
+            self._check_insider_blackout(request),
+            self._check_13d_filing_trigger(request),
+            self._check_pattern_day_trading(request),
+            self._check_concentration_limits(request),
+            self._check_watch_list(request)
+        ]
+        
+        results = await asyncio.gather(*checks)
+        
+        failed_checks = [r for r in results if not r.passed]
+        if failed_checks:
+            return ComplianceResult(
+                approved=False,
+                rejection_reason=failed_checks[0].reason,
+                failed_checks=failed_checks
+            )
+        
+        return ComplianceResult(approved=True)
+    
+    async def _check_restricted_securities(self, request):
+        """Check against internal restricted securities list"""
+        if request.symbol in self.restricted_securities:
+            return CheckResult(passed=False, reason="Restricted security")
+        return CheckResult(passed=True)
+    
+    async def _check_hard_to_borrow(self, request):
+        """Check Reg SHO share locate for short sales"""
+        if request.side == 'sell' and not self._has_position(request.symbol):
+            if not await self._locate_shares(request.symbol, request.quantity):
+                return CheckResult(passed=False, reason="HTB: No shares to locate")
+        return CheckResult(passed=True)
+    
+    async def _check_insider_blackout(self, request):
+        """Check earnings blackouts and MNPI periods"""
+        if await self._is_in_blackout_period(request.symbol):
+            return CheckResult(passed=False, reason="Insider blackout period")
+        return CheckResult(passed=True)
+    
+    async def _check_13d_filing_trigger(self, request):
+        """Check 5% ownership disclosure requirements"""
+        projected_ownership = await self._calculate_ownership_pct(
+            request.symbol, request.quantity
+        )
+        if projected_ownership >= 0.05:
+            return CheckResult(passed=False, reason="13D filing triggered")
+        return CheckResult(passed=True)
+    
+    async def _check_pattern_day_trading(self, request):
+        """Check PDT rules: 4 trades in 5 days, $25K minimum"""
+        if self.account_value < 25000:
+            day_trades = await self._count_day_trades_last_5_days()
+            if day_trades >= 3:
+                return CheckResult(passed=False, reason="PDT limit reached")
+        return CheckResult(passed=True)
+    
+    async def _check_concentration_limits(self, request):
+        """Check position concentration limits"""
+        # Handled in Phase 8, but pre-check here
+        return CheckResult(passed=True)
+    
+    async def _check_watch_list(self, request):
+        """Check compliance watch list"""
+        if request.symbol in self.watch_list:
+            await self._alert_compliance_team(request)
+        return CheckResult(passed=True)
+```
+
+---
+
+## Section 3: Phase 8 - Risk Authorization ⭐
+
+### Component: CentralRiskManager
+
+**File:** `core_engine/system/central_risk_manager.py`  
+**Layer:** GOVERNANCE_CONTROL  
+**Authority:** SINGLE POINT OF AUTHORITY for ALL trades
+
+### 9 Mandatory Authorization Checks
+
+```python
+async def authorize_trading_decision(
+    self, 
+    request: TradingDecisionRequest
+) -> TradingAuthorization:
+    """
+    Authorize or reject trading decision
+    
+    Performs 9 mandatory checks before authorizing any trade.
+    """
+    
+    # CHECK 1: Signal confidence
+    if request.confidence < self.risk_limits.min_signal_confidence:
+        return self._reject_authorization(
+            request, f"Confidence {request.confidence:.2%} below threshold"
+        )
+    
+    # CHECK 2: Cash availability (BUY orders)
+    if request.side.lower() == 'buy':
+        required_cash = request.quantity * request.current_price
+        if required_cash > self.available_cash:
+            max_affordable = self.available_cash / request.current_price
+            if max_affordable < request.quantity * 0.5:
+                return self._reject_authorization(
+                    request, f"Insufficient cash: need ${required_cash:,.2f}"
+                )
+            else:
+                request.quantity = max_affordable  # Partial fill
+    
+    # CHECK 3: Position availability (SELL orders)
+    elif request.side.lower() == 'sell':
+        current_position = self.current_positions.get(request.symbol, 0.0)
+        if current_position <= 0:
+            return self._reject_authorization(
+                request, f"No position to sell"
+            )
+        if request.quantity > current_position:
+            request.quantity = current_position
+    
+    # CHECK 4: Position size limits
+    new_position_value = request.quantity * request.current_price
+    if new_position_value > self.risk_limits.max_position_size * self.portfolio_value:
+        return self._reject_authorization(
+            request, f"Position size ${new_position_value:,.2f} exceeds limit"
+        )
+    
+    # CHECK 5: Concentration limits
+    concentration = new_position_value / self.portfolio_value
+    if concentration > self.risk_limits.max_concentration:
+        return self._reject_authorization(
+            request, f"Concentration {concentration:.2%} exceeds limit"
+        )
+    
+    # CHECK 6: Daily VaR limits
+    current_var = self._calculate_current_var()
+    if current_var > self.risk_limits.max_daily_var:
+        return self._reject_authorization(
+            request, f"Daily VaR {current_var:.2%} exceeds limit"
+        )
+    
+    # CHECK 7: Strategy allocation limits
+    strategy_allocation = self._get_strategy_allocation(request.strategy_id)
+    if strategy_allocation > self.risk_limits.max_strategy_allocation:
+        return self._reject_authorization(
+            request, f"Strategy allocation {strategy_allocation:.2%} exceeds limit"
+        )
+    
+    # CHECK 8: Regime-adjusted risk scaling
+    regime_multiplier = self._get_regime_risk_multiplier(request.market_regime)
+    adjusted_quantity = request.quantity * regime_multiplier
+    
+    # CHECK 9: Emergency mode
+    if self.emergency_mode:
+        return self._reject_authorization(
+            request, "System in emergency mode - all trades blocked"
+        )
+    
+    # ALL CHECKS PASSED - Authorize trade
+    authorization = TradingAuthorization(
+        authorization_id=str(uuid.uuid4()),
+        request_id=request.request_id,
+        authorization_level=AuthorizationLevel.AUTOMATIC,
+        authorized=True,
+        authorized_quantity=adjusted_quantity,
+        authorization_timestamp=datetime.now(),
+        risk_budget_allocated=new_position_value * 0.02,
+        conditions=['regime_adjusted', 'standard_limits'],
+        expiry_time=datetime.now() + timedelta(seconds=request.max_execution_time)
+    )
+    
+    self.active_authorizations[authorization.authorization_id] = authorization
+    return authorization
+```
+
+### Authorization Levels
+
+```python
+class AuthorizationLevel(Enum):
+    AUTOMATIC = "automatic"      # Auto-approved within normal parameters
+    STANDARD = "standard"        # Normal review process
+    ELEVATED = "elevated"        # Requires elevated review
+    EMERGENCY = "emergency"      # Emergency authorization
+    REJECTED = "rejected"        # Authorization denied
+```
+
+### Risk Limits Configuration
+
+```python
+# Default risk limits (configurable)
+risk_limits = {
+    'max_position_size': 0.10,      # 10% of portfolio
+    'max_daily_var': 0.05,          # 5% daily VaR
+    'max_concentration': 0.15,       # 15% per position
+    'max_strategy_allocation': 0.33, # 33% per strategy
+    'min_signal_confidence': 0.60    # 60% minimum confidence
+}
+```
+
+---
+
+## Section 4: Phase 9 - Circuit Breaker Validation
+
+### Component: TradingCircuitBreakers
+
+**File:** `core_engine/system/circuit_breakers.py`  
+**Authority:** SYSTEM_CONTROL  
+**Priority:** CRITICAL - Catastrophic loss prevention
+
+### 5 Circuit Breaker Mechanisms
+
+```python
+class TradingCircuitBreakers(ISystemComponent):
+    """Trading circuit breakers for catastrophic loss prevention"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.kill_switch_active = False
+        self.order_rate_limit = config.get('order_rate_limit', 10)  # per second
+        self.daily_loss_limit = config.get('daily_loss_limit', -0.02)  # -2%
+        self.drawdown_limit = config.get('drawdown_limit', -0.05)  # -5%
+        self.concentration_limit = config.get('concentration_limit', 0.15)
+    
+    async def check_circuit_breakers(self) -> CircuitBreakerStatus:
+        """Check all circuit breakers"""
+        
+        # 1. Manual Kill Switch (highest priority)
+        if self.kill_switch_active:
+            return CircuitBreakerStatus(
+                can_trade=False,
+                level=CircuitBreakerLevel.HALT,
+                reason="Manual kill switch activated"
+            )
+        
+        # 2. Order Rate Limiting
+        current_rate = await self._get_order_rate()
+        if current_rate > self.order_rate_limit:
+            return CircuitBreakerStatus(
+                can_trade=False,
+                level=CircuitBreakerLevel.HALT,
+                reason=f"Order rate {current_rate}/s exceeds limit"
+            )
+        
+        # 3. Daily Loss Limit
+        daily_pnl = await self._get_daily_pnl_pct()
+        if daily_pnl <= self.daily_loss_limit:
+            await self._execute_emergency_halt()
+            return CircuitBreakerStatus(
+                can_trade=False,
+                level=CircuitBreakerLevel.HALT,
+                reason=f"Daily loss {daily_pnl:.2%} exceeds limit"
+            )
+        
+        # 4. Drawdown from High
+        drawdown = await self._get_intraday_drawdown()
+        if drawdown <= self.drawdown_limit:
+            await self._execute_emergency_halt()
+            return CircuitBreakerStatus(
+                can_trade=False,
+                level=CircuitBreakerLevel.HALT,
+                reason=f"Drawdown {drawdown:.2%} exceeds limit"
+            )
+        
+        # 5. Warning levels (80% of limits)
+        if daily_pnl <= self.daily_loss_limit * 0.8:
+            return CircuitBreakerStatus(
+                can_trade=True,
+                level=CircuitBreakerLevel.WARNING,
+                reason=f"Approaching daily loss limit"
+            )
+        
+        return CircuitBreakerStatus(can_trade=True, level=CircuitBreakerLevel.NORMAL)
+    
+    async def activate_kill_switch(self, authorization_code: str) -> bool:
+        """Activate manual kill switch"""
+        if self._validate_authorization_code(authorization_code):
+            self.kill_switch_active = True
+            await self._cancel_all_pending_orders()
+            await self._notify_risk_team("KILL SWITCH ACTIVATED")
+            return True
+        return False
+```
+
+### Circuit Breaker Levels
+
+```python
+class CircuitBreakerLevel(Enum):
+    NORMAL = "normal"       # 🟢 All systems operational
+    WARNING = "warning"     # 🟡 Approaching limits (80%)
+    CAUTION = "caution"     # 🟠 Limit breached
+    HALT = "halt"           # 🔴 Trading stopped
+    EMERGENCY = "emergency" # ⚫ System shutdown
+```
+
+---
+
+## Section 5: Position Management Authority
+
+### SINGLE SOURCE OF TRUTH: CentralRiskManager
+
+**The CentralRiskManager is the ONLY component that can update positions.**
+
+### Position Update Flow
+
+```python
+async def update_position(
+    self,
+    symbol: str,
+    side: str,
+    quantity: float,
+    price: float,
+    timestamp: datetime
+) -> Dict[str, Any]:
+    """
+    Update position after trade execution
+    
+    ONLY THIS METHOD can modify positions (Rule 3 enforcement).
+    """
+    current_position = self.current_positions.get(symbol, 0.0)
+    
+    if side.lower() == 'buy':
+        new_position = current_position + quantity
+        self.available_cash -= (quantity * price)
+    elif side.lower() == 'sell':
+        new_position = current_position - quantity
+        self.available_cash += (quantity * price)
+    
+    self.current_positions[symbol] = new_position
+    
+    # Record and broadcast
+    position_change = {
+        'timestamp': timestamp,
+        'symbol': symbol,
+        'side': side,
+        'quantity': quantity,
+        'price': price,
+        'previous_position': current_position,
+        'new_position': new_position,
+        'position_value': new_position * price
+    }
+    self.position_history.append(position_change)
+    
+    await self._notify_position_change(position_change)
+    
+    return {
+        'symbol': symbol,
+        'position': new_position,
+        'portfolio_value': self.portfolio_value,
+        'available_cash': self.available_cash
+    }
+```
+
+---
+
+## Section 6: Professional Risk Metrics
+
+### Core Risk Metrics
+
+```python
+@dataclass
+class RiskMetrics:
+    """Professional risk metrics for institutional trading"""
+    
+    # Value at Risk (VaR)
+    var_95: float          # 95% Value at Risk (1-day)
+    var_99: float          # 99% Value at Risk (1-day)
+    conditional_var: float # Expected Shortfall (CVaR)
+    
+    # Drawdown Metrics
+    max_drawdown: float
+    current_drawdown: float
+    drawdown_duration: int
+    
+    # Risk-Adjusted Returns
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    information_ratio: float
+    
+    # Concentration Risk
+    herfindahl_index: float
+    max_sector_weight: float
+    correlation_risk: float
+```
+
+### Regime-Aware Risk Scaling
+
+```python
+def get_regime_risk_limits(self, regime: str) -> Dict[str, float]:
+    """Get risk limits adjusted for current market regime"""
+    base_limits = {
+        'max_position_size': 0.10,
+        'max_daily_var': 0.05,
+        'max_concentration': 0.15
+    }
+    
+    regime_adjustments = {
+        'low_volatility': {'max_position_size': 0.12, 'max_daily_var': 0.06},
+        'high_volatility': {'max_position_size': 0.07, 'max_daily_var': 0.03},
+        'choppy': {'max_position_size': 0.05, 'max_concentration': 0.10},
+        'illiquid': {'max_position_size': 0.08, 'max_concentration': 0.12}
+    }
+    
+    adjusted_limits = base_limits.copy()
+    if regime in regime_adjustments:
+        adjusted_limits.update(regime_adjustments[regime])
+    
+    return adjusted_limits
+```
+
+---
+
+## Section 7: Post-Trade Compliance (NEW)
+
+### Trade Reporting Requirements
+
+```python
+class PostTradeComplianceEngine(ISystemComponent):
+    """Post-trade regulatory compliance and reporting"""
+    
+    async def report_execution(self, execution: ExecutionResult) -> ComplianceRecord:
+        """Report trade for regulatory compliance"""
+        
+        # Best execution reporting (MiFID II)
+        best_ex_report = await self._create_best_execution_report(execution)
+        
+        # Trade reporting (FINRA/SEC)
+        trade_report = await self._create_trade_report(execution)
+        
+        # Short sale marking (Reg SHO)
+        if execution.side == 'sell':
+            await self._mark_short_sale_status(execution)
+        
+        return ComplianceRecord(
+            execution_id=execution.execution_id,
+            reports=[best_ex_report, trade_report],
+            timestamp=datetime.now()
+        )
+```
+
+---
+
+## Component Responsibility Matrix (Phases 6-10)
+
+| Phase | Component | Input | Output | Can Authorize? | Can Execute? | Can Update Positions? |
+|-------|-----------|-------|--------|----------------|--------------|----------------------|
+| **6** | StrategyManager | Strategy Signals | TradingDecisionRequest | ❌ NO | ❌ NO | ❌ NO |
+| **7** | PreTradeComplianceChecker | TradingDecisionRequest | ComplianceResult | ❌ NO | ❌ NO | ❌ NO |
+| **8** | CentralRiskManager | TradingDecisionRequest | TradingAuthorization | ✅ YES (ONLY) | ❌ NO | ✅ YES (ONLY) |
+| **9** | TradingCircuitBreakers | System State | CircuitBreakerStatus | ❌ NO | ❌ NO | ❌ NO |
+| **10** | CentralRiskManager | Authorization | ValidatedAuthorization | ✅ YES | ❌ NO | ✅ YES |
+
+---
+
+## PROHIBITED Patterns (Rule 3 Violations)
+
+### ❌ PROHIBITED: Bypassing Risk Authorization
+
+```python
+# ❌ BAD: Executing trades without authorization
+class BadTradingEngine:
+    async def execute_trade(self, signal):
+        # VIOLATES RULE 3: No authorization check!
+        order = Order(symbol=signal.symbol, quantity=signal.quantity)
+        result = await self.broker.place_order(order)  # ❌ PROHIBITED!
+```
+
+### ❌ PROHIBITED: Direct Position Updates
+
+```python
+# ❌ BAD: Updating positions outside RiskManager
+class BadPortfolioManager:
+    async def update_position(self, symbol, quantity):
+        # VIOLATES RULE 3: Only RiskManager can update positions!
+        self.positions[symbol] += quantity  # ❌ PROHIBITED!
+```
+
+### ✅ CORRECT: Proper Authorization Pattern
+
+```python
+# ✅ GOOD: Proper authorization flow
+class GoodTradingEngine:
+    async def execute_trade(self, request: TradingDecisionRequest):
+        # Step 1: Get authorization (MANDATORY per Rule 3)
+        authorization = await self.risk_manager.authorize_trading_decision(request)
+        
+        if authorization.authorization_level == AuthorizationLevel.REJECTED:
+            return None
+        
+        # Step 2: Execute ONLY with authorization
+        result = await self._execute_authorized(authorization)
+        
+        # Step 3: Report result back to RiskManager
+        await self.risk_manager.on_execution_complete(authorization.authorization_id, result)
+        
+        return result
+```
+
+---
+
+## MANDATORY Requirements
+
+1. **Strategy Registration**: All strategies register with StrategyManager
+2. **Signal Coordination**: All signals participate in aggregation process
+3. **Compliance Checks**: All trades pass 7 mandatory compliance checks
+4. **Risk Authorization**: ALL trades require CentralRiskManager authorization
+5. **Circuit Breaker Check**: Final safety validation before execution
+6. **Position Authority**: ONLY CentralRiskManager updates positions
+7. **Audit Trail**: Complete logging of all authorization decisions
+
+---
+
+## Related Rules
+
+- **Rule 1**: System Architecture - Component integration
+- **Rule 2**: Data Pipeline (Phases 1-5) - Signal generation
+- **Rule 4**: Analytics & Monitoring - Performance tracking
+- **Rule 5**: Execution & Order Management (Phases 11-16) - Trade execution
+- **Rule 6**: Operations & Recovery - Reconciliation
+
+---
+
+**Last Updated:** December 6, 2025  
+**Status:** ACTIVE (v1.0 - Consolidated from former Rules 4 & 5)

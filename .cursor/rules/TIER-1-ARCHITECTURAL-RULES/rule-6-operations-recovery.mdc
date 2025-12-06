@@ -1,0 +1,1106 @@
+---
+description: "Rule 6: Operations & Recovery - Continuous Operations, Settlement, and Disaster Recovery"
+alwaysApply: false
+---
+# Rule 6: Operations & Recovery
+
+**Version:** 1.0 (NEW - Consolidates operational concerns)  
+**Date:** December 6, 2025  
+**Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Migration Note:** This is a NEW rule that consolidates:
+- Position Reconciliation (from former Rule 7, Phase 11+)
+- Real-Time P&L Monitoring (from former Rules 4 & 7)
+- Position Aging Management (from former Rule 7, Phase 10+)
+- Settlement Management (NEW)
+- Disaster Recovery (NEW)
+- Operational Monitoring (NEW)
+
+---
+
+## Overview
+
+Rule 6 defines **continuous operational processes** that run alongside the trading pipeline. These processes ensure **position integrity**, **accurate P&L tracking**, **timely settlement**, and **system resilience**.
+
+**Key Principle:** Operational processes are **non-blocking** to the trading pipeline but **critical** for institutional-grade operations.
+
+---
+
+## Operational Process Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     CONTINUOUS OPERATIONAL PROCESSES                         │
+│                     (Running in parallel with trading pipeline)              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        ▼                            ▼                            ▼
+┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+│  SECTION 1        │    │  SECTION 2        │    │  SECTION 3        │
+│  Position         │    │  Real-Time P&L    │    │  Position Aging   │
+│  Reconciliation   │    │  Monitoring       │    │  Management       │
+│                   │    │                   │    │                   │
+│  • Broker Sync    │    │  • Tick-Level     │    │  • Holding Limits │
+│  • Discrepancy    │    │  • Attribution    │    │  • Age Categories │
+│    Detection      │    │  • High-Water     │    │  • Auto-Close     │
+│  • Auto-Correct   │    │  • Circuit Breaker│    │  • Alerts         │
+└───────────────────┘    └───────────────────┘    └───────────────────┘
+        │                            │                            │
+        ▼                            ▼                            ▼
+┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+│  SECTION 4        │    │  SECTION 5        │    │  SECTION 6        │
+│  Settlement       │    │  Disaster         │    │  Operational      │
+│  Management       │    │  Recovery         │    │  Monitoring       │
+│                   │    │                   │    │                   │
+│  • T+1/T+2 Track  │    │  • State Persist  │    │  • Health Dash    │
+│  • Failure Handle │    │  • Recovery Proc  │    │  • Alerting       │
+│  • Exposure Calc  │    │  • Failover       │    │  • Incident Resp  │
+│  • Clearing       │    │  • Backup         │    │  • Capacity       │
+└───────────────────┘    └───────────────────┘    └───────────────────┘
+```
+
+---
+
+## Section 1: Position Reconciliation
+
+### Component: PositionReconciliationEngine
+
+**File:** `core_engine/system/position_reconciliation.py`  
+**Schedule:** Every 5 minutes (1 minute if discrepancies detected)  
+**Authority:** OPERATIONAL - Can auto-correct severe discrepancies
+
+### Reconciliation Flow
+
+```python
+class PositionReconciliationEngine(ISystemComponent):
+    """Broker position reconciliation with auto-correction"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.reconciliation_interval = config.get('reconciliation_interval', 300)  # 5 min
+        self.accelerated_interval = config.get('accelerated_interval', 60)  # 1 min
+        self.minor_threshold = config.get('minor_threshold', 1000)  # $1K
+        self.moderate_threshold = config.get('moderate_threshold', 10000)  # $10K
+        self.severe_threshold = config.get('severe_threshold', 10000)  # $10K (auto-correct)
+        
+    async def reconcile_positions(self) -> ReconciliationReport:
+        """
+        Compare internal positions with broker positions
+        
+        Steps:
+        1. Fetch broker positions via API
+        2. Compare with CentralRiskManager positions
+        3. Calculate discrepancies
+        4. Classify severity
+        5. Take appropriate action
+        """
+        
+        # Step 1: Fetch broker positions
+        broker_positions = await self._fetch_broker_positions()
+        
+        # Step 2: Get internal positions (READ-ONLY from RiskManager)
+        internal_positions = await self.risk_manager.get_all_positions()
+        
+        # Step 3: Calculate discrepancies
+        discrepancies = self._calculate_discrepancies(
+            broker_positions, 
+            internal_positions
+        )
+        
+        # Step 4: Classify and handle each discrepancy
+        for symbol, discrepancy in discrepancies.items():
+            severity = self._classify_severity(discrepancy)
+            
+            if severity == DiscrepancySeverity.MINOR:
+                # Log and monitor
+                self.logger.info(f"Minor discrepancy: {symbol} ${discrepancy['value_diff']:.2f}")
+                
+            elif severity == DiscrepancySeverity.MODERATE:
+                # Alert risk team
+                await self._alert_risk_team(symbol, discrepancy)
+                
+            elif severity == DiscrepancySeverity.SEVERE:
+                # Auto-correct (trust broker)
+                await self._auto_correct_position(symbol, discrepancy, broker_positions)
+        
+        # Step 5: Generate report
+        return ReconciliationReport(
+            timestamp=datetime.now(),
+            discrepancies=discrepancies,
+            auto_corrections=self.auto_corrections,
+            next_reconciliation=self._calculate_next_reconciliation(discrepancies)
+        )
+    
+    def _classify_severity(self, discrepancy: Dict[str, Any]) -> DiscrepancySeverity:
+        """Classify discrepancy severity"""
+        value_diff = abs(discrepancy['value_diff'])
+        
+        if value_diff <= self.minor_threshold:
+            return DiscrepancySeverity.MINOR
+        elif value_diff <= self.moderate_threshold:
+            return DiscrepancySeverity.MODERATE
+        else:
+            return DiscrepancySeverity.SEVERE
+    
+    async def _auto_correct_position(
+        self, 
+        symbol: str, 
+        discrepancy: Dict[str, Any],
+        broker_positions: Dict[str, float]
+    ):
+        """
+        Auto-correct severe discrepancy
+        
+        SAFETY: Trust broker position over internal
+        """
+        broker_position = broker_positions.get(symbol, 0.0)
+        
+        # Log the correction
+        self.logger.warning(
+            f"🔧 AUTO-CORRECTING position: {symbol} "
+            f"Internal: {discrepancy['internal_qty']:.2f} → "
+            f"Broker: {broker_position:.2f}"
+        )
+        
+        # Request correction through RiskManager (Rule 3 compliance)
+        await self.risk_manager.force_position_sync(
+            symbol=symbol,
+            broker_position=broker_position,
+            correction_reason='severe_discrepancy_auto_correct',
+            original_internal=discrepancy['internal_qty']
+        )
+        
+        # Record the correction
+        self.auto_corrections.append({
+            'timestamp': datetime.now(),
+            'symbol': symbol,
+            'from': discrepancy['internal_qty'],
+            'to': broker_position,
+            'value_diff': discrepancy['value_diff']
+        })
+        
+        # Alert operations team
+        await self._notify_operations('POSITION_AUTO_CORRECTION', {
+            'symbol': symbol,
+            'correction': self.auto_corrections[-1]
+        })
+```
+
+### Discrepancy Severity Levels
+
+```python
+class DiscrepancySeverity(Enum):
+    """Position discrepancy severity levels"""
+    NONE = "none"           # No discrepancy
+    MINOR = "minor"         # <$1K - Log and monitor
+    MODERATE = "moderate"   # $1K-$10K - Alert risk team
+    SEVERE = "severe"       # >$10K - Auto-correct
+```
+
+---
+
+## Section 2: Real-Time P&L Monitoring
+
+### Component: RealTimePnLTracker
+
+**File:** `core_engine/analytics/real_time_pnl.py`  
+**Updates:** Every market data tick  
+**Integration:** CentralRiskManager + AnalyticsManager
+
+### P&L Tracking Implementation
+
+```python
+class RealTimePnLTracker(ISystemComponent):
+    """Tick-level P&L tracking with attribution"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.positions = {}
+        self.cost_basis = {}
+        self.realized_pnl = 0.0
+        self.unrealized_pnl = 0.0
+        self.intraday_high = 0.0
+        self.intraday_low = float('inf')
+        self.strategy_pnl = defaultdict(float)
+        self.position_pnl = defaultdict(float)
+    
+    async def on_market_data_tick(self, symbol: str, price: float):
+        """Update P&L on every price tick"""
+        if symbol not in self.positions or self.positions[symbol] == 0:
+            return
+        
+        position_qty = self.positions[symbol]
+        entry_price = self.cost_basis.get(symbol, price)
+        
+        # Calculate unrealized P&L for this position
+        position_unrealized = (price - entry_price) * position_qty
+        self.position_pnl[symbol] = position_unrealized
+        
+        # Update total unrealized P&L
+        self.unrealized_pnl = sum(self.position_pnl.values())
+        
+        # Update total P&L
+        total_pnl = self.realized_pnl + self.unrealized_pnl
+        
+        # Track intraday high/low
+        self.intraday_high = max(self.intraday_high, total_pnl)
+        self.intraday_low = min(self.intraday_low, total_pnl)
+        
+        # Calculate current drawdown
+        current_drawdown = total_pnl - self.intraday_high
+        
+        # Check circuit breaker thresholds
+        await self._check_pnl_circuit_breakers(total_pnl, current_drawdown)
+        
+        # Broadcast P&L update
+        await self._broadcast_pnl_update({
+            'timestamp': datetime.now(),
+            'total_pnl': total_pnl,
+            'realized_pnl': self.realized_pnl,
+            'unrealized_pnl': self.unrealized_pnl,
+            'intraday_high': self.intraday_high,
+            'current_drawdown': current_drawdown,
+            'position_pnl': dict(self.position_pnl),
+            'strategy_pnl': dict(self.strategy_pnl)
+        })
+    
+    async def on_position_closed(
+        self, 
+        symbol: str, 
+        quantity: float, 
+        exit_price: float,
+        strategy_id: str
+    ):
+        """Update realized P&L on position close"""
+        entry_price = self.cost_basis.get(symbol, exit_price)
+        realized = (exit_price - entry_price) * quantity
+        
+        self.realized_pnl += realized
+        self.strategy_pnl[strategy_id] += realized
+        
+        # Update position
+        self.positions[symbol] = self.positions.get(symbol, 0) - quantity
+        if self.positions[symbol] == 0:
+            del self.position_pnl[symbol]
+            del self.cost_basis[symbol]
+        
+        self.logger.info(
+            f"💰 Realized P&L: {symbol} {quantity}@${exit_price:.2f} "
+            f"= ${realized:,.2f} (Strategy: {strategy_id})"
+        )
+    
+    async def _check_pnl_circuit_breakers(
+        self, 
+        total_pnl: float, 
+        current_drawdown: float
+    ):
+        """Check P&L against circuit breaker thresholds"""
+        portfolio_value = await self.risk_manager.get_portfolio_value()
+        
+        # Daily loss limit check (-2%)
+        daily_pnl_pct = total_pnl / portfolio_value
+        if daily_pnl_pct <= self.daily_loss_limit:
+            await self._trigger_circuit_breaker(
+                'DAILY_LOSS_LIMIT',
+                f"Daily P&L {daily_pnl_pct:.2%} breached {self.daily_loss_limit:.2%} limit"
+            )
+        
+        # Drawdown limit check (-5%)
+        drawdown_pct = current_drawdown / portfolio_value
+        if drawdown_pct <= self.drawdown_limit:
+            await self._trigger_circuit_breaker(
+                'DRAWDOWN_LIMIT',
+                f"Drawdown {drawdown_pct:.2%} breached {self.drawdown_limit:.2%} limit"
+            )
+    
+    def get_pnl_snapshot(self) -> Dict[str, Any]:
+        """Get current P&L snapshot"""
+        total_pnl = self.realized_pnl + self.unrealized_pnl
+        return {
+            'total_pnl': total_pnl,
+            'realized_pnl': self.realized_pnl,
+            'unrealized_pnl': self.unrealized_pnl,
+            'intraday_high': self.intraday_high,
+            'intraday_low': self.intraday_low,
+            'current_drawdown': total_pnl - self.intraday_high,
+            'position_pnl': dict(self.position_pnl),
+            'strategy_pnl': dict(self.strategy_pnl)
+        }
+```
+
+### P&L Attribution
+
+```python
+@dataclass
+class PnLAttribution:
+    """Performance attribution breakdown"""
+    
+    # Total P&L
+    total_pnl: float
+    realized_pnl: float
+    unrealized_pnl: float
+    
+    # By Strategy
+    strategy_pnl: Dict[str, float]
+    strategy_contribution: Dict[str, float]  # As % of total
+    
+    # By Position
+    position_pnl: Dict[str, float]
+    top_contributors: List[Tuple[str, float]]
+    bottom_contributors: List[Tuple[str, float]]
+    
+    # By Factor (optional)
+    market_factor_pnl: float = 0.0
+    sector_factor_pnl: float = 0.0
+    alpha_pnl: float = 0.0
+```
+
+---
+
+## Section 3: Position Aging Management
+
+### Component: PositionAgingMonitor
+
+**File:** `core_engine/system/position_aging_monitor.py`  
+**Schedule:** Hourly check, continuous monitoring  
+**Authority:** OPERATIONAL - Can trigger auto-close
+
+### Strategy-Specific Holding Limits
+
+```python
+class PositionAgingMonitor(ISystemComponent):
+    """Monitor position age with strategy-specific limits"""
+    
+    # Default holding periods by strategy type
+    DEFAULT_HOLDING_PERIODS = {
+        'arbitrage': timedelta(days=2),
+        'mean_reversion': timedelta(days=3),
+        'stat_arb': timedelta(days=5),
+        'momentum': timedelta(days=7),
+        'breakout': timedelta(days=10),
+        'trend_following': timedelta(days=30),
+        'default': timedelta(days=5)
+    }
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.holding_periods = {
+            **self.DEFAULT_HOLDING_PERIODS,
+            **config.get('holding_periods', {})
+        }
+        self.age_alerts = defaultdict(list)
+        self.auto_close_enabled = config.get('auto_close_enabled', True)
+    
+    async def check_position_aging(self) -> AgingReport:
+        """Check all positions for aging violations"""
+        aging_report = AgingReport(timestamp=datetime.now())
+        
+        positions = await self.risk_manager.get_position_tracking()
+        
+        for symbol, position_info in positions.items():
+            entry_time = position_info['entry_time']
+            strategy_id = position_info['strategy_id']
+            strategy_type = position_info.get('strategy_type', 'default')
+            
+            # Get holding limit for this strategy
+            max_holding = self.holding_periods.get(
+                strategy_type, 
+                self.DEFAULT_HOLDING_PERIODS['default']
+            )
+            
+            # Calculate position age
+            age = datetime.now() - entry_time
+            age_ratio = age / max_holding
+            
+            # Categorize position
+            category = self._categorize_age(age_ratio)
+            
+            aging_report.add_position(symbol, {
+                'age_days': age.days,
+                'age_hours': age.total_seconds() / 3600,
+                'max_age_days': max_holding.days,
+                'age_ratio': age_ratio,
+                'category': category,
+                'strategy_id': strategy_id,
+                'strategy_type': strategy_type
+            })
+            
+            # Take action based on category
+            await self._handle_aging_category(symbol, category, position_info, age)
+        
+        return aging_report
+    
+    def _categorize_age(self, age_ratio: float) -> PositionAgeCategory:
+        """Categorize position by age ratio"""
+        if age_ratio < 0.5:
+            return PositionAgeCategory.FRESH      # 🟢 <50% of limit
+        elif age_ratio < 0.8:
+            return PositionAgeCategory.AGING      # 🟡 50-80%
+        elif age_ratio < 1.0:
+            return PositionAgeCategory.STALE      # 🟠 80-100%
+        else:
+            return PositionAgeCategory.EXPIRED    # 🔴 >100%
+    
+    async def _handle_aging_category(
+        self, 
+        symbol: str, 
+        category: PositionAgeCategory,
+        position_info: Dict[str, Any],
+        age: timedelta
+    ):
+        """Handle position based on age category"""
+        
+        if category == PositionAgeCategory.FRESH:
+            # Normal operation
+            pass
+        
+        elif category == PositionAgeCategory.AGING:
+            # Monitor closely - log warning
+            self.logger.warning(
+                f"🟡 Position aging: {symbol} held for {age.days} days "
+                f"(Strategy: {position_info['strategy_id']})"
+            )
+        
+        elif category == PositionAgeCategory.STALE:
+            # Alert trader - prepare to close
+            await self._alert_position_stale(symbol, position_info, age)
+            self.logger.warning(
+                f"🟠 Position stale: {symbol} held for {age.days} days - "
+                f"approaching limit! (Strategy: {position_info['strategy_id']})"
+            )
+        
+        elif category == PositionAgeCategory.EXPIRED:
+            # Auto-close if enabled
+            if self.auto_close_enabled:
+                await self._auto_close_expired_position(symbol, position_info, age)
+            else:
+                await self._alert_expired_position(symbol, position_info, age)
+    
+    async def _auto_close_expired_position(
+        self, 
+        symbol: str, 
+        position_info: Dict[str, Any],
+        age: timedelta
+    ):
+        """Auto-close expired position"""
+        self.logger.warning(
+            f"🔴 AUTO-CLOSING expired position: {symbol} "
+            f"held for {age.days} days (limit exceeded)"
+        )
+        
+        # Request close through RiskManager
+        await self.risk_manager.close_position(
+            symbol=symbol,
+            reason='holding_period_exceeded',
+            urgency='normal',
+            metadata={
+                'age_days': age.days,
+                'strategy_id': position_info['strategy_id'],
+                'entry_time': position_info['entry_time'].isoformat()
+            }
+        )
+
+
+class PositionAgeCategory(Enum):
+    """Position age categories"""
+    FRESH = "fresh"       # 🟢 <50% of limit
+    AGING = "aging"       # 🟡 50-80% of limit  
+    STALE = "stale"       # 🟠 80-100% of limit
+    EXPIRED = "expired"   # 🔴 >100% of limit
+```
+
+---
+
+## Section 4: Settlement Management
+
+### Component: SettlementManager
+
+**File:** `core_engine/system/settlement_manager.py`  
+**Authority:** OPERATIONAL - Settlement tracking and failure handling
+
+### Settlement Tracking
+
+```python
+class SettlementStatus(Enum):
+    """Settlement lifecycle states"""
+    PENDING = "pending"           # Trade executed, awaiting settlement
+    MATCHED = "matched"           # Trade matched with counterparty
+    AFFIRMED = "affirmed"         # Trade affirmed
+    SETTLING = "settling"         # Settlement in progress
+    SETTLED = "settled"           # Settlement complete
+    FAILED = "failed"             # Settlement failed
+    CANCELLED = "cancelled"       # Trade cancelled before settlement
+
+
+@dataclass
+class SettlementRecord:
+    """Settlement tracking record"""
+    
+    # Identity
+    settlement_id: str
+    execution_id: str
+    order_id: str
+    
+    # Trade details
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    trade_date: date
+    settlement_date: date
+    
+    # Settlement state
+    status: SettlementStatus = SettlementStatus.PENDING
+    
+    # Amounts
+    gross_amount: float = 0.0
+    net_amount: float = 0.0
+    commission: float = 0.0
+    fees: float = 0.0
+    
+    # Counterparty
+    counterparty_id: Optional[str] = None
+    clearing_broker: Optional[str] = None
+    
+    # Timestamps
+    created_at: datetime = field(default_factory=datetime.now)
+    settled_at: Optional[datetime] = None
+    
+    # Failure tracking
+    failure_reason: Optional[str] = None
+    retry_count: int = 0
+
+
+class SettlementManager(ISystemComponent):
+    """T+1/T+2 Settlement tracking and management"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.pending_settlements: Dict[str, SettlementRecord] = {}
+        self.settlement_calendar = {}  # Market holidays
+        self.default_settlement_days = config.get('settlement_days', 1)  # T+1
+        self.max_retries = config.get('max_retries', 3)
+    
+    def calculate_settlement_date(self, trade_date: date, symbol: str) -> date:
+        """Calculate settlement date based on market and instrument"""
+        settlement_days = self._get_settlement_days(symbol)
+        
+        # Add business days (skip weekends and holidays)
+        current = trade_date
+        days_added = 0
+        while days_added < settlement_days:
+            current += timedelta(days=1)
+            if current.weekday() < 5 and current not in self.settlement_calendar:
+                days_added += 1
+        
+        return current
+    
+    async def track_pending_settlement(
+        self, 
+        execution_id: str,
+        order_id: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        commission: float = 0.0
+    ) -> SettlementRecord:
+        """Create settlement tracking record after execution"""
+        trade_date = date.today()
+        settlement_date = self.calculate_settlement_date(trade_date, symbol)
+        
+        gross = quantity * price
+        net = gross + commission if side == 'buy' else gross - commission
+        
+        record = SettlementRecord(
+            settlement_id=f"STL-{execution_id}",
+            execution_id=execution_id,
+            order_id=order_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            price=price,
+            trade_date=trade_date,
+            settlement_date=settlement_date,
+            gross_amount=gross,
+            net_amount=net,
+            commission=commission
+        )
+        
+        self.pending_settlements[record.settlement_id] = record
+        
+        self.logger.info(
+            f"📋 Settlement tracked: {record.settlement_id} "
+            f"{symbol} {side} {quantity}@${price:.2f} "
+            f"due {settlement_date}"
+        )
+        
+        return record
+    
+    async def get_settlement_exposure(self) -> Dict[str, float]:
+        """Calculate total settlement exposure"""
+        buy_exposure = sum(
+            r.net_amount for r in self.pending_settlements.values()
+            if r.status == SettlementStatus.PENDING and r.side == 'buy'
+        )
+        sell_exposure = sum(
+            r.net_amount for r in self.pending_settlements.values()
+            if r.status == SettlementStatus.PENDING and r.side == 'sell'
+        )
+        
+        return {
+            'pending_buys': buy_exposure,
+            'pending_sells': sell_exposure,
+            'net_exposure': buy_exposure - sell_exposure,
+            'total_pending_count': len([
+                r for r in self.pending_settlements.values()
+                if r.status == SettlementStatus.PENDING
+            ]),
+            'due_today': len([
+                r for r in self.pending_settlements.values()
+                if r.settlement_date == date.today()
+            ]),
+            'overdue': len([
+                r for r in self.pending_settlements.values()
+                if r.settlement_date < date.today() and r.status == SettlementStatus.PENDING
+            ])
+        }
+    
+    async def check_settlement_failures(self) -> List[SettlementRecord]:
+        """Check for failed or late settlements"""
+        today = date.today()
+        failures = []
+        
+        for record in self.pending_settlements.values():
+            if record.status == SettlementStatus.PENDING:
+                if record.settlement_date < today:
+                    record.status = SettlementStatus.FAILED
+                    record.failure_reason = 'settlement_date_passed'
+                    failures.append(record)
+                    
+                    await self._handle_settlement_failure(record)
+        
+        return failures
+    
+    async def _handle_settlement_failure(self, record: SettlementRecord):
+        """Handle settlement failure"""
+        self.logger.error(
+            f"❌ Settlement failed: {record.settlement_id} "
+            f"{record.symbol} due {record.settlement_date}"
+        )
+        
+        if record.retry_count < self.max_retries:
+            # Retry settlement
+            record.retry_count += 1
+            record.status = SettlementStatus.PENDING
+            record.settlement_date = date.today() + timedelta(days=1)
+            
+            self.logger.info(
+                f"🔄 Retry settlement: {record.settlement_id} "
+                f"(attempt {record.retry_count}/{self.max_retries})"
+            )
+        else:
+            # Escalate to operations
+            await self._escalate_settlement_failure(record)
+    
+    async def confirm_settlement(self, settlement_id: str) -> SettlementRecord:
+        """Confirm settlement completion"""
+        record = self.pending_settlements.get(settlement_id)
+        if record:
+            record.status = SettlementStatus.SETTLED
+            record.settled_at = datetime.now()
+            
+            self.logger.info(
+                f"✅ Settlement confirmed: {settlement_id} "
+                f"{record.symbol}"
+            )
+        return record
+```
+
+---
+
+## Section 5: Disaster Recovery
+
+### Component: DisasterRecoveryManager
+
+**File:** `core_engine/system/disaster_recovery.py`  
+**Authority:** SYSTEM_CONTROL - Critical system protection
+
+### State Persistence
+
+```python
+class DisasterRecoveryManager(ISystemComponent):
+    """System state persistence and recovery"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.state_persistence_path = config.get('state_path', './state/')
+        self.backup_interval = config.get('backup_interval', 300)  # 5 min
+        self.max_backups = config.get('max_backups', 48)  # 4 hours of history
+        self.critical_components = [
+            'risk_manager',
+            'oms',
+            'settlement_manager',
+            'position_reconciliation'
+        ]
+    
+    async def persist_system_state(self) -> StateSnapshot:
+        """Persist complete system state for recovery"""
+        snapshot = StateSnapshot(
+            timestamp=datetime.now(),
+            snapshot_id=f"SS-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+        
+        # Capture critical component states
+        snapshot.risk_manager_state = await self._capture_risk_manager_state()
+        snapshot.oms_state = await self._capture_oms_state()
+        snapshot.positions = await self._capture_positions()
+        snapshot.pending_orders = await self._capture_pending_orders()
+        snapshot.settlement_records = await self._capture_settlements()
+        
+        # Save to disk
+        await self._save_snapshot(snapshot)
+        
+        # Rotate old backups
+        await self._rotate_backups()
+        
+        self.logger.info(f"💾 System state persisted: {snapshot.snapshot_id}")
+        
+        return snapshot
+    
+    async def recover_system_state(
+        self, 
+        snapshot_id: Optional[str] = None
+    ) -> RecoveryResult:
+        """Recover system state from snapshot"""
+        
+        # Load snapshot (latest if not specified)
+        if snapshot_id:
+            snapshot = await self._load_snapshot(snapshot_id)
+        else:
+            snapshot = await self._load_latest_snapshot()
+        
+        if not snapshot:
+            return RecoveryResult(
+                success=False,
+                error="No snapshot available for recovery"
+            )
+        
+        self.logger.warning(
+            f"🔄 RECOVERING system state from: {snapshot.snapshot_id} "
+            f"(captured at {snapshot.timestamp})"
+        )
+        
+        # Recovery sequence (order matters!)
+        recovery_steps = [
+            ('positions', self._recover_positions),
+            ('risk_manager', self._recover_risk_manager),
+            ('oms', self._recover_oms),
+            ('settlements', self._recover_settlements)
+        ]
+        
+        for step_name, recovery_func in recovery_steps:
+            try:
+                await recovery_func(snapshot)
+                self.logger.info(f"✅ Recovered: {step_name}")
+            except Exception as e:
+                self.logger.error(f"❌ Recovery failed: {step_name} - {e}")
+                return RecoveryResult(
+                    success=False,
+                    error=f"Failed at {step_name}: {str(e)}",
+                    partial_recovery=True,
+                    completed_steps=[s for s, _ in recovery_steps[:recovery_steps.index((step_name, recovery_func))]]
+                )
+        
+        # Verify recovery
+        verification = await self._verify_recovery(snapshot)
+        
+        return RecoveryResult(
+            success=verification['success'],
+            snapshot_id=snapshot.snapshot_id,
+            recovery_time=snapshot.timestamp,
+            verification=verification
+        )
+    
+    async def _recover_positions(self, snapshot: StateSnapshot):
+        """Recover position state"""
+        for symbol, position_data in snapshot.positions.items():
+            await self.risk_manager.force_position_sync(
+                symbol=symbol,
+                broker_position=position_data['quantity'],
+                correction_reason='disaster_recovery',
+                original_internal=0.0
+            )
+    
+    async def _recover_oms(self, snapshot: StateSnapshot):
+        """Recover OMS state"""
+        for order_id, order_data in snapshot.pending_orders.items():
+            if order_data['state'] in ['NEW', 'PARTIALLY_FILLED']:
+                # Reconstruct working order
+                await self.oms.restore_order(order_data)
+
+
+@dataclass
+class StateSnapshot:
+    """Complete system state snapshot"""
+    timestamp: datetime
+    snapshot_id: str
+    
+    # Component states
+    risk_manager_state: Dict[str, Any] = field(default_factory=dict)
+    oms_state: Dict[str, Any] = field(default_factory=dict)
+    positions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    pending_orders: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    settlement_records: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    
+    # Metadata
+    system_version: str = "1.0"
+    checksum: Optional[str] = None
+```
+
+### Failover Mechanisms
+
+```python
+class FailoverManager(ISystemComponent):
+    """System failover and redundancy management"""
+    
+    async def initiate_failover(self, reason: str) -> FailoverResult:
+        """Initiate system failover to backup"""
+        self.logger.critical(f"🚨 FAILOVER INITIATED: {reason}")
+        
+        # Step 1: Cancel all working orders
+        await self._cancel_all_working_orders()
+        
+        # Step 2: Persist current state
+        await self.dr_manager.persist_system_state()
+        
+        # Step 3: Notify operations
+        await self._notify_failover(reason)
+        
+        # Step 4: Switch to backup systems
+        failover_result = await self._execute_failover()
+        
+        return failover_result
+    
+    async def _cancel_all_working_orders(self):
+        """Emergency cancel all working orders"""
+        working_orders = await self.oms.get_working_orders()
+        
+        for order in working_orders:
+            try:
+                await self.oms.cancel_order(
+                    order.order_id, 
+                    reason='failover_emergency_cancel'
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to cancel order {order.order_id}: {e}")
+```
+
+---
+
+## Section 6: Operational Monitoring
+
+### Health Dashboard Requirements
+
+```python
+@dataclass
+class SystemHealthStatus:
+    """Complete system health status"""
+    
+    # Overall Status
+    overall_status: HealthLevel  # GREEN/YELLOW/RED/CRITICAL
+    timestamp: datetime
+    
+    # Component Health
+    component_health: Dict[str, HealthLevel]
+    
+    # Key Metrics
+    positions_in_sync: bool
+    working_orders_count: int
+    pending_settlements_count: int
+    daily_pnl: float
+    current_drawdown: float
+    
+    # Alerts
+    active_alerts: List[Alert]
+    recent_incidents: List[Incident]
+    
+    # Capacity
+    cpu_usage_pct: float
+    memory_usage_pct: float
+    disk_usage_pct: float
+    api_rate_limit_remaining: int
+
+
+class HealthLevel(Enum):
+    """System health levels"""
+    GREEN = "green"       # All systems operational
+    YELLOW = "yellow"     # Minor issues, monitoring
+    RED = "red"           # Significant issues
+    CRITICAL = "critical" # System failure
+```
+
+### Alerting Framework
+
+```python
+class AlertManager(ISystemComponent):
+    """Operational alerting framework"""
+    
+    ALERT_THRESHOLDS = {
+        'daily_pnl_warning': -0.015,      # -1.5%
+        'daily_pnl_critical': -0.02,      # -2%
+        'drawdown_warning': -0.04,        # -4%
+        'drawdown_critical': -0.05,       # -5%
+        'position_discrepancy_value': 10000,
+        'settlement_overdue_hours': 24,
+        'order_failure_rate': 0.1,        # 10%
+        'system_latency_ms': 1000
+    }
+    
+    async def check_and_alert(self) -> List[Alert]:
+        """Run all alert checks"""
+        alerts = []
+        
+        # P&L alerts
+        pnl_snapshot = await self.pnl_tracker.get_pnl_snapshot()
+        portfolio_value = await self.risk_manager.get_portfolio_value()
+        
+        daily_pnl_pct = pnl_snapshot['total_pnl'] / portfolio_value
+        if daily_pnl_pct <= self.ALERT_THRESHOLDS['daily_pnl_critical']:
+            alerts.append(Alert(
+                level=AlertLevel.CRITICAL,
+                category='P&L',
+                message=f"Daily P&L {daily_pnl_pct:.2%} breached critical threshold",
+                action_required='HALT_TRADING'
+            ))
+        elif daily_pnl_pct <= self.ALERT_THRESHOLDS['daily_pnl_warning']:
+            alerts.append(Alert(
+                level=AlertLevel.WARNING,
+                category='P&L',
+                message=f"Daily P&L {daily_pnl_pct:.2%} approaching limit"
+            ))
+        
+        # Position reconciliation alerts
+        recon_status = await self.reconciliation.get_status()
+        if recon_status['severe_discrepancies'] > 0:
+            alerts.append(Alert(
+                level=AlertLevel.CRITICAL,
+                category='RECONCILIATION',
+                message=f"{recon_status['severe_discrepancies']} severe position discrepancies",
+                action_required='INVESTIGATE'
+            ))
+        
+        # Settlement alerts
+        settlement_exposure = await self.settlement_manager.get_settlement_exposure()
+        if settlement_exposure['overdue'] > 0:
+            alerts.append(Alert(
+                level=AlertLevel.WARNING,
+                category='SETTLEMENT',
+                message=f"{settlement_exposure['overdue']} overdue settlements"
+            ))
+        
+        # Send alerts
+        for alert in alerts:
+            await self._send_alert(alert)
+        
+        return alerts
+```
+
+### Incident Response
+
+```python
+@dataclass
+class Incident:
+    """Operational incident record"""
+    incident_id: str
+    timestamp: datetime
+    severity: IncidentSeverity
+    category: str
+    description: str
+    status: IncidentStatus
+    assigned_to: Optional[str]
+    resolution: Optional[str]
+    resolved_at: Optional[datetime]
+
+
+class IncidentManager(ISystemComponent):
+    """Incident tracking and response"""
+    
+    async def create_incident(
+        self, 
+        severity: IncidentSeverity,
+        category: str,
+        description: str,
+        auto_actions: List[str] = None
+    ) -> Incident:
+        """Create and track new incident"""
+        incident = Incident(
+            incident_id=f"INC-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            timestamp=datetime.now(),
+            severity=severity,
+            category=category,
+            description=description,
+            status=IncidentStatus.OPEN
+        )
+        
+        # Execute automatic actions
+        if auto_actions:
+            for action in auto_actions:
+                await self._execute_auto_action(action, incident)
+        
+        # Notify appropriate team
+        await self._notify_incident(incident)
+        
+        return incident
+```
+
+---
+
+## Component Responsibility Matrix
+
+| Component | Responsibility | Runs | Can Modify Positions? | Authority |
+|-----------|---------------|------|----------------------|-----------|
+| **PositionReconciliation** | Broker sync, discrepancy detection | Every 5 min | ⚠️ Auto-correct only | OPERATIONAL |
+| **RealTimePnLTracker** | P&L tracking, circuit breaker | Every tick | ❌ READ-ONLY | OPERATIONAL |
+| **PositionAgingMonitor** | Holding limits, auto-close | Hourly | ⚠️ Auto-close only | OPERATIONAL |
+| **SettlementManager** | T+1/T+2 tracking, failures | Continuous | ❌ NO | OPERATIONAL |
+| **DisasterRecovery** | State persistence, recovery | Every 5 min | ✅ Recovery only | SYSTEM_CONTROL |
+| **AlertManager** | Threshold monitoring, alerts | Continuous | ❌ NO | OPERATIONAL |
+
+---
+
+## MANDATORY Operations Requirements
+
+1. **Position Reconciliation**: Sync with broker every 5 minutes
+2. **Real-Time P&L**: Update on every market data tick
+3. **Position Aging**: Monitor all positions against holding limits
+4. **Settlement Tracking**: Track all trades through settlement
+5. **State Persistence**: Snapshot system state every 5 minutes
+6. **Health Monitoring**: Continuous system health checks
+7. **Alerting**: Immediate alerts on threshold breaches
+
+---
+
+## PROHIBITED Patterns
+
+❌ **Ignoring Discrepancies**: All discrepancies must be tracked and resolved
+❌ **Skipping Reconciliation**: Position reconciliation cannot be disabled
+❌ **Stale P&L**: P&L must update on every tick
+❌ **Untracked Settlements**: All trades must have settlement records
+❌ **No Backup**: System state must be persisted regularly
+❌ **Silent Failures**: All failures must generate alerts
+
+---
+
+## Related Rules
+
+- **Rule 1**: System Architecture - Component integration
+- **Rule 3**: Risk Governance - Position management authority
+- **Rule 4**: Analytics & Monitoring - Performance analytics
+- **Rule 5**: Execution & Order Management - Order lifecycle
+
+---
+
+**Last Updated:** December 6, 2025  
+**Status:** ACTIVE (v1.0 - NEW rule consolidating operational concerns)

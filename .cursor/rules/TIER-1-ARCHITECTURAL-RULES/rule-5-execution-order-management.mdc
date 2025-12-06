@@ -1,0 +1,764 @@
+---
+description: "Rule 5: Execution & Order Management - Complete Execution Pipeline"
+alwaysApply: false
+---
+# Rule 5: Execution & Order Management
+
+**Version:** 1.0 (Expanded from former Rule 7)  
+**Date:** December 6, 2025  
+**Status:** ACTIVE - MANDATORY COMPLIANCE
+
+**Migration Note:** This rule expands former Rule 7 with:
+- NEW: Order Management System (OMS) - Phase 12
+- Clean phase numbering (11-16)
+- Position aging moved to Rule 6
+- Reconciliation moved to Rule 6
+
+---
+
+## Overview
+
+Rule 5 defines the **complete execution and portfolio update pipeline** from authorized trades through execution to portfolio state updates. This pipeline ensures **institutional-grade execution**, **transaction cost optimization**, and **accurate portfolio tracking**.
+
+**Key Principle:** ALL execution operations are governed by **Rule 3 (Risk Authorization)** and flow through the **TradingEngine (HOW) → OMS → UnifiedExecutionEngine (ACTION) → Portfolio Update** sequence.
+
+---
+
+## Complete Execution Pipeline (Phases 11-16)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FROM RULE 3: PHASE 10 OUTPUT                               │
+│                   ValidatedAuthorization (approved trades)                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 11: EXECUTION PLANNING (HOW) (Rule 5.1)                               │
+│ Component: TradingEngine (core_engine/trading/engine.py)                    │
+│ Authority: OPERATIONAL - Execution strategy planning                        │
+│ Responsibility: Determine HOW to execute authorized trades                  │
+│ Input: ValidatedAuthorization                                               │
+│ Output: ExecutionPlan                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 12: ORDER MANAGEMENT (Rule 5.2) ⭐ NEW                                 │
+│ Component: OrderManagementSystem (core_engine/system/oms.py)                │
+│ Authority: OPERATIONAL - Order lifecycle management                         │
+│ Responsibility: Create, track, modify orders throughout lifecycle          │
+│ Input: ExecutionPlan                                                        │
+│ Output: Order (with lifecycle tracking)                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 13: EXECUTION ACTION (Rule 5.3)                                       │
+│ Component: UnifiedExecutionEngine                                           │
+│           (core_engine/system/unified_execution_engine.py)                  │
+│ Authority: OPERATIONAL - Trade execution                                    │
+│ Responsibility: Execute trades per plan (ACTION)                            │
+│ Input: Order                                                                │
+│ Output: ExecutionResult                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 14: FILL PROCESSING (Rule 5.4)                                        │
+│ Component: OrderRejectionHandler + OMS                                      │
+│ Responsibility: Handle fills, partial fills, rejections                     │
+│ Input: ExecutionResult                                                      │
+│ Output: ProcessedFill / RejectionResolution                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 15: POSITION UPDATE (Rule 5.5) ⭐                                      │
+│ Component: CentralRiskManager (callback)                                    │
+│           (core_engine/system/central_risk_manager.py)                      │
+│ Authority: GOVERNANCE_CONTROL - Position management                         │
+│ Responsibility: Update positions and cash (ONLY HERE per Rule 3)           │
+│ Input: ProcessedFill                                                        │
+│ Output: PositionUpdate (broadcast to all components)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 16: TCA & ANALYTICS (Rule 5.6)                                        │
+│ Component: AnalyticsManager (core_engine/analytics/manager.py)              │
+│ Authority: OPERATIONAL - Performance measurement                            │
+│ Responsibility: Transaction cost analysis and performance tracking          │
+│ Input: ExecutionResult + PositionUpdate                                     │
+│ Output: ExecutionQualityMetrics                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Section 1: Phase 11 - Execution Planning
+
+### Component: TradingEngine
+
+**File:** `core_engine/trading/engine.py`  
+**Responsibility:** Determine HOW to execute authorized trades
+
+```python
+async def create_execution_plan(
+    self, 
+    authorization: TradingAuthorization
+) -> ExecutionPlan:
+    """
+    Create optimal execution plan
+    
+    Determines:
+    1. Execution algorithm (MARKET/LIMIT/TWAP/VWAP/ADAPTIVE)
+    2. Order slicing strategy
+    3. Timing parameters
+    4. Venue selection
+    """
+    
+    # Get market data for execution planning
+    market_data = await self.data_manager.get_market_data(authorization.symbol)
+    
+    # Assess liquidity
+    liquidity_score = await self.liquidity_engine.assess_liquidity(
+        authorization.symbol, 
+        authorization.authorized_quantity
+    )
+    
+    # Select execution algorithm
+    algorithm = self._select_execution_algorithm(
+        quantity=authorization.authorized_quantity,
+        urgency=authorization.urgency,
+        liquidity_score=liquidity_score,
+        time_horizon=authorization.max_execution_time
+    )
+    
+    # Create order slicing plan (for large orders)
+    slicing_plan = None
+    if authorization.authorized_quantity > liquidity_score.avg_trade_size * 5:
+        slicing_plan = self._create_slicing_plan(
+            total_quantity=authorization.authorized_quantity,
+            algorithm=algorithm,
+            time_horizon=authorization.max_execution_time
+        )
+    
+    # Calculate market impact estimate
+    impact_estimate = await self._estimate_market_impact(
+        symbol=authorization.symbol,
+        quantity=authorization.authorized_quantity,
+        liquidity_score=liquidity_score
+    )
+    
+    return ExecutionPlan(
+        authorization=authorization,
+        algorithm=algorithm,
+        slicing_plan=slicing_plan,
+        estimated_impact_bps=impact_estimate.total_impact_bps,
+        estimated_fill_price=market_data.current_price + impact_estimate.price_adjustment,
+        venue_preferences=self._get_venue_preferences(authorization.symbol)
+    )
+```
+
+### Execution Algorithm Selection
+
+```python
+class ExecutionAlgorithm(Enum):
+    MARKET = "market"          # Immediate execution
+    LIMIT = "limit"            # Price-constrained
+    TWAP = "twap"              # Time-Weighted Average Price
+    VWAP = "vwap"              # Volume-Weighted Average Price
+    ADAPTIVE = "adaptive"      # Intelligent algorithm selection
+
+def _select_execution_algorithm(
+    self,
+    quantity: float,
+    urgency: ExecutionUrgency,
+    liquidity_score: LiquidityScore,
+    time_horizon: int
+) -> ExecutionAlgorithm:
+    """Select optimal execution algorithm"""
+    
+    # Emergency/urgent trades use market orders
+    if urgency in [ExecutionUrgency.URGENT, ExecutionUrgency.EMERGENCY]:
+        return ExecutionAlgorithm.MARKET
+    
+    # Small quantities use market orders
+    if quantity < 1000:
+        return ExecutionAlgorithm.MARKET
+    
+    # Illiquid markets use adaptive algorithms
+    if liquidity_score.liquidity_regime == LiquidityRegime.ILLIQUID:
+        return ExecutionAlgorithm.ADAPTIVE
+    
+    # Large quantities with time flexibility use TWAP
+    if time_horizon > 300 and quantity > 5000:
+        return ExecutionAlgorithm.TWAP
+    
+    # Volume-sensitive use VWAP
+    if quantity > liquidity_score.avg_daily_volume * 0.1:
+        return ExecutionAlgorithm.VWAP
+    
+    return ExecutionAlgorithm.ADAPTIVE
+```
+
+---
+
+## Section 2: Phase 12 - Order Management System (NEW) ⭐
+
+### Component: OrderManagementSystem
+
+**File:** `core_engine/system/oms.py`  
+**Responsibility:** Complete order lifecycle management
+
+```python
+class OrderState(Enum):
+    """Order lifecycle states"""
+    PENDING_NEW = "pending_new"
+    NEW = "new"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    PENDING_CANCEL = "pending_cancel"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    PENDING_REPLACE = "pending_replace"
+
+@dataclass
+class Order:
+    """Order entity with complete lifecycle tracking"""
+    
+    # Identity
+    order_id: str
+    client_order_id: str
+    parent_order_id: Optional[str] = None
+    authorization_id: str = None
+    
+    # Order details
+    symbol: str = None
+    side: str = None
+    order_type: OrderType = OrderType.MARKET
+    quantity: float = 0.0
+    limit_price: Optional[float] = None
+    
+    # State
+    state: OrderState = OrderState.PENDING_NEW
+    filled_quantity: float = 0.0
+    remaining_quantity: float = 0.0
+    avg_fill_price: float = 0.0
+    
+    # Timestamps
+    created_at: datetime = None
+    submitted_at: Optional[datetime] = None
+    filled_at: Optional[datetime] = None
+    
+    # Audit trail
+    state_history: List[Dict[str, Any]] = field(default_factory=list)
+
+
+class OrderManagementSystem(ISystemComponent):
+    """Institutional Order Management System"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.orders: Dict[str, Order] = {}
+        self.orders_by_authorization: Dict[str, List[str]] = {}
+        self.persistence_enabled = config.get('persistence_enabled', True)
+    
+    async def create_order(
+        self,
+        authorization_id: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: OrderType = OrderType.MARKET,
+        limit_price: Optional[float] = None,
+        parent_order_id: Optional[str] = None
+    ) -> Order:
+        """Create new order from authorization"""
+        order = Order(
+            order_id=str(uuid.uuid4()),
+            client_order_id=f"CO-{uuid.uuid4().hex[:8]}",
+            authorization_id=authorization_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            remaining_quantity=quantity,
+            order_type=order_type,
+            limit_price=limit_price,
+            parent_order_id=parent_order_id,
+            created_at=datetime.now()
+        )
+        
+        # Store order
+        self.orders[order.order_id] = order
+        
+        # Index by authorization
+        if authorization_id not in self.orders_by_authorization:
+            self.orders_by_authorization[authorization_id] = []
+        self.orders_by_authorization[authorization_id].append(order.order_id)
+        
+        # Record state change
+        order.state_history.append({
+            'timestamp': datetime.now(),
+            'from_state': None,
+            'to_state': OrderState.PENDING_NEW,
+            'reason': 'order_created'
+        })
+        
+        if self.persistence_enabled:
+            await self._persist_order(order)
+        
+        return order
+    
+    async def submit_order(self, order_id: str) -> Order:
+        """Submit order to execution engine"""
+        order = self.orders.get(order_id)
+        if not order:
+            raise ValueError(f"Order not found: {order_id}")
+        
+        if order.state != OrderState.PENDING_NEW:
+            raise ValueError(f"Cannot submit order in state: {order.state}")
+        
+        await self._transition_state(order, OrderState.NEW, 'submitted_to_venue')
+        order.submitted_at = datetime.now()
+        
+        return order
+    
+    async def record_fill(
+        self,
+        order_id: str,
+        fill_quantity: float,
+        fill_price: float
+    ) -> Order:
+        """Record execution fill"""
+        order = self.orders.get(order_id)
+        if not order:
+            raise ValueError(f"Order not found: {order_id}")
+        
+        # Update quantities
+        order.filled_quantity += fill_quantity
+        order.remaining_quantity = order.quantity - order.filled_quantity
+        
+        # Update average price (weighted)
+        if order.avg_fill_price == 0:
+            order.avg_fill_price = fill_price
+        else:
+            total_value = (
+                order.avg_fill_price * (order.filled_quantity - fill_quantity) + 
+                fill_price * fill_quantity
+            )
+            order.avg_fill_price = total_value / order.filled_quantity
+        
+        # Determine new state
+        if order.remaining_quantity <= 0:
+            await self._transition_state(order, OrderState.FILLED, 'completely_filled')
+            order.filled_at = datetime.now()
+        else:
+            await self._transition_state(order, OrderState.PARTIALLY_FILLED, 'partial_fill')
+        
+        return order
+    
+    async def cancel_order(self, order_id: str, reason: str = None) -> Order:
+        """Request order cancellation"""
+        order = self.orders.get(order_id)
+        if order.state in [OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED]:
+            raise ValueError(f"Cannot cancel order in state: {order.state}")
+        
+        await self._transition_state(order, OrderState.PENDING_CANCEL, reason or 'cancel_requested')
+        return order
+    
+    async def get_working_orders(self) -> List[Order]:
+        """Get all working (active) orders"""
+        working_states = [
+            OrderState.NEW,
+            OrderState.PARTIALLY_FILLED,
+            OrderState.PENDING_CANCEL,
+            OrderState.PENDING_REPLACE
+        ]
+        return [o for o in self.orders.values() if o.state in working_states]
+    
+    async def _transition_state(self, order: Order, new_state: OrderState, reason: str):
+        """Record state transition"""
+        old_state = order.state
+        order.state = new_state
+        
+        order.state_history.append({
+            'timestamp': datetime.now(),
+            'from_state': old_state,
+            'to_state': new_state,
+            'reason': reason
+        })
+        
+        if self.persistence_enabled:
+            await self._persist_order(order)
+```
+
+---
+
+## Section 3: Phase 13 - Execution Action
+
+### Component: UnifiedExecutionEngine
+
+**File:** `core_engine/system/unified_execution_engine.py`  
+**Responsibility:** Perform actual trade execution
+
+```python
+async def execute_authorized_trade(
+    self,
+    order: Order
+) -> ExecutionResult:
+    """
+    Execute trade according to plan
+    
+    Steps:
+    1. Validate authorization
+    2. Execute per algorithm
+    3. Monitor fills
+    4. Calculate metrics
+    5. Report to RiskManager
+    """
+    
+    # Step 1: Validate authorization
+    if not self._validate_authorization(order.authorization_id):
+        return self._create_rejected_result(order, "Authorization expired or invalid")
+    
+    # Step 2: Execute based on algorithm
+    algorithm = self._get_algorithm_for_order(order)
+    if algorithm == ExecutionAlgorithm.MARKET:
+        result = await self._execute_market_order(order)
+    elif algorithm == ExecutionAlgorithm.TWAP:
+        result = await self._execute_twap(order)
+    elif algorithm == ExecutionAlgorithm.VWAP:
+        result = await self._execute_vwap(order)
+    elif algorithm == ExecutionAlgorithm.ADAPTIVE:
+        result = await self._execute_adaptive(order)
+    else:
+        result = await self._execute_market_order(order)
+    
+    # Step 3: Calculate execution metrics
+    result.execution_quality = self._calculate_execution_quality(order, result)
+    
+    # Step 4: Update OMS
+    if result.status == ExecutionStatus.FILLED:
+        await self.oms.record_fill(
+            order.order_id,
+            result.filled_quantity,
+            result.avg_fill_price
+        )
+    
+    # Step 5: MANDATORY - Report to RiskManager for position update (Phase 15)
+    if result.status == ExecutionStatus.FILLED:
+        await self._handle_position_updates(order, result)
+    
+    return result
+```
+
+### Position Update Callback (CRITICAL)
+
+```python
+async def _handle_position_updates(self, order: Order, result: ExecutionResult):
+    """
+    Handle position updates after successful execution
+    
+    MANDATORY: Update position via Risk Manager ONLY (Rule 3)
+    """
+    if result.status != ExecutionStatus.FILLED:
+        return
+    
+    if self.risk_manager_callback:
+        position_update = await self.risk_manager_callback.update_position(
+            symbol=order.symbol,
+            side=order.side.lower(),
+            quantity=result.filled_quantity,
+            price=result.avg_fill_price,
+            timestamp=result.execution_timestamp
+        )
+        
+        self.logger.info(
+            f"📊 Position updated via RiskManager (Rule 3, Phase 15): "
+            f"{order.symbol} {order.side} {result.filled_quantity} @ ${result.avg_fill_price:.2f}"
+        )
+        
+        return position_update
+    else:
+        self.logger.error("❌ No RiskManager callback - violates Rule 3")
+        raise RuntimeError("Cannot update position without RiskManager callback")
+```
+
+---
+
+## Section 4: Phase 14 - Fill Processing
+
+### Order Rejection Handler
+
+```python
+class OrderRejectionHandler(ISystemComponent):
+    """Intelligent order rejection handling with retry logic"""
+    
+    REJECTION_PATTERNS = {
+        'INSUFFICIENT_MARGIN': {'action': 'reduce_quantity', 'factor': 0.5},
+        'STOCK_HALTED': {'action': 'wait_and_retry', 'wait_seconds': 60},
+        'PRICE_COLLAR_VIOLATION': {'action': 'adjust_price'},
+        'CONNECTION_TIMEOUT': {'action': 'exponential_backoff', 'delays': [5, 10, 30]},
+        'DUPLICATE_ORDER_ID': {'action': 'regenerate_id'},
+        'MARKET_CLOSED': {'action': 'cancel'},
+        'POSITION_LIMIT_REACHED': {'action': 'escalate'},
+        'UNKNOWN_ERROR': {'action': 'escalate'}
+    }
+    
+    async def handle_rejection(
+        self,
+        order: Order,
+        rejection_reason: str,
+        rejection_code: str
+    ) -> RejectionResolution:
+        """Handle order rejection with intelligent retry"""
+        
+        pattern = self.REJECTION_PATTERNS.get(rejection_code, 
+                                               self.REJECTION_PATTERNS['UNKNOWN_ERROR'])
+        
+        if pattern['action'] == 'reduce_quantity':
+            new_quantity = order.quantity * pattern['factor']
+            return RejectionResolution(
+                action='RETRY',
+                modified_order=order._replace(quantity=new_quantity),
+                reason=f"Reduced quantity to {new_quantity}"
+            )
+        
+        elif pattern['action'] == 'wait_and_retry':
+            await asyncio.sleep(pattern['wait_seconds'])
+            return RejectionResolution(action='RETRY', modified_order=order)
+        
+        elif pattern['action'] == 'exponential_backoff':
+            retry_count = order.metadata.get('retry_count', 0)
+            if retry_count < len(pattern['delays']):
+                await asyncio.sleep(pattern['delays'][retry_count])
+                order.metadata['retry_count'] = retry_count + 1
+                return RejectionResolution(action='RETRY', modified_order=order)
+            else:
+                return RejectionResolution(action='ESCALATE', reason='Max retries exceeded')
+        
+        elif pattern['action'] == 'escalate':
+            await self._alert_risk_team(order, rejection_reason)
+            return RejectionResolution(action='ESCALATE', reason=rejection_reason)
+        
+        else:
+            return RejectionResolution(action='CANCEL', reason=rejection_reason)
+```
+
+---
+
+## Section 5: Phase 15 - Position Update
+
+Position updates are handled by CentralRiskManager (see Rule 3, Section 5).
+
+**Key Points:**
+- ONLY CentralRiskManager can update positions
+- Execution engine calls back to RiskManager
+- Position change is broadcast to all components
+
+---
+
+## Section 6: Phase 16 - TCA & Analytics
+
+### Execution Quality Metrics
+
+```python
+@dataclass
+class ExecutionQualityMetrics:
+    """Professional execution quality metrics for TCA"""
+    
+    # Benchmark Comparisons
+    arrival_cost_bps: float      # Cost vs arrival price
+    vwap_performance_bps: float  # Performance vs VWAP
+    twap_performance_bps: float  # Performance vs TWAP
+    
+    # Slippage Analysis
+    realized_slippage_bps: float
+    expected_slippage_bps: float
+    slippage_surprise_bps: float
+    
+    # Market Impact Analysis
+    permanent_impact_bps: float
+    temporary_impact_bps: float
+    market_impact_score: float
+    
+    # Quality Scores
+    overall_quality_score: float
+    venue_selection_score: float
+    timing_score: float
+
+
+async def analyze_execution_quality(
+    self,
+    execution_result: ExecutionResult,
+    market_data: Dict[str, Any]
+) -> ExecutionQualityMetrics:
+    """Comprehensive execution quality analysis"""
+    
+    benchmarks = await self._calculate_benchmarks(
+        execution_result.symbol,
+        execution_result.execution_timestamp,
+        market_data
+    )
+    
+    arrival_price = benchmarks['arrival_price']
+    slippage_bps = (
+        (execution_result.avg_fill_price - arrival_price) / arrival_price * 10000
+    )
+    
+    impact_metrics = self._measure_market_impact(execution_result, market_data)
+    
+    total_cost_bps = (
+        slippage_bps +
+        impact_metrics.total_impact_bps +
+        execution_result.commission / (execution_result.filled_quantity * arrival_price) * 10000
+    )
+    
+    return ExecutionQualityMetrics(
+        arrival_cost_bps=slippage_bps,
+        vwap_performance_bps=(
+            (execution_result.avg_fill_price - benchmarks['vwap']) / benchmarks['vwap'] * 10000
+        ),
+        realized_slippage_bps=execution_result.realized_slippage_bps,
+        permanent_impact_bps=impact_metrics.permanent_impact_bps,
+        temporary_impact_bps=impact_metrics.temporary_impact_bps,
+        total_cost_bps=total_cost_bps,
+        overall_quality_score=self._calculate_quality_score(total_cost_bps)
+    )
+```
+
+---
+
+## Section 7: Liquidity & Market Impact
+
+### Liquidity Assessment
+
+```python
+@dataclass
+class LiquidityScore:
+    """Comprehensive liquidity scoring"""
+    
+    overall_score: float  # 0-100
+    liquidity_regime: LiquidityRegime
+    confidence: float
+    
+    avg_daily_volume: float
+    current_volume_ratio: float
+    bid_ask_spread_bps: float
+    market_depth: float
+    order_book_resilience: float
+```
+
+### Market Impact Models
+
+```python
+def _almgren_chriss_model(
+    self,
+    quantity: float,
+    market_data: Dict[str, Any],
+    liquidity_score: LiquidityScore,
+    participation_rate: float
+) -> Dict[str, Any]:
+    """Almgren-Chriss optimal execution model"""
+    
+    volatility = market_data.get('volatility', 0.02)
+    
+    # Permanent impact (linear in quantity)
+    permanent_impact = self.linear_coefficient * participation_rate
+    
+    # Temporary impact (square root law)
+    temporary_impact = self.sqrt_coefficient * np.sqrt(participation_rate)
+    
+    total_impact_bps = (permanent_impact + temporary_impact) * 10000
+    
+    return {
+        'permanent_impact_bps': permanent_impact * 10000,
+        'temporary_impact_bps': temporary_impact * 10000,
+        'total_impact_bps': total_impact_bps,
+        'model_type': 'almgren_chriss'
+    }
+```
+
+---
+
+## Component Responsibility Matrix (Phases 11-16)
+
+| Phase | Component | Input | Output | Can Execute? | Can Update Positions? |
+|-------|-----------|-------|--------|--------------|----------------------|
+| **11** | TradingEngine | Authorization | ExecutionPlan | ❌ NO | ❌ NO |
+| **12** | OMS | ExecutionPlan | Order | ❌ NO | ❌ NO |
+| **13** | ExecutionEngine | Order | ExecutionResult | ✅ YES | ❌ NO |
+| **14** | RejectionHandler | ExecutionResult | Resolution | ⚠️ RETRY | ❌ NO |
+| **15** | CentralRiskManager | Fill | PositionUpdate | ❌ NO | ✅ YES (ONLY) |
+| **16** | AnalyticsManager | Result | QualityMetrics | ❌ NO | ❌ NO |
+
+---
+
+## PROHIBITED Patterns (Rule 5 Violations)
+
+### ❌ PROHIBITED: Bypassing OMS
+
+```python
+# ❌ BAD: Direct execution without OMS
+class BadExecutionEngine:
+    async def execute(self, authorization):
+        # VIOLATES RULE 5: Bypasses OMS order tracking
+        result = await self.broker.place_order(...)  # ❌
+```
+
+### ❌ PROHIBITED: Direct Position Updates
+
+```python
+# ❌ BAD: Execution engine updating positions
+class BadExecutionEngine:
+    async def execute(self, order):
+        result = await self.broker.place_order(order)
+        # VIOLATES RULE 3/5: Direct position update
+        self.positions[order.symbol] += result.quantity  # ❌
+```
+
+### ✅ CORRECT: Proper Execution Flow
+
+```python
+# ✅ GOOD: Complete Phase 11 → 12 → 13 → 14 → 15 → 16 flow
+class GoodExecutionOrchestrator:
+    async def execute_complete_flow(self, authorization):
+        # Phase 11: Execution Planning
+        plan = await self.trading_engine.create_execution_plan(authorization)
+        
+        # Phase 12: Order Management
+        order = await self.oms.create_order(plan)
+        await self.oms.submit_order(order.order_id)
+        
+        # Phase 13: Execution
+        result = await self.execution_engine.execute_authorized_trade(order)
+        
+        # Phase 14: Fill Processing (automatic)
+        # Phase 15: Position Update (via RiskManager callback)
+        # Phase 16: TCA (automatic)
+        
+        return result
+```
+
+---
+
+## MANDATORY Requirements
+
+1. **Authorization**: ALL executions require valid Rule 3 authorization
+2. **OMS Tracking**: ALL orders must be tracked in OMS
+3. **Position Updates**: ONLY through RiskManager callbacks
+4. **Liquidity Assessment**: Assess before every trade
+5. **Market Impact**: Use appropriate impact model
+6. **TCA**: Measure and optimize execution quality
+7. **Audit Compliance**: Log all execution decisions
+
+---
+
+## Related Rules
+
+- **Rule 1**: System Architecture - Component integration
+- **Rule 2**: Data Pipeline - Market data for execution
+- **Rule 3**: Risk Governance - Authorization (Phases 6-10)
+- **Rule 4**: Analytics - TCA integration
+- **Rule 6**: Operations - Reconciliation, Settlement
+
+---
+
+**Last Updated:** December 6, 2025  
+**Status:** ACTIVE (v1.0 - Expanded from former Rule 7)

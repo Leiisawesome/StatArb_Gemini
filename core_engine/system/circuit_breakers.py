@@ -2,7 +2,13 @@
 Trading Circuit Breakers - System Safety Requirement
 Emergency protection mechanisms to prevent catastrophic losses and system runaway.
 
-Circuit Breaker Mechanisms:
+Architecture Compliance (Tier-1 Rules):
+- Rule 3: Risk & Compliance Governance - Phase 9 (Circuit Breaker Validation)
+  - 5 mandatory circuit breaker mechanisms
+  - Final safety check before execution (feeds into Phase 10)
+  - Integration with Rule 6 P&L tracking for threshold checks
+
+Circuit Breaker Mechanisms (5 per Rule 3):
 1. Manual Kill Switch - Instant trading halt with authorization code
 2. Order Rate Limiting - Maximum orders per second/minute (default: 10/sec)
 3. Daily Loss Limit - Auto-halt on portfolio loss (default: -2%)
@@ -16,9 +22,11 @@ Circuit Breaker Levels:
 - HALT (🔴): Trading stopped
 - EMERGENCY (⚫): System shutdown
 
+Migration: December 2025 - Former Rule 4 Phase 7B content now Rule 3, Phase 9.
+
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging

@@ -2,7 +2,13 @@
 Order Rejection Handler - Intelligent Retry System
 Handles broker order rejections with pattern-matching and smart retry logic.
 
-Rejection Patterns (8 types):
+Architecture Compliance (Tier-1 Rules):
+- Rule 5: Execution & Order Management - Phase 14 (Fill Processing)
+  - Handles fills, partial fills, and rejections
+  - 8 intelligent rejection patterns with retry logic
+  - Integration with OMS (Phase 12) for order state updates
+
+Rejection Patterns (8 types per Rule 5):
 1. Insufficient Margin → Reduce quantity by 50%, retry
 2. Stock Halted → Wait for resumption, monitor market status
 3. Price Collar Violation → Adjust price within limits, retry
@@ -18,9 +24,11 @@ Retry Strategy:
 - Modifications: Pattern-specific (quantity, price, timing)
 - Escalation: After 3 failed attempts → Alert risk team
 
+Migration: December 2025 - Former Rule 7 Phase 9+ content now Rule 5, Phase 14.
+
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging

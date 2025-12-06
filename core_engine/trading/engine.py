@@ -6,16 +6,24 @@ Trading Engine - Core Engine (HOW Component)
 Clean implementation of the trading engine for core_engine.
 This component determines HOW trades should be executed.
 
-As part of the central Risk Manager hub, this engine:
+Architecture Compliance (Tier-1 Rules):
+- Rule 1: System Architecture - Layer 5 (Trading & Execution)
+- Rule 5: Execution & Order Management - Phase 11 (Execution Planning)
+  - Receives authorized trades from Risk Manager (Rule 3, Phase 10)
+  - Determines optimal execution algorithm (MARKET/LIMIT/TWAP/VWAP/ADAPTIVE)
+  - Creates execution plan with slicing strategy
+  - Passes to OMS (Phase 12) and ExecutionEngine (Phase 13)
+
+Key Responsibilities:
 - Receives authorized trades from Risk Manager
 - Determines optimal execution methodology
 - Plans trade execution strategy
 - Coordinates with ExecutionEngine for actual execution
 
-Migration: Direct implementation using proven trading patterns.
+Migration: December 2025 - Former Rule 7 content now Rule 5.
 
 Author: StatArb_Gemini Core Engine Migration  
-Version: 1.0.0 (Clean Production - HOW Component)
+Version: 2.0.0 (Rules Migration December 2025)
 """
 
 import asyncio

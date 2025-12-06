@@ -2,6 +2,13 @@
 Position Aging Monitor - Capital Efficiency Optimization
 Monitors position holding periods and enforces strategy-specific time limits.
 
+Architecture Compliance (Tier-1 Rules):
+- Rule 6: Operations & Recovery - Section 3 (Position Aging Management)
+  - Strategy-specific holding period limits
+  - Age category classification (Fresh/Aging/Stale/Expired)
+  - Auto-close logic for expired positions
+  - Integration with Rule 3 for position close requests
+
 Position Age Categories:
 - Fresh (<50% of limit): Normal operation
 - Aging (50-80%): Monitor closely
@@ -22,9 +29,11 @@ Auto-Close Logic:
 - Complete audit trail
 - Alert risk team
 
+Migration: December 2025 - Former Rule 7 Phase 10+ content now Rule 6, Section 3.
+
 Author: Trading System Team
-Date: October 25, 2025
-Version: 1.0
+Date: December 6, 2025
+Version: 2.0 (Rules Migration)
 """
 
 import logging
