@@ -92,6 +92,39 @@ from .feeds.adapters import (
 )
 
 # ============================================================================
+# POLYGON.IO REAL-TIME (Production WebSocket)
+# ============================================================================
+
+from .feeds.polygon_realtime import (
+    # Configuration
+    PolygonFeedConfig,
+    PolygonSubscriptionTier,
+    PolygonCluster,
+    
+    # Data Structures
+    PolygonAggregateBar,
+    PolygonTrade,
+    PolygonQuote,
+    
+    # Production Adapter
+    PolygonRealtimeFeedAdapter,
+    PolygonAggregatedDataManager,
+)
+
+from .feeds.polygon_integration import (
+    PolygonServiceConfig,
+    PolygonDataService,
+    create_polygon_service,
+)
+
+from .feeds.polygon_rest import (
+    PolygonRestConfig,
+    PolygonRestService,
+    AggregateBar,
+    create_polygon_rest_service,
+)
+
+# ============================================================================
 # DATA VALIDATION
 # ============================================================================
 
@@ -167,6 +200,24 @@ __all__ = [
     'PolygonFeedAdapter',
     'InteractiveBrokersFeedAdapter',
     'FeedAdapterFactory',
+    
+    # ===== POLYGON.IO REAL-TIME (Production) =====
+    'PolygonFeedConfig',
+    'PolygonSubscriptionTier',
+    'PolygonCluster',
+    'PolygonAggregateBar',
+    'PolygonTrade',
+    'PolygonQuote',
+    'PolygonRealtimeFeedAdapter',
+    'PolygonAggregatedDataManager',
+    'PolygonServiceConfig',
+    'PolygonDataService',
+    'create_polygon_service',
+    # REST API (Stock Starter)
+    'PolygonRestConfig',
+    'PolygonRestService',
+    'AggregateBar',
+    'create_polygon_rest_service',
     
     # ===== DATA VALIDATION =====
     'ValidationConfiguration',  # DEPRECATED

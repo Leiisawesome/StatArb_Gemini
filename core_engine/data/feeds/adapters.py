@@ -483,44 +483,102 @@ class PolygonFeedAdapter(DataFeedAdapter):
     """
     Polygon.io data feed adapter.
     
-    ⚠️  STUB IMPLEMENTATION - Returns simulated data
+    ⚠️  BASIC STUB - For full production use, use PolygonRealtimeFeedAdapter.
     
-    To implement fully, requires:
-        1. Polygon.io API key
-        2. WebSocket connection to Polygon streams
+    This adapter provides a fallback to simulated data when the production
+    adapter is not configured. For real Polygon.io integration:
+    
+        from core_engine.data.feeds import (
+            PolygonRealtimeFeedAdapter,
+            PolygonFeedConfig,
+        )
+        
+        config = PolygonFeedConfig(
+            api_key="your_api_key",
+            symbols=["AAPL", "TSLA"],
+        )
+        adapter = PolygonRealtimeFeedAdapter(config)
     
     Documentation: https://polygon.io/docs/stocks/getting-started
     """
     
-    IS_IMPLEMENTED = False
+    IS_IMPLEMENTED = False  # Mark as stub; production is PolygonRealtimeFeedAdapter
     PROVIDER = FeedProvider.POLYGON
     SUPPORTED_DATA_TYPES = ['quote', 'trade', 'bar', 'second_agg', 'minute_agg']
     
     def __init__(self, config: FeedAdapterConfig):
         super().__init__(config)
-        warnings.warn(
-            "PolygonFeedAdapter is a STUB. It returns simulated data. "
-            "Implement connect/subscribe methods for production use.",
-            UserWarning
-        )
-        self._simulated = SimulatedFeedAdapter(config)
+        
+        # Check if we can use the production adapter
+        self._use_production = False
+        self._production_adapter = None
+        
+        if config.api_key:
+            try:
+                from .polygon_realtime import PolygonRealtimeFeedAdapter, PolygonFeedConfig
+                
+                polygon_config = PolygonFeedConfig(
+                    api_key=config.api_key,
+                    symbols=list(config.provider_config.get('symbols', [])),
+                    name=config.name,
+                    connect_timeout_seconds=config.connect_timeout_seconds,
+                    reconnect_delay_seconds=config.reconnect_delay_seconds,
+                    max_reconnect_attempts=config.max_reconnect_attempts,
+                    max_subscriptions=config.max_subscriptions,
+                    buffer_size=config.buffer_size,
+                )
+                self._production_adapter = PolygonRealtimeFeedAdapter(polygon_config)
+                self._use_production = True
+                self.logger.info("Using production PolygonRealtimeFeedAdapter")
+                
+            except ImportError as e:
+                self.logger.warning(
+                    f"Could not load production Polygon adapter: {e}. "
+                    "Install websockets: pip install websockets"
+                )
+        
+        if not self._use_production:
+            warnings.warn(
+                "PolygonFeedAdapter using simulated data. "
+                "Provide api_key and install websockets for real data.",
+                UserWarning
+            )
+            self._simulated = SimulatedFeedAdapter(config)
     
     async def connect(self) -> bool:
+        if self._use_production and self._production_adapter:
+            return await self._production_adapter.connect()
         self.logger.warning("STUB: Using simulated connection for Polygon")
         return await self._simulated.connect()
     
     async def disconnect(self) -> None:
-        await self._simulated.disconnect()
+        if self._use_production and self._production_adapter:
+            await self._production_adapter.disconnect()
+        else:
+            await self._simulated.disconnect()
     
     async def subscribe(self, symbols: List[str], data_types: List[str]) -> bool:
+        if self._use_production and self._production_adapter:
+            return await self._production_adapter.subscribe(symbols, data_types)
         self.logger.warning("STUB: Using simulated data for Polygon subscription")
         return await self._simulated.subscribe(symbols, data_types)
     
     async def unsubscribe(self, symbols: List[str]) -> bool:
+        if self._use_production and self._production_adapter:
+            return await self._production_adapter.unsubscribe(symbols)
         return await self._simulated.unsubscribe(symbols)
     
     def is_connected(self) -> bool:
+        if self._use_production and self._production_adapter:
+            return self._production_adapter.is_connected()
         return self._simulated.is_connected()
+    
+    def add_message_handler(self, handler) -> None:
+        """Route message handler to appropriate adapter"""
+        if self._use_production and self._production_adapter:
+            self._production_adapter.add_message_handler(handler)
+        else:
+            super().add_message_handler(handler)
 
 
 class InteractiveBrokersFeedAdapter(DataFeedAdapter):

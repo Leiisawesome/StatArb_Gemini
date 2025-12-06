@@ -10,25 +10,29 @@ Components:
     - DataFeedAdapter: Abstract base for all adapters
     - SimulatedFeedAdapter: Testing adapter with configurable data generation
     - AlpacaFeedAdapter: Alpaca Markets integration
-    - PolygonFeedAdapter: Polygon.io integration
+    - PolygonFeedAdapter: Polygon.io stub (basic)
+    - PolygonRealtimeFeedAdapter: Polygon.io production WebSocket adapter
     - InteractiveBrokersFeedAdapter: Interactive Brokers integration
 
-Usage:
-    from core_engine.data.feeds import FeedAdapterFactory, FeedAdapterConfig
+Polygon.io Real-Time Integration:
+    For Stock Starter subscription (real-time aggregated data):
     
-    # Create an adapter via factory
-    config = FeedAdapterConfig(
-        provider="alpaca",
-        url="wss://stream.data.alpaca.markets/v2",
-        api_key="your-api-key",
-        symbols=["NVDA", "TSLA"]
+    from core_engine.data.feeds import (
+        PolygonRealtimeFeedAdapter,
+        PolygonFeedConfig,
+        PolygonSubscriptionTier,
     )
     
-    adapter = FeedAdapterFactory.create_adapter(config)
+    config = PolygonFeedConfig(
+        api_key="your_polygon_api_key",
+        symbols=["AAPL", "TSLA", "NVDA"],
+        subscription_tier=PolygonSubscriptionTier.STARTER,
+        data_types=["second_agg", "minute_agg", "trade"],
+    )
     
-    # Connect and subscribe
+    adapter = PolygonRealtimeFeedAdapter(config)
     await adapter.connect()
-    await adapter.subscribe("NVDA")
+    await adapter.subscribe(["AAPL", "TSLA"], ["second_agg", "minute_agg"])
 
 Architecture Compliance:
     - Rule 1 (Component Integration): All adapters implement ISystemComponent
@@ -36,7 +40,7 @@ Architecture Compliance:
     - Rule 6 (Error Handling): Comprehensive error handling with circuit breakers
 
 Author: StatArb_Gemini Core Engine
-Version: 2.0.0 (Production-Ready Adapters)
+Version: 2.1.0 (Production Polygon.io Real-Time)
 """
 
 from .manager import (
@@ -61,11 +65,52 @@ from .adapters import (
     # Concrete Adapters
     SimulatedFeedAdapter,
     AlpacaFeedAdapter,
-    PolygonFeedAdapter,
+    PolygonFeedAdapter,  # Basic stub
     InteractiveBrokersFeedAdapter,
     
     # Factory
     FeedAdapterFactory,
+)
+
+# ============================================================================
+# POLYGON.IO REAL-TIME ADAPTER (Production)
+# ============================================================================
+
+from .polygon_realtime import (
+    # Configuration
+    PolygonFeedConfig,
+    PolygonSubscriptionTier,
+    PolygonCluster,
+    
+    # Data Structures
+    PolygonAggregateBar,
+    PolygonTrade,
+    PolygonQuote,
+    
+    # Production Adapter
+    PolygonRealtimeFeedAdapter,
+    PolygonAggregatedDataManager,
+)
+
+# ============================================================================
+# POLYGON.IO DATA INTEGRATION SERVICE
+# ============================================================================
+
+from .polygon_integration import (
+    PolygonServiceConfig,
+    PolygonDataService,
+    create_polygon_service,
+)
+
+# ============================================================================
+# POLYGON.IO REST API (Stock Starter - Historical Data)
+# ============================================================================
+
+from .polygon_rest import (
+    PolygonRestConfig,
+    PolygonRestService,
+    AggregateBar,
+    create_polygon_rest_service,
 )
 
 __all__ = [
@@ -89,8 +134,29 @@ __all__ = [
     # ===== CONCRETE ADAPTERS =====
     'SimulatedFeedAdapter',
     'AlpacaFeedAdapter',
-    'PolygonFeedAdapter',
+    'PolygonFeedAdapter',  # Basic stub
     'InteractiveBrokersFeedAdapter',
+    
+    # ===== POLYGON.IO REAL-TIME (Production) =====
+    'PolygonFeedConfig',
+    'PolygonSubscriptionTier',
+    'PolygonCluster',
+    'PolygonAggregateBar',
+    'PolygonTrade',
+    'PolygonQuote',
+    'PolygonRealtimeFeedAdapter',
+    'PolygonAggregatedDataManager',
+    
+    # ===== POLYGON.IO DATA SERVICE =====
+    'PolygonServiceConfig',
+    'PolygonDataService',
+    'create_polygon_service',
+    
+    # ===== POLYGON.IO REST API (Stock Starter) =====
+    'PolygonRestConfig',
+    'PolygonRestService',
+    'AggregateBar',
+    'create_polygon_rest_service',
     
     # ===== FACTORY =====
     'FeedAdapterFactory',
