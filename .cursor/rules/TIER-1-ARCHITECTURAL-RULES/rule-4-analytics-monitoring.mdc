@@ -4,19 +4,9 @@ alwaysApply: false
 ---
 # Rule 4: Analytics & Monitoring
 
-**Version:** 1.0 (Restructured from former Rule 6)  
-**Date:** December 6, 2025  
-**Status:** ACTIVE - MANDATORY COMPLIANCE
+## Core Principle
 
-**Migration Note:** This rule was formerly Rule 6: Advanced Analytics Integration Standards.
-
----
-
-## Overview
-
-All analytics components within the core_engine must support **real-time processing**, **batch analytics**, **performance attribution**, **regime-aware analysis**, and **multi-timeframe capabilities**.
-
-**Key Principle:** Analytics are a cross-cutting concern that integrate throughout the trading pipeline, providing insights at pre-trade, execution, and post-trade stages.
+Analytics are a **cross-cutting concern** integrating throughout the trading pipeline. All analytics must support **real-time processing**, **batch analytics**, **regime awareness**, and **multi-timeframe capabilities**.
 
 ---
 
@@ -28,19 +18,19 @@ RULE 2: DATA PIPELINE (Phases 1-5)
 │   ├── Signal Quality Assessment
 │   ├── Liquidity Analysis
 │   └── Risk Metrics Calculation
-│
+
 RULE 3: RISK GOVERNANCE (Phases 6-10)
 ├── Risk Analytics
 │   ├── VaR Calculation
 │   ├── Position Risk Assessment
 │   └── Regime Risk Adjustment
-│
+
 RULE 5: EXECUTION (Phases 11-16)
 ├── Execution Analytics (Phase 16)
 │   ├── TCA Framework
 │   ├── Slippage Analysis
 │   └── Market Impact Measurement
-│
+
 RULE 6: OPERATIONS (Continuous)
 ├── Post-Trade Analytics
 │   ├── Performance Attribution
@@ -50,470 +40,204 @@ RULE 6: OPERATIONS (Continuous)
 
 ---
 
-## Section 1: Analytics Component Interface
-
-### IAnalyticsComponent Interface
-
-All analytics components MUST implement this interface:
+## IAnalyticsComponent Interface
 
 ```python
-from core_engine.system.interfaces import ISystemComponent
-from abc import abstractmethod
-from typing import Dict, Any, List, Optional
-import pandas as pd
-from datetime import datetime
-
 class IAnalyticsComponent(ISystemComponent):
-    """Enhanced interface for analytics components"""
-    
     @abstractmethod
     async def process_real_time_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Process real-time market data or trading events"""
         pass
     
     @abstractmethod
-    async def process_batch_data(
-        self, 
-        data: pd.DataFrame, 
-        start_time: datetime, 
-        end_time: datetime
-    ) -> Dict[str, Any]:
+    async def process_batch_data(self, data: pd.DataFrame, start: datetime, end: datetime) -> Dict:
         """Process historical data in batch mode"""
         pass
     
     @abstractmethod
-    async def get_analytics_summary(self, timeframe: str = '1D') -> Dict[str, Any]:
-        """Get analytics summary for specified timeframe"""
-        pass
-    
-    @abstractmethod
-    async def get_regime_aware_metrics(
-        self, 
-        regime_context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def get_regime_aware_metrics(self, regime_context: Dict) -> Dict[str, Any]:
         """Get metrics adjusted for current market regime"""
         pass
     
     @abstractmethod
-    async def get_multi_timeframe_analysis(
-        self, 
-        timeframes: List[str]
-    ) -> Dict[str, Dict[str, Any]]:
+    async def get_multi_timeframe_analysis(self, timeframes: List[str]) -> Dict[str, Dict]:
         """Get analysis across multiple timeframes"""
         pass
 ```
 
 ---
 
-## Section 2: Real-Time Analytics Processing
+## Real-Time Analytics
 
-### Streaming Analytics Pattern
+### Streaming Market Data
 
 ```python
-class RealTimeAnalyticsProcessor(IAnalyticsComponent):
-    """Real-time analytics processing with streaming capabilities"""
-    
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.streaming_buffer = {}
-        self.real_time_metrics = {}
-        self.update_frequency = config.get('update_frequency', 1)
-        self.last_update = datetime.now()
-    
-    async def process_real_time_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process real-time data with streaming analytics"""
-        try:
-            data_type = data.get('type')
-            
-            if data_type == 'market_data':
-                return await self._process_market_data_stream(data)
-            elif data_type == 'trade_execution':
-                return await self._process_trade_execution_stream(data)
-            elif data_type == 'position_update':
-                return await self._process_position_update_stream(data)
-            else:
-                self.logger.warning(f"Unknown data type: {data_type}")
-                return {}
-                
-        except Exception as e:
-            self.logger.error(f"Real-time processing failed: {e}")
-            return {'error': str(e)}
-    
-    async def _process_market_data_stream(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process streaming market data"""
-        symbol = data.get('symbol')
-        price = data.get('price')
-        volume = data.get('volume')
-        timestamp = data.get('timestamp')
+class RealTimeAnalyticsProcessor:
+    async def process_market_data_stream(self, data: Dict[str, Any]) -> Dict:
+        symbol = data['symbol']
+        price = data['price']
         
-        # Initialize buffer if needed
-        if symbol not in self.streaming_buffer:
-            self.streaming_buffer[symbol] = {
-                'prices': [],
-                'volumes': [],
-                'timestamps': [],
-                'returns': [],
-                'volatility': 0.0,
-                'momentum': 0.0
-            }
-        
-        buffer = self.streaming_buffer[symbol]
-        buffer['prices'].append(price)
-        buffer['volumes'].append(volume)
-        buffer['timestamps'].append(timestamp)
-        
-        # Maintain buffer size
-        max_buffer_size = self.config.get('max_buffer_size', 1000)
-        if len(buffer['prices']) > max_buffer_size:
-            buffer['prices'] = buffer['prices'][-max_buffer_size:]
-            buffer['volumes'] = buffer['volumes'][-max_buffer_size:]
-            buffer['timestamps'] = buffer['timestamps'][-max_buffer_size:]
+        # Maintain rolling buffer
+        self.buffer[symbol]['prices'].append(price)
         
         # Calculate real-time metrics
-        if len(buffer['prices']) >= 2:
-            returns = [(buffer['prices'][i] - buffer['prices'][i-1]) / buffer['prices'][i-1] 
-                      for i in range(1, len(buffer['prices']))]
-            buffer['returns'] = returns[-100:]
-            
-            if len(returns) >= 20:
-                buffer['volatility'] = np.std(returns[-20:]) * np.sqrt(252)
-            
-            if len(buffer['prices']) >= 10:
-                buffer['momentum'] = (buffer['prices'][-1] - buffer['prices'][-10]) / buffer['prices'][-10]
+        if len(self.buffer[symbol]['prices']) >= 20:
+            returns = self._calculate_returns(self.buffer[symbol]['prices'])
+            volatility = np.std(returns[-20:]) * np.sqrt(252)
+            momentum = (price - self.buffer[symbol]['prices'][-10]) / self.buffer[symbol]['prices'][-10]
         
-        self.real_time_metrics[symbol] = {
+        return {
             'current_price': price,
-            'current_volume': volume,
-            'volatility': buffer['volatility'],
-            'momentum': buffer['momentum'],
-            'last_update': timestamp
+            'volatility': volatility,
+            'momentum': momentum
         }
-        
-        return self.real_time_metrics[symbol]
 ```
 
 ### Event-Driven Analytics
 
 ```python
-class EventDrivenAnalytics(IAnalyticsComponent):
-    """Event-driven analytics for trading events"""
-    
-    def __init__(self):
-        super().__init__()
-        self.event_handlers = {
-            'trade_executed': self._handle_trade_execution,
-            'position_changed': self._handle_position_change,
-            'signal_generated': self._handle_signal_generation,
-            'risk_limit_breach': self._handle_risk_breach
-        }
-        self.event_metrics = defaultdict(list)
-    
-    async def process_trading_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Process trading events for analytics"""
-        event_type = event.get('event_type')
-        handler = self.event_handlers.get(event_type)
-        
-        if handler:
-            return await handler(event)
-        else:
-            self.logger.warning(f"No handler for event type: {event_type}")
-            return {}
-    
-    async def _handle_trade_execution(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle trade execution events"""
-        execution_metrics = {
-            'symbol': event.get('symbol'),
-            'execution_time': event.get('timestamp'),
-            'execution_price': event.get('price'),
-            'execution_quantity': event.get('quantity'),
-            'strategy_id': event.get('strategy_id'),
-            'market_impact': await self._calculate_market_impact(event),
-            'execution_cost': await self._calculate_execution_cost(event),
-            'slippage': await self._calculate_slippage(event)
-        }
-        
-        self.event_metrics['trade_executions'].append(execution_metrics)
-        return execution_metrics
+EVENT_HANDLERS = {
+    'trade_executed': lambda e: calculate_market_impact(e),
+    'position_changed': lambda e: update_exposure_metrics(e),
+    'signal_generated': lambda e: assess_signal_quality(e),
+    'risk_limit_breach': lambda e: escalate_and_log(e)
+}
 ```
 
 ---
 
-## Section 3: Performance Attribution Framework
+## Performance Attribution
 
 ### Multi-Strategy Attribution
 
 ```python
-class MultiStrategyAttributionAnalyzer(IAnalyticsComponent):
-    """Advanced performance attribution across multiple strategies"""
+@dataclass
+class StrategyAttribution:
+    total_return: float
+    contribution_percentage: float
+    sharpe_ratio: float
+    max_drawdown: float
+    calmar_ratio: float
+    volatility: float
+    win_rate: float
     
-    def __init__(self):
-        super().__init__()
-        self.strategy_returns = defaultdict(list)
-        self.factor_exposures = defaultdict(dict)
-        self.attribution_cache = {}
-    
-    async def calculate_strategy_attribution(
-        self, 
-        portfolio_returns: pd.Series, 
-        strategy_returns: Dict[str, pd.Series]
-    ) -> Dict[str, Any]:
-        """Calculate performance attribution by strategy"""
-        
-        attribution_results = {}
-        total_portfolio_return = portfolio_returns.sum()
-        
-        for strategy_id, returns in strategy_returns.items():
-            strategy_contribution = returns.sum()
-            contribution_percentage = (
-                strategy_contribution / total_portfolio_return 
-                if total_portfolio_return != 0 else 0
-            )
-            
-            sharpe_ratio = self._calculate_sharpe_ratio(returns)
-            max_drawdown = self._calculate_max_drawdown(returns)
-            calmar_ratio = (
-                returns.mean() * 252 / abs(max_drawdown) 
-                if max_drawdown != 0 else 0
-            )
-            
-            factor_attribution = await self._calculate_factor_attribution(
-                strategy_id, returns
-            )
-            
-            attribution_results[strategy_id] = {
-                'total_return': strategy_contribution,
-                'contribution_percentage': contribution_percentage,
-                'sharpe_ratio': sharpe_ratio,
-                'max_drawdown': max_drawdown,
-                'calmar_ratio': calmar_ratio,
-                'volatility': returns.std() * np.sqrt(252),
-                'factor_attribution': factor_attribution,
-                'trade_count': len(returns[returns != 0]),
-                'win_rate': (
-                    len(returns[returns > 0]) / len(returns[returns != 0]) 
-                    if len(returns[returns != 0]) > 0 else 0
-                )
-            }
-        
-        return attribution_results
-    
-    async def _calculate_factor_attribution(
-        self, 
-        strategy_id: str, 
-        returns: pd.Series
-    ) -> Dict[str, float]:
-        """Calculate factor-based attribution (Fama-French, etc.)"""
-        return {
-            'market_factor': 0.0,
-            'size_factor': 0.0,
-            'value_factor': 0.0,
-            'momentum_factor': 0.0,
-            'quality_factor': 0.0,
-            'alpha': 0.0
-        }
+    # Factor Attribution (Fama-French)
+    market_factor: float
+    size_factor: float
+    value_factor: float
+    momentum_factor: float
+    alpha: float  # Unexplained return
 ```
 
 ---
 
-## Section 4: Regime-Aware Analytics
+## Regime-Aware Analytics
+
+### Regime Adjustments
+
+| Volatility Regime | Risk Multiplier | Confidence Threshold | Position Sizing |
+|-------------------|-----------------|---------------------|-----------------|
+| Low | 1.2 | 0.50 | 1.1x |
+| Normal | 1.0 | 0.60 | 1.0x |
+| High | 0.7 | 0.70 | 0.8x |
+| Extreme | 0.4 | 0.80 | 0.5x |
 
 ```python
-class RegimeAwareAnalytics(IAnalyticsComponent):
-    """Analytics that adapt to market regime conditions"""
+async def get_regime_aware_metrics(self, regime_context: Dict) -> Dict:
+    volatility_regime = regime_context.get('volatility_regime')
     
-    def __init__(self, regime_engine):
-        super().__init__()
-        self.regime_engine = regime_engine
-        self.regime_metrics = defaultdict(dict)
-    
-    async def get_regime_aware_metrics(
-        self, 
-        regime_context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Get metrics adjusted for current market regime"""
-        current_regime = regime_context.get('primary_regime')
-        volatility_regime = regime_context.get('volatility_regime')
-        
-        regime_adjustments = {
-            'low_volatility': {
-                'risk_multiplier': 1.2,
-                'confidence_threshold': 0.5,
-                'position_sizing_factor': 1.1
-            },
-            'normal_volatility': {
-                'risk_multiplier': 1.0,
-                'confidence_threshold': 0.6,
-                'position_sizing_factor': 1.0
-            },
-            'high_volatility': {
-                'risk_multiplier': 0.7,
-                'confidence_threshold': 0.7,
-                'position_sizing_factor': 0.8
-            },
-            'extreme_volatility': {
-                'risk_multiplier': 0.4,
-                'confidence_threshold': 0.8,
-                'position_sizing_factor': 0.5
-            }
-        }
-        
-        adjustments = regime_adjustments.get(
-            volatility_regime, 
-            regime_adjustments['normal_volatility']
-        )
-        
-        return {
-            'current_regime': current_regime,
-            'volatility_regime': volatility_regime,
-            'regime_adjustments': adjustments,
-            'regime_confidence': regime_context.get('confidence', 0.5),
-            'regime_duration': regime_context.get('duration_days', 0),
-            'expected_regime_persistence': await self._calculate_regime_persistence(current_regime)
-        }
+    return {
+        'current_regime': regime_context['primary_regime'],
+        'regime_adjustments': REGIME_ADJUSTMENTS[volatility_regime],
+        'expected_persistence': self._calculate_regime_persistence()
+    }
 ```
 
 ---
 
-## Section 5: Multi-Timeframe Analysis
+## Multi-Timeframe Analysis
+
+### Supported Timeframes
+
+`['1min', '5min', '15min', '1h', '4h', '1D', '1W', '1M']`
+
+### Cross-Timeframe Correlation
 
 ```python
-class MultiTimeframeAnalyzer(IAnalyticsComponent):
-    """Analytics across multiple timeframes"""
+async def calculate_cross_timeframe_analysis(self, results: Dict) -> Dict:
+    trends = {tf: data.get('trend_direction') for tf, data in results.items()}
     
-    def __init__(self):
-        super().__init__()
-        self.supported_timeframes = ['1min', '5min', '15min', '1h', '4h', '1D', '1W', '1M']
-        self.timeframe_cache = {}
+    bullish = sum(1 for t in trends.values() if t == 'bullish')
+    bearish = sum(1 for t in trends.values() if t == 'bearish')
     
-    async def get_multi_timeframe_analysis(
-        self, 
-        timeframes: List[str]
-    ) -> Dict[str, Dict[str, Any]]:
-        """Get analysis across multiple timeframes"""
-        results = {}
-        
-        for timeframe in timeframes:
-            if timeframe not in self.supported_timeframes:
-                continue
-            
-            cache_key = f"{timeframe}_{datetime.now().strftime('%Y%m%d_%H')}"
-            if cache_key in self.timeframe_cache:
-                results[timeframe] = self.timeframe_cache[cache_key]
-                continue
-            
-            timeframe_metrics = await self._calculate_timeframe_metrics(timeframe)
-            self.timeframe_cache[cache_key] = timeframe_metrics
-            results[timeframe] = timeframe_metrics
-        
-        results['cross_timeframe_analysis'] = await self._calculate_cross_timeframe_correlations(results)
-        
-        return results
-    
-    async def _calculate_cross_timeframe_correlations(
-        self, 
-        timeframe_results: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Calculate correlations across timeframes"""
-        trends = {
-            tf: data.get('trend_direction') 
-            for tf, data in timeframe_results.items() 
-            if tf != 'cross_timeframe_analysis'
-        }
-        
-        bullish_count = sum(1 for trend in trends.values() if trend == 'bullish')
-        bearish_count = sum(1 for trend in trends.values() if trend == 'bearish')
-        total_timeframes = len(trends)
-        
-        trend_alignment = max(bullish_count, bearish_count) / total_timeframes if total_timeframes > 0 else 0
-        
-        return {
-            'trend_alignment_score': trend_alignment,
-            'dominant_trend': 'bullish' if bullish_count > bearish_count else 'bearish',
-            'timeframe_consensus': trend_alignment > 0.7,
-            'conflicting_timeframes': [
-                tf for tf, trend in trends.items() 
-                if trend != ('bullish' if bullish_count > bearish_count else 'bearish')
-            ]
-        }
+    return {
+        'trend_alignment_score': max(bullish, bearish) / len(trends),
+        'dominant_trend': 'bullish' if bullish > bearish else 'bearish',
+        'timeframe_consensus': max(bullish, bearish) / len(trends) > 0.7
+    }
 ```
 
 ---
 
-## Section 6: Dynamic Risk Analytics
+## Dynamic Risk Analytics
+
+### Regime-Adjusted VaR
 
 ```python
-class DynamicRiskAnalyzer(IAnalyticsComponent):
-    """Dynamic risk analysis with regime awareness"""
+async def calculate_dynamic_var(self, returns: pd.Series, regime_context: Dict) -> Dict:
+    base_var = np.percentile(returns, 5)  # 95% VaR
     
-    async def calculate_dynamic_var(
-        self, 
-        returns: pd.Series, 
-        confidence_level: float = 0.95,
-        regime_context: Dict[str, Any] = None
-    ) -> Dict[str, float]:
-        """Calculate Value at Risk with regime adjustments"""
-        
-        base_var = np.percentile(returns, (1 - confidence_level) * 100)
-        
-        if regime_context:
-            volatility_regime = regime_context.get('volatility_regime', 'normal_volatility')
-            regime_multipliers = {
-                'low_volatility': 0.8,
-                'normal_volatility': 1.0,
-                'high_volatility': 1.3,
-                'extreme_volatility': 1.8
-            }
-            regime_multiplier = regime_multipliers.get(volatility_regime, 1.0)
-            adjusted_var = base_var * regime_multiplier
-        else:
-            adjusted_var = base_var
-            regime_multiplier = 1.0
-        
-        tail_returns = returns[returns <= base_var]
-        expected_shortfall = tail_returns.mean() if len(tail_returns) > 0 else base_var
-        
-        return {
-            'base_var': base_var,
-            'regime_adjusted_var': adjusted_var,
-            'expected_shortfall': expected_shortfall,
-            'var_confidence_level': confidence_level,
-            'regime_multiplier': regime_multiplier
-        }
+    regime_multipliers = {
+        'low_volatility': 0.8,
+        'normal_volatility': 1.0,
+        'high_volatility': 1.3,
+        'extreme_volatility': 1.8
+    }
+    
+    multiplier = regime_multipliers.get(regime_context['volatility_regime'], 1.0)
+    adjusted_var = base_var * multiplier
+    
+    # Expected Shortfall (CVaR)
+    expected_shortfall = returns[returns <= base_var].mean()
+    
+    return {
+        'base_var': base_var,
+        'regime_adjusted_var': adjusted_var,
+        'expected_shortfall': expected_shortfall
+    }
 ```
 
 ---
 
-## PROHIBITED Analytics Patterns
+## MANDATORY Requirements
 
-❌ **Isolated Analytics**: Analytics components must integrate with regime engine  
-❌ **Single Timeframe Analysis**: Must support multi-timeframe capabilities  
-❌ **Batch-Only Processing**: Must support both real-time and batch processing  
-❌ **Non-Attributed Performance**: Must provide strategy-level attribution  
-❌ **Static Risk Models**: Must adapt to regime changes  
+1. **ISystemComponent:** All analytics implement enhanced interface
+2. **Real-Time:** Support streaming and event-driven processing
+3. **Batch:** Support historical analysis and backtesting
+4. **Attribution:** Provide strategy-level and factor-based attribution
+5. **Regime Awareness:** Adapt to market regime conditions
+6. **Multi-Timeframe:** Analyze across timeframes with correlation
 
 ---
 
-## MANDATORY Analytics Requirements
+## PROHIBITED Patterns
 
-1. **ISystemComponent Implementation**: All analytics components implement enhanced interface
-2. **Real-Time Processing**: Support streaming analytics and event-driven processing
-3. **Batch Processing**: Support historical analysis and backtesting
-4. **Performance Attribution**: Provide strategy-level and factor-based attribution
-5. **Regime Awareness**: Adapt metrics and analysis to market regime conditions
-6. **Multi-Timeframe Support**: Analyze across multiple timeframes with correlation analysis
+| Pattern | Violation |
+|---------|-----------|
+| Isolated analytics | Must integrate with regime engine |
+| Single timeframe only | Must support multi-timeframe |
+| Batch-only processing | Must support real-time |
+| Non-attributed performance | Must provide attribution |
+| Static risk models | Must adapt to regime changes |
 
 ---
 
 ## Related Rules
 
-- **Rule 1**: System Architecture - Component integration
-- **Rule 2**: Data Pipeline - Data source for analytics
-- **Rule 3**: Risk Governance - Risk metrics integration
-- **Rule 5**: Execution - TCA and execution analytics
-- **Rule 6**: Operations - Performance monitoring
-
----
-
-**Last Updated:** December 6, 2025  
-**Status:** ACTIVE (v1.0 - Restructured from former Rule 6)
+| Rule | Connection |
+|------|------------|
+| Rule 1 | Component integration |
+| Rule 2 | Data source for analytics |
+| Rule 3 | Risk metrics integration |
+| Rule 5 | TCA and execution analytics |
+| Rule 6 | Performance monitoring |

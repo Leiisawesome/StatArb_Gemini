@@ -2,571 +2,158 @@
 description: "Rule 2: Unified Data Flow Pipeline - Complete Specification"
 alwaysApply: false
 ---
-# Rule 2: Unified Data Flow Pipeline and Processing Patterns
+# Rule 2: Unified Data Flow Pipeline
 
-**Version:** 1.0 (Migrated from former Rule 3)  
-**Date:** December 6, 2025  
-**Status:** ACTIVE - MANDATORY COMPLIANCE
+## Core Principle
 
-**Migration Note:** This rule was formerly Rule 3. Phase numbering updated from 0-5 to 1-5.
+Data flows through a **standardized 5-phase pipeline**. Components **consume processed data** rather than processing raw data themselves. **ONLY `EnhancedTechnicalIndicators`** can calculate indicators.
 
 ---
 
-## Overview
-
-The core_engine implements a **strict, unified data flow pipeline** that ALL components MUST follow. This pipeline ensures **data consistency**, **eliminates code duplication**, and provides **single source of truth** for all processing operations.
-
-**Key Principle:** Data flows through a standardized pipeline. Components **consume processed data** rather than processing raw data themselves.
-
----
-
-## Complete 5-Phase Pipeline Architecture (Phases 1-5)
+## 5-Phase Pipeline (Phases 1-5)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 1: DATA INGESTION (Rule 2.1)                                          │
-│ Component: ClickHouseDataManager (core_engine/data/manager.py)              │
-│ Authority: SINGLE DATA AUTHORITY                                            │
-│ Responsibility: Load raw OHLCV from database                                │
-│ Input: Symbol list, date range, timeframe                                   │
-│ Output: pd.DataFrame[timestamp, open, high, low, close, volume]             │
-│ Methods: load_market_data(), get_historical_data()                          │
-│                                                                              │
-│ Storage: 1-minute OHLCV bars stored in ClickHouse database                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     ↓
-                        **Raw OHLCV DataFrame**
-                                     ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 2: INDICATORS LAYER (Rule 2.2)                                        │
-│ Component: EnhancedTechnicalIndicators                                      │
-│           (core_engine/processing/indicators/engine.py)                     │
-│ Responsibility: Calculate 29+ technical indicators                          │
-│ Input: Raw OHLCV DataFrame                                                  │
-│ Output: OHLCV + Indicators DataFrame                                        │
-│                                                                              │
-│ Indicators Calculated:                                                      │
-│ • Trend: SMA_10, SMA_20, SMA_50, SMA_200, EMA_9, EMA_12, MACD, ADX_14      │
-│ • Momentum: RSI_14, Stochastic, CCI, Williams %R, ROC, MOM                 │
-│ • Volatility: ATR_14, Bollinger Bands, Keltner, Donchian, Hist Vol         │
-│ • Volume: OBV, Volume_MA, VWAP, MFI, A/D Line                              │
-│                                                                              │
-│ Methods: calculate_indicators(market_data: pd.DataFrame) -> pd.DataFrame    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     ↓
-                **Indicators-Enriched DataFrame**
-                (OHLCV + 29+ indicator columns)
-                                     ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 3: FEATURE ENGINEERING LAYER (Rule 2.3)                               │
-│ Component: EnhancedFeatureEngineer                                          │
-│           (core_engine/processing/features/engineer.py)                     │
-│ Responsibility: Engineer 50+ ML-ready features                              │
-│ Input: OHLCV + Indicators DataFrame                                         │
-│ Output: OHLCV + Indicators + Features DataFrame                             │
-│                                                                              │
-│ Features Engineered:                                                        │
-│ • Price: returns_1, returns_5, log_returns, price_momentum                 │
-│ • Trend: trend_strength, trend_direction, ma_crossovers                    │
-│ • Momentum: rsi_normalized, momentum_acceleration, relative_momentum       │
-│ • Volatility: volatility_ratio, atr_normalized, bollinger_position         │
-│ • Volume: volume_ratio, obv_trend, volume_price_correlation                │
-│ • Cross-Asset: relative_strength, correlation, beta                        │
-│                                                                              │
-│ Methods: create_features(indicators_df: pd.DataFrame) -> pd.DataFrame       │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     ↓
-                **Feature-Rich DataFrame**
-                (OHLCV + Indicators + 50+ features)
-                                     ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 4: SIGNAL GENERATION LAYER (Rule 2.4)                                 │
-│ Component: EnhancedSignalGenerator                                          │
-│           (core_engine/processing/signals/generator.py)                     │
-│ Responsibility: Generate preliminary trading signals                        │
-│ Input: OHLCV + Indicators + Features DataFrame                              │
-│ Output: Fully Enriched DataFrame (+ signal columns)                         │
-│                                                                              │
-│ Signal Columns Added:                                                       │
-│ • signal_type: BUY/SELL/HOLD/CLOSE                                         │
-│ • signal_strength: 1-4 (WEAK to VERY_STRONG)                               │
-│ • confidence: 0.0-1.0                                                       │
-│                                                                              │
-│ Methods: generate_signals(features_df: pd.DataFrame) -> pd.DataFrame        │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     ↓
-                **Fully Enriched DataFrame**
-                (OHLCV + Indicators + Features + Preliminary Signals)
-                **READY FOR STRATEGY CONSUMPTION**
-                                     ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ PHASE 5: STRATEGY LAYER (Rule 2.5)                                          │
-│ Component: Trading Strategies (10 implementations)                          │
-│           (core_engine/trading/strategies/implementations/)                 │
-│ Responsibility: Apply strategy-specific logic to enriched data              │
-│ Input: Fully Enriched DataFrame (from Phase 4)                              │
-│ Output: List[StrategySignal]                                                │
-│                                                                              │
-│ **CRITICAL REQUIREMENT:**                                                   │
-│ ✅ Strategies MUST consume enriched data (not raw OHLCV)                    │
-│ ✅ Strategies MUST read pre-calculated indicators (not calculate)           │
-│ ✅ Strategies MUST focus on logic (not processing)                          │
-│ ❌ Strategies CANNOT calculate indicators                                    │
-│ ❌ Strategies CANNOT process raw data                                        │
-│ ❌ Strategies CANNOT bypass pipeline                                         │
-│                                                                              │
-│ Methods: generate_signals(enriched_data: Dict[str, pd.DataFrame])           │
-│          -> List[StrategySignal]                                            │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     ↓
-                **Strategy Signals**
-                (Strategy-specific trading signals)
-                                     ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   TO RULE 3: PHASE 6 INPUT                                   │
-│                   Strategy Signals → Risk Authorization                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Pipeline Orchestration (Rule 2.6)
-
-### ProcessingPipelineOrchestrator
-
-**File:** `core_engine/processing/pipeline_orchestrator.py`
-
-The pipeline orchestrator coordinates the complete processing flow:
-
-```python
-from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
-
-# Initialize pipeline
-pipeline = ProcessingPipelineOrchestrator(
-    data_config=data_config,
-    indicator_config=indicator_config,
-    feature_config=feature_config,
-    signal_config=signal_config
-)
-
-# Process data through complete pipeline ONCE
-enriched_data = await pipeline.process_market_data(
-    symbols=['AAPL', 'TSLA', 'NVDA'],
-    start_time=datetime(2024, 1, 1),
-    end_time=datetime(2024, 12, 31),
-    timeframe='1min'
-)
-
-# enriched_data is Dict[symbol, EnrichedMarketData]
-# Each EnrichedMarketData contains:
-#   - raw_data: Original OHLCV
-#   - indicators: OHLCV + 29+ indicators
-#   - features: OHLCV + indicators + 50+ features
-#   - signals: Fully enriched DataFrame
-```
-
-### StrategyManager Integration
-
-**File:** `core_engine/trading/strategies/manager.py`
-
-StrategyManager uses pipeline orchestrator to process data ONCE for all strategies:
-
-```python
-class StrategyManager:
-    """
-    Multi-strategy coordinator with pipeline integration
-    
-    **CRITICAL:** Processes data through pipeline ONCE,
-    then all strategies consume SAME enriched data.
-    """
-    
-    def __init__(self, config):
-        self.pipeline = ProcessingPipelineOrchestrator(config)
-        self.strategies = {}
-    
-    async def generate_all_signals(
-        self, 
-        symbols: List[str], 
-        start_time: datetime, 
-        end_time: datetime
-    ) -> List[StrategySignal]:
-        """Generate signals from all strategies"""
-        
-        # STEP 1: Process data through pipeline ONCE
-        enriched_data = await self.pipeline.process_market_data(
-            symbols=symbols,
-            start_time=start_time,
-            end_time=end_time
-        )
-        
-        # STEP 2: All strategies consume SAME enriched data
-        all_signals = []
-        for strategy_id, strategy in self.strategies.items():
-            strategy_data = {
-                symbol: enriched.get_enriched_dataframe()
-                for symbol, enriched in enriched_data.items()
-            }
-            
-            # Strategy receives ENRICHED data (not raw!)
-            signals = await strategy.generate_signals(strategy_data)
-            all_signals.extend(signals)
-        
-        return all_signals
+PHASE 1: DATA INGESTION
+├── Component: ClickHouseDataManager
+├── Input: Symbol list, date range, timeframe
+└── Output: pd.DataFrame[timestamp, open, high, low, close, volume]
+                                    ↓
+PHASE 2: INDICATORS LAYER
+├── Component: EnhancedTechnicalIndicators
+├── Input: Raw OHLCV DataFrame
+├── Output: OHLCV + 29 indicators (SMA, RSI, MACD, ADX, ATR, etc.)
+└── ⭐ ONLY HERE can indicators be calculated
+                                    ↓
+PHASE 3: FEATURE ENGINEERING
+├── Component: EnhancedFeatureEngineer
+├── Input: OHLCV + Indicators DataFrame
+└── Output: OHLCV + Indicators + 50+ ML features
+                                    ↓
+PHASE 4: SIGNAL GENERATION
+├── Component: EnhancedSignalGenerator
+├── Input: Feature-enriched DataFrame
+└── Output: Fully enriched DataFrame + signal columns
+                                    ↓
+PHASE 5: STRATEGY LAYER
+├── Component: Trading Strategies (10 implementations)
+├── Input: Fully Enriched DataFrame
+├── Output: List[StrategySignal]
+└── ⭐ Strategies MUST consume enriched data, NOT calculate indicators
+                                    ↓
+           → TO RULE 3: PHASE 6 (Risk Authorization)
 ```
 
 ---
 
 ## Component Responsibility Matrix
 
-| Phase | Component | Input | Output | Responsibility | Can Calculate Indicators? |
-|-------|-----------|-------|--------|----------------|---------------------------|
-| 1 | DataManager | Symbols, dates | Raw OHLCV | Load data from DB | ❌ NO |
-| 2 | Indicators Engine | Raw OHLCV | OHLCV + Indicators | Calculate indicators | ✅ YES (ONLY HERE) |
-| 3 | Feature Engineer | OHLCV + Indicators | + Features | Engineer features | ❌ NO |
-| 4 | Signal Generator | + Features | + Signals | Generate prelim signals | ❌ NO |
-| 5 | Strategy | Enriched Data | Strategy Signals | Apply strategy logic | ❌ NO |
-
-**KEY PRINCIPLE:** Only `EnhancedTechnicalIndicators` (Phase 2) can calculate indicators. ALL other components consume pre-calculated values.
+| Phase | Component | Can Calculate Indicators? | Responsibility |
+|-------|-----------|--------------------------|----------------|
+| 1 | DataManager | ❌ NO | Load data from DB |
+| 2 | Indicators Engine | ✅ YES (ONLY HERE) | Calculate indicators |
+| 3 | Feature Engineer | ❌ NO | Engineer features |
+| 4 | Signal Generator | ❌ NO | Generate preliminary signals |
+| 5 | Strategy | ❌ NO | Apply strategy logic |
 
 ---
 
-## Strategy Implementation Requirements (Rule 2.5 - CRITICAL)
+## Pipeline Orchestration
 
-### ✅ CORRECT Strategy Implementation
+```python
+from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
+
+pipeline = ProcessingPipelineOrchestrator(config)
+
+# Process ONCE, share with all strategies
+enriched_data = await pipeline.process_market_data(
+    symbols=['AAPL', 'TSLA'],
+    start_time=datetime(2024, 1, 1),
+    end_time=datetime(2024, 12, 31)
+)
+
+# enriched_data[symbol] contains: raw_data, indicators, features, signals
+```
+
+---
+
+## Strategy Implementation
+
+### ✅ CORRECT: Read Pre-Calculated Indicators
 
 ```python
 class EnhancedMomentumStrategy(EnhancedBaseStrategy):
-    """
-    Pipeline-compliant momentum strategy
-    
-    **Receives:** Enriched DataFrame (OHLCV + Indicators + Features)
-    **Does:** Reads pre-calculated indicators and applies logic
-    **Does NOT:** Calculate indicators or process raw data
-    """
-    
-    async def generate_signals(
-        self, 
-        enriched_data: Dict[str, pd.DataFrame]  # ENRICHED, not raw!
-    ) -> List[StrategySignal]:
-        """
-        Generate signals from PRE-PROCESSED data
-        
-        Args:
-            enriched_data: Dict[symbol, DataFrame with OHLCV + indicators + features]
-                          DataFrame has columns like: SMA_10, RSI_14, ADX_14, etc.
-        """
-        # Validate data is enriched
+    async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]) -> List[StrategySignal]:
         self._validate_enriched_data(enriched_data)
-        
-        signals = []
         
         for symbol in self.config.symbols:
             data = enriched_data[symbol]
             
-            # READ pre-calculated indicators (NO calculation!)
-            current_row = data.iloc[-1]
-            short_momentum = data['momentum_short'].iloc[-1]  # Pre-calculated
-            adx = current_row['ADX_14']  # Pre-calculated
-            rsi = current_row['RSI_14']  # Pre-calculated
-            volume_ratio = current_row['volume_ratio']  # Pre-calculated
+            # READ pre-calculated indicators
+            adx = data['ADX_14'].iloc[-1]
+            rsi = data['RSI_14'].iloc[-1]
+            volume_ratio = data['volume_ratio'].iloc[-1]
             
-            # STRATEGY LOGIC ONLY (no indicator calculation)
-            if (short_momentum > self.config.momentum_threshold and
-                adx > self.config.adx_threshold and
-                rsi < 70 and
-                volume_ratio > 1.2):
-                
-                signal = StrategySignal(...)
-                signals.append(signal)
+            # Apply strategy logic ONLY
+            if adx > 25 and rsi < 70 and volume_ratio > 1.2:
+                signals.append(StrategySignal(...))
         
         return signals
     
-    def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
-        """Validate that data is enriched (has required indicators)"""
-        required_columns = ['SMA_10', 'RSI_14', 'ADX_14', 'volume_ratio']
-        
-        for symbol, data in enriched_data.items():
-            missing = [col for col in required_columns if col not in data.columns]
+    def _validate_enriched_data(self, data: Dict[str, pd.DataFrame]):
+        required = ['SMA_10', 'RSI_14', 'ADX_14', 'volume_ratio']
+        for symbol, df in data.items():
+            missing = [col for col in required if col not in df.columns]
             if missing:
-                raise ValueError(
-                    f"{symbol} missing required indicators: {missing}. "
-                    f"Data must be enriched via ProcessingPipelineOrchestrator."
-                )
+                raise ValueError(f"{symbol} missing indicators: {missing}")
 ```
 
-### ❌ PROHIBITED Strategy Pattern (Rule Violation)
+### ❌ PROHIBITED: Calculate Own Indicators
 
 ```python
-class BadMomentumStrategy(EnhancedBaseStrategy):
-    """
-    ❌ VIOLATES RULE 2: This strategy calculates its own indicators
-    """
-    
-    async def generate_signals(
-        self, 
-        market_data: Dict[str, pd.DataFrame]  # Raw OHLCV
-    ) -> List[StrategySignal]:
-        
-        for symbol in self.config.symbols:
-            data = market_data[symbol]
-            
-            # ❌ PROHIBITED: Calculating indicators in strategy
-            sma_10 = data['close'].rolling(10).mean()  # ❌ BAD!
-            sma_20 = data['close'].rolling(20).mean()  # ❌ BAD!
-            
-            # ❌ PROHIBITED: Custom indicator calculation
-            adx = self._calculate_adx(data)  # ❌ BAD!
-```
-
-**Why This is Bad:**
-- ❌ Duplicates indicator calculation code (10 strategies = 10 copies)
-- ❌ Inconsistent calculations (each strategy may implement differently)
-- ❌ Maintenance nightmare (bug requires 10 fixes)
-- ❌ Performance waste (same indicator calculated 10 times)
-- ❌ Violates Single Responsibility Principle
-
----
-
-## MANDATORY Requirements (Rule 2.7)
-
-### For All Components
-
-1. **Data Source:** MUST use `ClickHouseDataManager` (no direct DB access)
-2. **Pipeline Flow:** MUST follow Phase 1 → 2 → 3 → 4 → 5 sequence
-3. **No Bypassing:** CANNOT skip pipeline stages
-4. **Indicator Calculation:** ONLY `EnhancedTechnicalIndicators` can calculate
-5. **Enriched Data Validation:** Components MUST validate input data format
-
-### For Strategies Specifically
-
-1. **Input Validation:** MUST validate data is enriched (has indicators)
-2. **Read-Only Indicators:** MUST read pre-calculated indicators
-3. **No Calculation:** CANNOT calculate indicators internally
-4. **Focus on Logic:** MUST focus on strategy-specific logic only
-5. **Method Signature:** `generate_signals(enriched_data: Dict[str, pd.DataFrame])`
-
-### For Pipeline Orchestrator
-
-1. **Single Processing:** Process data through pipeline ONCE per timeframe
-2. **Consistency:** Ensure all strategies receive SAME enriched data
-3. **Caching:** Cache enriched data to avoid reprocessing
-4. **Regime Integration:** Propagate regime context to all pipeline components
-5. **Error Handling:** Gracefully handle failures in pipeline stages
-
----
-
-## PROHIBITED Patterns (Rule 2.8)
-
-### ❌ Direct Database Access
-```python
-# PROHIBITED
-import clickhouse_connect
-client = clickhouse_connect.get_client()
-data = client.query("SELECT * FROM market_data")  # ❌ VIOLATES RULE 2.1
-```
-
-### ❌ Pipeline Bypassing
-```python
-# PROHIBITED
-class Strategy:
-    async def generate_signals(self, raw_data):
-        indicators = self._calculate_my_own_indicators(raw_data)  # ❌ VIOLATES RULE 2.2
-```
-
-### ❌ Indicator Calculation in Strategy
-```python
-# PROHIBITED
-class Strategy:
-    def _calculate_indicators(self, data):
-        rsi = self._calculate_rsi(data)  # ❌ VIOLATES RULE 2.5
-        adx = self._calculate_adx(data)  # ❌ VIOLATES RULE 2.5
-```
-
-### ❌ Inconsistent Data Formats
-```python
-# PROHIBITED - Use pd.DataFrame from pipeline
-strategy_a_data = np.array(market_data)  # ❌ VIOLATES RULE 2
-strategy_b_data = market_data.to_dict()  # ❌ VIOLATES RULE 2
+class BadStrategy:
+    async def generate_signals(self, market_data):
+        sma_10 = data['close'].rolling(10).mean()  # ❌ VIOLATES RULE 2
+        adx = self._calculate_adx(data)             # ❌ VIOLATES RULE 2
 ```
 
 ---
 
-## Benefits of Pipeline Architecture
+## Benefits
 
-### 1. Code Reduction
-- **Before:** 10 strategies × 150 lines of indicator code = 1,500 lines
-- **After:** 1 pipeline × indicator calculation = 0 lines in strategies
-- **Savings:** 1,500 lines of duplicated code eliminated (30% reduction)
-
-### 2. Performance Optimization
-- **Before:** Calculate same indicator 10 times (once per strategy)
-- **After:** Calculate each indicator ONCE (shared across strategies)
-- **Improvement:** 90% reduction in indicator calculation time
-
-### 3. Consistency Guarantee
-- **Before:** Each strategy may calculate RSI differently
-- **After:** All strategies use SAME RSI calculation
-- **Benefit:** 100% consistency across strategies
-
-### 4. Maintenance Efficiency
-- **Before:** Bug in ADX calculation → fix in 10 strategies
-- **After:** Bug in ADX calculation → fix in 1 place
-- **Improvement:** 90% reduction in maintenance effort
-
-### 5. Testing Simplicity
-- **Before:** Test indicator calculations in each strategy
-- **After:** Test indicators once in isolation
-- **Benefit:** Cleaner unit tests, better coverage
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Code lines | 1,500 (10 strategies × 150) | 0 in strategies | 100% reduction |
+| Indicator calculation | 10× per strategy | 1× shared | 90% faster |
+| Consistency | Variable per strategy | Identical | 100% consistent |
+| Bug fixes | 10 places | 1 place | 90% less maintenance |
 
 ---
 
-## Validation and Enforcement (Rule 2.9)
+## MANDATORY Requirements
 
-### Enriched Data Validation
-
-```python
-def validate_enriched_data(data: pd.DataFrame, component_name: str) -> None:
-    """Validate that DataFrame is enriched with required columns"""
-    
-    # Required indicator columns (from Phase 2)
-    required_indicators = [
-        'SMA_10', 'SMA_20', 'SMA_50', 
-        'RSI_14', 'MACD', 'ADX_14', 
-        'ATR_14', 'volume_ratio'
-    ]
-    
-    # Required feature columns (from Phase 3)
-    required_features = [
-        'returns_1', 'momentum_score', 
-        'trend_strength', 'volatility_ratio'
-    ]
-    
-    missing_indicators = [col for col in required_indicators if col not in data.columns]
-    missing_features = [col for col in required_features if col not in data.columns]
-    
-    if missing_indicators or missing_features:
-        raise ValueError(
-            f"{component_name} received raw data without enrichment! "
-            f"Missing indicators: {missing_indicators}, "
-            f"Missing features: {missing_features}. "
-            f"Data MUST be processed through ProcessingPipelineOrchestrator."
-        )
-```
-
-### Pipeline Compliance Testing
-
-```python
-# File: tests/compliance/test_rule2_enforcement.py
-
-class TestRule2Compliance:
-    """Verify Rule 2 compliance across all components"""
-    
-    def test_strategies_do_not_calculate_indicators(self):
-        """Ensure strategies don't have indicator calculation methods"""
-        prohibited_methods = [
-            '_calculate_indicators',
-            '_calculate_sma',
-            '_calculate_rsi',
-            '_calculate_adx',
-            '_calculate_macd'
-        ]
-        
-        for strategy_class in ALL_STRATEGY_CLASSES:
-            for method_name in prohibited_methods:
-                assert not hasattr(strategy_class, method_name), \
-                    f"{strategy_class.__name__} has prohibited method {method_name}"
-    
-    def test_strategies_validate_enriched_data(self):
-        """Ensure strategies validate data is enriched"""
-        for strategy_class in ALL_STRATEGY_CLASSES:
-            assert hasattr(strategy_class, '_validate_enriched_data'), \
-                f"{strategy_class.__name__} missing _validate_enriched_data method"
-    
-    async def test_complete_pipeline_flow(self):
-        """Test data flows through all pipeline stages"""
-        raw_data = await data_manager.load_market_data(...)
-        assert 'SMA_10' not in raw_data.columns  # Should be raw
-        
-        enriched_data = await pipeline.process_market_data(...)
-        
-        assert 'SMA_10' in enriched_data['AAPL'].signals.columns
-        assert 'RSI_14' in enriched_data['AAPL'].signals.columns
-        assert 'momentum_score' in enriched_data['AAPL'].signals.columns
-```
+1. **Data Source:** Use `ClickHouseDataManager` (no direct DB access)
+2. **Pipeline Flow:** Follow Phase 1 → 2 → 3 → 4 → 5 sequence
+3. **Indicator Calculation:** ONLY in `EnhancedTechnicalIndicators`
+4. **Strategy Input:** Must be enriched data with validation
+5. **Single Processing:** Process data through pipeline ONCE per timeframe
 
 ---
 
-## Migration Guide (Rule 2.10)
+## PROHIBITED Patterns
 
-### For Existing Strategies
-
-**Step 1:** Update method signature
-```python
-# OLD
-async def generate_signals(self, market_data: Dict[str, pd.DataFrame]):
-    
-# NEW
-async def generate_signals(self, enriched_data: Dict[str, pd.DataFrame]):
-```
-
-**Step 2:** Add enriched data validation
-```python
-def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]):
-    required_columns = ['SMA_10', 'RSI_14', 'ADX_14']
-    for symbol, data in enriched_data.items():
-        missing = [col for col in required_columns if col not in data.columns]
-        if missing:
-            raise ValueError(f"{symbol} missing indicators: {missing}")
-```
-
-**Step 3:** Remove indicator calculation methods
-```python
-# DELETE these methods:
-# - _calculate_indicators()
-# - _calculate_symbol_indicators()
-# - _calculate_adx()
-# - _calculate_rsi()
-```
-
-**Step 4:** Update signal generation to READ indicators
-```python
-# OLD (calculates)
-sma_10 = data['close'].rolling(10).mean()
-rsi = self._calculate_rsi(data)
-
-# NEW (reads)
-sma_10 = data['SMA_10'].iloc[-1]
-rsi = data['RSI_14'].iloc[-1]
-```
-
----
-
-## Summary
-
-**Rule 2 Requirements:**
-1. ✅ Use `ProcessingPipelineOrchestrator` for all data processing
-2. ✅ Follow 5-phase pipeline: Data → Indicators → Features → Signals → Strategy
-3. ✅ Strategies consume enriched data (not raw OHLCV)
-4. ✅ ONLY `EnhancedTechnicalIndicators` calculates indicators
-5. ✅ Validate enriched data in all consuming components
-6. ❌ NO indicator calculation in strategies
-7. ❌ NO pipeline bypassing
-8. ❌ NO direct database access
-
-**Compliance:** MANDATORY for all components  
-**Enforcement:** Automated tests + code reviews  
-**Benefits:** 30% code reduction, 90% performance improvement, 100% consistency
+| Pattern | Violation |
+|---------|-----------|
+| Direct database access | `client.query("SELECT * FROM...")` |
+| Indicator calculation in strategy | `data['close'].rolling(10).mean()` |
+| Custom indicator methods | `self._calculate_rsi(data)` |
+| Bypassing pipeline | Processing raw data directly |
 
 ---
 
 ## Related Rules
 
-- **Rule 1**: System Architecture - Component integration and regime-first
-- **Rule 3**: Risk & Compliance Governance (Phases 6-10) - Authorization pipeline
-- **Rule 5**: Execution & Order Management (Phases 11-16) - Trade execution
-
----
-
-**Last Updated:** December 6, 2025  
-**Status:** ACTIVE (v1.0 - Migrated from former Rule 3)  
-**Migration:** Phase numbering changed from 0-5 to 1-5
+| Rule | Connection |
+|------|------------|
+| Rule 1 | Component integration and regime-first |
+| Rule 3 | Authorization pipeline (Phases 6-10) |
+| Rule 5 | Execution pipeline (Phases 11-16) |
