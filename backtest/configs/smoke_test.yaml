@@ -9,10 +9,10 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["NVDA"]
+symbols: ["TSLA"]
 interval: "1min"
-start_date: "2024-12-20"  # Valid data date
-end_date: "2024-12-20"    # Same day (1 day test)
+start_date: "2024-12-16"  # Valid data date
+end_date: "2024-12-16"    # Same day (1 day test)
 
 # Small capital for quick test
 initial_capital: 100000
@@ -23,127 +23,90 @@ allow_shorts: false  # Disable for mean reversion (enable for pairs trading)
 # Uncomment ONE strategy block to test
 # ========================================
 
-# OPTION 1: Momentum Strategy (commented out)
-# strategies:
-#   - type: "momentum"
-#     name: "MOM_Simple"
-#     allocation_pct: 1.0
-#     parameters:
-#       # Core momentum periods
-#       short_period: 10
-#       medium_period: 20
-#       long_period: 50
-#       lookback_period: 60
-#       
-#       # Entry thresholds (RELAXED for testing)
-#       momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
-#       adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
-#       volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
-#       
-#       # RSI settings
-#       rsi_period: 14
-#       rsi_overbought: 75.0                 # RELAXED from 70 to 75
-#       rsi_oversold: 25.0                   # RELAXED from 30 to 25
-#       
-#       # Position sizing
-#       base_position_pct: 0.05
-#       max_position_pct: 0.10
-#       
-#       # Scanning mode
-#       scan_all_bars: false                 # Disabled - engine calls per-bar
-#       scan_interval: 1
-
-# OPTION 2: Mean Reversion Strategy (ACTIVE)
-# NOTE: Strategy uses EXHAUSTION SCORING system (v3.0)
-# Key thresholds are dislocation_*, NOT zscore_entry_threshold!
+# OPTION 1: Momentum Strategy (ACTIVE)
 strategies:
-  - type: "mean_reversion"
-    name: "MR_Simple"
+  - type: "momentum"
+    name: "MOM_Simple"
     allocation_pct: 1.0
     parameters:
-      # Core parameters
-      lookback_period: 30               # Smoother z-score (was 20)
-      scan_all_bars: false
-      scan_interval: 1
-      enable_regime_filter: false
+      # Core momentum periods
+      short_period: 10
+      medium_period: 20
+      long_period: 50
+      lookback_period: 60
       
-      # EXHAUSTION SCORING THRESHOLDS (ACTUAL entry control)
-      # Higher thresholds = fewer but higher-quality trades (larger price moves)
-      dislocation_minimum: 2.5          # Min z-score to consider (raised from 2.0 for more alpha)
-      dislocation_moderate: 2.5         # For moderate signal scoring
-      dislocation_strong: 3.0           # For strong signal scoring
-      
-      # Score thresholds for signal generation
-      exhaustion_score_moderate: 55.0   # Min score to generate signal (default 60)
-      exhaustion_score_strong: 65.0     # Score for high confidence (default 70)
+      # Entry thresholds (RELAXED for testing)
+      momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
+      adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
+      volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
       
       # RSI settings
-      rsi_oversold: 35
-      rsi_overbought: 65
+      rsi_period: 14
+      rsi_overbought: 75.0                 # RELAXED from 70 to 75
+      rsi_oversold: 25.0                   # RELAXED from 30 to 25
       
       # Position sizing
-      base_position_pct: 0.1    # 10% of portfolio per trade
+      base_position_pct: 0.05
+      max_position_pct: 0.10
       
-      # PRICE-AWARE EXIT THRESHOLDS
-      stop_loss_pct: -2.0
-      take_profit_pct: 10.0
-      min_profit_to_exit: 0.0    # Require at least breakeven (no loss exits)
-      
-      # MOMENTUM-AWARE EXIT LOGIC (NEW)
-      enable_momentum_exit: true
-      momentum_adx_threshold: 20.0      # ADX < 20 = weak trend, OK to exit
-      momentum_rsi_overbought: 70.0     # RSI > 70 = momentum exhausted, OK to exit  
-      momentum_rsi_oversold: 30.0       # RSI < 30 = momentum exhausted, OK to exit
-      momentum_volume_ratio: 0.7        # Volume < 70% avg = fading, OK to exit
-      momentum_extended_zscore: 3.0     # Always exit if |z| > 3.0
-      
-      # Legacy (kept for reference but NOT used by exhaustion system)
-      zscore_entry_threshold: 1.5       # IGNORED - use dislocation_minimum instead
-      zscore_exit_threshold: 0.5
-      
-      # INTRADAY TRADING - EOD LIQUIDATION
-      enable_eod_liquidation: true      # Close all positions before market close
-      eod_close_time: "15:55"           # Time to liquidate (5 min before close)
-      enable_entry_cutoff: true         # Stop new entries near close
-      entry_cutoff_time: "15:30"        # No new entries after this time
-      min_holding_bars: 5               # Minimum bars to hold (avoid churn)
+      # Scanning mode
+      scan_all_bars: false                 # Disabled - engine calls per-bar
+      scan_interval: 1
 
-# OPTION 3: SES Pairs Trading Strategy (commented out)
-# NOTE: Pairs trading requires cointegrated assets. BTC/ETH may not always be
-# cointegrated on a single day. For testing, try:
-# - Longer date range (multi-day) for statistical significance
-# - Assets known to be cointegrated (e.g., SPY/VOO, GLD/IAU)
-# - Crypto pairs that historically show cointegration
+# OPTION 2: Mean Reversion Strategy (commented out)
+# NOTE: Strategy uses EXHAUSTION SCORING system (v3.0)
+# Key thresholds are dislocation_*, NOT zscore_entry_threshold!
 # strategies:
-#   - type: "ses_pairs_trading"
-#     name: "SES_Pairs"
+#   - type: "mean_reversion"
+#     name: "MR_Simple"
 #     allocation_pct: 1.0
 #     parameters:
-#       # Asset universe for pair selection
-#       asset_universe: ["GLD", "IAU"]
-#       
-#       # Pair selection thresholds (RELAXED for smoke test)
-#       lookback_period: 300              # Increased to get more overlapping bars
-#       min_correlation: 0.5              # Minimum correlation for pair consideration
-#       correlation_threshold: 0.4        # Correlation to maintain pair
-#       cointegration_threshold: 0.15     # RELAXED from 0.05 for testing
-#       
-#       # Entry/exit Z-scores (VERY RELAXED for smoke test)
-#       entry_zscore: 0.15                # VERY LOW for testing (normally 1.5-2.0)
-#       exit_zscore: 0.05                 # Exit when zscore drops to this
-#       stop_loss_zscore: 3.0
-#       
-#       # SES thresholds (LOWERED for smoke test)
-#       ses_entry_threshold: 50.0         # LOWERED from 65 for testing
-#       
-#       # Position management
-#       max_pairs: 2
-#       position_size_pct: 0.05
-#       max_holding_period: 10            # REDUCED for smoke test
-#       
-#       # Scanning mode
+#       # Core parameters
+#       lookback_period: 30               # Smoother z-score (was 20)
 #       scan_all_bars: false
 #       scan_interval: 1
+#       enable_regime_filter: false
+#       
+#       # EXHAUSTION SCORING THRESHOLDS (ACTUAL entry control)
+#       # Higher thresholds = fewer but higher-quality trades (larger price moves)
+#       dislocation_minimum: 2.5          # Min z-score to consider (raised from 2.0 for more alpha)
+#       dislocation_moderate: 2.5         # For moderate signal scoring
+#       dislocation_strong: 3.0           # For strong signal scoring
+#       
+#       # Score thresholds for signal generation
+#       exhaustion_score_moderate: 55.0   # Min score to generate signal (default 60)
+#       exhaustion_score_strong: 65.0     # Score for high confidence (default 70)
+#       
+#       # RSI settings
+#       rsi_oversold: 35
+#       rsi_overbought: 65
+#       
+#       # Position sizing
+#       base_position_pct: 0.1    # 10% of portfolio per trade
+#       
+#       # PRICE-AWARE EXIT THRESHOLDS
+#       stop_loss_pct: -2.0
+#       take_profit_pct: 10.0
+#       min_profit_to_exit: 0.0    # Require at least breakeven (no loss exits)
+#       
+#       # MOMENTUM-AWARE EXIT LOGIC (NEW)
+#       enable_momentum_exit: true
+#       momentum_adx_threshold: 20.0      # ADX < 20 = weak trend, OK to exit
+#       momentum_rsi_overbought: 70.0     # RSI > 70 = momentum exhausted, OK to exit  
+#       momentum_rsi_oversold: 30.0       # RSI < 30 = momentum exhausted, OK to exit
+#       momentum_volume_ratio: 0.7        # Volume < 70% avg = fading, OK to exit
+#       momentum_extended_zscore: 3.0     # Always exit if |z| > 3.0
+#       
+#       # Legacy (kept for reference but NOT used by exhaustion system)
+#       zscore_entry_threshold: 1.5       # IGNORED - use dislocation_minimum instead
+#       zscore_exit_threshold: 0.5
+#       
+#       # INTRADAY TRADING - EOD LIQUIDATION
+#       enable_eod_liquidation: true      # Close all positions before market close
+#       eod_close_time: "15:55"           # Time to liquidate (5 min before close)
+#       enable_entry_cutoff: true         # Stop new entries near close
+#       entry_cutoff_time: "15:30"        # No new entries after this time
+#       min_holding_bars: 5               # Minimum bars to hold (avoid churn)
 
 # Minimal risk management
 min_signal_confidence: 0.40  # RELAXED for momentum (uses composite signals)
