@@ -1854,24 +1854,625 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 logger.debug(f"⚠️  [{symbol}] SHORT: Weak price structure, reducing confidence")
                 short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
         
+        # ========================================
+        # TEXTBOOK BEST PRACTICES INTEGRATION (P0/P1/P2)
+        # ========================================
+        # Pring's "weight of evidence" methodology:
+        # - P0: Price action MUST confirm momentum
+        # - P1: Volume MUST NOT diverge
+        # - P2: Synergy score modulates confidence
+        # ========================================
+        
         if long_condition_met:
-            logger.info(
-                f"🟢 {symbol} LONG entry: composite_z={composite_z:.2f} > {long_threshold:.2f}, "
-                f"composite_pct={composite_pct:.1f}% (>{self.config.composite_pct_entry:.1f}%) "
-                f"(regime-adjusted from {self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
-            )
+            # P0: Price action confirmation (CRITICAL)
+            if enriched_data is not None:
+                price_confirmed, price_reason = self._check_price_action_confirmation(
+                    symbol, enriched_data, SignalType.BUY, current_idx
+                )
+                if not price_confirmed:
+                    logger.info(
+                        f"⚠️  [{symbol}] LONG: Momentum alert but NO PRICE CONFIRMATION "
+                        f"(Pring Rule: momentum must be confirmed by price action)"
+                    )
+                    # Don't reject outright - reduce to warning if composite_z is very strong
+                    if composite_z < long_threshold * 1.5:
+                        logger.info(f"❌ [{symbol}] LONG REJECTED: Requires price confirmation for Z<{long_threshold*1.5:.2f}")
+                        return False, None
+                    else:
+                        logger.info(f"⚠️  [{symbol}] LONG: Very strong momentum (Z={composite_z:.2f}) overrides price confirmation")
+                
+                # P1: Volume confirmation (reject divergence)
+                vol_confirmed, vol_reason = self._check_volume_confirmation(
+                    symbol, enriched_data, SignalType.BUY, current_idx
+                )
+                if not vol_confirmed:
+                    logger.info(f"❌ [{symbol}] LONG REJECTED: {vol_reason} (Pring: volume must corroborate)")
+                    return False, None
+                
+                # P2: Synergy scoring (for confidence adjustment)
+                synergy = self._calculate_indicator_synergy(
+                    symbol, enriched_data, SignalType.BUY, current_idx
+                )
+                
+                if synergy['weak_consensus']:
+                    # Weak synergy - require higher threshold
+                    if composite_z < long_threshold * 1.3:
+                        logger.info(
+                            f"❌ [{symbol}] LONG REJECTED: Weak indicator synergy "
+                            f"(score={synergy['synergy_score']:.2f}, need stronger signal)"
+                        )
+                        return False, None
+                
+                logger.info(
+                    f"🟢 [{symbol}] LONG ENTRY CONFIRMED (Textbook Validated):\n"
+                    f"   composite_z={composite_z:.2f} > {long_threshold:.2f}\n"
+                    f"   price_confirmation={price_reason}\n"
+                    f"   volume={vol_reason}\n"
+                    f"   synergy_score={synergy['synergy_score']:.2f} ({synergy['confirmations']}/{synergy['max_confirmations']})\n"
+                    f"   breakdown={synergy['breakdown']}"
+                )
+            else:
+                logger.info(
+                    f"🟢 {symbol} LONG entry: composite_z={composite_z:.2f} > {long_threshold:.2f}, "
+                    f"composite_pct={composite_pct:.1f}% (>{self.config.composite_pct_entry:.1f}%) "
+                    f"(regime-adjusted from {self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
+                )
+            
             return True, SignalType.BUY
         
         # SHORT entry: Strong downward momentum (both Z-score AND percentile confirmation)
         if short_condition_met:
-            logger.info(
-                f"🔴 {symbol} SHORT entry: composite_z={composite_z:.2f} < {-short_threshold:.2f}, "
-                f"composite_pct={composite_pct:.1f}% (<{100 - self.config.composite_pct_entry:.1f}%) "
-                f"(regime-adjusted from {-self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
-            )
+            # P0: Price action confirmation (CRITICAL)
+            if enriched_data is not None:
+                price_confirmed, price_reason = self._check_price_action_confirmation(
+                    symbol, enriched_data, SignalType.SELL, current_idx
+                )
+                if not price_confirmed:
+                    logger.info(
+                        f"⚠️  [{symbol}] SHORT: Momentum alert but NO PRICE CONFIRMATION "
+                        f"(Pring Rule: momentum must be confirmed by price action)"
+                    )
+                    if composite_z > -short_threshold * 1.5:
+                        logger.info(f"❌ [{symbol}] SHORT REJECTED: Requires price confirmation for Z>{-short_threshold*1.5:.2f}")
+                        return False, None
+                    else:
+                        logger.info(f"⚠️  [{symbol}] SHORT: Very strong momentum (Z={composite_z:.2f}) overrides price confirmation")
+                
+                # P1: Volume confirmation
+                vol_confirmed, vol_reason = self._check_volume_confirmation(
+                    symbol, enriched_data, SignalType.SELL, current_idx
+                )
+                if not vol_confirmed:
+                    logger.info(f"❌ [{symbol}] SHORT REJECTED: {vol_reason}")
+                    return False, None
+                
+                # P2: Synergy scoring
+                synergy = self._calculate_indicator_synergy(
+                    symbol, enriched_data, SignalType.SELL, current_idx
+                )
+                
+                if synergy['weak_consensus']:
+                    if composite_z > -short_threshold * 1.3:
+                        logger.info(
+                            f"❌ [{symbol}] SHORT REJECTED: Weak indicator synergy "
+                            f"(score={synergy['synergy_score']:.2f})"
+                        )
+                        return False, None
+                
+                logger.info(
+                    f"🔴 [{symbol}] SHORT ENTRY CONFIRMED (Textbook Validated):\n"
+                    f"   composite_z={composite_z:.2f} < {-short_threshold:.2f}\n"
+                    f"   price_confirmation={price_reason}\n"
+                    f"   volume={vol_reason}\n"
+                    f"   synergy_score={synergy['synergy_score']:.2f} ({synergy['confirmations']}/{synergy['max_confirmations']})\n"
+                    f"   breakdown={synergy['breakdown']}"
+                )
+            else:
+                logger.info(
+                    f"🔴 {symbol} SHORT entry: composite_z={composite_z:.2f} < {-short_threshold:.2f}, "
+                    f"composite_pct={composite_pct:.1f}% (<{100 - self.config.composite_pct_entry:.1f}%) "
+                    f"(regime-adjusted from {-self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
+                )
+            
             return True, SignalType.SELL
         
         return False, None
+    
+    # ========================================
+    # TEXTBOOK MOMENTUM BEST PRACTICES (P0/P1/P2)
+    # ========================================
+    # Implementing Pring's "weight of evidence" methodology:
+    # - P0: Price action confirmation (MA crossover, pattern completion)
+    # - P1: KST/SPK composite momentum + volume divergence rejection
+    # - P2: Indicator synergy scoring
+    # ========================================
+    
+    def _check_price_action_confirmation(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        signal_type: SignalType,
+        current_idx: int = -1
+    ) -> Tuple[bool, str]:
+        """
+        P0 CRITICAL: Textbook momentum confirmation via price action
+        
+        Pring's Rule: "Momentum alerts must be confirmed by price action"
+        
+        Confirmation types (any ONE is sufficient):
+        1. MA Crossover: SMA_10 crosses SMA_20 in signal direction
+        2. Pattern Completion: Higher high (bull) or lower low (bear)
+        3. Trendline Break: Price breaks recent swing structure
+        
+        Args:
+            symbol: Trading symbol
+            data: Enriched DataFrame with MAs
+            signal_type: BUY or SELL
+            current_idx: Current bar index
+            
+        Returns:
+            Tuple[confirmed, confirmation_type]
+        """
+        if len(data) < 20:
+            logger.debug(f"[{symbol}] Insufficient data for price confirmation")
+            return False, "insufficient_data"
+        
+        # Resolve index
+        idx = current_idx if current_idx >= 0 else len(data) + current_idx
+        if idx < 20:
+            return False, "insufficient_history"
+        
+        # Get MA columns (handle naming variations)
+        sma_10_col = self._get_column_name('SMA_10', data)
+        sma_20_col = self._get_column_name('SMA_20', data)
+        sma_50_col = self._get_column_name('SMA_50', data)
+        
+        # Check if MAs exist
+        has_sma_10 = sma_10_col in data.columns
+        has_sma_20 = sma_20_col in data.columns
+        has_sma_50 = sma_50_col in data.columns
+        
+        confirmations = []
+        
+        # ========================================
+        # CONFIRMATION 1: MA Crossover
+        # ========================================
+        if has_sma_10 and has_sma_20:
+            sma_10_curr = data[sma_10_col].iloc[idx]
+            sma_20_curr = data[sma_20_col].iloc[idx]
+            sma_10_prev = data[sma_10_col].iloc[idx - 1]
+            sma_20_prev = data[sma_20_col].iloc[idx - 1]
+            
+            if not any(pd.isna([sma_10_curr, sma_20_curr, sma_10_prev, sma_20_prev])):
+                if signal_type == SignalType.BUY:
+                    # Bullish crossover: SMA_10 crosses above SMA_20
+                    ma_cross = (sma_10_prev <= sma_20_prev) and (sma_10_curr > sma_20_curr)
+                else:
+                    # Bearish crossover: SMA_10 crosses below SMA_20
+                    ma_cross = (sma_10_prev >= sma_20_prev) and (sma_10_curr < sma_20_curr)
+                
+                if ma_cross:
+                    confirmations.append("ma_crossover")
+                    logger.info(f"✅ [{symbol}] MA CROSSOVER confirmed ({signal_type.value})")
+        
+        # ========================================
+        # CONFIRMATION 2: Higher High / Lower Low Pattern
+        # ========================================
+        lookback = min(10, idx)
+        if lookback >= 5:
+            recent_high = data['high'].iloc[idx-4:idx+1].max()
+            prior_high = data['high'].iloc[idx-9:idx-4].max() if idx >= 9 else data['high'].iloc[:idx-4].max()
+            recent_low = data['low'].iloc[idx-4:idx+1].min()
+            prior_low = data['low'].iloc[idx-9:idx-4].min() if idx >= 9 else data['low'].iloc[:idx-4].min()
+            
+            if signal_type == SignalType.BUY:
+                # Bullish: Higher high confirms upward momentum
+                if recent_high > prior_high:
+                    confirmations.append("higher_high")
+                    logger.debug(f"✅ [{symbol}] HIGHER HIGH pattern confirmed")
+                # Also check: Higher low (base building)
+                if recent_low > prior_low:
+                    confirmations.append("higher_low")
+                    logger.debug(f"✅ [{symbol}] HIGHER LOW pattern confirmed")
+            else:
+                # Bearish: Lower low confirms downward momentum
+                if recent_low < prior_low:
+                    confirmations.append("lower_low")
+                    logger.debug(f"✅ [{symbol}] LOWER LOW pattern confirmed")
+                # Also check: Lower high (distribution)
+                if recent_high < prior_high:
+                    confirmations.append("lower_high")
+                    logger.debug(f"✅ [{symbol}] LOWER HIGH pattern confirmed")
+        
+        # ========================================
+        # CONFIRMATION 3: MA Alignment (Trend Structure)
+        # ========================================
+        if has_sma_10 and has_sma_20 and has_sma_50:
+            sma_10 = data[sma_10_col].iloc[idx]
+            sma_20 = data[sma_20_col].iloc[idx]
+            sma_50 = data[sma_50_col].iloc[idx]
+            
+            if not any(pd.isna([sma_10, sma_20, sma_50])):
+                if signal_type == SignalType.BUY:
+                    # Bullish alignment: SMA_10 > SMA_20 > SMA_50
+                    if sma_10 > sma_20 > sma_50:
+                        confirmations.append("ma_alignment")
+                        logger.debug(f"✅ [{symbol}] BULLISH MA ALIGNMENT confirmed")
+                else:
+                    # Bearish alignment: SMA_10 < SMA_20 < SMA_50
+                    if sma_10 < sma_20 < sma_50:
+                        confirmations.append("ma_alignment")
+                        logger.debug(f"✅ [{symbol}] BEARISH MA ALIGNMENT confirmed")
+        
+        # ========================================
+        # RESULT: At least ONE confirmation required
+        # ========================================
+        if confirmations:
+            confirmation_str = "+".join(confirmations)
+            logger.info(f"✅ [{symbol}] PRICE ACTION CONFIRMED: {confirmation_str}")
+            return True, confirmation_str
+        else:
+            logger.debug(f"❌ [{symbol}] No price action confirmation found")
+            return False, "no_confirmation"
+    
+    def calculate_kst(self, prices: pd.Series, smooth: bool = True) -> pd.Series:
+        """
+        P1: Know Sure Thing (KST) - Pring's Composite Momentum
+        
+        KST integrates multiple cycles by summing smoothed ROCs.
+        LONGER periods are weighted MORE HEAVILY to reflect dominant trend.
+        
+        Formula:
+        KST = w1*SMA(ROC_10,10) + w2*SMA(ROC_15,10) + w3*SMA(ROC_20,10) + w4*SMA(ROC_30,15)
+        
+        Weights: w1=1, w2=2, w3=3, w4=4 (longer = more weight)
+        
+        Args:
+            prices: Close price series
+            smooth: Whether to smooth each ROC component
+            
+        Returns:
+            KST series
+        """
+        if len(prices) < 50:
+            return pd.Series([0] * len(prices), index=prices.index)
+        
+        # ROC periods (representing different cycles)
+        roc_10 = prices.pct_change(10)
+        roc_15 = prices.pct_change(15)
+        roc_20 = prices.pct_change(20)
+        roc_30 = prices.pct_change(30)
+        
+        if smooth:
+            # Smooth each ROC (critical for noise reduction)
+            smooth_10 = roc_10.rolling(10, min_periods=5).mean()
+            smooth_15 = roc_15.rolling(10, min_periods=5).mean()
+            smooth_20 = roc_20.rolling(10, min_periods=5).mean()
+            smooth_30 = roc_30.rolling(15, min_periods=7).mean()
+        else:
+            smooth_10, smooth_15, smooth_20, smooth_30 = roc_10, roc_15, roc_20, roc_30
+        
+        # Weighted sum: LONGER periods get MORE weight (Pring's principle)
+        kst = (smooth_10 * 1 + smooth_15 * 2 + smooth_20 * 3 + smooth_30 * 4)
+        
+        return kst
+    
+    def calculate_kst_signal(self, kst: pd.Series, signal_period: int = 9) -> pd.Series:
+        """Calculate KST signal line (SMA of KST)"""
+        return kst.rolling(signal_period, min_periods=5).mean()
+    
+    def get_kst_analysis(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        current_idx: int = -1
+    ) -> Dict[str, Any]:
+        """
+        P1: Comprehensive KST analysis for momentum confirmation
+        
+        Returns:
+            Dict with KST value, signal, histogram, trend, crossover status
+        """
+        if 'close' not in data.columns or len(data) < 50:
+            return {
+                'kst': 0, 'signal': 0, 'histogram': 0,
+                'trend': 'neutral', 'crossover': None,
+                'valid': False
+            }
+        
+        idx = current_idx if current_idx >= 0 else len(data) + current_idx
+        prices = data['close'].iloc[:idx+1]
+        
+        kst = self.calculate_kst(prices)
+        kst_signal = self.calculate_kst_signal(kst)
+        
+        if len(kst) < 2 or pd.isna(kst.iloc[-1]):
+            return {
+                'kst': 0, 'signal': 0, 'histogram': 0,
+                'trend': 'neutral', 'crossover': None,
+                'valid': False
+            }
+        
+        kst_val = kst.iloc[-1]
+        signal_val = kst_signal.iloc[-1] if not pd.isna(kst_signal.iloc[-1]) else 0
+        histogram = kst_val - signal_val
+        
+        # Determine trend from KST slope
+        kst_prev = kst.iloc[-2] if len(kst) >= 2 else kst_val
+        trend = 'bullish' if kst_val > kst_prev else ('bearish' if kst_val < kst_prev else 'neutral')
+        
+        # Check for crossover
+        crossover = None
+        if len(kst) >= 2 and len(kst_signal) >= 2:
+            kst_prev = kst.iloc[-2]
+            sig_prev = kst_signal.iloc[-2]
+            if not any(pd.isna([kst_prev, sig_prev, kst_val, signal_val])):
+                if kst_prev <= sig_prev and kst_val > signal_val:
+                    crossover = 'bullish'
+                elif kst_prev >= sig_prev and kst_val < signal_val:
+                    crossover = 'bearish'
+        
+        return {
+            'kst': kst_val,
+            'signal': signal_val,
+            'histogram': histogram,
+            'trend': trend,
+            'crossover': crossover,
+            'kst_positive': kst_val > 0,
+            'kst_rising': kst_val > kst_prev,
+            'valid': True
+        }
+    
+    def _check_volume_confirmation(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        signal_type: SignalType,
+        current_idx: int = -1
+    ) -> Tuple[bool, str]:
+        """
+        P1: Volume divergence rejection per Pring's methodology
+        
+        Pring's Rule: "Volume analysis should corroborate price and momentum action.
+        A rise in price accompanied by a trend of falling volume is an abnormal and
+        bearish situation, indicating a weak rally."
+        
+        Volume Confirmation Rules:
+        - BUY: Volume should be rising or stable (vol_trend >= 0.85)
+        - SELL: Volume should spike (selling climax) or be rising
+        
+        Args:
+            symbol: Trading symbol
+            data: Enriched DataFrame
+            signal_type: BUY or SELL
+            current_idx: Current bar index
+            
+        Returns:
+            Tuple[confirmed, reason]
+        """
+        if len(data) < 20:
+            return True, "insufficient_data"  # Allow if can't check
+        
+        idx = current_idx if current_idx >= 0 else len(data) + current_idx
+        if idx < 20:
+            return True, "insufficient_history"
+        
+        # Calculate volume trend
+        vol_sma_5 = data['volume'].iloc[idx-4:idx+1].mean()
+        vol_sma_20 = data['volume'].iloc[idx-19:idx+1].mean()
+        
+        if vol_sma_20 == 0:
+            return True, "no_volume_data"
+        
+        vol_trend = vol_sma_5 / vol_sma_20  # >1 = rising, <1 = falling
+        
+        # Calculate price trend
+        price_now = data['close'].iloc[idx]
+        price_5ago = data['close'].iloc[idx-5]
+        price_trend = (price_now - price_5ago) / price_5ago if price_5ago != 0 else 0
+        
+        # Current volume spike
+        current_vol = data['volume'].iloc[idx]
+        vol_spike = current_vol / vol_sma_20 if vol_sma_20 > 0 else 1
+        
+        # ========================================
+        # DIVERGENCE CHECK
+        # ========================================
+        if signal_type == SignalType.BUY:
+            # Bullish: Rising price should have rising or stable volume
+            if price_trend > 0.005 and vol_trend < 0.80:
+                # Rising price with significantly falling volume = WEAK RALLY
+                logger.warning(
+                    f"❌ [{symbol}] VOLUME DIVERGENCE: Rising price (+{price_trend:.2%}) "
+                    f"with falling volume (ratio={vol_trend:.2f}) - WEAK RALLY REJECTED"
+                )
+                return False, "weak_rally_divergence"
+            
+            # Check for volume confirmation on breakout
+            if vol_spike >= 1.2:
+                logger.debug(f"✅ [{symbol}] Volume spike ({vol_spike:.1f}x avg) confirms BUY")
+                return True, "volume_spike_confirmed"
+            
+        else:  # SELL signal
+            # Bearish: Falling price should have rising volume (distribution/panic)
+            if price_trend < -0.005 and vol_trend < 0.70:
+                # Falling price with weak volume = May be exhaustion, not real selling
+                if vol_spike < 1.5:
+                    logger.warning(
+                        f"❌ [{symbol}] VOLUME DIVERGENCE: Falling price ({price_trend:.2%}) "
+                        f"with weak volume (spike={vol_spike:.1f}x) - NO SELLING CLIMAX"
+                    )
+                    return False, "no_selling_climax"
+            
+            # Selling climax confirmation
+            if vol_spike >= 2.0:
+                logger.debug(f"✅ [{symbol}] Selling climax volume ({vol_spike:.1f}x avg) confirms SELL")
+                return True, "selling_climax_confirmed"
+        
+        # No divergence detected - allow the signal
+        return True, "volume_ok"
+    
+    def _calculate_indicator_synergy(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        signal_type: SignalType,
+        current_idx: int = -1
+    ) -> Dict[str, Any]:
+        """
+        P2: Indicator synergy scoring per Pring's "weight of evidence"
+        
+        Combines multiple methodologies:
+        1. Momentum (RSI, composite_z)
+        2. Trend (MA alignment, ADX)
+        3. Volume (confirmation)
+        4. Composite (KST analysis)
+        
+        Returns synergy score 0.0 - 1.0 and breakdown
+        """
+        idx = current_idx if current_idx >= 0 else len(data) + current_idx
+        if idx < 20 or len(data) < 20:
+            return {'synergy_score': 0.5, 'confirmations': 0, 'max_confirmations': 6, 'breakdown': {}}
+        
+        confirmations = 0
+        max_confirmations = 6
+        breakdown = {}
+        
+        current_bar = data.iloc[idx]
+        
+        # ========================================
+        # 1. MOMENTUM INDICATOR (RSI in favorable zone)
+        # ========================================
+        rsi_col = self._get_column_name('RSI_14', data)
+        if rsi_col in data.columns:
+            rsi = current_bar.get(rsi_col, 50)
+            if not pd.isna(rsi):
+                if signal_type == SignalType.BUY:
+                    # Bullish: RSI should be rising from oversold or in midrange
+                    if 30 < rsi < 70:
+                        confirmations += 1
+                        breakdown['rsi'] = 'favorable'
+                    elif rsi < 30:
+                        confirmations += 0.5  # Oversold, caution
+                        breakdown['rsi'] = 'oversold'
+                else:
+                    # Bearish: RSI should be falling from overbought or in midrange
+                    if 30 < rsi < 70:
+                        confirmations += 1
+                        breakdown['rsi'] = 'favorable'
+                    elif rsi > 70:
+                        confirmations += 0.5  # Overbought, caution
+                        breakdown['rsi'] = 'overbought'
+        
+        # ========================================
+        # 2. MA ALIGNMENT (Trend structure)
+        # ========================================
+        sma_10_col = self._get_column_name('SMA_10', data)
+        sma_20_col = self._get_column_name('SMA_20', data)
+        sma_50_col = self._get_column_name('SMA_50', data)
+        
+        if all(col in data.columns for col in [sma_10_col, sma_20_col, sma_50_col]):
+            sma_10 = current_bar.get(sma_10_col, 0)
+            sma_20 = current_bar.get(sma_20_col, 0)
+            sma_50 = current_bar.get(sma_50_col, 0)
+            
+            if not any(pd.isna([sma_10, sma_20, sma_50])):
+                if signal_type == SignalType.BUY:
+                    if sma_10 > sma_20 > sma_50:
+                        confirmations += 1
+                        breakdown['ma_alignment'] = 'bullish'
+                    elif sma_10 > sma_20:
+                        confirmations += 0.5
+                        breakdown['ma_alignment'] = 'partial_bullish'
+                else:
+                    if sma_10 < sma_20 < sma_50:
+                        confirmations += 1
+                        breakdown['ma_alignment'] = 'bearish'
+                    elif sma_10 < sma_20:
+                        confirmations += 0.5
+                        breakdown['ma_alignment'] = 'partial_bearish'
+        
+        # ========================================
+        # 3. ADX TREND STRENGTH
+        # ========================================
+        adx_col = self._get_column_name('ADX_14', data)
+        if adx_col in data.columns:
+            adx = current_bar.get(adx_col, 0)
+            if not pd.isna(adx):
+                if adx >= 25:
+                    confirmations += 1
+                    breakdown['adx'] = 'strong_trend'
+                elif adx >= 20:
+                    confirmations += 0.5
+                    breakdown['adx'] = 'moderate_trend'
+                else:
+                    breakdown['adx'] = 'weak_trend'
+        
+        # ========================================
+        # 4. VOLUME CONFIRMATION
+        # ========================================
+        vol_confirmed, vol_reason = self._check_volume_confirmation(symbol, data, signal_type, idx)
+        if vol_confirmed:
+            if 'spike' in vol_reason or 'climax' in vol_reason:
+                confirmations += 1
+                breakdown['volume'] = vol_reason
+            else:
+                confirmations += 0.5
+                breakdown['volume'] = 'neutral'
+        else:
+            breakdown['volume'] = 'divergence'
+        
+        # ========================================
+        # 5. KST ANALYSIS (Composite Momentum)
+        # ========================================
+        kst_data = self.get_kst_analysis(symbol, data, idx)
+        if kst_data['valid']:
+            if signal_type == SignalType.BUY:
+                if kst_data['kst_positive'] and kst_data['kst_rising']:
+                    confirmations += 1
+                    breakdown['kst'] = 'bullish'
+                elif kst_data['crossover'] == 'bullish':
+                    confirmations += 1
+                    breakdown['kst'] = 'bullish_crossover'
+                elif kst_data['kst_rising']:
+                    confirmations += 0.5
+                    breakdown['kst'] = 'improving'
+            else:
+                if not kst_data['kst_positive'] and not kst_data['kst_rising']:
+                    confirmations += 1
+                    breakdown['kst'] = 'bearish'
+                elif kst_data['crossover'] == 'bearish':
+                    confirmations += 1
+                    breakdown['kst'] = 'bearish_crossover'
+                elif not kst_data['kst_rising']:
+                    confirmations += 0.5
+                    breakdown['kst'] = 'deteriorating'
+        
+        # ========================================
+        # 6. COMPOSITE Z-SCORE STRENGTH
+        # ========================================
+        composite_z = current_bar.get('composite_z', 0)
+        if not pd.isna(composite_z):
+            if signal_type == SignalType.BUY and composite_z > 1.5:
+                confirmations += 1
+                breakdown['composite_z'] = 'strong_bullish'
+            elif signal_type == SignalType.SELL and composite_z < -1.5:
+                confirmations += 1
+                breakdown['composite_z'] = 'strong_bearish'
+            elif abs(composite_z) > 1.0:
+                confirmations += 0.5
+                breakdown['composite_z'] = 'moderate'
+        
+        synergy_score = confirmations / max_confirmations
+        
+        return {
+            'synergy_score': synergy_score,
+            'confirmations': confirmations,
+            'max_confirmations': max_confirmations,
+            'breakdown': breakdown,
+            'strong_consensus': synergy_score >= 0.7,
+            'weak_consensus': synergy_score < 0.4
+        }
     
     # ========================================
     # HYBRID EXIT LOGIC
