@@ -3921,8 +3921,28 @@ class InstitutionalBacktestEngine:
                 quantity_type = signal_row.get('quantity_type', 'ABSOLUTE')
                 target_quantity = signal_row.get('target_quantity', 0)
                 
-                # Only process BUY/SELL signals (skip HOLD)
-                if signal_type in ['buy', 'sell'] and confidence >= 0.6:
+                # ========================================================================
+                # Signal Type Processing (Rule 2 - Signal Semantics)
+                # ========================================================================
+                # Explicit signal types (preferred):
+                #   - long_entry: Open long position
+                #   - long_exit: Close long position
+                #   - short_entry: Open short position (or close long if shorts not allowed)
+                #   - short_exit: Close short position
+                # Legacy signal types (deprecated):
+                #   - buy: Ambiguous - treated as long_entry or short_exit
+                #   - sell: Ambiguous - treated as long_exit or short_entry
+                # ========================================================================
+                
+                # Normalize signal type to lowercase for comparison
+                signal_type_lower = signal_type.lower() if isinstance(signal_type, str) else str(signal_type).lower()
+                
+                # Define valid actionable signals
+                entry_signals = ['buy', 'long_entry', 'short_entry']
+                exit_signals = ['sell', 'long_exit', 'short_exit', 'close', 'close_long', 'close_short']
+                actionable_signals = entry_signals + exit_signals
+                
+                if signal_type_lower in actionable_signals and confidence >= 0.6:
                     
                     # Get current position
                     current_position = 0.0
@@ -3935,6 +3955,9 @@ class InstitutionalBacktestEngine:
                         position_obj = self.position_tracker.get_position(symbol)
                         if position_obj:
                             current_position = position_obj.quantity
+                    
+                    has_long = current_position > 0
+                    has_short = current_position < 0
                     
                     # Get current price for position calculations
                     # For multi-symbol, get price from self.market_data since bar_df may only have primary symbol
@@ -3958,90 +3981,153 @@ class InstitutionalBacktestEngine:
                     else:
                         current_price = 100.0
                     
-                    # Determine trade side and quantity
-                    if signal_type == 'buy' and current_position <= 0:
-                        # Enter long position
-                        side = 'buy'
-                        
-                        # CRITICAL FIX: Convert percentage to shares if signal uses percentage-based sizing
+                    # ================================================================
+                    # Determine trade action based on explicit signal type
+                    # ================================================================
+                    side = None
+                    quantity = 0
+                    
+                    # Helper function for position sizing
+                    def calculate_entry_quantity():
+                        nonlocal quantity
                         if quantity_type == "PERCENTAGE" and target_weight is not None and target_weight > 0:
-                            # Use signal's target_weight (percentage of portfolio)
-                            # Get current portfolio value from risk manager or use initial capital
                             portfolio_value = self.risk_manager.portfolio_value if (
                                 self.risk_manager and hasattr(self.risk_manager, 'portfolio_value')
                             ) else self.config.initial_capital
-                            
                             dollar_amount = target_weight * portfolio_value
                             quantity = dollar_amount / current_price
-                            quantity = max(1, int(quantity))  # At least 1 share, round down
-                            
-                            logger.debug(f"   💰 Percentage-based sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
-                        
+                            quantity = max(1, int(quantity))
+                            logger.debug(f"   💰 Percentage sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
                         elif target_quantity > 0:
-                            # Use absolute quantity from signal
                             quantity = max(1, int(target_quantity))
                             logger.debug(f"   💰 Absolute sizing: {quantity} shares")
-                        
                         else:
-                            # Fallback: Use strategy config or global max_position_size
                             if self.config.strategies and len(self.config.strategies) > 0:
-                                # Try to get from strategy parameters first
                                 strategy_params = self.config.strategies[0].get('parameters', {})
                                 base_position_pct = strategy_params.get('base_position_pct', None)
-                                
                                 if base_position_pct is not None:
                                     position_size_pct = base_position_pct
                                 else:
-                                    # Fallback to strategy-level max_position_size
                                     position_size_pct = self.config.strategies[0].get('max_position_size', self.config.max_position_size)
                             else:
                                 position_size_pct = self.config.max_position_size
-                            
                             portfolio_value = self.config.initial_capital
                             dollar_amount = position_size_pct * portfolio_value
                             quantity = dollar_amount / current_price
                             quantity = max(1, int(quantity))
-                            
                             logger.debug(f"   💰 Fallback sizing: {position_size_pct:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                        return quantity
                     
-                    elif signal_type == 'sell' and current_position > 0:
-                        # Close long position
-                        side = 'sell'
-                        quantity = abs(int(current_position))  # Sell entire position
-                        logger.debug(f"   💰 Closing position: {quantity} shares")
-                    
-                    elif signal_type == 'sell' and current_position == 0:
-                        # Check if shorts are allowed (for pairs trading)
-                        if getattr(self.config, 'allow_shorts', False):
-                            # Open short position
-                            side = 'sell'
-                            # Calculate position size similar to buy side
-                            if quantity_type == "PERCENTAGE" and target_weight is not None and target_weight > 0:
-                                portfolio_value = self.risk_manager.portfolio_value if (
-                                    self.risk_manager and hasattr(self.risk_manager, 'portfolio_value')
-                                ) else self.config.initial_capital
-                                dollar_amount = target_weight * portfolio_value
-                                quantity = dollar_amount / current_price
-                                quantity = max(1, int(quantity))
-                                logger.debug(f"   💰 Short percentage-based sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
-                            elif target_quantity > 0:
-                                quantity = max(1, int(target_quantity))
-                                logger.debug(f"   💰 Short absolute sizing: {quantity} shares")
-                            else:
-                                # Fallback sizing for shorts
-                                position_size_pct = self.config.max_position_size
-                                portfolio_value = self.config.initial_capital
-                                dollar_amount = position_size_pct * portfolio_value
-                                quantity = dollar_amount / current_price
-                                quantity = max(1, int(quantity))
-                                logger.debug(f"   💰 Short fallback sizing: {position_size_pct:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
+                    # ==============================================================
+                    # LONG_ENTRY / BUY: Open long position
+                    # ==============================================================
+                    if signal_type_lower in ['long_entry', 'buy']:
+                        if has_short:
+                            # First close the short, then open long
+                            side = 'buy'
+                            quantity = abs(int(current_position))  # Cover short first
+                            logger.debug(f"   🔄 Covering short position: {quantity} shares")
+                            # Note: Next iteration should open long
+                        elif not has_long:
+                            # Open new long position
+                            side = 'buy'
+                            calculate_entry_quantity()
+                            logger.debug(f"   📈 Opening LONG: {quantity} shares")
                         else:
-                            # Skip sell signal if no position and shorts not allowed
-                            logger.debug(f"   ⚠️  Skipping SELL signal for {symbol}: no position to close and shorts not allowed")
+                            # Already have long, skip
+                            logger.debug(f"   ⏭️  Skipping LONG_ENTRY for {symbol}: already have long position")
+                            continue
+                    
+                    # ==============================================================
+                    # LONG_EXIT / CLOSE_LONG: Close long position
+                    # ==============================================================
+                    elif signal_type_lower in ['long_exit', 'close_long']:
+                        if has_long:
+                            side = 'sell'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📉 Closing LONG: {quantity} shares")
+                        else:
+                            logger.debug(f"   ⏭️  Skipping LONG_EXIT for {symbol}: no long position to close")
+                            continue
+                    
+                    # ==============================================================
+                    # SHORT_ENTRY: Open short position OR close long (if shorts disabled)
+                    # ==============================================================
+                    elif signal_type_lower in ['short_entry']:
+                        if has_long:
+                            # Close the long position first (or instead of shorting)
+                            side = 'sell'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📉 Closing LONG (from SHORT_ENTRY signal): {quantity} shares")
+                            # Note: If shorts allowed, next iteration could open short
+                        elif not has_short:
+                            if getattr(self.config, 'allow_shorts', False):
+                                # Open short position
+                                side = 'sell'
+                                calculate_entry_quantity()
+                                logger.debug(f"   📉 Opening SHORT: {quantity} shares")
+                            else:
+                                logger.debug(f"   ⏭️  Skipping SHORT_ENTRY for {symbol}: shorts not allowed")
+                                continue
+                        else:
+                            logger.debug(f"   ⏭️  Skipping SHORT_ENTRY for {symbol}: already have short position")
+                            continue
+                    
+                    # ==============================================================
+                    # SHORT_EXIT / CLOSE_SHORT: Close short position
+                    # ==============================================================
+                    elif signal_type_lower in ['short_exit', 'close_short']:
+                        if has_short:
+                            side = 'buy'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📈 Closing SHORT (covering): {quantity} shares")
+                        else:
+                            logger.debug(f"   ⏭️  Skipping SHORT_EXIT for {symbol}: no short position to cover")
+                            continue
+                    
+                    # ==============================================================
+                    # Legacy SELL: Ambiguous - close long OR open short
+                    # ==============================================================
+                    elif signal_type_lower == 'sell':
+                        if has_long:
+                            # Close long position
+                            side = 'sell'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📉 Closing LONG (from legacy SELL): {quantity} shares")
+                        elif not has_short:
+                            if getattr(self.config, 'allow_shorts', False):
+                                side = 'sell'
+                                calculate_entry_quantity()
+                                logger.debug(f"   📉 Opening SHORT (from legacy SELL): {quantity} shares")
+                            else:
+                                logger.debug(f"   ⏭️  Skipping SELL for {symbol}: no position to close and shorts not allowed")
+                                continue
+                        else:
+                            continue
+                    
+                    # ==============================================================
+                    # CLOSE: Close any position
+                    # ==============================================================
+                    elif signal_type_lower == 'close':
+                        if has_long:
+                            side = 'sell'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📉 Closing LONG (from CLOSE): {quantity} shares")
+                        elif has_short:
+                            side = 'buy'
+                            quantity = abs(int(current_position))
+                            logger.debug(f"   📈 Closing SHORT (from CLOSE): {quantity} shares")
+                        else:
+                            logger.debug(f"   ⏭️  Skipping CLOSE for {symbol}: no position to close")
                             continue
                     
                     else:
-                        continue  # Skip if already in position or invalid condition
+                        logger.debug(f"   ⚠️  Unknown signal type: {signal_type_lower}")
+                        continue
+                    
+                    # Validate we have a valid trade
+                    if side is None or quantity <= 0:
+                        continue
                     
                     # Request authorization from CentralRiskManager (BRICK #8)
                     if self.risk_manager:

@@ -150,6 +150,79 @@ class BadStrategy:
 
 ---
 
+## Signal Type Semantics (CRITICAL)
+
+### Core Principle
+
+**Signal types MUST explicitly indicate BOTH the action (entry/exit) AND direction (long/short).**
+Ambiguous signals like generic "BUY" or "SELL" are **PROHIBITED** as they conflate:
+- SHORT_ENTRY (open short) with LONG_EXIT (close long)
+- LONG_ENTRY (open long) with SHORT_EXIT (cover short)
+
+### Canonical SignalType Enum
+
+```python
+class SignalType(Enum):
+    # Long Position Actions
+    LONG_ENTRY = "long_entry"       # Open long (buy to open)
+    LONG_EXIT = "long_exit"         # Close long (sell to close)
+    LONG_INCREASE = "increase_long" # Add to long
+    LONG_REDUCE = "reduce_long"     # Partial close long
+    
+    # Short Position Actions
+    SHORT_ENTRY = "short_entry"     # Open short (sell to open)
+    SHORT_EXIT = "short_exit"       # Close short (buy to cover)
+    SHORT_INCREASE = "increase_short" # Add to short
+    SHORT_REDUCE = "reduce_short"    # Partial close short
+    
+    # Neutral
+    HOLD = "hold"
+    
+    # Deprecated (avoid using)
+    BUY = "buy"    # Ambiguous - use LONG_ENTRY or SHORT_EXIT
+    SELL = "sell"  # Ambiguous - use LONG_EXIT or SHORT_ENTRY
+```
+
+### Strategy Signal Generation Rules
+
+| Market Condition | Correct SignalType | Meaning |
+|------------------|-------------------|---------|
+| Bullish momentum, no position | `LONG_ENTRY` | Open new long |
+| Bearish momentum, has long | `LONG_EXIT` | Close existing long |
+| Bearish momentum, no position | `SHORT_ENTRY` | Open new short |
+| Bullish momentum, has short | `SHORT_EXIT` | Close existing short |
+| Momentum weakening, has long | `LONG_EXIT` | Exit before deterioration |
+
+### ❌ PROHIBITED: Ambiguous Signals
+
+```python
+# WRONG: Strategy generates SELL when it means SHORT_ENTRY
+if bearish_condition:
+    return SignalType.SELL  # ❌ Ambiguous - is this close long or open short?
+```
+
+### ✅ CORRECT: Explicit Signals
+
+```python
+# RIGHT: Explicit about action and direction
+if bearish_condition and has_long_position:
+    return SignalType.LONG_EXIT  # ✅ Clear: exit existing long
+    
+if bearish_condition and no_position:
+    return SignalType.SHORT_ENTRY  # ✅ Clear: open new short
+```
+
+### Execution Engine Interpretation
+
+| SignalType | Has Long | Has Short | No Position | Action |
+|------------|----------|-----------|-------------|--------|
+| `LONG_ENTRY` | SKIP | Close short then buy | Buy | Open long |
+| `LONG_EXIT` | Sell | SKIP | SKIP | Close long |
+| `SHORT_ENTRY` | Close long then sell | SKIP | Sell short | Open short |
+| `SHORT_EXIT` | SKIP | Buy to cover | SKIP | Close short |
+
+---
+
 ## Related Rules
 
 | Rule | Connection |

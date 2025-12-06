@@ -64,25 +64,122 @@ class SignalType(Enum):
     Canonical trading signal type enumeration.
     
     Single source of truth for all trading signal actions.
-    Consolidates definitions from:
-    - trading/strategies/strategy_engine.py (most complete)
-    - trading/strategies/manager.py
-    - trading/strategies/multi_strategy_coordinator.py
-    - processing/signals/generator.py
-    """
-    # Basic signals
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
-    CLOSE = "close"
     
-    # Position-specific signals (from strategy_engine.py)
-    CLOSE_LONG = "close_long"
-    CLOSE_SHORT = "close_short"
-    REDUCE_LONG = "reduce_long"
-    REDUCE_SHORT = "reduce_short"
-    INCREASE_LONG = "increase_long"
-    INCREASE_SHORT = "increase_short"
+    IMPORTANT: Signal types MUST explicitly indicate BOTH:
+    1. Action (entry/exit/increase/reduce)
+    2. Direction (long/short)
+    
+    See Rule 2 (Data Pipeline) - Signal Type Semantics section.
+    
+    CORRECT USAGE:
+    - LONG_ENTRY: Open new long position (buy to open)
+    - LONG_EXIT: Close existing long position (sell to close)
+    - SHORT_ENTRY: Open new short position (sell to open)
+    - SHORT_EXIT: Close existing short position (buy to cover)
+    
+    AVOID: BUY, SELL (ambiguous - kept for backward compatibility only)
+    """
+    # =========================================================================
+    # EXPLICIT SIGNAL TYPES (PREFERRED - use these)
+    # =========================================================================
+    
+    # Long Position Actions
+    LONG_ENTRY = "long_entry"       # Open long (buy to open)
+    LONG_EXIT = "long_exit"         # Close long (sell to close) - alias: CLOSE_LONG
+    LONG_INCREASE = "increase_long" # Add to existing long
+    LONG_REDUCE = "reduce_long"     # Partial close long
+    
+    # Short Position Actions
+    SHORT_ENTRY = "short_entry"     # Open short (sell to open)
+    SHORT_EXIT = "short_exit"       # Close short (buy to cover) - alias: CLOSE_SHORT
+    SHORT_INCREASE = "increase_short" # Add to existing short
+    SHORT_REDUCE = "reduce_short"    # Partial close short
+    
+    # Neutral
+    HOLD = "hold"
+    
+    # =========================================================================
+    # DEPRECATED: Ambiguous signals (kept for backward compatibility)
+    # =========================================================================
+    # WARNING: These are ambiguous and should be avoided in new code:
+    # - BUY could mean LONG_ENTRY (open long) or SHORT_EXIT (cover short)
+    # - SELL could mean LONG_EXIT (close long) or SHORT_ENTRY (open short)
+    
+    BUY = "buy"      # DEPRECATED: Use LONG_ENTRY or SHORT_EXIT instead
+    SELL = "sell"    # DEPRECATED: Use LONG_EXIT or SHORT_ENTRY instead
+    CLOSE = "close"  # DEPRECATED: Use LONG_EXIT or SHORT_EXIT instead
+    
+    # Legacy aliases (kept for backward compatibility)
+    CLOSE_LONG = "close_long"     # Alias for LONG_EXIT
+    CLOSE_SHORT = "close_short"   # Alias for SHORT_EXIT
+    REDUCE_LONG = "reduce_long"   # Same as LONG_REDUCE
+    REDUCE_SHORT = "reduce_short" # Same as SHORT_REDUCE
+    INCREASE_LONG = "increase_long"   # Same as LONG_INCREASE
+    INCREASE_SHORT = "increase_short" # Same as SHORT_INCREASE
+    
+    @classmethod
+    def is_entry_signal(cls, signal_type: 'SignalType') -> bool:
+        """Check if signal type is an entry signal."""
+        return signal_type in (cls.LONG_ENTRY, cls.SHORT_ENTRY, cls.BUY, cls.SELL)
+    
+    @classmethod
+    def is_exit_signal(cls, signal_type: 'SignalType') -> bool:
+        """Check if signal type is an exit signal."""
+        return signal_type in (
+            cls.LONG_EXIT, cls.SHORT_EXIT, cls.CLOSE,
+            cls.CLOSE_LONG, cls.CLOSE_SHORT,
+            cls.LONG_REDUCE, cls.SHORT_REDUCE,
+            cls.REDUCE_LONG, cls.REDUCE_SHORT
+        )
+    
+    @classmethod
+    def is_long_signal(cls, signal_type: 'SignalType') -> bool:
+        """Check if signal type is related to long positions."""
+        return signal_type in (
+            cls.LONG_ENTRY, cls.LONG_EXIT, cls.LONG_INCREASE, cls.LONG_REDUCE,
+            cls.CLOSE_LONG, cls.INCREASE_LONG, cls.REDUCE_LONG, cls.BUY
+        )
+    
+    @classmethod
+    def is_short_signal(cls, signal_type: 'SignalType') -> bool:
+        """Check if signal type is related to short positions."""
+        return signal_type in (
+            cls.SHORT_ENTRY, cls.SHORT_EXIT, cls.SHORT_INCREASE, cls.SHORT_REDUCE,
+            cls.CLOSE_SHORT, cls.INCREASE_SHORT, cls.REDUCE_SHORT, cls.SELL
+        )
+    
+    @classmethod
+    def normalize(cls, signal_type: 'SignalType', has_long: bool = False, has_short: bool = False) -> 'SignalType':
+        """
+        Normalize ambiguous signals to explicit signals based on position context.
+        
+        Args:
+            signal_type: The signal type to normalize
+            has_long: Whether there's an existing long position
+            has_short: Whether there's an existing short position
+            
+        Returns:
+            Normalized SignalType (explicit form)
+        """
+        if signal_type == cls.BUY:
+            if has_short:
+                return cls.SHORT_EXIT  # Cover short
+            return cls.LONG_ENTRY  # Open long
+        elif signal_type == cls.SELL:
+            if has_long:
+                return cls.LONG_EXIT  # Close long
+            return cls.SHORT_ENTRY  # Open short
+        elif signal_type == cls.CLOSE:
+            if has_long:
+                return cls.LONG_EXIT
+            elif has_short:
+                return cls.SHORT_EXIT
+        elif signal_type == cls.CLOSE_LONG:
+            return cls.LONG_EXIT
+        elif signal_type == cls.CLOSE_SHORT:
+            return cls.SHORT_EXIT
+        
+        return signal_type
 
 
 class SignalStrength(Enum):

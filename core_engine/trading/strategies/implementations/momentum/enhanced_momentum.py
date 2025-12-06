@@ -1859,9 +1859,19 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # ========================================
         # Pring's "weight of evidence" methodology:
         # - P0: Price action MUST confirm momentum
-        # - P1: Volume MUST NOT diverge
+        # - P1: Volume MUST NOT diverge + End-of-Day + Volume Exhaustion
         # - P2: Synergy score modulates confidence
         # ========================================
+        
+        # P1a: END-OF-DAY FILTER
+        # Block entries in last 30 minutes - overnight risk with no management opportunity
+        if enriched_data is not None and current_idx is not None:
+            eod_blocked, eod_reason = self._check_end_of_day_filter(
+                symbol, enriched_data, current_idx
+            )
+            if eod_blocked:
+                logger.info(f"❌ [{symbol}] ENTRY BLOCKED: {eod_reason}")
+                return False, None
         
         if long_condition_met:
             # P0: Price action confirmation (CRITICAL)
@@ -1913,12 +1923,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 )
             else:
                 logger.info(
-                    f"🟢 {symbol} LONG entry: composite_z={composite_z:.2f} > {long_threshold:.2f}, "
+                    f"🟢 {symbol} LONG_ENTRY: composite_z={composite_z:.2f} > {long_threshold:.2f}, "
                     f"composite_pct={composite_pct:.1f}% (>{self.config.composite_pct_entry:.1f}%) "
                     f"(regime-adjusted from {self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
                 )
             
-            return True, SignalType.BUY
+            return True, SignalType.LONG_ENTRY
         
         # SHORT entry: Strong downward momentum (both Z-score AND percentile confirmation)
         if short_condition_met:
@@ -1969,12 +1979,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 )
             else:
                 logger.info(
-                    f"🔴 {symbol} SHORT entry: composite_z={composite_z:.2f} < {-short_threshold:.2f}, "
+                    f"🔴 {symbol} SHORT_ENTRY: composite_z={composite_z:.2f} < {-short_threshold:.2f}, "
                     f"composite_pct={composite_pct:.1f}% (<{100 - self.config.composite_pct_entry:.1f}%) "
                     f"(regime-adjusted from {-self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
                 )
             
-            return True, SignalType.SELL
+            return True, SignalType.SHORT_ENTRY
         
         return False, None
     
@@ -2311,6 +2321,147 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         # No divergence detected - allow the signal
         return True, "volume_ok"
+    
+    def _check_end_of_day_filter(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        current_idx: int
+    ) -> Tuple[bool, str]:
+        """
+        P1a: End-of-Day Entry Filter
+        
+        Blocks entries in the last 30 minutes of the trading session (after 15:30).
+        Rationale:
+        - Overnight risk with no opportunity to manage
+        - End-of-day momentum often reverses at next open
+        - Reduces "buying the close" into overnight gaps
+        
+        Args:
+            symbol: Trading symbol
+            data: Enriched DataFrame with timestamp column
+            current_idx: Current bar index
+            
+        Returns:
+            Tuple[blocked, reason] - (True = block entry, reason)
+        """
+        EOD_CUTOFF_HOUR = 15
+        EOD_CUTOFF_MINUTE = 30  # Block entries after 15:30
+        
+        # Safely get the current bar index
+        idx = min(current_idx, len(data) - 1) if current_idx >= 0 else len(data) - 1
+        
+        
+        # Try to get timestamp from the data
+        current_ts = None
+        
+        # Method 1: Check common timestamp column names
+        ts_columns = ['timestamp', 'regime_timestamp', 'time', 'datetime']
+        for col in ts_columns:
+            if col in data.columns:
+                current_ts = data[col].iloc[idx]
+                break
+        
+        # Method 2: Check index if it's datetime
+        if current_ts is None and isinstance(data.index, pd.DatetimeIndex):
+            current_ts = data.index[idx]
+        
+        # Parse timestamp if we got one
+        if current_ts is not None and hasattr(current_ts, 'hour'):
+            hour = current_ts.hour
+            minute = current_ts.minute
+            
+            # Block entries after 15:30
+            if hour > EOD_CUTOFF_HOUR or (hour == EOD_CUTOFF_HOUR and minute >= EOD_CUTOFF_MINUTE):
+                minutes_to_close = (16 - hour) * 60 - minute
+                reason = (
+                    f"END-OF-DAY BLOCK: {hour}:{minute:02d} "
+                    f"(~{minutes_to_close} min to 16:00) - overnight risk"
+                )
+                logger.warning(f"🕐 [{symbol}] {reason}")
+                return True, reason
+            
+            return False, "time_ok"
+        
+        # No timestamp available - don't block (let other filters handle it)
+        logger.debug(f"[{symbol}] EOD filter: No timestamp available, skipping check")
+        return False, "no_timestamp"
+    
+    def _check_volume_exhaustion(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        current_idx: int,
+        spike_threshold: float = 3.0,
+        lookback: int = 3
+    ) -> Tuple[bool, str]:
+        """
+        P1b: Volume Exhaustion/Blow-off Filter
+        
+        Blocks entries following recent volume spikes > 3x average.
+        Per Pring: "Parabolic moves accompanied by volume spikes often mark 
+        the END, not the beginning, of a trend."
+        
+        Volume exhaustion signals:
+        - Volume spike > 3x 20-bar average in last 3 bars
+        - Often indicates blow-off top or selling climax
+        - Entry AFTER such spike has poor risk/reward
+        
+        EXCEPTIONS:
+        - First 30 minutes of trading (9:30-10:00): High volume is normal
+        - Last 30 minutes (handled by EOD filter)
+        
+        Args:
+            symbol: Trading symbol
+            data: Enriched DataFrame
+            current_idx: Current bar index
+            spike_threshold: Volume multiple to consider exhaustion (default 3.0x)
+            lookback: How many bars back to check for spike (default 3)
+            
+        Returns:
+            Tuple[exhaustion_detected, reason]
+        """
+        # Skip first 30 bars (9:30-10:00) - opening volume is always elevated
+        OPENING_EXCLUSION_BARS = 30
+        if current_idx < OPENING_EXCLUSION_BARS:
+            return False, "opening_period_exempt"
+        
+        if len(data) < 25:
+            return False, "insufficient_data"
+        
+        idx = current_idx if current_idx >= 0 else len(data) + current_idx
+        if idx < 25:
+            return False, "insufficient_history"
+        
+        # Calculate 20-bar volume average (ending before lookback window)
+        vol_sma_20 = data['volume'].iloc[idx-lookback-19:idx-lookback+1].mean()
+        
+        if vol_sma_20 == 0:
+            return False, "no_volume_data"
+        
+        # Check for volume spikes in the lookback window (last N bars)
+        max_spike = 0
+        spike_bar = None
+        
+        for i in range(lookback):
+            check_idx = idx - lookback + i + 1  # bars [idx-2, idx-1, idx] for lookback=3
+            if check_idx >= 0 and check_idx < len(data):
+                vol = data['volume'].iloc[check_idx]
+                spike = vol / vol_sma_20
+                if spike > max_spike:
+                    max_spike = spike
+                    spike_bar = i
+        
+        if max_spike >= spike_threshold:
+            bars_ago = lookback - spike_bar
+            reason = (
+                f"VOLUME EXHAUSTION: {max_spike:.1f}x spike detected {bars_ago} bars ago "
+                f"(threshold={spike_threshold}x) - Pring: blow-off/exhaustion signal"
+            )
+            logger.warning(f"💨 [{symbol}] {reason}")
+            return True, reason
+        
+        return False, "volume_healthy"
     
     def _calculate_indicator_synergy(
         self,
