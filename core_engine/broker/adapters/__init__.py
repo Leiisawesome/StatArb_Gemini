@@ -2,6 +2,11 @@
 Broker adapters for real broker integration
 """
 
-from .ibkr_adapter import IBKRAdapter
+try:
+    from .ibkr_adapter import IBKRAdapter
+    _IBKR_AVAILABLE = True
+except ImportError:
+    _IBKR_AVAILABLE = False
+    IBKRAdapter = None
 
-__all__ = ['IBKRAdapter']
+__all__ = ['IBKRAdapter'] if _IBKR_AVAILABLE else []

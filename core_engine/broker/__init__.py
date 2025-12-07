@@ -17,6 +17,17 @@ from .broker_adapter import (
     TimeInForce
 )
 
+from .adapters import (
+    IBKRAdapter
+)
+
+# Handle case where IBKRAdapter is not available (ibapi not installed)
+if IBKRAdapter is None:
+    # Create a placeholder class for documentation/testing
+    class IBKRAdapter:
+        """Placeholder IBKRAdapter - requires ibapi package for full functionality"""
+        pass
+
 from .broker_manager import (
     BrokerManager,
     BrokerConfig
@@ -35,6 +46,9 @@ __all__ = [
     'OrderAction',
     'OrderType',
     'TimeInForce',
+    
+    # Adapters
+    'IBKRAdapter',
     
     # Broker Manager
     'BrokerManager',

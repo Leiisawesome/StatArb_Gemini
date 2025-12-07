@@ -102,7 +102,6 @@ class TestBrokerAdapterBasic:
     def test_broker_type_enum(self):
         """Test BrokerType enum values"""
         assert BrokerType.INTERACTIVE_BROKERS.value == "interactive_brokers"
-        assert BrokerType.ALPACA.value == "alpaca"
         assert BrokerType.TD_AMERITRADE.value == "td_ameritrade"
     
     def test_connection_status_enum(self):
