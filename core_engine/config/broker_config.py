@@ -23,9 +23,7 @@ class TradingMode(Enum):
 
 class BrokerType(Enum):
     """Supported broker types"""
-    ALPACA = "alpaca"
     INTERACTIVE_BROKERS = "interactive_brokers"
-    TD_AMERITRADE = "td_ameritrade"
 
 
 @dataclass
@@ -67,31 +65,6 @@ class RiskLimits:
 
 
 @dataclass
-class AlpacaConfig:
-    """Alpaca broker configuration"""
-    api_key: str
-    secret_key: str
-    base_url: str
-    data_feed_url: Optional[str] = None
-    paper_trading: bool = True
-
-    def validate(self) -> bool:
-        """Validate Alpaca configuration"""
-        if not self.api_key or not self.secret_key:
-            logger.error("Alpaca API credentials missing!")
-            return False
-
-        if self.paper_trading and "paper" not in self.base_url.lower():
-            logger.error("Paper trading flag set but using live URL!")
-            return False
-
-        if not self.paper_trading:
-            logger.warning("⚠️ Alpaca LIVE trading mode enabled!")
-
-        return True
-
-
-@dataclass
 class InteractiveBrokersConfig:
     """Interactive Brokers configuration"""
     host: str
@@ -123,11 +96,10 @@ class BrokerConfig:
     trading_mode: TradingMode = TradingMode.PAPER
 
     # Broker configurations
-    alpaca: Optional[AlpacaConfig] = None
     interactive_brokers: Optional[InteractiveBrokersConfig] = None
 
     # Active broker
-    active_broker: BrokerType = BrokerType.ALPACA
+    active_broker: BrokerType = BrokerType.INTERACTIVE_BROKERS
 
     # Risk limits
     risk_limits: RiskLimits = field(default_factory=RiskLimits)
@@ -155,14 +127,7 @@ class BrokerConfig:
             return False
 
         # Validate active broker config
-        if self.active_broker == BrokerType.ALPACA:
-            if not self.alpaca:
-                logger.error("Alpaca selected but not configured!")
-                return False
-            if not self.alpaca.validate():
-                return False
-
-        elif self.active_broker == BrokerType.INTERACTIVE_BROKERS:
+        if self.active_broker == BrokerType.INTERACTIVE_BROKERS:
             if not self.interactive_brokers:
                 logger.error("IB selected but not configured!")
                 return False
@@ -205,20 +170,6 @@ class BrokerConfigLoader:
             config.trading_mode = TradingMode.LIVE
             logger.warning("⚠️ LIVE trading mode configured!")
 
-        # Load Alpaca configuration
-        alpaca_api_key = os.getenv("ALPACA_PAPER_API_KEY") or os.getenv("ALPACA_API_KEY")
-        alpaca_secret_key = os.getenv("ALPACA_PAPER_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY")
-
-        if alpaca_api_key and alpaca_secret_key:
-            config.alpaca = AlpacaConfig(
-                api_key=alpaca_api_key,
-                secret_key=alpaca_secret_key,
-                base_url=os.getenv("ALPACA_PAPER_BASE_URL", "https://paper-api.alpaca.markets"),
-                data_feed_url=os.getenv("ALPACA_DATA_FEED_URL"),
-                paper_trading=os.getenv("ALPACA_PAPER_TRADING", "true").lower() == "true"
-            )
-            logger.info("✅ Alpaca configuration loaded")
-
         # Load Interactive Brokers configuration
         ib_host = os.getenv("IB_PAPER_HOST") or os.getenv("IB_HOST")
         ib_port = os.getenv("IB_PAPER_PORT") or os.getenv("IB_PORT")
@@ -238,11 +189,9 @@ class BrokerConfigLoader:
             os.getenv("BROKER_TYPE") or
             os.getenv("ACTIVE_BROKER") or
             os.getenv("PHASE_9_ACTIVE_BROKER") or
-            "alpaca"
+            "interactive_brokers"
         ).lower()
-        if active_broker == "alpaca":
-            config.active_broker = BrokerType.ALPACA
-        elif active_broker in ["ib", "interactive_brokers"]:
+        if active_broker in ["ib", "interactive_brokers"]:
             config.active_broker = BrokerType.INTERACTIVE_BROKERS
 
         # Load risk limits (support both old and new variable names)
@@ -289,15 +238,6 @@ class BrokerConfigLoader:
 # Trading Mode (paper/live) - KEEP ON PAPER FOR PHASE 9!
 PHASE_9_TRADING_MODE=paper
 
-# Alpaca (Paper Trading)
-ALPACA_PAPER_API_KEY=your_paper_api_key_here
-ALPACA_PAPER_SECRET_KEY=your_paper_secret_key_here
-ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
-ALPACA_PAPER_TRADING=true
-
-# Alpaca Data Feed
-ALPACA_DATA_FEED_URL=wss://stream.data.alpaca.markets/v2/iex
-
 # Interactive Brokers (Paper Trading)
 IB_PAPER_HOST=127.0.0.1
 IB_PAPER_PORT=7497
@@ -305,8 +245,8 @@ IB_PAPER_CLIENT_ID=1
 IB_PAPER_ACCOUNT=DU1234567
 IB_PAPER_TRADING=true
 
-# Active Broker (alpaca/interactive_brokers)
-PHASE_9_ACTIVE_BROKER=alpaca
+# Active Broker (interactive_brokers)
+PHASE_9_ACTIVE_BROKER=interactive_brokers
 
 # Risk Limits (Conservative for Phase 9)
 PHASE_9_MAX_POSITION_SIZE=100
