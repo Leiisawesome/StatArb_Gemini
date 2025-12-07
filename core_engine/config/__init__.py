@@ -23,7 +23,7 @@ from .unified_config import (
 # System-wide configuration
 from .system_config import SystemConfig, BacktestConfig, BacktestMode
 
-# Broker configuration  
+# Broker configuration
 from .broker_config import (
     BrokerConfig,
     AlpacaConfig,
@@ -42,14 +42,14 @@ from .component_config import (
     RiskLimits,
     TimingConfig,
     PerformanceConfig,
-    
+
     # Data brick sub-configs (Phase 1)
     ConnectionConfig,
     CachingConfig,
     DataValidationConfig,
     FeedManagementConfig,
     DataPerformanceConfig,
-    
+
     # Domain configs
     DataConfig,
     RiskConfig,
@@ -61,31 +61,31 @@ from .component_config import (
     AnalyticsConfig,
     ExecutionConfig,
     PortfolioConfig,
-    
+
     # Risk utility configs (Phase 5 - Risk Brick Enhancement)
     ExposureConfig,
     VarConfig,
     StressTestConfig,
     LimitConfig,
     CorrelationConfig,
-    
+
     # Analytics brick configs (Phase 5 - Analytics Enhancement)
     PerformanceAnalyticsConfig,
     MetricsCalculatorConfig,
     AttributionAnalyticsConfig,
     BenchmarkAnalyticsConfig,
     ReportGenerationConfig,
-    
+
     # Broker brick configs (Phase 6 - Broker Enhancement)
     BrokerConnectionConfig,
     BrokerSessionConfig,
     BrokerSystemConfig,  # Renamed from BrokerConfig to avoid collision with broker_config.py
-    
+
     # Backward compatibility
     LegacyDataConfig,
     LegacyRiskConfig,
     LegacyProcessingConfig,
-    
+
     # Utilities
     create_default_config_set,
     validate_config_compatibility
@@ -115,47 +115,47 @@ __all__ = [
     'UnifiedConfig', 'ConfigFormat', 'ConfigSource',
     'get_config', 'init_config',
     'config_get', 'config_set', 'config_section',
-    
+
     # System
     'SystemConfig', 'BacktestConfig', 'BacktestMode',
-    
+
     # Broker
     'BrokerConfig', 'AlpacaConfig', 'InteractiveBrokersConfig',
     'BrokerConfigLoader', 'load_broker_config',
     'TradingMode', 'BrokerType', 'BrokerRiskLimits',
-    
+
     # Sub-configs (reusable)
     'PositionLimits', 'RiskLimits', 'TimingConfig', 'PerformanceConfig',
-    
+
     # Data brick sub-configs (Phase 1)
     'ConnectionConfig', 'CachingConfig', 'DataValidationConfig',
     'FeedManagementConfig', 'DataPerformanceConfig',
-    
+
     # Component configs (consolidated)
     'DataConfig', 'RiskConfig', 'ProcessingConfig',
     'IndicatorConfig', 'FeatureConfig', 'SignalConfig',
     'RegimeConfig', 'AnalyticsConfig', 'ExecutionConfig', 'PortfolioConfig',
-    
+
     # Risk utility configs (Phase 5 - Risk Brick Enhancement)
     'ExposureConfig', 'VarConfig', 'StressTestConfig', 'LimitConfig', 'CorrelationConfig',
-    
+
     # Analytics brick configs (Phase 5 - Analytics Enhancement)
     'PerformanceAnalyticsConfig', 'MetricsCalculatorConfig', 'AttributionAnalyticsConfig',
     'BenchmarkAnalyticsConfig', 'ReportGenerationConfig',
-    
+
     # Broker brick configs (Phase 6 - Broker Enhancement)
     'BrokerConnectionConfig', 'BrokerSessionConfig', 'BrokerSystemConfig',
-    
+
     # Backward compatibility
     'LegacyDataConfig', 'LegacyRiskConfig', 'LegacyProcessingConfig',
-    
+
     # Strategies
     'StrategyType', 'BaseStrategyConfig', 'StrategyConfig',
     'MomentumConfig', 'MeanReversionConfig', 'StatisticalArbitrageConfig',
     'FactorConfig', 'MultiAssetConfig', 'TrendFollowingConfig',
     'BreakoutConfig', 'PairsConfig', 'VolatilityConfig', 'ArbitrageConfig',
     'create_strategy_config', 'get_all_strategy_configs',
-    
+
     # Utilities
     'create_default_config_set', 'validate_config_compatibility'
 ]

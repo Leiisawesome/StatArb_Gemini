@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../..')))
 
 from core_engine.data.feeds.polygon_rest import (
-    PolygonRestService,
     create_polygon_rest_service,
 )
 

@@ -22,30 +22,30 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExperimentResult:
     """Structured experiment result"""
-    
+
     # Experiment metadata
     experiment_name: str
     experiment_type: str
     run_timestamp: datetime
     duration_seconds: float
-    
+
     # Engine results (pass-through from InstitutionalBacktestEngine)
     engine_results: Dict[str, Any]
-    
+
     # Performance summary (extracted from engine_results)
     total_return_pct: float
     sharpe_ratio: float
     max_drawdown_pct: float
     total_trades: int
     win_rate: float
-    
+
     # Additional metrics (experiment-specific)
     custom_metrics: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Status
     success: bool = True
     error_message: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -70,18 +70,18 @@ class ExperimentResult:
 class BaseExperiment(ABC):
     """
     Abstract base for all backtest experiments.
-    
+
     Enforces:
     - Consistent interface
     - Zero re-implementation (use engine as black box)
     - Structured results
     - Config-driven execution
     """
-    
+
     def __init__(self, config: Dict[str, Any], output_dir: str = "backtest/results"):
         """
         Initialize experiment.
-        
+
         Args:
             config: Experiment configuration (loaded from YAML)
             output_dir: Directory for results output
@@ -90,36 +90,34 @@ class BaseExperiment(ABC):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
     @abstractmethod
     async def run(self) -> ExperimentResult:
         """
         Run experiment.
-        
+
         MUST:
         - Use InstitutionalBacktestEngine (import from backtest.engine)
         - Not re-implement any engine logic
         - Return ExperimentResult
-        
+
         Returns:
             ExperimentResult with structured results
         """
-        pass
-    
+
     @abstractmethod
     def get_description(self) -> str:
         """
         Get one-line experiment description.
-        
+
         Returns:
             Human-readable description
         """
-        pass
-    
+
     def print_summary(self, result: ExperimentResult):
         """
         Print concise run summary to console.
-        
+
         Args:
             result: Experiment result to summarize
         """
@@ -130,7 +128,7 @@ class BaseExperiment(ABC):
         print(f"Status:         {'✅ SUCCESS' if result.success else '❌ FAILED'}")
         print(f"Duration:       {result.duration_seconds:.2f}s")
         print()
-        
+
         if result.success:
             print("Performance Metrics:")
             print(f"  Total Return:    {result.total_return_pct:>8.2f}%")
@@ -138,7 +136,7 @@ class BaseExperiment(ABC):
             print(f"  Max Drawdown:    {result.max_drawdown_pct:>8.2f}%")
             print(f"  Total Trades:    {result.total_trades:>8}")
             print(f"  Win Rate:        {result.win_rate:>8.1f}%")
-            
+
             if result.custom_metrics:
                 print()
                 print("Custom Metrics:")
@@ -147,7 +145,7 @@ class BaseExperiment(ABC):
                         print(f"  {key:<20} {value:>10.4f}")
                     else:
                         print(f"  {key:<20} {value:>10}")
-            
+
             # Print trade list if available
             if result.engine_results and 'execution_history' in result.engine_results:
                 trades = result.engine_results['execution_history']
@@ -156,40 +154,40 @@ class BaseExperiment(ABC):
                     print("Trade List:")
                     print(f"  {'#':<3} {'Timestamp':<20} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
                     print("  " + "-"*90)
-                    
+
                     # Track positions per symbol to calculate P&L
                     positions: Dict[str, List[tuple]] = {}  # symbol -> [(qty, price), ...]
-                    
+
                     for i, trade in enumerate(trades, 1):
                         timestamp = str(trade.get('timestamp', 'N/A'))[:19]
                         symbol = trade.get('symbol', 'N/A')
                         action = trade.get('action', trade.get('side', 'N/A'))
                         quantity = trade.get('quantity', trade.get('qty', 0))
                         price = trade.get('price', trade.get('fill_price', 0))
-                        
+
                         # Extract signal strength and confidence
                         strength = trade.get('signal_strength', trade.get('strength', 0))
                         confidence = trade.get('confidence', 0)
-                        
+
                         # Format strength (0-1 scale)
                         if isinstance(strength, (int, float)) and strength > 0:
                             str_display = f"{strength:>4.2f}"
                         else:
                             str_display = "  - "
-                        
+
                         # Format confidence as percentage
                         if confidence > 0:
                             conf_display = f"{confidence*100:>5.1f}%" if confidence <= 1 else f"{confidence:>5.1f}%"
                         else:
                             conf_display = "    - "
-                        
+
                         # Calculate P&L for sells using FIFO
                         pnl = 0.0
                         pnl_str = ""
-                        
+
                         if symbol not in positions:
                             positions[symbol] = []
-                        
+
                         if action.lower() == 'buy':
                             positions[symbol].append((quantity, price))
                         elif action.lower() == 'sell':
@@ -204,51 +202,51 @@ class BaseExperiment(ABC):
                                 else:
                                     positions[symbol][0] = (entry_qty - sold_qty, entry_price)
                             pnl_str = f"${pnl:>+11.2f}"
-                        
+
                         if not pnl_str:
                             pnl_str = " " * 12
-                        
+
                         print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
-        
+
         print("="*80)
-    
+
     def save_results(self, result: ExperimentResult):
         """
         Write structured results to disk.
-        
+
         Saves:
         - JSON file with full results
         - CSV file with key metrics (if applicable)
-        
+
         Args:
             result: Experiment result to save
         """
         timestamp = result.run_timestamp.strftime("%Y%m%d_%H%M%S")
         experiment_slug = result.experiment_name.replace(" ", "_").lower()
-        
+
         # Save JSON
         json_path = self.output_dir / f"{experiment_slug}_{timestamp}.json"
         with open(json_path, 'w') as f:
             json.dump(result.to_dict(), f, indent=2, default=str)
-        
+
         self.logger.info(f"Results saved to: {json_path}")
-        
+
         # Save summary CSV (for easy comparison across runs)
         csv_path = self.output_dir / "experiment_summary.csv"
         self._append_to_summary_csv(result, csv_path)
-    
+
     def _append_to_summary_csv(self, result: ExperimentResult, csv_path: Path):
         """Append result to summary CSV"""
         import csv
-        
+
         # Check if file exists to determine if we need header
         file_exists = csv_path.exists()
-        
+
         with open(csv_path, 'a', newline='') as f:
             writer = csv.writer(f)
-            
+
             # Write header if new file
             if not file_exists:
                 writer.writerow([
@@ -256,7 +254,7 @@ class BaseExperiment(ABC):
                     'total_return_pct', 'sharpe_ratio', 'max_drawdown_pct',
                     'total_trades', 'win_rate', 'duration_seconds', 'success'
                 ])
-            
+
             # Write data row
             writer.writerow([
                 result.run_timestamp.isoformat(),
@@ -270,14 +268,14 @@ class BaseExperiment(ABC):
                 result.duration_seconds,
                 result.success
             ])
-    
+
     def _extract_performance_metrics(self, engine_results: Dict[str, Any]) -> Dict[str, float]:
         """
         Extract standard performance metrics from engine results.
-        
+
         Args:
             engine_results: Raw results from InstitutionalBacktestEngine
-            
+
         Returns:
             Dict with standard metrics
         """
@@ -286,14 +284,14 @@ class BaseExperiment(ABC):
         # Note: Use 'or {}' to handle None values (get() returns None if key exists with None value)
         performance = engine_results.get('performance', {}) or {}
         summary = engine_results.get('summary', {}) or {}
-        
+
         # Handle total_trades - check all locations
         total_trades = (
-            performance.get('total_trades') or 
-            summary.get('total_trades') or 
+            performance.get('total_trades') or
+            summary.get('total_trades') or
             engine_results.get('total_trades', 0)
         )
-        
+
         # Handle total_return - check summary first (it stores as decimal, convert to %)
         # summary['total_return'] is 0.00597 meaning 0.597%
         total_return_pct = (
@@ -301,21 +299,21 @@ class BaseExperiment(ABC):
             (summary.get('total_return', 0.0) * 100) or  # Convert decimal to percentage
             engine_results.get('total_return_pct', 0.0)
         )
-        
+
         # Handle sharpe_ratio - check summary first
         sharpe_ratio = (
             performance.get('sharpe_ratio') or
             summary.get('sharpe_ratio') or
             engine_results.get('sharpe_ratio', 0.0)
         )
-        
+
         # Handle max_drawdown_pct - check summary first (stored as decimal, convert to %)
         max_drawdown_pct = (
             performance.get('max_drawdown_pct') or
             (summary.get('max_drawdown_pct', 0.0) * 100) or  # Convert decimal to percentage
             engine_results.get('max_drawdown_pct', 0.0)
         )
-        
+
         # Handle win_rate - check summary first (stored as decimal, convert to %)
         win_rate_decimal = (
             performance.get('win_rate') or
@@ -323,7 +321,7 @@ class BaseExperiment(ABC):
             engine_results.get('win_rate', 0.0)
         )
         win_rate = win_rate_decimal * 100 if win_rate_decimal <= 1.0 else win_rate_decimal
-        
+
         return {
             'total_return_pct': total_return_pct,
             'sharpe_ratio': sharpe_ratio,

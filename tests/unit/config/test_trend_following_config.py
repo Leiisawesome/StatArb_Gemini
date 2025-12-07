@@ -43,7 +43,7 @@ class TestTrendFollowingConfig:
             atr_period=21,
             atr_multiplier=2.5
         )
-        
+
         assert config.fast_ma_period == 30
         assert config.slow_ma_period == 150
         assert config.adx_period == 21
@@ -54,7 +54,7 @@ class TestTrendFollowingConfig:
     def test_inheritance_from_base(self):
         """Test that TrendFollowingConfig inherits from BaseStrategyConfig."""
         config = TrendFollowingConfig()
-        
+
         # Test inherited properties
         assert hasattr(config, 'name')
         assert hasattr(config, 'strategy_type')
@@ -64,7 +64,7 @@ class TestTrendFollowingConfig:
         assert hasattr(config, 'symbols')
         assert hasattr(config, 'profit_target_ratio')
         assert hasattr(config, 'execution_timeout')
-        
+
         # Test inherited default values
         assert config.symbols == ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
         assert config.profit_target_ratio == 3.0  # Updated from 2.0 to 3.0 (merged from local config)
@@ -73,12 +73,12 @@ class TestTrendFollowingConfig:
     def test_composition_pattern(self):
         """Test that TrendFollowingConfig uses composition pattern for sub-configs."""
         config = TrendFollowingConfig()
-        
+
         # Test that sub-configs are properly initialized
         assert config.position_limits is not None
         assert config.risk_limits is not None
         assert config.timing is not None
-        
+
         # Test that sub-configs have expected properties
         assert hasattr(config.position_limits, 'max_position_size')
         assert hasattr(config.risk_limits, 'max_daily_var')
@@ -88,7 +88,7 @@ class TestTrendFollowingConfig:
         """Test that TrendFollowingConfig can be serialized to dict."""
         config = TrendFollowingConfig()
         config_dict = asdict(config)
-        
+
         assert isinstance(config_dict, dict)
         assert 'name' in config_dict
         assert 'strategy_type' in config_dict
@@ -102,7 +102,7 @@ class TestTrendFollowingConfig:
     def test_strategy_specific_parameters(self):
         """Test strategy-specific parameters are correctly set."""
         config = TrendFollowingConfig()
-        
+
         # Test trend following-specific parameters
         # Updated defaults from local config merge: fast=12, slow=26 (MACD-like settings)
         assert config.fast_ma_period == 12
@@ -118,7 +118,7 @@ class TestTrendFollowingConfig:
     def test_parameter_validation(self):
         """Test parameter validation (if implemented)."""
         config = TrendFollowingConfig()
-        
+
         # Test that all parameters are within expected ranges
         assert config.fast_ma_period > 0
         assert config.slow_ma_period > 0
@@ -134,7 +134,7 @@ class TestTrendFollowingConfig:
             name="custom_trend_following",
             strategy_id="trend_following_001"
         )
-        
+
         assert config.name == "custom_trend_following"
         assert config.strategy_id == "trend_following_001"
         assert config.strategy_type == StrategyType.TREND_FOLLOWING
@@ -146,7 +146,7 @@ class TestTrendFollowingConfig:
             primary_timeframe="1h",
             secondary_timeframes=["4h", "1D"]
         )
-        
+
         assert config.enable_multi_timeframe is True
         assert config.primary_timeframe == "1h"
         assert config.secondary_timeframes == ["4h", "1D"]
@@ -155,7 +155,7 @@ class TestTrendFollowingConfig:
         """Test symbol configuration."""
         custom_symbols = ["SPY", "QQQ", "IWM", "EFA"]
         config = TrendFollowingConfig(symbols=custom_symbols)
-        
+
         assert config.symbols == custom_symbols
         assert len(config.symbols) == 4
         assert "SPY" in config.symbols
@@ -166,10 +166,10 @@ class TestTrendFollowingConfig:
     def test_ma_period_relationship(self):
         """Test that fast MA period is less than slow MA period."""
         config = TrendFollowingConfig()
-        
+
         # Fast MA should be less than slow MA
         assert config.fast_ma_period < config.slow_ma_period
-        
+
         # Test with custom values
         custom_config = TrendFollowingConfig(
             fast_ma_period=20,
@@ -183,10 +183,10 @@ class TestTrendFollowingConfig:
             adx_period=21,
             adx_threshold=30.0
         )
-        
+
         assert config.adx_period == 21
         assert config.adx_threshold == 30.0
-        
+
         # ADX threshold should be reasonable for trend detection
         assert 20 <= config.adx_threshold <= 50
 
@@ -196,10 +196,10 @@ class TestTrendFollowingConfig:
             atr_period=21,
             atr_multiplier=2.5
         )
-        
+
         assert config.atr_period == 21
         assert config.atr_multiplier == 2.5
-        
+
         # ATR multiplier should be reasonable for stop losses
         assert 1.0 <= config.atr_multiplier <= 5.0
 
@@ -212,12 +212,12 @@ class TestTrendFollowingConfig:
             adx_threshold=35.0,
             atr_multiplier=3.0
         )
-        
+
         assert conservative_config.fast_ma_period == 100
         assert conservative_config.slow_ma_period == 300
         assert conservative_config.adx_threshold == 35.0
         assert conservative_config.atr_multiplier == 3.0
-        
+
         # Aggressive trend following
         aggressive_config = TrendFollowingConfig(
             fast_ma_period=20,
@@ -225,7 +225,7 @@ class TestTrendFollowingConfig:
             adx_threshold=20.0,
             atr_multiplier=1.5
         )
-        
+
         assert aggressive_config.fast_ma_period == 20
         assert aggressive_config.slow_ma_period == 50
         assert aggressive_config.adx_threshold == 20.0

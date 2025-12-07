@@ -15,8 +15,7 @@ import pytest_asyncio
 import asyncio
 import logging
 import sys
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 import pandas as pd
 import numpy as np
 
@@ -39,10 +38,9 @@ from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager
 
 # Configuration imports
 from core_engine.config.component_config import (
-    RiskConfig, DataConfig, RegimeConfig, ExecutionConfig
+    RiskConfig, DataConfig, RegimeConfig
 )
 # StrategyConfig is in StrategyManagerConfig
-from core_engine.trading.strategies.manager import StrategyManagerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +63,7 @@ def event_loop():
 async def orchestrator():
     """
     Create REAL HierarchicalSystemOrchestrator for integration tests.
-    
+
     This is a REAL component, not a mock.
     """
     orchestrator = HierarchicalSystemOrchestrator()
@@ -94,7 +92,7 @@ async def initialized_orchestrator():
 async def regime_engine():
     """
     Create REAL EnhancedRegimeEngine for integration tests.
-    
+
     This is the FOUNDATION component (initializes FIRST per Rule 2).
     """
     config = RegimeConfig()
@@ -112,7 +110,7 @@ async def regime_engine():
 async def risk_manager():
     """
     Create REAL CentralRiskManager for integration tests.
-    
+
     This is the GOVERNANCE layer component (Layer 1).
     """
     config = RiskConfig()
@@ -137,7 +135,7 @@ async def risk_manager_with_orchestrator(orchestrator, risk_manager):
 async def data_manager():
     """
     Create REAL ClickHouseDataManager for integration tests.
-    
+
     Note: In tests, this may use mock data or test database.
     """
     config = DataConfig()
@@ -166,14 +164,14 @@ async def pipeline_orchestrator():
     from core_engine.config.component_config import (
         IndicatorConfig, FeatureConfig, SignalConfig
     )
-    
+
     config = {
         'data_config': DataConfig(),
         'indicator_config': IndicatorConfig(),
         'feature_config': FeatureConfig(),
         'signal_config': SignalConfig()
     }
-    
+
     pipeline = ProcessingPipelineOrchestrator(**config)
     await pipeline.initialize()
     yield pipeline
@@ -206,20 +204,20 @@ async def strategy_manager_with_risk(strategy_manager, risk_manager):
 async def strategy_manager_with_pipeline(strategy_manager, pipeline_orchestrator, regime_engine):
     """
     Create strategy manager with pipeline orchestrator integration.
-    
+
     This fixture provides StrategyManager and ProcessingPipelineOrchestrator
     properly integrated for data pipeline testing.
     """
     # Set regime engine on pipeline (if not already set)
     if hasattr(pipeline_orchestrator, 'set_regime_engine'):
         pipeline_orchestrator.set_regime_engine(regime_engine)
-    
+
     # Link pipeline to strategy manager
     if hasattr(strategy_manager, 'set_pipeline_orchestrator'):
         strategy_manager.set_pipeline_orchestrator(pipeline_orchestrator)
     elif hasattr(strategy_manager, 'pipeline_orchestrator'):
         strategy_manager.pipeline_orchestrator = pipeline_orchestrator
-    
+
     yield {
         'strategy_manager': strategy_manager,
         'pipeline_orchestrator': pipeline_orchestrator
@@ -229,7 +227,7 @@ async def strategy_manager_with_pipeline(strategy_manager, pipeline_orchestrator
 async def strategy_manager_with_regime(strategy_manager, regime_engine):
     """
     Create strategy manager with regime engine integration.
-    
+
     This fixture provides StrategyManager with RegimeEngine properly integrated
     for regime-aware testing.
     """
@@ -238,7 +236,7 @@ async def strategy_manager_with_regime(strategy_manager, regime_engine):
         strategy_manager.set_regime_engine(regime_engine)
     elif hasattr(strategy_manager, 'regime_engine'):
         strategy_manager.regime_engine = regime_engine
-    
+
     yield {
         'strategy_manager': strategy_manager,
         'regime_engine': regime_engine
@@ -309,7 +307,7 @@ async def analytics_manager():
 async def complete_system():
     """
     Create COMPLETE integrated system with all components.
-    
+
     This fixture provides a fully integrated system for end-to-end testing.
     Components are initialized in correct order (Regime-First).
     """
@@ -318,17 +316,17 @@ async def complete_system():
     regime_engine = EnhancedRegimeEngine(regime_config)
     await regime_engine.initialize()
     await regime_engine.start()
-    
+
     # STEP 2: Initialize Orchestrator
     orchestrator = HierarchicalSystemOrchestrator()
     await orchestrator.initialize()
-    
+
     # STEP 3: Initialize RiskManager (order=25) - Governance
     risk_config = RiskConfig()
     risk_manager = CentralRiskManager(risk_config)
     await risk_manager.initialize()
     orchestrator.register_central_risk_manager(risk_manager)
-    
+
     # STEP 4: Initialize DataManager (order=10) - with regime context
     data_config = DataConfig()
     data_manager = ClickHouseDataManager(data_config)
@@ -339,7 +337,7 @@ async def complete_system():
         ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
         initialization_order=10
     )
-    
+
     # STEP 5: Initialize Pipeline (order=15)
     from core_engine.config.component_config import (
         IndicatorConfig, FeatureConfig, SignalConfig
@@ -358,7 +356,7 @@ async def complete_system():
         ComponentLayer.SUPPORT, AuthorityLevel.OPERATIONAL,
         initialization_order=15
     )
-    
+
     # STEP 6: Initialize StrategyManager (order=20)
     strategy_config = {}  # StrategyManager accepts dict config
     strategy_manager = StrategyManager(strategy_config)
@@ -370,7 +368,7 @@ async def complete_system():
         ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
         initialization_order=20
     )
-    
+
     # STEP 7: Initialize TradingEngine (order=30)
     # EnhancedTradingEngine expects Dict[str, Any], not ExecutionConfig
     trading_engine_config = {}
@@ -382,7 +380,7 @@ async def complete_system():
         ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
         initialization_order=30
     )
-    
+
     # STEP 8: Initialize ExecutionEngine (order=40)
     # UnifiedExecutionEngine may also expect dict config
     execution_engine_config = {}
@@ -394,7 +392,7 @@ async def complete_system():
         ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
         initialization_order=40
     )
-    
+
     # STEP 9: Initialize AnalyticsManager (order=35)
     from core_engine.config.component_config import AnalyticsConfig
     analytics_config = AnalyticsConfig()
@@ -405,10 +403,10 @@ async def complete_system():
         ComponentLayer.EXECUTION, AuthorityLevel.OPERATIONAL,
         initialization_order=35
     )
-    
+
     # Start system
     await orchestrator.start()
-    
+
     system = {
         'orchestrator': orchestrator,
         'regime_engine': regime_engine,
@@ -420,9 +418,9 @@ async def complete_system():
         'execution_engine': execution_engine,
         'analytics_manager': analytics_manager
     }
-    
+
     yield system
-    
+
     # Cleanup in reverse order
     await orchestrator.stop()
     await analytics_manager.stop()
@@ -443,17 +441,17 @@ async def complete_system():
 def create_enriched_data():
     """
     Create enriched market data for strategy testing.
-    
+
     Returns DataFrame with OHLCV + indicators + features.
     """
     def _create(symbols: List[str] = ['AAPL'], rows: int = 200) -> Dict[str, pd.DataFrame]:
         """Create enriched data for symbols"""
         enriched = {}
-        
+
         for symbol in symbols:
             dates = pd.date_range(start='2024-01-01', periods=rows, freq='1min')
             np.random.seed(42)  # For reproducibility
-            
+
             # Generate OHLCV data
             base_price = 100.0
             prices = []
@@ -461,7 +459,7 @@ def create_enriched_data():
                 change = np.random.normal(0, 0.01)
                 base_price *= (1 + change)
                 prices.append(base_price)
-            
+
             df = pd.DataFrame({
                 'timestamp': dates,
                 'open': prices,
@@ -470,7 +468,7 @@ def create_enriched_data():
                 'close': prices,
                 'volume': np.random.randint(1000, 10000, rows)
             })
-            
+
             # Add indicators (simplified)
             df['SMA_10'] = df['close'].rolling(10).mean()
             df['SMA_20'] = df['close'].rolling(20).mean()
@@ -478,22 +476,22 @@ def create_enriched_data():
             df['MACD'] = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
             df['ADX_14'] = 20.0  # Simplified ADX
             df['ATR_14'] = df['high'].rolling(14).max() - df['low'].rolling(14).min()
-            
+
             # Add features
             df['returns_1'] = df['close'].pct_change(1)
             df['momentum_score'] = (df['close'] - df['close'].shift(10)) / df['close'].shift(10)
             df['volatility_ratio'] = df['returns_1'].rolling(20).std() / df['returns_1'].rolling(60).std()
             df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
-            
+
             # Add signals
             df['signal_type'] = 'HOLD'
             df['signal_strength'] = 0
             df['confidence'] = 0.5
-            
+
             enriched[symbol] = df
-        
+
         return enriched
-    
+
     return _create
 
 @pytest.fixture
@@ -517,7 +515,7 @@ def create_trading_decision_request():
             strategy_id=strategy_id,
             requesting_component='StrategyManager'
         )
-    
+
     return _create
 
 # ==============================================================================
@@ -541,6 +539,6 @@ def wait_for_condition():
                 return True
             await asyncio.sleep(interval)
         raise TimeoutError(error_msg)
-    
+
     return _wait
 

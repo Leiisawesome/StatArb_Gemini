@@ -29,7 +29,7 @@ def sample_returns():
     """Create sample return data for testing"""
     np.random.seed(42)
     dates = pd.date_range('2024-01-01', periods=100, freq='D')
-    
+
     # Create correlated returns
     base = np.random.normal(0, 0.01, 100)
     returns = pd.DataFrame({
@@ -37,7 +37,7 @@ def sample_returns():
         'GOOGL': base * 0.8 + np.random.normal(0, 0.005, 100),
         'MSFT': base * 0.7 + np.random.normal(0, 0.005, 100)
     }, index=dates)
-    
+
     return returns
 
 
@@ -114,7 +114,7 @@ def test_correlation_result_dataclass():
         timestamp=datetime.now(),
         metadata={'test': 'data'}
     )
-    
+
     assert result.asset1 == "AAPL"
     assert result.asset2 == "GOOGL"
     assert result.correlation == 0.75
@@ -128,7 +128,7 @@ def test_correlation_result_dataclass():
 def test_correlation_matrix_dataclass(sample_correlation_matrix):
     """Test CorrelationMatrix dataclass creation"""
     eigenvalues = [2.1, 0.6, 0.3]
-    
+
     result = CorrelationMatrix(
         matrix=sample_correlation_matrix,
         method=CorrelationMethod.PEARSON,
@@ -140,7 +140,7 @@ def test_correlation_matrix_dataclass(sample_correlation_matrix):
         is_positive_definite=True,
         metadata={'sample_size': 100}
     )
-    
+
     assert result.matrix.equals(sample_correlation_matrix)
     assert result.method == CorrelationMethod.PEARSON
     assert result.eigenvalues == eigenvalues
@@ -153,7 +153,7 @@ def test_regime_detection_result_dataclass():
     """Test RegimeDetectionResult dataclass creation"""
     now = datetime.now()
     history = [(now - timedelta(hours=48), CorrelationRegime.NORMAL)]
-    
+
     result = RegimeDetectionResult(
         current_regime=CorrelationRegime.HIGH,
         regime_probability=0.85,
@@ -163,7 +163,7 @@ def test_regime_detection_result_dataclass():
         confidence=0.75,
         metadata={'avg_correlation': 0.68}
     )
-    
+
     assert result.current_regime == CorrelationRegime.HIGH
     assert result.regime_probability == 0.85
     assert result.regime_duration == timedelta(hours=24)
@@ -182,7 +182,7 @@ def test_tail_dependence_result_dataclass():
         extreme_percentile=0.05,
         timestamp=datetime.now()
     )
-    
+
     assert result.asset1 == "AAPL"
     assert result.asset2 == "GOOGL"
     assert result.upper_tail_dependence == 0.6
@@ -198,18 +198,18 @@ def test_tail_dependence_result_dataclass():
 def test_default_initialization():
     """Test CorrelationAnalyzer default initialization"""
     analyzer = CorrelationAnalyzer()
-    
+
     assert analyzer.ewma_lambda == 0.94
     assert analyzer.min_observations == 50
     assert analyzer.regime_detection_window == 60
     assert analyzer.tail_threshold == 0.05
     assert analyzer.cache_ttl_seconds == 300
-    
+
     assert analyzer.regime_thresholds['low'] == 0.3
     assert analyzer.regime_thresholds['normal'] == 0.6
     assert analyzer.regime_thresholds['high'] == 0.8
     assert analyzer.regime_thresholds['crisis'] == 0.9
-    
+
     assert analyzer._current_regime == CorrelationRegime.NORMAL
     assert isinstance(analyzer._regime_start_time, datetime)
 
@@ -221,7 +221,7 @@ def test_custom_configuration(configured_analyzer):
     assert configured_analyzer.regime_detection_window == 50
     assert configured_analyzer.tail_threshold == 0.10
     assert configured_analyzer.cache_ttl_seconds == 600
-    
+
     assert configured_analyzer.regime_thresholds['low'] == 0.25
     assert configured_analyzer.regime_thresholds['normal'] == 0.55
     assert configured_analyzer.regime_thresholds['high'] == 0.75
@@ -234,7 +234,7 @@ def test_state_initialization(correlation_analyzer):
     assert hasattr(correlation_analyzer, '_correlation_cache')
     assert hasattr(correlation_analyzer, '_regime_history')
     assert hasattr(correlation_analyzer, '_calculation_history')
-    
+
     assert isinstance(correlation_analyzer._correlation_cache, dict)
     assert len(correlation_analyzer._correlation_cache) == 0
     assert len(correlation_analyzer._regime_history) == 0
@@ -252,7 +252,7 @@ async def test_calculate_correlation_matrix_pearson(correlation_analyzer, sample
         sample_returns,
         method=CorrelationMethod.PEARSON
     )
-    
+
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.PEARSON
     assert result.matrix.shape == (3, 3)
@@ -260,13 +260,13 @@ async def test_calculate_correlation_matrix_pearson(correlation_analyzer, sample
     assert result.is_positive_definite is True
     assert len(result.eigenvalues) == 3
     assert result.condition_number > 0
-    
+
     # Check diagonal is 1.0
     assert np.allclose(np.diag(result.matrix.values), 1.0)
-    
+
     # Check symmetry
     assert np.allclose(result.matrix.values, result.matrix.values.T)
-    
+
     # Check calculation history
     assert len(correlation_analyzer._calculation_history) == 1
 
@@ -278,7 +278,7 @@ async def test_calculate_correlation_matrix_spearman(correlation_analyzer, sampl
         sample_returns,
         method=CorrelationMethod.SPEARMAN
     )
-    
+
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.SPEARMAN
     assert result.matrix.shape == (3, 3)
@@ -293,7 +293,7 @@ async def test_calculate_correlation_matrix_kendall(correlation_analyzer, sample
         sample_returns,
         method=CorrelationMethod.KENDALL
     )
-    
+
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.KENDALL
     assert result.matrix.shape == (3, 3)
@@ -307,12 +307,12 @@ async def test_calculate_correlation_matrix_ewma(correlation_analyzer, sample_re
         sample_returns,
         method=CorrelationMethod.EWMA
     )
-    
+
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.EWMA
     assert result.matrix.shape == (3, 3)
     assert np.allclose(np.diag(result.matrix.values), 1.0)
-    
+
     # EWMA should give slightly different results than Pearson
     pearson_result = await correlation_analyzer.calculate_correlation_matrix(
         sample_returns,
@@ -328,7 +328,7 @@ async def test_calculate_correlation_matrix_shrinkage(correlation_analyzer, samp
         sample_returns,
         method=CorrelationMethod.SHRINKAGE
     )
-    
+
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.SHRINKAGE
     assert result.matrix.shape == (3, 3)
@@ -343,7 +343,7 @@ async def test_calculate_correlation_matrix_insufficient_data(correlation_analyz
         'AAPL': [0.01, -0.02, 0.015],
         'GOOGL': [0.015, -0.015, 0.01]
     }, index=pd.date_range('2024-01-01', periods=3, freq='D'))
-    
+
     with pytest.raises(ValueError, match="Insufficient data"):
         await correlation_analyzer.calculate_correlation_matrix(small_returns)
 
@@ -355,14 +355,14 @@ async def test_calculate_correlation_matrix_eigenvalues(correlation_analyzer, sa
         sample_returns,
         method=CorrelationMethod.PEARSON
     )
-    
+
     # Eigenvalues should be sorted descending
     assert result.eigenvalues == sorted(result.eigenvalues, reverse=True)
-    
+
     # Condition number should be max/min eigenvalue
     expected_condition = result.eigenvalues[0] / result.eigenvalues[-1]
     assert abs(result.condition_number - expected_condition) < 0.01
-    
+
     # For correlation matrix, all eigenvalues should be positive (or very small)
     assert all(e > -1e-10 for e in result.eigenvalues)
 
@@ -381,7 +381,7 @@ async def test_calculate_pairwise_correlation_pearson(correlation_analyzer, samp
         method=CorrelationMethod.PEARSON,
         confidence_level=0.95
     )
-    
+
     assert isinstance(result, CorrelationResult)
     assert result.asset1 == 'AAPL'
     assert result.asset2 == 'GOOGL'
@@ -389,7 +389,7 @@ async def test_calculate_pairwise_correlation_pearson(correlation_analyzer, samp
     assert -1.0 <= result.correlation <= 1.0
     assert 0.0 <= result.p_value <= 1.0
     assert result.sample_size == 100
-    
+
     # Check confidence interval
     ci_lower, ci_upper = result.confidence_interval
     assert ci_lower < result.correlation < ci_upper
@@ -406,23 +406,23 @@ async def test_calculate_pairwise_correlation_methods(correlation_analyzer, samp
         sample_returns['GOOGL'],
         method=CorrelationMethod.PEARSON
     )
-    
+
     spearman_result = await correlation_analyzer.calculate_pairwise_correlation(
         sample_returns['AAPL'],
         sample_returns['GOOGL'],
         method=CorrelationMethod.SPEARMAN
     )
-    
+
     kendall_result = await correlation_analyzer.calculate_pairwise_correlation(
         sample_returns['AAPL'],
         sample_returns['GOOGL'],
         method=CorrelationMethod.KENDALL
     )
-    
+
     # Different methods should give different (but related) results
     assert spearman_result.method == CorrelationMethod.SPEARMAN
     assert kendall_result.method == CorrelationMethod.KENDALL
-    
+
     # Kendall is typically smaller than Spearman and Pearson
     # But all should have same sign
     assert np.sign(pearson_result.correlation) == np.sign(spearman_result.correlation)
@@ -437,13 +437,13 @@ async def test_calculate_pairwise_correlation_confidence_levels(correlation_anal
         sample_returns['GOOGL'],
         confidence_level=0.95
     )
-    
+
     result_99 = await correlation_analyzer.calculate_pairwise_correlation(
         sample_returns['AAPL'],
         sample_returns['GOOGL'],
         confidence_level=0.99
     )
-    
+
     # 99% CI should be wider than 95% CI
     ci_95_width = result_95.confidence_interval[1] - result_95.confidence_interval[0]
     ci_99_width = result_99.confidence_interval[1] - result_99.confidence_interval[0]
@@ -457,12 +457,12 @@ async def test_calculate_pairwise_correlation_data_alignment(correlation_analyze
     # Create series with different indices
     dates1 = pd.date_range('2024-01-01', periods=100, freq='D')
     dates2 = pd.date_range('2024-01-05', periods=100, freq='D')  # Offset by 4 days
-    
+
     series1 = pd.Series(np.random.normal(0, 0.01, 100), index=dates1, name='AAPL')
     series2 = pd.Series(np.random.normal(0, 0.01, 100), index=dates2, name='GOOGL')
-    
+
     result = await correlation_analyzer.calculate_pairwise_correlation(series1, series2)
-    
+
     # Should only use overlapping dates
     assert result.sample_size == 96  # 100 - 4 offset days
 
@@ -472,7 +472,7 @@ async def test_calculate_pairwise_correlation_insufficient_data(correlation_anal
     """Test pairwise correlation with insufficient aligned data"""
     series1 = pd.Series([0.01, 0.02], index=[0, 1], name='AAPL')
     series2 = pd.Series([0.015, 0.025], index=[0, 1], name='GOOGL')
-    
+
     with pytest.raises(ValueError, match="Insufficient aligned data"):
         await correlation_analyzer.calculate_pairwise_correlation(series1, series2)
 
@@ -490,12 +490,12 @@ async def test_detect_correlation_regime_low(correlation_analyzer, sample_return
         'GOOGL': [0.15, 1.0, 0.20],
         'MSFT': [0.10, 0.20, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result = await correlation_analyzer.detect_correlation_regime(
         low_corr_matrix,
         sample_returns
     )
-    
+
     assert isinstance(result, RegimeDetectionResult)
     assert result.current_regime == CorrelationRegime.LOW
     assert 0.0 <= result.regime_probability <= 1.0
@@ -512,12 +512,12 @@ async def test_detect_correlation_regime_normal(correlation_analyzer, sample_ret
         'GOOGL': [0.45, 1.0, 0.50],
         'MSFT': [0.40, 0.50, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result = await correlation_analyzer.detect_correlation_regime(
         normal_corr_matrix,
         sample_returns
     )
-    
+
     assert result.current_regime == CorrelationRegime.NORMAL
     assert result.regime_probability > 0.5
 
@@ -531,12 +531,12 @@ async def test_detect_correlation_regime_high(correlation_analyzer, sample_retur
         'GOOGL': [0.70, 1.0, 0.75],
         'MSFT': [0.65, 0.75, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result = await correlation_analyzer.detect_correlation_regime(
         high_corr_matrix,
         sample_returns
     )
-    
+
     assert result.current_regime == CorrelationRegime.HIGH
 
 
@@ -549,12 +549,12 @@ async def test_detect_correlation_regime_crisis(correlation_analyzer, sample_ret
         'GOOGL': [0.92, 1.0, 0.95],
         'MSFT': [0.88, 0.95, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result = await correlation_analyzer.detect_correlation_regime(
         crisis_corr_matrix,
         sample_returns
     )
-    
+
     assert result.current_regime == CorrelationRegime.CRISIS
     assert result.regime_probability > 0.5  # Lower threshold since formula varies
 
@@ -568,23 +568,23 @@ async def test_detect_correlation_regime_change(correlation_analyzer, sample_ret
         'GOOGL': [0.45, 1.0, 0.50],
         'MSFT': [0.40, 0.50, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result1 = await correlation_analyzer.detect_correlation_regime(normal_matrix, sample_returns)
     initial_regime = result1.current_regime
-    
+
     # Transition to high regime
     high_matrix = pd.DataFrame({
         'AAPL': [1.0, 0.70, 0.65],
         'GOOGL': [0.70, 1.0, 0.75],
         'MSFT': [0.65, 0.75, 1.0]
     }, index=['AAPL', 'GOOGL', 'MSFT'])
-    
+
     result2 = await correlation_analyzer.detect_correlation_regime(high_matrix, sample_returns)
-    
+
     # Check regime changed
     assert result2.current_regime != initial_regime
     assert result2.metadata['regime_changed'] is True
-    
+
     # Check regime history was updated
     assert len(correlation_analyzer._regime_history) >= 1
 
@@ -596,15 +596,15 @@ async def test_regime_probability_calculation(correlation_analyzer):
     prob_low_center = correlation_analyzer._calculate_regime_probability(0.15, CorrelationRegime.LOW)
     prob_low_edge = correlation_analyzer._calculate_regime_probability(0.29, CorrelationRegime.LOW)
     assert prob_low_center > prob_low_edge
-    
+
     # Test NORMAL regime probabilities
     prob_normal = correlation_analyzer._calculate_regime_probability(0.45, CorrelationRegime.NORMAL)
     assert prob_normal > 0.5
-    
+
     # Test HIGH regime probabilities
     prob_high = correlation_analyzer._calculate_regime_probability(0.70, CorrelationRegime.HIGH)
     assert prob_high > 0.5
-    
+
     # Test CRISIS regime probabilities
     prob_crisis = correlation_analyzer._calculate_regime_probability(0.95, CorrelationRegime.CRISIS)
     assert prob_crisis > 0.7
@@ -622,7 +622,7 @@ async def test_calculate_tail_dependence_basic(correlation_analyzer, sample_retu
         sample_returns['GOOGL'],
         threshold_percentile=0.05
     )
-    
+
     assert isinstance(result, TailDependenceResult)
     assert result.asset1 == 'AAPL'
     assert result.asset2 == 'GOOGL'
@@ -639,16 +639,16 @@ async def test_calculate_tail_dependence_various_percentiles(correlation_analyze
         sample_returns['GOOGL'],
         threshold_percentile=0.05
     )
-    
+
     result_10pct = await correlation_analyzer.calculate_tail_dependence(
         sample_returns['AAPL'],
         sample_returns['GOOGL'],
         threshold_percentile=0.10
     )
-    
+
     assert result_5pct.extreme_percentile == 0.05
     assert result_10pct.extreme_percentile == 0.10
-    
+
     # Larger percentile should generally give higher tail dependence
     # (more observations in tail)
 
@@ -661,21 +661,21 @@ async def test_calculate_tail_dependence_extreme_correlation(correlation_analyze
     np.random.seed(42)
     n = 100
     base = np.random.normal(0, 0.01, n)
-    
+
     # Add some extreme events where both move together
     extreme_indices = [5, 15, 25, 35, 45]
     for idx in extreme_indices:
         base[idx] = 0.05  # Large positive move
-    
+
     series1 = pd.Series(base + np.random.normal(0, 0.001, n), name='AAPL')
     series2 = pd.Series(base + np.random.normal(0, 0.001, n), name='GOOGL')
-    
+
     result = await correlation_analyzer.calculate_tail_dependence(
         series1,
         series2,
         threshold_percentile=0.05
     )
-    
+
     # Should show high tail dependence
     assert result.upper_tail_dependence > 0.3
 
@@ -685,7 +685,7 @@ async def test_calculate_tail_dependence_insufficient_data(correlation_analyzer)
     """Test tail dependence with insufficient data"""
     series1 = pd.Series([0.01, 0.02], name='AAPL')
     series2 = pd.Series([0.015, 0.025], name='GOOGL')
-    
+
     with pytest.raises(ValueError, match="Insufficient aligned data"):
         await correlation_analyzer.calculate_tail_dependence(series1, series2)
 
@@ -698,15 +698,15 @@ async def test_calculate_tail_dependence_insufficient_data(correlation_analyzer)
 async def test_stress_test_correlation_breakdown(correlation_analyzer, sample_correlation_matrix):
     """Test correlation breakdown stress scenario"""
     stress_scenarios = {'correlation_breakdown': 1.0}
-    
+
     results = await correlation_analyzer.stress_test_correlations(
         sample_correlation_matrix,
         stress_scenarios
     )
-    
+
     assert 'correlation_breakdown' in results
     stressed_matrix = results['correlation_breakdown']
-    
+
     # Should be identity matrix (all correlations → 0)
     assert np.allclose(stressed_matrix.values, np.eye(3))
 
@@ -715,18 +715,18 @@ async def test_stress_test_correlation_breakdown(correlation_analyzer, sample_co
 async def test_stress_test_correlation_spike(correlation_analyzer, sample_correlation_matrix):
     """Test correlation spike stress scenario"""
     stress_scenarios = {'correlation_spike': 0.5}
-    
+
     results = await correlation_analyzer.stress_test_correlations(
         sample_correlation_matrix,
         stress_scenarios
     )
-    
+
     assert 'correlation_spike' in results
     stressed_matrix = results['correlation_spike']
-    
+
     # Diagonal should still be 1.0
     assert np.allclose(np.diag(stressed_matrix.values), 1.0)
-    
+
     # Off-diagonal values should be higher than original
     for i in range(3):
         for j in range(3):
@@ -741,18 +741,18 @@ async def test_stress_test_correlation_spike(correlation_analyzer, sample_correl
 async def test_stress_test_sector_contagion(correlation_analyzer, sample_correlation_matrix):
     """Test sector contagion stress scenario"""
     stress_scenarios = {'sector_contagion': 0.3}
-    
+
     results = await correlation_analyzer.stress_test_correlations(
         sample_correlation_matrix,
         stress_scenarios
     )
-    
+
     assert 'sector_contagion' in results
     stressed_matrix = results['sector_contagion']
-    
+
     # Diagonal should be 1.0
     assert np.allclose(np.diag(stressed_matrix.values), 1.0)
-    
+
     # Correlations should be clipped to valid range (excluding diagonal)
     off_diagonal = stressed_matrix.values[~np.eye(3, dtype=bool)]
     assert (off_diagonal >= -0.99).all()
@@ -768,18 +768,18 @@ async def test_stress_test_multiple_scenarios(correlation_analyzer, sample_corre
         'sector_contagion': 0.3,
         'custom_scenario': 1.2
     }
-    
+
     results = await correlation_analyzer.stress_test_correlations(
         sample_correlation_matrix,
         stress_scenarios
     )
-    
+
     assert len(results) == 4
     assert 'correlation_breakdown' in results
     assert 'correlation_spike' in results
     assert 'sector_contagion' in results
     assert 'custom_scenario' in results
-    
+
     # All results should be valid correlation matrices
     for scenario, matrix in results.items():
         assert matrix.shape == (3, 3)
@@ -794,17 +794,17 @@ async def test_stress_test_multiple_scenarios(correlation_analyzer, sample_corre
 async def test_stress_test_matrix_validity(correlation_analyzer, sample_correlation_matrix):
     """Test that stressed matrices remain valid"""
     stress_scenarios = {'extreme_stress': 5.0}  # Extreme stress factor
-    
+
     results = await correlation_analyzer.stress_test_correlations(
         sample_correlation_matrix,
         stress_scenarios
     )
-    
+
     stressed_matrix = results['extreme_stress']
-    
+
     # Diagonal should be 1.0
     assert np.allclose(np.diag(stressed_matrix.values), 1.0)
-    
+
     # Off-diagonal should be clipped to valid range
     off_diagonal = stressed_matrix.values[~np.eye(3, dtype=bool)]
     assert (off_diagonal >= -0.99).all()
@@ -818,7 +818,7 @@ async def test_stress_test_matrix_validity(correlation_analyzer, sample_correlat
 def test_get_correlation_statistics(correlation_analyzer, sample_correlation_matrix):
     """Test correlation statistics calculation"""
     stats = correlation_analyzer.get_correlation_statistics(sample_correlation_matrix)
-    
+
     assert 'mean_correlation' in stats
     assert 'median_correlation' in stats
     assert 'std_correlation' in stats
@@ -828,7 +828,7 @@ def test_get_correlation_statistics(correlation_analyzer, sample_correlation_mat
     assert 'high_correlations' in stats
     assert 'negative_correlations' in stats
     assert 'near_zero_correlations' in stats
-    
+
     # Check value ranges
     assert 0.0 <= stats['mean_correlation'] <= 1.0
     assert 0.0 <= stats['positive_correlations'] <= 1.0
@@ -843,18 +843,18 @@ def test_get_correlation_statistics_various_patterns(correlation_analyzer):
         'B': [0.85, 1.0, 0.88],
         'C': [0.90, 0.88, 1.0]
     }, index=['A', 'B', 'C'])
-    
+
     high_stats = correlation_analyzer.get_correlation_statistics(high_corr_matrix)
     assert high_stats['mean_correlation'] > 0.8
     assert high_stats['high_correlations'] == 1.0  # All correlations > 0.7
-    
+
     # Mixed correlations
     mixed_corr_matrix = pd.DataFrame({
         'A': [1.0, -0.3, 0.5],
         'B': [-0.3, 1.0, 0.1],
         'C': [0.5, 0.1, 1.0]
     }, index=['A', 'B', 'C'])
-    
+
     mixed_stats = correlation_analyzer.get_correlation_statistics(mixed_corr_matrix)
     assert mixed_stats['negative_correlations'] > 0.0
     assert mixed_stats['positive_correlations'] > 0.0
@@ -873,9 +873,9 @@ async def test_calculation_history(correlation_analyzer, sample_returns):
         sample_returns,
         method=CorrelationMethod.SPEARMAN
     )
-    
+
     history = correlation_analyzer.get_calculation_history()
-    
+
     assert len(history) == 2
     assert history[0]['method'] == 'pearson'
     assert history[1]['method'] == 'spearman'
@@ -893,19 +893,19 @@ async def test_regime_history(correlation_analyzer, sample_returns):
         'B': [0.15, 1.0, 0.20],
         'C': [0.10, 0.20, 1.0]
     }, index=['A', 'B', 'C'])
-    
+
     high_matrix = pd.DataFrame({
         'A': [1.0, 0.70, 0.65],
         'B': [0.70, 1.0, 0.75],
         'C': [0.65, 0.75, 1.0]
     }, index=['A', 'B', 'C'])
-    
+
     # Detect regimes
     await correlation_analyzer.detect_correlation_regime(low_matrix, sample_returns)
     await correlation_analyzer.detect_correlation_regime(high_matrix, sample_returns)
-    
+
     history = correlation_analyzer.get_regime_history()
-    
+
     # Should have at least one regime change recorded
     assert len(history) >= 1
 
@@ -915,12 +915,12 @@ def test_clear_cache(correlation_analyzer):
     # Add some items to cache
     correlation_analyzer._correlation_cache['test1'] = 'value1'
     correlation_analyzer._correlation_cache['test2'] = 'value2'
-    
+
     assert len(correlation_analyzer._correlation_cache) == 2
-    
+
     # Clear cache
     correlation_analyzer.clear_cache()
-    
+
     assert len(correlation_analyzer._correlation_cache) == 0
 
 
@@ -942,12 +942,12 @@ async def test_regime_confidence_calculation(correlation_analyzer):
     short_duration = timedelta(hours=1)
     conf_short = correlation_analyzer._calculate_regime_confidence(short_duration, 0.5)
     assert 0.1 <= conf_short <= 1.0
-    
+
     # Test with long duration
     long_duration = timedelta(hours=48)
     conf_long = correlation_analyzer._calculate_regime_confidence(long_duration, 0.5)
     assert conf_long >= conf_short
-    
+
     # Test with extreme correlation (higher confidence)
     conf_extreme = correlation_analyzer._calculate_regime_confidence(long_duration, 0.95)
     conf_moderate = correlation_analyzer._calculate_regime_confidence(long_duration, 0.5)

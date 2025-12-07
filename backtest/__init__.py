@@ -15,7 +15,7 @@ This application orchestrates all 9 core_engine components to provide:
 Usage:
     from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
     from core_engine.config import BacktestConfig, BacktestMode
-    
+
     config = BacktestConfig.from_dict({
         "backtest_name": "My Backtest",
         "symbols": ["AAPL"],

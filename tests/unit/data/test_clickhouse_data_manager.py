@@ -82,20 +82,20 @@ class TestClickHouseDataManagerBasics:
     async def test_data_manager_health_check_without_clickhouse(self, data_config):
         """Test data manager fails fast when ClickHouse unavailable"""
         from core_engine.exceptions import ClickHouseConnectionError
-        
+
         # This should fail fast during __init__ when ClickHouse is unavailable
         # Patch at module level to ensure it works even when tests run together
         with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=False):
             with pytest.raises(ClickHouseConnectionError):
                 # Exception should be raised during __init__, not initialize()
                 manager = ClickHouseDataManager(data_config)
-    
+
     @pytest.mark.asyncio
     async def test_data_manager_health_check_with_clickhouse(self, data_manager):
         """Test data manager health check when ClickHouse is available"""
         await data_manager.initialize()
         await data_manager.start()
-        
+
         health = await data_manager.health_check()
         # Ensure healthy is actually a boolean, not a Mock
         assert isinstance(health['healthy'], bool)
@@ -108,7 +108,7 @@ class TestClickHouseDataManagerBasics:
     async def test_data_manager_status(self, data_manager):
         """Test data manager status reporting"""
         await data_manager.initialize()
-        
+
         status = data_manager.get_status()
         assert 'component_type' in status
         assert status['initialized'] is True

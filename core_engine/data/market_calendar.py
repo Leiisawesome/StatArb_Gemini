@@ -15,8 +15,8 @@ Author: StatArb_Gemini Core Engine
 
 from enum import Enum
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
-from typing import Dict, Optional, Tuple
+from datetime import datetime, time
+from typing import Tuple
 import logging
 
 class AssetClass(Enum):
@@ -47,10 +47,10 @@ class MarketCalendar:
     Manages trading hours and sessions for different asset classes.
     Replaces hardcoded 9:30-16:00 logic.
     """
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        
+
         # Define standard sessions
         self.sessions = {
             AssetClass.US_EQUITY: MarketSession(
@@ -72,15 +72,15 @@ class MarketCalendar:
                 days_of_week=(0, 1, 2, 3, 4)  # Sun 5pm ET to Fri 5pm ET (simplified as Mon-Fri for now)
             )
         }
-    
+
     def get_session_times(self, date: datetime, asset_class: AssetClass) -> Tuple[datetime, datetime]:
         """
         Get open and close datetimes for a specific date and asset class.
-        
+
         Args:
             date: The date to check
             asset_class: The asset class (AssetClass enum)
-            
+
         Returns:
             Tuple of (open_dt, close_dt)
         """
@@ -88,7 +88,7 @@ class MarketCalendar:
         if not session:
             # Default to US Equity if unknown
             session = self.sessions[AssetClass.US_EQUITY]
-            
+
         # Check if trading day
         if date.weekday() not in session.days_of_week:
             # Not a trading day - return None or handle appropriately
@@ -102,20 +102,20 @@ class MarketCalendar:
             second=session.open_time.second,
             microsecond=session.open_time.microsecond
         )
-        
+
         close_dt = date.replace(
             hour=session.close_time.hour,
             minute=session.close_time.minute,
             second=session.close_time.second,
             microsecond=session.close_time.microsecond
         )
-        
+
         return open_dt, close_dt
 
     def get_asset_class(self, symbol: str) -> AssetClass:
         """
         Determine asset class from symbol.
-        
+
         Heuristics:
         - Ends with '-USD': Crypto (e.g., BTC-USD)
         - Contains '/': Forex (e.g., EUR/USD)

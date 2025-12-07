@@ -46,7 +46,7 @@ from core_engine.type_definitions.enums import (
 async def integrated_system():
     """
     Create fully integrated trading system with all components wired together.
-    
+
     This is the main fixture for end-to-end integration testing.
     Returns all components properly initialized and connected.
     """
@@ -59,7 +59,7 @@ async def integrated_system():
     )
     orchestrator = HierarchicalSystemOrchestrator(orchestrator_config)
     await orchestrator.initialize()
-    
+
     # Initialize risk manager
     risk_config = RiskManagementConfig(
         max_position_size=10000.0,
@@ -71,7 +71,7 @@ async def integrated_system():
     )
     risk_manager = CentralRiskManager(risk_config)
     await risk_manager.initialize()
-    
+
     # Initialize strategy manager
     strategy_config = StrategyConfig(
         enabled=True,
@@ -80,7 +80,7 @@ async def integrated_system():
     )
     strategy_manager = StrategyManager(strategy_config)
     await strategy_manager.initialize()
-    
+
     # Initialize execution engine
     execution_config = ExecutionConfig(
         max_order_size=10000.0,
@@ -91,7 +91,7 @@ async def integrated_system():
     )
     execution_engine = UnifiedExecutionEngine(execution_config)
     await execution_engine.initialize()
-    
+
     # Register components with orchestrator
     await orchestrator.register_component(
         "risk_manager",
@@ -111,7 +111,7 @@ async def integrated_system():
         layer="execution",
         authority_level="automatic"
     )
-    
+
     # Return all components
     system = {
         'orchestrator': orchestrator,
@@ -119,9 +119,9 @@ async def integrated_system():
         'strategy_manager': strategy_manager,
         'execution_engine': execution_engine,
     }
-    
+
     yield system
-    
+
     # Cleanup
     await orchestrator.shutdown()
     await risk_manager.shutdown()
@@ -143,7 +143,7 @@ async def risk_controlled_execution():
     )
     risk_manager = CentralRiskManager(risk_config)
     await risk_manager.initialize()
-    
+
     # Execution engine
     execution_config = ExecutionConfig(
         max_order_size=10000.0,
@@ -151,15 +151,15 @@ async def risk_controlled_execution():
     )
     execution_engine = UnifiedExecutionEngine(execution_config)
     await execution_engine.initialize()
-    
+
     # Wire together: execution engine should respect risk authorizations
     components = {
         'risk_manager': risk_manager,
         'execution_engine': execution_engine,
     }
-    
+
     yield components
-    
+
     await risk_manager.shutdown()
     await execution_engine.shutdown()
 
@@ -177,7 +177,7 @@ async def strategy_risk_pipeline():
     )
     strategy_manager = StrategyManager(strategy_config)
     await strategy_manager.initialize()
-    
+
     # Risk manager
     risk_config = RiskManagementConfig(
         max_position_size=10000.0,
@@ -185,14 +185,14 @@ async def strategy_risk_pipeline():
     )
     risk_manager = CentralRiskManager(risk_config)
     await risk_manager.initialize()
-    
+
     components = {
         'strategy_manager': strategy_manager,
         'risk_manager': risk_manager,
     }
-    
+
     yield components
-    
+
     await strategy_manager.shutdown()
     await risk_manager.shutdown()
 
@@ -205,7 +205,7 @@ async def strategy_risk_pipeline():
 def market_data_generator():
     """
     Generate realistic market data for integration testing.
-    
+
     Returns a callable that produces market data with specified characteristics.
     """
     def generate(
@@ -217,32 +217,32 @@ def market_data_generator():
     ) -> List[Dict[str, Any]]:
         """
         Generate synthetic market data.
-        
+
         Args:
             symbols: List of ticker symbols
             num_updates: Number of price updates to generate
             volatility: Price volatility (std dev)
             trend: Drift/trend in price
             start_price: Starting price
-            
+
         Returns:
             List of market data updates
         """
         if symbols is None:
             symbols = ['AAPL', 'MSFT', 'GOOGL']
-        
+
         import numpy as np
         updates = []
-        
+
         for symbol in symbols:
             price = start_price
             timestamp = datetime.now()
-            
+
             for i in range(num_updates):
                 # Random walk with drift
                 change = np.random.normal(trend, volatility)
                 price = price * (1 + change)
-                
+
                 update = {
                     'symbol': symbol,
                     'price': round(price, 2),
@@ -254,9 +254,9 @@ def market_data_generator():
                     'ask_size': int(np.random.uniform(100, 1000)),
                 }
                 updates.append(update)
-        
+
         return updates
-    
+
     return generate
 
 
@@ -272,25 +272,25 @@ def market_crash_generator():
     ) -> List[Dict[str, Any]]:
         """
         Generate flash crash scenario.
-        
+
         Args:
             symbols: List of ticker symbols
             crash_magnitude: Size of price drop (0-1)
             recovery_time: Updates until recovery
-            
+
         Returns:
             List of market data with crash pattern
         """
         if symbols is None:
             symbols = ['AAPL', 'MSFT']
-        
+
         updates = []
         start_price = 100.0
         timestamp = datetime.now()
-        
+
         for symbol in symbols:
             price = start_price
-            
+
             # Pre-crash normal trading
             for i in range(20):
                 update = {
@@ -300,7 +300,7 @@ def market_crash_generator():
                     'timestamp': timestamp + timedelta(seconds=i),
                 }
                 updates.append(update)
-            
+
             # Crash: rapid price decline
             for i in range(20, 30):
                 crash_progress = (i - 20) / 10
@@ -312,7 +312,7 @@ def market_crash_generator():
                     'timestamp': timestamp + timedelta(seconds=i),
                 }
                 updates.append(update)
-            
+
             # Recovery
             crash_price = start_price * (1 - crash_magnitude)
             for i in range(30, 30 + recovery_time):
@@ -325,9 +325,9 @@ def market_crash_generator():
                     'timestamp': timestamp + timedelta(seconds=i),
                 }
                 updates.append(update)
-        
+
         return updates
-    
+
     return generate
 
 
@@ -343,31 +343,31 @@ def high_frequency_data_generator():
     ) -> List[Dict[str, Any]]:
         """
         Generate high-frequency tick data.
-        
+
         Args:
             symbols: List of ticker symbols
             updates_per_second: Tick rate
             duration_seconds: Test duration
-            
+
         Returns:
             List of rapid market updates
         """
         if symbols is None:
             symbols = ['AAPL']
-        
+
         import numpy as np
         updates = []
         total_updates = updates_per_second * duration_seconds
-        
+
         for symbol in symbols:
             price = 100.0
             base_time = datetime.now()
-            
+
             for i in range(total_updates):
                 # Micro price changes
                 price += np.random.uniform(-0.01, 0.01)
                 timestamp = base_time + timedelta(microseconds=i * (1000000 // updates_per_second))
-                
+
                 update = {
                     'symbol': symbol,
                     'price': round(price, 2),
@@ -375,9 +375,9 @@ def high_frequency_data_generator():
                     'timestamp': timestamp,
                 }
                 updates.append(update)
-        
+
         return updates
-    
+
     return generate
 
 
@@ -398,13 +398,13 @@ def trading_signal_generator():
     ) -> Dict[str, Any]:
         """
         Generate trading signal.
-        
+
         Args:
             signal_type: 'buy' or 'sell'
             confidence: Signal confidence (0-1)
             position_size: Suggested position size
             symbol: Ticker symbol
-            
+
         Returns:
             Trading signal dictionary
         """
@@ -417,7 +417,7 @@ def trading_signal_generator():
             'strategy_id': 'momentum_01',
             'rationale': f"Strong {signal_type} signal based on momentum analysis",
         }
-    
+
     return generate
 
 
@@ -436,11 +436,11 @@ async def mock_broker():
             self.orders = []
             self.fills = []
             self.connection_status = 'connected'
-            
+
         async def submit_order(self, order: Dict[str, Any]) -> Dict[str, Any]:
             """Simulate order submission."""
             self.orders.append(order)
-            
+
             # Simulate fill
             fill = {
                 'order_id': order.get('order_id'),
@@ -451,9 +451,9 @@ async def mock_broker():
                 'timestamp': datetime.now(),
             }
             self.fills.append(fill)
-            
+
             return fill
-        
+
         async def cancel_order(self, order_id: str) -> bool:
             """Simulate order cancellation."""
             for order in self.orders:
@@ -461,19 +461,19 @@ async def mock_broker():
                     order['status'] = OrderStatus.CANCELLED
                     return True
             return False
-        
+
         async def get_positions(self) -> List[Dict[str, Any]]:
             """Get current positions."""
             return []
-        
+
         def disconnect(self):
             """Simulate broker disconnection."""
             self.connection_status = 'disconnected'
-        
+
         def reconnect(self):
             """Simulate broker reconnection."""
             self.connection_status = 'connected'
-    
+
     broker = MockBroker()
     yield broker
 
@@ -488,16 +488,16 @@ def performance_monitor():
     Monitor performance metrics during integration tests.
     """
     import time
-    
+
     class PerformanceMonitor:
         def __init__(self):
             self.metrics = {}
             self.start_times = {}
-        
+
         def start(self, operation: str):
             """Start timing an operation."""
             self.start_times[operation] = time.time()
-        
+
         def end(self, operation: str):
             """End timing and record duration."""
             if operation in self.start_times:
@@ -508,24 +508,24 @@ def performance_monitor():
                 del self.start_times[operation]
                 return duration
             return None
-        
+
         def get_average(self, operation: str) -> float:
             """Get average duration for operation."""
             if operation in self.metrics and self.metrics[operation]:
                 return sum(self.metrics[operation]) / len(self.metrics[operation])
             return 0.0
-        
+
         def get_max(self, operation: str) -> float:
             """Get max duration for operation."""
             if operation in self.metrics and self.metrics[operation]:
                 return max(self.metrics[operation])
             return 0.0
-        
+
         def reset(self):
             """Reset all metrics."""
             self.metrics = {}
             self.start_times = {}
-    
+
     return PerformanceMonitor()
 
 
@@ -546,7 +546,7 @@ def wait_for_condition():
     ):
         """
         Wait for condition to become true.
-        
+
         Args:
             condition_fn: Callable that returns bool
             timeout: Maximum wait time
@@ -559,5 +559,5 @@ def wait_for_condition():
                 return True
             await asyncio.sleep(interval)
         raise TimeoutError(error_msg)
-    
+
     return wait

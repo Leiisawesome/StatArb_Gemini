@@ -24,10 +24,10 @@ def sample_market_data() -> Dict[str, pd.DataFrame]:
     """Generate sample market data for testing"""
     symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']
     market_data = {}
-    
+
     # Generate 100 days of data
     dates = pd.date_range(end=datetime.now(), periods=100, freq='D')
-    
+
     for symbol in symbols:
         data = pd.DataFrame({
             'timestamp': dates,
@@ -40,7 +40,7 @@ def sample_market_data() -> Dict[str, pd.DataFrame]:
         })
         data['close'] = data['close'].clip(lower=50)  # Prevent negative prices
         market_data[symbol] = data.set_index('timestamp')
-    
+
     return market_data
 
 
@@ -52,7 +52,7 @@ def sample_intraday_data() -> pd.DataFrame:
         periods=390,  # Full trading day (6.5 hours)
         freq='1min'
     )
-    
+
     return pd.DataFrame({
         'timestamp': timestamps,
         'open': 100 + np.random.randn(390).cumsum() * 0.1,
@@ -80,7 +80,7 @@ def sample_returns_series() -> pd.Series:
 def sample_signals() -> List[StrategySignal]:
     """Generate sample trading signals"""
     signals = []
-    
+
     for i, symbol in enumerate(['AAPL', 'GOOGL', 'MSFT']):
         signal = StrategySignal(
             signal_id=f'signal_{i}',
@@ -97,7 +97,7 @@ def sample_signals() -> List[StrategySignal]:
             signal_reason='Test signal generation'
         )
         signals.append(signal)
-    
+
     return signals
 
 

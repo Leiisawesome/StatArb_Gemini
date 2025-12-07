@@ -51,7 +51,7 @@ class TestMeanReversionConfig:
     def test_inheritance_from_base(self):
         """Test that MeanReversionConfig inherits from BaseStrategyConfig."""
         config = MeanReversionConfig()
-        
+
         # Test inherited properties
         assert hasattr(config, 'name')
         assert hasattr(config, 'strategy_type')
@@ -61,7 +61,7 @@ class TestMeanReversionConfig:
         assert hasattr(config, 'symbols')
         assert hasattr(config, 'profit_target_ratio')
         assert hasattr(config, 'execution_timeout')
-        
+
         # Test inherited default values
         assert config.symbols == ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
         assert config.profit_target_ratio == 2.0
@@ -70,12 +70,12 @@ class TestMeanReversionConfig:
     def test_composition_pattern(self):
         """Test that MeanReversionConfig uses composition pattern for sub-configs."""
         config = MeanReversionConfig()
-        
+
         # Test that sub-configs are properly initialized
         assert config.position_limits is not None
         assert config.risk_limits is not None
         assert config.timing is not None
-        
+
         # Test that sub-configs have expected properties
         assert hasattr(config.position_limits, 'max_position_size')
         assert hasattr(config.risk_limits, 'max_daily_var')
@@ -85,7 +85,7 @@ class TestMeanReversionConfig:
         """Test that MeanReversionConfig can be serialized to dict."""
         config = MeanReversionConfig()
         config_dict = asdict(config)
-        
+
         assert isinstance(config_dict, dict)
         assert 'name' in config_dict
         assert 'strategy_type' in config_dict
@@ -99,16 +99,16 @@ class TestMeanReversionConfig:
     def test_strategy_specific_parameters(self):
         """Test strategy-specific parameters are correctly set."""
         config = MeanReversionConfig()
-        
+
         # Test mean reversion-specific parameters
         assert config.lookback_period == 20
         assert config.zscore_entry_threshold == 2.0
         assert config.zscore_exit_threshold == 0.5
-        
+
         # Test Bollinger Bands parameters
         assert config.bollinger_period == 20
         assert config.bollinger_std == 2.0
-        
+
         # Test RSI parameters
         assert config.rsi_period == 14
         assert config.rsi_oversold == 30
@@ -117,7 +117,7 @@ class TestMeanReversionConfig:
     def test_parameter_validation(self):
         """Test parameter validation (if implemented)."""
         config = MeanReversionConfig()
-        
+
         # Test that all parameters are within expected ranges
         assert config.lookback_period > 0
         assert config.zscore_entry_threshold > 0
@@ -134,7 +134,7 @@ class TestMeanReversionConfig:
             name="custom_mean_reversion",
             strategy_id="mean_reversion_001"
         )
-        
+
         assert config.name == "custom_mean_reversion"
         assert config.strategy_id == "mean_reversion_001"
         assert config.strategy_type == StrategyType.MEAN_REVERSION
@@ -146,7 +146,7 @@ class TestMeanReversionConfig:
             primary_timeframe="5min",
             secondary_timeframes=["15min", "1h"]
         )
-        
+
         assert config.enable_multi_timeframe is True
         assert config.primary_timeframe == "5min"
         assert config.secondary_timeframes == ["15min", "1h"]
@@ -155,7 +155,7 @@ class TestMeanReversionConfig:
         """Test symbol configuration."""
         custom_symbols = ["AAPL", "GOOGL", "MSFT"]
         config = MeanReversionConfig(symbols=custom_symbols)
-        
+
         assert config.symbols == custom_symbols
         assert len(config.symbols) == 3
         assert "AAPL" in config.symbols
@@ -165,10 +165,10 @@ class TestMeanReversionConfig:
     def test_zscore_thresholds_relationship(self):
         """Test that zscore thresholds have proper relationship."""
         config = MeanReversionConfig()
-        
+
         # Entry threshold should be higher than exit threshold
         assert config.zscore_entry_threshold > config.zscore_exit_threshold
-        
+
         # Both should be positive
         assert config.zscore_entry_threshold > 0
         assert config.zscore_exit_threshold > 0
@@ -176,10 +176,10 @@ class TestMeanReversionConfig:
     def test_rsi_thresholds_relationship(self):
         """Test that RSI thresholds have proper relationship."""
         config = MeanReversionConfig()
-        
+
         # Overbought should be higher than oversold
         assert config.rsi_overbought > config.rsi_oversold
-        
+
         # Both should be within valid RSI range (0-100)
         assert 0 <= config.rsi_oversold <= 100
         assert 0 <= config.rsi_overbought <= 100
@@ -187,12 +187,12 @@ class TestMeanReversionConfig:
     def test_bollinger_bands_parameters(self):
         """Test Bollinger Bands specific parameters."""
         config = MeanReversionConfig()
-        
+
         # Period should be positive
         assert config.bollinger_period > 0
-        
+
         # Standard deviation should be positive
         assert config.bollinger_std > 0
-        
+
         # Common values are 1, 2, 2.5
         assert config.bollinger_std in [1.0, 2.0, 2.5, 3.0] or config.bollinger_std > 0

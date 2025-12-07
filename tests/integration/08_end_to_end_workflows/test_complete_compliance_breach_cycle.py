@@ -16,32 +16,30 @@ Date: November 4, 2025
 """
 
 import pytest
-import pytest_asyncio
 
-from core_engine.system.central_risk_manager import CentralRiskManager, TradingDecisionRequest, TradingDecisionType
-from core_engine.config.component_config import RiskConfig
+from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
 
 class TestCompleteComplianceBreachCycle:
     """Integration tests for complete compliance breach cycle"""
-    
+
     @pytest.mark.asyncio
     async def test_compliance_checker_detects_compliance_breach(self, risk_manager):
         """
         Test: PreTradeComplianceChecker detects compliance breach
-        
+
         Scenario: Compliance breach detected
         Expected: Breach detected and reported
         """
         # Compliance checker would detect breaches
         # Verify risk manager exists
         assert risk_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_compliance_checker_rejects_trade(self, risk_manager):
         """
         Test: ComplianceChecker rejects trade
-        
+
         Scenario: Trade rejected due to compliance breach
         Expected: Trade rejected correctly
         """
@@ -57,42 +55,42 @@ class TestCompleteComplianceBreachCycle:
             requesting_component='StrategyManager',
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )
-        
+
         # Compliance checker would reject trade
         authorization = await risk_manager.authorize_trading_decision(request)
-        
+
         # Verify authorization processed
         assert authorization is not None
-    
+
     @pytest.mark.asyncio
     async def test_system_logs_compliance_breach(self, risk_manager):
         """
         Test: System logs compliance breach
-        
+
         Scenario: Compliance breach logged
         Expected: Breach logged correctly
         """
         # System would log compliance breaches
         # Verify risk manager exists
         assert risk_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_system_notifies_compliance_team(self, risk_manager):
         """
         Test: System notifies compliance team
-        
+
         Scenario: Compliance team notified of breach
         Expected: Notification sent successfully
         """
         # System would notify compliance team
         # Verify risk manager exists
         assert risk_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_system_provides_compliance_breach_diagnostics(self, risk_manager):
         """
         Test: System provides compliance breach diagnostics
-        
+
         Scenario: Get compliance breach diagnostics
         Expected: Diagnostics available
         """

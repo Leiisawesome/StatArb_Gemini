@@ -112,91 +112,91 @@ DEFAULT_BENCHMARK_CONFIG = BenchmarkConfig()
 def create_analytics_manager(config=None):
     """
     Factory function to create analytics manager with default or custom configuration
-    
+
     Args:
         config: AnalyticsConfig instance or None for default
-        
+
     Returns:
         AnalyticsManager instance
     """
     if config is None:
         config = DEFAULT_ANALYTICS_CONFIG
-    
+
     return EnhancedAnalyticsManager(config)
 
 def create_performance_analyzer(config=None):
     """
     Factory function to create performance analyzer
-    
+
     Args:
         config: PerformanceConfig instance or None for default
-        
+
     Returns:
         PerformanceAnalyzer instance
     """
     if config is None:
         config = DEFAULT_PERFORMANCE_CONFIG
-    
+
     return PerformanceAnalyzer(config)
 
 def create_attribution_analyzer(config=None):
     """
     Factory function to create attribution analyzer
-    
+
     Args:
         config: AttributionConfig instance or None for default
-        
+
     Returns:
         AttributionAnalyzer instance
     """
     if config is None:
         config = DEFAULT_ATTRIBUTION_CONFIG
-    
+
     return AttributionAnalyzer(config)
 
 def create_metrics_calculator(config=None):
     """
     Factory function to create metrics calculator
-    
+
     Args:
         config: MetricConfig instance or None for default
-        
+
     Returns:
         MetricsCalculator instance
     """
     if config is None:
         config = DEFAULT_METRICS_CONFIG
-    
+
     return EnhancedMetricsCalculator(config)
 
 def create_report_generator(config=None):
     """
     Factory function to create report generator
-    
+
     Args:
         config: ReportConfig instance or None for default
-        
+
     Returns:
         ReportGenerator instance
     """
     if config is None:
         config = DEFAULT_REPORT_CONFIG
-    
+
     return ReportGenerator(config)
 
 def create_benchmark_analyzer(config=None):
     """
     Factory function to create benchmark analyzer
-    
+
     Args:
         config: BenchmarkConfig instance or None for default
-        
+
     Returns:
         BenchmarkAnalyzer instance
     """
     if config is None:
         config = DEFAULT_BENCHMARK_CONFIG
-    
+
     return BenchmarkAnalyzer(config)
 
 # Convenience imports for common use cases
@@ -226,23 +226,23 @@ __all__ = [
     'calculate_beta',
     'calculate_alpha',
     'calculate_tracking_error',
-    
+
     # Core classes
     'EnhancedAnalyticsManager',
-    'PerformanceAnalyzer', 
+    'PerformanceAnalyzer',
     'AttributionAnalyzer',
     'EnhancedMetricsCalculator',
     'ReportGenerator',
     'BenchmarkAnalyzer',
-    
+
     # Configuration classes
     'AnalyticsConfig',
     'PerformanceConfig',
-    'AttributionConfig', 
+    'AttributionConfig',
     'MetricConfig',
     'ReportConfig',
     'BenchmarkConfig',
-    
+
     # Data classes
     'AnalyticsResults',
     'AnalyticsTask',
@@ -254,7 +254,7 @@ __all__ = [
     'BenchmarkData',
     'ComparisonResult',
     'FactorAnalysisResult',
-    
+
     # Enums
     'AnalyticsMode',
     'AnalyticsPriority',
@@ -262,7 +262,7 @@ __all__ = [
     'MetricFrequency',
     'ReportFormat',
     'ChartType',
-    
+
     # Factory functions
     'create_analytics_manager',
     'create_performance_analyzer',
@@ -270,7 +270,7 @@ __all__ = [
     'create_metrics_calculator',
     'create_report_generator',
     'create_benchmark_analyzer',
-    
+
     # Default configs
     'DEFAULT_ANALYTICS_CONFIG',
     'DEFAULT_PERFORMANCE_CONFIG',
@@ -278,7 +278,7 @@ __all__ = [
     'DEFAULT_METRICS_CONFIG',
     'DEFAULT_REPORT_CONFIG',
     'DEFAULT_BENCHMARK_CONFIG',
-    
+
     # Registries
     'ANALYTICS_COMPONENTS',
     'ANALYTICS_CONFIGS'

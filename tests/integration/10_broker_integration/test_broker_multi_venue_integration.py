@@ -13,32 +13,29 @@ Date: November 4, 2025
 """
 
 import pytest
-import pytest_asyncio
 
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.config.component_config import ExecutionConfig
 
 
 class TestBrokerMultiVenueIntegration:
     """Integration tests for broker multi-venue integration"""
-    
+
     @pytest.mark.asyncio
     async def test_broker_adapter_supports_multiple_venues(self, execution_engine):
         """
         Test: BrokerAdapter supports multiple venues
-        
+
         Scenario: Route orders to multiple venues
         Expected: Multiple venues supported
         """
         # Broker adapter would support multiple venues
         # Verify execution engine exists
         assert execution_engine is not None
-    
+
     @pytest.mark.asyncio
     async def test_broker_adapter_routes_orders_to_optimal_venue(self, execution_engine):
         """
         Test: BrokerAdapter routes orders to optimal venue
-        
+
         Scenario: Select optimal venue for order
         Expected: Optimal venue selected
         """

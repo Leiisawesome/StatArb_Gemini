@@ -434,7 +434,7 @@ class TestCentralRiskManager:
         # Test that config can be updated by creating new instance
         updated_config = risk_config.copy()
         updated_config["max_position_size"] = 0.15
-        
+
         risk_manager = CentralRiskManager(updated_config)
         assert risk_manager.config.max_position_size == 0.15
 

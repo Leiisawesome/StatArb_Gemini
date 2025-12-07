@@ -53,28 +53,28 @@ class ValidationRule:
     category: ValidationCategory
     severity: ValidationSeverity
     action: ValidationAction
-    
+
     # Rule parameters
     enabled: bool = True
     priority: int = 1
-    
+
     # Thresholds
     numeric_threshold: Optional[float] = None
     percentage_threshold: Optional[float] = None
     time_threshold: Optional[timedelta] = None
-    
+
     # Constraints
     symbols: Optional[List[str]] = None
     strategies: Optional[List[str]] = None
     venues: Optional[List[str]] = None
-    
+
     # Timing
     market_hours_only: bool = False
     business_days_only: bool = False
-    
+
     # Custom validation function
     custom_validator: Optional[Callable] = None
-    
+
     # Metadata
     created_by: str = "system"
     created_at: datetime = field(default_factory=datetime.now)
@@ -89,20 +89,20 @@ class ValidationResult:
     category: ValidationCategory
     severity: ValidationSeverity
     action: ValidationAction
-    
+
     # Result details
     passed: bool
     message: str
     details: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Context
     execution_id: Optional[str] = None
     order_id: Optional[str] = None
     symbol: Optional[str] = None
-    
+
     # Timing
     check_time: datetime = field(default_factory=datetime.now)
-    
+
     # Actions taken
     action_taken: Optional[str] = None
     action_details: Dict[str, Any] = field(default_factory=dict)
@@ -117,46 +117,46 @@ class ExecutionContext:
     side: str
     quantity: float
     price: Optional[float] = None
-    
+
     # Execution details
     order_type: str = "LIMIT"
     time_in_force: str = "DAY"
     venue: Optional[str] = None
-    
+
     # Strategy context
     strategy_id: Optional[str] = None
     portfolio_id: Optional[str] = None
-    
+
     # Market context
     current_price: Optional[float] = None
     bid_price: Optional[float] = None
     ask_price: Optional[float] = None
     spread: Optional[float] = None
     volatility: Optional[float] = None
-    
+
     # Risk context
     current_position: float = 0.0
     notional_exposure: float = 0.0
     portfolio_value: Optional[float] = None
-    
+
     # Timing context
     submission_time: datetime = field(default_factory=datetime.now)
     expected_execution_time: Optional[datetime] = None
-    
+
     # Previous executions
     recent_executions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class PreTradeValidator:
     """Pre-trade execution validation"""
-    
+
     def __init__(self):
         self.rules = {}
         self._load_default_pre_trade_rules()
-    
+
     def _load_default_pre_trade_rules(self) -> None:
         """Load default pre-trade validation rules"""
-        
+
         rules = [
             ValidationRule(
                 rule_id="order_size_limit",
@@ -213,62 +213,62 @@ class PreTradeValidator:
                 time_threshold=timedelta(seconds=30)
             )
         ]
-        
+
         for rule in rules:
             self.rules[rule.rule_id] = rule
-    
+
     def validate_execution(self, context: ExecutionContext) -> List[ValidationResult]:
         """Validate execution against pre-trade rules"""
-        
+
         results = []
-        
+
         for rule in self.rules.values():
             if not rule.enabled:
                 continue
-            
+
             if rule.category != ValidationCategory.PRE_TRADE:
                 continue
-            
+
             # Apply rule filters
             if not self._rule_applies(rule, context):
                 continue
-            
+
             # Run validation
             result = self._apply_rule(rule, context)
             results.append(result)
-        
+
         return results
-    
+
     def _rule_applies(self, rule: ValidationRule, context: ExecutionContext) -> bool:
         """Check if rule applies to execution context"""
-        
+
         # Symbol filter
         if rule.symbols and context.symbol not in rule.symbols:
             return False
-        
+
         # Strategy filter
         if rule.strategies and context.strategy_id not in rule.strategies:
             return False
-        
+
         # Venue filter
         if rule.venues and context.venue not in rule.venues:
             return False
-        
+
         # Market hours filter
         if rule.market_hours_only:
             if not self._is_market_hours(context.submission_time):
                 return False
-        
+
         # Business days filter
         if rule.business_days_only:
             if context.submission_time.weekday() >= 5:  # Weekend
                 return False
-        
+
         return True
-    
+
     def _apply_rule(self, rule: ValidationRule, context: ExecutionContext) -> ValidationResult:
         """Apply validation rule to execution context"""
-        
+
         result = ValidationResult(
             rule_id=rule.rule_id,
             rule_name=rule.rule_name,
@@ -281,7 +281,7 @@ class PreTradeValidator:
             passed=True,
             message="Validation passed"
         )
-        
+
         try:
             if rule.rule_id == "order_size_limit":
                 result = self._validate_order_size(rule, context, result)
@@ -297,14 +297,14 @@ class PreTradeValidator:
                 result = self._validate_duplicate_order(rule, context, result)
             elif rule.custom_validator:
                 result = rule.custom_validator(rule, context, result)
-            
+
         except Exception as e:
             result.passed = False
             result.message = f"Validation error: {str(e)}"
             result.details = {"error": str(e)}
-        
+
         return result
-    
+
     def _validate_order_size(
         self,
         rule: ValidationRule,
@@ -312,7 +312,7 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate order size"""
-        
+
         if rule.numeric_threshold and context.quantity > rule.numeric_threshold:
             result.passed = False
             result.message = f"Order size {context.quantity:,.0f} exceeds limit {rule.numeric_threshold:,.0f}"
@@ -321,9 +321,9 @@ class PreTradeValidator:
                 "limit": rule.numeric_threshold,
                 "excess": context.quantity - rule.numeric_threshold
             }
-        
+
         return result
-    
+
     def _validate_notional_limit(
         self,
         rule: ValidationRule,
@@ -331,10 +331,10 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate notional amount"""
-        
+
         if context.price:
             notional = context.quantity * context.price
-            
+
             if rule.numeric_threshold and notional > rule.numeric_threshold:
                 result.passed = False
                 result.message = f"Notional ${notional:,.2f} exceeds limit ${rule.numeric_threshold:,.2f}"
@@ -343,9 +343,9 @@ class PreTradeValidator:
                     "limit": rule.numeric_threshold,
                     "excess": notional - rule.numeric_threshold
                 }
-        
+
         return result
-    
+
     def _validate_price_reasonableness(
         self,
         rule: ValidationRule,
@@ -353,12 +353,12 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate price reasonableness"""
-        
+
         if not context.price or not context.current_price:
             return result
-        
+
         price_deviation = abs(context.price - context.current_price) / context.current_price
-        
+
         if rule.percentage_threshold and price_deviation > rule.percentage_threshold:
             result.passed = False
             result.message = (
@@ -371,9 +371,9 @@ class PreTradeValidator:
                 "deviation": price_deviation,
                 "threshold": rule.percentage_threshold
             }
-        
+
         return result
-    
+
     def _validate_market_hours(
         self,
         rule: ValidationRule,
@@ -381,7 +381,7 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate market hours"""
-        
+
         if not self._is_market_hours(context.submission_time):
             result.passed = False
             result.message = f"Order submitted outside market hours: {context.submission_time.strftime('%H:%M:%S')}"
@@ -389,9 +389,9 @@ class PreTradeValidator:
                 "submission_time": context.submission_time.isoformat(),
                 "market_hours": "09:30-16:00 ET"
             }
-        
+
         return result
-    
+
     def _validate_position_concentration(
         self,
         rule: ValidationRule,
@@ -399,18 +399,18 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate position concentration"""
-        
+
         if not context.portfolio_value:
             return result
-        
+
         # Calculate new position after execution
         if context.side == 'BUY':
             new_position_value = context.current_position + (context.quantity * (context.price or context.current_price or 0))
         else:
             new_position_value = context.current_position - (context.quantity * (context.price or context.current_price or 0))
-        
+
         concentration = abs(new_position_value) / context.portfolio_value
-        
+
         if rule.percentage_threshold and concentration > rule.percentage_threshold:
             result.passed = False
             result.message = (
@@ -423,9 +423,9 @@ class PreTradeValidator:
                 "concentration": concentration,
                 "limit": rule.percentage_threshold
             }
-        
+
         return result
-    
+
     def _validate_duplicate_order(
         self,
         rule: ValidationRule,
@@ -433,19 +433,19 @@ class PreTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate for duplicate orders"""
-        
+
         if not rule.time_threshold:
             return result
-        
+
         # Check recent executions for potential duplicates
         cutoff_time = context.submission_time - rule.time_threshold
-        
+
         for recent in context.recent_executions:
             if recent.get('symbol') == context.symbol and recent.get('side') == context.side:
                 recent_time = recent.get('submission_time')
                 if isinstance(recent_time, str):
                     recent_time = datetime.fromisoformat(recent_time)
-                
+
                 if recent_time and recent_time >= cutoff_time:
                     # Check if quantities are similar (within 10%)
                     recent_qty = recent.get('quantity', 0)
@@ -461,17 +461,17 @@ class PreTradeValidator:
                             "threshold_seconds": rule.time_threshold.total_seconds()
                         }
                         break
-        
+
         return result
-    
+
     def _is_market_hours(self, timestamp: datetime) -> bool:
         """Check if timestamp is during market hours"""
-        
+
         # Simple market hours check (9:30 AM - 4:00 PM ET)
         time_part = timestamp.time()
         market_open = datetime.min.time().replace(hour=9, minute=30)
         market_close = datetime.min.time().replace(hour=16, minute=0)
-        
+
         # Check weekday and time
         return (
             timestamp.weekday() < 5 and  # Monday-Friday
@@ -481,14 +481,14 @@ class PreTradeValidator:
 
 class RealTimeValidator:
     """Real-time execution validation during trading"""
-    
+
     def __init__(self):
         self.rules = {}
         self._load_default_realtime_rules()
-    
+
     def _load_default_realtime_rules(self) -> None:
         """Load default real-time validation rules"""
-        
+
         rules = [
             ValidationRule(
                 rule_id="execution_speed",
@@ -527,28 +527,28 @@ class RealTimeValidator:
                 percentage_threshold=0.005  # 0.5%
             )
         ]
-        
+
         for rule in rules:
             self.rules[rule.rule_id] = rule
-    
+
     def validate_ongoing_execution(
         self,
         context: ExecutionContext,
         execution_metrics: Dict[str, Any]
     ) -> List[ValidationResult]:
         """Validate ongoing execution"""
-        
+
         results = []
-        
+
         for rule in self.rules.values():
             if not rule.enabled or rule.category != ValidationCategory.REAL_TIME:
                 continue
-            
+
             result = self._apply_realtime_rule(rule, context, execution_metrics)
             results.append(result)
-        
+
         return results
-    
+
     def _apply_realtime_rule(
         self,
         rule: ValidationRule,
@@ -556,7 +556,7 @@ class RealTimeValidator:
         metrics: Dict[str, Any]
     ) -> ValidationResult:
         """Apply real-time validation rule"""
-        
+
         result = ValidationResult(
             rule_id=rule.rule_id,
             rule_name=rule.rule_name,
@@ -569,7 +569,7 @@ class RealTimeValidator:
             passed=True,
             message="Real-time validation passed"
         )
-        
+
         try:
             if rule.rule_id == "execution_speed":
                 result = self._validate_execution_speed(rule, context, metrics, result)
@@ -579,13 +579,13 @@ class RealTimeValidator:
                 result = self._validate_fill_rate(rule, context, metrics, result)
             elif rule.rule_id == "market_impact_monitor":
                 result = self._validate_market_impact(rule, context, metrics, result)
-            
+
         except Exception as e:
             result.passed = False
             result.message = f"Real-time validation error: {str(e)}"
-        
+
         return result
-    
+
     def _validate_execution_speed(
         self,
         rule: ValidationRule,
@@ -594,9 +594,9 @@ class RealTimeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate execution speed"""
-        
+
         execution_time = metrics.get('execution_time_seconds', 0)
-        
+
         if rule.time_threshold and execution_time > rule.time_threshold.total_seconds():
             result.passed = False
             result.message = f"Slow execution: {execution_time:.1f}s exceeds {rule.time_threshold.total_seconds():.1f}s threshold"
@@ -604,9 +604,9 @@ class RealTimeValidator:
                 "execution_time": execution_time,
                 "threshold": rule.time_threshold.total_seconds()
             }
-        
+
         return result
-    
+
     def _validate_slippage(
         self,
         rule: ValidationRule,
@@ -615,9 +615,9 @@ class RealTimeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate execution slippage"""
-        
+
         slippage = metrics.get('slippage', 0)
-        
+
         if rule.percentage_threshold and abs(slippage) > rule.percentage_threshold:
             result.passed = False
             result.message = f"High slippage: {slippage:.2%} exceeds {rule.percentage_threshold:.2%} threshold"
@@ -625,9 +625,9 @@ class RealTimeValidator:
                 "slippage": slippage,
                 "threshold": rule.percentage_threshold
             }
-        
+
         return result
-    
+
     def _validate_fill_rate(
         self,
         rule: ValidationRule,
@@ -636,9 +636,9 @@ class RealTimeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate fill rate"""
-        
+
         fill_rate = metrics.get('fill_rate', 1.0)
-        
+
         if rule.percentage_threshold and fill_rate < rule.percentage_threshold:
             result.passed = False
             result.message = f"Low fill rate: {fill_rate:.2%} below {rule.percentage_threshold:.2%} threshold"
@@ -646,9 +646,9 @@ class RealTimeValidator:
                 "fill_rate": fill_rate,
                 "threshold": rule.percentage_threshold
             }
-        
+
         return result
-    
+
     def _validate_market_impact(
         self,
         rule: ValidationRule,
@@ -657,9 +657,9 @@ class RealTimeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Validate market impact"""
-        
+
         market_impact = metrics.get('market_impact', 0)
-        
+
         if rule.percentage_threshold and abs(market_impact) > rule.percentage_threshold:
             result.passed = False
             result.message = f"High market impact: {market_impact:.2%} exceeds {rule.percentage_threshold:.2%} threshold"
@@ -667,20 +667,20 @@ class RealTimeValidator:
                 "market_impact": market_impact,
                 "threshold": rule.percentage_threshold
             }
-        
+
         return result
 
 
 class PostTradeValidator:
     """Post-trade execution validation and compliance"""
-    
+
     def __init__(self):
         self.rules = {}
         self._load_default_post_trade_rules()
-    
+
     def _load_default_post_trade_rules(self) -> None:
         """Load default post-trade validation rules"""
-        
+
         rules = [
             ValidationRule(
                 rule_id="best_execution",
@@ -715,31 +715,31 @@ class PostTradeValidator:
                 action=ValidationAction.ALERT
             )
         ]
-        
+
         for rule in rules:
             self.rules[rule.rule_id] = rule
-    
+
     def validate_completed_execution(
         self,
         context: ExecutionContext,
         execution_results: Dict[str, Any]
     ) -> List[ValidationResult]:
         """Validate completed execution"""
-        
+
         results = []
-        
+
         for rule in self.rules.values():
             if not rule.enabled:
                 continue
-            
+
             if rule.category not in [ValidationCategory.POST_TRADE, ValidationCategory.COMPLIANCE]:
                 continue
-            
+
             result = self._apply_post_trade_rule(rule, context, execution_results)
             results.append(result)
-        
+
         return results
-    
+
     def _apply_post_trade_rule(
         self,
         rule: ValidationRule,
@@ -747,7 +747,7 @@ class PostTradeValidator:
         results: Dict[str, Any]
     ) -> ValidationResult:
         """Apply post-trade validation rule"""
-        
+
         result = ValidationResult(
             rule_id=rule.rule_id,
             rule_name=rule.rule_name,
@@ -760,7 +760,7 @@ class PostTradeValidator:
             passed=True,
             message="Post-trade validation passed"
         )
-        
+
         try:
             if rule.rule_id == "best_execution":
                 result = self._analyze_best_execution(rule, context, results, result)
@@ -770,13 +770,13 @@ class PostTradeValidator:
                 result = self._analyze_venue_performance(rule, context, results, result)
             elif rule.rule_id == "regulatory_reporting":
                 result = self._check_regulatory_reporting(rule, context, results, result)
-            
+
         except Exception as e:
             result.passed = False
             result.message = f"Post-trade validation error: {str(e)}"
-        
+
         return result
-    
+
     def _analyze_best_execution(
         self,
         rule: ValidationRule,
@@ -785,25 +785,25 @@ class PostTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Analyze best execution"""
-        
+
         # Simple best execution analysis
         avg_price = results.get('avg_execution_price', 0)
         market_price = context.current_price or 0
-        
+
         if market_price > 0:
             execution_quality = abs(avg_price - market_price) / market_price
-            
+
             result.details = {
                 "avg_execution_price": avg_price,
                 "market_price_at_arrival": market_price,
                 "execution_quality": execution_quality,
                 "assessment": "good" if execution_quality < 0.001 else "needs_review"
             }
-            
+
             result.message = f"Best execution analysis: {execution_quality:.4f} price deviation"
-        
+
         return result
-    
+
     def _analyze_transaction_costs(
         self,
         rule: ValidationRule,
@@ -812,28 +812,28 @@ class PostTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Analyze transaction costs"""
-        
+
         total_slippage = results.get('total_slippage', 0)
         market_impact = results.get('market_impact', 0)
         commission = results.get('commission', 0)
-        
+
         notional = context.quantity * (context.price or context.current_price or 0)
         total_cost_bps = 0
-        
+
         if notional > 0:
             total_cost_bps = ((abs(total_slippage) + abs(market_impact)) * notional + commission) / notional * 10000
-        
+
         result.details = {
             "slippage_bps": total_slippage * 10000,
             "market_impact_bps": market_impact * 10000,
             "commission": commission,
             "total_cost_bps": total_cost_bps
         }
-        
+
         result.message = f"Transaction cost analysis: {total_cost_bps:.1f} bps total cost"
-        
+
         return result
-    
+
     def _analyze_venue_performance(
         self,
         rule: ValidationRule,
@@ -842,13 +842,13 @@ class PostTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Analyze venue performance"""
-        
+
         venue_breakdown = results.get('venue_breakdown', {})
-        
+
         if venue_breakdown:
             best_venue = min(venue_breakdown.items(), key=lambda x: x[1].get('avg_slippage', float('inf')))
             worst_venue = max(venue_breakdown.items(), key=lambda x: x[1].get('avg_slippage', 0))
-            
+
             result.details = {
                 "venues_used": list(venue_breakdown.keys()),
                 "best_venue": best_venue[0],
@@ -856,11 +856,11 @@ class PostTradeValidator:
                 "worst_venue": worst_venue[0],
                 "worst_venue_slippage": worst_venue[1].get('avg_slippage', 0)
             }
-            
+
             result.message = f"Venue performance: {len(venue_breakdown)} venues used"
-        
+
         return result
-    
+
     def _check_regulatory_reporting(
         self,
         rule: ValidationRule,
@@ -869,10 +869,10 @@ class PostTradeValidator:
         result: ValidationResult
     ) -> ValidationResult:
         """Check regulatory reporting requirements"""
-        
+
         # Simple regulatory check
         notional = context.quantity * (context.price or context.current_price or 0)
-        
+
         # Example: Large trade reporting threshold
         if notional > 10_000_000:  # $10M threshold
             result.details = {
@@ -887,202 +887,202 @@ class PostTradeValidator:
                 "requires_reporting": False
             }
             result.message = "No special reporting required"
-        
+
         return result
 
 
 class ExecutionValidator:
     """
     Advanced Execution Validator
-    
+
     Comprehensive validation system for trade execution with pre-trade,
     real-time, and post-trade validation capabilities.
     """
-    
+
     def __init__(self):
         """Initialize execution validator"""
-        
+
         # Validation engines
         self.pre_trade_validator = PreTradeValidator()
         self.realtime_validator = RealTimeValidator()
         self.post_trade_validator = PostTradeValidator()
-        
+
         # Validation history
         self._validation_history = []
         self._failed_validations = defaultdict(list)
-        
+
         # Configuration
         self.block_on_critical = True
         self.alert_on_warnings = True
-        
+
         # Callbacks
         self._validation_callbacks = []
-        
+
         # Threading
         self._lock = threading.Lock()
-        
+
         logger.info("Execution Validator initialized")
-    
+
     def validate_pre_trade(self, context: ExecutionContext) -> Tuple[bool, List[ValidationResult]]:
         """Perform pre-trade validation"""
-        
+
         try:
             results = self.pre_trade_validator.validate_execution(context)
-            
+
             # Process results
             critical_failures = [r for r in results if not r.passed and r.severity == ValidationSeverity.CRITICAL]
             error_failures = [r for r in results if not r.passed and r.severity == ValidationSeverity.ERROR]
-            
+
             # Determine if execution should be blocked
             should_block = False
             if self.block_on_critical and (critical_failures or error_failures):
                 should_block = True
-            
+
             # Store results
             with self._lock:
                 self._validation_history.extend(results)
                 for result in results:
                     if not result.passed:
                         self._failed_validations[result.rule_id].append(result)
-            
+
             # Trigger callbacks
             for result in results:
                 self._trigger_validation_callbacks(result)
-            
+
             logger.info(f"Pre-trade validation completed for {context.execution_id}: {len(results)} checks")
-            
+
             return not should_block, results
-            
+
         except Exception as e:
             logger.error(f"Error in pre-trade validation: {e}")
             return False, []
-    
+
     def validate_real_time(
         self,
         context: ExecutionContext,
         execution_metrics: Dict[str, Any]
     ) -> List[ValidationResult]:
         """Perform real-time validation during execution"""
-        
+
         try:
             results = self.realtime_validator.validate_ongoing_execution(context, execution_metrics)
-            
+
             # Store results
             with self._lock:
                 self._validation_history.extend(results)
                 for result in results:
                     if not result.passed:
                         self._failed_validations[result.rule_id].append(result)
-            
+
             # Trigger callbacks
             for result in results:
                 self._trigger_validation_callbacks(result)
-            
+
             logger.debug(f"Real-time validation completed for {context.execution_id}: {len(results)} checks")
-            
+
             return results
-            
+
         except Exception as e:
             logger.error(f"Error in real-time validation: {e}")
             return []
-    
+
     def validate_post_trade(
         self,
         context: ExecutionContext,
         execution_results: Dict[str, Any]
     ) -> List[ValidationResult]:
         """Perform post-trade validation and analysis"""
-        
+
         try:
             results = self.post_trade_validator.validate_completed_execution(context, execution_results)
-            
+
             # Store results
             with self._lock:
                 self._validation_history.extend(results)
                 for result in results:
                     if not result.passed:
                         self._failed_validations[result.rule_id].append(result)
-            
+
             # Trigger callbacks
             for result in results:
                 self._trigger_validation_callbacks(result)
-            
+
             logger.info(f"Post-trade validation completed for {context.execution_id}: {len(results)} checks")
-            
+
             return results
-            
+
         except Exception as e:
             logger.error(f"Error in post-trade validation: {e}")
             return []
-    
+
     def add_custom_rule(self, rule: ValidationRule) -> None:
         """Add custom validation rule"""
-        
+
         if rule.category == ValidationCategory.PRE_TRADE:
             self.pre_trade_validator.rules[rule.rule_id] = rule
         elif rule.category == ValidationCategory.REAL_TIME:
             self.realtime_validator.rules[rule.rule_id] = rule
         elif rule.category in [ValidationCategory.POST_TRADE, ValidationCategory.COMPLIANCE]:
             self.post_trade_validator.rules[rule.rule_id] = rule
-        
+
         logger.info(f"Added custom validation rule: {rule.rule_id}")
-    
+
     def remove_rule(self, rule_id: str) -> bool:
         """Remove validation rule"""
-        
+
         removed = False
-        
+
         if rule_id in self.pre_trade_validator.rules:
             del self.pre_trade_validator.rules[rule_id]
             removed = True
-        
+
         if rule_id in self.realtime_validator.rules:
             del self.realtime_validator.rules[rule_id]
             removed = True
-        
+
         if rule_id in self.post_trade_validator.rules:
             del self.post_trade_validator.rules[rule_id]
             removed = True
-        
+
         if removed:
             logger.info(f"Removed validation rule: {rule_id}")
-        
+
         return removed
-    
+
     def add_validation_callback(self, callback: Callable[[ValidationResult], None]) -> None:
         """Add callback for validation events"""
         self._validation_callbacks.append(callback)
-    
+
     def _trigger_validation_callbacks(self, result: ValidationResult) -> None:
         """Trigger validation callbacks"""
-        
+
         for callback in self._validation_callbacks:
             try:
                 callback(result)
             except Exception as e:
                 logger.error(f"Error in validation callback: {e}")
-    
+
     def get_validation_summary(self) -> Dict[str, Any]:
         """Get validation summary statistics"""
-        
+
         with self._lock:
             total_validations = len(self._validation_history)
             failed_validations = len([r for r in self._validation_history if not r.passed])
-            
+
             # Group by category
             category_stats = defaultdict(lambda: {'total': 0, 'failed': 0})
             for result in self._validation_history:
                 category_stats[result.category.value]['total'] += 1
                 if not result.passed:
                     category_stats[result.category.value]['failed'] += 1
-            
+
             # Group by severity
             severity_stats = defaultdict(lambda: {'total': 0, 'failed': 0})
             for result in self._validation_history:
                 severity_stats[result.severity.value]['total'] += 1
                 if not result.passed:
                     severity_stats[result.severity.value]['failed'] += 1
-            
+
             return {
                 'total_validations': total_validations,
                 'failed_validations': failed_validations,
@@ -1091,10 +1091,10 @@ class ExecutionValidator:
                 'severity_breakdown': dict(severity_stats),
                 'most_failed_rules': self._get_most_failed_rules()
             }
-    
+
     def _get_most_failed_rules(self) -> List[Dict[str, Any]]:
         """Get rules with most failures"""
-        
+
         rule_failures = [
             {
                 'rule_id': rule_id,
@@ -1103,12 +1103,12 @@ class ExecutionValidator:
             }
             for rule_id, failures in self._failed_validations.items()
         ]
-        
+
         # Sort by failure count
         rule_failures.sort(key=lambda x: x['failure_count'], reverse=True)
-        
+
         return rule_failures[:10]  # Top 10
-    
+
     def get_validation_history(
         self,
         execution_id: Optional[str] = None,
@@ -1117,35 +1117,35 @@ class ExecutionValidator:
         failed_only: bool = False
     ) -> List[ValidationResult]:
         """Get validation history with filtering"""
-        
+
         with self._lock:
             results = self._validation_history.copy()
-        
+
         # Apply filters
         if execution_id:
             results = [r for r in results if r.execution_id == execution_id]
-        
+
         if rule_id:
             results = [r for r in results if r.rule_id == rule_id]
-        
+
         if category:
             results = [r for r in results if r.category == category]
-        
+
         if failed_only:
             results = [r for r in results if not r.passed]
-        
+
         # Sort by check time (most recent first)
         results.sort(key=lambda x: x.check_time, reverse=True)
-        
+
         return results
-    
+
     def generate_validation_report(
         self,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Generate comprehensive validation report"""
-        
+
         # Filter by date range
         history = self._validation_history
         if start_date or end_date:
@@ -1154,42 +1154,42 @@ class ExecutionValidator:
                 if (not start_date or r.check_time >= start_date) and
                    (not end_date or r.check_time <= end_date)
             ]
-        
+
         if not history:
             return {'report_period': 'No data', 'total_validations': 0}
-        
+
         # Calculate metrics
         total_validations = len(history)
         failed_validations = len([r for r in history if not r.passed])
         success_rate = (total_validations - failed_validations) / total_validations
-        
+
         # Group by various dimensions
         category_breakdown = defaultdict(lambda: {'total': 0, 'failed': 0, 'success_rate': 0})
         severity_breakdown = defaultdict(lambda: {'total': 0, 'failed': 0, 'success_rate': 0})
         daily_breakdown = defaultdict(lambda: {'total': 0, 'failed': 0, 'success_rate': 0})
-        
+
         for result in history:
             # Category breakdown
             category_breakdown[result.category.value]['total'] += 1
             if not result.passed:
                 category_breakdown[result.category.value]['failed'] += 1
-            
+
             # Severity breakdown
             severity_breakdown[result.severity.value]['total'] += 1
             if not result.passed:
                 severity_breakdown[result.severity.value]['failed'] += 1
-            
+
             # Daily breakdown
             day = result.check_time.strftime('%Y-%m-%d')
             daily_breakdown[day]['total'] += 1
             if not result.passed:
                 daily_breakdown[day]['failed'] += 1
-        
+
         # Calculate success rates
         for breakdown in [category_breakdown, severity_breakdown, daily_breakdown]:
             for key, stats in breakdown.items():
                 stats['success_rate'] = (stats['total'] - stats['failed']) / stats['total'] if stats['total'] > 0 else 0
-        
+
         return {
             'report_period': f"{start_date or 'Beginning'} to {end_date or 'Present'}",
             'total_validations': total_validations,
@@ -1201,45 +1201,45 @@ class ExecutionValidator:
             'most_failed_rules': self._get_most_failed_rules(),
             'validation_trend': self._calculate_validation_trend(history)
         }
-    
+
     def _calculate_validation_trend(self, history: List[ValidationResult]) -> Dict[str, float]:
         """Calculate validation trend over time"""
-        
+
         if len(history) < 2:
             return {'trend': 0, 'description': 'Insufficient data'}
-        
+
         # Sort by time
         sorted_history = sorted(history, key=lambda x: x.check_time)
-        
+
         # Split into first and second half
         mid_point = len(sorted_history) // 2
         first_half = sorted_history[:mid_point]
         second_half = sorted_history[mid_point:]
-        
+
         # Calculate success rates
         first_half_success = len([r for r in first_half if r.passed]) / len(first_half)
         second_half_success = len([r for r in second_half if r.passed]) / len(second_half)
-        
+
         trend = second_half_success - first_half_success
-        
+
         if trend > 0.05:
             description = "Improving"
         elif trend < -0.05:
             description = "Declining"
         else:
             description = "Stable"
-        
+
         return {
             'trend': trend,
             'description': description,
             'first_half_success_rate': first_half_success,
             'second_half_success_rate': second_half_success
         }
-    
+
     def start(self) -> None:
         """Start execution validator"""
         logger.info("Execution Validator started")
-    
+
     def stop(self) -> None:
         """Stop execution validator"""
         logger.info("Execution Validator stopped")

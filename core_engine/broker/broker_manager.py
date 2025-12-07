@@ -8,11 +8,9 @@ Simplified broker management with basic adapter lifecycle management
 
 import logging
 import threading
-import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from enum import Enum
 
 from .broker_adapter import (
     BrokerAdapter, BrokerCredentials, BrokerType

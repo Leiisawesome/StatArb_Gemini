@@ -28,7 +28,7 @@ class TestAlpacaConfig:
         """Test AlpacaConfig initialization with required parameters."""
         config = AlpacaConfig(
             api_key="test_key",
-            secret_key="test_secret", 
+            secret_key="test_secret",
             base_url="https://paper-api.alpaca.markets"
         )
         assert config.api_key == "test_key"
@@ -61,7 +61,7 @@ class TestAlpacaConfig:
             base_url="https://paper-api.alpaca.markets"
         )
         assert config.validate() is True
-        
+
         # Test missing API key
         config = AlpacaConfig(
             api_key="",
@@ -69,7 +69,7 @@ class TestAlpacaConfig:
             base_url="https://paper-api.alpaca.markets"
         )
         assert config.validate() is False
-        
+
         # Test missing secret key
         config = AlpacaConfig(
             api_key="test_key",
@@ -81,7 +81,7 @@ class TestAlpacaConfig:
     def test_to_dict(self):
         """Test AlpacaConfig to_dict conversion."""
         config = AlpacaConfig(
-            api_key="test", 
+            api_key="test",
             secret_key="secret",
             base_url="https://paper-api.alpaca.markets"
         )
@@ -132,7 +132,7 @@ class TestInteractiveBrokersConfig:
             client_id=1
         )
         assert config.validate() is True
-        
+
         # Test missing host
         config = InteractiveBrokersConfig(
             host="",
@@ -140,7 +140,7 @@ class TestInteractiveBrokersConfig:
             client_id=1
         )
         assert config.validate() is False
-        
+
         # Test missing port
         config = InteractiveBrokersConfig(
             host="127.0.0.1",
@@ -152,7 +152,7 @@ class TestInteractiveBrokersConfig:
     def test_to_dict(self):
         """Test InteractiveBrokersConfig to_dict conversion."""
         config = InteractiveBrokersConfig(
-            host="test", 
+            host="test",
             port=1234,
             client_id=1
         )
@@ -213,11 +213,11 @@ class TestRiskLimits:
         # Test valid config
         config = RiskLimits()
         assert config.validate() is True
-        
+
         # Test invalid daily loss limit
         config = RiskLimits(max_daily_loss=2000.00)
         assert config.validate() is False
-        
+
         # Test invalid position size
         config = RiskLimits(max_position_size=1000)
         assert config.validate() is False
@@ -254,7 +254,7 @@ class TestBrokerConfig:
             base_url="https://api.alpaca.markets"
         )
         risk_limits = RiskLimits(max_position_size=200)
-        
+
         config = BrokerConfig(
             trading_mode=TradingMode.LIVE,
             alpaca=alpaca_config,
@@ -284,7 +284,7 @@ class TestBrokerConfig:
         )
         config = BrokerConfig(alpaca=alpaca_config, active_broker=BrokerType.ALPACA)
         assert config.validate() is True
-        
+
         # Test with Interactive Brokers config
         ib_config = InteractiveBrokersConfig(
             host="127.0.0.1",
@@ -308,7 +308,7 @@ class TestBrokerConfigLoader:
     def test_load_from_env(self):
         """Test loading configuration from environment variables."""
         import os
-        
+
         # Set environment variables
         env_vars = {
             "ALPACA_PAPER_API_KEY": "test_api_key",
@@ -317,10 +317,10 @@ class TestBrokerConfigLoader:
             "PHASE_9_ACTIVE_BROKER": "alpaca",
             "PHASE_9_TRADING_MODE": "paper"
         }
-        
+
         with patch.dict(os.environ, env_vars, clear=True):
             config = BrokerConfigLoader.load_from_env()
-            
+
             assert config.trading_mode == TradingMode.PAPER
             assert config.active_broker == BrokerType.ALPACA
             assert config.alpaca is not None
@@ -332,7 +332,7 @@ class TestBrokerConfigLoader:
         """Test loading configuration from specific env file."""
         import tempfile
         import os
-        
+
         # Create temporary .env file
         env_content = """
 ALPACA_PAPER_API_KEY=test_key
@@ -341,16 +341,16 @@ ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 PHASE_9_ACTIVE_BROKER=alpaca
 PHASE_9_TRADING_MODE=paper
 """
-        
+
         with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
             f.write(env_content)
             temp_file = f.name
-        
+
         try:
             # Clear environment to avoid interference from actual .env file
             with patch.dict(os.environ, {}, clear=True):
                 config = BrokerConfigLoader.load_from_env(temp_file)
-                
+
                 assert config.trading_mode == TradingMode.PAPER
                 assert config.active_broker == BrokerType.ALPACA
                 assert config.alpaca is not None
@@ -362,13 +362,13 @@ PHASE_9_TRADING_MODE=paper
         """Test creating sample .env file."""
         import tempfile
         import os
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             sample_file = os.path.join(temp_dir, ".env.sample")
             BrokerConfigLoader.create_sample_env_file(sample_file)
-            
+
             assert os.path.exists(sample_file)
-            
+
             with open(sample_file, 'r') as f:
                 content = f.read()
                 assert "ALPACA_PAPER_API_KEY" in content
@@ -394,7 +394,7 @@ class TestBrokerConfigIntegration:
             RiskLimits(),
             BrokerConfig()
         ]
-        
+
         for config in configs:
             config_dict = asdict(config)
             assert isinstance(config_dict, dict)
@@ -402,19 +402,19 @@ class TestBrokerConfigIntegration:
     def test_broker_config_loader_integration(self):
         """Test BrokerConfigLoader with all broker types."""
         import os
-        
+
         # Test Alpaca config loading
         env_vars = {
             "ALPACA_PAPER_API_KEY": "test_key",
             "ALPACA_PAPER_SECRET_KEY": "test_secret",
             "PHASE_9_ACTIVE_BROKER": "alpaca"
         }
-        
+
         with patch.dict(os.environ, env_vars, clear=True):
             config = BrokerConfigLoader.load_from_env()
             assert config.active_broker == BrokerType.ALPACA
             assert config.validate() is True
-        
+
         # Test Interactive Brokers config loading
         env_vars = {
             "IB_PAPER_HOST": "127.0.0.1",
@@ -422,7 +422,7 @@ class TestBrokerConfigIntegration:
             "IB_PAPER_CLIENT_ID": "1",
             "PHASE_9_ACTIVE_BROKER": "interactive_brokers"
         }
-        
+
         with patch.dict(os.environ, env_vars, clear=True):
             config = BrokerConfigLoader.load_from_env()
             assert config.active_broker == BrokerType.INTERACTIVE_BROKERS
@@ -437,7 +437,7 @@ class TestBrokerConfigIntegration:
             base_url="https://paper-api.alpaca.markets"
         )
         assert config.validate() is True
-        
+
         # Test InteractiveBrokersConfig validation
         config = InteractiveBrokersConfig(
             host="127.0.0.1",
@@ -445,11 +445,11 @@ class TestBrokerConfigIntegration:
             client_id=1
         )
         assert config.validate() is True
-        
+
         # Test RiskLimits validation
         config = RiskLimits()
         assert config.validate() is True
-        
+
         # Test BrokerConfig validation with Alpaca
         alpaca_config = AlpacaConfig(
             api_key="test",
@@ -467,16 +467,16 @@ class TestBrokerConfigIntegration:
             base_url="https://paper-api.alpaca.markets"
         )
         risk_limits = RiskLimits(max_position_size=150)
-        
+
         broker_config = BrokerConfig(
             alpaca=alpaca_config,
             risk_limits=risk_limits
         )
-        
+
         # Test that composed configs are properly set
         assert broker_config.alpaca.api_key == "test"
         assert broker_config.risk_limits.max_position_size == 150
-        
+
         # Test that composed configs can be modified
         broker_config.risk_limits.max_position_size = 200
         assert broker_config.risk_limits.max_position_size == 200

@@ -98,7 +98,7 @@ class TestStrategyManagerBasics:
         """Test strategy manager health check"""
         await strategy_manager.initialize()
         await strategy_manager.start()
-        
+
         health = await strategy_manager.health_check()
         assert health['healthy'] is True
         assert 'component_type' in health
@@ -109,7 +109,7 @@ class TestStrategyManagerBasics:
     async def test_strategy_manager_status(self, strategy_manager):
         """Test strategy manager status reporting"""
         await strategy_manager.initialize()
-        
+
         status = strategy_manager.get_status()
         assert 'component_type' in status
         assert status['initialized'] is True
@@ -180,7 +180,7 @@ class TestEnhancedTradingEngineBasics:
         """Test trading engine health check"""
         await trading_engine.initialize()
         await trading_engine.start()
-        
+
         health = await trading_engine.health_check()
         assert health['healthy'] is True
         assert health['component_type'] == 'EnhancedTradingEngine'
@@ -191,7 +191,7 @@ class TestEnhancedTradingEngineBasics:
     async def test_trading_engine_status(self, trading_engine):
         """Test trading engine status reporting"""
         await trading_engine.initialize()
-        
+
         status = trading_engine.get_status()
         assert status['component_type'] == 'EnhancedTradingEngine'
         assert status['initialized'] is True
@@ -259,7 +259,7 @@ class TestUnifiedExecutionEngineBasics:
         """Test execution engine health check"""
         await execution_engine.initialize()
         await execution_engine.start()
-        
+
         health = await execution_engine.health_check()
         assert health['healthy'] is True
         assert 'component_type' in health
@@ -270,7 +270,7 @@ class TestUnifiedExecutionEngineBasics:
     async def test_execution_engine_status(self, execution_engine):
         """Test execution engine status reporting"""
         await execution_engine.initialize()
-        
+
         status = execution_engine.get_status()
         assert 'component_type' in status
         assert status['initialized'] is True
@@ -341,7 +341,7 @@ class TestEnhancedPortfolioManagerBasics:
         """Test portfolio manager health check"""
         await portfolio_manager.initialize()
         await portfolio_manager.start()
-        
+
         health = await portfolio_manager.health_check()
         assert health['healthy'] is True
         assert health['component_type'] == 'EnhancedPortfolioManager'
@@ -352,7 +352,7 @@ class TestEnhancedPortfolioManagerBasics:
     async def test_portfolio_manager_status(self, portfolio_manager):
         """Test portfolio manager status reporting"""
         await portfolio_manager.initialize()
-        
+
         status = portfolio_manager.get_status()
         assert status['component_type'] == 'EnhancedPortfolioManager'
         assert status['initialized'] is True
@@ -490,7 +490,7 @@ class TestIntegrationWorkflow:
             assert 'initialized' in status
             assert 'operational' in status
             assert status['initialized'] is True
-            
+
             # Only some components have health_metrics
             if hasattr(component, 'health_metrics'):
                 assert 'health_metrics' in status

@@ -5,7 +5,7 @@ Professional command-line interface for running institutional-grade backtests.
 
 Usage:
     python -m backtest.cli.main [command] [options]
-    
+
 Or use the shortcut:
     backtest [command] [options]
 """

@@ -16,20 +16,20 @@ Components:
 
 Polygon.io Real-Time Integration:
     For Stock Starter subscription (real-time aggregated data):
-    
+
     from core_engine.data.feeds import (
         PolygonRealtimeFeedAdapter,
         PolygonFeedConfig,
         PolygonSubscriptionTier,
     )
-    
+
     config = PolygonFeedConfig(
         api_key="your_polygon_api_key",
         symbols=["AAPL", "TSLA", "NVDA"],
         subscription_tier=PolygonSubscriptionTier.STARTER,
         data_types=["second_agg", "minute_agg", "trade"],
     )
-    
+
     adapter = PolygonRealtimeFeedAdapter(config)
     await adapter.connect()
     await adapter.subscribe(["AAPL", "TSLA"], ["second_agg", "minute_agg"])
@@ -51,23 +51,23 @@ from .manager import (
 from .adapters import (
     # Configuration
     FeedAdapterConfig,
-    
+
     # Enums
     AdapterStatus,
     FeedProvider,
-    
+
     # Data Structures
     FeedMessage,
-    
+
     # Base Classes
     DataFeedAdapter,
-    
+
     # Concrete Adapters
     SimulatedFeedAdapter,
     AlpacaFeedAdapter,
     PolygonFeedAdapter,  # Basic stub
     InteractiveBrokersFeedAdapter,
-    
+
     # Factory
     FeedAdapterFactory,
 )
@@ -81,12 +81,12 @@ from .polygon_realtime import (
     PolygonFeedConfig,
     PolygonSubscriptionTier,
     PolygonCluster,
-    
+
     # Data Structures
     PolygonAggregateBar,
     PolygonTrade,
     PolygonQuote,
-    
+
     # Production Adapter
     PolygonRealtimeFeedAdapter,
     PolygonAggregatedDataManager,
@@ -117,26 +117,26 @@ __all__ = [
     # ===== FEED MANAGER =====
     'FeedConfiguration',
     'FeedManager',
-    
+
     # ===== ADAPTER CONFIGURATION =====
     'FeedAdapterConfig',
-    
+
     # ===== ENUMS =====
     'AdapterStatus',
     'FeedProvider',
-    
+
     # ===== DATA STRUCTURES =====
     'FeedMessage',
-    
+
     # ===== BASE CLASSES =====
     'DataFeedAdapter',
-    
+
     # ===== CONCRETE ADAPTERS =====
     'SimulatedFeedAdapter',
     'AlpacaFeedAdapter',
     'PolygonFeedAdapter',  # Basic stub
     'InteractiveBrokersFeedAdapter',
-    
+
     # ===== POLYGON.IO REAL-TIME (Production) =====
     'PolygonFeedConfig',
     'PolygonSubscriptionTier',
@@ -146,18 +146,18 @@ __all__ = [
     'PolygonQuote',
     'PolygonRealtimeFeedAdapter',
     'PolygonAggregatedDataManager',
-    
+
     # ===== POLYGON.IO DATA SERVICE =====
     'PolygonServiceConfig',
     'PolygonDataService',
     'create_polygon_service',
-    
+
     # ===== POLYGON.IO REST API (Stock Starter) =====
     'PolygonRestConfig',
     'PolygonRestService',
     'AggregateBar',
     'create_polygon_rest_service',
-    
+
     # ===== FACTORY =====
     'FeedAdapterFactory',
 ]

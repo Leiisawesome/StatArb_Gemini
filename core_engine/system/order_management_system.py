@@ -34,7 +34,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
 from collections import defaultdict
@@ -106,18 +106,18 @@ class Fill:
 class Order:
     """
     Order entity with complete lifecycle tracking.
-    
+
     Implements Rule 5, Phase 12 requirements for order management.
     """
-    
+
     # Identity
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     client_order_id: str = ""
     parent_order_id: Optional[str] = None  # For child orders (slicing)
-    
+
     # Authorization link (Rule 3)
     authorization_id: str = ""
-    
+
     # Order details
     symbol: str = ""
     side: str = ""  # 'buy' or 'sell'
@@ -126,33 +126,33 @@ class Order:
     limit_price: Optional[float] = None
     stop_price: Optional[float] = None
     time_in_force: TimeInForce = TimeInForce.DAY
-    
+
     # State
     state: OrderState = OrderState.PENDING_NEW
     filled_quantity: float = 0.0
     remaining_quantity: float = 0.0
     avg_fill_price: float = 0.0
-    
+
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     submitted_at: Optional[datetime] = None
     last_updated_at: Optional[datetime] = None
     filled_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    
+
     # Compliance (Rule 3)
     compliance_tags: List[str] = field(default_factory=list)
     strategy_id: str = ""
-    
+
     # Fills
     fills: List[Fill] = field(default_factory=list)
-    
+
     # Audit trail
     state_history: List[OrderStateChange] = field(default_factory=list)
-    
+
     # Metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def __post_init__(self):
         """Initialize derived fields"""
         self.remaining_quantity = self.quantity
@@ -163,20 +163,20 @@ class Order:
 class OrderManagementSystem(ISystemComponent):
     """
     Institutional Order Management System
-    
+
     Implements Rule 5, Phase 12: Complete order lifecycle management.
-    
+
     Integrates with:
     - Rule 3 (Phase 10): Receives authorized trades
     - Rule 5 (Phase 11): Receives execution plans
     - Rule 5 (Phase 13): Sends to execution engine
     - Rule 6: Reports to reconciliation and settlement
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         """
         Initialize OMS with configuration.
-        
+
         Args:
             config: OMS configuration including:
                 - persistence_enabled: Enable order persistence
@@ -188,17 +188,17 @@ class OrderManagementSystem(ISystemComponent):
         self.orders_by_authorization: Dict[str, List[str]] = defaultdict(list)
         self.orders_by_symbol: Dict[str, List[str]] = defaultdict(list)
         self.orders_by_strategy: Dict[str, List[str]] = defaultdict(list)
-        
+
         # Configuration
         self.persistence_enabled = self.config.get('persistence_enabled', True)
         self.max_order_age_days = self.config.get('max_order_age_days', 30)
         self.state_persistence_path = self.config.get('state_persistence_path', './state/oms/')
-        
+
         # Callbacks for integration
         self._execution_callback: Optional[Callable] = None
         self._risk_manager_callback: Optional[Callable] = None
         self._settlement_callback: Optional[Callable] = None
-        
+
         # Statistics
         self.stats = {
             'orders_created': 0,
@@ -208,55 +208,55 @@ class OrderManagementSystem(ISystemComponent):
             'total_volume': 0.0,
             'total_value': 0.0
         }
-        
+
         self._initialized = False
         self._running = False
-        
+
         logger.info("OrderManagementSystem initialized (Rule 5, Phase 12)")
-    
+
     # ===== ISystemComponent Implementation =====
-    
+
     async def initialize(self) -> bool:
         """Initialize OMS and recover state if persistence enabled"""
         try:
             if self.persistence_enabled:
                 await self._recover_orders()
-            
+
             self._initialized = True
             logger.info("OMS initialized successfully")
             return True
         except Exception as e:
             logger.error(f"OMS initialization failed: {e}")
             return False
-    
+
     async def start(self) -> bool:
         """Start OMS operations"""
         if not self._initialized:
             await self.initialize()
-        
+
         self._running = True
-        
+
         # Start background tasks
         asyncio.create_task(self._order_expiry_monitor())
         asyncio.create_task(self._state_persistence_task())
-        
+
         logger.info("OMS started")
         return True
-    
+
     async def stop(self) -> bool:
         """Stop OMS and persist state"""
         self._running = False
-        
+
         if self.persistence_enabled:
             await self._persist_all_orders()
-        
+
         logger.info("OMS stopped")
         return True
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Check OMS health"""
         working_orders = await self.get_working_orders()
-        
+
         return {
             'healthy': self._running,
             'orders_total': len(self.orders),
@@ -264,7 +264,7 @@ class OrderManagementSystem(ISystemComponent):
             'persistence_enabled': self.persistence_enabled,
             'stats': self.stats
         }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get OMS status"""
         return {
@@ -273,9 +273,9 @@ class OrderManagementSystem(ISystemComponent):
             'orders_count': len(self.orders),
             'stats': self.stats
         }
-    
+
     # ===== Order Lifecycle Methods =====
-    
+
     async def create_order(
         self,
         authorization_id: str,
@@ -293,9 +293,9 @@ class OrderManagementSystem(ISystemComponent):
     ) -> Order:
         """
         Create new order from authorization.
-        
+
         Phase 12 entry point - receives from Phase 11 (Execution Planning).
-        
+
         Args:
             authorization_id: Rule 3 authorization ID
             symbol: Trading symbol
@@ -309,7 +309,7 @@ class OrderManagementSystem(ISystemComponent):
             compliance_tags: Compliance tags from Rule 3
             strategy_id: Strategy that generated the order
             metadata: Additional metadata
-            
+
         Returns:
             Created Order object
         """
@@ -327,59 +327,59 @@ class OrderManagementSystem(ISystemComponent):
             strategy_id=strategy_id,
             metadata=metadata or {}
         )
-        
+
         # Store order in indices
         self.orders[order.order_id] = order
         self.orders_by_authorization[authorization_id].append(order.order_id)
         self.orders_by_symbol[symbol].append(order.order_id)
         if strategy_id:
             self.orders_by_strategy[strategy_id].append(order.order_id)
-        
+
         # Record state change
         self._record_state_change(order, None, OrderState.PENDING_NEW, 'order_created')
-        
+
         # Update stats
         self.stats['orders_created'] += 1
-        
+
         # Persist if enabled
         if self.persistence_enabled:
             await self._persist_order(order)
-        
+
         logger.info(
             f"📝 Order created: {order.order_id[:8]} "
             f"{symbol} {side} {quantity} @ {order_type.value}"
         )
-        
+
         return order
-    
+
     async def submit_order(self, order_id: str) -> Order:
         """
         Submit order to execution engine (Phase 13).
-        
+
         Args:
             order_id: Order ID to submit
-            
+
         Returns:
             Updated Order object
-            
+
         Raises:
             ValueError: If order not found or invalid state
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         if order.state != OrderState.PENDING_NEW:
             raise ValueError(f"Cannot submit order in state: {order.state.value}")
-        
+
         # Transition state
         await self._transition_state(order, OrderState.NEW, 'submitted_to_venue')
         order.submitted_at = datetime.now()
-        
+
         logger.info(f"📤 Order submitted: {order.order_id[:8]}")
-        
+
         return order
-    
+
     async def record_fill(
         self,
         order_id: str,
@@ -391,9 +391,9 @@ class OrderManagementSystem(ISystemComponent):
     ) -> Order:
         """
         Record execution fill.
-        
+
         Called by Phase 14 (Fill Processing) when fills are received.
-        
+
         Args:
             order_id: Order ID
             fill_quantity: Quantity filled
@@ -401,14 +401,14 @@ class OrderManagementSystem(ISystemComponent):
             venue: Execution venue
             commission: Commission charged
             fees: Exchange/regulatory fees
-            
+
         Returns:
             Updated Order object
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         # Create fill record
         fill = Fill(
             fill_id=str(uuid.uuid4()),
@@ -420,113 +420,113 @@ class OrderManagementSystem(ISystemComponent):
             fees=fees
         )
         order.fills.append(fill)
-        
+
         # Update quantities
         prev_filled = order.filled_quantity
         order.filled_quantity += fill_quantity
         order.remaining_quantity = order.quantity - order.filled_quantity
-        
+
         # Update average price (weighted average)
         if prev_filled == 0:
             order.avg_fill_price = fill_price
         else:
             total_value = (order.avg_fill_price * prev_filled) + (fill_price * fill_quantity)
             order.avg_fill_price = total_value / order.filled_quantity
-        
+
         order.last_updated_at = datetime.now()
-        
+
         # Update stats
         self.stats['total_volume'] += fill_quantity
         self.stats['total_value'] += fill_quantity * fill_price
-        
+
         # Determine new state
         if order.remaining_quantity <= 0:
             await self._transition_state(order, OrderState.FILLED, 'completely_filled')
             order.filled_at = datetime.now()
             self.stats['orders_filled'] += 1
-            
+
             # Notify settlement (Rule 6)
             if self._settlement_callback:
                 await self._settlement_callback(order)
         else:
             await self._transition_state(order, OrderState.PARTIALLY_FILLED, 'partial_fill')
-        
+
         logger.info(
             f"✅ Fill recorded: {order.order_id[:8]} "
             f"{fill_quantity}@${fill_price:.2f} "
             f"({order.filled_quantity}/{order.quantity})"
         )
-        
+
         return order
-    
+
     async def cancel_order(self, order_id: str, reason: str = None) -> Order:
         """
         Request order cancellation.
-        
+
         Args:
             order_id: Order ID to cancel
             reason: Cancellation reason
-            
+
         Returns:
             Updated Order object
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         terminal_states = [OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED]
         if order.state in terminal_states:
             raise ValueError(f"Cannot cancel order in state: {order.state.value}")
-        
+
         await self._transition_state(order, OrderState.PENDING_CANCEL, reason or 'cancel_requested')
-        
+
         logger.info(f"🚫 Cancel requested: {order.order_id[:8]} - {reason}")
-        
+
         return order
-    
+
     async def confirm_cancellation(self, order_id: str) -> Order:
         """
         Confirm order cancellation from venue.
-        
+
         Args:
             order_id: Order ID
-            
+
         Returns:
             Updated Order object
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         await self._transition_state(order, OrderState.CANCELLED, 'cancel_confirmed')
         self.stats['orders_cancelled'] += 1
-        
+
         logger.info(f"❌ Cancellation confirmed: {order.order_id[:8]}")
-        
+
         return order
-    
+
     async def reject_order(self, order_id: str, reason: str) -> Order:
         """
         Mark order as rejected.
-        
+
         Args:
             order_id: Order ID
             reason: Rejection reason
-            
+
         Returns:
             Updated Order object
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         await self._transition_state(order, OrderState.REJECTED, reason)
         self.stats['orders_rejected'] += 1
-        
+
         logger.warning(f"⛔ Order rejected: {order.order_id[:8]} - {reason}")
-        
+
         return order
-    
+
     async def modify_order(
         self,
         order_id: str,
@@ -535,23 +535,23 @@ class OrderManagementSystem(ISystemComponent):
     ) -> Order:
         """
         Modify pending order.
-        
+
         Args:
             order_id: Order ID to modify
             new_quantity: New quantity (optional)
             new_limit_price: New limit price (optional)
-            
+
         Returns:
             Updated Order object
         """
         order = self.orders.get(order_id)
         if not order:
             raise ValueError(f"Order not found: {order_id}")
-        
+
         modifiable_states = [OrderState.NEW, OrderState.PARTIALLY_FILLED]
         if order.state not in modifiable_states:
             raise ValueError(f"Cannot modify order in state: {order.state.value}")
-        
+
         # Record modifications
         modifications = {}
         if new_quantity is not None:
@@ -561,29 +561,29 @@ class OrderManagementSystem(ISystemComponent):
         if new_limit_price is not None:
             modifications['limit_price'] = {'old': order.limit_price, 'new': new_limit_price}
             order.limit_price = new_limit_price
-        
+
         order.metadata['modifications'] = order.metadata.get('modifications', [])
         order.metadata['modifications'].append({
             'timestamp': datetime.now().isoformat(),
             'changes': modifications
         })
-        
+
         await self._transition_state(
             order,
             OrderState.PENDING_REPLACE,
             f'modification_requested: {list(modifications.keys())}'
         )
-        
+
         logger.info(f"📝 Order modification requested: {order.order_id[:8]}")
-        
+
         return order
-    
+
     # ===== Query Methods =====
-    
+
     async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order by ID"""
         return self.orders.get(order_id)
-    
+
     async def get_working_orders(self) -> List[Order]:
         """Get all working (active) orders"""
         working_states = [
@@ -593,31 +593,31 @@ class OrderManagementSystem(ISystemComponent):
             OrderState.PENDING_REPLACE
         ]
         return [o for o in self.orders.values() if o.state in working_states]
-    
+
     async def get_orders_by_authorization(self, authorization_id: str) -> List[Order]:
         """Get all orders for an authorization"""
         order_ids = self.orders_by_authorization.get(authorization_id, [])
         return [self.orders[oid] for oid in order_ids if oid in self.orders]
-    
+
     async def get_orders_by_symbol(self, symbol: str) -> List[Order]:
         """Get all orders for a symbol"""
         order_ids = self.orders_by_symbol.get(symbol, [])
         return [self.orders[oid] for oid in order_ids if oid in self.orders]
-    
+
     async def get_orders_by_strategy(self, strategy_id: str) -> List[Order]:
         """Get all orders for a strategy"""
         order_ids = self.orders_by_strategy.get(strategy_id, [])
         return [self.orders[oid] for oid in order_ids if oid in self.orders]
-    
+
     async def get_child_orders(self, parent_order_id: str) -> List[Order]:
         """Get child orders for a parent order"""
         return [
-            o for o in self.orders.values() 
+            o for o in self.orders.values()
             if o.parent_order_id == parent_order_id
         ]
-    
+
     # ===== Internal Methods =====
-    
+
     def _record_state_change(
         self,
         order: Order,
@@ -633,33 +633,32 @@ class OrderManagementSystem(ISystemComponent):
             reason=reason
         )
         order.state_history.append(change)
-    
+
     async def _transition_state(self, order: Order, new_state: OrderState, reason: str):
         """Transition order to new state"""
         old_state = order.state
         order.state = new_state
         order.last_updated_at = datetime.now()
-        
+
         self._record_state_change(order, old_state, new_state, reason)
-        
+
         if self.persistence_enabled:
             await self._persist_order(order)
-    
+
     async def _persist_order(self, order: Order):
         """Persist order to storage (placeholder for actual implementation)"""
         # TODO: Implement actual persistence (database, file, etc.)
-        pass
-    
+
     async def _persist_all_orders(self):
         """Persist all orders"""
         for order in self.orders.values():
             await self._persist_order(order)
-    
+
     async def _recover_orders(self):
         """Recover orders from persistence after restart"""
         # TODO: Implement recovery logic
         logger.info("Order recovery check complete")
-    
+
     async def _order_expiry_monitor(self):
         """Monitor and expire old orders"""
         while self._running:
@@ -673,12 +672,12 @@ class OrderManagementSystem(ISystemComponent):
                                 order, OrderState.EXPIRED, 'time_in_force_expired'
                             )
                             logger.info(f"⏰ Order expired: {order.order_id[:8]}")
-                
+
                 await asyncio.sleep(60)  # Check every minute
             except Exception as e:
                 logger.error(f"Order expiry monitor error: {e}")
                 await asyncio.sleep(60)
-    
+
     async def _state_persistence_task(self):
         """Periodic state persistence"""
         while self._running:
@@ -689,17 +688,17 @@ class OrderManagementSystem(ISystemComponent):
             except Exception as e:
                 logger.error(f"State persistence error: {e}")
                 await asyncio.sleep(300)
-    
+
     # ===== Callback Registration =====
-    
+
     def set_execution_callback(self, callback: Callable):
         """Set callback for execution engine"""
         self._execution_callback = callback
-    
+
     def set_risk_manager_callback(self, callback: Callable):
         """Set callback for risk manager"""
         self._risk_manager_callback = callback
-    
+
     def set_settlement_callback(self, callback: Callable):
         """Set callback for settlement manager"""
         self._settlement_callback = callback

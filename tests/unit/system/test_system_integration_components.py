@@ -61,7 +61,7 @@ class TestSystemIntegrationManagerBasics:
                 'portfolio_id': 'test_portfolio',
                 'base_currency': 'USD'
             },
-            
+
             # System settings
             enable_performance_monitoring=False,  # Disable for testing
             enable_health_monitoring=False,       # Disable for testing
@@ -94,7 +94,7 @@ class TestSystemIntegrationManagerBasics:
         result = await system_manager.initialize()
         # We don't assert True here because some components may not be available
         assert isinstance(result, bool)
-        
+
         # Check that the manager attempted initialization
         assert system_manager.current_phase in [SystemPhase.STARTUP, SystemPhase.ERROR]
 
@@ -103,7 +103,7 @@ class TestSystemIntegrationManagerBasics:
         """Test system integration manager health check"""
         # Initialize first (may fail, but health check should still work)
         await system_manager.initialize()
-        
+
         health = await system_manager.health_check()
         assert 'healthy' in health
         assert 'component_type' in health
@@ -149,7 +149,7 @@ class TestConfigurationTemplates:
     def test_config_validation(self):
         """Test configuration validation"""
         config = SystemConfiguration()
-        
+
         # Test default values
         assert config.enable_performance_monitoring is True
         assert config.enable_health_monitoring is True
@@ -165,7 +165,7 @@ class TestComponentCompatibility:
         """Test that all enhanced components are compatible"""
         # Test individual component creation and basic lifecycle
         components = []
-        
+
         # Enhanced Trading Engine
         try:
             trading_config = {'max_slice_size': 500.0, 'enable_smart_routing': True}
@@ -173,7 +173,7 @@ class TestComponentCompatibility:
             components.append(('EnhancedTradingEngine', trading_engine))
         except Exception as e:
             print(f"Skipping EnhancedTradingEngine due to config issue: {e}")
-        
+
         # Enhanced Portfolio Manager
         try:
             portfolio_config = {'portfolio_id': 'test', 'base_currency': 'USD'}
@@ -181,7 +181,7 @@ class TestComponentCompatibility:
             components.append(('EnhancedPortfolioManager', portfolio_manager))
         except Exception as e:
             print(f"Skipping EnhancedPortfolioManager due to config issue: {e}")
-        
+
         # Enhanced Regime Engine
         try:
             regime_config = {'lookback_window': 30, 'volatility_window': 10}
@@ -189,7 +189,7 @@ class TestComponentCompatibility:
             components.append(('EnhancedRegimeEngine', regime_engine))
         except Exception as e:
             print(f"Skipping EnhancedRegimeEngine due to config issue: {e}")
-        
+
         # Test each component's basic lifecycle
         for name, component in components:
             try:
@@ -198,31 +198,31 @@ class TestComponentCompatibility:
                 if not init_result:
                     print(f"Warning: {name} initialization returned False")
                     continue
-                
+
                 # Test start
                 start_result = await component.start()
                 if not start_result:
                     print(f"Warning: {name} start returned False")
                     continue
-                
+
                 # Test health check
                 health = await component.health_check()
                 assert 'healthy' in health, f"{name} health check missing 'healthy' key"
-                
+
                 # Test status
                 status = component.get_status()
                 assert 'component_type' in status, f"{name} status missing 'component_type' key"
-                
+
                 # Test stop
                 stop_result = await component.stop()
                 if not stop_result:
                     print(f"Warning: {name} stop returned False")
-                
+
             except Exception as e:
                 print(f"Error testing {name}: {e}")
                 # Continue with other components
                 continue
-        
+
         # Ensure we tested at least some components
         assert len(components) > 0, "No components were successfully created for testing"
 
@@ -234,7 +234,7 @@ class TestComponentCompatibility:
         except ImportError:
             # If interfaces module not available, skip this test
             pytest.skip("ISystemComponent interface not available")
-        
+
         # List of enhanced component classes that should implement ISystemComponent
         enhanced_components = [
             EnhancedPortfolioManager,
@@ -243,17 +243,17 @@ class TestComponentCompatibility:
             EnhancedFeatureEngineer,
             EnhancedSignalGenerator
         ]
-        
+
         for component_class in enhanced_components:
             # Check that required methods exist (interface compliance)
             required_methods = ['initialize', 'start', 'stop', 'health_check', 'get_status']
             for method_name in required_methods:
                 assert hasattr(component_class, method_name), f"{component_class.__name__} missing method {method_name}"
-                
+
                 # Check that method is callable
                 method = getattr(component_class, method_name)
                 assert callable(method), f"{component_class.__name__}.{method_name} is not callable"
-            
+
             # Check if class implements ISystemComponent (may not be direct inheritance)
             try:
                 is_compliant = issubclass(component_class, ISystemComponent)
@@ -277,16 +277,16 @@ class TestSystemPhases:
             enable_performance_monitoring=False,
             enable_health_monitoring=False
         )
-        
+
         manager = SystemIntegrationManager(config)
-        
+
         # Initial phase
         assert manager.current_phase == SystemPhase.INITIALIZATION
-        
+
         # After initialization attempt
         await manager.initialize()
         assert manager.current_phase in [SystemPhase.STARTUP, SystemPhase.ERROR]
-        
+
         # After stop
         await manager.stop()
         assert manager.current_phase == SystemPhase.SHUTDOWN
@@ -304,7 +304,7 @@ class TestSystemPhases:
             ComponentStatus.STOPPED,
             ComponentStatus.ERROR
         ]
-        
+
         for status in statuses:
             assert isinstance(status.value, str)
             assert len(status.value) > 0
@@ -319,7 +319,7 @@ class TestSystemPhases:
             SystemPhase.SHUTDOWN,
             SystemPhase.ERROR
         ]
-        
+
         for phase in phases:
             assert isinstance(phase.value, str)
             assert len(phase.value) > 0
@@ -335,18 +335,18 @@ class TestSystemMetrics:
             enable_performance_monitoring=False,
             enable_health_monitoring=False
         )
-        
+
         manager = SystemIntegrationManager(config)
-        
+
         # Check initial metrics
         assert manager.system_metrics.total_components == 0
         assert manager.system_metrics.operational_components == 0
         assert manager.system_metrics.failed_components == 0
         assert manager.system_metrics.system_uptime == 0.0
-        
+
         # After initialization
         await manager.initialize()
-        
+
         # Metrics should be updated
         assert manager.system_metrics.total_components >= 0
         assert manager.system_metrics.initialization_time >= 0
@@ -358,13 +358,13 @@ class TestSystemMetrics:
             enable_performance_monitoring=False,
             enable_health_monitoring=False
         )
-        
+
         manager = SystemIntegrationManager(config)
-        
+
         # Test with no components
         health_score = manager._calculate_system_health_score({})
         assert health_score == 0.0
-        
+
         # Test with healthy components
         component_health = {
             'comp1': {'healthy': True},
@@ -373,7 +373,7 @@ class TestSystemMetrics:
         }
         health_score = manager._calculate_system_health_score(component_health)
         assert health_score == 2.0 / 3.0  # 2 out of 3 healthy
-        
+
         # Test with all healthy components
         component_health = {
             'comp1': {'healthy': True},
@@ -404,29 +404,29 @@ class TestEndToEndIntegration:
                 'lookback_window': 20,
                 'volatility_window': 10
             },
-            
+
             # Disable monitoring for testing
             enable_performance_monitoring=False,
             enable_health_monitoring=False
         )
-        
+
         manager = SystemIntegrationManager(config)
-        
+
         try:
             # Test initialization
             await manager.initialize()
             # Don't assert True because some components may not be available
-            
+
             # Test health check regardless of initialization result
             health = await manager.health_check()
             assert 'healthy' in health
             assert 'system_metrics' in health
-            
+
             # Test status
             status = manager.get_status()
             assert 'current_phase' in status
             assert 'component_status' in status
-            
+
         finally:
             # Always try to stop
             await manager.stop()
@@ -441,17 +441,17 @@ class TestEndToEndIntegration:
             enable_performance_monitoring=False,
             enable_health_monitoring=False
         )
-        
+
         manager = SystemIntegrationManager(config)
-        
+
         # Should handle invalid config gracefully
         await manager.initialize()
         # Don't assert specific result, just that it doesn't crash
-        
+
         # Health check should still work
         health = await manager.health_check()
         assert 'healthy' in health
-        
+
         await manager.stop()
 
 

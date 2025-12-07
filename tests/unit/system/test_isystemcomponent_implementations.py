@@ -28,44 +28,44 @@ async def test_system_validator_interface():
     print("\n" + "="*80)
     print("TEST: SystemValidator ISystemComponent Implementation")
     print("="*80 + "\n")
-    
+
     # Test 1: Instance creation
     validator = SystemValidator(ValidationLevel.BASIC)
     assert isinstance(validator, ISystemComponent), "SystemValidator must implement ISystemComponent"
     print("✅ Test 1.1: SystemValidator implements ISystemComponent")
-    
+
     # Test 2: Initialize
     result = await validator.initialize()
     assert result is True, "Initialize should return True"
     assert validator.is_initialized is True, "is_initialized should be True"
     print("✅ Test 1.2: initialize() works correctly")
-    
+
     # Test 3: Start
     result = await validator.start()
     assert result is True, "Start should return True"
     assert validator.is_operational is True, "is_operational should be True"
     print("✅ Test 1.3: start() works correctly")
-    
+
     # Test 4: Health check
     health = await validator.health_check()
     assert isinstance(health, dict), "health_check should return dict"
     assert health['healthy'] is True, "Should be healthy"
     assert health['component_type'] == 'SystemValidator', "Component type should be SystemValidator"
     print("✅ Test 1.4: health_check() returns proper dict")
-    
+
     # Test 5: Get status
     status = validator.get_status()
     assert isinstance(status, dict), "get_status should return dict"
     assert status['operational'] is True, "Should be operational"
     assert status['component_type'] == 'SystemValidator', "Component type should be SystemValidator"
     print("✅ Test 1.5: get_status() returns proper dict")
-    
+
     # Test 6: Stop
     result = await validator.stop()
     assert result is True, "Stop should return True"
     assert validator.is_operational is False, "is_operational should be False"
     print("✅ Test 1.6: stop() works correctly")
-    
+
     print("\n🎉 SystemValidator: ALL TESTS PASSED (6/6)")
 
 
@@ -74,35 +74,35 @@ async def test_system_monitor_interface():
     print("\n" + "="*80)
     print("TEST: SystemMonitor ISystemComponent Implementation")
     print("="*80 + "\n")
-    
+
     # Test 1: Instance creation
     monitor = SystemMonitor()
     assert isinstance(monitor, ISystemComponent), "SystemMonitor must implement ISystemComponent"
     print("✅ Test 2.1: SystemMonitor implements ISystemComponent")
-    
+
     # Test 2: Initialize
     result = await monitor.initialize()
     assert result is True, "Initialize should return True"
     assert monitor.is_initialized is True, "is_initialized should be True"
     print("✅ Test 2.2: initialize() works correctly")
-    
+
     # Test 3: Start
     result = await monitor.start()
     assert result is True, "Start should return True"
     assert monitor.is_operational is True, "is_operational should be True"
     assert monitor.is_monitoring is True, "Monitoring should be active"
     print("✅ Test 2.3: start() works correctly")
-    
+
     # Wait a moment for monitoring to start
     await asyncio.sleep(0.5)
-    
+
     # Test 4: Health check
     health = await monitor.health_check()
     assert isinstance(health, dict), "health_check should return dict"
     assert health['component_type'] == 'SystemMonitor', "Component type should be SystemMonitor"
     assert health['monitoring_active'] is True, "Monitoring should be active"
     print("✅ Test 2.4: health_check() returns proper dict")
-    
+
     # Test 5: Get status
     status = monitor.get_status()
     assert isinstance(status, dict), "get_status should return dict"
@@ -110,14 +110,14 @@ async def test_system_monitor_interface():
     assert status['component_type'] == 'SystemMonitor', "Component type should be SystemMonitor"
     assert status['monitoring_active'] is True, "Monitoring should be active"
     print("✅ Test 2.5: get_status() returns proper dict")
-    
+
     # Test 6: Stop
     result = await monitor.stop()
     assert result is True, "Stop should return True"
     assert monitor.is_operational is False, "is_operational should be False"
     assert monitor.is_monitoring is False, "Monitoring should be stopped"
     print("✅ Test 2.6: stop() works correctly")
-    
+
     print("\n🎉 SystemMonitor: ALL TESTS PASSED (6/6)")
 
 
@@ -126,11 +126,11 @@ async def main():
     print("\n" + "="*80)
     print("ISYSTEMCOMPONENT IMPLEMENTATION TESTS")
     print("="*80)
-    
+
     total_tests = 0
     passed_tests = 0
     failed_tests = 0
-    
+
     # Test SystemValidator
     try:
         await test_system_validator_interface()
@@ -140,7 +140,7 @@ async def main():
         failed_tests += 1
         total_tests += 6
         print(f"\n❌ SystemValidator tests FAILED: {e}")
-    
+
     # Test SystemMonitor
     try:
         await test_system_monitor_interface()
@@ -150,7 +150,7 @@ async def main():
         failed_tests += 1
         total_tests += 6
         print(f"\n❌ SystemMonitor tests FAILED: {e}")
-    
+
     # Summary
     print("\n" + "="*80)
     print("TEST SUMMARY")
@@ -159,7 +159,7 @@ async def main():
     print(f"✅ Passed: {passed_tests}")
     print(f"❌ Failed: {failed_tests}")
     print(f"Success Rate: {passed_tests/total_tests*100:.1f}%")
-    
+
     if failed_tests == 0:
         print("\n🎉 ALL TESTS PASSED! ISystemComponent implementation verified!")
         return 0

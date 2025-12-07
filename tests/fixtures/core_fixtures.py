@@ -63,7 +63,7 @@ def mock_risk_manager():
     mock.is_initialized = True
     mock.is_operational = True
     mock.emergency_mode = False
-    
+
     # Mock methods
     mock.authorize_trading_decision = AsyncMock(return_value=Mock(
         authorization_level='automatic',
@@ -76,7 +76,7 @@ def mock_risk_manager():
         'var_utilization': 0.3,
         'concentration_risk': 0.2
     })
-    
+
     return mock
 
 
@@ -121,7 +121,7 @@ def mock_strategy_manager():
     mock.is_initialized = True
     mock.is_running = True
     mock.active_strategies = {}
-    
+
     # Mock methods
     mock.generate_signals = AsyncMock(return_value=[])
     mock.add_strategy = AsyncMock(return_value=True)
@@ -131,7 +131,7 @@ def mock_strategy_manager():
         'sharpe_ratio': 1.2,
         'win_rate': 0.6
     })
-    
+
     return mock
 
 
@@ -170,7 +170,7 @@ def mock_execution_engine():
     """Mock UnifiedExecutionEngine for isolated testing"""
     mock = Mock(spec=UnifiedExecutionEngine)
     mock.is_initialized = True
-    
+
     # Mock methods
     mock.execute_order = AsyncMock(return_value=Mock(
         status='filled',
@@ -180,7 +180,7 @@ def mock_execution_engine():
     ))
     mock.cancel_order = AsyncMock(return_value=True)
     mock.get_execution_status = Mock(return_value='filled')
-    
+
     return mock
 
 
@@ -218,7 +218,7 @@ def mock_orchestrator():
     mock = Mock(spec=HierarchicalSystemOrchestrator)
     mock.system_status = 'operational'
     mock.component_registry = {}
-    
+
     # Mock methods
     mock.register_component = Mock(return_value='test_component_id')
     mock.initialize_system = AsyncMock(return_value=True)
@@ -228,7 +228,7 @@ def mock_orchestrator():
         'component_count': 5,
         'operational_components': 5
     })
-    
+
     return mock
 
 
@@ -265,7 +265,7 @@ async def metrics_calculator_fixture(metrics_calculator_config):
 def mock_metrics_calculator():
     """Mock metrics calculator for isolated testing"""
     mock = Mock(spec=EnhancedMetricsCalculator)
-    
+
     # Mock methods
     mock.calculate_return_metrics = Mock(return_value={
         'total_return': 0.15,
@@ -277,7 +277,7 @@ def mock_metrics_calculator():
         'var_95': -0.02,
         'max_drawdown': -0.10
     })
-    
+
     return mock
 
 
@@ -296,7 +296,7 @@ async def integrated_system_fixture(
     strategy_manager_fixture.risk_manager = risk_manager_fixture
     risk_manager_fixture.strategy_manager = strategy_manager_fixture
     risk_manager_fixture.unified_execution_engine = execution_engine_fixture
-    
+
     yield {
         'risk_manager': risk_manager_fixture,
         'strategy_manager': strategy_manager_fixture,

@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 class PnLSnapshot:
     """
     Point-in-time P&L snapshot
-    
+
     Attributes:
         timestamp: Snapshot timestamp
         realized_pnl: Realized P&L (closed positions)
@@ -63,7 +63,7 @@ class PnLSnapshot:
     intraday_high: float
     current_drawdown: float
     portfolio_value: float
-    
+
     # Attribution
     position_pnl: Dict[str, float] = field(default_factory=dict)
     strategy_pnl: Dict[str, float] = field(default_factory=dict)
@@ -72,21 +72,21 @@ class PnLSnapshot:
 class RealTimePnLTracker:
     """
     Real-Time P&L Tracker
-    
+
     Monitors portfolio P&L in real-time with:
     - Tick-by-tick unrealized P&L updates
     - Position-level attribution
     - Strategy-level attribution
     - Intraday high-water mark tracking
     - Drawdown monitoring
-    
+
     Integration: Called by CentralRiskManager on price updates and position changes
     """
-    
+
     def __init__(self, risk_manager, config: Optional[Dict] = None):
         """
         Initialize P&L tracker
-        
+
         Args:
             risk_manager: CentralRiskManager instance
             config: Configuration dictionary
@@ -94,96 +94,96 @@ class RealTimePnLTracker:
         self.risk_manager = risk_manager
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         # P&L State
         self.realized_pnl = 0.0
         self.unrealized_pnl = 0.0
         self.total_pnl = 0.0
-        
+
         # Intraday Tracking
         self.intraday_high = 0.0
         self.intraday_high_timestamp: Optional[datetime] = None
         self.current_drawdown = 0.0
-        
+
         # Attribution
         self.position_pnl: Dict[str, float] = {}  # symbol → P&L
         self.strategy_pnl: Dict[str, float] = {}  # strategy_id → P&L
         self.position_cost_basis: Dict[str, float] = {}  # symbol → avg cost
         self.position_strategy_map: Dict[str, str] = {}  # symbol → strategy_id
-        
+
         # History
         self.pnl_history: List[PnLSnapshot] = []
         self.max_history_size = self.config.get('max_history_size', 1000)
-        
+
         # Daily Reset
         self.last_reset_date = datetime.now().date()
         self.daily_start_value: Optional[float] = None
-        
+
         # Statistics
         self.total_updates = 0
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
-        
+
         self.logger.info("✅ RealTimePnLTracker initialized")
         self.logger.info(f"   Max History Size: {self.max_history_size}")
-    
+
     def set_risk_manager(self, risk_manager) -> None:
         """
         Inject the risk manager after construction.
-        
+
         This is needed because in backtest mode, the P&L tracker is created
         before the CentralRiskManager, so we inject it after both are created.
-        
+
         Args:
             risk_manager: CentralRiskManager instance
         """
         self.risk_manager = risk_manager
         self.logger.info("✅ RiskManager injected into RealTimePnLTracker")
-    
+
     async def update_market_data(self, symbol: str, price: float, timestamp: datetime):
         """
         Update P&L based on new market price
-        
+
         Called on every price tick for held positions
-        
+
         Args:
             symbol: Trading symbol
             price: Current market price
             timestamp: Price timestamp
         """
         self.total_updates += 1
-        
+
         # Check if daily reset needed
         await self._check_daily_reset()
-        
+
         # Update unrealized P&L for this position
         if symbol in self.risk_manager.current_positions:
             position = self.risk_manager.current_positions[symbol]
-            
+
             if abs(position) > 0.001:  # Has position
                 # Calculate P&L
                 cost_basis = self.position_cost_basis.get(symbol, price)
                 position_pnl = (price - cost_basis) * position
-                
+
                 # Update position P&L
                 old_pnl = self.position_pnl.get(symbol, 0.0)
                 self.position_pnl[symbol] = position_pnl
-                
+
                 # Update total unrealized P&L
                 self.unrealized_pnl += (position_pnl - old_pnl)
-                
+
                 # Update strategy attribution
                 if symbol in self.position_strategy_map:
                     strategy_id = self.position_strategy_map[symbol]
                     self.strategy_pnl[strategy_id] = self.strategy_pnl.get(strategy_id, 0.0) + (position_pnl - old_pnl)
-        
+
         # Update total P&L
         self._update_total_pnl()
-        
+
         # Update intraday high
         self._update_intraday_high(timestamp)
-        
+
         # Log periodically (every 100 updates)
         if self.total_updates % 100 == 0:
             self.logger.debug(
@@ -193,7 +193,7 @@ class RealTimePnLTracker:
                 f"Total: ${self.total_pnl:,.0f}, "
                 f"Drawdown: {self.current_drawdown:.2%}"
             )
-    
+
     async def update_position_close(
         self,
         symbol: str,
@@ -204,9 +204,9 @@ class RealTimePnLTracker:
     ):
         """
         Update P&L when position is closed
-        
+
         Called by CentralRiskManager when positions are closed
-        
+
         Args:
             symbol: Trading symbol
             quantity: Quantity closed (always positive)
@@ -216,45 +216,45 @@ class RealTimePnLTracker:
         """
         if timestamp is None:
             timestamp = datetime.now()
-        
+
         self.total_trades += 1
-        
+
         # Calculate realized P&L
         cost_basis = self.position_cost_basis.get(symbol, exit_price)
         trade_pnl = (exit_price - cost_basis) * quantity
-        
+
         # Update realized P&L
         self.realized_pnl += trade_pnl
-        
+
         # Update statistics
         if trade_pnl > 0:
             self.winning_trades += 1
         elif trade_pnl < 0:
             self.losing_trades += 1
-        
+
         # Update strategy attribution
         if strategy_id:
             self.strategy_pnl[strategy_id] = self.strategy_pnl.get(strategy_id, 0.0) + trade_pnl
-        
+
         # Update position P&L (remove unrealized, add to realized)
         if symbol in self.position_pnl:
             unrealized_before = self.position_pnl[symbol]
             self.unrealized_pnl -= unrealized_before
             del self.position_pnl[symbol]
-        
+
         # Update total P&L
         self._update_total_pnl()
-        
+
         # Update intraday high
         self._update_intraday_high(timestamp)
-        
+
         self.logger.info(
             f"💰 Position closed: {symbol} | "
             f"Qty: {quantity:.2f} @ ${exit_price:.2f} | "
             f"Trade P&L: ${trade_pnl:,.0f} | "
             f"Total P&L: ${self.total_pnl:,.0f}"
         )
-    
+
     async def update_position_entry(
         self,
         symbol: str,
@@ -265,7 +265,7 @@ class RealTimePnLTracker:
     ):
         """
         Update tracking when new position is entered
-        
+
         Args:
             symbol: Trading symbol
             quantity: Position quantity
@@ -275,16 +275,16 @@ class RealTimePnLTracker:
         """
         if timestamp is None:
             timestamp = datetime.now()
-        
+
         # Update cost basis
         # Get position BEFORE this entry was added (subtract quantity to get prior position)
         current_position_after = self.risk_manager.current_positions.get(symbol, 0.0)
         prior_position = current_position_after - quantity
-        
+
         if symbol in self.position_cost_basis and abs(prior_position) > 0.001:
             # Adding to existing position - use averaging logic
             current_cost = self.position_cost_basis[symbol]
-            
+
             # Calculate new average cost
             total_cost = (current_cost * prior_position) + (entry_price * quantity)
             new_position = prior_position + quantity
@@ -292,21 +292,21 @@ class RealTimePnLTracker:
         else:
             # NEW position (prior was 0 or no prior cost basis) - use entry price directly
             self.position_cost_basis[symbol] = entry_price
-        
+
         # Map position to strategy
         if strategy_id:
             self.position_strategy_map[symbol] = strategy_id
-        
+
         self.logger.info(
             f"📈 Position entry: {symbol} | "
             f"Qty: {quantity:.2f} @ ${entry_price:.2f} | "
             f"Cost Basis: ${self.position_cost_basis[symbol]:.2f}"
         )
-    
+
     def _update_total_pnl(self):
         """Update total P&L"""
         self.total_pnl = self.realized_pnl + self.unrealized_pnl
-    
+
     def _update_intraday_high(self, timestamp: datetime):
         """Update intraday high-water mark"""
         if self.total_pnl > self.intraday_high:
@@ -319,27 +319,27 @@ class RealTimePnLTracker:
                 self.current_drawdown = (self.total_pnl - self.intraday_high) / self.intraday_high
             else:
                 self.current_drawdown = 0.0
-    
+
     async def _check_daily_reset(self):
         """Check if daily reset is needed"""
         today = datetime.now().date()
         if today > self.last_reset_date:
             await self.daily_reset()
-    
+
     async def daily_reset(self):
         """Reset daily tracking (call at start of trading day)"""
         self.logger.info("📅 Daily P&L reset: Resetting intraday metrics")
-        
+
         # Reset intraday metrics
         self.intraday_high = self.total_pnl
         self.intraday_high_timestamp = datetime.now()
         self.current_drawdown = 0.0
-        
+
         # Set daily start value
         self.daily_start_value = self.risk_manager.portfolio_value
-        
+
         self.last_reset_date = datetime.now().date()
-    
+
     def get_current_snapshot(self) -> PnLSnapshot:
         """Get current P&L snapshot"""
         snapshot = PnLSnapshot(
@@ -353,28 +353,28 @@ class RealTimePnLTracker:
             position_pnl=dict(self.position_pnl),
             strategy_pnl=dict(self.strategy_pnl)
         )
-        
+
         # Add to history
         self.pnl_history.append(snapshot)
-        
+
         # Maintain history size
         if len(self.pnl_history) > self.max_history_size:
             self.pnl_history = self.pnl_history[-self.max_history_size:]
-        
+
         return snapshot
-    
+
     def get_position_pnl(self, symbol: str) -> float:
         """Get P&L for specific position"""
         return self.position_pnl.get(symbol, 0.0)
-    
+
     def get_strategy_pnl(self, strategy_id: str) -> float:
         """Get P&L for specific strategy"""
         return self.strategy_pnl.get(strategy_id, 0.0)
-    
+
     def get_top_positions(self, count: int = 10) -> List[tuple]:
         """
         Get top positions by P&L
-        
+
         Returns:
             List of (symbol, pnl) tuples sorted by P&L
         """
@@ -384,11 +384,11 @@ class RealTimePnLTracker:
             reverse=True
         )
         return sorted_positions[:count]
-    
+
     def get_bottom_positions(self, count: int = 10) -> List[tuple]:
         """
         Get worst positions by P&L
-        
+
         Returns:
             List of (symbol, pnl) tuples sorted by P&L (worst first)
         """
@@ -397,13 +397,13 @@ class RealTimePnLTracker:
             key=lambda x: x[1]
         )
         return sorted_positions[:count]
-    
+
     # Statistics and Reporting
-    
+
     def get_pnl_statistics(self) -> Dict:
         """Get P&L statistics"""
         win_rate = self.winning_trades / max(1, self.total_trades)
-        
+
         return {
             'realized_pnl': self.realized_pnl,
             'unrealized_pnl': self.unrealized_pnl,
@@ -421,11 +421,11 @@ class RealTimePnLTracker:
             'positions_tracked': len(self.position_pnl),
             'strategies_tracked': len(self.strategy_pnl)
         }
-    
+
     def generate_pnl_report(self) -> str:
         """Generate P&L report"""
         stats = self.get_pnl_statistics()
-        
+
         report = [
             "=" * 60,
             "REAL-TIME P&L REPORT",
@@ -453,7 +453,7 @@ class RealTimePnLTracker:
             f"  Strategies Tracked:  {stats['strategies_tracked']}",
             ""
         ]
-        
+
         # Top positions
         if self.position_pnl:
             report.append("TOP POSITIONS (P&L):")
@@ -461,7 +461,7 @@ class RealTimePnLTracker:
             for symbol, pnl in top_positions:
                 report.append(f"  {symbol:8s}: ${pnl:>10,.0f}")
             report.append("")
-        
+
         # Strategy attribution
         if self.strategy_pnl:
             report.append("STRATEGY ATTRIBUTION:")
@@ -473,23 +473,23 @@ class RealTimePnLTracker:
             for strategy_id, pnl in sorted_strategies[:5]:
                 report.append(f"  {strategy_id:30s}: ${pnl:>10,.0f}")
             report.append("")
-        
+
         report.append("=" * 60)
-        
+
         return "\n".join(report)
-    
+
     def get_pnl_series(self, minutes: int = 60) -> List[PnLSnapshot]:
         """
         Get P&L time series for last N minutes
-        
+
         Args:
             minutes: Number of minutes to look back
-            
+
         Returns:
             List of PnL snapshots
         """
         cutoff_time = datetime.now() - timedelta(minutes=minutes)
-        
+
         return [
             snapshot for snapshot in self.pnl_history
             if snapshot.timestamp >= cutoff_time

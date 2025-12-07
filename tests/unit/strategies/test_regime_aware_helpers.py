@@ -9,8 +9,8 @@ Date: November 3, 2025
 Priority 2: Regime-Aware Testing
 """
 
-from unittest.mock import Mock, MagicMock
-from typing import Dict, Any, Optional
+from unittest.mock import Mock
+from typing import Dict, Any
 
 
 def create_mock_regime_engine(
@@ -21,18 +21,18 @@ def create_mock_regime_engine(
 ) -> Mock:
     """
     Create a mock regime engine for testing
-    
+
     Args:
         primary_regime: Primary market regime
         volatility_regime: Volatility classification (low/normal/high/extreme)
         trend_regime: Trend classification (trending/sideways/choppy)
         confidence: Regime confidence (0.0-1.0)
-    
+
     Returns:
         Mock regime engine with specified regime context
     """
     regime_engine = Mock()
-    
+
     # Mock get_current_regime_context
     regime_context = {
         'primary_regime': primary_regime,
@@ -40,10 +40,10 @@ def create_mock_regime_engine(
         'trend_regime': trend_regime,
         'confidence': confidence
     }
-    
+
     regime_engine.get_current_regime_context = Mock(return_value=regime_context)
     regime_engine.current_regime_context = regime_context
-    
+
     return regime_engine
 
 
@@ -55,13 +55,13 @@ def create_regime_context_mock(
 ) -> Mock:
     """
     Create a mock regime context object
-    
+
     Args:
         primary_regime: Primary market regime
         volatility_regime: Volatility classification
         trend_regime: Trend classification
         confidence: Regime confidence
-    
+
     Returns:
         Mock regime context object
     """
@@ -70,7 +70,7 @@ def create_regime_context_mock(
     regime_context.volatility_regime = volatility_regime
     regime_context.trend_regime = trend_regime
     regime_context.confidence = confidence
-    
+
     return regime_context
 
 
@@ -124,10 +124,10 @@ REGIME_CONFIGS = {
 def get_regime_config(regime_name: str) -> Dict[str, Any]:
     """
     Get predefined regime configuration
-    
+
     Args:
         regime_name: Name of regime (e.g., 'low_volatility', 'high_volatility')
-    
+
     Returns:
         Dict with regime configuration
     """

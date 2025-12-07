@@ -1,10 +1,10 @@
 """
-Phase 9 Day 1: Configuration Loading Test
+IBKR Configuration Loading Test
 
 Tests:
 - Configuration file loading
 - Environment variable parsing
-- Alpaca config validation
+- IBKR config validation
 - Risk limits validation
 """
 import sys
@@ -20,94 +20,97 @@ from core_engine.config.broker_config import load_broker_config
 def test_config_loading():
     """Test configuration loads correctly from .env file"""
     print("=" * 60)
-    print("Broker Integration: Configuration Loading Test")
+    print("IBKR Configuration Loading Test")
     print("=" * 60)
-    
+
     try:
         # Load configuration
         print("\n⏳ Loading configuration from .env...")
         config = load_broker_config()
-        
-        # Test Alpaca config
-        print("\n🔧 Testing Alpaca Configuration:")
-        alpaca_config = config.alpaca
-        
-        # Check that credentials are loaded
-        if not alpaca_config.api_key:
-            print("❌ ALPACA_API_KEY not found in .env")
-            return False
-        
-        if not alpaca_config.secret_key:
-            print("❌ ALPACA_SECRET_KEY not found in .env")
-            return False
-        
-        # Display config (masked)
-        print(f"   ✓ API Key: {alpaca_config.api_key[:8]}...")
-        print(f"   ✓ Base URL: {alpaca_config.base_url}")
-        print(f"   ✓ Paper Trading: {alpaca_config.paper_trading}")
-        
+
+        # Test IBKR config
+        print("\n🔧 Testing Interactive Brokers Configuration:")
+        ibkr_config = config.interactive_brokers
+
+        # Check that connection parameters are loaded
+        if not ibkr_config.host:
+            print("❌ IBKR_HOST not found in .env")
+            assert False, "IBKR_HOST not found in .env"
+
+        if not ibkr_config.port:
+            print("❌ IBKR_PORT not found in .env")
+            assert False, "IBKR_PORT not found in .env"
+
+        if ibkr_config.client_id is None:
+            print("❌ IBKR_CLIENT_ID not found in .env")
+            assert False, "IBKR_CLIENT_ID not found in .env"
+
+        # Display config
+        print(f"   ✓ Host: {ibkr_config.host}")
+        print(f"   ✓ Port: {ibkr_config.port}")
+        print(f"   ✓ Client ID: {ibkr_config.client_id}")
+        print(f"   ✓ Paper Trading: {ibkr_config.paper_trading}")
+
         # Validate configuration
-        print("\n🔍 Validating Alpaca Configuration:")
-        if alpaca_config.validate():
+        print("\n🔍 Validating IBKR Configuration:")
+        if ibkr_config.validate():
             print("   ✅ Configuration validation: PASSED")
         else:
             print("   ❌ Configuration validation: FAILED")
-            return False
-        
+            assert False, "Configuration validation failed"
+
         # Test risk limits
         print("\n📊 Testing Risk Limits:")
         risk_limits = config.risk_limits
-        
+
         print(f"   Max Position Size: {risk_limits.max_position_size} shares")
         print(f"   Max Position Value: ${risk_limits.max_position_value:,.2f}")
         print(f"   Max Daily Trades: {risk_limits.max_daily_trades}")
         print(f"   Max Daily Loss: ${risk_limits.max_daily_loss:.2f}")
         print(f"   Paper Trading Only: {risk_limits.paper_trading_only}")
         print(f"   Manual Approval Required: {risk_limits.require_manual_approval}")
-        
+
         # Validate risk limits
         print("\n🔍 Validating Risk Limits:")
         if risk_limits.validate():
             print("   ✅ Risk limits validation: PASSED")
         else:
             print("   ❌ Risk limits validation: FAILED")
-            return False
-        
+            assert False, "Risk limits validation failed"
+
         # Test trading mode
         print("\n🎯 Testing Trading Mode:")
         trading_mode = config.trading_mode
         print(f"   Current Mode: {trading_mode.value}")
-        
+
         if trading_mode.value == "paper":
             print("   ✅ Paper trading mode confirmed")
         else:
             print("   ⚠️  WARNING: Not in paper trading mode!")
-        
+
         print("\n" + "=" * 60)
-        print("✅ Broker Configuration Test: SUCCESS")
+        print("✅ IBKR Configuration Test: SUCCESS")
         print("=" * 60)
         print("\n📝 Next Steps:")
-        print("   1. Verify your Alpaca credentials are correct")
-        print("   2. Run connection test: python tests/broker_integration/test_alpaca_connection.py")
-        print("   3. Check Alpaca dashboard: https://app.alpaca.markets/paper/dashboard/overview")
-        return True
-        
+        print("   1. Verify your IBKR TWS/Gateway is running")
+        print("   2. Run connection test: python tests/broker_integration/test_ibkr_connection.py")
+        print("   3. Check IBKR Trader Workstation is connected")
+
     except FileNotFoundError as e:
         print(f"\n❌ ERROR: .env file not found!")
         print(f"   {str(e)}")
         print("\n📝 Create .env file in project root with:")
-        print("   ALPACA_API_KEY=your_key_here")
-        print("   ALPACA_SECRET_KEY=your_secret_here")
-        print("   ALPACA_BASE_URL=https://paper-api.alpaca.markets")
+        print("   IBKR_HOST=127.0.0.1")
+        print("   IBKR_PORT=4002")
+        print("   IBKR_CLIENT_ID=1")
         print("   TRADING_MODE=paper")
-        return False
-        
+        assert False, ".env file not found"
+
     except Exception as e:
         print(f"\n❌ ERROR: {type(e).__name__}")
         print(f"   {str(e)}")
-        return False
+        assert False, f"Configuration loading failed: {str(e)}"
 
 
 if __name__ == "__main__":
-    success = test_config_loading()
-    sys.exit(0 if success else 1)
+    test_config_loading()

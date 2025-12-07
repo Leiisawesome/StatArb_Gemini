@@ -140,7 +140,7 @@ class TestIntegrationWorkflow:
             assert 'initialized' in status
             assert 'operational' in status
             assert status['initialized'] is True
-            
+
             # Different components have different status structures
             if hasattr(component, 'health_metrics'):
                 assert 'health_metrics' in status

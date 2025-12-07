@@ -13,40 +13,40 @@ __author__ = "StatArb_Gemini"
 try:
     # System components (existing)
     pass
-    
+
     # Data management (moved)
-    
+
     # Regime assessment (existing)
-    
+
     # Processing pipeline (moved)
-    
+
     # Trading components (moved)
-    
+
     # Configuration (new)
-    
+
     __all__ = [
         # System components
         'HierarchicalSystemOrchestrator',
-        'CentralRiskManager', 
+        'CentralRiskManager',
         'UnifiedExecutionEngine',
-        
+
         # Data and processing
         'ClickHouseDataManager',
         'RegimeEngine',
         'EnhancedTechnicalIndicators',
         'FeatureEngineer',
         'SignalGenerator',
-        
+
         # Trading
         'PortfolioManager',
-        
+
         # Configuration
         'SystemConfig',
         'DataConfig',
-        'RiskConfig', 
+        'RiskConfig',
         'ProcessingConfig'
     ]
-    
+
 except ImportError as e:
     # Graceful fallback during migration
     print(f"Warning: Some components not available during migration: {e}")

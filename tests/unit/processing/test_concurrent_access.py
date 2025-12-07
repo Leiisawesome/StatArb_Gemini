@@ -30,7 +30,7 @@ from core_engine.system.interfaces import RegimeContext
 
 class TestConcurrentAccess:
     """Test processing components under concurrent access"""
-    
+
     @pytest.fixture
     def sample_market_data(self):
         """Create sample market data"""
@@ -45,7 +45,7 @@ class TestConcurrentAccess:
             'symbol': 'TEST'
         })
         return data
-    
+
     def create_symbol_data(self, symbol: str, duration: int = 100):
         """Create market data for a specific symbol"""
         dates = pd.date_range(start='2024-01-01', periods=duration, freq='1min')
@@ -59,24 +59,24 @@ class TestConcurrentAccess:
             'symbol': symbol
         })
         return data
-    
+
     # ============================================================================
     # Concurrent Indicator Calculations
     # ============================================================================
-    
+
     @pytest.mark.asyncio
     async def test_concurrent_indicator_calculations(self):
         """Test multiple threads calculating indicators simultaneously"""
         engine = EnhancedTechnicalIndicators()
         await engine.initialize()
         await engine.start()
-        
+
         # Create data for multiple symbols
         symbols = ['AAPL', 'GOOGL', 'MSFT', 'NVDA', 'TSLA']
         datasets = {symbol: self.create_symbol_data(symbol) for symbol in symbols}
-        
+
         results = {}
-        
+
         def calculate_for_symbol(symbol):
             """Calculate indicators for a symbol"""
             try:
@@ -84,91 +84,91 @@ class TestConcurrentAccess:
                 return symbol, result
             except Exception:
                 return symbol, None
-        
+
         # Run calculations concurrently
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(calculate_for_symbol, symbol): symbol 
+            futures = {executor.submit(calculate_for_symbol, symbol): symbol
                       for symbol in symbols}
-            
+
             for future in as_completed(futures):
                 symbol, result = future.result()
                 results[symbol] = result
-        
+
         # Verify all calculations completed successfully
         assert len(results) == len(symbols)
         for symbol in symbols:
             assert results[symbol] is not None
             assert not results[symbol].empty
             assert 'sma_20' in results[symbol].columns
-    
+
     @pytest.mark.asyncio
     async def test_concurrent_regime_updates(self):
         """Test concurrent regime updates"""
         engine = EnhancedTechnicalIndicators()
         await engine.initialize()
         await engine.start()
-        
+
         # Define multiple regime contexts
         regimes = [
             RegimeContext(
-                primary_regime='low_volatility', 
+                primary_regime='low_volatility',
                 regime_confidence=0.8,
                 regime_start_time=datetime.now(),
                 regime_duration_minutes=60.0
             ),
             RegimeContext(
-                primary_regime='high_volatility', 
+                primary_regime='high_volatility',
                 regime_confidence=0.9,
                 regime_start_time=datetime.now(),
                 regime_duration_minutes=45.0
             ),
             RegimeContext(
-                primary_regime='trending', 
+                primary_regime='trending',
                 regime_confidence=0.7,
                 regime_start_time=datetime.now(),
                 regime_duration_minutes=90.0
             ),
             RegimeContext(
-                primary_regime='choppy', 
+                primary_regime='choppy',
                 regime_confidence=0.6,
                 regime_start_time=datetime.now(),
                 regime_duration_minutes=30.0
             ),
         ]
-        
+
         # Update regimes concurrently
         async def update_regime(regime_context):
             await engine.on_regime_change(regime_context)
             return True
-        
+
         # Run concurrent updates
         results = await asyncio.gather(*[update_regime(r) for r in regimes])
-        
+
         # All updates should complete without error
         assert all(results)
-        
+
         # Verify component health after concurrent updates
         health = await engine.health_check()
         assert health['healthy'] is True
-    
+
     # ============================================================================
     # Parallel Feature Engineering
     # ============================================================================
-    
+
     @pytest.mark.asyncio
     async def test_parallel_feature_engineering(self):
         """Test parallel feature engineering for multiple symbols"""
         engineer = EnhancedFeatureEngineer()
         await engineer.initialize()
         await engineer.start()
-        
+
         # Create data for multiple symbols
         symbols = ['AAPL', 'GOOGL', 'MSFT', 'NVDA', 'TSLA']
-        datasets = {symbol: self.create_symbol_data(symbol, duration=200) 
+        datasets = {symbol: self.create_symbol_data(symbol, duration=200)
                    for symbol in symbols}
-        
+
         results = {}
-        
+
         def engineer_features(symbol):
             """Engineer features for a symbol"""
             try:
@@ -176,39 +176,39 @@ class TestConcurrentAccess:
                 return symbol, features
             except Exception:
                 return symbol, None
-        
+
         # Run feature engineering in parallel
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(engineer_features, symbol): symbol 
+            futures = {executor.submit(engineer_features, symbol): symbol
                       for symbol in symbols}
-            
+
             for future in as_completed(futures):
                 symbol, features = future.result()
                 results[symbol] = features
-        
+
         # Verify all feature engineering completed successfully
         assert len(results) == len(symbols)
         for symbol in symbols:
             assert results[symbol] is not None
             assert not results[symbol].empty
-    
+
     # ============================================================================
     # Concurrent Signal Generation
     # ============================================================================
-    
+
     @pytest.mark.asyncio
     async def test_concurrent_signal_generation(self):
         """Test concurrent signal generation"""
         generator = EnhancedSignalGenerator()
         await generator.initialize()
         await generator.start()
-        
+
         # Create data for multiple symbols
         symbols = ['AAPL', 'GOOGL', 'MSFT', 'NVDA']
         datasets = {symbol: self.create_symbol_data(symbol) for symbol in symbols}
-        
+
         results = {}
-        
+
         def generate_signals(symbol):
             """Generate signals for a symbol"""
             try:
@@ -216,33 +216,33 @@ class TestConcurrentAccess:
                 return symbol, signals
             except Exception:
                 return symbol, []
-        
+
         # Generate signals concurrently
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(generate_signals, symbol): symbol 
+            futures = {executor.submit(generate_signals, symbol): symbol
                       for symbol in symbols}
-            
+
             for future in as_completed(futures):
                 symbol, signals = future.result()
                 results[symbol] = signals
-        
+
         # Verify all signal generation completed
         assert len(results) == len(symbols)
         for symbol in symbols:
             assert results[symbol] is not None
-    
+
     @pytest.mark.asyncio
     async def test_race_condition_health_checks(self):
         """Test concurrent health checks"""
         generator = EnhancedSignalGenerator()
         await generator.initialize()
         await generator.start()
-        
+
         # Run multiple health checks concurrently
         health_results = await asyncio.gather(*[
             generator.health_check() for _ in range(20)
         ])
-        
+
         # All health checks should complete successfully
         assert len(health_results) == 20
         for health in health_results:

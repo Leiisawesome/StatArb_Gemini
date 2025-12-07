@@ -8,7 +8,7 @@ Lightweight implementations replacing core_structure dependencies.
 from .orders import Order, OrderType, OrderStatus, OrderSide, ExecutionResult
 from .portfolio import Portfolio, PortfolioManager, PortfolioSnapshot, PortfolioConfig, Position
 from .strategy import (
-    BaseStrategy, StrategyInterface, StrategyMetrics, StrategyType, 
+    BaseStrategy, StrategyInterface, StrategyMetrics, StrategyType,
     StrategyConfig, TradingSignal, StrategyManager,
     SignalType, SignalStrength  # Canonical signal types
 )
@@ -21,27 +21,27 @@ from .broker import BrokerInterface, BrokerManager, BrokerConfig, PaperBroker, B
 __all__ = [
     # Orders
     'Order', 'OrderType', 'OrderStatus', 'OrderSide', 'ExecutionResult',
-    
+
     # Portfolio
     'Portfolio', 'PortfolioManager', 'PortfolioSnapshot', 'PortfolioConfig', 'Position',
-    
+
     # Strategy
     'BaseStrategy', 'StrategyInterface', 'StrategyMetrics', 'StrategyType',
     'StrategyConfig', 'TradingSignal', 'StrategyManager',
     'SignalType', 'SignalStrength',  # Canonical signal types
-    
+
     # Risk
     'RiskManager', 'RiskMetrics', 'RiskConfig', 'RiskResult', 'RiskLevel',
-    
+
     # Regime (Canonical types - Single Source of Truth)
     'MarketRegime', 'RegimeType', 'RegimeState', 'RegimeConfig', 'RegimeSignal', 'RegimeEngine',
-    
+
     # Data
     'DataManager', 'DataProvider', 'MarketData', 'DataConfig',
-    
+
     # Analytics
     'AnalyticsEngine', 'PerformanceMetrics',
-    
+
     # Broker
     'BrokerInterface', 'BrokerManager', 'BrokerConfig', 'PaperBroker', 'BrokerType'
 ]

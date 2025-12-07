@@ -94,7 +94,7 @@ def fill_processor():
 
 class TestEnums:
     """Test enum definitions"""
-    
+
     def test_fill_status_enum(self):
         """Test FillStatus enum values"""
         assert FillStatus.PENDING.value == "pending"
@@ -102,13 +102,13 @@ class TestEnums:
         assert FillStatus.RECONCILED.value == "reconciled"
         assert FillStatus.PROCESSED.value == "processed"
         assert FillStatus.REJECTED.value == "rejected"
-    
+
     def test_reconciliation_status_enum(self):
         """Test ReconciliationStatus enum values"""
         assert ReconciliationStatus.MATCHED.value == "matched"
         assert ReconciliationStatus.UNMATCHED.value == "unmatched"
         assert ReconciliationStatus.BROKEN.value == "broken"
-    
+
     def test_reporting_frequency_enum(self):
         """Test ReportingFrequency enum values"""
         assert ReportingFrequency.REAL_TIME.value == "real_time"
@@ -119,30 +119,30 @@ class TestEnums:
 
 class TestTradeExecution:
     """Test TradeExecution dataclass"""
-    
+
     def test_basic_trade_execution(self, sample_trade_execution):
         """Test basic trade execution creation"""
         assert sample_trade_execution.execution_id == "EXEC001"
         assert sample_trade_execution.symbol == "AAPL"
         assert sample_trade_execution.quantity == 1000.0
         assert sample_trade_execution.price == 150.00
-    
+
     def test_trade_with_commission(self, sample_trade_execution):
         """Test trade execution with commission and fees"""
         assert sample_trade_execution.commission == 5.00
         assert sample_trade_execution.fees == 2.50
         total_cost = sample_trade_execution.commission + sample_trade_execution.fees
         assert total_cost == 7.50
-    
+
     def test_trade_notional_value(self, sample_trade_execution):
         """Test trade notional value calculation"""
         notional = sample_trade_execution.quantity * sample_trade_execution.price
         assert notional == 150000.00
-    
+
     def test_trade_default_status(self, sample_trade_execution):
         """Test trade default status is PENDING"""
         assert sample_trade_execution.fill_status == FillStatus.PENDING
-    
+
     def test_sell_side_trade(self):
         """Test sell side trade creation"""
         trade = TradeExecution(
@@ -161,17 +161,17 @@ class TestTradeExecution:
 
 class TestPositionUpdate:
     """Test PositionUpdate dataclass"""
-    
+
     def test_basic_position_update(self, sample_position_update):
         """Test basic position update creation"""
         assert sample_position_update.symbol == "AAPL"
         assert sample_position_update.quantity_change == 1000.0
         assert sample_position_update.new_position == 1000.0
-    
+
     def test_position_avg_cost(self, sample_position_update):
         """Test position average cost tracking"""
         assert sample_position_update.new_avg_cost == 150.00
-    
+
     def test_position_pnl(self, sample_position_update):
         """Test position PnL tracking"""
         assert sample_position_update.realized_pnl == 0.0
@@ -180,7 +180,7 @@ class TestPositionUpdate:
 
 class TestFillEvent:
     """Test FillEvent dataclass"""
-    
+
     def test_fill_event_creation(self):
         """Test fill event creation"""
         event = FillEvent(
@@ -198,23 +198,23 @@ class TestFillEvent:
 
 class TestFillValidator:
     """Test fill validation logic"""
-    
+
     def test_validator_initialization(self, fill_validator):
         """Test validator initialization"""
         assert fill_validator is not None
         assert hasattr(fill_validator, 'validation_rules')
-    
+
     def test_default_rules_loaded(self, fill_validator):
         """Test default validation rules are loaded"""
         assert len(fill_validator.validation_rules) > 0
-    
+
     def test_validate_fill_basic(self, fill_validator, sample_trade_execution):
         """Test basic fill validation"""
         result = fill_validator.validate_fill(sample_trade_execution)
         assert isinstance(result, tuple)
         is_valid, messages = result
         assert isinstance(is_valid, bool)
-    
+
     def test_price_range_validation(self, fill_validator):
         """Test price range validation"""
         trade = TradeExecution(
@@ -227,15 +227,15 @@ class TestFillValidator:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         # Set reference price
         fill_validator._reference_data["AAPL"] = {"price": 150.00}
-        
+
         result = fill_validator.validate_fill(trade)
         is_valid, messages = result
         # Should pass with price at reference
         assert isinstance(is_valid, bool)
-    
+
     def test_quantity_validation(self, fill_validator):
         """Test quantity limit validation"""
         trade = TradeExecution(
@@ -248,7 +248,7 @@ class TestFillValidator:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         result = fill_validator.validate_fill(trade)
         is_valid, messages = result
         # May fail quantity check depending on rules
@@ -259,12 +259,12 @@ class TestFillValidator:
 
 class TestTradeReconciler:
     """Test trade reconciliation"""
-    
+
     def test_reconciler_initialization(self, trade_reconciler):
         """Test reconciler initialization"""
         assert trade_reconciler is not None
         assert hasattr(trade_reconciler, 'reconcile_execution')
-    
+
     def test_reconcile_matched_trade(self, trade_reconciler, sample_trade_execution):
         """Test reconciling a matched trade"""
         # Create matching counterparty data
@@ -276,10 +276,10 @@ class TestTradeReconciler:
             'price': 150.00,
             'venue': 'NYSE',
         }
-        
+
         result = trade_reconciler.reconcile_execution(sample_trade_execution, counterparty_data)
         assert isinstance(result, ReconciliationStatus)
-    
+
     def test_reconcile_quantity_mismatch(self, trade_reconciler):
         """Test reconciling trades with quantity mismatch"""
         trade1 = TradeExecution(
@@ -292,7 +292,7 @@ class TestTradeReconciler:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         counterparty_data = {
             'execution_id': 'EXEC005_CP',
             'symbol': 'AAPL',
@@ -301,7 +301,7 @@ class TestTradeReconciler:
             'price': 150.00,
             'venue': 'NYSE',
         }
-        
+
         result = trade_reconciler.reconcile_execution(trade1, counterparty_data)
         assert isinstance(result, ReconciliationStatus)
         # Should detect mismatch - will be BROKEN or MATCHED depending on tolerance
@@ -312,20 +312,20 @@ class TestTradeReconciler:
 
 class TestPositionManager:
     """Test position management"""
-    
+
     def test_manager_initialization(self, position_manager):
         """Test position manager initialization"""
         assert position_manager is not None
         assert hasattr(position_manager, 'process_execution')
-    
+
     def test_new_position_from_trade(self, position_manager, sample_trade_execution):
         """Test creating new position from trade"""
         update = position_manager.process_execution(sample_trade_execution)
-        
+
         assert isinstance(update, PositionUpdate)
         assert update.symbol == "AAPL"
         assert update.quantity_change == 1000.0
-    
+
     def test_add_to_existing_position(self, position_manager):
         """Test adding to existing position"""
         # First trade
@@ -339,9 +339,9 @@ class TestPositionManager:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         position_manager.process_execution(trade1)
-        
+
         # Second trade
         trade2 = TradeExecution(
             execution_id="EXEC007",
@@ -353,14 +353,14 @@ class TestPositionManager:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         update = position_manager.process_execution(trade2)
-        
+
         assert update.new_position == 1000.0
         # Average cost should be weighted average
         expected_avg = (500 * 150.00 + 500 * 152.00) / 1000
         assert abs(update.new_avg_cost - expected_avg) < 0.01
-    
+
     def test_reduce_position(self, position_manager):
         """Test reducing a position"""
         # Build position
@@ -375,7 +375,7 @@ class TestPositionManager:
             venue="NYSE",
         )
         position_manager.process_execution(trade1)
-        
+
         # Sell some
         trade2 = TradeExecution(
             execution_id="EXEC009",
@@ -387,13 +387,13 @@ class TestPositionManager:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         update = position_manager.process_execution(trade2)
-        
+
         assert update.new_position == 600.0
         # Should have realized PnL
         assert update.realized_pnl > 0  # Sold at profit
-    
+
     def test_get_position(self, position_manager):
         """Test retrieving current position"""
         # Create position
@@ -408,7 +408,7 @@ class TestPositionManager:
             venue="NASDAQ",
         )
         position_manager.process_execution(trade)
-        
+
         position_data = position_manager.get_position("DEFAULT", "GOOGL")
         assert position_data is not None
         assert isinstance(position_data, dict)
@@ -419,21 +419,21 @@ class TestPositionManager:
 
 class TestTradeReporter:
     """Test trade reporting"""
-    
+
     def test_reporter_initialization(self, trade_reporter):
         """Test reporter initialization"""
         assert trade_reporter is not None
         assert hasattr(trade_reporter, 'generate_execution_report')
-    
+
     def test_generate_basic_report(self, trade_reporter, sample_trade_execution):
         """Test generating basic trade report"""
         trade_reporter.add_execution(sample_trade_execution)
         report = trade_reporter.generate_execution_report()
-        
+
         assert isinstance(report, (dict, pd.DataFrame))
         if isinstance(report, pd.DataFrame):
             assert len(report) > 0
-    
+
     def test_report_with_multiple_trades(self, trade_reporter):
         """Test report with multiple trades"""
         trades = [
@@ -449,14 +449,14 @@ class TestTradeReporter:
             )
             for i in range(5)
         ]
-        
+
         for trade in trades:
             trade_reporter.add_execution(trade)
-        
+
         report = trade_reporter.generate_execution_report()
         assert isinstance(report, pd.DataFrame)
         assert len(report) == 5
-    
+
     def test_report_by_symbol(self, trade_reporter):
         """Test generating report filtered by symbol"""
         trades = [
@@ -481,10 +481,10 @@ class TestTradeReporter:
                 venue="NASDAQ",
             ),
         ]
-        
+
         for trade in trades:
             trade_reporter.add_execution(trade)
-        
+
         report = trade_reporter.generate_execution_report(symbol="AAPL")
         assert isinstance(report, pd.DataFrame)
         if len(report) > 0:
@@ -495,22 +495,22 @@ class TestTradeReporter:
 
 class TestFillProcessor:
     """Test main fill processor"""
-    
+
     def test_processor_initialization(self, fill_processor):
         """Test fill processor initialization"""
         assert fill_processor is not None
         assert hasattr(fill_processor, 'process_fill')
         assert hasattr(fill_processor, 'validator')
         assert hasattr(fill_processor, 'reconciler')
-    
+
     @pytest.mark.asyncio
     async def test_process_fill_basic(self, fill_processor, sample_trade_execution):
         """Test basic fill processing"""
         result = await fill_processor.process_fill(sample_trade_execution)
-        
+
         # Returns bool indicating success/failure
         assert isinstance(result, bool)
-    
+
     @pytest.mark.asyncio
     async def test_process_multiple_fills(self, fill_processor):
         """Test processing multiple fills"""
@@ -527,21 +527,21 @@ class TestFillProcessor:
             )
             for i in range(3)
         ]
-        
+
         results = []
         for trade in trades:
             result = await fill_processor.process_fill(trade)
             results.append(result)
-        
+
         assert len(results) == 3
         assert all(isinstance(r, bool) for r in results)
-    
+
     def test_get_fill_metrics(self, fill_processor):
         """Test retrieving fill metrics"""
         metrics = fill_processor.get_fill_metrics("AAPL")
-        
+
         assert isinstance(metrics, FillMetrics)
-    
+
     @pytest.mark.asyncio
     async def test_process_partial_fill(self, fill_processor):
         """Test processing partial fill"""
@@ -555,7 +555,7 @@ class TestFillProcessor:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         result = await fill_processor.process_fill(trade)
         assert isinstance(result, bool)
 
@@ -564,7 +564,7 @@ class TestFillProcessor:
 
 class TestErrorHandling:
     """Test error handling scenarios"""
-    
+
     @pytest.mark.asyncio
     async def test_invalid_fill_rejection(self, fill_processor):
         """Test invalid fill is rejected"""
@@ -578,7 +578,7 @@ class TestErrorHandling:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         try:
             result = await fill_processor.process_fill(invalid_trade)
             # Should either raise or return rejection status
@@ -587,7 +587,7 @@ class TestErrorHandling:
         except (ValueError, AssertionError):
             # Expected to raise error
             pass
-    
+
     def test_position_update_error_handling(self, position_manager):
         """Test position manager handles errors gracefully"""
         invalid_trade = TradeExecution(
@@ -600,7 +600,7 @@ class TestErrorHandling:
             execution_time=datetime.now(),
             venue="NYSE",
         )
-        
+
         try:
             position_manager.process_execution(invalid_trade)
         except (ValueError, KeyError, AttributeError):
@@ -612,7 +612,7 @@ class TestErrorHandling:
 
 class TestIntegration:
     """Test integration scenarios"""
-    
+
     @pytest.mark.asyncio
     async def test_full_fill_lifecycle(self, fill_processor):
         """Test complete fill processing lifecycle"""
@@ -628,19 +628,19 @@ class TestIntegration:
             venue="NYSE",
             commission=5.00,
         )
-        
+
         # Process fill
         result = await fill_processor.process_fill(trade)
         assert isinstance(result, bool)
-        
+
         # Get metrics
         metrics = fill_processor.get_fill_metrics("AAPL")
         assert isinstance(metrics, FillMetrics)
-    
+
     def test_multiple_symbols_tracking(self, position_manager):
         """Test tracking positions across multiple symbols"""
         symbols = ["AAPL", "GOOGL", "MSFT"]
-        
+
         for i, symbol in enumerate(symbols):
             trade = TradeExecution(
                 execution_id=f"EXEC_MULTI_{i}",
@@ -653,7 +653,7 @@ class TestIntegration:
                 venue="NYSE",
             )
             position_manager.process_execution(trade)
-        
+
         # Check all positions exist
         for symbol in symbols:
             position_data = position_manager.get_position("DEFAULT", symbol)

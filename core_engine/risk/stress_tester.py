@@ -88,11 +88,11 @@ class PortfolioStressResult:
 class StressTester:
     """
     Advanced stress testing framework
-    
+
     Provides comprehensive stress testing capabilities including historical scenarios,
     hypothetical shocks, Monte Carlo simulations, and reverse stress testing.
     """
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize stress tester"""
         self.config = config or {}
@@ -100,26 +100,26 @@ class StressTester:
         self._scenarios = {}
         self._historical_scenarios = {}
         self._test_results = deque(maxlen=1000)
-        
+
         # Configuration
         self.monte_carlo_runs = self.config.get('monte_carlo_runs', 10000)
         self.confidence_levels = self.config.get('confidence_levels', [0.95, 0.99, 0.999])
         self.correlation_decay = self.config.get('correlation_decay', 0.94)
-        
+
         # Market factor mappings
         self._factor_mappings = {}
         self._correlation_matrix = {}
         self._volatility_estimates = {}
-        
+
         # Load predefined scenarios
         self._load_historical_scenarios()
         self._load_hypothetical_scenarios()
-        
+
         logger.info("StressTester initialized")
-    
+
     def _load_historical_scenarios(self) -> None:
         """Load historical stress scenarios"""
-        
+
         # Black Monday 1987
         black_monday = StressScenario(
             name="Black_Monday_1987",
@@ -134,7 +134,7 @@ class StressTester:
             probability=0.001,  # Once in 1000 days
             time_horizon_days=1
         )
-        
+
         # LTCM Crisis 1998
         ltcm_crisis = StressScenario(
             name="LTCM_Crisis_1998",
@@ -148,7 +148,7 @@ class StressTester:
             ],
             probability=0.001
         )
-        
+
         # Dot-com Crash 2000-2002
         dotcom_crash = StressScenario(
             name="Dotcom_Crash_2000",
@@ -162,7 +162,7 @@ class StressTester:
             probability=0.0004,  # Once in 2500 days
             time_horizon_days=756  # 3 years
         )
-        
+
         # 2008 Financial Crisis
         financial_crisis_2008 = StressScenario(
             name="Financial_Crisis_2008",
@@ -179,7 +179,7 @@ class StressTester:
             probability=0.0003,  # Once in 3333 days (13 years)
             time_horizon_days=517  # Peak to trough
         )
-        
+
         # European Sovereign Debt Crisis 2010-2012
         euro_crisis = StressScenario(
             name="Euro_Crisis_2010",
@@ -193,7 +193,7 @@ class StressTester:
             ],
             probability=0.0005
         )
-        
+
         # COVID-19 Pandemic 2020
         covid_pandemic = StressScenario(
             name="COVID_Pandemic_2020",
@@ -210,7 +210,7 @@ class StressTester:
             probability=0.0003,
             time_horizon_days=33  # Peak decline period
         )
-        
+
         self._historical_scenarios = {
             'black_monday_1987': black_monday,
             'ltcm_crisis_1998': ltcm_crisis,
@@ -219,10 +219,10 @@ class StressTester:
             'euro_crisis_2010': euro_crisis,
             'covid_pandemic_2020': covid_pandemic
         }
-    
+
     def _load_hypothetical_scenarios(self) -> None:
         """Load hypothetical stress scenarios"""
-        
+
         # Interest rate shock
         rate_shock = StressScenario(
             name="Interest_Rate_Shock",
@@ -235,7 +235,7 @@ class StressTester:
                 MarketShock("RATES_30Y", ShockType.ABSOLUTE, 0.02, "30Y rate +200bp")
             ]
         )
-        
+
         # Currency crisis
         currency_crisis = StressScenario(
             name="Currency_Crisis",
@@ -247,7 +247,7 @@ class StressTester:
                 MarketShock("VOLATILITY_FX", ShockType.VOLATILITY, 2.5, "FX volatility spike")
             ]
         )
-        
+
         # Commodity shock
         commodity_shock = StressScenario(
             name="Commodity_Shock",
@@ -260,7 +260,7 @@ class StressTester:
                 MarketShock("INDUSTRIAL_METALS", ShockType.RELATIVE, -0.20, "Industrial metal decline")
             ]
         )
-        
+
         # Geopolitical crisis
         geopolitical_crisis = StressScenario(
             name="Geopolitical_Crisis",
@@ -274,7 +274,7 @@ class StressTester:
                 MarketShock("GOLD", ShockType.RELATIVE, 0.15, "Safe haven demand")
             ]
         )
-        
+
         # Technology disruption
         tech_disruption = StressScenario(
             name="Technology_Disruption",
@@ -286,7 +286,7 @@ class StressTester:
                 MarketShock("GROWTH_PREMIUM", ShockType.RELATIVE, -0.50, "Growth factor decline")
             ]
         )
-        
+
         self._scenarios.update({
             'rate_shock': rate_shock,
             'currency_crisis': currency_crisis,
@@ -294,7 +294,7 @@ class StressTester:
             'geopolitical_crisis': geopolitical_crisis,
             'tech_disruption': tech_disruption
         })
-    
+
     async def run_stress_test(
         self,
         scenario_name: str,
@@ -304,47 +304,47 @@ class StressTester:
     ) -> PortfolioStressResult:
         """
         Run stress test on portfolio using specified scenario
-        
+
         Args:
             scenario_name: Name of stress scenario
             positions: Portfolio positions
             portfolio_value: Total portfolio value
             factor_loadings: Optional factor loadings for positions
-            
+
         Returns:
             Portfolio stress test results
         """
         start_time = time.time()
-        
+
         try:
             # Defensive type conversion for portfolio_value
             portfolio_value = float(portfolio_value) if portfolio_value is not None else 0.0
-            
+
             # Get scenario
             scenario = self._get_scenario(scenario_name)
             if not scenario:
                 raise ValueError(f"Unknown scenario: {scenario_name}")
-            
+
             # Calculate position-level impacts
             position_results = []
             total_pnl = 0.0
-            
+
             for position_id, position in positions.items():
                 result = await self._calculate_position_stress(
                     position_id, position, scenario, factor_loadings
                 )
                 position_results.append(result)
                 total_pnl += result.pnl
-            
+
             # Calculate portfolio-level metrics
             total_pnl_percentage = (total_pnl / portfolio_value * 100) if portfolio_value > 0 else 0
-            
+
             # Calculate worst-case VaR equivalent
             worst_case_var = abs(total_pnl) if total_pnl < 0 else 0
-            
+
             # Risk breakdown by factor
             risk_breakdown = self._calculate_risk_breakdown(position_results, scenario)
-            
+
             portfolio_result = PortfolioStressResult(
                 scenario_name=scenario_name,
                 total_pnl=total_pnl,
@@ -354,7 +354,7 @@ class StressTester:
                 risk_breakdown=risk_breakdown,
                 scenario_probability=scenario.probability
             )
-            
+
             # Store result
             self._test_results.append({
                 'timestamp': datetime.now(),
@@ -363,15 +363,15 @@ class StressTester:
                 'total_pnl': total_pnl,
                 'calculation_time': time.time() - start_time
             })
-            
+
             logger.info(f"Stress test '{scenario_name}' completed: PnL = {total_pnl:.2f} ({total_pnl_percentage:.2f}%)")
-            
+
             return portfolio_result
-            
+
         except Exception as e:
             logger.error(f"Error running stress test: {e}")
             raise
-    
+
     async def _calculate_position_stress(
         self,
         position_id: str,
@@ -380,31 +380,31 @@ class StressTester:
         factor_loadings: Optional[Dict[str, Dict[str, float]]] = None
     ) -> StressTestResult:
         """Calculate stress test impact for individual position"""
-        
+
         original_value = position.get('market_value', 0)
-        
+
         # Get position characteristics
         position.get('asset_type', 'EQUITY')
         position.get('sector', '')
         position.get('region', '')
         position.get('currency', 'USD')
-        
+
         # Calculate aggregate shock for this position
         total_shock = 0.0
         risk_attribution = {}
-        
+
         for shock in scenario.shocks:
             shock_impact = self._calculate_shock_impact(
                 shock, position, factor_loadings.get(position_id, {}) if factor_loadings else {}
             )
             total_shock += shock_impact
             risk_attribution[shock.factor] = shock_impact * original_value
-        
+
         # Apply shock to position value
         stressed_value = original_value * (1 + total_shock)
         pnl = stressed_value - original_value
         pnl_percentage = (pnl / original_value * 100) if original_value != 0 else 0
-        
+
         return StressTestResult(
             scenario_name=scenario.name,
             position_id=position_id,
@@ -415,7 +415,7 @@ class StressTester:
             contribution_to_portfolio=pnl,
             risk_attribution=risk_attribution
         )
-    
+
     def _calculate_shock_impact(
         self,
         shock: MarketShock,
@@ -423,13 +423,13 @@ class StressTester:
         factor_loadings: Dict[str, float]
     ) -> float:
         """Calculate impact of individual shock on position"""
-        
+
         # Get position sensitivity to this factor
         sensitivity = self._get_position_sensitivity(shock.factor, position, factor_loadings)
-        
+
         if sensitivity == 0:
             return 0.0
-        
+
         # Apply shock based on type
         if shock.shock_type == ShockType.RELATIVE:
             return sensitivity * shock.magnitude
@@ -446,9 +446,9 @@ class StressTester:
         elif shock.shock_type == ShockType.CORRELATION:
             # Correlation shocks affect correlation-dependent strategies
             return sensitivity * shock.magnitude * 0.1  # Simplified correlation impact
-        
+
         return 0.0
-    
+
     def _get_position_sensitivity(
         self,
         factor: str,
@@ -456,16 +456,16 @@ class StressTester:
         factor_loadings: Dict[str, float]
     ) -> float:
         """Get position sensitivity to market factor"""
-        
+
         # Check explicit factor loadings first
         if factor in factor_loadings:
             return factor_loadings[factor]
-        
+
         # Map position characteristics to factors
         asset_type = position.get('asset_type', 'EQUITY')
         sector = position.get('sector', '').upper()
         region = position.get('region', '').upper()
-        
+
         # Equity factors
         if factor.startswith('EQUITY'):
             if asset_type in ['EQUITY', 'STOCK']:
@@ -480,7 +480,7 @@ class StressTester:
                 else:
                     return 0.5
             return 0.0
-        
+
         # Interest rate factors
         elif factor.startswith('RATES'):
             if asset_type in ['BOND', 'FIXED_INCOME']:
@@ -489,7 +489,7 @@ class StressTester:
             elif asset_type in ['EQUITY', 'STOCK']:
                 return -0.1  # Negative sensitivity for equities
             return 0.0
-        
+
         # Credit factors
         elif factor.startswith('CREDIT'):
             if asset_type in ['BOND', 'FIXED_INCOME', 'CORPORATE_BOND']:
@@ -497,14 +497,14 @@ class StressTester:
             elif asset_type in ['EQUITY', 'STOCK'] and 'FINANCIAL' in sector:
                 return 0.3  # Bank stocks sensitive to credit
             return 0.0
-        
+
         # Currency factors
         elif factor.endswith('_USD') or factor.startswith('USD'):
             position_currency = position.get('currency', 'USD')
             if position_currency != 'USD':
                 return 1.0
             return 0.0
-        
+
         # Commodity factors
         elif factor in ['OIL', 'GOLD', 'AGRICULTURE', 'INDUSTRIAL_METALS']:
             if asset_type == 'COMMODITY':
@@ -518,32 +518,32 @@ class StressTester:
             elif 'MATERIALS' in sector and factor == 'INDUSTRIAL_METALS':
                 return 0.4
             return 0.0
-        
+
         # Volatility factors
         elif factor == 'VOLATILITY':
             if asset_type in ['OPTION', 'WARRANT']:
                 return position.get('vega', 1.0)
             else:
                 return 0.1  # Small volatility sensitivity for most assets
-        
+
         # No default - raise exception for unknown asset types
         raise ConfigurationRequiredError(f"Unknown asset type for volatility sensitivity: {asset_type}")
-    
+
     def _calculate_risk_breakdown(
         self,
         position_results: List[StressTestResult],
         scenario: StressScenario
     ) -> Dict[str, float]:
         """Calculate risk breakdown by factor"""
-        
+
         risk_breakdown = defaultdict(float)
-        
+
         for result in position_results:
             for factor, attribution in result.risk_attribution.items():
                 risk_breakdown[factor] += attribution
-        
+
         return dict(risk_breakdown)
-    
+
     async def run_monte_carlo_stress_test(
         self,
         positions: Dict[str, Any],
@@ -552,16 +552,16 @@ class StressTester:
         factor_loadings: Optional[Dict[str, Dict[str, float]]] = None
     ) -> Dict[str, Any]:
         """Run Monte Carlo stress test"""
-        
+
         if num_simulations is None:
             num_simulations = self.monte_carlo_runs
-        
+
         start_time = time.time()
-        
+
         try:
             # Generate random scenarios
             scenarios = self._generate_monte_carlo_scenarios(num_simulations)
-            
+
             # Run stress tests for all scenarios
             results = []
             for i, scenario_shocks in enumerate(scenarios):
@@ -572,7 +572,7 @@ class StressTester:
                     test_type=StressTestType.MONTE_CARLO,
                     shocks=scenario_shocks
                 )
-                
+
                 # Calculate portfolio impact
                 total_pnl = 0.0
                 for position_id, position in positions.items():
@@ -580,12 +580,12 @@ class StressTester:
                         position_id, position, temp_scenario, factor_loadings
                     )
                     total_pnl += result.pnl
-                
+
                 results.append(total_pnl)
-            
+
             # Calculate statistics
             results_array = np.array(results)
-            
+
             mc_results = {
                 'mean_pnl': float(np.mean(results_array)),
                 'std_pnl': float(np.std(results_array)),
@@ -597,18 +597,18 @@ class StressTester:
                 'scenarios_run': num_simulations,
                 'calculation_time': time.time() - start_time
             }
-            
+
             logger.info(f"Monte Carlo stress test completed: {num_simulations} simulations in {time.time() - start_time:.2f}s")
-            
+
             return mc_results
-            
+
         except Exception as e:
             logger.error(f"Error running Monte Carlo stress test: {e}")
             raise
-    
+
     def _generate_monte_carlo_scenarios(self, num_simulations: int) -> List[List[MarketShock]]:
         """Generate random scenarios for Monte Carlo simulation"""
-        
+
         # Define key risk factors and their distributions
         risk_factors = {
             'EQUITY_US': {'mean': 0, 'std': 0.15, 'distribution': 'normal'},
@@ -619,13 +619,13 @@ class StressTester:
             'OIL': {'mean': 0, 'std': 0.25, 'distribution': 'normal'},
             'VOLATILITY': {'mean': 1, 'std': 0.5, 'distribution': 'lognormal'}
         }
-        
+
         scenarios = []
         np.random.seed(42)  # For reproducibility
-        
+
         for _ in range(num_simulations):
             scenario_shocks = []
-            
+
             for factor, params in risk_factors.items():
                 if params['distribution'] == 'normal':
                     shock_value = np.random.normal(params['mean'], params['std'])
@@ -636,7 +636,7 @@ class StressTester:
                 else:
                     shock_value = np.random.normal(params['mean'], params['std'])
                     shock_type = ShockType.RELATIVE
-                
+
                 shock = MarketShock(
                     factor=factor,
                     shock_type=shock_type,
@@ -644,41 +644,41 @@ class StressTester:
                     description=f"MC simulation shock"
                 )
                 scenario_shocks.append(shock)
-            
+
             scenarios.append(scenario_shocks)
-        
+
         return scenarios
-    
+
     def _get_scenario(self, scenario_name: str) -> Optional[StressScenario]:
         """Get scenario by name from all available scenarios"""
-        
+
         # Check user-defined scenarios first
         if scenario_name in self._scenarios:
             return self._scenarios[scenario_name]
-        
+
         # Check historical scenarios
         if scenario_name in self._historical_scenarios:
             return self._historical_scenarios[scenario_name]
-        
+
         return None
-    
+
     def add_custom_scenario(self, scenario: StressScenario) -> None:
         """Add custom stress scenario"""
         self._scenarios[scenario.name] = scenario
         logger.info(f"Added custom stress scenario: {scenario.name}")
-    
+
     def get_all_scenarios(self) -> Dict[str, StressScenario]:
         """Get all available stress scenarios"""
         all_scenarios = {}
         all_scenarios.update(self._historical_scenarios)
         all_scenarios.update(self._scenarios)
         return all_scenarios
-    
+
     def get_test_history(self) -> List[Dict[str, Any]]:
         """Get stress test history"""
         with self._lock:
             return list(self._test_results)
-    
+
     async def cleanup(self) -> None:
         """Cleanup resources"""
         logger.info("StressTester cleanup completed")

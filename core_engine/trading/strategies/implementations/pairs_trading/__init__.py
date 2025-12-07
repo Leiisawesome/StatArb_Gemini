@@ -35,12 +35,12 @@ from .ses_pairs_trading import (
 __all__ = [
     # Legacy Strategy
     'EnhancedPairsTradingStrategy',
-    
+
     # SES Strategy (v2.0)
     'SESPairsTradingStrategy',
     'SpreadExhaustionScorer',
     'MeanReversionCore',
-    
+
     # Data Classes
     'PairMetrics',
     'SESScoreBreakdown',

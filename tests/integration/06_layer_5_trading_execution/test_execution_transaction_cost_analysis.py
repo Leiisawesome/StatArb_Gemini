@@ -16,21 +16,17 @@ Date: November 4, 2025
 """
 
 import pytest
-import pytest_asyncio
 
-from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.analytics.manager_enhanced import EnhancedAnalyticsManager
-from core_engine.config.component_config import ExecutionConfig, AnalyticsConfig
 
 
 class TestExecutionTransactionCostAnalysis:
     """Integration tests for execution transaction cost analysis"""
-    
+
     @pytest.mark.asyncio
     async def test_tca_analyzer_measures_execution_quality(self, execution_engine, analytics_manager):
         """
         Test: TCAAnalyzer measures execution quality
-        
+
         Scenario: Measure execution quality metrics
         Expected: Quality metrics calculated
         """
@@ -38,48 +34,48 @@ class TestExecutionTransactionCostAnalysis:
         # Verify both components exist
         assert execution_engine is not None
         assert analytics_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_tca_analyzer_calculates_slippage(self, analytics_manager):
         """
         Test: TCAAnalyzer calculates slippage
-        
+
         Scenario: Calculate slippage vs arrival price
         Expected: Slippage calculated correctly
         """
         # TCA analyzer would calculate slippage
         # Verify analytics manager exists
         assert analytics_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_tca_analyzer_benchmarks_against_vwap_twap(self, analytics_manager):
         """
         Test: TCAAnalyzer benchmarks against VWAP/TWAP
-        
+
         Scenario: Benchmark execution against VWAP/TWAP
         Expected: Benchmark comparisons provided
         """
         # TCA analyzer would benchmark against VWAP/TWAP
         # Verify capability exists
         assert analytics_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_tca_analyzer_calculates_market_impact(self, analytics_manager):
         """
         Test: TCAAnalyzer calculates market impact
-        
+
         Scenario: Calculate permanent and temporary market impact
         Expected: Market impact calculated correctly
         """
         # TCA analyzer would calculate market impact
         # Verify capability exists
         assert analytics_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_tca_analyzer_provides_execution_reports(self, analytics_manager):
         """
         Test: TCAAnalyzer provides execution reports
-        
+
         Scenario: Generate comprehensive execution reports
         Expected: Reports generated correctly
         """

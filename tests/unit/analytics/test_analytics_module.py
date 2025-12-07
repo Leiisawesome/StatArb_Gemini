@@ -158,7 +158,7 @@ class TestEnhancedMetricsCalculator:
         """Test return metrics calculation."""
         # Initialize the calculator first
         asyncio.run(metrics_calculator.initialize())
-        
+
         # Create sample return data with datetime index
         dates = pd.date_range('2023-01-01', periods=5, freq='D')
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012], index=dates)
@@ -171,7 +171,7 @@ class TestEnhancedMetricsCalculator:
         """Test risk metrics calculation."""
         # Initialize the calculator first
         asyncio.run(metrics_calculator.initialize())
-        
+
         # Create sample return data
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012])
 
@@ -183,7 +183,7 @@ class TestEnhancedMetricsCalculator:
         """Test risk-adjusted metrics calculation."""
         # Initialize the calculator first
         asyncio.run(metrics_calculator.initialize())
-        
+
         # Create sample return data
         returns = pd.Series([0.01, -0.005, 0.008, -0.002, 0.012])
 

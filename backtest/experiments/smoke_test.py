@@ -15,7 +15,7 @@ Author: StatArb_Gemini Core Engine
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any
 import time
 
@@ -27,41 +27,41 @@ from core_engine.config import BacktestConfig
 class SmokeTest(BaseExperiment):
     """
     Smoke test experiment.
-    
+
     Tests:
     - Engine initialization
     - Single symbol, 1-day backtest
     - Simple mean reversion strategy
     - Result generation
     """
-    
+
     def get_description(self) -> str:
         return "Smoke test: Single symbol, 1-day, simple strategy"
-    
+
     async def run(self) -> ExperimentResult:
         """Run smoke test"""
         start_time = time.time()
         experiment_name = self.config.get('experiment_name', 'Smoke_Test')
-        
+
         try:
             self.logger.info(f"🔧 Starting smoke test: {experiment_name}")
-            
+
             # Create minimal backtest config
             backtest_config = self._create_backtest_config()
-            
+
             # Initialize engine (ORCHESTRATION ONLY - no logic re-implementation)
             self.logger.info("   Initializing InstitutionalBacktestEngine...")
             engine = InstitutionalBacktestEngine(backtest_config)
             await engine.initialize()
-            
+
             # Run backtest (black box)
             self.logger.info("   Running backtest...")
             engine_results = await engine.run_backtest()
-            
+
             # Extract metrics
             duration = time.time() - start_time
             metrics = self._extract_performance_metrics(engine_results)
-            
+
             # Create result
             result = ExperimentResult(
                 experiment_name=experiment_name,
@@ -80,14 +80,14 @@ class SmokeTest(BaseExperiment):
                 },
                 success=True
             )
-            
+
             self.logger.info(f"✅ Smoke test completed in {duration:.2f}s")
             return result
-            
+
         except Exception as e:
             duration = time.time() - start_time
             self.logger.error(f"❌ Smoke test failed: {e}")
-            
+
             return ExperimentResult(
                 experiment_name=experiment_name,
                 experiment_type="smoke_test",
@@ -102,7 +102,7 @@ class SmokeTest(BaseExperiment):
                 success=False,
                 error_message=str(e)
             )
-    
+
     def _create_backtest_config(self) -> BacktestConfig:
         """Create backtest config from YAML configuration"""
         # Build config from YAML (prefer YAML over defaults)
@@ -118,7 +118,7 @@ class SmokeTest(BaseExperiment):
             'max_concentration': self.config.get('max_concentration', 0.20),
             'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
         }
-        
+
         # Add regime risk multipliers if provided
         if 'regime_risk_multipliers' in self.config:
             config_dict['regime_risk_multipliers'] = self.config['regime_risk_multipliers']
@@ -128,7 +128,7 @@ class SmokeTest(BaseExperiment):
                 'normal_volatility': 1.0,
                 'high_volatility': 0.7
             }
-        
+
         # Add strategies from YAML if provided
         if 'strategies' in self.config:
             config_dict['strategies'] = self.config['strategies']
@@ -144,10 +144,10 @@ class SmokeTest(BaseExperiment):
                     'z_exit': 0.5
                 }
             }]
-        
+
         # Note: save_trade_log and save_regime_log are not BacktestConfig params
         # They would be handled at engine level if needed
-        
+
         return BacktestConfig(**config_dict)
 
 
@@ -155,7 +155,7 @@ class SmokeTest(BaseExperiment):
 async def run_smoke_test(config: Dict[str, Any] = None):
     """
     Run smoke test experiment.
-    
+
     Args:
         config: Optional config dict. If None, loads from smoke_test.yaml
     """
@@ -163,7 +163,7 @@ async def run_smoke_test(config: Dict[str, Any] = None):
         # Load from YAML configuration file
         from backtest.utils.config_loader import load_config
         from pathlib import Path
-        
+
         try:
             # Get path to smoke_test.yaml
             config_path = Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'
@@ -180,16 +180,16 @@ async def run_smoke_test(config: Dict[str, Any] = None):
                 'start_date': '2024-01-02',
                 'end_date': '2024-01-02'
             }
-    
+
     experiment = SmokeTest(config)
     result = await experiment.run()
-    
+
     # Print summary
     experiment.print_summary(result)
-    
+
     # Save results
     experiment.save_results(result)
-    
+
     return result
 
 

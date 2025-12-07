@@ -82,7 +82,7 @@ class TestEnhancedRegimeEngineBasics:
         """Test regime engine health check"""
         await regime_engine.initialize()
         await regime_engine.start()
-        
+
         health = await regime_engine.health_check()
         # Health may be False initially due to no regime data, which is expected
         assert 'healthy' in health
@@ -94,7 +94,7 @@ class TestEnhancedRegimeEngineBasics:
     async def test_regime_engine_status(self, regime_engine):
         """Test regime engine status reporting"""
         await regime_engine.initialize()
-        
+
         status = regime_engine.get_status()
         assert status['component_type'] == 'EnhancedRegimeEngine'
         assert status['initialized'] is True

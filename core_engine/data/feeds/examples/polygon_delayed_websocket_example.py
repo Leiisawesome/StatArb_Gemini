@@ -150,7 +150,7 @@ async def delayed_websocket_example():
         # Wait for data or timeout
         logger.info("Waiting for delayed data (30 seconds)...")
         await asyncio.sleep(30.0)  # Wait 30 seconds for data
-        
+
         logger.info("Timeout reached, disconnecting...")
         await adapter.disconnect()
 

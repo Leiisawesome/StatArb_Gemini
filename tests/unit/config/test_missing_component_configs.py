@@ -19,31 +19,31 @@ from core_engine.config.component_config import (
     ReportGenerationConfig,
     MetricsCalculatorConfig,
     PerformanceAnalyticsConfig,
-    
+
     # Execution & Portfolio Configs
     ExecutionConfig,
     PortfolioConfig,
-    
+
     # Processing Configs
     RegimeConfig,
     SignalConfig,
     FeatureConfig,
     IndicatorConfig,
-    
+
     # Connection & Data Configs
     ConnectionConfig,
     CachingConfig,
     DataValidationConfig,
     FeedManagementConfig,
     DataPerformanceConfig,
-    
+
     # Risk Configs
     CorrelationConfig,
     ExposureConfig,
     VarConfig,
     StressTestConfig,
     LimitConfig,
-    
+
     # Performance Configs
     TimingConfig,
     PerformanceConfig
@@ -81,7 +81,7 @@ class TestAnalyticsConfig:
             min_data_points=50,
             max_data_points=100000
         )
-        
+
         assert config.mode == "batch"
         assert config.max_workers == 8
         assert config.enable_caching is False
@@ -105,7 +105,7 @@ class TestAnalyticsConfig:
         assert hasattr(config, 'report_frequency')
         assert hasattr(config, 'min_data_points')
         assert hasattr(config, 'max_data_points')
-        
+
         # Test composition pattern
         assert hasattr(config, 'performance')
         assert hasattr(config, 'metrics')
@@ -149,7 +149,7 @@ class TestAttributionAnalyticsConfig:
         # Test invalid attribution_frequency
         with pytest.raises(ValueError, match="attribution_frequency must be one of"):
             AttributionAnalyticsConfig(attribution_frequency="invalid")
-        
+
         # Test invalid factor_model
         with pytest.raises(ValueError, match="factor_model must be one of"):
             AttributionAnalyticsConfig(factor_model="invalid")
@@ -198,7 +198,7 @@ class TestBenchmarkAnalyticsConfig:
         assert hasattr(config, 'enable_information_ratio')
         assert hasattr(config, 'rolling_window')
         assert hasattr(config, 'min_correlation_periods')
-        
+
         # Test that default_benchmarks is not empty
         assert len(config.default_benchmarks) > 0
 
@@ -320,7 +320,7 @@ class TestMetricsCalculatorConfig:
         # Test invalid var_method
         with pytest.raises(ValueError, match="var_method must be one of"):
             MetricsCalculatorConfig(var_method="invalid")
-        
+
         # Test invalid var_confidence_level
         with pytest.raises(ValueError, match="var_confidence_level must be \\(0, 1\\)"):
             MetricsCalculatorConfig(var_confidence_level=1.5)
@@ -379,7 +379,7 @@ class TestPerformanceAnalyticsConfig:
         # Test invalid risk_free_rate
         with pytest.raises(ValueError, match="risk_free_rate must be \\[0, 0\\.10\\]"):
             PerformanceAnalyticsConfig(risk_free_rate=0.15)
-        
+
         # Test invalid annualization_factor
         with pytest.raises(ValueError, match="annualization_factor must be \\[200, 365\\]"):
             PerformanceAnalyticsConfig(annualization_factor=100)
@@ -440,7 +440,7 @@ class TestExecutionConfig:
         assert hasattr(config, 'max_execution_time')
         assert hasattr(config, 'default_algorithm')
         assert hasattr(config, 'timing')
-        
+
         # Test composition pattern
         assert hasattr(config.timing, 'health_check_interval')
 
@@ -487,7 +487,7 @@ class TestPortfolioConfig:
         assert hasattr(config, 'rebalance_frequency')
         assert hasattr(config, 'position_limits')
         assert hasattr(config, 'timing')
-        
+
         # Test composition pattern
         assert hasattr(config.position_limits, 'max_position_size')
         assert hasattr(config.timing, 'health_check_interval')
@@ -815,11 +815,11 @@ class TestConnectionConfig:
         # Test invalid connect_timeout
         with pytest.raises(ValueError, match="connect_timeout must be positive"):
             ConnectionConfig(connect_timeout=0)
-        
+
         # Test invalid read_timeout
         with pytest.raises(ValueError, match="read_timeout must be positive"):
             ConnectionConfig(read_timeout=0)
-        
+
         # Test invalid max_retry_attempts
         with pytest.raises(ValueError, match="max_retry_attempts must be non-negative"):
             ConnectionConfig(max_retry_attempts=-1)
@@ -854,11 +854,11 @@ class TestCachingConfig:
         # Test invalid cache_ttl
         with pytest.raises(ValueError, match="cache_ttl must be non-negative"):
             CachingConfig(cache_ttl=-1)
-        
+
         # Test invalid max_cache_size
         with pytest.raises(ValueError, match="max_cache_size must be positive"):
             CachingConfig(max_cache_size=0)
-        
+
 
 
 class TestDataValidationConfig:
@@ -926,11 +926,11 @@ class TestDataValidationConfig:
         # Test invalid quality_threshold
         with pytest.raises(ValueError, match="quality_threshold must be \\[0, 1\\]"):
             DataValidationConfig(quality_threshold=1.5)
-        
+
         # Test invalid max_price_change_pct
         with pytest.raises(ValueError, match="max_price_change_pct must be non-negative"):
             DataValidationConfig(max_price_change_pct=-10.0)
-        
+
         # Test invalid outlier_threshold_std
         with pytest.raises(ValueError, match="outlier_threshold_std must be positive"):
             DataValidationConfig(outlier_threshold_std=0)
@@ -986,11 +986,11 @@ class TestFeedManagementConfig:
         # Test invalid max_concurrent_requests
         with pytest.raises(ValueError, match="max_concurrent_requests must be positive"):
             FeedManagementConfig(max_concurrent_requests=0)
-        
+
         # Test invalid buffer_size
         with pytest.raises(ValueError, match="buffer_size must be positive"):
             FeedManagementConfig(buffer_size=0)
-        
+
         # Test invalid heartbeat_interval
         with pytest.raises(ValueError, match="heartbeat_interval must be positive"):
             FeedManagementConfig(heartbeat_interval=0)
@@ -1031,11 +1031,11 @@ class TestDataPerformanceConfig:
         # Test invalid max_concurrent_requests
         with pytest.raises(ValueError, match="max_concurrent_requests must be positive"):
             DataPerformanceConfig(max_concurrent_requests=0)
-        
+
         # Test invalid request_timeout_seconds
         with pytest.raises(ValueError, match="request_timeout_seconds must be positive"):
             DataPerformanceConfig(request_timeout_seconds=0)
-        
+
         # Test invalid data_retention_days
         with pytest.raises(ValueError, match="data_retention_days must be positive"):
             DataPerformanceConfig(data_retention_days=0)
@@ -1188,7 +1188,7 @@ class TestVarConfig:
         assert hasattr(config, 'enable_cvar')
         assert hasattr(config, 'cache_results')
         assert hasattr(config, 'cache_ttl_seconds')
-        
+
 
 
 class TestStressTestConfig:
@@ -1287,7 +1287,7 @@ class TestLimitConfig:
         assert hasattr(config, 'enable_real_time_monitoring')
         assert hasattr(config, 'warning_threshold')
         assert hasattr(config, 'critical_threshold')
-        
+
 
 
 class TestTimingConfig:
@@ -1319,14 +1319,14 @@ class TestTimingConfig:
         # Test invalid health_check_interval
         with pytest.raises(ValueError, match="health_check_interval must be >= 1"):
             TimingConfig(health_check_interval=0)
-        
+
         # Test invalid update_frequency (only shows warning, not ValueError)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             TimingConfig(update_frequency="invalid")
             assert len(w) == 1
             assert "update_frequency 'invalid' not in standard frequencies" in str(w[0].message)
-        
+
 
 
 class TestPerformanceConfig:
@@ -1381,7 +1381,7 @@ class TestComponentConfigIntegration:
             CorrelationConfig(), ExposureConfig(), VarConfig(), StressTestConfig(),
             LimitConfig(), TimingConfig(), PerformanceConfig()
         ]
-        
+
         for config in configs:
             config_dict = asdict(config)
             assert isinstance(config_dict, dict)
@@ -1399,7 +1399,7 @@ class TestComponentConfigIntegration:
             CorrelationConfig, ExposureConfig, VarConfig, StressTestConfig,
             LimitConfig, TimingConfig, PerformanceConfig
         ]
-        
+
         for config_class in configs:
             # Test that invalid lookback periods are caught (if they exist and have validation)
             if hasattr(config_class, 'lookback') or hasattr(config_class, 'lookback_period'):
@@ -1412,7 +1412,7 @@ class TestComponentConfigIntegration:
                         pass  # Expected behavior
                     except TypeError:
                         pass  # Some configs don't accept these parameters
-            
+
             # Test that invalid thresholds are caught (if they exist and have validation)
             if hasattr(config_class, 'threshold') or hasattr(config_class, 'confidence_level'):
                 threshold_attr = 'threshold' if hasattr(config_class, 'threshold') else 'confidence_level'
@@ -1430,16 +1430,16 @@ class TestComponentConfigIntegration:
         # Test analytics config composition
         analytics_config = AnalyticsConfig()
         attribution_config = AttributionAnalyticsConfig()
-        
+
         # Test execution and portfolio config composition
         execution_config = ExecutionConfig()
         portfolio_config = PortfolioConfig()
-        
+
         # Test data config composition
         connection_config = ConnectionConfig()
         caching_config = CachingConfig()
         validation_config = DataValidationConfig()
-        
+
         # Verify all configs were created successfully
         assert analytics_config is not None
         assert attribution_config is not None

@@ -126,7 +126,7 @@ def custom_var_calculator():
 
 class TestEnumsAndDataclasses:
     """Test enums and dataclasses."""
-    
+
     def test_var_method_enum_values(self):
         """Test VarMethod enum has all expected values."""
         assert VarMethod.HISTORICAL.value == "historical"
@@ -135,10 +135,10 @@ class TestEnumsAndDataclasses:
         assert VarMethod.CORNISH_FISHER.value == "cornish_fisher"
         assert VarMethod.FILTERED_HISTORICAL.value == "filtered_historical"
         assert VarMethod.EVT.value == "extreme_value_theory"
-        
+
         # Test all 6 methods exist
         assert len(VarMethod) == 6
-    
+
     def test_risk_measure_enum_values(self):
         """Test RiskMeasure enum has all expected values."""
         assert RiskMeasure.VAR.value == "var"
@@ -147,10 +147,10 @@ class TestEnumsAndDataclasses:
         assert RiskMeasure.VOLATILITY.value == "volatility"
         assert RiskMeasure.BETA.value == "beta"
         assert RiskMeasure.TRACKING_ERROR.value == "tracking_error"
-        
+
         # Test all 6 measures exist
         assert len(RiskMeasure) == 6
-    
+
     def test_var_result_dataclass(self):
         """Test VarResult dataclass creation."""
         result = VarResult(
@@ -162,7 +162,7 @@ class TestEnumsAndDataclasses:
             timestamp=datetime.now(),
             metadata={'test': 'data'}
         )
-        
+
         assert result.var_value == 10000.0
         assert result.confidence_level == 0.95
         assert result.method == VarMethod.HISTORICAL
@@ -170,7 +170,7 @@ class TestEnumsAndDataclasses:
         assert result.currency == "USD"
         assert isinstance(result.timestamp, datetime)
         assert result.metadata == {'test': 'data'}
-    
+
     def test_risk_metrics_dataclass(self):
         """Test RiskMetrics dataclass creation."""
         metrics = RiskMetrics(
@@ -187,13 +187,13 @@ class TestEnumsAndDataclasses:
             kurtosis=3.0,
             timestamp=datetime.now()
         )
-        
+
         assert metrics.var_1d[0.95] == 10000.0
         assert metrics.cvar_1d[0.99] == 18000.0
         assert metrics.volatility_daily == 0.01
         assert metrics.beta == 1.2
         assert metrics.sharpe_ratio == 1.5
-    
+
     def test_stress_test_scenario_dataclass(self):
         """Test StressTestScenario dataclass creation."""
         scenario = StressTestScenario(
@@ -203,7 +203,7 @@ class TestEnumsAndDataclasses:
             correlation_changes={('EQUITY', 'BOND'): 0.5},
             volatility_multipliers={'EQUITY': 2.0}
         )
-        
+
         assert scenario.name == "Test Crisis"
         assert scenario.factor_shocks['EQUITY'] == -0.3
         assert scenario.correlation_changes[('EQUITY', 'BOND')] == 0.5
@@ -216,7 +216,7 @@ class TestEnumsAndDataclasses:
 
 class TestInitialization:
     """Test VarCalculator initialization."""
-    
+
     def test_default_initialization(self, var_calculator):
         """Test default initialization sets correct defaults."""
         assert var_calculator.default_confidence_levels == [0.95, 0.99, 0.999]
@@ -225,12 +225,12 @@ class TestInitialization:
         assert var_calculator.min_observations == 50
         assert var_calculator.mc_simulations == 10000
         assert var_calculator.risk_free_rate == 0.02
-        
+
         # Check internal state
         assert hasattr(var_calculator, '_lock')
         assert hasattr(var_calculator, '_calculation_history')
         # Note: _stress_scenarios removed - stress testing consolidated into StressTester class
-    
+
     def test_custom_configuration(self, custom_var_calculator):
         """Test custom configuration initialization."""
         assert custom_var_calculator.default_confidence_levels == [0.90, 0.95, 0.99]
@@ -239,7 +239,7 @@ class TestInitialization:
         assert custom_var_calculator.min_observations == 30
         assert custom_var_calculator.mc_simulations == 5000
         assert custom_var_calculator.risk_free_rate == 0.03
-    
+
     # NOTE: test_default_stress_scenarios_loaded removed
     # Stress testing functionality has been consolidated into StressTester class
     # VarCalculator no longer maintains stress scenarios (reduces code duplication)
@@ -251,7 +251,7 @@ class TestInitialization:
 
 class TestHistoricalVaR:
     """Test historical VaR calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_historical_var_calculation(self, var_calculator, sample_returns):
         """Test basic historical VaR calculation."""
@@ -261,11 +261,11 @@ class TestHistoricalVaR:
             confidence_levels=[0.95, 0.99],
             time_horizon=1
         )
-        
+
         # Check results for both confidence levels
         assert 0.95 in results
         assert 0.99 in results
-        
+
         # Verify VarResult structure
         var_95 = results[0.95]
         assert isinstance(var_95, VarResult)
@@ -273,10 +273,10 @@ class TestHistoricalVaR:
         assert var_95.confidence_level == 0.95
         assert var_95.method == VarMethod.HISTORICAL
         assert var_95.time_horizon == 1
-        
+
         # 99% VaR should be higher than 95% VaR
         assert results[0.99].var_value > results[0.95].var_value
-    
+
     @pytest.mark.asyncio
     async def test_historical_var_multiple_confidence_levels(self, var_calculator, sample_returns):
         """Test historical VaR with multiple confidence levels."""
@@ -286,14 +286,14 @@ class TestHistoricalVaR:
             confidence_levels=[0.90, 0.95, 0.99, 0.999],
             time_horizon=1
         )
-        
+
         assert len(results) == 4
-        
+
         # VaR should increase with confidence level
         assert results[0.90].var_value < results[0.95].var_value
         assert results[0.95].var_value < results[0.99].var_value
         assert results[0.99].var_value < results[0.999].var_value
-    
+
     @pytest.mark.asyncio
     async def test_historical_var_time_horizon_scaling(self, var_calculator, sample_returns):
         """Test historical VaR with different time horizons."""
@@ -303,18 +303,18 @@ class TestHistoricalVaR:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         results_10d = await var_calculator.calculate_var(
             returns=sample_returns,
             method=VarMethod.HISTORICAL,
             confidence_levels=[0.95],
             time_horizon=10
         )
-        
+
         # 10-day VaR should be higher than 1-day VaR (roughly sqrt(10) times)
         var_1d = results_1d[0.95].var_value
         var_10d = results_10d[0.95].var_value
-        
+
         assert var_10d > var_1d
         # Should be approximately sqrt(10) = 3.16 times larger
         ratio = var_10d / var_1d
@@ -327,7 +327,7 @@ class TestHistoricalVaR:
 
 class TestParametricVaR:
     """Test parametric VaR calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_parametric_var_calculation(self, var_calculator, sample_returns):
         """Test parametric VaR (normal distribution)."""
@@ -337,22 +337,22 @@ class TestParametricVaR:
             confidence_levels=[0.95, 0.99],
             time_horizon=1
         )
-        
+
         assert 0.95 in results
         assert 0.99 in results
-        
+
         var_95 = results[0.95]
         assert var_95.method == VarMethod.PARAMETRIC
         assert var_95.var_value > 0
-        
+
         # Check metadata includes mean and std
         assert 'mean_return' in var_95.metadata
         assert 'std_return' in var_95.metadata
         assert 'z_score' in var_95.metadata
-        
+
         # 99% VaR should be higher
         assert results[0.99].var_value > results[0.95].var_value
-    
+
     @pytest.mark.asyncio
     async def test_parametric_var_z_scores(self, var_calculator, sample_returns):
         """Test parametric VaR z-score calculation for various confidence levels."""
@@ -362,16 +362,16 @@ class TestParametricVaR:
             confidence_levels=[0.90, 0.95, 0.99],
             time_horizon=1
         )
-        
+
         # Extract z-scores from metadata
         z_90 = results[0.90].metadata['z_score']
         z_95 = results[0.95].metadata['z_score']
         z_99 = results[0.99].metadata['z_score']
-        
+
         # Z-scores are negative and decrease with confidence (more negative)
         # 90% → -1.28, 95% → -1.645, 99% → -2.33
         assert z_90 > z_95 > z_99  # -1.28 > -1.645 > -2.33
-        
+
         # Approximate z-scores (absolute values)
         assert abs(z_90) > 1.2 and abs(z_90) < 1.4
         assert abs(z_95) > 1.6 and abs(z_95) < 1.7
@@ -384,7 +384,7 @@ class TestParametricVaR:
 
 class TestMonteCarloVaR:
     """Test Monte Carlo VaR calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_monte_carlo_var_calculation(self, var_calculator, sample_returns):
         """Test Monte Carlo VaR simulation."""
@@ -394,21 +394,21 @@ class TestMonteCarloVaR:
             confidence_levels=[0.95, 0.99],
             time_horizon=1
         )
-        
+
         assert 0.95 in results
         assert 0.99 in results
-        
+
         var_95 = results[0.95]
         assert var_95.method == VarMethod.MONTE_CARLO
         assert var_95.var_value > 0
-        
+
         # Check metadata includes simulation count
         assert 'simulations' in var_95.metadata
         assert var_95.metadata['simulations'] == 10000
-        
+
         # 99% VaR should be higher
         assert results[0.99].var_value > results[0.95].var_value
-    
+
     @pytest.mark.asyncio
     async def test_monte_carlo_reproducibility(self, var_calculator, sample_returns):
         """Test Monte Carlo VaR reproducibility with seed."""
@@ -419,14 +419,14 @@ class TestMonteCarloVaR:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         results2 = await var_calculator.calculate_var(
             returns=sample_returns,
             method=VarMethod.MONTE_CARLO,
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         # Results should be identical due to seed=42
         assert results1[0.95].var_value == results2[0.95].var_value
 
@@ -437,7 +437,7 @@ class TestMonteCarloVaR:
 
 class TestCornishFisherVaR:
     """Test Cornish-Fisher VaR calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_cornish_fisher_var_with_skewed_data(self, var_calculator):
         """Test Cornish-Fisher VaR with skewed distribution."""
@@ -449,28 +449,28 @@ class TestCornishFisherVaR:
                 np.random.normal(-0.02, 0.02, 20)    # Large negative tail
             ])
         )
-        
+
         results = await var_calculator.calculate_var(
             returns=skewed_returns,
             method=VarMethod.CORNISH_FISHER,
             confidence_levels=[0.95, 0.99],
             time_horizon=1
         )
-        
+
         assert 0.95 in results
         var_95 = results[0.95]
-        
+
         assert var_95.method == VarMethod.CORNISH_FISHER
         assert var_95.var_value > 0
-        
+
         # Check metadata includes skewness and kurtosis
         assert 'skewness' in var_95.metadata
         assert 'kurtosis' in var_95.metadata
         assert 'z_adjustment' in var_95.metadata
-        
+
         # Should have negative skewness
         assert var_95.metadata['skewness'] < 0
-    
+
     @pytest.mark.asyncio
     async def test_cornish_fisher_vs_parametric(self, var_calculator, sample_returns):
         """Test Cornish-Fisher VaR adjustment vs parametric."""
@@ -481,21 +481,21 @@ class TestCornishFisherVaR:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         param_results = await var_calculator.calculate_var(
             returns=sample_returns,
             method=VarMethod.PARAMETRIC,
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         cf_var = cf_results[0.95].var_value
         param_var = param_results[0.95].var_value
-        
+
         # Both should be positive
         assert cf_var > 0
         assert param_var > 0
-        
+
         # They should be different (unless perfectly normal)
         # For our test data, they should be reasonably close
         ratio = cf_var / param_var
@@ -508,7 +508,7 @@ class TestCornishFisherVaR:
 
 class TestFilteredHistoricalVaR:
     """Test filtered historical VaR calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_filtered_historical_var_calculation(self, var_calculator, sample_returns):
         """Test filtered historical VaR with exponential weighting."""
@@ -518,18 +518,18 @@ class TestFilteredHistoricalVaR:
             confidence_levels=[0.95, 0.99],
             time_horizon=1
         )
-        
+
         assert 0.95 in results
         var_95 = results[0.95]
-        
+
         assert var_95.method == VarMethod.FILTERED_HISTORICAL
         assert var_95.var_value > 0
-        
+
         # Check metadata includes lambda and weighted observations
         assert 'lambda_factor' in var_95.metadata
         assert 'weighted_observations' in var_95.metadata
         assert var_95.metadata['lambda_factor'] == 0.94
-    
+
     @pytest.mark.asyncio
     async def test_filtered_vs_unfiltered_historical(self, var_calculator, sample_returns):
         """Test filtered historical VaR vs regular historical VaR."""
@@ -540,21 +540,21 @@ class TestFilteredHistoricalVaR:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         historical_results = await var_calculator.calculate_var(
             returns=sample_returns,
             method=VarMethod.HISTORICAL,
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         filtered_var = filtered_results[0.95].var_value
         historical_var = historical_results[0.95].var_value
-        
+
         # Both should be positive
         assert filtered_var > 0
         assert historical_var > 0
-        
+
         # Filtered method uses exponential weighting which can significantly change the VaR
         # The ratio can vary widely depending on recent vs historical volatility
         # Just ensure both are positive and computed (not testing specific ratio)
@@ -566,7 +566,7 @@ class TestFilteredHistoricalVaR:
 
 class TestComprehensiveRiskMetrics:
     """Test comprehensive risk metrics calculation."""
-    
+
     @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13.3 compatibility issue with .min() and _NoValueType")
     @pytest.mark.asyncio
     async def test_all_metrics_calculated(self, var_calculator, sample_returns):
@@ -574,37 +574,37 @@ class TestComprehensiveRiskMetrics:
         metrics = await var_calculator.calculate_comprehensive_risk_metrics(
             returns=sample_returns
         )
-        
+
         assert isinstance(metrics, RiskMetrics)
-        
+
         # Check VaR and CVaR
         assert len(metrics.var_1d) == 3  # Default confidence levels
         assert len(metrics.cvar_1d) == 3
         assert 0.95 in metrics.var_1d
         assert 0.99 in metrics.var_1d
         assert 0.999 in metrics.var_1d
-        
+
         # Check volatility
         assert metrics.volatility_daily > 0
         assert metrics.volatility_annual > 0
         assert metrics.volatility_annual > metrics.volatility_daily  # Annual > Daily
-        
+
         # Check max drawdown
         assert isinstance(metrics.max_drawdown, float)
         assert metrics.max_drawdown <= 0  # Drawdown is negative
-        
+
         # Check optional metrics without benchmark
         assert metrics.beta is None
         assert metrics.tracking_error is None
-        
+
         # Check ratios
         assert isinstance(metrics.sharpe_ratio, (float, type(None)))
         assert isinstance(metrics.sortino_ratio, (float, type(None)))
-        
+
         # Check higher moments
         assert isinstance(metrics.skewness, (float, type(None)))
         assert isinstance(metrics.kurtosis, (float, type(None)))
-    
+
     @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13.3 compatibility issue with .min() and _NoValueType")
     @pytest.mark.asyncio
     async def test_risk_metrics_with_benchmark(self, var_calculator, sample_returns, sample_benchmark_returns):
@@ -613,16 +613,16 @@ class TestComprehensiveRiskMetrics:
             returns=sample_returns,
             benchmark_returns=sample_benchmark_returns
         )
-        
+
         # Beta and tracking error should be calculated
         assert metrics.beta is not None
         assert isinstance(metrics.beta, float)
         assert metrics.beta > 0  # Should be positive for correlated assets
-        
+
         assert metrics.tracking_error is not None
         assert isinstance(metrics.tracking_error, float)
         assert metrics.tracking_error > 0
-    
+
     @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13.3 compatibility issue with .min() and _NoValueType")
     @pytest.mark.asyncio
     async def test_risk_metrics_without_benchmark(self, var_calculator, sample_returns):
@@ -631,22 +631,22 @@ class TestComprehensiveRiskMetrics:
             returns=sample_returns,
             benchmark_returns=None
         )
-        
+
         # Beta and tracking error should be None
         assert metrics.beta is None
         assert metrics.tracking_error is None
-    
+
     @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13.3 compatibility issue with .min() and _NoValueType")
     @pytest.mark.asyncio
     async def test_max_drawdown_calculation(self, var_calculator):
         """Test max drawdown calculation with known data."""
         # Create returns with known drawdown
         returns = pd.Series([0.05, -0.10, -0.05, 0.03, -0.08])
-        
+
         metrics = await var_calculator.calculate_comprehensive_risk_metrics(
             returns=returns
         )
-        
+
         # Should have negative drawdown
         assert metrics.max_drawdown < 0
         assert metrics.max_drawdown > -1.0  # Should be > -100%
@@ -667,7 +667,7 @@ class TestComprehensiveRiskMetrics:
 
 class TestIntegrationAndEdgeCases:
     """Test integration scenarios and edge cases."""
-    
+
     @pytest.mark.asyncio
     async def test_calculate_var_main_method_all_methods(self, var_calculator, sample_returns):
         """Test calculate_var main method with all VaR methods."""
@@ -678,7 +678,7 @@ class TestIntegrationAndEdgeCases:
             VarMethod.CORNISH_FISHER,
             VarMethod.FILTERED_HISTORICAL
         ]
-        
+
         for method in methods_to_test:
             results = await var_calculator.calculate_var(
                 returns=sample_returns,
@@ -686,17 +686,17 @@ class TestIntegrationAndEdgeCases:
                 confidence_levels=[0.95],
                 time_horizon=1
             )
-            
+
             assert 0.95 in results
             assert results[0.95].method == method
             assert results[0.95].var_value > 0
-    
+
     @pytest.mark.asyncio
     async def test_insufficient_data_error(self, var_calculator):
         """Test error raised with insufficient data."""
         # Create small return series (less than min_observations)
         small_returns = pd.Series(np.random.normal(0, 0.01, 30))  # Only 30 obs, need 50
-        
+
         with pytest.raises(ValueError, match="Insufficient data"):
             await var_calculator.calculate_var(
                 returns=small_returns,
@@ -704,7 +704,7 @@ class TestIntegrationAndEdgeCases:
                 confidence_levels=[0.95],
                 time_horizon=1
             )
-    
+
     @pytest.mark.asyncio
     async def test_unsupported_method_error(self, var_calculator, sample_returns):
         """Test error raised for unsupported VaR method (EVT)."""
@@ -715,14 +715,14 @@ class TestIntegrationAndEdgeCases:
                 confidence_levels=[0.95],
                 time_horizon=1
             )
-    
+
     @pytest.mark.asyncio
     async def test_calculation_history_tracking(self, var_calculator, sample_returns):
         """Test calculation history is tracked."""
         # Get initial history
         initial_history = var_calculator.get_calculation_history()
         initial_count = len(initial_history)
-        
+
         # Perform multiple calculations
         await var_calculator.calculate_var(
             returns=sample_returns,
@@ -730,18 +730,18 @@ class TestIntegrationAndEdgeCases:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         await var_calculator.calculate_var(
             returns=sample_returns,
             method=VarMethod.PARAMETRIC,
             confidence_levels=[0.99],
             time_horizon=1
         )
-        
+
         # Check history has been updated
         updated_history = var_calculator.get_calculation_history()
         assert len(updated_history) == initial_count + 2
-        
+
         # Verify history entries have required fields
         last_entry = updated_history[-1]
         assert 'method' in last_entry
@@ -756,7 +756,7 @@ class TestIntegrationAndEdgeCases:
 
 class TestEdgeCases:
     """Test additional edge cases."""
-    
+
     @pytest.mark.asyncio
     async def test_dataframe_returns_conversion(self, var_calculator, sample_portfolio_returns):
         """Test VaR calculation with DataFrame returns (portfolio)."""
@@ -766,10 +766,10 @@ class TestEdgeCases:
             confidence_levels=[0.95],
             time_horizon=1
         )
-        
+
         assert 0.95 in results
         assert results[0.95].var_value > 0
-    
+
     @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13.3 compatibility issue with .min() and _NoValueType")
     @pytest.mark.asyncio
     async def test_cvar_calculation(self, var_calculator, sample_returns):
@@ -777,11 +777,11 @@ class TestEdgeCases:
         metrics = await var_calculator.calculate_comprehensive_risk_metrics(
             returns=sample_returns
         )
-        
+
         # CVaR should be higher than VaR for each confidence level
         for conf_level in [0.95, 0.99, 0.999]:
             assert metrics.cvar_1d[conf_level] >= metrics.var_1d[conf_level]
-    
+
     @pytest.mark.asyncio
     async def test_cleanup_method(self, var_calculator):
         """Test cleanup method executes without error."""

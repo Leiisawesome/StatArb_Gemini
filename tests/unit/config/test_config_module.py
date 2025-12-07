@@ -69,7 +69,7 @@ class TestRiskConfig:
     def test_custom_initialization(self):
         """Test RiskConfig initialization with custom values."""
         from core_engine.config.component_config import PositionLimits, RiskLimits
-        
+
         config = RiskConfig(
             position_limits=PositionLimits(max_position_size=0.05),
             risk_limits=RiskLimits(max_daily_var=0.03),

@@ -33,7 +33,7 @@ class Position:
     current_price: float
     side: str  # "long" or "short"
     cost_basis: float
-    
+
     # Optional fields
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -48,14 +48,14 @@ class AccountInfo:
     portfolio_value: float
     equity: float
     currency: str = "USD"
-    
+
     # Trading restrictions
     is_pattern_day_trader: bool = False
     day_trade_count: int = 0
-    
+
     # Account status
     status: str = "active"
-    
+
     # Optional fields
     margin_multiplier: Optional[float] = None
     maintenance_margin: Optional[float] = None

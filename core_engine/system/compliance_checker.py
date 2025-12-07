@@ -48,7 +48,7 @@ class ComplianceViolationType(Enum):
 class ComplianceResult:
     """
     Result of pre-trade compliance check
-    
+
     Attributes:
         approved: Whether trade is compliant
         rejection_reason: Reason for rejection if not approved
@@ -63,7 +63,7 @@ class ComplianceResult:
     compliance_checks_performed: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     violation_type: Optional[ComplianceViolationType] = None
-    
+
     def __post_init__(self):
         """Validate compliance result"""
         if not self.approved and not self.rejection_reason:
@@ -73,60 +73,60 @@ class ComplianceResult:
 class PreTradeComplianceChecker:
     """
     Pre-trade compliance engine (INSTITUTIONAL REQUIREMENT)
-    
+
     Performs regulatory compliance checks BEFORE risk authorization.
     ALL trades must pass compliance before proceeding to risk checks.
-    
+
     Integration Point: Called at start of CentralRiskManager.authorize_trading_decision()
     """
-    
+
     def __init__(self, config: Optional[Dict] = None):
         """
         Initialize compliance checker
-        
+
         Args:
             config: Configuration dictionary with compliance parameters
         """
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         # Restricted Securities Lists
         self.restricted_list: Set[str] = set()  # Internal restricted list
         self.watch_list: Set[str] = set()       # Compliance watch list
-        
+
         # Hard-to-Borrow (HTB)
         self.hard_to_borrow: Set[str] = set()   # Current HTB list
         self.locate_cache: Dict[str, datetime] = {}  # Share locate cache (valid 1 day)
-        
+
         # Insider Trading Controls
         self.blackout_periods: Dict[str, Tuple[datetime, datetime]] = {}  # symbol → (start, end)
-        
+
         # Pattern Day Trading (PDT)
         self.account_type = self.config.get('account_type', 'margin')  # 'margin' or 'cash'
         self.account_equity = self.config.get('account_equity', 100000.0)
         self.pdt_threshold = 25000.0  # SEC requirement
         self.trade_history: List[Dict] = []  # Last 5 days
-        
+
         # 13D/G Filing Triggers
         self.ownership_threshold = 0.05  # 5% ownership triggers filing
         self.current_ownership: Dict[str, float] = {}  # symbol → ownership %
-        
+
         # Concentration Limits
         self.max_concentration = self.config.get('max_concentration', 0.20)  # 20% max per position
         self.portfolio_value = self.config.get('portfolio_value', 100000.0)
-        
+
         # Statistics
         self.compliance_checks_performed = 0
         self.trades_approved = 0
         self.trades_rejected = 0
         self.rejection_reasons: Dict[str, int] = {}
-        
+
         self.logger.info("✅ PreTradeComplianceChecker initialized")
         self.logger.info(f"   Account Type: {self.account_type}")
         self.logger.info(f"   Account Equity: ${self.account_equity:,.2f}")
         self.logger.info(f"   PDT Threshold: ${self.pdt_threshold:,.2f}")
         self.logger.info(f"   Max Concentration: {self.max_concentration:.1%}")
-    
+
     async def check_pre_trade_compliance(
         self,
         symbol: str,
@@ -138,7 +138,7 @@ class PreTradeComplianceChecker:
     ) -> ComplianceResult:
         """
         Perform comprehensive pre-trade compliance check
-        
+
         Args:
             symbol: Trading symbol (e.g., 'AAPL')
             side: 'buy' or 'sell'
@@ -146,17 +146,17 @@ class PreTradeComplianceChecker:
             price: Expected execution price
             strategy_id: Strategy making the trade
             account_id: Trading account ID
-            
+
         Returns:
             ComplianceResult with approval/rejection and reasons
         """
         self.compliance_checks_performed += 1
         checks_performed = []
         warnings = []
-        
+
         try:
             self.logger.debug(f"Starting compliance checks for {symbol} {side} {quantity} @ ${price}")
-            
+
             # CHECK 1: Restricted Securities List
             checks_performed.append("restricted_securities_check")
             if symbol in self.restricted_list:
@@ -168,7 +168,7 @@ class PreTradeComplianceChecker:
                     compliance_checks_performed=checks_performed,
                     violation_type=ComplianceViolationType.RESTRICTED_SECURITY
                 )
-            
+
             # CHECK 2: Hard-to-Borrow (Reg SHO) - SHORT SALES ONLY
             checks_performed.append("hard_to_borrow_check")
             if side.lower() in ['sell', 'short']:
@@ -184,7 +184,7 @@ class PreTradeComplianceChecker:
                     )
                 elif htb_result.get('warning'):
                     warnings.append(f"HTB Warning: {htb_result['warning']}")
-            
+
             # CHECK 3: Insider Blackout Periods
             checks_performed.append("insider_blackout_check")
             if symbol in self.blackout_periods:
@@ -198,7 +198,7 @@ class PreTradeComplianceChecker:
                         compliance_checks_performed=checks_performed,
                         violation_type=ComplianceViolationType.INSIDER_BLACKOUT
                     )
-            
+
             # CHECK 4: 13D/G Filing Triggers (5%+ ownership)
             checks_performed.append("13d_13g_filing_check")
             if side.lower() == 'buy':
@@ -215,7 +215,7 @@ class PreTradeComplianceChecker:
                     )
                 elif filing_check.get('warning'):
                     warnings.append(filing_check['warning'])
-            
+
             # CHECK 5: Pattern Day Trading Rules (Reg T)
             checks_performed.append("pattern_day_trading_check")
             pdt_check = self._check_pattern_day_trading(symbol, side)
@@ -230,7 +230,7 @@ class PreTradeComplianceChecker:
                 )
             elif pdt_check.get('warning'):
                 warnings.append(pdt_check['warning'])
-            
+
             # CHECK 6: Concentration Limits
             checks_performed.append("concentration_limit_check")
             concentration_check = self._check_concentration_limits(symbol, side, quantity, price)
@@ -245,23 +245,23 @@ class PreTradeComplianceChecker:
                 )
             elif concentration_check.get('warning'):
                 warnings.append(concentration_check['warning'])
-            
+
             # CHECK 7: Watch List Monitoring
             checks_performed.append("watch_list_check")
             if symbol in self.watch_list:
                 warnings.append(f"Security {symbol} is on compliance watch list - extra scrutiny required")
                 self.logger.warning(f"⚠️ Watch list alert: {symbol}")
-            
+
             # ALL CHECKS PASSED
             self.trades_approved += 1
             self.logger.info(f"✅ Compliance approved: {symbol} {side} {quantity}")
-            
+
             return ComplianceResult(
                 approved=True,
                 compliance_checks_performed=checks_performed,
                 warnings=warnings
             )
-            
+
         except Exception as e:
             self.logger.error(f"Compliance check error for {symbol}: {e}")
             self.trades_rejected += 1
@@ -272,11 +272,11 @@ class PreTradeComplianceChecker:
                 requires_manual_review=True,
                 compliance_checks_performed=checks_performed
             )
-    
+
     async def _check_hard_to_borrow(self, symbol: str, quantity: float) -> Dict:
         """
         Check if security is hard-to-borrow (Reg SHO compliance)
-        
+
         For short sales, broker must have reasonable grounds to believe
         the security can be borrowed and delivered.
         """
@@ -285,34 +285,34 @@ class PreTradeComplianceChecker:
             locate_time = self.locate_cache[symbol]
             if datetime.now() - locate_time < timedelta(days=1):
                 return {'available': True, 'locate_cached': True}
-        
+
         # Check HTB list
         if symbol in self.hard_to_borrow:
             return {
                 'available': False,
                 'reason': 'Security on hard-to-borrow list'
             }
-        
+
         # In production, this would query broker API for HTB status
         # For now, assume available
         return {'available': True, 'locate_cached': False}
-    
+
     def _check_filing_triggers(self, symbol: str, quantity: float, price: float) -> Dict:
         """
         Check if trade would trigger 13D or 13G filing (5%+ ownership)
-        
+
         SEC requires disclosure of beneficial ownership of 5% or more
         of a voting class of equity securities.
         """
         # Get current ownership
         current_ownership = self.current_ownership.get(symbol, 0.0)
-        
+
         # Calculate new ownership after trade
         # Note: Would need shares outstanding from market data in production
         shares_outstanding = 1_000_000_000  # Placeholder
         new_shares = self.current_ownership.get(f"{symbol}_shares", 0) + quantity
         new_ownership = new_shares / shares_outstanding
-        
+
         if new_ownership >= self.ownership_threshold:
             return {
                 'requires_filing': True,
@@ -320,20 +320,20 @@ class PreTradeComplianceChecker:
                 'new_ownership': new_ownership,
                 'filing_type': '13D' if new_ownership >= 0.05 else '13G'
             }
-        
+
         # Warning if approaching threshold
         if new_ownership >= 0.045:  # 4.5% warning threshold
             return {
                 'requires_filing': False,
                 'warning': f"Approaching 5% ownership threshold: {new_ownership:.2%}"
             }
-        
+
         return {'requires_filing': False}
-    
+
     def _check_pattern_day_trading(self, symbol: str, side: str) -> Dict:
         """
         Check Pattern Day Trading rules (Reg T)
-        
+
         A pattern day trader is someone who executes 4 or more day trades
         within 5 business days, provided the number of day trades is more
         than 6% of total trades. Requires minimum $25K equity.
@@ -341,12 +341,12 @@ class PreTradeComplianceChecker:
         # Cash accounts are exempt from PDT rules
         if self.account_type == 'cash':
             return {'compliant': True}
-        
+
         # Count day trades in last 5 days
         five_days_ago = datetime.now() - timedelta(days=5)
         recent_trades = [t for t in self.trade_history if t['timestamp'] > five_days_ago]
         day_trades = self._count_day_trades(recent_trades)
-        
+
         # Check if would become pattern day trader
         if day_trades >= 3:  # Would be 4th day trade
             if self.account_equity < self.pdt_threshold:
@@ -358,54 +358,54 @@ class PreTradeComplianceChecker:
                     ),
                     'day_trades': day_trades + 1
                 }
-        
+
         # Warning if approaching PDT threshold
         if day_trades == 2:
             return {
                 'compliant': True,
                 'warning': f"Approaching PDT limit: {day_trades + 1}/4 day trades in 5 days"
             }
-        
+
         return {'compliant': True, 'day_trades': day_trades}
-    
+
     def _count_day_trades(self, trades: List[Dict]) -> int:
         """Count day trades (buy and sell same symbol same day)"""
         # Group trades by date and symbol
         day_trades = 0
         trades_by_day = {}
-        
+
         for trade in trades:
             date = trade['timestamp'].date()
             symbol = trade['symbol']
             key = (date, symbol)
-            
+
             if key not in trades_by_day:
                 trades_by_day[key] = {'buys': 0, 'sells': 0}
-            
+
             if trade['side'].lower() == 'buy':
                 trades_by_day[key]['buys'] += 1
             else:
                 trades_by_day[key]['sells'] += 1
-        
+
         # Count days with both buy and sell
         for counts in trades_by_day.values():
             if counts['buys'] > 0 and counts['sells'] > 0:
                 day_trades += 1
-        
+
         return day_trades
-    
+
     def _check_concentration_limits(self, symbol: str, side: str, quantity: float, price: float) -> Dict:
         """
         Check position concentration limits
-        
+
         Prevents over-concentration in single position
         """
         if side.lower() != 'buy':
             return {'compliant': True}
-        
+
         position_value = quantity * price
         concentration = position_value / self.portfolio_value
-        
+
         if concentration > self.max_concentration:
             return {
                 'compliant': False,
@@ -415,49 +415,49 @@ class PreTradeComplianceChecker:
                 ),
                 'concentration': concentration
             }
-        
+
         # Warning at 80% of limit
         if concentration > self.max_concentration * 0.8:
             return {
                 'compliant': True,
                 'warning': f"High concentration: {concentration:.1%} of portfolio"
             }
-        
+
         return {'compliant': True}
-    
+
     def _record_rejection(self, reason: str):
         """Record rejection for statistics"""
         if reason not in self.rejection_reasons:
             self.rejection_reasons[reason] = 0
         self.rejection_reasons[reason] += 1
-    
+
     # Configuration Management Methods
-    
+
     def add_to_restricted_list(self, symbols: List[str]):
         """Add symbols to restricted securities list"""
         self.restricted_list.update(symbols)
         self.logger.info(f"Added {len(symbols)} symbols to restricted list")
-    
+
     def remove_from_restricted_list(self, symbols: List[str]):
         """Remove symbols from restricted securities list"""
         self.restricted_list.difference_update(symbols)
         self.logger.info(f"Removed {len(symbols)} symbols from restricted list")
-    
+
     def add_to_watch_list(self, symbols: List[str]):
         """Add symbols to compliance watch list"""
         self.watch_list.update(symbols)
         self.logger.info(f"Added {len(symbols)} symbols to watch list")
-    
+
     def set_blackout_period(self, symbol: str, start: datetime, end: datetime):
         """Set insider trading blackout period for symbol"""
         self.blackout_periods[symbol] = (start, end)
         self.logger.info(f"Blackout period set for {symbol}: {start} to {end}")
-    
+
     def update_htb_list(self, htb_symbols: Set[str]):
         """Update hard-to-borrow list (typically from broker)"""
         self.hard_to_borrow = htb_symbols
         self.logger.info(f"HTB list updated: {len(htb_symbols)} securities")
-    
+
     def record_trade(self, symbol: str, side: str, quantity: float, timestamp: datetime):
         """Record trade for PDT tracking"""
         self.trade_history.append({
@@ -466,13 +466,13 @@ class PreTradeComplianceChecker:
             'quantity': quantity,
             'timestamp': timestamp
         })
-        
+
         # Keep only last 5 days
         five_days_ago = datetime.now() - timedelta(days=5)
         self.trade_history = [t for t in self.trade_history if t['timestamp'] > five_days_ago]
-    
+
     # Statistics and Reporting
-    
+
     def get_compliance_statistics(self) -> Dict:
         """Get compliance check statistics"""
         return {
@@ -486,11 +486,11 @@ class PreTradeComplianceChecker:
             'htb_list_size': len(self.hard_to_borrow),
             'active_blackout_periods': len(self.blackout_periods)
         }
-    
+
     def generate_compliance_report(self) -> str:
         """Generate compliance report"""
         stats = self.get_compliance_statistics()
-        
+
         report = [
             "=" * 60,
             "PRE-TRADE COMPLIANCE REPORT",
@@ -509,6 +509,6 @@ class PreTradeComplianceChecker:
             f"  - Active Blackouts:     {stats['active_blackout_periods']}",
             "=" * 60
         ]
-        
+
         return "\n".join(report)
 

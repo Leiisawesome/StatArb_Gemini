@@ -11,9 +11,7 @@ Tests the data feed adapter infrastructure including:
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from unittest.mock import MagicMock
 
 from core_engine.data.feeds.adapters import (
     AdapterStatus,

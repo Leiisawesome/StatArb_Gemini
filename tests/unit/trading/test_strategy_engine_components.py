@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class SimpleTestStrategy(BaseStrategy):
     """Simple test strategy for unit testing"""
-    
+
     def __init__(self, strategy_id: str = "simple_test_strategy"):
         config = StrategyConfig(
             strategy_id=strategy_id,
@@ -46,14 +46,14 @@ class SimpleTestStrategy(BaseStrategy):
         )
         super().__init__(config)
         self.initialized = False
-    
+
     def initialize(self) -> bool:
         self.initialized = True
         return True
-    
+
     def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Any]:
         return [{'symbol': 'TEST', 'action': 'buy', 'quantity': 100}]
-    
+
     def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         pass
 
@@ -83,71 +83,71 @@ def temp_dir():
 
 class TestStrategyExecutionEngineBasics:
     """Basic tests for StrategyExecutionEngine"""
-    
+
     def test_engine_creation(self):
         """Test basic engine creation"""
         config = {'max_concurrent_strategies': 3}
         engine = StrategyExecutionEngine(config)
-        
+
         assert engine is not None
         assert engine.component_id is not None
         assert isinstance(engine.component_id, str)
         assert not engine.is_initialized
         assert not engine.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_engine_initialization(self):
         """Test engine initialization"""
         config = {'max_concurrent_strategies': 3}
         engine = StrategyExecutionEngine(config)
-        
+
         result = await engine.initialize()
-        
+
         assert result is True
         assert engine.is_initialized
         assert not engine.is_operational  # Not started yet
-    
+
     @pytest.mark.asyncio
     async def test_engine_lifecycle(self):
         """Test engine start/stop lifecycle"""
         config = {'max_concurrent_strategies': 3}
         engine = StrategyExecutionEngine(config)
-        
+
         # Initialize first
         await engine.initialize()
-        
+
         # Test start
         start_result = await engine.start()
         assert start_result is True
         assert engine.is_operational
-        
+
         # Test stop
         stop_result = await engine.stop()
         assert stop_result is True
         assert not engine.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_health_check(self):
         """Test health check functionality"""
         config = {'max_concurrent_strategies': 3}
         engine = StrategyExecutionEngine(config)
         await engine.initialize()
-        
+
         health_status = await engine.health_check()
-        
+
         assert health_status is not None
         assert isinstance(health_status, dict)
         assert 'healthy' in health_status
         assert 'component_type' in health_status
         assert health_status['component_type'] == 'StrategyExecutionEngine'
-    
+
     def test_status_reporting(self):
         """Test status reporting"""
         config = {'max_concurrent_strategies': 3}
         engine = StrategyExecutionEngine(config)
-        
+
         status = engine.get_status()
-        
+
         assert isinstance(status, dict)
         assert 'component_id' in status
         assert 'component_type' in status
@@ -157,7 +157,7 @@ class TestStrategyExecutionEngineBasics:
 
 class TestStrategyRegistryBasics:
     """Basic tests for EnhancedStrategyRegistry"""
-    
+
     def test_registry_creation(self, temp_dir):
         """Test basic registry creation"""
         config = {
@@ -166,13 +166,13 @@ class TestStrategyRegistryBasics:
             'cache_enabled': True
         }
         registry = EnhancedStrategyRegistry(config)
-        
+
         assert registry is not None
         assert registry.component_id is not None
         assert isinstance(registry.component_id, str)
         assert not registry.is_initialized
         assert not registry.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_registry_initialization(self, temp_dir):
         """Test registry initialization"""
@@ -182,13 +182,13 @@ class TestStrategyRegistryBasics:
             'cache_enabled': True
         }
         registry = EnhancedStrategyRegistry(config)
-        
+
         result = await registry.initialize()
-        
+
         assert result is True
         assert registry.is_initialized
         assert registry.registry_path.exists()
-    
+
     @pytest.mark.asyncio
     async def test_registry_lifecycle(self, temp_dir):
         """Test registry start/stop lifecycle"""
@@ -198,20 +198,20 @@ class TestStrategyRegistryBasics:
             'cache_enabled': True
         }
         registry = EnhancedStrategyRegistry(config)
-        
+
         # Initialize first
         await registry.initialize()
-        
+
         # Test start
         start_result = await registry.start()
         assert start_result is True
         assert registry.is_operational
-        
+
         # Test stop
         stop_result = await registry.stop()
         assert stop_result is True
         assert not registry.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_health_check(self, temp_dir):
         """Test health check functionality"""
@@ -222,15 +222,15 @@ class TestStrategyRegistryBasics:
         }
         registry = EnhancedStrategyRegistry(config)
         await registry.initialize()
-        
+
         health_status = await registry.health_check()
-        
+
         assert health_status is not None
         assert isinstance(health_status, dict)
         assert 'healthy' in health_status
         assert 'component_type' in health_status
         assert health_status['component_type'] == 'EnhancedStrategyRegistry'
-    
+
     @pytest.mark.asyncio
     async def test_strategy_registration(self, temp_dir):
         """Test basic strategy registration"""
@@ -241,20 +241,20 @@ class TestStrategyRegistryBasics:
         }
         registry = EnhancedStrategyRegistry(config)
         await registry.initialize()
-        
+
         # Mock the validator to avoid complex validation
         with patch.object(registry.validator, 'validate_strategy') as mock_validate:
             mock_validate.return_value = Mock(overall_score=85.0, overall_status=Mock(value='passed'))
-            
+
             strategy_id = await registry.register_strategy(SimpleTestStrategy, validate=True)
-            
+
             assert strategy_id is not None
             assert strategy_id in registry.strategies
 
 
 class TestStrategyValidatorBasics:
     """Basic tests for EnhancedStrategyValidator"""
-    
+
     def test_validator_creation(self):
         """Test basic validator creation"""
         config = {
@@ -262,13 +262,13 @@ class TestStrategyValidatorBasics:
             'enable_caching': True
         }
         validator = EnhancedStrategyValidator(config)
-        
+
         assert validator is not None
         assert validator.component_id is not None
         assert isinstance(validator.component_id, str)
         assert not validator.is_initialized
         assert not validator.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_validator_initialization(self):
         """Test validator initialization"""
@@ -277,13 +277,13 @@ class TestStrategyValidatorBasics:
             'enable_caching': True
         }
         validator = EnhancedStrategyValidator(config)
-        
+
         result = await validator.initialize()
-        
+
         assert result is True
         assert validator.is_initialized
         assert validator.validation_level == ValidationLevel.STANDARD
-    
+
     @pytest.mark.asyncio
     async def test_validator_lifecycle(self):
         """Test validator start/stop lifecycle"""
@@ -292,20 +292,20 @@ class TestStrategyValidatorBasics:
             'enable_caching': True
         }
         validator = EnhancedStrategyValidator(config)
-        
+
         # Initialize first
         await validator.initialize()
-        
+
         # Test start
         start_result = await validator.start()
         assert start_result is True
         assert validator.is_operational
-        
+
         # Test stop
         stop_result = await validator.stop()
         assert stop_result is True
         assert not validator.is_operational
-    
+
     @pytest.mark.asyncio
     async def test_health_check(self):
         """Test health check functionality"""
@@ -315,15 +315,15 @@ class TestStrategyValidatorBasics:
         }
         validator = EnhancedStrategyValidator(config)
         await validator.initialize()
-        
+
         health_status = await validator.health_check()
-        
+
         assert health_status is not None
         assert isinstance(health_status, dict)
         assert 'healthy' in health_status
         assert 'component_type' in health_status
         assert health_status['component_type'] == 'EnhancedStrategyValidator'
-    
+
     @pytest.mark.asyncio
     async def test_basic_validation(self, sample_market_data):
         """Test basic strategy validation"""
@@ -333,16 +333,16 @@ class TestStrategyValidatorBasics:
         }
         validator = EnhancedStrategyValidator(config)
         await validator.initialize()
-        
+
         test_strategy = SimpleTestStrategy()
-        
+
         result = await validator.validate_strategy(
             test_strategy,
             sample_data=sample_market_data,
             run_backtest=False,
             use_cache=False
         )
-        
+
         assert result is not None
         assert hasattr(result, 'overall_score')
         assert hasattr(result, 'overall_status')
@@ -351,7 +351,7 @@ class TestStrategyValidatorBasics:
 
 class TestIntegrationWorkflow:
     """Test integration between components"""
-    
+
     @pytest.mark.asyncio
     async def test_component_integration(self, temp_dir, sample_market_data):
         """Test basic integration between all components"""
@@ -366,28 +366,28 @@ class TestIntegrationWorkflow:
             'validation_level': 'basic',
             'enable_caching': False
         }
-        
+
         engine = StrategyExecutionEngine(engine_config)
         registry = EnhancedStrategyRegistry(registry_config)
         validator = EnhancedStrategyValidator(validator_config)
-        
+
         # Initialize all components
         engine_init = await engine.initialize()
         registry_init = await registry.initialize()
         validator_init = await validator.initialize()
-        
+
         assert all([engine_init, registry_init, validator_init])
-        
+
         # Start all components
         await engine.start()
         await registry.start()
         await validator.start()
-        
+
         # All should be operational
         assert engine.is_operational
         assert registry.is_operational
         assert validator.is_operational
-        
+
         # Test basic validation
         test_strategy = SimpleTestStrategy()
         validation_result = await validator.validate_strategy(
@@ -395,14 +395,14 @@ class TestIntegrationWorkflow:
             sample_data=sample_market_data,
             use_cache=False
         )
-        
+
         assert validation_result is not None
-        
+
         # Cleanup
         await engine.stop()
         await registry.stop()
         await validator.stop()
-    
+
     @pytest.mark.asyncio
     async def test_health_checks_all_components(self, temp_dir):
         """Test health checks for all components"""
@@ -416,21 +416,21 @@ class TestIntegrationWorkflow:
             'validation_level': 'basic',
             'enable_caching': False
         })
-        
+
         await engine.initialize()
         await registry.initialize()
         await validator.initialize()
-        
+
         # Test health checks
         engine_health = await engine.health_check()
         registry_health = await registry.health_check()
         validator_health = await validator.health_check()
-        
+
         assert engine_health['healthy'] is True
         # Registry health may be False if not started, which is acceptable
         assert 'healthy' in registry_health
         assert validator_health['healthy'] is True
-        
+
         assert engine_health['component_type'] == 'StrategyExecutionEngine'
         assert registry_health['component_type'] == 'EnhancedStrategyRegistry'
         assert validator_health['component_type'] == 'EnhancedStrategyValidator'

@@ -21,7 +21,7 @@ from core_engine.analytics.attribution_analyzer import (
 
 class TestAttributionAnalyzer:
     """Comprehensive tests for AttributionAnalyzer - Advanced performance attribution analysis"""
-    
+
     def setup_method(self):
         """Set up test fixtures"""
         self.config = AttributionConfig(
@@ -34,10 +34,10 @@ class TestAttributionAnalyzer:
             enable_allocation_effect=True,
             enable_selection_effect=True
         )
-        
+
         # Create a mock attribution analyzer
         self.attribution_analyzer = Mock()
-        
+
         # Sample portfolio data
         self.portfolio_data = pd.DataFrame({
             'timestamp': pd.date_range(start='2024-01-01', periods=1000, freq='D'),
@@ -45,7 +45,7 @@ class TestAttributionAnalyzer:
             'returns': np.random.normal(0.001, 0.02, 1000),
             'benchmark_returns': np.random.normal(0.0008, 0.018, 1000)
         })
-        
+
         # Sample holdings data
         self.holdings_data = pd.DataFrame({
             'timestamp': pd.date_range(start='2024-01-01', periods=100, freq='D'),
@@ -54,7 +54,7 @@ class TestAttributionAnalyzer:
             'return': np.random.normal(0.001, 0.02, 100),
             'sector': ['Technology', 'Technology', 'Technology', 'Consumer Discretionary'] * 25
         })
-        
+
         # Sample factor data
         self.factor_data = pd.DataFrame({
             'timestamp': pd.date_range(start='2024-01-01', periods=1000, freq='D'),
@@ -63,7 +63,7 @@ class TestAttributionAnalyzer:
             'value_factor': np.random.normal(0.0001, 0.006, 1000),
             'momentum_factor': np.random.normal(0.0003, 0.010, 1000)
         })
-    
+
     def test_attribution_method_enum(self):
         """Test AttributionMethod enum values"""
         assert AttributionMethod.BRINSON.value == "brinson"
@@ -72,7 +72,7 @@ class TestAttributionAnalyzer:
         assert AttributionMethod.HOLDINGS_BASED.value == "holdings_based"
         assert AttributionMethod.MULTI_FACTOR.value == "multi_factor"
         assert AttributionMethod.RISK_MODEL.value == "risk_model"
-    
+
     def test_attribution_type_enum(self):
         """Test AttributionType enum values"""
         assert AttributionType.SECTOR.value == "sector"
@@ -82,14 +82,14 @@ class TestAttributionAnalyzer:
         assert AttributionType.GEOGRAPHIC.value == "geographic"
         assert AttributionType.CURRENCY.value == "currency"
         assert AttributionType.ASSET_CLASS.value == "asset_class"
-    
+
     def test_performance_component_enum(self):
         """Test PerformanceComponent enum values"""
         assert PerformanceComponent.ALLOCATION.value == "allocation"
         assert PerformanceComponent.SELECTION.value == "selection"
         assert PerformanceComponent.INTERACTION.value == "interaction"
         assert PerformanceComponent.TOTAL.value == "total"
-    
+
     def test_attribution_config_creation(self):
         """Test AttributionConfig creation"""
         config = AttributionConfig(
@@ -102,7 +102,7 @@ class TestAttributionAnalyzer:
             enable_allocation_effect=True,
             enable_selection_effect=True
         )
-        
+
         assert config.attribution_method == AttributionMethod.BRINSON
         assert config.attribution_frequency == "weekly"
         assert config.factor_model_type == "carhart"
@@ -111,7 +111,7 @@ class TestAttributionAnalyzer:
         assert config.sector_classification == "industry"
         assert config.enable_allocation_effect is True
         assert config.enable_selection_effect is True
-    
+
     @pytest.mark.asyncio
     async def test_attribution_analyzer_interface_methods(self):
         """Test that AttributionAnalyzer has expected interface methods"""
@@ -124,7 +124,7 @@ class TestAttributionAnalyzer:
         assert hasattr(self.attribution_analyzer, 'analyze_returns_based_attribution')
         assert hasattr(self.attribution_analyzer, 'generate_attribution_report')
         assert hasattr(self.attribution_analyzer, 'calculate_attribution_statistics')
-    
+
     @pytest.mark.asyncio
     async def test_analyze_factor_attribution_interface(self):
         """Test factor attribution analysis interface"""
@@ -146,11 +146,11 @@ class TestAttributionAnalyzer:
             'factor_rsquared': 0.85,
             'factor_volatility': 0.12
         })
-        
+
         result = await self.attribution_analyzer.analyze_factor_attribution(
             self.portfolio_data, self.factor_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert 'factor_attribution' in result
         assert result['factor_attribution']['market_factor'] == 0.10
@@ -168,7 +168,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_factor_attribution.assert_called_once_with(
             self.portfolio_data, self.factor_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_analyze_sector_attribution_interface(self):
         """Test sector attribution analysis interface"""
@@ -196,11 +196,11 @@ class TestAttributionAnalyzer:
                 'Consumer Discretionary': 0.15
             }
         })
-        
+
         result = await self.attribution_analyzer.analyze_sector_attribution(
             self.holdings_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert result['allocation_effect'] == 0.05
         assert result['selection_effect'] == 0.08
@@ -215,7 +215,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_sector_attribution.assert_called_once_with(
             self.holdings_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_analyze_security_attribution_interface(self):
         """Test security attribution analysis interface"""
@@ -237,11 +237,11 @@ class TestAttributionAnalyzer:
             ],
             'concentration_risk': 0.65
         })
-        
+
         result = await self.attribution_analyzer.analyze_security_attribution(
             self.holdings_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert 'security_attribution' in result
         assert result['security_attribution']['AAPL'] == 0.05
@@ -256,7 +256,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_security_attribution.assert_called_once_with(
             self.holdings_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_analyze_brinson_attribution_interface(self):
         """Test Brinson attribution analysis interface"""
@@ -274,11 +274,11 @@ class TestAttributionAnalyzer:
             'benchmark_return': 0.08,
             'portfolio_return': 0.23
         })
-        
+
         result = await self.attribution_analyzer.analyze_brinson_attribution(
             self.holdings_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert result['allocation_effect'] == 0.05
         assert result['selection_effect'] == 0.08
@@ -293,7 +293,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_brinson_attribution.assert_called_once_with(
             self.holdings_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_analyze_multi_factor_attribution_interface(self):
         """Test multi-factor attribution analysis interface"""
@@ -320,11 +320,11 @@ class TestAttributionAnalyzer:
             'residual_alpha': 0.03,
             'factor_rsquared': 0.85
         })
-        
+
         result = await self.attribution_analyzer.analyze_multi_factor_attribution(
             self.portfolio_data, self.factor_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert 'factor_attribution' in result
         assert 'factor_exposures' in result
@@ -334,7 +334,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_multi_factor_attribution.assert_called_once_with(
             self.portfolio_data, self.factor_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_analyze_returns_based_attribution_interface(self):
         """Test returns-based attribution analysis interface"""
@@ -355,11 +355,11 @@ class TestAttributionAnalyzer:
                 'correlation': 0.85
             }
         })
-        
+
         result = await self.attribution_analyzer.analyze_returns_based_attribution(
             self.portfolio_data
         )
-        
+
         assert result['total_attribution'] == 0.15
         assert 'attribution_breakdown' in result
         assert result['attribution_breakdown']['systematic_attribution'] == 0.10
@@ -372,7 +372,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.analyze_returns_based_attribution.assert_called_once_with(
             self.portfolio_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_generate_attribution_report_interface(self):
         """Test attribution report generation interface"""
@@ -395,11 +395,11 @@ class TestAttributionAnalyzer:
                 'Monitor factor exposure concentration'
             ]
         })
-        
+
         result = await self.attribution_analyzer.generate_attribution_report(
             self.portfolio_data, self.holdings_data
         )
-        
+
         assert 'report_id' in result
         assert 'report_timestamp' in result
         assert 'summary_attribution' in result
@@ -413,7 +413,7 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.generate_attribution_report.assert_called_once_with(
             self.portfolio_data, self.holdings_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_calculate_attribution_statistics_interface(self):
         """Test attribution statistics calculation interface"""
@@ -431,11 +431,11 @@ class TestAttributionAnalyzer:
                 'kurtosis': 3.5
             }
         })
-        
+
         result = await self.attribution_analyzer.calculate_attribution_statistics(
             self.portfolio_data
         )
-        
+
         assert result['attribution_consistency'] == 0.75
         assert result['attribution_stability'] == 0.80
         assert result['attribution_volatility'] == 0.12
@@ -450,15 +450,15 @@ class TestAttributionAnalyzer:
         self.attribution_analyzer.calculate_attribution_statistics.assert_called_once_with(
             self.portfolio_data
         )
-    
+
     @pytest.mark.asyncio
     async def test_attribution_analyzer_error_handling_interface(self):
         """Test attribution analyzer error handling interface"""
         self.attribution_analyzer.handle_attribution_error = AsyncMock(return_value=True)
-        
+
         test_error = Exception("Attribution error")
         result = await self.attribution_analyzer.handle_attribution_error('factor_attribution', test_error)
-        
+
         assert result is True
         self.attribution_analyzer.handle_attribution_error.assert_called_once_with('factor_attribution', test_error)
 

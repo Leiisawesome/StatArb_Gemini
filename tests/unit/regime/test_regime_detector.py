@@ -445,14 +445,14 @@ class TestRegimeDetector:
     def test_detect_transition(self, sample_market_data, detector_config):
         """Test regime transition detection."""
         detector = RegimeDetector(detector_config)
-        
+
         # Run multiple detections to potentially create transitions
         detection1 = detector.detect_current_regime(sample_market_data.iloc[:100])
         detection2 = detector.detect_current_regime(sample_market_data.iloc[50:150])
-        
+
         # Get transition history
         transitions = detector.get_transition_history()
-        
+
         assert isinstance(transitions, list)
         if transitions:
             for transition in transitions:

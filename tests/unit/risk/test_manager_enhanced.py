@@ -128,7 +128,7 @@ def mock_correlation_matrix():
         'AAPL': [1.0, 0.7],
         'GOOGL': [0.7, 1.0]
     }, index=['AAPL', 'GOOGL'])
-    
+
     return CorrelationMatrix(
         matrix=matrix,
         method='pearson',
@@ -172,8 +172,8 @@ def risk_manager_custom():
 
 class TestDataclasses:
     """Test dataclasses."""
-    
-    def test_risk_snapshot_creation(self, mock_risk_metrics, mock_exposure_breakdown, 
+
+    def test_risk_snapshot_creation(self, mock_risk_metrics, mock_exposure_breakdown,
                                      mock_correlation_matrix, mock_stress_result):
         """Test RiskSnapshot dataclass creation."""
         snapshot = RiskSnapshot(
@@ -188,14 +188,14 @@ class TestDataclasses:
             risk_score=45.0,
             metadata={'test': 'data'}
         )
-        
+
         assert snapshot.portfolio_value == 25000.0
         assert snapshot.risk_score == 45.0
         assert snapshot.regime_status == 'NORMAL'
         assert len(snapshot.exposures) == 1
         assert snapshot.risk_metrics == mock_risk_metrics
         assert snapshot.metadata['test'] == 'data'
-    
+
     def test_risk_alert_creation(self):
         """Test RiskAlert dataclass creation."""
         alert = RiskAlert(
@@ -205,7 +205,7 @@ class TestDataclasses:
             message='Risk score exceeds threshold',
             details={'risk_score': 85.0}
         )
-        
+
         assert alert.alert_id == 'test_alert_001'
         assert alert.alert_type == 'HIGH_RISK_SCORE'
         assert alert.severity == AlertSeverity.CRITICAL
@@ -220,38 +220,38 @@ class TestDataclasses:
 
 class TestInitialization:
     """Test EnhancedRiskManager initialization."""
-    
+
     def test_default_initialization(self, risk_manager):
         """Test default initialization."""
         assert risk_manager.risk_calculation_interval == 300  # 5 minutes
         assert risk_manager.snapshot_retention_days == 30
         assert risk_manager.enable_real_time_monitoring is True
-        
+
         # Check risk weights
         assert risk_manager.risk_weights['var'] == 0.25
         assert risk_manager.risk_weights['stress_test'] == 0.25
         assert risk_manager.risk_weights['correlation'] == 0.20
         assert risk_manager.risk_weights['concentration'] == 0.15
         assert risk_manager.risk_weights['limits'] == 0.15
-        
+
         # Check components initialized
         assert risk_manager.exposure_calculator is not None
         assert risk_manager.var_calculator is not None
         assert risk_manager.stress_tester is not None
         assert risk_manager.limit_monitor is not None
         assert risk_manager.correlation_analyzer is not None
-        
+
         # Check internal state
         assert isinstance(risk_manager._risk_snapshots, deque)
         assert isinstance(risk_manager._risk_alerts, deque)
         assert risk_manager._monitoring_active is False
-    
+
     def test_custom_configuration(self, risk_manager_custom):
         """Test custom configuration initialization."""
         assert risk_manager_custom.risk_calculation_interval == 60
         assert risk_manager_custom.snapshot_retention_days == 7
         assert risk_manager_custom.enable_real_time_monitoring is False
-        
+
         # Check custom risk weights
         assert risk_manager_custom.risk_weights['var'] == 0.30
         assert risk_manager_custom.risk_weights['stress_test'] == 0.30
@@ -264,7 +264,7 @@ class TestInitialization:
 
 class TestComprehensiveRiskCalculation:
     """Test comprehensive risk calculation."""
-    
+
     @pytest.mark.asyncio
     async def test_calculate_comprehensive_risk_full_data(
         self, risk_manager, sample_positions, sample_returns_data,
@@ -281,15 +281,15 @@ class TestComprehensiveRiskCalculation:
         risk_manager.correlation_analyzer.calculate_correlation_matrix = AsyncMock(
             return_value=mock_correlation_matrix
         )
-        
+
         # Mock stress tests
         risk_manager.stress_tester.run_stress_test = AsyncMock(
             return_value=mock_stress_result
         )
-        
+
         # Mock limit monitor
         risk_manager.limit_monitor.check_limits = AsyncMock(return_value=[])
-        
+
         # Mock regime detection
         regime_result = RegimeDetectionResult(
             current_regime=CorrelationRegime.NORMAL,
@@ -303,7 +303,7 @@ class TestComprehensiveRiskCalculation:
         risk_manager.correlation_analyzer.detect_correlation_regime = AsyncMock(
             return_value=regime_result
         )
-        
+
         # Calculate risk
         snapshot = await risk_manager.calculate_comprehensive_risk(
             positions=sample_positions,
@@ -311,7 +311,7 @@ class TestComprehensiveRiskCalculation:
             returns_data=sample_returns_data,
             market_data={}
         )
-        
+
         # Verify snapshot
         assert isinstance(snapshot, RiskSnapshot)
         assert snapshot.portfolio_value == 25000.0
@@ -319,12 +319,12 @@ class TestComprehensiveRiskCalculation:
         assert snapshot.risk_metrics == mock_risk_metrics
         assert snapshot.regime_status == 'NORMAL'
         assert 0 <= snapshot.risk_score <= 100
-        
+
         # Verify components were called
         risk_manager.exposure_calculator.calculate_exposures.assert_called_once()
         risk_manager.var_calculator.calculate_comprehensive_risk_metrics.assert_called_once()
         risk_manager.correlation_analyzer.calculate_correlation_matrix.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_calculate_comprehensive_risk_minimal_data(
         self, risk_manager, sample_positions, mock_exposure_breakdown
@@ -338,7 +338,7 @@ class TestComprehensiveRiskCalculation:
         risk_manager.stress_tester.run_stress_test = AsyncMock(
             side_effect=Exception("No data")
         )
-        
+
         # Calculate risk without returns_data
         snapshot = await risk_manager.calculate_comprehensive_risk(
             positions=sample_positions,
@@ -346,13 +346,13 @@ class TestComprehensiveRiskCalculation:
             returns_data=None,
             market_data=None
         )
-        
+
         # Verify snapshot created
         assert isinstance(snapshot, RiskSnapshot)
         assert snapshot.portfolio_value == 25000.0
         assert snapshot.risk_metrics is None  # No returns data
         assert snapshot.correlation_matrix is None
-    
+
     @pytest.mark.asyncio
     async def test_calculate_comprehensive_risk_with_single_asset(
         self, risk_manager, mock_exposure_breakdown, mock_risk_metrics
@@ -360,7 +360,7 @@ class TestComprehensiveRiskCalculation:
         """Test risk calculation with single asset (no correlation)."""
         # Single asset returns
         single_returns = pd.DataFrame({'AAPL': [0.01, -0.02, 0.015]})
-        
+
         risk_manager.exposure_calculator.calculate_exposures = AsyncMock(
             return_value=mock_exposure_breakdown
         )
@@ -371,7 +371,7 @@ class TestComprehensiveRiskCalculation:
         risk_manager.stress_tester.run_stress_test = AsyncMock(
             side_effect=Exception("No data")
         )
-        
+
         # Calculate risk
         snapshot = await risk_manager.calculate_comprehensive_risk(
             positions={'AAPL': {}},
@@ -379,11 +379,11 @@ class TestComprehensiveRiskCalculation:
             returns_data=single_returns,
             market_data={}
         )
-        
+
         # Verify snapshot
         assert isinstance(snapshot, RiskSnapshot)
         assert snapshot.correlation_matrix is None  # Only 1 asset
-    
+
     @pytest.mark.asyncio
     async def test_calculate_comprehensive_risk_error_handling(self, risk_manager, sample_positions):
         """Test error handling in risk calculation."""
@@ -391,14 +391,14 @@ class TestComprehensiveRiskCalculation:
         risk_manager.exposure_calculator.calculate_exposures = AsyncMock(
             side_effect=Exception("Calculation error")
         )
-        
+
         # Should raise exception
         with pytest.raises(Exception, match="Calculation error"):
             await risk_manager.calculate_comprehensive_risk(
                 positions=sample_positions,
                 portfolio_value=25000.0
             )
-    
+
     @pytest.mark.asyncio
     async def test_run_key_stress_tests(self, risk_manager, sample_positions, mock_stress_result):
         """Test key stress tests execution."""
@@ -406,13 +406,13 @@ class TestComprehensiveRiskCalculation:
         risk_manager.stress_tester.run_stress_test = AsyncMock(
             return_value=mock_stress_result
         )
-        
+
         # Run stress tests
         results = await risk_manager._run_key_stress_tests(sample_positions, 25000.0)
-        
+
         # Verify all 4 scenarios attempted
         assert risk_manager.stress_tester.run_stress_test.call_count == 4
-        
+
         # Verify scenarios
         called_scenarios = [call[0][0] for call in risk_manager.stress_tester.run_stress_test.call_args_list]
         assert 'financial_crisis_2008' in called_scenarios
@@ -427,7 +427,7 @@ class TestComprehensiveRiskCalculation:
 
 class TestRiskScoring:
     """Test risk score calculation."""
-    
+
     def test_calculate_risk_score_high_risk(
         self, risk_manager, mock_risk_metrics, mock_exposure_breakdown, mock_stress_result
     ):
@@ -441,7 +441,7 @@ class TestRiskScoring:
             max_drawdown=-0.40,
             timestamp=datetime.now()
         )
-        
+
         # Severe stress result
         severe_stress = {
             'crisis': PortfolioStressResult(
@@ -454,7 +454,7 @@ class TestRiskScoring:
                 timestamp=datetime.now()
             )
         }
-        
+
         # Multiple critical breaches
         breaches = [
             LimitBreach(
@@ -484,7 +484,7 @@ class TestRiskScoring:
                 timestamp=datetime.now()
             )
         ]
-        
+
         score = risk_manager._calculate_risk_score(
             exposures=mock_exposure_breakdown,
             risk_metrics=high_risk_metrics,
@@ -492,11 +492,11 @@ class TestRiskScoring:
             limit_breaches=breaches,
             regime_status='CRISIS'
         )
-        
+
         # Should be high score (> 80)
         assert score > 80
         assert score <= 100
-    
+
     def test_calculate_risk_score_low_risk(self, risk_manager, mock_exposure_breakdown):
         """Test low risk score calculation."""
         # Low risk metrics
@@ -508,7 +508,7 @@ class TestRiskScoring:
             max_drawdown=-0.05,
             timestamp=datetime.now()
         )
-        
+
         # Mild stress result
         mild_stress = {
             'scenario': PortfolioStressResult(
@@ -521,7 +521,7 @@ class TestRiskScoring:
                 timestamp=datetime.now()
             )
         }
-        
+
         score = risk_manager._calculate_risk_score(
             exposures=mock_exposure_breakdown,
             risk_metrics=low_risk_metrics,
@@ -529,11 +529,11 @@ class TestRiskScoring:
             limit_breaches=[],
             regime_status='LOW'
         )
-        
+
         # Should be low score (< 40)
         assert score < 40
         assert score >= 0
-    
+
     def test_calculate_risk_score_missing_components(self, risk_manager, mock_exposure_breakdown):
         """Test risk score with missing components."""
         score = risk_manager._calculate_risk_score(
@@ -543,7 +543,7 @@ class TestRiskScoring:
             limit_breaches=[],
             regime_status='NORMAL'
         )
-        
+
         # Should still calculate (lower due to missing data)
         assert 0 <= score <= 100
 
@@ -554,9 +554,9 @@ class TestRiskScoring:
 
 class TestAlerts:
     """Test alert system."""
-    
+
     @pytest.mark.asyncio
-    async def test_high_risk_score_alert(self, risk_manager, mock_risk_metrics, 
+    async def test_high_risk_score_alert(self, risk_manager, mock_risk_metrics,
                                           mock_exposure_breakdown, mock_correlation_matrix):
         """Test high risk score alert generation."""
         # Create high-risk snapshot
@@ -571,18 +571,18 @@ class TestAlerts:
             regime_status='NORMAL',
             risk_score=85.0  # > 80
         )
-        
+
         # Check alerts
         await risk_manager._check_risk_alerts(snapshot)
-        
+
         # Verify alert created
         assert len(risk_manager._risk_alerts) > 0
         alert = risk_manager._risk_alerts[-1]
         assert alert.alert_type == 'HIGH_RISK_SCORE'
         assert alert.severity == AlertSeverity.CRITICAL
-    
+
     @pytest.mark.asyncio
-    async def test_crisis_regime_alert(self, risk_manager, mock_risk_metrics, 
+    async def test_crisis_regime_alert(self, risk_manager, mock_risk_metrics,
                                         mock_exposure_breakdown, mock_correlation_matrix):
         """Test crisis regime alert generation."""
         snapshot = RiskSnapshot(
@@ -596,16 +596,16 @@ class TestAlerts:
             regime_status='CRISIS',  # Crisis regime
             risk_score=50.0
         )
-        
+
         await risk_manager._check_risk_alerts(snapshot)
-        
+
         # Verify crisis alert
         crisis_alerts = [a for a in risk_manager._risk_alerts if a.alert_type == 'CRISIS_REGIME']
         assert len(crisis_alerts) > 0
         assert crisis_alerts[0].severity == AlertSeverity.CRITICAL
-    
+
     @pytest.mark.asyncio
-    async def test_extreme_stress_loss_alert(self, risk_manager, mock_risk_metrics, 
+    async def test_extreme_stress_loss_alert(self, risk_manager, mock_risk_metrics,
                                                mock_exposure_breakdown, mock_correlation_matrix):
         """Test extreme stress loss alert generation."""
         # Extreme stress result
@@ -620,7 +620,7 @@ class TestAlerts:
                 timestamp=datetime.now()
             )
         }
-        
+
         snapshot = RiskSnapshot(
             timestamp=datetime.now(),
             portfolio_value=25000.0,
@@ -632,28 +632,28 @@ class TestAlerts:
             regime_status='NORMAL',
             risk_score=50.0
         )
-        
+
         await risk_manager._check_risk_alerts(snapshot)
-        
+
         # Verify stress alert
         stress_alerts = [a for a in risk_manager._risk_alerts if a.alert_type == 'EXTREME_STRESS_LOSS']
         assert len(stress_alerts) > 0
         assert stress_alerts[0].severity == AlertSeverity.WARNING
-    
+
     def test_alert_handler_registration(self, risk_manager):
         """Test alert handler add/remove."""
         # Create mock handler
         handler = AsyncMock()
-        
+
         # Add handler
         initial_count = len(risk_manager._alert_handlers)
         risk_manager.add_alert_handler(handler)
         assert len(risk_manager._alert_handlers) == initial_count + 1
-        
+
         # Remove handler
         risk_manager.remove_alert_handler(handler)
         assert len(risk_manager._alert_handlers) == initial_count
-    
+
     @pytest.mark.asyncio
     async def test_limit_breach_alert_handling(self, risk_manager):
         """Test limit breach alert creation."""
@@ -671,10 +671,10 @@ class TestAlerts:
             description='Position size limit exceeded for AAPL',
             timestamp=datetime.now()
         )
-        
+
         # Handle breach
         await risk_manager._handle_limit_alert(breach)
-        
+
         # Verify alert created
         assert len(risk_manager._risk_alerts) > 0
         alert = risk_manager._risk_alerts[-1]
@@ -689,8 +689,8 @@ class TestAlerts:
 
 class TestSnapshotAndQuery:
     """Test snapshot storage and query methods."""
-    
-    def test_snapshot_storage_and_retrieval(self, risk_manager, mock_risk_metrics, 
+
+    def test_snapshot_storage_and_retrieval(self, risk_manager, mock_risk_metrics,
                                               mock_exposure_breakdown, mock_correlation_matrix):
         """Test snapshot storage and retrieval."""
         # Create snapshot
@@ -705,17 +705,17 @@ class TestSnapshotAndQuery:
             regime_status='NORMAL',
             risk_score=50.0
         )
-        
+
         # Store snapshot
         risk_manager._store_risk_snapshot(snapshot)
-        
+
         # Retrieve latest
         latest = risk_manager.get_latest_risk_snapshot()
         assert latest is not None
         assert latest.portfolio_value == 25000.0
         assert latest.risk_score == 50.0
-    
-    def test_get_risk_snapshots_time_filtering(self, risk_manager, mock_risk_metrics, 
+
+    def test_get_risk_snapshots_time_filtering(self, risk_manager, mock_risk_metrics,
                                                  mock_exposure_breakdown, mock_correlation_matrix):
         """Test snapshot retrieval with time filtering."""
         # Create snapshots at different times
@@ -730,7 +730,7 @@ class TestSnapshotAndQuery:
             regime_status='NORMAL',
             risk_score=40.0
         )
-        
+
         recent_snapshot = RiskSnapshot(
             timestamp=datetime.now(),
             portfolio_value=25000.0,
@@ -742,15 +742,15 @@ class TestSnapshotAndQuery:
             regime_status='NORMAL',
             risk_score=50.0
         )
-        
+
         risk_manager._store_risk_snapshot(old_snapshot)
         risk_manager._store_risk_snapshot(recent_snapshot)
-        
+
         # Get last 24 hours (should get recent only)
         snapshots_24h = risk_manager.get_risk_snapshots(hours=24)
         assert len(snapshots_24h) >= 1
         assert all(s.timestamp >= datetime.now() - timedelta(hours=24) for s in snapshots_24h)
-    
+
     def test_get_recent_alerts(self, risk_manager):
         """Test recent alerts retrieval."""
         # Create alerts at different times
@@ -762,7 +762,7 @@ class TestSnapshotAndQuery:
             details={},
             timestamp=datetime.now() - timedelta(hours=48)
         )
-        
+
         recent_alert = RiskAlert(
             alert_id='recent_alert',
             alert_type='TEST',
@@ -771,16 +771,16 @@ class TestSnapshotAndQuery:
             details={},
             timestamp=datetime.now()
         )
-        
+
         risk_manager._risk_alerts.append(old_alert)
         risk_manager._risk_alerts.append(recent_alert)
-        
+
         # Get last 24 hours
         alerts_24h = risk_manager.get_recent_alerts(hours=24)
         assert len(alerts_24h) >= 1
         assert all(a.timestamp >= datetime.now() - timedelta(hours=24) for a in alerts_24h)
-    
-    def test_snapshot_cleanup(self, risk_manager, mock_risk_metrics, 
+
+    def test_snapshot_cleanup(self, risk_manager, mock_risk_metrics,
                                mock_exposure_breakdown, mock_correlation_matrix):
         """Test old snapshot cleanup."""
         # Create old snapshot (beyond retention period)
@@ -795,7 +795,7 @@ class TestSnapshotAndQuery:
             regime_status='NORMAL',
             risk_score=40.0
         )
-        
+
         recent_snapshot = RiskSnapshot(
             timestamp=datetime.now(),
             portfolio_value=25000.0,
@@ -807,11 +807,11 @@ class TestSnapshotAndQuery:
             regime_status='NORMAL',
             risk_score=50.0
         )
-        
+
         # Store both
         risk_manager._store_risk_snapshot(old_snapshot)
         risk_manager._store_risk_snapshot(recent_snapshot)
-        
+
         # Old snapshot should be cleaned up
         cutoff = datetime.now() - timedelta(days=risk_manager.snapshot_retention_days)
         remaining_snapshots = [s for s in risk_manager._risk_snapshots if s.timestamp >= cutoff]
@@ -824,7 +824,7 @@ class TestSnapshotAndQuery:
 
 class TestMonitoring:
     """Test monitoring functionality."""
-    
+
     @pytest.mark.asyncio
     async def test_start_stop_monitoring(self, risk_manager):
         """Test start and stop monitoring."""
@@ -836,37 +836,37 @@ class TestMonitoring:
                 'returns_data': None,
                 'market_data': {}
             }
-        
+
         # Start monitoring
         await risk_manager.start_monitoring(mock_data_provider)
         assert risk_manager._monitoring_active is True
         assert risk_manager._monitoring_task is not None
-        
+
         # Stop monitoring
         await risk_manager.stop_monitoring()
         assert risk_manager._monitoring_active is False
-    
+
     @pytest.mark.asyncio
     async def test_monitoring_duplicate_start(self, risk_manager):
         """Test starting monitoring when already active."""
         async def mock_data_provider():
             return {'positions': {}, 'portfolio_value': 10000.0}
-        
+
         # Start monitoring
         await risk_manager.start_monitoring(mock_data_provider)
         assert risk_manager._monitoring_active is True
-        
+
         # Try to start again (should warn but not crash)
         await risk_manager.start_monitoring(mock_data_provider)
-        
+
         # Cleanup
         await risk_manager.stop_monitoring()
-    
+
     @pytest.mark.asyncio
     async def test_monitoring_loop_execution(self, risk_manager, sample_positions):
         """Test monitoring loop execution."""
         call_count = 0
-        
+
         async def mock_data_provider():
             nonlocal call_count
             call_count += 1
@@ -876,27 +876,27 @@ class TestMonitoring:
                 'returns_data': None,
                 'market_data': {}
             }
-        
+
         # Mock calculate_comprehensive_risk
         risk_manager.calculate_comprehensive_risk = AsyncMock()
-        
+
         # Set monitoring active
         risk_manager._monitoring_active = True
-        
+
         # Mock asyncio.sleep to control loop
         with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             # Make sleep raise CancelledError after first iteration
             mock_sleep.side_effect = [None, asyncio.CancelledError()]
-            
+
             # Start monitoring loop directly
             try:
                 await risk_manager._monitoring_loop(mock_data_provider)
             except asyncio.CancelledError:
                 pass
-            
+
             # Verify data provider was called
             assert call_count >= 1
-            
+
             # Verify calculate_comprehensive_risk was called
             assert risk_manager.calculate_comprehensive_risk.call_count >= 1
 
@@ -907,13 +907,13 @@ class TestMonitoring:
 
 class TestSummaryAndLimits:
     """Test summary and limit management."""
-    
-    def test_get_risk_summary(self, risk_manager, mock_risk_metrics, mock_exposure_breakdown, 
+
+    def test_get_risk_summary(self, risk_manager, mock_risk_metrics, mock_exposure_breakdown,
                                 mock_correlation_matrix, mock_stress_result):
         """Test risk summary generation."""
         # Create and store snapshot
         stress_results = {'crisis': mock_stress_result}
-        
+
         snapshot = RiskSnapshot(
             timestamp=datetime.now(),
             portfolio_value=25000.0,
@@ -925,12 +925,12 @@ class TestSummaryAndLimits:
             regime_status='NORMAL',
             risk_score=50.0
         )
-        
+
         risk_manager._store_risk_snapshot(snapshot)
-        
+
         # Get summary
         summary = risk_manager.get_risk_summary()
-        
+
         # Verify summary structure
         assert 'timestamp' in summary
         assert 'portfolio_value' in summary
@@ -939,21 +939,21 @@ class TestSummaryAndLimits:
         assert summary['portfolio_value'] == 25000.0
         assert summary['risk_score'] == 50.0
         assert summary['regime_status'] == 'NORMAL'
-        
+
         # Check var_metrics
         assert 'var_metrics' in summary
         assert summary['var_metrics']['var_95'] == 1000.0
         assert summary['var_metrics']['var_99'] == 1500.0
-        
+
         # Check worst stress scenario
         assert 'worst_stress_scenario' in summary
         assert summary['worst_stress_scenario']['scenario'] == 'financial_crisis_2008'
         assert summary['worst_stress_scenario']['pnl_percentage'] == -20.0
-        
+
         # Check top exposures
         assert 'top_exposures' in summary
         assert len(summary['top_exposures']) > 0
-    
+
     @pytest.mark.asyncio
     async def test_limit_management_methods(self, risk_manager):
         """Test limit management methods."""
@@ -970,34 +970,34 @@ class TestSummaryAndLimits:
             warning_threshold=80.0,
             is_active=True
         )
-        
+
         # Mock limit_monitor methods
         risk_manager.limit_monitor.add_limit = Mock()
         risk_manager.limit_monitor.update_limit = Mock()
         risk_manager.limit_monitor.remove_limit = Mock()
         risk_manager.limit_monitor.get_all_limits = Mock(return_value=[limit])
         risk_manager.limit_monitor.get_current_breaches = Mock(return_value=[])
-        
+
         # Test add limit
         await risk_manager.add_risk_limit(limit)
         risk_manager.limit_monitor.add_limit.assert_called_once_with(limit)
-        
+
         # Test update limit
         await risk_manager.update_risk_limit('L1', {'threshold_value': 120.0})
         risk_manager.limit_monitor.update_limit.assert_called_once_with('L1', {'threshold_value': 120.0})
-        
+
         # Test remove limit
         await risk_manager.remove_risk_limit('L1')
         risk_manager.limit_monitor.remove_limit.assert_called_once_with('L1')
-        
+
         # Test get all limits
         limits = risk_manager.get_all_risk_limits()
         assert len(limits) == 1
-        
+
         # Test get breaches
         breaches = risk_manager.get_current_limit_breaches()
         assert len(breaches) == 0
-    
+
     @pytest.mark.asyncio
     async def test_cleanup_method(self, risk_manager):
         """Test cleanup of all components."""
@@ -1007,10 +1007,10 @@ class TestSummaryAndLimits:
         risk_manager.stress_tester.cleanup = AsyncMock()
         risk_manager.limit_monitor.cleanup = AsyncMock()
         risk_manager.correlation_analyzer.cleanup = AsyncMock()
-        
+
         # Call cleanup
         await risk_manager.cleanup()
-        
+
         # Verify all components cleaned up
         risk_manager.exposure_calculator.cleanup.assert_called_once()
         risk_manager.var_calculator.cleanup.assert_called_once()

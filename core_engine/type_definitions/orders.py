@@ -44,17 +44,17 @@ class Order:
     order_type: OrderType
     price: Optional[float] = None
     stop_price: Optional[float] = None
-    
+
     # Order tracking
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: OrderStatus = OrderStatus.PENDING
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
     # Execution tracking
     filled_quantity: float = 0.0
     average_price: Optional[float] = None
     commission: float = 0.0
-    
+
     # Metadata
     strategy_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -71,11 +71,11 @@ class ExecutionResult:
     commission: float
     timestamp: datetime = field(default_factory=datetime.now)
     execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    
+
     # Success/failure tracking
     success: bool = True
     error_message: Optional[str] = None
-    
+
     # Broker details
     broker_order_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)

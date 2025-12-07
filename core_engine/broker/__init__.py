@@ -5,7 +5,7 @@ Comprehensive multi-broker connectivity and execution management
 
 from .broker_adapter import (
     BrokerAdapter,
-    BrokerCredentials, 
+    BrokerCredentials,
     BrokerType,
     ConnectionStatus,
     StandardOrder,
@@ -26,7 +26,6 @@ if IBKRAdapter is None:
     # Create a placeholder class for documentation/testing
     class IBKRAdapter:
         """Placeholder IBKRAdapter - requires ibapi package for full functionality"""
-        pass
 
 from .broker_manager import (
     BrokerManager,
@@ -46,10 +45,10 @@ __all__ = [
     'OrderAction',
     'OrderType',
     'TimeInForce',
-    
+
     # Adapters
     'IBKRAdapter',
-    
+
     # Broker Manager
     'BrokerManager',
     'BrokerConfig',

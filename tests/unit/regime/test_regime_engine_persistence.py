@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-import pandas as pd
 import pytest
 
 from core_engine.config import DataConfig, RegimeConfig

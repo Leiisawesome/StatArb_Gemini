@@ -284,7 +284,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # Feed market data to the engine
@@ -313,7 +313,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # Mock subscriber
@@ -341,7 +341,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # Feed market data to establish a baseline regime
@@ -369,7 +369,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # Initially empty
@@ -388,7 +388,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # With no data fed, analyze_regime should return a dict
@@ -407,7 +407,7 @@ class TestEnhancedRegimeEngine:
             'update_frequency': regime_config.update_frequency,
             'enable_enhanced_detection': regime_config.enable_enhanced_detection
         }
-        
+
         engine = EnhancedRegimeEngine(config_dict)
 
         # Engine should work regardless of symbol used for data feeding

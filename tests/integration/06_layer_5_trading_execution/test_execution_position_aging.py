@@ -13,32 +13,29 @@ Date: November 4, 2025
 """
 
 import pytest
-import pytest_asyncio
 
-from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.config.component_config import RiskConfig
 
 
 class TestExecutionPositionAging:
     """Integration tests for execution position aging"""
-    
+
     @pytest.mark.asyncio
     async def test_position_aging_monitor_detects_expired_positions(self, risk_manager):
         """
         Test: PositionAgingMonitor detects expired positions
-        
+
         Scenario: Position exceeds holding period limit
         Expected: Expired position detected
         """
         # Position aging monitor would detect expired positions
         # Verify risk manager exists
         assert risk_manager is not None
-    
+
     @pytest.mark.asyncio
     async def test_position_aging_monitor_triggers_position_closure(self, risk_manager):
         """
         Test: PositionAgingMonitor triggers position closure
-        
+
         Scenario: Expired position triggers closure
         Expected: Position closure triggered
         """

@@ -103,7 +103,7 @@ class TestExecutionEngine:
         # Add a mock active request
         execution_engine._active_requests[request_id] = {
             'request': Mock(),
-            'slices': [Mock(quantity=100, filled_quantity=50, status=ExecutionStatus.PARTIALLY_FILLED, 
+            'slices': [Mock(quantity=100, filled_quantity=50, status=ExecutionStatus.PARTIALLY_FILLED,
                            avg_fill_price=150.0, slippage=0.5)],
             'status': ExecutionStatus.PARTIALLY_FILLED,
             'created_at': datetime.now()
@@ -156,9 +156,9 @@ class TestExecutionValidator:
             quantity=100,
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         assert is_valid is True
         # All validation results should have passed=True
         assert all(result.passed for result in results)
@@ -173,9 +173,9 @@ class TestExecutionValidator:
             quantity=2000000,  # 2M shares - exceeds 1M limit
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         assert is_valid is False
         # At least one validation result should have failed
         assert any(not result.passed for result in results)
@@ -194,9 +194,9 @@ class TestExecutionValidator:
             quantity=100,
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Market hours validation should pass during normal trading hours
         assert is_valid is True
 
@@ -213,9 +213,9 @@ class TestExecutionValidator:
             bid_price=149.5,
             ask_price=150.5
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         assert is_valid is True
 
     def test_validate_negative_quantity(self, execution_validator):
@@ -228,9 +228,9 @@ class TestExecutionValidator:
             quantity=-100,  # Invalid negative quantity
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Check that validation ran and has results
         assert isinstance(results, list)
         assert len(results) > 0
@@ -245,9 +245,9 @@ class TestExecutionValidator:
             quantity=0,  # Invalid zero quantity
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Check that validation ran and has results
         assert isinstance(results, list)
         assert len(results) > 0
@@ -262,9 +262,9 @@ class TestExecutionValidator:
             quantity=100,
             price=-150.0  # Invalid negative price
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Check that validation ran and has results
         assert isinstance(results, list)
         assert len(results) > 0
@@ -279,9 +279,9 @@ class TestExecutionValidator:
             quantity=100,
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Check that validation ran and has results
         assert isinstance(results, list)
         assert len(results) > 0
@@ -296,9 +296,9 @@ class TestExecutionValidator:
             quantity=100,
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Check that validation ran and has results
         assert isinstance(results, list)
         assert len(results) > 0
@@ -314,9 +314,9 @@ class TestExecutionValidator:
             price=500.0,  # Extreme price
             current_price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # May fail due to extreme price deviation
         # Note: Result depends on validation rules
         assert isinstance(is_valid, bool)
@@ -332,9 +332,9 @@ class TestExecutionValidator:
             quantity=100.5,  # Fractional quantity
             price=150.0
         )
-        
+
         is_valid, results = execution_validator.validate_pre_trade(context)
-        
+
         # Some validators may accept fractional quantities
         assert isinstance(is_valid, bool)
 
@@ -351,12 +351,12 @@ class TestExecutionValidator:
             )
             for i in range(5)
         ]
-        
+
         results_list = []
         for context in contexts:
             is_valid, results = execution_validator.validate_pre_trade(context)
             results_list.append((is_valid, results))
-        
+
         # Should have results for all contexts
         assert len(results_list) == 5
         # All should be valid normal orders

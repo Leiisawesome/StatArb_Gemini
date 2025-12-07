@@ -32,26 +32,26 @@ def validate_market_data_bar(
 ) -> None:
     """
     Validate that market data bar contains all required fields with valid values
-    
+
     This is CRITICAL for backtest integrity. Missing or invalid market data
     means execution simulation will be incorrect.
-    
+
     Args:
         bar: Market data bar dictionary
         symbol: Trading symbol
         bar_index: Current bar index in backtest
         required_fields: List of required fields (uses defaults if None)
-    
+
     Raises:
         BacktestDataError: If any required field is missing or invalid
-    
+
     Example:
         >>> validate_market_data_bar(bar, 'AAPL', 100)
         # Raises BacktestDataError if 'close' is missing
     """
     if required_fields is None:
         required_fields = ['close', 'volume', 'volatility', 'high', 'low', 'timestamp']
-    
+
     # Check for missing fields
     missing_fields = [f for f in required_fields if f not in bar]
     if missing_fields:
@@ -70,7 +70,7 @@ def validate_market_data_bar(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     # Check for None values
     none_fields = [f for f in required_fields if bar[f] is None]
     if none_fields:
@@ -89,10 +89,10 @@ def validate_market_data_bar(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     # Validate field types and ranges
     validation_errors = []
-    
+
     # Price validations
     for price_field in ['close', 'high', 'low']:
         if price_field in bar:
@@ -101,7 +101,7 @@ def validate_market_data_bar(
                 validation_errors.append(f"{price_field}: wrong type (expected number, got {type(value).__name__})")
             elif value <= 0:
                 validation_errors.append(f"{price_field}: invalid value ({value} <= 0)")
-    
+
     # Volume validation
     if 'volume' in bar:
         volume = bar['volume']
@@ -109,7 +109,7 @@ def validate_market_data_bar(
             validation_errors.append(f"volume: wrong type (expected number, got {type(volume).__name__})")
         elif volume < 0:
             validation_errors.append(f"volume: invalid value ({volume} < 0)")
-    
+
     # Volatility validation
     if 'volatility' in bar:
         volatility = bar['volatility']
@@ -117,25 +117,25 @@ def validate_market_data_bar(
             validation_errors.append(f"volatility: wrong type (expected number, got {type(volatility).__name__})")
         elif not (0 < volatility < 1):
             validation_errors.append(f"volatility: out of range ({volatility} not in (0, 1))")
-    
+
     # Timestamp validation
     if 'timestamp' in bar:
         timestamp = bar['timestamp']
         if not isinstance(timestamp, (datetime, pd.Timestamp)):
             validation_errors.append(f"timestamp: wrong type (expected datetime, got {type(timestamp).__name__})")
-    
+
     # Price consistency checks
     if 'high' in bar and 'low' in bar and 'close' in bar:
         high = bar['high']
         low = bar['low']
         close = bar['close']
-        
+
         if high < low:
             validation_errors.append(f"price inconsistency: high ({high}) < low ({low})")
-        
+
         if close > high or close < low:
             validation_errors.append(f"price inconsistency: close ({close}) outside high-low range [{low}, {high}]")
-    
+
     if validation_errors:
         error_msg = format_backtest_error(
             error_type="Invalid Market Data Values",
@@ -161,24 +161,24 @@ def validate_signal(
 ) -> None:
     """
     Validate that signal contains all required fields with valid values
-    
+
     Signals MUST be explicit and complete. No defaults or fallbacks allowed.
-    
+
     Args:
         signal: Signal dictionary
         bar_index: Current bar index in backtest
         required_fields: List of required fields (uses defaults if None)
-    
+
     Raises:
         BacktestValidationError: If signal is invalid
-    
+
     Example:
         >>> validate_signal(signal, 100)
         # Raises BacktestValidationError if 'target_weight' is missing
     """
     if required_fields is None:
         required_fields = ['symbol', 'signal', 'confidence', 'target_weight']
-    
+
     # Check for missing fields
     missing_fields = [f for f in required_fields if f not in signal]
     if missing_fields:
@@ -197,36 +197,36 @@ def validate_signal(
             )
         )
         raise BacktestValidationError(error_msg)
-    
+
     # Validate field types
     validation_errors = []
-    
+
     if 'symbol' in signal and not isinstance(signal['symbol'], str):
         validation_errors.append(f"symbol: wrong type (expected str, got {type(signal['symbol']).__name__})")
-    
+
     if 'signal' in signal and not isinstance(signal['signal'], str):
         validation_errors.append(f"signal: wrong type (expected str, got {type(signal['signal']).__name__})")
-    
+
     if 'confidence' in signal:
         confidence = signal['confidence']
         if not isinstance(confidence, (int, float)):
             validation_errors.append(f"confidence: wrong type (expected number, got {type(confidence).__name__})")
         elif not (0.0 <= confidence <= 1.0):
             validation_errors.append(f"confidence: out of range ({confidence} not in [0.0, 1.0])")
-    
+
     if 'target_weight' in signal:
         target_weight = signal['target_weight']
         if not isinstance(target_weight, (int, float)):
             validation_errors.append(f"target_weight: wrong type (expected number, got {type(target_weight).__name__})")
         elif not (0.0 <= target_weight <= 1.0):
             validation_errors.append(f"target_weight: out of range ({target_weight} not in [0.0, 1.0])")
-    
+
     # Validate signal type
     if 'signal' in signal:
         valid_signals = ['BUY', 'SELL', 'HOLD', 'CLOSE']
         if signal['signal'] not in valid_signals:
             validation_errors.append(f"signal: invalid value ('{signal['signal']}' not in {valid_signals})")
-    
+
     if validation_errors:
         error_msg = format_backtest_error(
             error_type="Invalid Signal Values",
@@ -251,17 +251,17 @@ def validate_regime_context(
 ) -> None:
     """
     Validate regime context is complete and reliable
-    
+
     Per Rule 2 (Regime-First), regime context MUST be valid at all times.
-    
+
     Args:
         regime_context: Regime context dictionary
         bar_index: Current bar index in backtest
         min_confidence: Minimum required confidence (default: 0.5)
-    
+
     Raises:
         BacktestDataError: If regime context is invalid
-    
+
     Example:
         >>> validate_regime_context(regime_context, 100)
         # Raises BacktestDataError if confidence < 0.5
@@ -280,11 +280,11 @@ def validate_regime_context(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     # Check for required fields
     required_fields = ['primary_regime', 'confidence', 'volatility_regime']
     missing_fields = [f for f in required_fields if f not in regime_context]
-    
+
     if missing_fields:
         error_msg = format_backtest_error(
             error_type="Incomplete Regime Context",
@@ -301,7 +301,7 @@ def validate_regime_context(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     # Validate confidence level
     confidence = regime_context.get('confidence', 0.0)
     if confidence < min_confidence:
@@ -322,11 +322,11 @@ def validate_regime_context(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     # Validate regime values
     valid_regimes = ['low_volatility', 'normal_volatility', 'high_volatility', 'extreme_volatility', 'crisis']
     primary_regime = regime_context.get('primary_regime', '')
-    
+
     if primary_regime not in valid_regimes:
         logger.warning(
             f"⚠️  Unknown primary_regime '{primary_regime}' at bar {bar_index}. "
@@ -341,15 +341,15 @@ def validate_component_initialized(
 ) -> None:
     """
     Validate that a required component is initialized
-    
+
     Args:
         component: Component instance to check
         component_name: Name of component for error message
         operation: Operation that requires the component
-    
+
     Raises:
         BacktestConfigurationError: If component is None or not initialized
-    
+
     Example:
         >>> validate_component_initialized(self.strategy_manager, 'StrategyManager', 'signal generation')
         # Raises BacktestConfigurationError if StrategyManager is None
@@ -370,7 +370,7 @@ def validate_component_initialized(
         )
         from backtest.exceptions import BacktestConfigurationError
         raise BacktestConfigurationError(error_msg)
-    
+
     # Check if component has is_initialized attribute
     if hasattr(component, 'is_initialized') and not component.is_initialized:
         error_msg = format_backtest_error(
@@ -398,13 +398,13 @@ def validate_price_positive(
 ) -> None:
     """
     Validate that a price value is positive
-    
+
     Args:
         price: Price value to validate
         field_name: Name of price field (e.g., 'close', 'fill_price')
         symbol: Trading symbol
         bar_index: Current bar index
-    
+
     Raises:
         BacktestDataError: If price is <= 0 or None
     """
@@ -424,7 +424,7 @@ def validate_price_positive(
             )
         )
         raise BacktestDataError(error_msg)
-    
+
     if price <= 0:
         error_msg = format_backtest_error(
             error_type="Invalid Price Data",

@@ -79,62 +79,62 @@ def mock_risk_manager():
 
 class TestEmergencyResponse:
     """Test emergency response procedures"""
-    
+
     @pytest.mark.asyncio
     async def test_emergency_response_trigger(self, orchestrator, mock_risk_manager):
         """Test emergency response can be triggered"""
         orchestrator.register_central_risk_manager(mock_risk_manager)
         orchestrator.system_status = SystemStatus.OPERATIONAL
-        
+
         # Trigger emergency response
         await orchestrator._initiate_emergency_response("Test emergency")
-        
+
         # Verify emergency mode activated
         assert orchestrator.emergency_mode is True
         assert orchestrator.system_status == SystemStatus.EMERGENCY
         assert orchestrator.emergency_initiated_at is not None
-        
+
         # Verify risk manager emergency shutdown called
         mock_risk_manager.emergency_shutdown.assert_called_once()
-        
+
         logger.info("✅ Emergency response trigger test passed")
-    
+
     @pytest.mark.asyncio
     async def test_emergency_stop_trading(self, orchestrator, mock_component):
         """Test emergency stop trading functionality"""
         # Register trading component with async stop
         mock_component.stop = AsyncMock(return_value=True)
-        
+
         component_id = orchestrator.register_component(
             "TradingEngine", mock_component,
             layer=ComponentLayer.EXECUTION,
             authority_level=AuthorityLevel.OPERATIONAL
         )
-        
+
         # Trigger emergency stop
         await orchestrator._emergency_stop_trading()
-        
+
         # Verify component stop was attempted (may or may not be called depending on implementation)
         # The method attempts to stop trading components, but exact behavior depends on component state
-        
+
         logger.info("✅ Emergency stop trading test passed")
-    
+
     @pytest.mark.asyncio
     async def test_emergency_conditions_check(self, orchestrator, mock_risk_manager):
         """Test emergency condition detection"""
         orchestrator.register_central_risk_manager(mock_risk_manager)
         orchestrator.system_status = SystemStatus.OPERATIONAL
         orchestrator.started_at = datetime.now()
-        
+
         # Simulate unhealthy risk manager
         orchestrator.component_registry[orchestrator.risk_manager_id].update_status("unhealthy", "Test failure")
-        
+
         # Check emergency conditions
         await orchestrator._check_emergency_conditions()
-        
+
         # Should trigger emergency mode
         assert orchestrator.emergency_mode is True
-        
+
         logger.info("✅ Emergency conditions check test passed")
 
 
@@ -144,7 +144,7 @@ class TestEmergencyResponse:
 
 class TestSystemMonitoring:
     """Test system monitoring functionality"""
-    
+
     @pytest.mark.asyncio
     async def test_health_check_components(self, orchestrator, mock_component):
         """Test component health checking"""
@@ -153,37 +153,37 @@ class TestSystemMonitoring:
             "TestComponent", mock_component,
             layer=ComponentLayer.SUPPORT
         )
-        
+
         # Run health check
         await orchestrator._health_check_components()
-        
+
         # Verify health check was called
         mock_component.health_check.assert_called()
-        
+
         # Verify component status updated
         registration = orchestrator.component_registry[component_id]
         assert registration.status == "operational"
-        
+
         logger.info("✅ Health check components test passed")
-    
+
     def test_update_system_metrics(self, orchestrator, mock_component):
         """Test system metrics update"""
         orchestrator.started_at = datetime.now()
-        
+
         # Register some components
         orchestrator.register_component("Component1", mock_component, ComponentLayer.SUPPORT)
         orchestrator.register_component("Component2", mock_component, ComponentLayer.EXECUTION)
-        
+
         # Update metrics (updates internal system_monitor metrics)
         orchestrator._update_system_metrics()
-        
+
         # Verify metrics updated - check system_monitor's internal metrics
         # Note: system_metrics property returns a copy from system_monitor.system_metrics
         metrics = orchestrator.system_monitor.system_metrics
         assert isinstance(metrics, dict)
         # After _update_system_metrics, should have component counts
         assert 'total_components' in metrics or len(metrics) >= 0
-        
+
         logger.info("✅ Update system metrics test passed")
 
 
@@ -193,16 +193,16 @@ class TestSystemMonitoring:
 
 class TestSystemStatus:
     """Test system status reporting"""
-    
+
     def test_get_system_status(self, orchestrator, mock_risk_manager):
         """Test system status retrieval"""
         orchestrator.register_central_risk_manager(mock_risk_manager)
         orchestrator.system_status = SystemStatus.OPERATIONAL
         orchestrator.started_at = datetime.now()
-        
+
         # Get system status
         status = orchestrator.get_system_status()
-        
+
         # Verify status structure
         assert 'system_id' in status
         assert 'status' in status
@@ -212,7 +212,7 @@ class TestSystemStatus:
         assert 'metrics' in status
         assert 'component_summary' in status
         assert 'risk_manager_status' in status
-        
+
         logger.info("✅ Get system status test passed")
 
 
@@ -222,14 +222,14 @@ class TestSystemStatus:
 
 class TestErrorTracking:
     """Test error tracking functionality"""
-    
+
     def test_track_error(self, orchestrator, mock_component):
         """Test error tracking and recording"""
         component_id = orchestrator.register_component(
             "TestComponent", mock_component,
             layer=ComponentLayer.SUPPORT
         )
-        
+
         # Track an error
         orchestrator.track_error(
             component_id=component_id,
@@ -239,7 +239,7 @@ class TestErrorTracking:
                 'severity': 'high'
             }
         )
-        
+
         # Verify error was tracked
         assert len(orchestrator.error_tracker) > 0
         error = orchestrator.error_tracker[-1]
@@ -247,7 +247,7 @@ class TestErrorTracking:
         assert error['error_type'] == "test_error"
         assert 'timestamp' in error
         assert 'details' in error
-        
+
         logger.info("✅ Track error test passed")
 
 
@@ -257,7 +257,7 @@ class TestErrorTracking:
 
 class TestRecoveryActions:
     """Test recovery action functionality"""
-    
+
     @pytest.mark.asyncio
     async def test_initiate_recovery(self, orchestrator, mock_component):
         """Test recovery initiation"""
@@ -265,7 +265,7 @@ class TestRecoveryActions:
             "TestComponent", mock_component,
             layer=ComponentLayer.SUPPORT
         )
-        
+
         # Initiate recovery
         recovery_result = await orchestrator.initiate_recovery({
             'component': component_id,
@@ -273,16 +273,16 @@ class TestRecoveryActions:
             'severity': 'high',
             'auto_recovery': True
         })
-        
+
         # Verify recovery result structure
         assert 'timestamp' in recovery_result
         assert 'status' in recovery_result
         assert recovery_result['component'] == component_id
         assert 'recovery_method' in recovery_result
-        
+
         # Verify recovery action recorded
         assert len(orchestrator.recovery_actions) > 0
-        
+
         logger.info("✅ Initiate recovery test passed")
 
 
@@ -292,24 +292,24 @@ class TestRecoveryActions:
 
 class TestSystemDiagnostics:
     """Test system diagnostics functionality"""
-    
+
     @pytest.mark.asyncio
     async def test_run_system_diagnostics(self, orchestrator, mock_component):
         """Test system diagnostics execution"""
         orchestrator.started_at = datetime.now()
-        
+
         # Register components
         orchestrator.register_component("Component1", mock_component, ComponentLayer.SUPPORT)
         orchestrator.register_component("Component2", mock_component, ComponentLayer.EXECUTION)
-        
+
         # Run diagnostics
         diagnostics = await orchestrator.run_system_diagnostics()
-        
+
         # Verify diagnostics structure
         assert 'timestamp' in diagnostics
         assert 'system_status' in diagnostics or 'system_health' in diagnostics
         assert 'diagnostics' in diagnostics or 'emergency_mode' in diagnostics
-        
+
         logger.info("✅ Run system diagnostics test passed")
 
 
@@ -319,7 +319,7 @@ class TestSystemDiagnostics:
 
 class TestPerformanceMonitoring:
     """Test performance monitoring functionality"""
-    
+
     @pytest.mark.asyncio
     async def test_monitor_component_performance(self, orchestrator, mock_component):
         """Test component performance monitoring"""
@@ -328,19 +328,19 @@ class TestPerformanceMonitoring:
             "TestComponent", mock_component,
             layer=ComponentLayer.SUPPORT
         )
-        
+
         # Monitor performance
         result = await orchestrator.monitor_component_performance()
-        
+
         # Verify result structure
         assert isinstance(result, dict)
         assert 'timestamp' in result
         assert 'total_components' in result
-        
+
         # Note: Implementation has a bug where it tries to set read-only property 'performance_metrics'
         # This causes the method to return an error dict instead of component data
         # Test verifies that the method completes and returns a structured response
-        
+
         if 'error' in result:
             # Expected: property setter error
             assert 'performance_metrics' in result['error']
@@ -359,14 +359,14 @@ class TestPerformanceMonitoring:
 
 class TestAuditTrail:
     """Test audit trail functionality"""
-    
+
     def test_log_audit_event(self, orchestrator, mock_component):
         """Test audit event logging"""
         component_id = orchestrator.register_component(
             "TestComponent", mock_component,
             layer=ComponentLayer.SUPPORT
         )
-        
+
         # Log audit event
         orchestrator.log_audit_event(
             event_type="component_registration",
@@ -376,7 +376,7 @@ class TestAuditTrail:
                 'layer': ComponentLayer.SUPPORT.value
             }
         )
-        
+
         # Verify audit event was logged
         assert len(orchestrator.audit_trail) > 0
         event = orchestrator.audit_trail[-1]
@@ -384,7 +384,7 @@ class TestAuditTrail:
         assert event['component_id'] == component_id
         assert 'timestamp' in event
         assert 'details' in event
-        
+
         logger.info("✅ Log audit event test passed")
 
 

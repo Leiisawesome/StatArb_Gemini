@@ -23,6 +23,7 @@ Requirements:
 
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -34,25 +35,25 @@ from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 def test_position_tracking():
     """Test position retrieval and data validation"""
-    
+
     print("\n" + "=" * 70)
     print("DAY 5: Position Tracking & P&L Testing")
     print("=" * 70)
-    
+
     # Load configuration
     print("\n[1/5] Loading broker configuration...")
     config = load_broker_config()
     print(f"✅ Configuration loaded: {config.active_broker.value}")
-    
+
     # Create adapter and connect
-    print("\n[2/5] Connecting to Alpaca...")
+    print("\n[2/5] Connecting to IBKR...")
     adapter = IBKRAdapter(config.interactive_brokers)
-    
+
     try:
         adapter.connect()
         account_info = adapter.get_account_info()
         print(f"✅ Connected to account: {account_info.account_id}")
-        
+
         # Get account state
         print("\n[3/5] Retrieving account information...")
         print(f"✅ Account details:")
@@ -60,7 +61,7 @@ def test_position_tracking():
         print(f"   Buying power: ${account_info.buying_power:,.2f}")
         print(f"   Portfolio value: ${account_info.portfolio_value:,.2f}")
         print(f"   Equity: ${account_info.equity:,.2f}")
-        
+
         # Calculate portfolio metrics
         positions_value = account_info.portfolio_value - account_info.cash
         if account_info.portfolio_value > 0:
@@ -69,15 +70,15 @@ def test_position_tracking():
         else:
             cash_percentage = 100
             positions_percentage = 0
-        
+
         print(f"\n   Portfolio Breakdown:")
         print(f"   Cash: ${account_info.cash:,.2f} ({cash_percentage:.1f}%)")
         print(f"   Positions: ${positions_value:,.2f} ({positions_percentage:.1f}%)")
-        
+
         # Get all positions
         print("\n[4/5] Retrieving all open positions...")
         positions = adapter.get_positions()
-        
+
         if len(positions) == 0:
             print(f"✅ No open positions (clean state)")
             print(f"\n   To test with positions:")
@@ -85,10 +86,10 @@ def test_position_tracking():
             print(f"   2. Run this test again to see position tracking")
         else:
             print(f"✅ Found {len(positions)} open position(s):")
-            
+
             total_unrealized_pl = 0.0
             total_market_value = 0.0
-            
+
             for i, pos in enumerate(positions, 1):
                 print(f"\n   Position #{i}:")
                 print(f"   Symbol: {pos.symbol}")
@@ -100,43 +101,43 @@ def test_position_tracking():
                 print(f"   Cost basis: ${float(pos.cost_basis):,.2f}")
                 print(f"   Unrealized P&L: ${float(pos.unrealized_pl):,.2f}")
                 print(f"   Unrealized P&L %: {float(pos.unrealized_plpc):.2f}%")
-                
+
                 # Validate calculations
                 expected_market_value = float(pos.qty) * float(pos.current_price)
                 expected_unrealized_pl = float(pos.market_value) - float(pos.cost_basis)
-                
+
                 market_value_match = abs(float(pos.market_value) - expected_market_value) < 0.01
                 pl_match = abs(float(pos.unrealized_pl) - expected_unrealized_pl) < 0.01
-                
+
                 if market_value_match and pl_match:
                     print(f"   ✅ P&L calculations verified")
                 else:
                     print(f"   ⚠️  P&L calculation discrepancy detected")
-                
+
                 total_unrealized_pl += float(pos.unrealized_pl)
                 total_market_value += float(pos.market_value)
-            
+
             # Summary
             print(f"\n   Portfolio Summary:")
             print(f"   Total positions value: ${total_market_value:,.2f}")
             print(f"   Total unrealized P&L: ${total_unrealized_pl:,.2f}")
-            
+
             if total_market_value > 0:
                 total_pl_percentage = (total_unrealized_pl / (total_market_value - total_unrealized_pl)) * 100
                 print(f"   Total P&L %: {total_pl_percentage:.2f}%")
-        
+
         # Test position retrieval by symbol
         print("\n[5/5] Testing specific position retrieval...")
         test_symbol = "SPY"
         spy_position = adapter.get_position(test_symbol)
-        
+
         if spy_position:
             print(f"✅ {test_symbol} position found:")
             print(f"   Quantity: {spy_position.qty}")
             print(f"   Current value: ${float(spy_position.market_value):,.2f}")
         else:
             print(f"✅ No {test_symbol} position (as expected)")
-        
+
         print("\n" + "=" * 70)
         print("✅ DAY 5 TEST PASSED: Position tracking verified!")
         print("=" * 70)
@@ -147,15 +148,13 @@ def test_position_tracking():
         print("  ✓ Position detail access")
         print("  ✓ P&L calculation validation")
         print("  ✓ Specific position lookup")
-        
-        return True
-        
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
-        
+        pytest.fail(f"Position tracking test failed: {e}")
+
     finally:
         print("\nDisconnecting from broker...")
         adapter.disconnect()
@@ -164,7 +163,7 @@ def test_position_tracking():
 
 if __name__ == "__main__":
     import datetime
-    
+
     print("\n" + "=" * 70)
     print("PHASE 9 - BROKER INTEGRATION - WEEK 1 - DAY 5")
     print("Position Tracking & P&L Testing")
@@ -172,11 +171,11 @@ if __name__ == "__main__":
     print(f"Test started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Trading mode: PAPER ONLY")
     print(f"\n✅ This test can run anytime (read-only operations)")
-    
+
     success = test_position_tracking()
-    
+
     print(f"\nTest completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     if success:
         print("\n🎉 SUCCESS: Position tracking verified!")
         print("   Week 1 Days 3-5 testing complete!")

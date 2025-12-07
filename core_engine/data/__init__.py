@@ -49,11 +49,11 @@ from .sources.market_data import (
     DataSource,
     DataType,
     DataQuality,
-    
+
     # Data Structures
     MarketDataPoint,
     DataSubscription,
-    
+
     # Handlers (if exported)
     # MarketDataHandler,  # May need to be added if class exists
 )
@@ -70,23 +70,23 @@ from .feeds.manager import (
 from .feeds.adapters import (
     # Configuration
     FeedAdapterConfig,
-    
+
     # Enums
     AdapterStatus,
     FeedProvider,
-    
+
     # Data Structures
     FeedMessage,
-    
+
     # Base Classes
     DataFeedAdapter as BaseFeedAdapter,  # Alias to avoid conflict with sources.market_data.DataFeedAdapter
-    
+
     # Concrete Adapters
     SimulatedFeedAdapter,
     AlpacaFeedAdapter,
     PolygonFeedAdapter,
     InteractiveBrokersFeedAdapter,
-    
+
     # Factory
     FeedAdapterFactory,
 )
@@ -100,12 +100,12 @@ from .feeds.polygon_realtime import (
     PolygonFeedConfig,
     PolygonSubscriptionTier,
     PolygonCluster,
-    
+
     # Data Structures
     PolygonAggregateBar,
     PolygonTrade,
     PolygonQuote,
-    
+
     # Production Adapter
     PolygonRealtimeFeedAdapter,
     PolygonAggregatedDataManager,
@@ -142,7 +142,7 @@ from .alternative_data_handler import (
     AlternativeDataType,
     DataProvider,
     ProcessingStatus,
-    
+
     # Data Structures
     AlternativeDataPoint,
     AlternativeDataRequest,
@@ -150,7 +150,7 @@ from .alternative_data_handler import (
     SentimentAnalysis,
     NewsAnalysis,
     WebScrapingTarget,
-    
+
     # Core Components
     SentimentAnalyzer,
     WebScraper,
@@ -174,7 +174,7 @@ __all__ = [
     # ===== PRIMARY DATA MANAGER =====
     'ClickHouseDataManager',
     'ClickHouseDataConfig',  # DEPRECATED
-    
+
     # ===== DATA SOURCES =====
     'DataEngineConfig',  # DEPRECATED
     'DataSource',
@@ -182,17 +182,17 @@ __all__ = [
     'DataQuality',
     'MarketDataPoint',
     'DataSubscription',
-    
+
     # ===== DATA FEEDS =====
     'FeedConfiguration',
     'FeedManager',
-    
+
     # Feed Adapters - Configuration
     'FeedAdapterConfig',
     'AdapterStatus',
     'FeedProvider',
     'FeedMessage',
-    
+
     # Feed Adapters - Classes
     'BaseFeedAdapter',  # Alias for DataFeedAdapter from feeds.adapters
     'SimulatedFeedAdapter',
@@ -200,7 +200,7 @@ __all__ = [
     'PolygonFeedAdapter',
     'InteractiveBrokersFeedAdapter',
     'FeedAdapterFactory',
-    
+
     # ===== POLYGON.IO REAL-TIME (Production) =====
     'PolygonFeedConfig',
     'PolygonSubscriptionTier',
@@ -218,16 +218,16 @@ __all__ = [
     'PolygonRestService',
     'AggregateBar',
     'create_polygon_rest_service',
-    
+
     # ===== DATA VALIDATION =====
     'ValidationConfiguration',  # DEPRECATED
-    
+
     # ===== ALTERNATIVE DATA =====
     # Enums
     'AlternativeDataType',
     'DataProvider',
     'ProcessingStatus',
-    
+
     # Data Structures
     'AlternativeDataPoint',
     'AlternativeDataRequest',
@@ -235,12 +235,12 @@ __all__ = [
     'SentimentAnalysis',
     'NewsAnalysis',
     'WebScrapingTarget',
-    
+
     # Core Components
     'SentimentAnalyzer',
     'WebScraper',
     'AlternativeDataHandler',
-    
+
     # ===== LIQUIDITY ASSESSMENT =====
     'LiquidityRegime',
     'LiquidityAssessmentEngine',
@@ -257,7 +257,7 @@ The following config classes are deprecated and will be removed in a future vers
 Please migrate to centralized configuration:
 
     from core_engine.config import DataConfig
-    
+
     # Create centralized config
     data_config = DataConfig(
         symbols=['NVDA', 'TSLA', 'AAPL'],

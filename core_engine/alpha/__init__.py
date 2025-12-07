@@ -12,7 +12,7 @@ Components:
 
 Usage:
     from core_engine.alpha import SignalMaturityScore, ERAR, Cooldown
-    
+
     # Create SMS for signal evaluation
     sms = SignalMaturityScore(
         exhaustion=0.7,
@@ -20,7 +20,7 @@ Usage:
         ofi_shift=0.1,
         vol_compression=0.8
     )
-    
+
     if sms.is_mature(threshold=0.5, regime='normal'):
         # Check ERAR
         erar = ERAR(expected_pnl=15.0, cvar_95=25.0, spread_bps=2.0)
@@ -32,17 +32,17 @@ Usage:
 from .ads_components import (
     # §1 Signal Maturity Score
     SignalMaturityScore,
-    
+
     # §3 ERAR Gate
     ERAR,
-    
+
     # §8 Cooldown
     Cooldown,
-    
+
     # Pending Signal Management
     PendingSignalContext,
     PendingSignalQueue,
-    
+
     # Helper functions
     compute_exhaustion,
     compute_reversal_probability,

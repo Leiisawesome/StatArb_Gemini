@@ -18,22 +18,22 @@ from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 def test_market_status_and_clock():
     """Test market status checking and clock information"""
-    
+
     print("\n" + "=" * 70)
     print("TEST: Market Status & Clock")
     print("=" * 70)
-    
+
     config = load_broker_config()
     adapter = IBKRAdapter(config.interactive_brokers)
-    
+
     try:
         adapter.connect()
-        
+
         # Test market open check
         print("\n[1/3] Checking if market is open...")
         is_open = adapter.is_market_open()
         print(f"✅ Market is {'OPEN' if is_open else 'CLOSED'}")
-        
+
         # Test market clock
         print("\n[2/3] Getting market clock...")
         clock = adapter.get_market_clock()
@@ -42,7 +42,7 @@ def test_market_status_and_clock():
         print(f"   Is open: {clock['is_open']}")
         print(f"   Next open: {clock['next_open']}")
         print(f"   Next close: {clock['next_close']}")
-        
+
         # Calculate time until next open/close
         now = datetime.now(clock['timestamp'].tzinfo)
         if clock['is_open']:
@@ -51,7 +51,7 @@ def test_market_status_and_clock():
         else:
             time_until_open = clock['next_open'] - now
             print(f"   ⏰ Market opens in: {time_until_open}")
-        
+
         # Test connection health
         print("\n[3/3] Checking connection health...")
         health = adapter.check_connection_health()
@@ -60,39 +60,39 @@ def test_market_status_and_clock():
         print(f"   Data client: {'✅' if health.get('data_client_healthy') else '❌'}")
         if health['errors']:
             print(f"   Errors: {health['errors']}")
-        
+
         print("\n✅ Market status tests passed!")
-        return True
-        
+        assert True  # Test passed
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
-        
+        assert False, f"Test failed: {e}"
+
     finally:
         adapter.disconnect()
 
 
 def test_market_data_and_quotes():
     """Test market data retrieval and quote fetching"""
-    
+
     print("\n" + "=" * 70)
     print("TEST: Market Data & Quotes")
     print("=" * 70)
-    
+
     config = load_broker_config()
     adapter = IBKRAdapter(config.interactive_brokers)
-    
+
     try:
         adapter.connect()
-        
+
         test_symbol = "SPY"
-        
+
         # Test latest quote
         print(f"\n[1/2] Getting latest quote for {test_symbol}...")
         quote = adapter.get_latest_quote(test_symbol)
-        
+
         if quote:
             print(f"✅ Quote retrieved for {test_symbol}:")
             print(f"   Bid: ${quote['bid_price']:.2f} x {quote['bid_size']}")
@@ -101,11 +101,11 @@ def test_market_data_and_quotes():
             print(f"   Timestamp: {quote['timestamp']}")
         else:
             print(f"⚠️  No quote data available for {test_symbol}")
-        
+
         # Test asset info
         print(f"\n[2/2] Getting asset information for {test_symbol}...")
         asset_info = adapter.get_asset_info(test_symbol)
-        
+
         if asset_info:
             print(f"✅ Asset info retrieved for {test_symbol}:")
             print(f"   Name: {asset_info['name']}")
@@ -117,93 +117,93 @@ def test_market_data_and_quotes():
             print(f"   Status: {asset_info['status']}")
         else:
             print(f"❌ Could not retrieve asset info for {test_symbol}")
-        
+
         print("\n✅ Market data tests passed!")
-        return True
-        
+        assert True  # Test passed
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
-        
+        assert False, f"Test failed: {e}"
+
     finally:
         adapter.disconnect()
 
 
 def test_order_validation():
     """Test order parameter validation"""
-    
+
     print("\n" + "=" * 70)
     print("TEST: Order Validation")
     print("=" * 70)
-    
+
     config = load_broker_config()
     adapter = IBKRAdapter(config.interactive_brokers)
-    
+
     try:
         adapter.connect()
-        
+
         # Test 1: Valid order
         print("\n[1/5] Testing valid order parameters...")
         valid, msg = adapter.validate_order_params("SPY", 1, 400.0, "buy")
         print(f"   Result: {'✅ VALID' if valid else '❌ INVALID'} - {msg}")
-        
+
         # Test 2: Invalid quantity
         print("\n[2/5] Testing invalid quantity (negative)...")
         valid, msg = adapter.validate_order_params("SPY", -5, 400.0, "buy")
         print(f"   Result: {'✅ VALID' if valid else '❌ INVALID (expected)'} - {msg}")
-        
+
         # Test 3: Invalid symbol
         print("\n[3/5] Testing invalid symbol...")
         valid, msg = adapter.validate_order_params("INVALID_SYMBOL_XYZ", 1, 100.0, "buy")
         print(f"   Result: {'✅ VALID' if valid else '❌ INVALID (expected)'} - {msg}")
-        
+
         # Test 4: Invalid side
         print("\n[4/5] Testing invalid side...")
         valid, msg = adapter.validate_order_params("SPY", 1, 400.0, "invalid_side")
         print(f"   Result: {'✅ VALID' if valid else '❌ INVALID (expected)'} - {msg}")
-        
+
         # Test 5: Buying power check
         print("\n[5/5] Testing buying power check...")
         account = adapter.get_account_info()
         print(f"   Current buying power: ${account.buying_power:,.2f}")
-        
+
         has_power = adapter.check_buying_power(1000.0)
         print(f"   Can afford $1,000: {'✅ YES' if has_power else '❌ NO'}")
-        
+
         has_power = adapter.check_buying_power(1000000000.0)
         print(f"   Can afford $1B: {'✅ YES' if has_power else '❌ NO (expected)'}")
-        
+
         print("\n✅ Order validation tests passed!")
-        return True
-        
+        assert True  # Test passed
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
-        
+        assert False, f"Test failed: {e}"
+
     finally:
         adapter.disconnect()
 
 
 def test_stop_orders():
     """Test stop and stop-limit order submission"""
-    
+
     print("\n" + "=" * 70)
     print("TEST: Stop Orders")
     print("=" * 70)
-    
+
     config = load_broker_config()
     adapter = IBKRAdapter(config.interactive_brokers)
-    
+
     try:
         adapter.connect()
-        
+
         test_symbol = "SPY"
         test_quantity = 1
-        
+
         # Clean up any existing orders first
         print("\n[0/3] Cleaning up existing orders...")
         try:
@@ -215,7 +215,7 @@ def test_stop_orders():
             time.sleep(2)  # Wait for cancellations to process
         except Exception as e:
             print(f"   Note: Cleanup encountered: {e}")
-        
+
         # Get current quote to set sensible stop prices
         quote = adapter.get_latest_quote(test_symbol)
         if quote:
@@ -227,13 +227,13 @@ def test_stop_orders():
         else:
             stop_buy_price = 500.0
             stop_sell_price = 300.0
-        
+
         # Test 1: Stop order
         print(f"\n[1/3] Submitting stop BUY order...")
         print(f"   Symbol: {test_symbol}")
         print(f"   Quantity: {test_quantity}")
         print(f"   Stop price: ${stop_buy_price:.2f}")
-        
+
         stop_order = adapter.submit_stop_order(
             symbol=test_symbol,
             qty=test_quantity,
@@ -241,23 +241,23 @@ def test_stop_orders():
             stop_price=stop_buy_price,
             time_in_force="day"
         )
-        
+
         print(f"✅ Stop order submitted:")
         print(f"   Order ID: {stop_order.order_id}")
         print(f"   Status: {stop_order.status}")
-        
+
         # Cancel first order before submitting opposite side (avoid wash trade detection)
         time.sleep(1)
         adapter.cancel_order(stop_order.order_id)
         print(f"   Cancelled stop order: {stop_order.order_id}")
-        
+
         # Test 2: Stop-limit order
         print(f"\n[2/3] Submitting stop-limit SELL order...")
         print(f"   Symbol: {test_symbol}")
         print(f"   Quantity: {test_quantity}")
         print(f"   Stop price: ${stop_sell_price:.2f}")
         print(f"   Limit price: ${stop_sell_price * 0.99:.2f}")
-        
+
         stop_limit_order = adapter.submit_stop_limit_order(
             symbol=test_symbol,
             qty=test_quantity,
@@ -266,67 +266,84 @@ def test_stop_orders():
             limit_price=round(stop_sell_price * 0.99, 2),  # Round to 2 decimals
             time_in_force="day"
         )
-        
+
         print(f"✅ Stop-limit order submitted:")
         print(f"   Order ID: {stop_limit_order.order_id}")
         print(f"   Status: {stop_limit_order.status}")
-        
+
         # Test 3: Cancel the stop-limit order
         print(f"\n[3/3] Cancelling test order...")
-        
+
         time.sleep(1)  # Brief pause
-        
+
         adapter.cancel_order(stop_limit_order.order_id)
         print(f"✅ Cancelled stop-limit order: {stop_limit_order.order_id}")
-        
+
         print("\n✅ Stop order tests passed!")
-        return True
-        
+        assert True  # Test passed
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
-        
+        assert False, f"Test failed: {e}"
+
     finally:
         adapter.disconnect()
 
 
 def test_all_enhanced_features():
     """Run all enhanced feature tests"""
-    
+
     print("\n" + "=" * 70)
     print("ALPACA ENHANCED FEATURES - COMPREHENSIVE TEST SUITE")
     print("=" * 70)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    results = {
-        'market_status': test_market_status_and_clock(),
-        'market_data': test_market_data_and_quotes(),
-        'validation': test_order_validation(),
-        'stop_orders': test_stop_orders()
-    }
-    
+
+    try:
+        test_market_status_and_clock()
+        results = {'market_status': True}
+    except AssertionError:
+        results = {'market_status': False}
+
+    try:
+        test_market_data_and_quotes()
+        results['market_data'] = True
+    except AssertionError:
+        results['market_data'] = False
+
+    try:
+        test_order_validation()
+        results['validation'] = True
+    except AssertionError:
+        results['validation'] = False
+
+    try:
+        test_stop_orders()
+        results['stop_orders'] = True
+    except AssertionError:
+        results['stop_orders'] = False
+
     # Summary
     print("\n" + "=" * 70)
     print("TEST SUMMARY")
     print("=" * 70)
-    
+
     for test_name, passed in results.items():
         status = "✅ PASSED" if passed else "❌ FAILED"
         print(f"{test_name:20s}: {status}")
-    
+
     total_passed = sum(results.values())
     total_tests = len(results)
-    
+
     print(f"\nTotal: {total_passed}/{total_tests} tests passed")
-    
+
     if total_passed == total_tests:
         print("\n🎉 ALL TESTS PASSED!")
-        return 0
+        assert True  # All tests passed
     else:
         print(f"\n⚠️  {total_tests - total_passed} test(s) failed")
-        return 1
+        assert False, f"{total_tests - total_passed} test(s) failed"
 
 
 if __name__ == "__main__":

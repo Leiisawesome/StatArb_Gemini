@@ -419,7 +419,7 @@ class TestPortfolioRebalancer:
         """Test creating rebalance target."""
         # Set target portfolio first
         targets = {"AAPL": Decimal('0.10'), "GOOGL": Decimal('0.15'), "MSFT": Decimal('0.08')}
-        
+
         with patch.object(rebalancer.allocation_engine, 'get_strategy_allocation') as mock_alloc:
             mock_alloc.return_value = Decimal('1000000.00')  # Mock strategy capital
             rebalancer.set_target_portfolio("growth_strategy", targets)
@@ -456,7 +456,7 @@ class TestPortfolioRebalancer:
             "GOOGL": Decimal('0.15'),
             "MSFT": Decimal('0.08')
         }
-        
+
         with patch.object(rebalancer.allocation_engine, 'get_strategy_allocation') as mock_alloc:
             mock_alloc.return_value = Decimal('1000000.00')  # Mock strategy capital
             rebalancer.set_target_portfolio("strat1", targets)
@@ -479,7 +479,7 @@ class TestPortfolioRebalancer:
             "GOOGL": Decimal('0.15'),
             "MSFT": Decimal('0.08')
         }
-        
+
         with patch.object(rebalancer.allocation_engine, 'get_strategy_allocation') as mock_alloc:
             mock_alloc.return_value = Decimal('1000000.00')  # Mock strategy capital
             rebalancer.set_target_portfolio("strat1", targets)

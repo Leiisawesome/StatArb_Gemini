@@ -34,19 +34,19 @@ except ImportError:
         @abstractmethod
         async def initialize(self) -> bool:
             pass
-        
+
         @abstractmethod
         async def start(self) -> bool:
             pass
-        
+
         @abstractmethod
         async def stop(self) -> bool:
             pass
-        
+
         @abstractmethod
         async def health_check(self) -> Dict[str, Any]:
             pass
-        
+
         @abstractmethod
         def get_status(self) -> Dict[str, Any]:
             pass
@@ -85,7 +85,7 @@ class EnhancedSignal:
     target_weight: Optional[float] = None  # Portfolio weight (e.g., 0.02 = 2%)
     quantity_type: str = "ABSOLUTE"  # "PERCENTAGE" or "ABSOLUTE"
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def copy(self) -> 'EnhancedSignal':
         """Create a copy of the signal"""
         return EnhancedSignal(
@@ -123,39 +123,39 @@ class StrategyRegistration:
 class MultiStrategySignalAggregator(ISystemComponent):
     """
     Advanced signal aggregation across multiple strategies
-    
+
     Features:
     - Multi-strategy signal collection
     - Weighted signal aggregation
     - Performance-based dynamic weighting
     - Risk-aware signal processing
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         # Component identification
         self.component_id = str(uuid.uuid4())
         self.is_initialized = False
         self.is_operational = False
-        
+
         # Strategy management
         self.registered_strategies: Dict[str, StrategyRegistration] = {}
         self.strategy_weights: Dict[str, float] = {}
         self.strategy_performance: Dict[str, Dict[str, float]] = defaultdict(dict)
-        
+
         # Signal processing
         self.signal_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
         self.aggregated_signals: List[EnhancedSignal] = []
-        
+
         # Configuration
         self.max_concurrent_strategies = self.config.get('max_concurrent_strategies', 10)
         self.min_confidence_threshold = self.config.get('min_confidence_threshold', 0.6)
         self.enable_dynamic_weighting = self.config.get('enable_dynamic_weighting', False)  # Disabled by default for stability
-        
+
         self.logger.info(f"🎯 MultiStrategySignalAggregator initialized: {self.component_id}")
-    
+
     async def initialize(self) -> bool:
         """Initialize signal aggregator"""
         try:
@@ -166,12 +166,12 @@ class MultiStrategySignalAggregator(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Signal Aggregator initialization failed: {e}")
             return False
-    
+
     async def start(self) -> bool:
         """Start signal aggregator"""
         if not self.is_initialized:
             return False
-        
+
         try:
             self.logger.info("🚀 Starting Multi-Strategy Signal Aggregator...")
             self.is_operational = True
@@ -180,7 +180,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Signal Aggregator start failed: {e}")
             return False
-    
+
     async def stop(self) -> bool:
         """Stop signal aggregator"""
         try:
@@ -191,7 +191,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Signal Aggregator stop failed: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Health check for signal aggregator"""
         return {
@@ -202,7 +202,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
             'active_strategies': len([s for s in self.registered_strategies.values() if s.is_active]),
             'signals_processed': sum(len(history) for history in self.signal_history.values())
         }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get aggregator status"""
         return {
@@ -213,7 +213,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
             'registered_strategies': len(self.registered_strategies),
             'strategy_weights': self.strategy_weights
         }
-    
+
     async def register_strategy(self, strategy_id: str, strategy_instance: Any,
                               strategy_type: StrategyType, weight: float = 1.0,
                               priority: int = 1, allocation_pct: float = 0.1,
@@ -223,7 +223,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
             if len(self.registered_strategies) >= self.max_concurrent_strategies:
                 self.logger.warning(f"Maximum strategies ({self.max_concurrent_strategies}) already registered")
                 return False
-            
+
             registration = StrategyRegistration(
                 strategy_id=strategy_id,
                 strategy_instance=strategy_instance,
@@ -234,10 +234,10 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 max_positions=max_positions,
                 risk_limit=risk_limit
             )
-            
+
             self.registered_strategies[strategy_id] = registration
             self.strategy_weights[strategy_id] = weight
-            
+
             # Initialize performance tracking
             self.strategy_performance[strategy_id] = {
                 'total_signals': 0,
@@ -246,20 +246,20 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 'avg_confidence': 0.0,
                 'performance_score': 1.0
             }
-            
+
             # Configure strategy callbacks if supported
             if hasattr(strategy_instance, 'set_signal_callback'):
                 strategy_instance.set_signal_callback(
                     lambda signals, sid=strategy_id: self._receive_strategy_signals(sid, signals)
                 )
-            
+
             self.logger.info(f"✅ Strategy registered: {strategy_id} ({strategy_type.value})")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"❌ Strategy registration failed: {e}")
             return False
-    
+
     async def unregister_strategy(self, strategy_id: str) -> bool:
         """Unregister a strategy"""
         try:
@@ -268,21 +268,21 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 del self.strategy_weights[strategy_id]
                 if strategy_id in self.strategy_performance:
                     del self.strategy_performance[strategy_id]
-                
+
                 self.logger.info(f"✅ Strategy unregistered: {strategy_id}")
                 return True
             else:
                 self.logger.warning(f"Strategy not found for unregistration: {strategy_id}")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"❌ Strategy unregistration failed: {e}")
             return False
-    
+
     async def collect_all_signals(self, market_data, position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, List[EnhancedSignal]]:
         """
         Collect signals from all registered strategies
-        
+
         Args:
             market_data: Either pd.DataFrame or Dict[str, pd.DataFrame]
                 - If DataFrame: will be converted to dict format for enhanced strategies
@@ -300,14 +300,14 @@ class MultiStrategySignalAggregator(ISystemComponent):
         # Store position details for strategies to access
         self._position_details = position_details or {}
         strategy_signals = {}
-        
+
         # Normalize market_data to dict format for enhanced strategies
         if isinstance(market_data, pd.DataFrame):
             # Skip empty DataFrames
             if market_data.empty:
                 self.logger.debug("collect_all_signals received empty DataFrame, skipping")
                 return {}
-            
+
             # Extract symbol from DataFrame if available
             if 'symbol' in market_data.columns:
                 symbols = market_data['symbol'].unique()
@@ -324,7 +324,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
                         if hasattr(config, 'symbols') and config.symbols:
                             inferred_symbol = config.symbols[0]
                             break
-                
+
                 if inferred_symbol:
                     enriched_data = {inferred_symbol: market_data}
                 else:
@@ -336,11 +336,11 @@ class MultiStrategySignalAggregator(ISystemComponent):
         else:
             self.logger.warning(f"Unexpected market_data type: {type(market_data)}")
             return {}
-        
+
         for strategy_id, registration in self.registered_strategies.items():
             if not registration.is_active:
                 continue
-            
+
             try:
                 # Generate signals from strategy (with position details for price-aware decisions)
                 if hasattr(registration.strategy_instance, 'generate_signals'):
@@ -353,25 +353,25 @@ class MultiStrategySignalAggregator(ISystemComponent):
                         )
                     else:
                         raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
-                    
+
                     # Convert to enhanced signals
                     enhanced_signals = []
                     for signal in raw_signals:
                         enhanced_signal = self._convert_to_enhanced_signal(signal, strategy_id, registration)
                         if enhanced_signal and enhanced_signal.confidence >= self.min_confidence_threshold:
                             enhanced_signals.append(enhanced_signal)
-                    
+
                     strategy_signals[strategy_id] = enhanced_signals
-                    
+
                     # Update performance tracking
                     await self._update_strategy_performance(strategy_id, enhanced_signals)
-                    
+
             except Exception as e:
                 self.logger.error(f"❌ Signal collection failed for {strategy_id}: {e}")
                 strategy_signals[strategy_id] = []
-        
+
         return strategy_signals
-    
+
     async def aggregate_strategy_signals(self, strategy_signals: Dict[str, List[EnhancedSignal]]) -> List[EnhancedSignal]:
         """Aggregate signals from multiple strategies with conflict resolution"""
         try:
@@ -380,17 +380,17 @@ class MultiStrategySignalAggregator(ISystemComponent):
             for strategy_id, signals in strategy_signals.items():
                 if strategy_id not in self.strategy_weights:
                     continue
-                
+
                 strategy_weight = self.strategy_weights[strategy_id]
-                
+
                 # DEBUG: Log strategy weight
                 self.logger.debug(f"📊 Strategy {strategy_id}: weight={strategy_weight}, signals={len(signals)}")
-                
+
                 # Apply dynamic weighting if enabled
                 if self.enable_dynamic_weighting:
                     performance_multiplier = self.strategy_performance[strategy_id].get('performance_score', 1.0)
                     strategy_weight *= performance_multiplier
-                
+
                 for signal in signals:
                     weighted_signal = signal.copy()
                     # Store original confidence before weighting
@@ -400,30 +400,30 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     if len(strategy_signals) > 1:
                         weighted_signal.confidence *= strategy_weight
                     weighted_signals.append(weighted_signal)
-            
+
             # Step 2: Group signals by symbol
             signals_by_symbol = defaultdict(list)
             for signal in weighted_signals:
                 signals_by_symbol[signal.symbol].append(signal)
-            
+
             # Step 3: Resolve conflicts and aggregate
             aggregated_signals = []
             for symbol, symbol_signals in signals_by_symbol.items():
                 resolved_signal = await self._resolve_signal_conflicts(symbol_signals)
                 if resolved_signal:
                     aggregated_signals.append(resolved_signal)
-            
+
             # Store aggregated signals
             self.aggregated_signals = aggregated_signals
-            
+
             self.logger.info(f"📊 Aggregated {len(aggregated_signals)} signals from {len(strategy_signals)} strategies")
             return aggregated_signals
-            
+
         except Exception as e:
             self.logger.error(f"❌ Signal aggregation failed: {e}")
             return []
-    
-    def _convert_to_enhanced_signal(self, raw_signal: Any, strategy_id: str, 
+
+    def _convert_to_enhanced_signal(self, raw_signal: Any, strategy_id: str,
                                   registration: StrategyRegistration) -> Optional[EnhancedSignal]:
         """Convert raw signal to enhanced signal"""
         try:
@@ -445,7 +445,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     signal_type = SignalType(str(action).lower())
             else:
                 return None
-            
+
             enhanced_signal = EnhancedSignal(
                 signal_id=f"{strategy_id}_{uuid.uuid4().hex[:8]}",
                 symbol=getattr(raw_signal, 'symbol', 'UNKNOWN'),
@@ -466,13 +466,13 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     'risk_limit': registration.risk_limit
                 }
             )
-            
+
             return enhanced_signal
-            
+
         except Exception as e:
             self.logger.error(f"Signal conversion failed: {e}")
             return None
-    
+
     async def _receive_strategy_signals(self, strategy_id: str, signals: List[Any]):
         """Receive signals from strategy callback"""
         try:
@@ -482,30 +482,30 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     'timestamp': datetime.now(),
                     'signal': signal
                 })
-            
+
             self.logger.debug(f"📨 Received {len(signals)} signals from {strategy_id}")
-            
+
         except Exception as e:
             self.logger.error(f"Signal reception failed for {strategy_id}: {e}")
-    
+
     async def _update_strategy_performance(self, strategy_id: str, signals: List[EnhancedSignal]):
         """Update strategy performance metrics"""
         try:
             performance = self.strategy_performance[strategy_id]
-            
+
             # Update signal counts
             performance['total_signals'] += len(signals)
-            
+
             # Update confidence metrics
             if signals:
                 confidences = [s.confidence for s in signals]
                 performance['avg_confidence'] = np.mean(confidences)
-            
+
             # Calculate performance score (placeholder - would use actual trading results)
             win_rate = performance.get('win_rate', 0.5)
             avg_confidence = performance.get('avg_confidence', 0.5)
             performance['performance_score'] = (win_rate * 0.6) + (avg_confidence * 0.4)
-            
+
             # Update dynamic weights if enabled
             if self.enable_dynamic_weighting and strategy_id in self.strategy_weights:
                 base_weight = self.registered_strategies[strategy_id].weight
@@ -518,7 +518,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     # Ensure minimum multiplier of 0.1 to never completely zero out a strategy
                     performance_multiplier = max(0.1, performance_multiplier)
                 self.strategy_weights[strategy_id] = base_weight * performance_multiplier
-            
+
         except Exception as e:
             self.logger.error(f"Performance update failed for {strategy_id}: {e}")
 
@@ -529,42 +529,42 @@ class MultiStrategySignalAggregator(ISystemComponent):
             self.conflict_resolver = SignalConflictResolver()
             await self.conflict_resolver.initialize()
             await self.conflict_resolver.start()
-        
+
         return await self.conflict_resolver.resolve_conflicts(signals)
 
 
 class SignalConflictResolver(ISystemComponent):
     """
     Advanced signal conflict resolution
-    
+
     Features:
     - Multiple resolution methods
     - Risk-aware conflict resolution
     - Strategy priority consideration
     - Confidence-based weighting
     """
-    
+
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         # Component identification
         self.component_id = str(uuid.uuid4())
         self.is_initialized = False
         self.is_operational = False
-        
+
         # Configuration
         self.default_resolution_method = ConflictResolutionMethod(
             self.config.get('resolution_method', 'confidence_weighted')
         )
         self.conflict_threshold = self.config.get('conflict_threshold', 0.1)  # 10% difference threshold
-        
+
         # Conflict tracking
         self.conflict_history = []
         self.resolution_stats = defaultdict(int)
-        
+
         self.logger.info(f"⚖️ SignalConflictResolver initialized: {self.component_id}")
-    
+
     async def initialize(self) -> bool:
         """Initialize conflict resolver"""
         try:
@@ -575,12 +575,12 @@ class SignalConflictResolver(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Conflict Resolver initialization failed: {e}")
             return False
-    
+
     async def start(self) -> bool:
         """Start conflict resolver"""
         if not self.is_initialized:
             return False
-        
+
         try:
             self.logger.info("🚀 Starting Signal Conflict Resolver...")
             self.is_operational = True
@@ -589,7 +589,7 @@ class SignalConflictResolver(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Conflict Resolver start failed: {e}")
             return False
-    
+
     async def stop(self) -> bool:
         """Stop conflict resolver"""
         try:
@@ -600,7 +600,7 @@ class SignalConflictResolver(ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ Conflict Resolver stop failed: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Health check for conflict resolver"""
         return {
@@ -610,7 +610,7 @@ class SignalConflictResolver(ISystemComponent):
             'conflicts_resolved': len(self.conflict_history),
             'resolution_method': self.default_resolution_method.value
         }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get resolver status"""
         return {
@@ -621,21 +621,21 @@ class SignalConflictResolver(ISystemComponent):
             'resolution_method': self.default_resolution_method.value,
             'resolution_stats': dict(self.resolution_stats)
         }
-    
+
     async def resolve_conflicts(self, signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve conflicts between signals for the same symbol"""
         if not signals:
             return None
-        
+
         if len(signals) == 1:
             return signals[0]
-        
+
         try:
             # Separate by signal type
             buy_signals = [s for s in signals if s.signal_type == SignalType.BUY]
             sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
             hold_signals = [s for s in signals if s.signal_type == SignalType.HOLD]
-            
+
             # Record conflict
             conflict_record = {
                 'timestamp': datetime.now(),
@@ -646,7 +646,7 @@ class SignalConflictResolver(ISystemComponent):
                 'hold_signals': len(hold_signals)
             }
             self.conflict_history.append(conflict_record)
-            
+
             # Resolution logic
             if buy_signals and sell_signals:
                 # Conflicting signals - use resolution method
@@ -668,15 +668,15 @@ class SignalConflictResolver(ISystemComponent):
                 resolved_signal = hold_signals[0] if hold_signals else None
                 self.resolution_stats['hold_selected'] += 1
                 return resolved_signal
-                
+
         except Exception as e:
             self.logger.error(f"Conflict resolution failed: {e}")
             return signals[0] if signals else None
-    
-    async def _resolve_conflicting_signals(self, buy_signals: List[EnhancedSignal], 
+
+    async def _resolve_conflicting_signals(self, buy_signals: List[EnhancedSignal],
                                          sell_signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve conflicting buy/sell signals"""
-        
+
         if self.default_resolution_method == ConflictResolutionMethod.CONFIDENCE_WEIGHTED:
             return await self._resolve_by_confidence_weighted(buy_signals, sell_signals)
         elif self.default_resolution_method == ConflictResolutionMethod.STRATEGY_WEIGHTED:
@@ -688,15 +688,15 @@ class SignalConflictResolver(ISystemComponent):
         else:
             # Default to confidence weighted
             return await self._resolve_by_confidence_weighted(buy_signals, sell_signals)
-    
-    async def _resolve_by_confidence_weighted(self, buy_signals: List[EnhancedSignal], 
+
+    async def _resolve_by_confidence_weighted(self, buy_signals: List[EnhancedSignal],
                                             sell_signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve using confidence-weighted approach"""
-        
+
         # Calculate weighted confidence for each direction
         buy_confidence = sum(s.confidence * s.metadata.get('strategy_weight', 1.0) for s in buy_signals)
         sell_confidence = sum(s.confidence * s.metadata.get('strategy_weight', 1.0) for s in sell_signals)
-        
+
         # Choose direction with higher weighted confidence
         if buy_confidence > sell_confidence * (1 + self.conflict_threshold):
             return await self._aggregate_same_direction_signals(buy_signals)
@@ -705,55 +705,55 @@ class SignalConflictResolver(ISystemComponent):
         else:
             # Too close - generate hold signal
             return self._create_hold_signal(buy_signals[0].symbol, buy_signals + sell_signals)
-    
-    async def _resolve_by_strategy_weighted(self, buy_signals: List[EnhancedSignal], 
+
+    async def _resolve_by_strategy_weighted(self, buy_signals: List[EnhancedSignal],
                                           sell_signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve using strategy weights"""
-        
+
         buy_weight = sum(s.metadata.get('strategy_weight', 1.0) for s in buy_signals)
         sell_weight = sum(s.metadata.get('strategy_weight', 1.0) for s in sell_signals)
-        
+
         if buy_weight > sell_weight:
             return await self._aggregate_same_direction_signals(buy_signals)
         elif sell_weight > buy_weight:
             return await self._aggregate_same_direction_signals(sell_signals)
         else:
             return self._create_hold_signal(buy_signals[0].symbol, buy_signals + sell_signals)
-    
-    async def _resolve_by_highest_confidence(self, buy_signals: List[EnhancedSignal], 
+
+    async def _resolve_by_highest_confidence(self, buy_signals: List[EnhancedSignal],
                                            sell_signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve by selecting highest confidence signal"""
-        
+
         all_signals = buy_signals + sell_signals
         highest_confidence_signal = max(all_signals, key=lambda s: s.confidence)
-        
+
         if highest_confidence_signal.signal_type == SignalType.BUY:
             return await self._aggregate_same_direction_signals(buy_signals)
         else:
             return await self._aggregate_same_direction_signals(sell_signals)
-    
-    async def _resolve_by_majority_vote(self, buy_signals: List[EnhancedSignal], 
+
+    async def _resolve_by_majority_vote(self, buy_signals: List[EnhancedSignal],
                                       sell_signals: List[EnhancedSignal]) -> Optional[EnhancedSignal]:
         """Resolve by majority vote"""
-        
+
         if len(buy_signals) > len(sell_signals):
             return await self._aggregate_same_direction_signals(buy_signals)
         elif len(sell_signals) > len(buy_signals):
             return await self._aggregate_same_direction_signals(sell_signals)
         else:
             return self._create_hold_signal(buy_signals[0].symbol, buy_signals + sell_signals)
-    
+
     async def _aggregate_same_direction_signals(self, signals: List[EnhancedSignal]) -> EnhancedSignal:
         """Aggregate signals in the same direction"""
         if not signals:
             return None
-        
+
         # Weighted average of confidence and quantity
         total_weight = sum(s.metadata.get('strategy_weight', 1.0) for s in signals)
         weighted_confidence = sum(s.confidence * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
         weighted_strength = sum(s.strength * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
         weighted_quantity = sum(s.quantity * s.metadata.get('strategy_weight', 1.0) for s in signals) / total_weight
-        
+
         # Create aggregated signal
         aggregated_signal = EnhancedSignal(
             signal_id=f"aggregated_{uuid.uuid4().hex[:8]}",
@@ -774,12 +774,12 @@ class SignalConflictResolver(ISystemComponent):
                 'resolution_method': self.default_resolution_method.value
             }
         )
-        
+
         return aggregated_signal
-    
+
     def _create_hold_signal(self, symbol: str, contributing_signals: List[EnhancedSignal]) -> EnhancedSignal:
         """Create a hold signal when conflicts cannot be resolved"""
-        
+
         return EnhancedSignal(
             signal_id=f"hold_{uuid.uuid4().hex[:8]}",
             symbol=symbol,

@@ -24,7 +24,7 @@ Key Responsibilities:
 
 Migration: December 2025 - Former Rule 5 content absorbed into Rule 3.
 
-Author: StatArb_Gemini Core Engine Migration  
+Author: StatArb_Gemini Core Engine Migration
 Version: 2.0.0 (Rules Migration December 2025)
 """
 
@@ -34,7 +34,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable, Type
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 import pandas as pd
 
@@ -68,7 +67,7 @@ from .strategy_registry import StrategyRegistry
 
 # Import multi-strategy coordination components
 from .multi_strategy_coordinator import (
-    MultiStrategySignalAggregator, SignalConflictResolver, 
+    MultiStrategySignalAggregator, SignalConflictResolver,
     EnhancedSignal, StrategyRegistration
 )
 
@@ -102,11 +101,11 @@ class TradingSignal:
     expected_return: float
     risk_score: float
     quantity: float
-    
+
     # Position sizing fields (CRITICAL for percentage-based sizing)
     target_weight: Optional[float] = None  # Target portfolio weight (0.05 = 5%)
     quantity_type: str = "ABSOLUTE"  # "PERCENTAGE" or "ABSOLUTE"
-    
+
     target_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
@@ -137,7 +136,7 @@ class StrategyManagerConfig:
     enable_enhanced_strategies: bool = True  # Enable enhanced strategy implementations
     auto_discover_strategies: bool = True    # Auto-discover strategies on startup
     strategy_registry_path: str = "strategy_registry.json"  # Registry file path
-    
+
     # Multi-strategy coordination settings
     enable_multi_strategy_coordination: bool = True
     enable_signal_aggregation: bool = True
@@ -145,7 +144,7 @@ class StrategyManagerConfig:
     conflict_resolution_method: str = "confidence_weighted"
     enable_dynamic_weighting: bool = True
     enable_strategy_attribution: bool = True
-    
+
     # Phase 3: Pipeline integration settings (Rule 3)
     enable_pipeline_integration: bool = True  # Use ProcessingPipelineOrchestrator
     pipeline_config: Optional[Any] = None      # Pipeline configuration
@@ -153,7 +152,7 @@ class StrategyManagerConfig:
 
 class EnhancedStrategyFactory:
     """Factory for creating enhanced strategy instances"""
-    
+
     # Strategy class mapping
     STRATEGY_CLASSES = {
         StrategyType.MOMENTUM: EnhancedMomentumStrategy,
@@ -168,7 +167,7 @@ class EnhancedStrategyFactory:
         StrategyType.VOLATILITY: EnhancedVolatilityStrategy,
         StrategyType.ARBITRAGE: EnhancedArbitrageStrategy
     }
-    
+
     # Configuration class mapping
     CONFIG_CLASSES = {
         StrategyType.MOMENTUM: MomentumConfig,
@@ -183,7 +182,7 @@ class EnhancedStrategyFactory:
         StrategyType.VOLATILITY: VolatilityConfig,
         StrategyType.ARBITRAGE: ArbitrageConfig
     }
-    
+
     @classmethod
     def create_strategy(cls, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
         """Create enhanced strategy instance"""
@@ -192,7 +191,7 @@ class EnhancedStrategyFactory:
             if not strategy_class:
                 logger.error(f"No enhanced strategy class found for type: {strategy_type}")
                 raise ConfigurationRequiredError(f"Unknown strategy type: {strategy_type}")
-            
+
             # Create configuration object
             config_class = cls.CONFIG_CLASSES.get(strategy_type)
             if config_class:
@@ -205,13 +204,13 @@ class EnhancedStrategyFactory:
                     strategy_type=strategy_type,
                     **{k: v for k, v in config.items() if k not in ['name', 'type']}
                 )
-            
+
             # Create strategy instance
             strategy_instance = strategy_class(strategy_config)
-            
+
             logger.info(f"✅ Created enhanced strategy: {strategy_type.value} - {config.get('name')}")
             return strategy_instance
-            
+
         except ConfigurationRequiredError as config_error:
             # Configuration validation failed (e.g., invalid lookback)
             logger.error(
@@ -222,7 +221,7 @@ class EnhancedStrategyFactory:
         except Exception as e:
             logger.exception(f"❌ Unexpected error creating enhanced strategy {strategy_type}: {e}")
             return None
-    
+
     @classmethod
     def _create_config_object(cls, config_class: Type, config_dict: Dict[str, Any]):
         """Create configuration object from dictionary"""
@@ -230,14 +229,14 @@ class EnhancedStrategyFactory:
             # Get config class constructor parameters
             import inspect
             sig = inspect.signature(config_class.__init__)
-            
+
             # Extract parameters from nested 'parameters' dict if present
             flat_config = config_dict.copy()
             if 'parameters' in flat_config and isinstance(flat_config['parameters'], dict):
                 # Merge parameters into flat config
                 parameters = flat_config.pop('parameters')
                 flat_config.update(parameters)
-            
+
             # Filter config_dict to only include valid parameters
             valid_params = {}
             for param_name, param in sig.parameters.items():
@@ -248,18 +247,18 @@ class EnhancedStrategyFactory:
                 elif hasattr(param, 'default') and param.default != inspect.Parameter.empty:
                     # Use default value if available
                     continue
-            
+
             return config_class(**valid_params)
-            
+
         except Exception as e:
             logger.error(f"Failed to create config object: {e}")
             raise ConfigurationRequiredError(f"Cannot create strategy configuration: {e}") from e
-    
+
     @classmethod
     def get_available_strategies(cls) -> List[StrategyType]:
         """Get list of available enhanced strategies"""
         return list(cls.STRATEGY_CLASSES.keys())
-    
+
     @classmethod
     def is_strategy_available(cls, strategy_type: StrategyType) -> bool:
         """Check if enhanced strategy is available"""
@@ -267,83 +266,83 @@ class EnhancedStrategyFactory:
 
 class IStrategySubscriber:
     """Interface for strategy event subscribers"""
-    
+
     async def on_signal_generated(self, signal: TradingSignal) -> None:
         """Handle signal generation"""
-    
+
     async def on_strategy_status_change(self, strategy_event: Dict[str, Any]) -> None:
         """Handle strategy status changes"""
 
 class StrategyManager(ISystemComponent, IRegimeAware):
     """
     Core Engine Strategy Manager - WHAT Component with IRegimeAware
-    
+
     This component sits within the Risk Manager (Central Hub) and determines
     WHAT trades should be made:
-    
+
     1. Manages multiple trading strategies
     2. Analyzes market conditions and regime changes
     3. Generates trading signals based on strategy analysis
     4. Aggregates and filters signals for quality
     5. Submits trade requests to Risk Manager for authorization
-    
+
     The WHAT methodology includes:
     - Multi-strategy signal generation
     - Regime-aware strategy activation (IRegimeAware)
     - Signal quality filtering and aggregation
     - Portfolio-level signal coordination
-    
+
     Implements:
     - ISystemComponent for lifecycle management (Rule 1)
     - IRegimeAware for regime adaptation (Rule 2)
     """
-    
+
     def __init__(self, config: Dict[str, Any], data_config: Optional[Any] = None):
         self.config = StrategyManagerConfig(**config) if config else StrategyManagerConfig()
         self.data_config = data_config  # Store data config for pipeline orchestrator
         self.component_id = f"strategy_manager_{uuid.uuid4().hex[:8]}"
-        
+
         # Component references (set by Risk Manager)
         self.risk_manager: Optional[Any] = None
         self.data_manager: Optional[Any] = None
         self.regime_engine: Optional[Any] = None
-        
+
         # Enhanced strategy integration
         self.strategy_factory = EnhancedStrategyFactory()
         self.strategy_registry: Optional[StrategyRegistry] = None
-        
+
         # Phase 3: Pipeline orchestrator integration (Rule 3)
         self.pipeline_orchestrator: Optional[ProcessingPipelineOrchestrator] = None
         self.pipeline_enabled = self.config.enable_pipeline_integration
-        
+
         if self.pipeline_enabled:
             logger.info("✅ Pipeline integration enabled (Rule 3 - Phase 3)")
         else:
             logger.warning("⚠️  Pipeline integration disabled, using legacy mode")
-        
+
         # Strategy infrastructure - Now stores actual enhanced strategies
         self.active_strategies: Dict[str, EnhancedBaseStrategy] = {}
         self.strategy_allocations: Dict[str, StrategyAllocation] = {}
         self.strategy_performance: Dict[str, Dict[str, Any]] = {}
-        
+
         # Multi-strategy coordination components
         self.signal_aggregator: Optional[MultiStrategySignalAggregator] = None
         self.conflict_resolver: Optional[SignalConflictResolver] = None
         self.strategy_registrations: Dict[str, StrategyRegistration] = {}
         self.enable_multi_strategy = self.config.enable_multi_strategy_coordination
-        
+
         # Signal management
         self.pending_signals: Dict[str, TradingSignal] = {}
         self.signal_history: List[TradingSignal] = []
         self.aggregated_signals: Dict[str, TradingSignal] = {}
-        
+
         # Current market context
         self.current_regime: Optional[str] = None
         self.market_conditions: Dict[str, Any] = {}
-        
+
         # Subscribers
         self.subscribers: List[IStrategySubscriber] = []
-        
+
         # ISystemComponent state management
         self.is_initialized = False
         self.is_running = False
@@ -351,13 +350,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
         self.signal_generation_task: Optional[asyncio.Task] = None
-        
+
         # Leverage existing core strategy manager
         self.core_strategy_manager: Optional[Any] = None
-        
+
         logger.info("🧠 Enhanced Strategy Manager (WHAT) initialized")
         logger.info(f"📊 Available enhanced strategies: {[s.value for s in self.strategy_factory.get_available_strategies()]}")
-    
+
     async def _initialize_strategy_registry(self) -> None:
         """Initialize strategy registry for enhanced strategy management"""
         try:
@@ -372,20 +371,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.info("✅ Strategy registry initialized")
         except Exception as e:
             logger.warning(f"⚠️ Strategy registry initialization failed: {e}")
-    
+
     async def _discover_enhanced_strategies(self) -> None:
         """Auto-discover enhanced strategies from implementations directory"""
         try:
             if not self.strategy_registry:
                 logger.warning("Strategy registry not available for discovery")
                 return
-            
+
             # Discover strategies in implementations directory
             implementations_path = Path(__file__).parent / "implementations"
             discovered_strategies = self.strategy_registry.discovery.discover_strategies([str(implementations_path)])
-            
+
             logger.info(f"🔍 Discovered {len(discovered_strategies)} enhanced strategies")
-            
+
             # Register discovered strategies
             for strategy_metadata in discovered_strategies:
                 try:
@@ -397,18 +396,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     logger.info(f"📝 Registered strategy: {strategy_metadata.name} ({strategy_id})")
                 except Exception as e:
                     logger.warning(f"Failed to register strategy {strategy_metadata.name}: {e}")
-                    
+
         except Exception as e:
             logger.warning(f"⚠️ Enhanced strategy discovery failed: {e}")
-    
+
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
-    
+
     def register_with_orchestrator(self, orchestrator) -> str:
         """Register component with HierarchicalSystemOrchestrator"""
         from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
-        
+
         self.orchestrator = orchestrator
         self.component_id = orchestrator.register_component(
             name="StrategyManager",
@@ -417,47 +416,47 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             authority_level=AuthorityLevel.OPERATIONAL,
             initialization_order=20  # PHASE 4: After processing (order=17), before risk (order=25)
         )
-        
+
         logger.info(f"✅ StrategyManager registered with orchestrator: {self.component_id}")
         return self.component_id
-    
+
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""
         if not self.orchestrator or not self.component_id:
             logger.warning("No orchestrator available for authorization request")
             return False
-        
+
         return await self.orchestrator.request_system_authorization(
             operation, self.component_id, details
         )
-    
+
     # ========================================
     # ISystemComponent Interface Implementation
     # ========================================
-    
+
     async def initialize(self) -> bool:
         """Initialize enhanced strategy manager"""
         try:
             logger.info("🔄 Initializing Enhanced Strategy Manager (WHAT)...")
-            
+
             # Initialize strategy registry if enabled
             if self.config.enable_enhanced_strategies:
                 await self._initialize_strategy_registry()
-            
+
             # Auto-discover enhanced strategies if enabled
             if self.config.auto_discover_strategies:
                 await self._discover_enhanced_strategies()
-            
+
             # Strategies must be registered manually - no default strategies
             logger.info("📊 Manual strategy registration mode - no default strategies")
-            
+
             # Initialize strategy performance tracking
             await self._initialize_performance_tracking()
-            
+
             # Initialize multi-strategy coordination if enabled
             if self.enable_multi_strategy:
                 await self._initialize_multi_strategy_coordination()
-                
+
                 # CRITICAL FIX: Sync already-registered strategies to signal aggregator
                 # (strategies may have been registered before signal_aggregator existed)
                 if self.signal_aggregator and self.active_strategies:
@@ -479,7 +478,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 logger.info(f"   ✅ Synced: {strategy_name}")
                             except Exception as e:
                                 logger.warning(f"   ⚠️ Failed to sync {strategy_name}: {e}")
-            
+
             # Phase 3: Initialize pipeline orchestrator (Rule 3)
             if self.pipeline_enabled:
                 try:
@@ -491,43 +490,43 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     )
                     await self.pipeline_orchestrator.initialize()
                     await self.pipeline_orchestrator.start()
-                    
+
                     # Inject regime engine into pipeline
                     if self.regime_engine:
                         self.pipeline_orchestrator.set_regime_engine(self.regime_engine)
                         logger.debug("✅ Regime engine propagated to pipeline")
-                    
+
                     logger.info("✅ Pipeline orchestrator initialized and operational")
                 except Exception as e:
                     logger.error(f"❌ Pipeline orchestrator initialization failed: {e}")
                     self.pipeline_enabled = False
-            
+
             self.is_initialized = True
             logger.info("✅ Enhanced Strategy Manager (WHAT) initialization complete")
             logger.info(f"📊 Active enhanced strategies: {len(self.active_strategies)}")
             return True
-            
+
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"❌ Enhanced Strategy Manager initialization failed: {e}")
             return False
-    
+
     async def register_enhanced_strategy(self, strategy_type: StrategyType, config: Dict[str, Any]) -> bool:
         """Register an enhanced strategy programmatically"""
         try:
             strategy_name = config.get('name', f'{strategy_type.value}_strategy')
-            
+
             # Check if strategy type is available
             if not self.strategy_factory.is_strategy_available(strategy_type):
                 logger.error(f"❌ Enhanced strategy type not available: {strategy_type}")
                 return False
-            
+
             # Create enhanced strategy instance
             strategy_instance = await self._create_strategy_instance(strategy_type, config)
             if not strategy_instance:
                 logger.error(f"❌ Failed to create enhanced strategy: {strategy_name}")
                 return False
-            
+
             # Create allocation
             allocation = StrategyAllocation(
                 strategy_name=strategy_name,
@@ -536,7 +535,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 max_positions=config.get('max_positions', 5),
                 risk_limit=config.get('risk_limit', 0.05)
             )
-            
+
             # Store strategy and allocation
             self.active_strategies[strategy_name] = strategy_instance
             self.strategy_allocations[strategy_name] = allocation
@@ -548,7 +547,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'max_drawdown': 0.0,
                 'last_signal_time': None
             }
-            
+
             # CRITICAL FIX: Register with signal aggregator for multi-strategy coordination
             if self.signal_aggregator:
                 try:
@@ -565,18 +564,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     logger.info(f"✅ Strategy registered with signal aggregator: {strategy_name}")
                 except Exception as e:
                     logger.warning(f"⚠️ Signal aggregator registration failed for {strategy_name}: {e}")
-            
+
             logger.info(f"✅ Enhanced strategy registered: {strategy_name} ({strategy_type.value})")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to register enhanced strategy: {e}")
             return False
-    
+
     def get_enhanced_strategy_status(self) -> Dict[str, Any]:
         """Get status of enhanced strategies"""
         enhanced_strategies = {}
-        
+
         for name, strategy in self.active_strategies.items():
             if isinstance(strategy, EnhancedBaseStrategy):
                 enhanced_strategies[name] = {
@@ -585,39 +584,39 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'performance': strategy.get_performance_summary(),
                     'health': 'requires_async_call'  # Health check requires async call
                 }
-        
+
         return {
             'total_enhanced_strategies': len(enhanced_strategies),
             'available_strategy_types': [s.value for s in self.strategy_factory.get_available_strategies()],
             'enhanced_strategies': enhanced_strategies,
             'registry_status': 'active' if self.strategy_registry else 'not_initialized'
         }
-    
+
     async def start(self) -> bool:
         """Start strategy manager"""
         try:
             if not self.is_initialized:
                 logger.error("❌ Cannot start - Strategy Manager not initialized")
                 return False
-            
+
             logger.info("🚀 Starting Strategy Manager signal generation...")
-            
+
             # Start signal generation loop
             self.signal_generation_task = asyncio.create_task(self._run_signal_generation())
-            
+
             self.is_running = True
             logger.info("✅ Strategy Manager (WHAT) started")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to start Strategy Manager: {e}")
             raise
-    
+
     async def stop(self) -> bool:
         """Stop strategy manager"""
         try:
             logger.info("🛑 Stopping Strategy Manager...")
-            
+
             if self.signal_generation_task:
                 self.signal_generation_task.cancel()
                 try:
@@ -625,23 +624,23 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 except asyncio.CancelledError:
                     pass
                 self.signal_generation_task = None
-            
+
             # Phase 3: Stop pipeline orchestrator
             if self.pipeline_orchestrator:
                 await self.pipeline_orchestrator.stop()
                 logger.debug("✅ Pipeline orchestrator stopped")
-            
+
             self.is_running = False
             logger.info("✅ Strategy Manager stopped")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to stop Strategy Manager: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check of the strategy manager"""
-        
+
         try:
             health_status = {
                 'healthy': True,
@@ -659,7 +658,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'regime_engine': self.regime_engine is not None
                 }
             }
-            
+
             # Check strategy health
             unhealthy_strategies = []
             for strategy_id, strategy in self.active_strategies.items():
@@ -668,27 +667,27 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     if not strategy_health.get('healthy', True):
                         unhealthy_strategies.append(strategy_id)
                         health_status['healthy'] = False
-            
+
             if unhealthy_strategies:
                 health_status['unhealthy_strategies'] = unhealthy_strategies
-            
+
             # Check signal generation health
             if self.is_running and not self.signal_generation_task:
                 health_status['healthy'] = False
                 health_status['warning'] = "Signal generation task not running"
-            
+
             return health_status
-            
+
         except Exception as e:
             return {
                 'healthy': False,
                 'error': str(e),
                 'component_type': 'StrategyManager'
             }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the strategy manager"""
-        
+
         return {
             'component_type': 'StrategyManager',
             'initialized': self.is_initialized,
@@ -707,18 +706,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             },
             'signal_generation_active': self.signal_generation_task is not None and not self.signal_generation_task.done()
         }
-    
+
     # Component Integration
     def set_risk_manager(self, risk_manager: Any):
         """Set risk manager reference"""
         self.risk_manager = risk_manager
         logger.info("🔗 Risk Manager linked to Strategy Manager")
-    
+
     def set_data_manager(self, data_manager: Any):
         """Set data manager reference"""
         self.data_manager = data_manager
         logger.info("🔗 Data Manager linked to Strategy Manager")
-    
+
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Set regime engine reference - IRegimeAware interface method
@@ -726,54 +725,54 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """
         self.regime_engine = regime_engine
         logger.info("✅ Regime Engine linked to Strategy Manager (IRegimeAware, Rule 2)")
-        
+
         # Phase 3: Propagate regime engine to pipeline (Rule 2 + Rule 3)
         if self.pipeline_orchestrator and hasattr(self.pipeline_orchestrator, 'set_regime_engine'):
             self.pipeline_orchestrator.set_regime_engine(regime_engine)
             logger.debug("✅ Regime engine propagated to pipeline orchestrator")
-    
+
     async def on_regime_change(self, new_regime_context: Any) -> None:
         """
         Callback for regime changes - IRegimeAware interface method
         Adjust strategy weights based on regime appropriateness.
-        
+
         Args:
             new_regime_context: New regime context with updated information
         """
         if not new_regime_context:
             return
-        
+
         previous_regime = self.current_regime.primary_regime.value if (self.current_regime and hasattr(self.current_regime, 'primary_regime')) else None
         self.current_regime = new_regime_context
-        
+
         regime_name = new_regime_context.primary_regime.value if hasattr(new_regime_context, 'primary_regime') else str(new_regime_context)
         logger.info(f"🔄 Strategy Manager adapting to regime change: {previous_regime} → {regime_name}")
-        
+
         # Adapt strategies to new regime
         await self.adapt_to_regime(new_regime_context)
-    
+
     def get_current_regime_context(self) -> Optional[Any]:
         """
         Get current regime context - IRegimeAware interface method
-        
+
         Returns:
             Current RegimeContext or None if not available
         """
         return self.current_regime if hasattr(self, 'current_regime') else None
-    
+
     async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
         """
         Adapt component behavior to current regime - IRegimeAware interface method
-        
+
         Adaptation strategy:
         - Trending regimes → Prioritize momentum/trend strategies
         - Range-bound regimes → Prioritize mean-reversion/pairs strategies
         - High volatility → Reduce position sizes, increase quality thresholds
         - Low volatility → Increase position sizes, relax thresholds
-        
+
         Args:
             regime_context: Current regime context
-            
+
         Returns:
             Dictionary with adaptation details and adjustments made
         """
@@ -784,17 +783,17 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             'adjustments': [],
             'success': True
         }
-        
+
         try:
             regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else str(regime_context)
             volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
-            
+
             # Update current regime
             if not hasattr(self, 'current_regime'):
                 self.current_regime = regime_context
             else:
                 self.current_regime = regime_context
-            
+
             # Adjust strategy weights based on regime
             if 'trending' in regime_name.lower():
                 # Prioritize momentum and trend-following strategies
@@ -803,7 +802,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'reason': 'trending_regime'
                 })
                 logger.info(f"📊 Strategies adapted for trending: prioritize momentum/trend-following")
-            
+
             elif 'range' in regime_name.lower() or 'mean_reversion' in regime_name.lower():
                 # Prioritize mean-reversion and pairs strategies
                 adaptations['adjustments'].append({
@@ -811,7 +810,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'reason': 'range_bound_regime'
                 })
                 logger.info(f"📊 Strategies adapted for range-bound: prioritize mean-reversion/pairs")
-            
+
             # Adjust risk parameters based on volatility
             if volatility_regime == 'high_volatility':
                 self.config.min_confidence_threshold = 0.7  # Higher threshold
@@ -839,26 +838,26 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'max_allocation': 0.33,
                     'reason': 'normal_volatility'
                 })
-            
+
             # Notify all active strategies of regime change
             if hasattr(self, 'active_strategies'):
                 for strategy_name, strategy in self.active_strategies.items():
                     if hasattr(strategy, 'on_regime_change'):
                         await strategy.on_regime_change(regime_context)
-            
+
             logger.info(f"✅ Strategy Manager adapted to regime: {regime_name}")
-            
+
         except Exception as e:
             logger.error(f"❌ Regime adaptation failed: {e}")
             adaptations['success'] = False
             adaptations['error'] = str(e)
-        
+
         return adaptations
-    
+
     def validate_regime_dependency(self) -> bool:
         """
         Validate regime engine is properly configured - IRegimeAware interface method
-        
+
         Returns:
             True if regime engine is properly configured, False otherwise
         """
@@ -868,21 +867,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         else:
             logger.debug("✅ Regime engine properly configured")
         return is_valid
-    
+
     def subscribe(self, subscriber: IStrategySubscriber):
         """Subscribe to strategy events"""
         self.subscribers.append(subscriber)
         logger.info(f"📝 New strategy subscriber: {type(subscriber).__name__}")
-    
+
     # Core Strategy Methods
     async def add_strategy(self, strategy_config: Dict[str, Any]) -> bool:
         """Add new trading strategy"""
         try:
             strategy_name = strategy_config['name']
             strategy_type = StrategyType(strategy_config['type'])
-            
+
             logger.info(f"➕ Adding strategy: {strategy_name} ({strategy_type.value})")
-            
+
             # Create strategy allocation
             allocation = StrategyAllocation(
                 strategy_name=strategy_name,
@@ -892,10 +891,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 risk_limit=strategy_config.get('risk_limit', 0.05),
                 active=strategy_config.get('active', True)
             )
-            
+
             # Initialize strategy based on type
             strategy = await self._create_strategy_instance(strategy_type, strategy_config)
-            
+
             # Store strategy
             self.active_strategies[strategy_name] = strategy
             self.strategy_allocations[strategy_name] = allocation
@@ -907,39 +906,39 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'max_drawdown': 0.0,
                 'last_updated': datetime.now()
             }
-            
+
             logger.info(f"✅ Strategy added: {strategy_name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to add strategy: {e}")
             return False
-    
+
     async def remove_strategy(self, strategy_name: str) -> bool:
         """Remove trading strategy"""
         try:
             if strategy_name not in self.active_strategies:
                 return False
-            
+
             logger.info(f"➖ Removing strategy: {strategy_name}")
-            
+
             # Stop strategy
             strategy = self.active_strategies[strategy_name]
             if hasattr(strategy, 'stop'):
                 await strategy.stop()
-            
+
             # Remove from collections
             del self.active_strategies[strategy_name]
             del self.strategy_allocations[strategy_name]
-            
+
             logger.info(f"✅ Strategy removed: {strategy_name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to remove strategy {strategy_name}: {e}")
             return False
-    
-    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None, 
+
+    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None,
                              current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[TradingSignal]:
         """
         Generate trading signals from all active strategies
@@ -947,47 +946,47 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """
         try:
             all_signals = []
-            
+
             # Update market context
             await self._update_market_context()
-            
+
             # Get current regime for strategy selection
             regime_info = await self._get_current_regime_info()
-            
+
             # Generate signals from each active strategy with enhanced logic
             logger.info(f"🎯 LOOP DEBUG: active_strategies = {list(self.active_strategies.keys())}")
             for strategy_name, strategy in self.active_strategies.items():
                 allocation = self.strategy_allocations.get(strategy_name)
                 if not allocation or not allocation.active:
                     continue
-                
+
                 try:
                     # Enhanced strategy signal generation with position awareness
                     strategy_signals = await self._generate_enhanced_strategy_signals(
-                        strategy, strategy_name, symbols, regime_info, 
+                        strategy, strategy_name, symbols, regime_info,
                         market_data, current_positions
                     )
                     all_signals.extend(strategy_signals)
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
-            
+
             # Enhanced filtering with regime and position awareness
             filtered_signals = await self._filter_signals_enhanced(all_signals, regime_info, current_positions)
-            
+
             # Intelligent signal aggregation with regime weighting
             aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
-            
+
             # Store signals
             for signal in aggregated_signals:
                 self.pending_signals[signal.signal_id] = signal
                 self.aggregated_signals[signal.symbol] = signal
-            
+
             # Notify subscribers
             for signal in aggregated_signals:
                 for subscriber in self.subscribers:
                     await subscriber.on_signal_generated(signal)
-            
+
             # Only log when signals are actually generated to reduce spam
             if len(aggregated_signals) > 0:
                 logger.info(f"📊 Generated {len(aggregated_signals)} enhanced signals from {len(all_signals)} raw signals "
@@ -996,11 +995,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 logger.debug(f"📊 Generated 0 enhanced signals from {len(all_signals)} raw signals "
                             f"(regime: {regime_info.get('regime', 'unknown')})")
             return aggregated_signals
-            
+
         except Exception as e:
             logger.error(f"❌ Enhanced signal generation failed: {e}")
             return []
-    
+
     async def generate_signals_with_pipeline(
         self,
         symbols: List[str],
@@ -1011,21 +1010,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     ) -> List[TradingSignal]:
         """
         Generate trading signals using pipeline orchestrator (Rule 3 - Phase 3)
-        
+
         **KEY CHANGE:** Process data through pipeline ONCE, then all strategies
         consume the SAME enriched data.
-        
+
         **ARCHITECTURAL NOTE (Rule 4 - Approach 3: Continuous Signal Stream):**
         Strategies are STATELESS and generate signals based ONLY on market state.
         They do NOT receive current_positions for signal generation.
-        
+
         Why this design?
         - ✅ Strategies focus on alpha logic (WHAT to trade based on market conditions)
         - ✅ Risk Manager handles position awareness (WHETHER to execute)
         - ✅ Risk Manager filters redundant signals (e.g., BUY when already long)
         - ✅ Clean separation of concerns (Strategy=WHAT, RiskManager=WHETHER)
         - ✅ Stateless strategies are easier to test and backtest
-        
+
         Position awareness flow:
         1. Strategy generates signal: "Market is oversold" → BUY signal
         2. Strategy generates signal: "Market at mean" → CLOSE signal
@@ -1035,21 +1034,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
            - CLOSE signal + no position → REJECT (redundant)
            - BUY signal + no position → AUTHORIZE (valid)
            - CLOSE signal + have position → AUTHORIZE (valid)
-        
+
         current_positions parameter:
         - Reserved for filtering/aggregation logic in StrategyManager
         - NOT passed to strategy.generate_signals() per Approach 3 design
         - Risk Manager performs final position-aware filtering
-        
+
         See: docs/08_analysis/WHY_STRATEGY_TRACKS_POSITIONS.md (Approach 3)
-        
+
         Args:
             symbols: List of symbols to process
             start_time: Start time for data
             end_time: End time for data
             timeframe: Data timeframe (default: 1min)
             current_positions: Current positions for filtering/aggregation
-        
+
         Returns:
             List[TradingSignal]: Aggregated signals from all strategies
         """
@@ -1058,7 +1057,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 logger.warning("Pipeline not available, falling back to legacy generate_signals")
                 # Fallback to existing method
                 return await self.generate_signals(symbols, market_data=None, current_positions=current_positions)
-            
+
             # PHASE 1-4: Process data through pipeline ONCE
             logger.info(f"📊 Processing {len(symbols)} symbols through pipeline (Rule 3)")
             enriched_data = await self.pipeline_orchestrator.process_market_data(
@@ -1067,42 +1066,42 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 end_time=end_time,
                 timeframe=timeframe
             )
-            
+
             if not enriched_data:
                 logger.warning("No enriched data from pipeline")
                 return []
-            
+
             logger.info(f"✅ Pipeline processing complete: {len(enriched_data)} symbols enriched")
-            
+
             # Convert EnrichedMarketData to strategy format
             enriched_dataframes = {
                 symbol: data.get_enriched_dataframe()
                 for symbol, data in enriched_data.items()
             }
-            
+
             # PHASE 5: All strategies consume SAME enriched data
             all_signals = []
-            
+
             # Update market context
             await self._update_market_context()
             regime_info = await self._get_current_regime_info()
-            
+
             # Generate signals from each active strategy
             for strategy_name, strategy in self.active_strategies.items():
                 allocation = self.strategy_allocations.get(strategy_name)
                 if not allocation or not allocation.active:
                     continue
-                
+
                 try:
                     logger.debug(f"📡 Generating signals from {strategy_name} with enriched data")
-                    
+
                     # Call strategy with enriched data
                     if isinstance(strategy, EnhancedBaseStrategy):
                         # Strategy receives enriched DataFrames (OHLCV + indicators + features)
                         raw_signals = await strategy.generate_signals(enriched_dataframes)
-                        
+
                         logger.info(f"✅ {strategy_name}: generated {len(raw_signals)} signals from enriched data")
-                        
+
                         # Convert to TradingSignal objects
                         strategy_type = allocation.strategy_type
                         converted_count = 0
@@ -1110,19 +1109,19 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             try:
                                 # Convert SignalType enum to string for comparison
                                 signal_type_str = raw_signal.signal_type.value if hasattr(raw_signal.signal_type, 'value') else str(raw_signal.signal_type).lower()
-                                
+
                                 # ✅ CRITICAL FIX: Extract target_weight and quantity_type
                                 # Strategies use target_weight (percentage) instead of quantity (shares)
                                 target_quantity = getattr(raw_signal, 'target_quantity', None)
                                 target_weight = getattr(raw_signal, 'target_weight', None)
                                 quantity_type = getattr(raw_signal, 'quantity_type', 'ABSOLUTE')
-                                
+
                                 # Determine quantity field based on type
                                 if quantity_type == 'PERCENTAGE' and target_weight is not None:
                                     quantity = None  # Will be calculated by engine from target_weight
                                 else:
                                     quantity = target_quantity if target_quantity is not None else getattr(raw_signal, 'quantity', None)
-                                
+
                                 trading_signal = TradingSignal(
                                     signal_id=str(uuid.uuid4()),
                                     strategy_name=strategy_name,
@@ -1134,11 +1133,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     expected_return=getattr(raw_signal, 'expected_return', 0.0),
                                     risk_score=getattr(raw_signal, 'risk_score', 0.5),
                                     quantity=quantity,
-                                    
+
                                     # ✅ CRITICAL FIX: Add position sizing fields
                                     target_weight=target_weight,
                                     quantity_type=quantity_type,
-                                    
+
                                     target_price=getattr(raw_signal, 'target_price', None),
                                     stop_loss=getattr(raw_signal, 'stop_loss', None),
                                     take_profit=getattr(raw_signal, 'take_profit', None),
@@ -1161,50 +1160,50 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 logger.error(f"      Signal attributes: {dir(raw_signal)}")
                                 import traceback
                                 logger.error(f"      Traceback: {traceback.format_exc()}")
-                        
+
                         logger.info(f"   📊 Converted {converted_count}/{len(raw_signals)} signals to TradingSignal objects")
-                
+
                 except Exception as e:
                     logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
                     continue
-            
+
             # Enhanced filtering and aggregation
             filtered_signals = await self._filter_signals_enhanced(all_signals, regime_info, current_positions)
             aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
-            
+
             # Store signals
             for signal in aggregated_signals:
                 self.pending_signals[signal.signal_id] = signal
                 self.aggregated_signals[signal.symbol] = signal
-            
+
             # Notify subscribers
             for signal in aggregated_signals:
                 for subscriber in self.subscribers:
                     await subscriber.on_signal_generated(signal)
-            
+
             logger.info(f"📊 Raw signals: {len(all_signals)}, Filtered: {len(filtered_signals) if 'filtered_signals' in locals() else 0}, Aggregated: {len(aggregated_signals)}")
             logger.info(
                 f"📊 Pipeline signal generation complete: "
                 f"{len(aggregated_signals)} final signals from {len(all_signals)} raw signals "
                 f"(regime: {regime_info.get('regime', 'unknown')})"
             )
-            
+
             return aggregated_signals
-            
+
         except Exception as e:
             logger.error(f"❌ Pipeline signal generation failed: {e}", exc_info=True)
             return []
-    
+
     async def submit_trade_requests(self) -> List[str]:
         """Submit trade requests to Risk Manager based on generated signals"""
         try:
             submitted_requests = []
-            
+
             for signal in list(self.pending_signals.values()):
                 # Check if signal meets submission criteria
                 if not await self._should_submit_signal(signal):
                     continue
-                
+
                 # Create trade request
                 trade_request = {
                     'request_id': str(uuid.uuid4()),
@@ -1220,29 +1219,29 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'take_profit': signal.take_profit,
                     'metadata': signal.metadata
                 }
-                
+
                 # Submit to Risk Manager for authorization
                 if self.risk_manager:
                     authorization = await self.risk_manager.authorize_trade(
                         type('TradeRequest', (), trade_request)()
                     )
-                    
+
                     if authorization.decision.value == 'approve':
                         submitted_requests.append(trade_request['request_id'])
                         logger.info(f"✅ Trade request submitted: {signal.symbol} {signal.signal_type.value}")
                     else:
                         logger.warning(f"⛔ Trade request rejected: {signal.symbol} - {authorization.reason}")
-                
+
                 # Remove from pending
                 del self.pending_signals[signal.signal_id]
-            
+
             logger.info(f"📤 Submitted {len(submitted_requests)} trade requests")
             return submitted_requests
-            
+
         except Exception as e:
             logger.error(f"❌ Trade request submission failed: {e}")
             return []
-    
+
     # Strategy Implementation Methods
     async def _create_strategy_instance(self, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
         """Create enhanced strategy instance using factory"""
@@ -1261,11 +1260,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             else:
                 logger.error(f"❌ Enhanced strategies disabled, cannot create strategy: {strategy_type}")
                 raise ConfigurationRequiredError("Enhanced strategies are disabled")
-            
+
         except Exception as e:
             logger.error(f"❌ Error creating strategy instance: {e}")
             return None
-    
+
     async def _generate_strategy_signals(self, strategy: Any, strategy_name: str, symbols: List[str]) -> List[TradingSignal]:
         """Generate signals from individual enhanced strategy"""
         try:
@@ -1284,7 +1283,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 else:
                     logger.error(f"❌ Strategy {strategy_name} has no generate_signals method")
                     raise ConfigurationRequiredError(f"Strategy {strategy_name} missing generate_signals method")
-            
+
             # Convert to TradingSignal objects
             signals = []
             for raw_signal in raw_signals:
@@ -1305,46 +1304,46 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     metadata=raw_signal.get('metadata', {})
                 )
                 signals.append(signal)
-            
+
             return signals
-            
+
         except Exception as e:
             logger.error(f"❌ Strategy signal generation failed for {strategy_name}: {e}")
             return []
-    
+
     async def _filter_signals(self, signals: List[TradingSignal]) -> List[TradingSignal]:
         """Filter signals based on quality criteria"""
         filtered = []
-        
+
         for signal in signals:
             # Confidence threshold
             if signal.confidence < self.config.min_confidence_threshold:
                 continue
-            
+
             # Regime awareness filtering
             if self.config.enable_regime_awareness and self.current_regime:
                 if not await self._is_signal_regime_appropriate(signal):
                     continue
-            
+
             # Correlation filtering
             if self.config.enable_correlation_filtering:
                 if await self._is_signal_correlated(signal):
                     continue
-            
+
             filtered.append(signal)
-        
+
         return filtered
-    
+
     async def _aggregate_signals(self, signals: List[TradingSignal]) -> List[TradingSignal]:
         """Aggregate signals by symbol"""
         symbol_signals = {}
-        
+
         # Group by symbol
         for signal in signals:
             if signal.symbol not in symbol_signals:
                 symbol_signals[signal.symbol] = []
             symbol_signals[signal.symbol].append(signal)
-        
+
         # Aggregate each symbol's signals
         aggregated = []
         for symbol, symbol_signal_list in symbol_signals.items():
@@ -1355,13 +1354,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 agg_signal = await self._aggregate_symbol_signals(symbol_signal_list)
                 if agg_signal:
                     aggregated.append(agg_signal)
-        
+
         return aggregated
-    
+
     async def _aggregate_symbol_signals(self, signals: List[TradingSignal]) -> Optional[TradingSignal]:
         """
         Aggregate multiple signals for the same symbol
-        
+
         **ENHANCED:** Improved aggregation logic that:
         1. Uses proper weighted average (not confidence squared)
         2. Adds confidence boost for multiple signals (consensus strength)
@@ -1369,41 +1368,41 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """
         if not signals:
             return None
-        
+
         # Weighted average aggregation
         total_weight = sum(s.confidence for s in signals)
         if total_weight == 0:
             return None
-        
+
         signal_count = len(signals)
         avg_confidence = total_weight / signal_count if signal_count > 0 else 0.0
-        
+
         # ENHANCED: For multiple signals, use consensus-based aggregation
         # When many signals agree, it's a strong signal (not a weak one)
         if signal_count > 1:
             # Use weighted average formula: sum(confidence^2) / sum(confidence)
             # This gives more weight to high-confidence signals
             weighted_confidence = sum(s.confidence * s.confidence for s in signals) / total_weight
-            
+
             # ENHANCED: Add consensus boost for multiple signals
             # Many signals with same direction = strong consensus = higher confidence
             # Boost scales with signal count and average confidence
             consensus_boost = min(0.15, signal_count * 0.002)  # Up to 15% boost for many signals
-            
+
             # Additional boost if average confidence is already high
             if avg_confidence > 0.6:
                 consensus_boost += 0.05  # Extra 5% for high-confidence consensus
-            
+
             # Apply consensus boost
             weighted_confidence = min(1.0, weighted_confidence + consensus_boost)
-            
+
             # ENHANCED: For many signals (>20), the aggregated confidence should reflect consensus strength
             # When we have 100+ signals, that's a VERY strong consensus
             if signal_count > 20:
                 # Use the higher of: weighted average or average with boost
                 # This ensures many signals don't get penalized
                 weighted_confidence = max(weighted_confidence, avg_confidence * 0.9 + consensus_boost)
-            
+
             # ENHANCED: Floor for many signals - if we have 50+ signals, minimum confidence should be reasonable
             if signal_count > 50:
                 min_confidence_floor = max(0.5, avg_confidence * 0.7)  # At least 70% of average
@@ -1411,22 +1410,22 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         else:
             # Single signal - use its confidence directly
             weighted_confidence = signals[0].confidence if signals else 0.0
-        
+
         weighted_expected_return = sum(s.expected_return * s.confidence for s in signals) / total_weight
         weighted_risk_score = sum(s.risk_score * s.confidence for s in signals) / total_weight
-        
+
         # Determine consensus signal type (weighted by confidence)
         signal_votes = {}
         for signal in signals:
             vote = signal.signal_type
             signal_votes[vote] = signal_votes.get(vote, 0) + signal.confidence
-        
+
         if not signal_votes:
             return None
-        
+
         consensus_signal = max(signal_votes.items(), key=lambda x: x[1])[0]
         consensus_strength = signal_votes[consensus_signal] / total_weight  # Percentage of weighted votes
-        
+
         # Calculate total quantity (use average, not sum, to avoid position sizing issues)
         matching_signals = [s for s in signals if s.signal_type == consensus_signal]
         if matching_signals:
@@ -1434,10 +1433,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             total_quantity = sum(s.quantity for s in matching_signals if s.quantity) / len(matching_signals) if matching_signals else None
         else:
             total_quantity = None
-        
+
         logger.debug(f"   📊 Aggregation stats: {signal_count} signals, consensus={consensus_signal.value}, "
                     f"strength={consensus_strength:.2%}, confidence={weighted_confidence:.4f}")
-        
+
         return TradingSignal(
             signal_id=str(uuid.uuid4()),
             strategy_name="aggregated",
@@ -1455,34 +1454,34 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             time_horizon=signals[0].time_horizon,
             metadata={'aggregated_from': len(signals), 'consensus_strength': consensus_strength}
         )
-    
+
     # Analysis and Monitoring Methods
     async def _run_signal_generation(self):
         """Run continuous signal generation"""
         logger.info("📊 Starting continuous signal generation...")
-        
+
         while self.is_running:
             try:
                 # Get active symbols
                 symbols = await self._get_active_symbols()
-                
+
                 # Generate signals
                 if symbols:
                     signals = await self.generate_signals(symbols)
-                    
+
                     # Submit trade requests
                     if signals:
                         await self.submit_trade_requests()
-                
+
                 # Wait for next interval
                 await asyncio.sleep(self.config.signal_generation_interval)
-                
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"❌ Signal generation loop error: {e}")
                 await asyncio.sleep(30)
-    
+
     async def _update_market_context(self):
         """Update current market context"""
         try:
@@ -1500,57 +1499,57 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 # Fallback if no regime engine
                 self.current_regime = 'neutral'
                 self.market_conditions = {'volatility': 0.02, 'trend': 'sideways'}
-            
+
         except Exception as e:
             logger.debug(f"Market context update failed: {e}, using fallback")
             self.current_regime = 'neutral'
             self.market_conditions = {'volatility': 0.02, 'trend': 'sideways'}
-    
+
     async def _should_submit_signal(self, signal: TradingSignal) -> bool:
         """Check if signal should be submitted for trading"""
         # Basic checks
         if signal.confidence < self.config.min_confidence_threshold:
             return False
-        
+
         # Check strategy allocation limits
         allocation = self.strategy_allocations.get(signal.strategy_name)
         if not allocation or not allocation.active:
             return False
-        
+
         # Additional risk checks can be added here
         return True
-    
+
     async def _is_signal_regime_appropriate(self, signal: TradingSignal) -> bool:
         """Check if signal is appropriate for current market regime"""
         if not self.current_regime:
             return True
-        
+
         # Strategy-regime compatibility logic
         if signal.strategy_type == StrategyType.MEAN_REVERSION:
             return self.current_regime in ['ranging', 'consolidation']
         elif signal.strategy_type == StrategyType.MOMENTUM:
             return self.current_regime in ['trending', 'breakout']
-        
+
         return True
-    
+
     async def _is_signal_correlated(self, signal: TradingSignal) -> bool:
         """Check if signal is too correlated with existing positions"""
         # Simplified correlation check
         return False
-    
+
     async def _get_active_symbols(self) -> List[str]:
         """Get list of active symbols to analyze"""
         # Return default symbols for now
         return ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']
-    
-    
+
+
     async def _initialize_performance_tracking(self):
         """Initialize strategy performance tracking"""
         logger.info("📊 Initializing strategy performance tracking...")
         # Performance tracking setup
-    
+
     # ENHANCED METHODS - Multi-Strategy with Regime Awareness
-    
+
     async def _get_current_regime_info(self) -> Dict[str, Any]:
         """Get comprehensive current regime information"""
         try:
@@ -1598,8 +1597,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'recommended_strategies': ['mean_reversion', 'momentum'],
                 'strategy_weights': {'mean_reversion': 0.5, 'momentum': 0.5}
             }
-    
-    async def _generate_enhanced_strategy_signals(self, strategy: Any, strategy_name: str, 
+
+    async def _generate_enhanced_strategy_signals(self, strategy: Any, strategy_name: str,
                                                 symbols: List[str], regime_info: Dict[str, Any],
                                                 market_data: Optional[Dict[str, Any]] = None,
                                                 current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[TradingSignal]:
@@ -1609,20 +1608,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """
         try:
             signals = []
-            
+
             # Get strategy type
             allocation = self.strategy_allocations.get(strategy_name)
             if not allocation:
                 return signals
-            
+
             strategy_type = allocation.strategy_type
-            
+
             # Check if strategy is appropriate for current regime
             regime_support = self._is_strategy_regime_supported(strategy_type, regime_info)
             if not regime_support:
                 logger.debug(f"Strategy {strategy_name} not supported in regime {regime_info.get('regime')}")
                 return signals
-            
+
             # For enhanced strategy instances, use their generate_signals method
             logger.info(f"🎯 DEBUG: Checking strategy type for {strategy_name}: {type(strategy).__name__}")
             if isinstance(strategy, EnhancedBaseStrategy):
@@ -1643,11 +1642,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 market_data_dict[symbol] = market_data
                     else:
                         market_data_dict = {symbol: market_data for symbol in symbols}
-                    
+
                     # Call the enhanced strategy's generate_signals method
                     raw_signals = await strategy.generate_signals(market_data_dict)
                     logger.debug(f"📊 Enhanced strategy {strategy_name} generated {len(raw_signals)} signals")
-                    
+
                     # Convert StrategySignal objects to TradingSignal objects
                     for raw_signal in raw_signals:
                         # Preserve timestamp from StrategySignal if available
@@ -1675,10 +1674,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                         signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
                                     except:
                                         pass
-                        
+
                         # Use preserved timestamp or default to now
                         created_at = signal_timestamp if signal_timestamp else datetime.now()
-                        
+
                         trading_signal = TradingSignal(
                             signal_id=str(uuid.uuid4()),
                             strategy_name=strategy_name,
@@ -1700,100 +1699,100 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             created_at=created_at
                         )
                         signals.append(trading_signal)
-                    
+
                     return signals
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Enhanced strategy {strategy_name} signal generation failed: {e}")
                     return signals
-            
+
             # No fallback signal generation - strategies must be properly implemented
             logger.warning(f"⚠️ No enhanced strategy found for {strategy_name}, skipping signal generation")
-            
+
             return signals
-            
+
         except Exception as e:
             logger.error(f"❌ Enhanced strategy signal generation failed for {strategy_name}: {e}")
             return []
-    
-    async def _generate_mean_reversion_signal(self, symbol: str, market_data: Optional[Dict[str, Any]], 
+
+    async def _generate_mean_reversion_signal(self, symbol: str, market_data: Optional[Dict[str, Any]],
                                             regime_info: Dict[str, Any], current_position: Dict[str, Any],
                                             strategy_name: str) -> Optional[TradingSignal]:
         """Generate mean reversion signal with position awareness"""
         try:
             if not market_data:
                 return None
-            
+
             # Extract technical indicators
             rsi = market_data.get('rsi', 50)
             zscore = market_data.get('zscore', 0)
             bb_position = market_data.get('bb_position', 0.5)
             price = market_data.get('close', market_data.get('price', 0))
             market_data.get('volume_ratio', 1.0)
-            
+
             # Position awareness
             has_position = current_position.get('shares', 0) != 0
-            
+
             # Mean reversion thresholds (from test implementation)
             rsi_oversold = 25  # More extreme for higher quality
             rsi_overbought = 75
             zscore_threshold = 1.8
-            
+
             signal_type = None
             confidence = 0.0
             reasons = []
-            
+
             # BUY signals (oversold conditions) - only when no position
             if not has_position and rsi < rsi_oversold:
                 signal_type = SignalType.BUY
                 confidence += 0.4
                 reasons.append(f"RSI oversold ({rsi:.1f})")
-            
+
             if not has_position and zscore < -zscore_threshold:
                 signal_type = SignalType.BUY
                 confidence += 0.4
                 reasons.append(f"Extreme negative z-score ({zscore:.2f})")
-            
+
             if not has_position and bb_position < 0.2:
                 signal_type = SignalType.BUY
                 confidence += 0.2
                 reasons.append(f"Near BB lower band ({bb_position:.2f})")
-            
+
             # SELL signals (overbought conditions) - only when have position
             if has_position and rsi > rsi_overbought:
                 signal_type = SignalType.SELL
                 confidence += 0.4
                 reasons.append(f"RSI overbought ({rsi:.1f})")
-            
+
             if has_position and zscore > zscore_threshold:
                 signal_type = SignalType.SELL
                 confidence += 0.4
                 reasons.append(f"Extreme positive z-score ({zscore:.2f})")
-            
+
             if has_position and bb_position > 0.8:
                 signal_type = SignalType.SELL
                 confidence += 0.2
                 reasons.append(f"Near BB upper band ({bb_position:.2f})")
-            
+
             # Minimum confidence threshold
             if confidence < 0.6:
                 return None
-            
+
             # Scale confidence to proper range (0.6-0.95)
             scaled_confidence = min(0.95, 0.6 + (confidence - 0.6) * 0.8)
-            
+
             # Dynamic position sizing based on confidence and regime
             base_size = 0.05  # 5% base position
             regime_multiplier = regime_info.get('risk_multiplier', 1.0)
             position_size = base_size * scaled_confidence / regime_multiplier
-            
+
             # Calculate quantity (assuming $100k portfolio, $400 stock price)
             portfolio_value = 100000
             quantity = int((portfolio_value * position_size) / price) if price > 0 else 0
-            
+
             if quantity <= 0:
                 return None
-            
+
             return TradingSignal(
                 signal_id=str(uuid.uuid4()),
                 strategy_name=strategy_name,
@@ -1819,19 +1818,19 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'current_position': current_position.get('shares', 0)
                 }
             )
-            
+
         except Exception as e:
             logger.error(f"❌ Mean reversion signal generation failed for {symbol}: {e}")
             return None
-    
-    async def _generate_momentum_signal(self, symbol: str, market_data: Optional[Dict[str, Any]], 
+
+    async def _generate_momentum_signal(self, symbol: str, market_data: Optional[Dict[str, Any]],
                                       regime_info: Dict[str, Any], current_position: Dict[str, Any],
                                       strategy_name: str) -> Optional[TradingSignal]:
         """Generate momentum signal with position awareness"""
         try:
             if not market_data:
                 return None
-            
+
             # Extract technical indicators
             rsi = market_data.get('rsi', 50)
             macd = market_data.get('macd', 0)
@@ -1839,80 +1838,80 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             price = market_data.get('close', market_data.get('price', 0))
             volume_ratio = market_data.get('volume_ratio', 1.0)
             trend_strength = market_data.get('trend_strength', 0)
-            
+
             # Position awareness
             has_position = current_position.get('shares', 0) != 0
             is_long = current_position.get('shares', 0) > 0
-            
+
             # Momentum thresholds
             rsi_momentum_min = 60  # Bullish momentum
             rsi_momentum_max = 40  # Bearish momentum
-            
+
             signal_type = None
             confidence = 0.0
             reasons = []
-            
+
             # BUY signals (bullish momentum) - only when no position or short
             if not is_long and rsi > rsi_momentum_min:
                 signal_type = SignalType.BUY
                 confidence += 0.3
                 reasons.append(f"Bullish RSI momentum ({rsi:.1f})")
-            
+
             if not is_long and macd > macd_signal:
                 signal_type = SignalType.BUY
                 confidence += 0.3
                 reasons.append("MACD bullish crossover")
-            
+
             if not is_long and trend_strength > 0.02:
                 signal_type = SignalType.BUY
                 confidence += 0.2
                 reasons.append(f"Strong uptrend ({trend_strength:.3f})")
-            
+
             if not is_long and volume_ratio > 1.5:
                 signal_type = SignalType.BUY
                 confidence += 0.1
                 reasons.append(f"High volume confirmation ({volume_ratio:.1f}x)")
-            
+
             # SELL signals (bearish momentum) - only when have long position
             if is_long and rsi < rsi_momentum_max:
                 signal_type = SignalType.SELL
                 confidence += 0.3
                 reasons.append(f"Bearish RSI momentum ({rsi:.1f})")
-            
+
             if is_long and macd < macd_signal:
                 signal_type = SignalType.SELL
                 confidence += 0.3
                 reasons.append("MACD bearish crossover")
-            
+
             if is_long and trend_strength < -0.02:
                 signal_type = SignalType.SELL
                 confidence += 0.2
                 reasons.append("Trend weakening")
-            
+
             if is_long and volume_ratio > 2.0:
                 signal_type = SignalType.SELL
                 confidence += 0.1
                 reasons.append(f"High volume exit ({volume_ratio:.1f}x)")
-            
+
             # Minimum confidence threshold
             if confidence < 0.6:
                 return None
-            
+
             # Scale confidence
             scaled_confidence = min(0.95, 0.6 + (confidence - 0.6) * 0.8)
-            
+
             # Dynamic position sizing
             base_size = 0.06  # 6% base position (slightly larger for momentum)
             regime_multiplier = regime_info.get('risk_multiplier', 1.0)
             position_size = base_size * scaled_confidence / regime_multiplier
-            
+
             # Calculate quantity
             portfolio_value = 100000
             quantity = int((portfolio_value * position_size) / price) if price > 0 else 0
-            
+
             if quantity <= 0:
                 return None
-            
+
             return TradingSignal(
                 signal_id=str(uuid.uuid4()),
                 strategy_name=strategy_name,
@@ -1938,22 +1937,22 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'current_position': current_position.get('shares', 0)
                 }
             )
-            
+
         except Exception as e:
             logger.error(f"❌ Momentum signal generation failed for {symbol}: {e}")
             return None
-    
-    async def _generate_generic_signal(self, symbol: str, market_data: Optional[Dict[str, Any]], 
+
+    async def _generate_generic_signal(self, symbol: str, market_data: Optional[Dict[str, Any]],
                                      regime_info: Dict[str, Any], current_position: Dict[str, Any],
                                      strategy_name: str, strategy_type: StrategyType) -> Optional[TradingSignal]:
         """Generate generic signal for other strategy types"""
         # Placeholder for other strategy types
         return None
-    
+
     def _is_strategy_regime_supported(self, strategy_type: StrategyType, regime_info: Dict[str, Any]) -> bool:
         """Check if strategy type is supported in current regime"""
         regime = regime_info.get('regime', 'neutral').lower()
-        
+
         if strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion works well in ranging/volatile markets
             return regime in ['ranging', 'volatile', 'calm_ranging', 'volatile_ranging', 'neutral']
@@ -1963,36 +1962,36 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         else:
             # Other strategies - allow by default
             return True
-    
-    async def _filter_signals_enhanced(self, signals: List[TradingSignal], 
+
+    async def _filter_signals_enhanced(self, signals: List[TradingSignal],
                                      regime_info: Dict[str, Any],
                                      current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[TradingSignal]:
         """Enhanced signal filtering with regime and position awareness"""
         filtered = []
-        
+
         logger.info(f"🔍 Filtering {len(signals)} signals (min_confidence: {self.config.min_confidence_threshold})")
-        
+
         for signal in signals:
             filter_reason = None
-            
+
             # Basic confidence threshold
             if signal.confidence < self.config.min_confidence_threshold:
                 filter_reason = f"confidence {signal.confidence:.4f} < {self.config.min_confidence_threshold}"
                 logger.warning(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
-            
+
             # Regime appropriateness check
             if not self._is_strategy_regime_supported(signal.strategy_type, regime_info):
                 filter_reason = f"strategy not supported in current regime"
                 logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
-            
+
             # Position-aware filtering
             if current_positions:
                 current_pos = current_positions.get(signal.symbol, {'shares': 0})
                 has_position = current_pos.get('shares', 0) != 0
                 is_long = current_pos.get('shares', 0) > 0
-                
+
                 # Don't buy if already long, don't sell if no position
                 if signal.signal_type == SignalType.BUY and is_long:
                     filter_reason = f"already long position"
@@ -2002,7 +2001,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     filter_reason = f"no position to sell"
                     logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                     continue
-            
+
             # Strategy allocation check
             allocation = self.strategy_allocations.get(signal.strategy_name)
             if not allocation:
@@ -2013,46 +2012,46 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 filter_reason = f"allocation not active for {signal.strategy_name}"
                 logger.debug(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
                 continue
-            
+
             filtered.append(signal)
             logger.debug(f"   ✅ Passed filter: {signal.strategy_name} {signal.symbol} {signal.signal_type} (confidence: {signal.confidence:.4f})")
-        
+
         logger.info(f"✅ Filtered {len(filtered)}/{len(signals)} signals passed")
         return filtered
-    
-    async def _aggregate_signals_enhanced(self, signals: List[TradingSignal], 
+
+    async def _aggregate_signals_enhanced(self, signals: List[TradingSignal],
                                         regime_info: Dict[str, Any]) -> List[TradingSignal]:
         """Enhanced signal aggregation with regime weighting"""
         if not signals:
             logger.info("📊 Aggregation: No signals to aggregate")
             return []
-        
+
         logger.info(f"📊 Aggregating {len(signals)} signals for {len(set(s.symbol for s in signals))} symbols")
-        
+
         # Group by symbol
         symbol_signals = {}
         for signal in signals:
             if signal.symbol not in symbol_signals:
                 symbol_signals[signal.symbol] = []
             symbol_signals[signal.symbol].append(signal)
-        
+
         logger.info(f"📊 Grouped into {len(symbol_signals)} symbols")
-        
+
         # Aggregate with regime weighting
         aggregated = []
         regime_weights = regime_info.get('strategy_weights', {})
-        
+
         for symbol, symbol_signal_list in symbol_signals.items():
             if len(symbol_signal_list) == 1:
                 # Single signal - apply regime weighting (but don't penalize below threshold)
                 signal = symbol_signal_list[0]
                 original_confidence = signal.confidence
                 strategy_weight = regime_weights.get(signal.strategy_type.value, 1.0)
-                
+
                 logger.info(f"📊 Aggregation for {symbol}: {signal.strategy_name} {signal.signal_type}")
                 logger.info(f"   Original confidence: {original_confidence:.4f}")
                 logger.info(f"   Regime weight: {strategy_weight:.4f}")
-                
+
                 # Apply regime weighting but preserve signals that meet threshold
                 # Regime weighting should adjust for regime favorability, not eliminate good signals
                 if original_confidence >= self.config.min_confidence_threshold:
@@ -2066,10 +2065,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 else:
                     # Original confidence was low - apply regime weight normally
                     signal.confidence = original_confidence * strategy_weight
-                
+
                 logger.info(f"   Final confidence: {signal.confidence:.4f}")
                 logger.info(f"   Threshold: {self.config.min_confidence_threshold:.4f}")
-                
+
                 if signal.confidence >= self.config.min_confidence_threshold:
                     aggregated.append(signal)
                     logger.info(f"   ✅ Signal added to aggregated list")
@@ -2088,45 +2087,45 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
                 else:
                     logger.warning(f"   ❌ Aggregation returned None for {len(symbol_signal_list)} signals")
-        
+
         return aggregated
-    
-    async def _aggregate_symbol_signals_enhanced(self, signals: List[TradingSignal], 
+
+    async def _aggregate_symbol_signals_enhanced(self, signals: List[TradingSignal],
                                                regime_weights: Dict[str, float]) -> Optional[TradingSignal]:
         """
         Enhanced symbol signal aggregation with regime weighting
-        
+
         **ENHANCED:** For multiple signals, apply regime weight AFTER aggregation to preserve
         consensus strength. This ensures that many signals agreeing doesn't get over-penalized.
         """
         if not signals:
             return None
-        
+
         signal_count = len(signals)
         logger.info(f"📊 Aggregating {signal_count} signals for {signals[0].symbol}")
-        
+
         # Calculate original confidence stats
         total_original_confidence = sum(s.confidence for s in signals)
         avg_original_confidence = total_original_confidence / signal_count if signal_count > 0 else 0.0
         regime_weight = regime_weights.get(signals[0].strategy_type.value, 1.0)
-        
+
         logger.info(f"   📊 Original confidence stats: avg={avg_original_confidence:.4f}, total={total_original_confidence:.4f}")
         logger.info(f"   📊 Regime weight: {regime_weight:.4f}")
-        
+
         # DETAILED: Show signal distribution
         confidence_distribution = {}
         signal_type_distribution = {}
         confidence_values = []
-        
+
         for signal in signals:
             # Collect confidence values
             conf = signal.confidence
             confidence_values.append(conf)
-            
+
             # Round confidence to 0.05 for grouping (more granular)
             conf_bucket = round(conf * 20) / 20  # Round to nearest 0.05
             confidence_distribution[conf_bucket] = confidence_distribution.get(conf_bucket, 0) + 1
-            
+
             # Get signal type (handle both enum and string)
             try:
                 if hasattr(signal.signal_type, 'value'):
@@ -2137,30 +2136,30 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     sig_type = str(signal.signal_type)
             except:
                 sig_type = str(signal.signal_type)
-            
+
             signal_type_distribution[sig_type] = signal_type_distribution.get(sig_type, 0) + 1
-        
+
         # Calculate statistics
         min_conf = min(confidence_values) if confidence_values else 0.0
         max_conf = max(confidence_values) if confidence_values else 0.0
         median_conf = sorted(confidence_values)[len(confidence_values) // 2] if confidence_values else 0.0
-        
+
         logger.info(f"   📊 Signal Confidence Statistics:")
         logger.info(f"      Min: {min_conf:.4f}, Max: {max_conf:.4f}, Median: {median_conf:.4f}, Avg: {avg_original_confidence:.4f}")
-        
+
         logger.info(f"   📊 Signal Confidence Distribution (by 0.05 buckets):")
         for conf_bucket in sorted(confidence_distribution.keys(), reverse=True):
             count = confidence_distribution[conf_bucket]
             pct = (count / signal_count) * 100
             bar = "█" * int(pct / 2)  # Visual bar
             logger.info(f"      {conf_bucket:.2f}: {count:3d} signals ({pct:5.1f}%) {bar}")
-        
+
         logger.info(f"   📊 Signal Type Distribution:")
         for sig_type, count in sorted(signal_type_distribution.items(), key=lambda x: x[1], reverse=True):
             pct = (count / signal_count) * 100
             bar = "█" * int(pct / 2)  # Visual bar
             logger.info(f"      {sig_type}: {count:3d} signals ({pct:5.1f}%) {bar}")
-        
+
         # Show sample signals with timestamps
         logger.info(f"   📊 Sample Signals (first 5 and last 5):")
         for i, signal in enumerate(signals[:5]):
@@ -2169,13 +2168,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 sig_type_str = signal.signal_type.value
             elif hasattr(signal.signal_type, 'name'):
                 sig_type_str = signal.signal_type.name
-            
+
             strength_str = str(signal.strength)
             if hasattr(signal.strength, 'value'):
                 strength_str = signal.strength.value
             elif hasattr(signal.strength, 'name'):
                 strength_str = signal.strength.name
-            
+
             # Get timestamp from created_at or metadata
             timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
             if not timestamp and 'timestamp' in signal.metadata:
@@ -2185,10 +2184,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                     except:
                         pass
-            
+
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'
             logger.info(f"      Signal {i+1}: {sig_type_str:4s} confidence={signal.confidence:.4f}, strength={strength_str}, timestamp={timestamp_str}")
-        
+
         if signal_count > 10:
             logger.info(f"      ... ({signal_count - 10} signals in between) ...")
             for i, signal in enumerate(signals[-5:], start=signal_count-4):
@@ -2197,13 +2196,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     sig_type_str = signal.signal_type.value
                 elif hasattr(signal.signal_type, 'name'):
                     sig_type_str = signal.signal_type.name
-                
+
                 strength_str = str(signal.strength)
                 if hasattr(signal.strength, 'value'):
                     strength_str = signal.strength.value
                 elif hasattr(signal.strength, 'name'):
                     strength_str = signal.strength.name
-                
+
                 # Get timestamp
                 timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
                 if not timestamp and 'timestamp' in signal.metadata:
@@ -2213,19 +2212,19 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                         except:
                             pass
-                
+
                 timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'
                 logger.info(f"      Signal {i}: {sig_type_str:4s} confidence={signal.confidence:.4f}, strength={strength_str}, timestamp={timestamp_str}")
-        
+
         # Show ALL timestamps grouped by signal type
         logger.info(f"   📊 ALL 115 Signal Timestamps:")
         buy_signals_with_metadata = []
         sell_signals_with_metadata = []
-        
+
         for signal in signals:
             # Get timestamp
             timestamp = signal.created_at if hasattr(signal, 'created_at') and signal.created_at else None
-            
+
             # Try to get bar_index from metadata to reconstruct timestamp
             bar_index = None
             if signal.metadata:
@@ -2233,36 +2232,36 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 # Also try additional_data
                 if not bar_index and 'additional_data' in signal.metadata:
                     bar_index = signal.metadata['additional_data'].get('bar_index')
-            
+
             # Get entry price for reference
             entry_price = None
             if signal.metadata:
                 entry_price = signal.metadata.get('entry_price')
                 if not entry_price and 'additional_data' in signal.metadata:
                     entry_price = signal.metadata['additional_data'].get('entry_price')
-            
+
             sig_type_str = str(signal.signal_type)
             if hasattr(signal.signal_type, 'value'):
                 sig_type_str = signal.signal_type.value
             elif hasattr(signal.signal_type, 'name'):
                 sig_type_str = signal.signal_type.name
-            
+
             signal_info = {
                 'timestamp': timestamp,
                 'bar_index': bar_index,
                 'entry_price': entry_price,
                 'confidence': signal.confidence
             }
-            
+
             if sig_type_str.lower() == 'buy':
                 buy_signals_with_metadata.append(signal_info)
             elif sig_type_str.lower() == 'sell':
                 sell_signals_with_metadata.append(signal_info)
-        
+
         # Sort by bar_index if available, otherwise by timestamp
         buy_signals_with_metadata.sort(key=lambda x: x['bar_index'] if x['bar_index'] is not None else (x['timestamp'] or datetime.min))
         sell_signals_with_metadata.sort(key=lambda x: x['bar_index'] if x['bar_index'] is not None else (x['timestamp'] or datetime.min))
-        
+
         logger.info(f"      BUY Signals ({len(buy_signals_with_metadata)} total):")
         logger.info(f"         ⚠️  Note: Timestamps show signal creation time. Bar indices indicate historical evaluation.")
         for i, sig_info in enumerate(buy_signals_with_metadata[:20], 1):  # Show first 20
@@ -2272,14 +2271,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.info(f"         {i:3d}. {ts_str} | {bar_info} | {price_info} | conf={sig_info['confidence']:.4f}")
         if len(buy_signals_with_metadata) > 20:
             logger.info(f"         ... ({len(buy_signals_with_metadata) - 20} more BUY signals) ...")
-        
+
         logger.info(f"      SELL Signals ({len(sell_signals_with_metadata)} total):")
         for i, sig_info in enumerate(sell_signals_with_metadata, 1):
             bar_info = f"bar_idx={sig_info['bar_index']}" if sig_info['bar_index'] is not None else "bar_idx=N/A"
             price_info = f"price=${sig_info['entry_price']:.2f}" if sig_info['entry_price'] else "price=N/A"
             ts_str = sig_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if sig_info['timestamp'] else 'N/A'
             logger.info(f"         {i:3d}. {ts_str} | {bar_info} | {price_info} | conf={sig_info['confidence']:.4f}")
-        
+
         # Summary
         bar_indices = [s['bar_index'] for s in buy_signals_with_metadata + sell_signals_with_metadata if s['bar_index'] is not None]
         if bar_indices:
@@ -2287,26 +2286,26 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             max_bar = max(bar_indices)
             logger.info(f"      📊 Bar Index Range: {min_bar} → {max_bar} (evaluated {max_bar - min_bar + 1} bars from historical data)")
             logger.info(f"      📊 Historical Scanning: {len(bar_indices)} signals generated from {max_bar - min_bar + 1} different bars")
-        
+
         # ENHANCED: For multiple signals, aggregate FIRST, then apply regime weight
         # This preserves the consensus strength of many signals
         # Aggregation should reflect the strength of agreement, not be penalized before it happens
         logger.info(f"   📊 Step 1: Aggregating {signal_count} signals into single consensus signal...")
         agg_signal = await self._aggregate_symbol_signals(signals)
-        
+
         if not agg_signal:
             logger.warning(f"   ❌ Aggregation returned None for {signal_count} signals")
             return None
-        
+
         logger.info(f"   ✅ Aggregation complete: {signal_count} signals → 1 consensus signal")
         logger.info(f"      Consensus type: {agg_signal.signal_type.value if hasattr(agg_signal.signal_type, 'value') else agg_signal.signal_type}")
         logger.info(f"      Aggregated confidence (before regime): {agg_signal.confidence:.4f}")
         logger.info(f"      Aggregated from: {agg_signal.metadata.get('aggregated_from', signal_count)} signals")
-        
+
         # Apply regime weight AFTER aggregation (for multiple signals)
         # This way, the consensus strength is preserved, and regime weight adjusts the final signal
         original_agg_confidence = agg_signal.confidence
-        
+
         # ENHANCED: For many signals with high consensus, apply regime weight more gently
         # Many signals agreeing is a strong signal that should be respected
         if signal_count > 20 and original_agg_confidence >= 0.7:
@@ -2328,20 +2327,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             # Original aggregated confidence was already low - apply regime weight normally
             final_confidence = original_agg_confidence * regime_weight
             logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} * {regime_weight:.4f} = {final_confidence:.4f}")
-        
+
         agg_signal.confidence = final_confidence
-        
+
         logger.info(f"   📊 Final aggregated signal confidence: {agg_signal.confidence:.4f}")
         logger.info(f"   📊 Threshold: {self.config.min_confidence_threshold:.4f}")
-        
+
         # Check if aggregated signal meets threshold
         if agg_signal.confidence < self.config.min_confidence_threshold:
             logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
         else:
             logger.info(f"   ✅ Aggregated signal meets threshold")
-        
+
         return agg_signal
-    
+
     def get_strategy_status(self) -> Dict[str, Any]:
         """Get comprehensive strategy status"""
         return {
@@ -2365,11 +2364,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'regime_engine': self.regime_engine is not None
             }
         }
-    
+
     # ========================================
     # STANDARDIZED DATA CONSUMPTION METHODS
     # ========================================
-    
+
     def process_signals(self, signals: List[Any]) -> List[Any]:
         """Standardized method for processing signals data"""
         processed_signals = []
@@ -2381,31 +2380,31 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             }
             processed_signals.append(processed_signal)
         return processed_signals
-    
+
     def analyze_signals(self, signals: List[Any]) -> List[Any]:
         """Standardized method for analyzing signals data (alias)"""
         return self.process_signals(signals)
-    
+
     def evaluate_signals(self, signals: List[Any]) -> List[Any]:
         """Standardized method for evaluating signals data (alias)"""
         return self.process_signals(signals)
-    
+
     def process_decisions(self, decisions: List[Any]) -> List[Any]:
         """Standardized method for processing strategy decisions"""
         return self.process_signals(decisions)
-    
+
     def handle_decisions(self, decisions: List[Any]) -> List[Any]:
         """Standardized method for handling decisions (alias)"""
         return self.process_decisions(decisions)
-    
+
     def execute_decisions(self, decisions: List[Any]) -> List[Any]:
         """Standardized method for executing decisions (alias)"""
         return self.process_decisions(decisions)
-    
+
     def make_decisions(self, signals: List[Any]) -> List[Any]:
         """Standardized method for making strategy decisions"""
         return self.process_signals(signals)
-    
+
     def evaluate_strategies(self, data: Any) -> List[Any]:
         """Standardized method for evaluating strategies"""
         return [{
@@ -2414,11 +2413,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             'processing_timestamp': datetime.now(),
             'processing_component': 'StrategyManager'
         }]
-    
+
     # ========================================
     # REGIME DATA CONSUMPTION METHODS
     # ========================================
-    
+
     def process_regime(self, regime_data: Any) -> Dict[str, Any]:
         """Standardized method for processing regime data"""
         return {
@@ -2427,20 +2426,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             'processing_timestamp': datetime.now(),
             'processing_component': 'StrategyManager'
         }
-    
+
     def handle_regime_change(self, regime_analysis: Any) -> Dict[str, Any]:
         """Standardized method for handling regime changes"""
         return self.process_regime(regime_analysis)
-    
+
     # NOTE: adapt_to_regime is now async (IRegimeAware interface) - see line ~698
     # def adapt_to_regime(self, regime_data: Any) -> Dict[str, Any]:
     #     """Deprecated: Use async version (IRegimeAware)"""
     #     return self.process_regime(regime_data)
-    
+
     # ========================================
     # REGIME-ADJUSTED RISK PRODUCTION METHODS
     # ========================================
-    
+
     def generate_risk_adjusted_strategies(self, regime_data: Any = None) -> List[Any]:
         """Standardized method for generating regime-adjusted strategy decisions"""
         return [{
@@ -2450,11 +2449,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             'processing_timestamp': datetime.now(),
             'processing_component': 'StrategyManager'
         }]
-    
+
     def create_regime_adjusted_decisions(self, data: Any = None) -> List[Any]:
         """Standardized method for creating regime-adjusted decisions"""
         return self.generate_risk_adjusted_strategies(data)
-    
+
     def produce_risk_context(self, strategy_data: Any = None) -> Dict[str, Any]:
         """Standardized method for producing risk context from strategies"""
         return {
@@ -2467,43 +2466,43 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             'processing_timestamp': datetime.now(),
             'processing_component': 'StrategyManager'
         }
-    
+
     # ========================================
     # REGIME-ADJUSTED STRATEGIES PRODUCTION METHODS
     # ========================================
-    
+
     def create_regime_adjusted_strategies(self, regime_data: Any = None) -> List[Any]:
         """Standardized method for creating regime-adjusted strategies"""
         return self.generate_risk_adjusted_strategies(regime_data)
-    
+
     def produce_regime_strategies(self, regime_data: Any = None) -> List[Any]:
         """Standardized method for producing regime strategies"""
         return self.generate_risk_adjusted_strategies(regime_data)
-    
+
     def adapt_strategies_to_regime(self, regime_data: Any = None) -> List[Any]:
         """Standardized method for adapting strategies to regime"""
         return self.generate_risk_adjusted_strategies(regime_data)
-    
+
     # ========================================
     # STRATEGY CALLBACK METHODS
     # ========================================
-    
+
     def set_signal_callback(self, callback: Callable):
         """Set signal callback for strategy notifications"""
         if not hasattr(self, 'signal_callbacks'):
             self.signal_callbacks = []
-        
+
         self.signal_callbacks.append(callback)
         self.logger.info("✅ Signal callback registered with StrategyManager")
-    
+
     def on_signal_generated(self, signal_data: Dict[str, Any]):
         """Callback method for signal generation"""
         try:
             self.logger.info(f"📡 Signal generated: {signal_data.get('symbol', 'unknown')}")
-            
+
             # Process signal data
             self.process_signals([signal_data])
-            
+
             # Notify registered callbacks
             if hasattr(self, 'signal_callbacks'):
                 for callback in self.signal_callbacks:
@@ -2511,13 +2510,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         callback(signal_data)
                     except Exception as e:
                         self.logger.error(f"Signal callback notification failed: {e}")
-            
+
             return {'signal_processed': True, 'notifications_sent': len(getattr(self, 'signal_callbacks', []))}
-            
+
         except Exception as e:
             self.logger.error(f"Signal generation callback failed: {e}")
             return {'error': str(e)}
-    
+
     def register_callback(self, callback_type: str, callback: Callable):
         """Register a callback for specific events"""
         try:
@@ -2527,57 +2526,57 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 if not hasattr(self, 'strategy_callbacks'):
                     self.strategy_callbacks = []
                 self.strategy_callbacks.append(callback)
-            
+
             self.logger.info(f"✅ {callback_type} callback registered")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Callback registration failed: {e}")
             return False
-    
+
     # ========================================
     # RISK MANAGEMENT CALLBACK METHODS
     # ========================================
-    
+
     def set_risk_callbacks(self, risk_callback: Callable = None):
         """Set risk management callback"""
         self.risk_callback = risk_callback
         if risk_callback:
             self.logger.info("✅ Risk callback registered with StrategyManager")
-    
+
     def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
         """Callback method for risk limit breaches"""
         try:
             self.logger.warning(f"🚨 Strategy risk limit breach: {risk_data}")
-            
+
             # Handle risk breach (e.g., pause strategies)
             if hasattr(self, 'risk_callback') and self.risk_callback:
                 self.risk_callback(risk_data)
-            
+
             return {'risk_breach_handled': True}
-            
+
         except Exception as e:
             self.logger.error(f"Risk limit breach callback failed: {e}")
             return {'error': str(e)}
-    
+
     def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
         """Callback method for emergency shutdown"""
         try:
             self.logger.critical(f"🚨 Strategy emergency shutdown: {shutdown_reason}")
-            
+
             # Emergency strategy actions
             # In a real implementation, this would stop all strategies
-            
+
             return {'emergency_shutdown_handled': True}
-            
+
         except Exception as e:
             self.logger.error(f"Emergency shutdown callback failed: {e}")
             return {'error': str(e)}
-    
+
     # ========================================
     # AUTHORIZATION METHODS
     # ========================================
-    
+
     def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
         """Authorize strategy operations"""
         try:
@@ -2586,18 +2585,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'generate_signals', 'analyze_market', 'create_strategy',
                 'modify_strategy', 'pause_strategy', 'resume_strategy'
             ]
-            
+
             if operation in authorized_operations:
                 self.logger.info(f"✅ Strategy operation authorized: {operation}")
                 return True
             else:
                 self.logger.warning(f"❌ Strategy operation not authorized: {operation}")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Authorization failed: {e}")
             return False
-    
+
     def validate_authorization(self, authorization_token: str) -> bool:
         """Validate authorization token for strategy operations"""
         try:
@@ -2609,51 +2608,51 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             else:
                 self.logger.warning("❌ Invalid strategy authorization token")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Authorization validation failed: {e}")
             return False
-    
+
     def check_authority_level(self, required_level: str) -> bool:
         """Check if component has required authority level"""
         try:
             # Strategy manager has OPERATIONAL authority level
             component_authority = "OPERATIONAL"
-            
+
             authority_hierarchy = {
                 "READ_ONLY": 1,
                 "OPERATIONAL": 2,
                 "GOVERNANCE_CONTROL": 3,
                 "SYSTEM_CONTROL": 4
             }
-            
+
             component_level = authority_hierarchy.get(component_authority, 0)
             required_level_num = authority_hierarchy.get(required_level, 999)
-            
+
             authorized = component_level >= required_level_num
-            
+
             if authorized:
                 self.logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
             else:
                 self.logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
-            
+
             return authorized
-            
+
         except Exception as e:
             self.logger.error(f"Authority level check failed: {e}")
             return False
-    
+
     # ========================================
     # ANALYTICS INTEGRATION METHODS
     # ========================================
-    
+
     def calculate_metrics(self, data: Any = None) -> Dict[str, Any]:
         """Calculate strategy analytics metrics"""
         try:
             # Get current strategy state
             active_strategies = len(self.active_strategies)
             total_signals = sum(len(signals) for signals in self.strategy_signals.values())
-            
+
             # Calculate strategy metrics
             strategy_metrics = {
                 'active_strategies': active_strategies,
@@ -2663,7 +2662,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'avg_confidence': self._calculate_average_confidence(),
                 'strategy_allocation': self._calculate_strategy_allocation()
             }
-            
+
             # Performance metrics per strategy
             strategy_performance = {}
             for strategy_id in self.active_strategies.keys():
@@ -2673,7 +2672,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'avg_confidence': sum(s.confidence for s in signals) / len(signals) if signals else 0.0,
                     'signal_types': list(set(s.signal_type.value for s in signals)) if signals else []
                 }
-            
+
             return {
                 'metrics_calculated': True,
                 'calculation_timestamp': datetime.now(),
@@ -2681,7 +2680,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'strategy_performance': strategy_performance,
                 'component': 'StrategyManager'
             }
-            
+
         except Exception as e:
             self.logger.error(f"Strategy metrics calculation failed: {e}")
             return {
@@ -2689,7 +2688,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'error': str(e),
                 'calculation_timestamp': datetime.now()
             }
-    
+
     def analyze_performance(self, data: Any = None) -> Dict[str, Any]:
         """Analyze strategy performance"""
         try:
@@ -2709,14 +2708,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     'coordination_status': 'active' if self.active_strategies else 'inactive'
                 }
             }
-            
+
             return {
                 'performance_analyzed': True,
                 'analysis_timestamp': datetime.now(),
                 'performance_analysis': performance_analysis,
                 'component': 'StrategyManager'
             }
-            
+
         except Exception as e:
             self.logger.error(f"Strategy performance analysis failed: {e}")
             return {
@@ -2724,14 +2723,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'error': str(e),
                 'analysis_timestamp': datetime.now()
             }
-    
+
     def generate_analytics(self, data: Any = None) -> Dict[str, Any]:
         """Generate comprehensive strategy analytics"""
         try:
             # Combine metrics and performance analysis
             metrics = self.calculate_metrics(data)
             performance = self.analyze_performance(data)
-            
+
             analytics = {
                 'analytics_generated': True,
                 'generation_timestamp': datetime.now(),
@@ -2745,9 +2744,9 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'recommendations': self._generate_strategy_recommendations(),
                 'component': 'StrategyManager'
             }
-            
+
             return analytics
-            
+
         except Exception as e:
             self.logger.error(f"Strategy analytics generation failed: {e}")
             return {
@@ -2755,7 +2754,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'error': str(e),
                 'generation_timestamp': datetime.now()
             }
-    
+
     def track_performance(self, data: Any = None) -> Dict[str, Any]:
         """Track strategy performance over time"""
         try:
@@ -2768,9 +2767,9 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'alerts': self._generate_performance_alerts(),
                 'component': 'StrategyManager'
             }
-            
+
             return performance_tracking
-            
+
         except Exception as e:
             self.logger.error(f"Strategy performance tracking failed: {e}")
             return {
@@ -2778,63 +2777,63 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'error': str(e),
                 'tracking_timestamp': datetime.now()
             }
-    
+
     def monitor_performance(self, data: Any = None) -> Dict[str, Any]:
         """Monitor strategy performance (alias for track_performance)"""
         return self.track_performance(data)
-    
+
     def _calculate_average_confidence(self) -> float:
         """Calculate average confidence across all signals"""
         try:
             all_signals = []
             for signals in self.strategy_signals.values():
                 all_signals.extend(signals)
-            
+
             if not all_signals:
                 return 0.0
-            
+
             return sum(s.confidence for s in all_signals) / len(all_signals)
-            
+
         except Exception:
             return 0.0
-    
+
     def _calculate_strategy_allocation(self) -> Dict[str, float]:
         """Calculate allocation per strategy"""
         try:
             if not self.active_strategies:
                 return {}
-            
+
             # Mock allocation calculation (in real implementation, would use actual allocations)
             equal_allocation = 1.0 / len(self.active_strategies)
             return {strategy_id: equal_allocation for strategy_id in self.active_strategies.keys()}
-            
+
         except Exception:
             return {}
-    
+
     def _calculate_strategy_efficiency(self) -> float:
         """Calculate overall strategy efficiency"""
         try:
             if not self.active_strategies:
                 return 0.0
-            
+
             # Mock efficiency calculation
             signal_count = sum(len(signals) for signals in self.strategy_signals.values())
             strategy_count = len(self.active_strategies)
-            
+
             # Efficiency = signals per strategy
             efficiency = signal_count / strategy_count if strategy_count > 0 else 0.0
-            
+
             # Normalize to 0-100 scale
             return min(100.0, efficiency * 10)
-            
+
         except Exception:
             return 50.0  # Default moderate efficiency
-    
+
     def _assess_signal_quality(self) -> str:
         """Assess overall signal quality"""
         try:
             avg_confidence = self._calculate_average_confidence()
-            
+
             if avg_confidence > 0.8:
                 return "Excellent"
             elif avg_confidence > 0.7:
@@ -2843,10 +2842,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 return "Fair"
             else:
                 return "Poor"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _assess_strategy_coordination(self) -> str:
         """Assess strategy coordination effectiveness"""
         try:
@@ -2860,16 +2859,16 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 return "Moderately coordinated"
             else:
                 return "Over-coordinated"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _assess_strategy_health(self) -> str:
         """Assess overall strategy health"""
         try:
             active_count = len(self.active_strategies)
             signal_count = sum(len(signals) for signals in self.strategy_signals.values())
-            
+
             if active_count == 0:
                 return "Inactive"
             elif signal_count == 0:
@@ -2878,107 +2877,107 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 return "Overloaded"
             else:
                 return "Healthy"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _assess_coordination_effectiveness(self) -> float:
         """Assess coordination effectiveness (0-100)"""
         try:
             if not self.active_strategies:
                 return 0.0
-            
+
             # Mock coordination assessment
             strategy_count = len(self.active_strategies)
             signal_count = sum(len(signals) for signals in self.strategy_signals.values())
-            
+
             # Effectiveness based on signal generation per strategy
             if strategy_count == 0:
                 return 0.0
-            
+
             signals_per_strategy = signal_count / strategy_count
             effectiveness = min(100.0, signals_per_strategy * 20)  # Scale to 0-100
-            
+
             return effectiveness
-            
+
         except Exception:
             return 50.0  # Default moderate effectiveness
-    
+
     def _calculate_signal_quality_score(self) -> float:
         """Calculate signal quality score (0-100)"""
         try:
             avg_confidence = self._calculate_average_confidence()
             return avg_confidence * 100
-            
+
         except Exception:
             return 50.0  # Default moderate quality
-    
+
     def _generate_strategy_recommendations(self) -> List[str]:
         """Generate strategy recommendations"""
         try:
             recommendations = []
-            
+
             active_count = len(self.active_strategies)
             signal_count = sum(len(signals) for signals in self.strategy_signals.values())
-            
+
             if active_count == 0:
                 recommendations.append("Consider activating strategies")
             elif active_count > self.config.max_concurrent_strategies:
                 recommendations.append("Reduce number of active strategies")
             elif signal_count == 0:
                 recommendations.append("Check strategy signal generation")
-            
+
             avg_confidence = self._calculate_average_confidence()
             if avg_confidence < 0.6:
                 recommendations.append("Improve signal confidence thresholds")
-            
+
             return recommendations
-            
+
         except Exception:
             return ["Unable to generate recommendations"]
-    
+
     def _assess_performance_trend(self) -> str:
         """Assess performance trend"""
         try:
             # Mock trend assessment (in real implementation, would use historical data)
             signal_count = sum(len(signals) for signals in self.strategy_signals.values())
-            
+
             if signal_count > 10:
                 return "Improving"
             elif signal_count > 5:
                 return "Stable"
             else:
                 return "Declining"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _generate_performance_alerts(self) -> List[str]:
         """Generate performance alerts"""
         try:
             alerts = []
-            
+
             if len(self.active_strategies) == 0:
                 alerts.append("No active strategies")
-            
+
             avg_confidence = self._calculate_average_confidence()
             if avg_confidence < 0.5:
                 alerts.append("Low signal confidence detected")
-            
+
             return alerts
-            
+
         except Exception:
             return []
-    
+
     # ========================================
     # MULTI-STRATEGY COORDINATION METHODS
     # ========================================
-    
+
     async def _initialize_multi_strategy_coordination(self) -> None:
         """Initialize multi-strategy coordination components"""
         try:
             logger.info("🎯 Initializing multi-strategy coordination...")
-            
+
             # Initialize signal aggregator
             if self.config.enable_signal_aggregation:
                 aggregator_config = {
@@ -2990,7 +2989,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 await self.signal_aggregator.initialize()
                 await self.signal_aggregator.start()
                 logger.info("✅ Signal aggregator initialized")
-            
+
             # Initialize conflict resolver
             if self.config.enable_conflict_resolution:
                 resolver_config = {
@@ -3001,31 +3000,31 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 await self.conflict_resolver.initialize()
                 await self.conflict_resolver.start()
                 logger.info("✅ Conflict resolver initialized")
-            
+
             logger.info("✅ Multi-strategy coordination initialized")
-            
+
         except Exception as e:
             logger.error(f"❌ Multi-strategy coordination initialization failed: {e}")
             raise
-    
-    async def register_enhanced_strategy(self, strategy_type: StrategyType, 
+
+    async def register_enhanced_strategy(self, strategy_type: StrategyType,
                                        config: Dict[str, Any]) -> bool:
         """Register an enhanced strategy for multi-strategy coordination"""
         try:
             strategy_id = config.get('name', f"{strategy_type.value}_{uuid.uuid4().hex[:8]}")
-            
+
             # Create strategy instance using factory
             strategy_instance = self.strategy_factory.create_strategy(strategy_type, config)
             if not strategy_instance:
                 logger.error(f"Failed to create strategy instance: {strategy_type}")
                 return False
-            
+
             # Initialize strategy
             await strategy_instance.initialize()
-            
+
             # Store in active strategies
             self.active_strategies[strategy_id] = strategy_instance
-            
+
             # Create strategy allocation
             allocation = StrategyAllocation(
                 strategy_name=strategy_id,
@@ -3035,7 +3034,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 risk_limit=config.get('risk_limit', 0.05)
             )
             self.strategy_allocations[strategy_id] = allocation
-            
+
             # Register with signal aggregator if available
             if self.signal_aggregator:
                 await self.signal_aggregator.register_strategy(
@@ -3048,18 +3047,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     max_positions=allocation.max_positions,
                     risk_limit=allocation.risk_limit
                 )
-            
+
             logger.info(f"✅ Enhanced strategy registered: {strategy_id} ({strategy_type.value})")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Enhanced strategy registration failed: {e}")
             return False
-    
+
     async def collect_all_signals(self, market_data, position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, List[EnhancedSignal]]:
         """
         Collect signals from all registered strategies
-        
+
         Args:
             market_data: Dict mapping symbol to enriched DataFrame
             position_details: Dict mapping symbol to rich position info (entry_price, pnl, etc.)
@@ -3067,25 +3066,25 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         if not self.signal_aggregator:
             logger.warning("Signal aggregator not available")
             return {}
-        
+
         try:
             return await self.signal_aggregator.collect_all_signals(market_data, position_details=position_details)
         except Exception as e:
             logger.error(f"Signal collection failed: {e}")
             return {}
-    
+
     async def aggregate_strategy_signals(self, strategy_signals: Dict[str, List[EnhancedSignal]]) -> List[EnhancedSignal]:
         """Aggregate signals from multiple strategies with conflict resolution"""
         if not self.signal_aggregator:
             logger.warning("Signal aggregator not available")
             return []
-        
+
         try:
             return await self.signal_aggregator.aggregate_strategy_signals(strategy_signals)
         except Exception as e:
             logger.error(f"Signal aggregation failed: {e}")
             return []
-    
+
     async def convert_signals_to_trading_requests(
         self,
         signals: List[EnhancedSignal],
@@ -3093,13 +3092,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     ) -> List[TradingDecisionRequest]:
         """
         Convert EnhancedSignal objects to TradingDecisionRequest objects
-        
+
         Implements Phase 6→7 conversion per Rule 4.1
-        
+
         Args:
             signals: List of EnhancedSignal from strategy aggregation
             regime_context: Optional regime context for decision requests
-            
+
         Returns:
             List of TradingDecisionRequest ready for risk authorization
         """
@@ -3118,14 +3117,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     regime_context = {'regime': 'unknown', 'confidence': 0.5, 'volatility': 0.02}
             elif regime_context is None:
                 regime_context = {'regime': 'unknown', 'confidence': 0.5, 'volatility': 0.02}
-            
+
             trading_requests = []
-            
+
             for signal in signals:
                 # Determine decision type based on signal type
                 # Handle both enum and string values
                 signal_type_value = signal.signal_type.value if hasattr(signal.signal_type, 'value') else str(signal.signal_type)
-                
+
                 if signal_type_value.lower() in ['buy', 'long']:
                     decision_type = TradingDecisionType.POSITION_ENTRY
                     side = 'buy'
@@ -3137,7 +3136,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     side = 'sell'  # Close implies sell
                 else:  # HOLD or unknown
                     continue  # Skip hold signals
-                
+
                 # Create TradingDecisionRequest
                 request = TradingDecisionRequest(
                     decision_type=decision_type,
@@ -3146,13 +3145,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     side=side,
                     quantity=signal.quantity,
                     confidence=signal.confidence,
-                    
+
                     # Market context
                     current_price=signal.price if signal.price else signal.metadata.get('current_price', 0.0),
                     market_regime=regime_context.get('regime', 'unknown'),
                     regime_confidence=regime_context.get('confidence', 0.5),
                     volatility_estimate=regime_context.get('volatility', 0.02),
-                    
+
                     # Metadata from signal
                     requesting_component='StrategyManager',
                     justification=f"Signal from {signal.strategy_type} strategy",
@@ -3163,65 +3162,65 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         'original_signal_metadata': signal.metadata
                     }
                 )
-                
+
                 trading_requests.append(request)
-            
+
             logger.info(
                 f"✅ Converted {len(signals)} signals to {len(trading_requests)} trading requests "
                 f"(Phase 6→7 conversion per Rule 4.1)"
             )
-            
+
             return trading_requests
-            
+
         except Exception as e:
             logger.error(f"Signal to request conversion failed: {e}")
             return []
-    
+
     async def aggregate_signals_and_create_requests(
         self,
         strategy_signals: Dict[str, List[EnhancedSignal]]
     ) -> List[TradingDecisionRequest]:
         """
         Complete Phase 6 flow: Aggregate signals and convert to trading requests
-        
+
         This is the main entry point for Phase 6→7 integration.
-        
+
         Args:
             strategy_signals: Dict mapping strategy_id to list of signals
-            
+
         Returns:
             List of TradingDecisionRequest ready for Phase 7 authorization
         """
         try:
             # Step 1: Aggregate signals from multiple strategies
             aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)
-            
+
             if not aggregated_signals:
                 logger.warning("No signals after aggregation")
                 return []
-            
+
             logger.info(f"📊 Aggregated {len(aggregated_signals)} signals from {len(strategy_signals)} strategies")
-            
+
             # Step 2: Convert to TradingDecisionRequest
             trading_requests = await self.convert_signals_to_trading_requests(aggregated_signals)
-            
+
             logger.info(
                 f"✅ Phase 6 complete: {len(aggregated_signals)} signals → "
                 f"{len(trading_requests)} trading requests ready for Phase 7"
             )
-            
+
             return trading_requests
-            
+
         except Exception as e:
             logger.error(f"Phase 6 aggregation and conversion failed: {e}")
             return []
-    
-    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None, 
+
+    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None,
                              current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
                              position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> List[EnhancedSignal]:
         """
         Generate signals using multi-strategy coordination
-        
+
         Args:
             symbols: List of symbols to generate signals for
             market_data: Dict mapping symbol to enriched DataFrame
@@ -3239,39 +3238,39 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         try:
             # Store position details for strategies to access
             self._position_details = position_details or {}
-            
+
             if not self.enable_multi_strategy or not self.signal_aggregator:
                 # Fallback to traditional signal generation
                 return await self._generate_traditional_signals(symbols)
-            
+
             # Get market data (use provided or fetch)
             if market_data is None:
                 market_data = await self._get_market_data(symbols)
-            
+
             # Collect signals from all strategies (passing position details)
             strategy_signals = await self.collect_all_signals(market_data, position_details=position_details)
-            
+
             # Aggregate and resolve conflicts
             aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)
-            
+
             logger.info(f"📊 Generated {len(aggregated_signals)} aggregated signals from {len(strategy_signals)} strategies")
             return aggregated_signals
-            
+
         except Exception as e:
             logger.error(f"Multi-strategy signal generation failed: {e}")
             return []
-    
+
     async def _generate_traditional_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
         """Fallback traditional signal generation"""
         # Placeholder - would implement traditional signal generation
         return []
-    
+
     async def _get_market_data(self, symbols: List[str]):
         """Get market data for signal generation"""
         # Placeholder - would get data from data manager
         import pandas as pd
         return pd.DataFrame()  # Empty DataFrame for now
-    
+
     def get_multi_strategy_status(self) -> Dict[str, Any]:
         """Get multi-strategy coordination status"""
         return {

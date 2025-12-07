@@ -4,7 +4,7 @@ Comprehensive Test Suite for Stress Tester
 ==========================================
 
 Day 9 - Phase 7 Week 3
-Target: 20-25 tests covering edge cases and uncovered paths  
+Target: 20-25 tests covering edge cases and uncovered paths
 Current coverage: 71% -> Target: 85%+
 
 Test Categories:
@@ -115,7 +115,7 @@ def test_scenarios_dictionary(stress_tester):
 def test_configuration_defaults():
     """Test default configuration values"""
     tester = StressTester()
-    
+
     assert tester.monte_carlo_runs == 10000  # Default
     assert 0.95 in tester.confidence_levels
     assert tester.correlation_decay == 0.94
@@ -128,7 +128,7 @@ def test_configuration_defaults():
 def test_market_shock_creation(sample_market_shock):
     """Test MarketShock dataclass creation"""
     shock = sample_market_shock
-    
+
     assert shock.factor == "EQUITY_US"
     assert shock.shock_type == ShockType.RELATIVE
     assert shock.magnitude == -0.10
@@ -138,7 +138,7 @@ def test_market_shock_creation(sample_market_shock):
 def test_stress_scenario_creation(sample_stress_scenario):
     """Test StressScenario creation"""
     scenario = sample_stress_scenario
-    
+
     assert scenario.name == "Market_Correction"
     assert scenario.test_type == StressTestType.HYPOTHETICAL
     assert len(scenario.shocks) == 1
@@ -173,14 +173,14 @@ def test_hypothetical_scenario_with_multiple_shocks():
         MarketShock("RATES", ShockType.ABSOLUTE, 0.01, "Rate increase"),
         MarketShock("VOLATILITY", ShockType.VOLATILITY, 2.0, "Vol spike")
     ]
-    
+
     scenario = StressScenario(
         name="Multi_Factor_Stress",
         description="Multiple factor stress test",
         test_type=StressTestType.HYPOTHETICAL,
         shocks=shocks
     )
-    
+
     assert len(scenario.shocks) == 3
     assert scenario.test_type == StressTestType.HYPOTHETICAL
 
@@ -189,7 +189,7 @@ def test_shock_magnitude_variations():
     """Test different shock magnitudes"""
     mild_shock = MarketShock("EQUITY", ShockType.RELATIVE, -0.05, "Mild shock")
     severe_shock = MarketShock("EQUITY", ShockType.RELATIVE, -0.30, "Severe shock")
-    
+
     assert mild_shock.magnitude > severe_shock.magnitude
     assert abs(severe_shock.magnitude) > abs(mild_shock.magnitude)
 
@@ -198,7 +198,7 @@ def test_absolute_vs_relative_shocks():
     """Test absolute and relative shock types"""
     absolute_shock = MarketShock("RATES", ShockType.ABSOLUTE, 0.02, "200 bps")
     relative_shock = MarketShock("EQUITY", ShockType.RELATIVE, -0.10, "10% down")
-    
+
     assert absolute_shock.shock_type == ShockType.ABSOLUTE
     assert relative_shock.shock_type == ShockType.RELATIVE
 
@@ -212,7 +212,7 @@ def test_scenario_metadata():
         shocks=[],
         metadata={'region': 'US', 'asset_class': 'equity'}
     )
-    
+
     assert 'region' in scenario.metadata
     assert scenario.metadata['region'] == 'US'
 
@@ -254,7 +254,7 @@ def test_reverse_stress_scenario_type():
         test_type=StressTestType.REVERSE,
         shocks=[]
     )
-    
+
     assert scenario.test_type == StressTestType.REVERSE
 
 
@@ -266,7 +266,7 @@ def test_sensitivity_analysis_type():
         test_type=StressTestType.SENSITIVITY,
         shocks=[]
     )
-    
+
     assert scenario.test_type == StressTestType.SENSITIVITY
 
 
@@ -279,7 +279,7 @@ def test_scenario_probability_handling():
         shocks=[],
         probability=0.10
     )
-    
+
     low_prob = StressScenario(
         name="Rare",
         description="Rare event",
@@ -287,7 +287,7 @@ def test_scenario_probability_handling():
         shocks=[],
         probability=0.001
     )
-    
+
     assert high_prob.probability > low_prob.probability
 
 
@@ -303,7 +303,7 @@ def test_correlation_breakdown_scenario_type():
         test_type=StressTestType.CORRELATION_BREAKDOWN,
         shocks=[]
     )
-    
+
     assert scenario.test_type == StressTestType.CORRELATION_BREAKDOWN
 
 
@@ -315,7 +315,7 @@ def test_correlation_shock():
         magnitude=0.9,
         description="Correlations spike to 0.9"
     )
-    
+
     assert corr_shock.shock_type == ShockType.CORRELATION
     assert corr_shock.magnitude == 0.9
 
@@ -338,7 +338,7 @@ def test_empty_shock_list():
         test_type=StressTestType.HYPOTHETICAL,
         shocks=[]
     )
-    
+
     assert len(scenario.shocks) == 0
 
 
@@ -350,7 +350,7 @@ def test_extreme_shock_magnitude():
         magnitude=-0.99,  # 99% decline
         description="Extreme stress"
     )
-    
+
     assert extreme_shock.magnitude == -0.99
 
 
@@ -362,7 +362,7 @@ def test_zero_shock_magnitude():
         magnitude=0.0,
         description="No change"
     )
-    
+
     assert zero_shock.magnitude == 0.0
 
 
@@ -377,7 +377,7 @@ def test_stress_test_result_creation():
         pnl_percentage=-0.10,
         contribution_to_portfolio=0.05
     )
-    
+
     assert result.pnl == -1000
     assert result.pnl_percentage == -0.10
     assert result.timestamp is not None
@@ -392,7 +392,7 @@ def test_portfolio_stress_result_creation():
         worst_case_var=10000,
         position_results=[]
     )
-    
+
     assert result.total_pnl == -5000
     assert result.worst_case_var == 10000
     assert len(result.position_results) == 0
@@ -427,6 +427,6 @@ def test_suite_metadata():
         'test_categories': 7,
         'phase': 'Phase 7 Week 3 Day 9'
     }
-    
+
     assert metadata['total_tests'] == 25
     assert metadata['test_categories'] == 7

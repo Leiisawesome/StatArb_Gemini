@@ -54,14 +54,14 @@ def event_loop():
 async def test_system() -> AsyncGenerator[SystemIntegrationManager, None]:
     """Initialize test system for all tests"""
     logger.info("🔧 Initializing test system...")
-    
+
     try:
         system = SystemIntegrationManager()
         await system.initialize()
-        
+
         logger.info("✅ Test system initialized successfully")
         yield system
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize test system: {e}")
         raise
@@ -76,14 +76,14 @@ async def test_system() -> AsyncGenerator[SystemIntegrationManager, None]:
 async def test_orchestrator() -> AsyncGenerator[HierarchicalSystemOrchestrator, None]:
     """Initialize test orchestrator for all tests"""
     logger.info("🎭 Initializing test orchestrator...")
-    
+
     try:
         orchestrator = HierarchicalSystemOrchestrator()
         await orchestrator.initialize()
-        
+
         logger.info("✅ Test orchestrator initialized successfully")
         yield orchestrator
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize test orchestrator: {e}")
         raise
@@ -297,19 +297,19 @@ def pytest_collection_modifyitems(config, items):
         # Add performance marker to performance tests
         if "performance" in item.nodeid:
             item.add_marker(pytest.mark.performance)
-        
+
         # Add stress marker to stress tests
         if "stress" in item.nodeid:
             item.add_marker(pytest.mark.stress)
-        
+
         # Add integration marker to integration tests
         if "integration" in item.nodeid:
             item.add_marker(pytest.mark.integration)
-        
+
         # Add compliance marker to compliance tests
         if "compliance" in item.nodeid:
             item.add_marker(pytest.mark.compliance)
-        
+
         # Add slow marker to tests that take > 5 seconds
         if hasattr(item, 'function') and hasattr(item.function, '__name__'):
             if 'slow' in item.function.__name__ or 'comprehensive' in item.function.__name__:

@@ -91,24 +91,24 @@ class PerformanceConfig:
     # Risk-free rate
     risk_free_rate_source: RiskFreeRateSource = RiskFreeRateSource.TREASURY_3M
     custom_risk_free_rate: float = 0.02  # 2% annual
-    
+
     # Calculation parameters
     trading_days_per_year: int = 252
     confidence_level: float = 0.95  # For VaR calculations
     var_lookback_days: int = 252
-    
+
     # Benchmark settings
     default_benchmark: str = "SPY"
     enable_benchmark_comparison: bool = True
-    
+
     # Attribution settings
     enable_factor_attribution: bool = True
     attribution_frequency: str = "daily"
-    
+
     # Risk metrics
     enable_downside_metrics: bool = True
     drawdown_threshold: float = 0.05  # 5%
-    
+
     # Performance periods
     analysis_periods: List[PerformancePeriod] = field(default_factory=lambda: [
         PerformancePeriod.DAILY,
@@ -116,11 +116,11 @@ class PerformanceConfig:
         PerformancePeriod.YEARLY,
         PerformancePeriod.INCEPTION
     ])
-    
+
     # Caching settings
     enable_caching: bool = True
     cache_ttl: int = 3600  # Cache time-to-live in seconds
-    
+
     # Risk-free rate property for backward compatibility
     @property
     def risk_free_rate(self) -> float:
@@ -135,36 +135,36 @@ class PerformanceMetrics:
     start_date: datetime
     end_date: datetime
     period: PerformancePeriod
-    
+
     # Basic returns
     total_return: float = 0.0
     annualized_return: float = 0.0
-    
+
     # Risk metrics
     volatility: float = 0.0
     downside_volatility: float = 0.0
     maximum_drawdown: float = 0.0
     maximum_drawdown_duration: int = 0
-    
+
     # Risk-adjusted returns
     sharpe_ratio: float = 0.0
     sortino_ratio: float = 0.0
     calmar_ratio: float = 0.0
     omega_ratio: float = 0.0
-    
+
     # Risk measures
     var_95: float = 0.0
     cvar_95: float = 0.0
     skewness: float = 0.0
     kurtosis: float = 0.0
-    
+
     # Benchmark-relative metrics
     beta: float = 0.0
     alpha: float = 0.0
     information_ratio: float = 0.0
     tracking_error: float = 0.0
     treynor_ratio: float = 0.0
-    
+
     # Trading metrics
     win_rate: float = 0.0
     profit_factor: float = 0.0
@@ -172,12 +172,12 @@ class PerformanceMetrics:
     average_loss: float = 0.0
     largest_win: float = 0.0
     largest_loss: float = 0.0
-    
+
     # Additional statistics
     total_trades: int = 0
     winning_trades: int = 0
     losing_trades: int = 0
-    
+
     # Metadata
     calculation_timestamp: datetime = field(default_factory=datetime.now)
     benchmark_symbol: Optional[str] = None
@@ -190,40 +190,40 @@ class PerformanceReport:
     portfolio_name: str
     report_id: str
     generation_timestamp: datetime
-    
+
     # Time period
     start_date: datetime
     end_date: datetime
-    
+
     # Overall metrics
     portfolio_metrics: PerformanceMetrics
-    
+
     # Period breakdown
     period_metrics: Dict[PerformancePeriod, PerformanceMetrics] = field(default_factory=dict)
-    
+
     # Position-level metrics
     position_metrics: Dict[str, PerformanceMetrics] = field(default_factory=dict)
-    
+
     # Rolling metrics
     rolling_sharpe: pd.Series = field(default_factory=pd.Series)
     rolling_volatility: pd.Series = field(default_factory=pd.Series)
     rolling_drawdown: pd.Series = field(default_factory=pd.Series)
-    
+
     # Performance attribution
     factor_attribution: Dict[str, float] = field(default_factory=dict)
     sector_attribution: Dict[str, float] = field(default_factory=dict)
-    
+
     # Risk decomposition
     risk_breakdown: Dict[str, float] = field(default_factory=dict)
-    
+
     # Charts and visualizations data
     equity_curve: pd.Series = field(default_factory=pd.Series)
     drawdown_series: pd.Series = field(default_factory=pd.Series)
     monthly_returns: pd.DataFrame = field(default_factory=pd.DataFrame)
-    
+
     # Summary statistics
     summary_stats: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Warnings and notes
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
@@ -231,10 +231,10 @@ class PerformanceReport:
 
 class RiskMetricsCalculator:
     """Advanced risk metrics calculator - delegates to core_metrics"""
-    
+
     def __init__(self, config: PerformanceConfig):
         self.config = config
-    
+
     def calculate_var(
         self,
         returns: pd.Series,
@@ -243,7 +243,7 @@ class RiskMetricsCalculator:
     ) -> float:
         """Calculate Value at Risk - delegates to core_metrics"""
         return calculate_var(returns, confidence_level, method)
-    
+
     def calculate_cvar(
         self,
         returns: pd.Series,
@@ -251,14 +251,14 @@ class RiskMetricsCalculator:
     ) -> float:
         """Calculate Conditional Value at Risk - delegates to core_metrics"""
         return calculate_cvar(returns, confidence_level)
-    
+
     def calculate_maximum_drawdown(self, returns: pd.Series) -> Tuple[float, int]:
         """Calculate maximum drawdown and duration - delegates to core_metrics"""
         if returns.empty:
             return 0.0, 0
         _, max_dd, duration = calculate_drawdown(returns)
         return abs(max_dd), duration
-    
+
     def calculate_downside_volatility(
         self,
         returns: pd.Series,
@@ -266,140 +266,140 @@ class RiskMetricsCalculator:
     ) -> float:
         """Calculate downside volatility - delegates to core_metrics"""
         return core_downside_volatility(
-            returns, 
+            returns,
             target_return=minimum_acceptable_return,
             periods_per_year=self.config.trading_days_per_year
         )
-    
+
     def calculate_omega_ratio(
         self,
         returns: pd.Series,
         threshold: float = 0.0
     ) -> float:
         """Calculate Omega ratio"""
-        
+
         if returns.empty:
             return 0.0
-        
+
         excess_returns = returns - threshold
         positive_returns = excess_returns[excess_returns > 0].sum()
         negative_returns = -excess_returns[excess_returns < 0].sum()
-        
+
         if negative_returns == 0:
             return np.inf if positive_returns > 0 else 1.0
-        
+
         return positive_returns / negative_returns
 
 
 class BenchmarkAnalyzer:
     """Benchmark comparison and beta calculation"""
-    
+
     def __init__(self, config: PerformanceConfig):
         self.config = config
         self.benchmark_cache = {}
-    
+
     def calculate_beta(
         self,
         portfolio_returns: pd.Series,
         benchmark_returns: pd.Series
     ) -> Tuple[float, float]:
         """Calculate beta and alpha relative to benchmark"""
-        
+
         if len(portfolio_returns) != len(benchmark_returns) or len(portfolio_returns) < 2:
             return 0.0, 0.0
-        
+
         # Align series
         aligned_data = pd.DataFrame({
             'portfolio': portfolio_returns,
             'benchmark': benchmark_returns
         }).dropna()
-        
+
         if len(aligned_data) < 2:
             return 0.0, 0.0
-        
+
         # Calculate beta using linear regression
         X = aligned_data['benchmark'].values.reshape(-1, 1)
         y = aligned_data['portfolio'].values
-        
+
         reg = LinearRegression().fit(X, y)
         beta = reg.coef_[0]
         alpha = reg.intercept_
-        
+
         # Annualize alpha
         alpha_annualized = alpha * self.config.trading_days_per_year
-        
+
         return beta, alpha_annualized
-    
+
     def calculate_tracking_error(
         self,
         portfolio_returns: pd.Series,
         benchmark_returns: pd.Series
     ) -> float:
         """Calculate tracking error"""
-        
+
         if len(portfolio_returns) != len(benchmark_returns):
             return 0.0
-        
+
         excess_returns = portfolio_returns - benchmark_returns
         return excess_returns.std() * np.sqrt(self.config.trading_days_per_year)
-    
+
     def calculate_information_ratio(
         self,
         portfolio_returns: pd.Series,
         benchmark_returns: pd.Series
     ) -> float:
         """Calculate information ratio"""
-        
+
         if len(portfolio_returns) != len(benchmark_returns):
             return 0.0
-        
+
         excess_returns = portfolio_returns - benchmark_returns
         tracking_error = self.calculate_tracking_error(portfolio_returns, benchmark_returns)
-        
+
         if tracking_error == 0:
             return 0.0
-        
+
         excess_return_mean = excess_returns.mean() * self.config.trading_days_per_year
         return excess_return_mean / tracking_error
 
 
 class TradingMetricsCalculator:
     """Trading-specific performance metrics"""
-    
+
     def calculate_win_rate(self, returns: pd.Series) -> float:
         """Calculate win rate (percentage of positive returns)"""
-        
+
         if returns.empty:
             return 0.0
-        
+
         winning_periods = len(returns[returns > 0])
         total_periods = len(returns.dropna())
-        
+
         return winning_periods / total_periods if total_periods > 0 else 0.0
-    
+
     def calculate_profit_factor(self, returns: pd.Series) -> float:
         """Calculate profit factor (gross profit / gross loss)"""
-        
+
         if returns.empty:
             return 0.0
-        
+
         positive_returns = returns[returns > 0].sum()
         negative_returns = abs(returns[returns < 0].sum())
-        
+
         if negative_returns == 0:
             return np.inf if positive_returns > 0 else 0.0
-        
+
         return positive_returns / negative_returns
-    
+
     def calculate_trading_statistics(self, returns: pd.Series) -> Dict[str, float]:
         """Calculate comprehensive trading statistics"""
-        
+
         if returns.empty:
             return {}
-        
+
         positive_returns = returns[returns > 0]
         negative_returns = returns[returns < 0]
-        
+
         stats = {
             'total_trades': len(returns.dropna()),
             'winning_trades': len(positive_returns),
@@ -411,27 +411,27 @@ class TradingMetricsCalculator:
             'largest_win': positive_returns.max() if len(positive_returns) > 0 else 0.0,
             'largest_loss': negative_returns.min() if len(negative_returns) > 0 else 0.0,
         }
-        
+
         return stats
 
 
 class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     """
     Advanced Performance Analyzer with Regime Awareness
-    
+
     Comprehensive performance analysis with risk-adjusted metrics,
     benchmark comparison, detailed attribution analysis, and regime-aware analysis.
-    
+
     **Enhanced Features:**
     - ISystemComponent integration for orchestrator
     - IRegimeAware integration for regime-based analysis
     - Regime-specific performance attribution
     """
-    
+
     def __init__(self, config: Optional[Any] = None):
         """
         Initialize performance analyzer
-        
+
         Args:
             config: PerformanceConfig or PerformanceAnalyticsConfig or dict
         """
@@ -442,10 +442,10 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 self.centralized_config = CentralizedPerformanceConfig()
             elif isinstance(config, dict):
                 self.centralized_config = CentralizedPerformanceConfig(**{
-                    k: v for k, v in config.items() 
+                    k: v for k, v in config.items()
                     if hasattr(CentralizedPerformanceConfig, k)
                 })
-            
+
             # Map to local PerformanceConfig for backward compatibility
             self.config = PerformanceConfig(
                 risk_free_rate_source=RiskFreeRateSource.CUSTOM,
@@ -474,51 +474,51 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     "Centralized configuration not available. "
                     "Cannot proceed without proper configuration setup."
                 )
-        
+
         # Component calculators
         self.risk_calculator = RiskMetricsCalculator(self.config)
         self.benchmark_analyzer = BenchmarkAnalyzer(self.config)
         self.trading_calculator = TradingMetricsCalculator()
-        
+
         # Data storage
         self._performance_cache = {}
         self._benchmark_data = {}
         self._risk_free_rates = {}
-        
+
         # Threading
         self._lock = threading.Lock()
-        
+
         # ISystemComponent state management
         self.is_initialized = False
         self.is_operational = False
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
         self.last_error: Optional[str] = None
-        
+
         # IRegimeAware state management
         self.regime_engine: Optional[Any] = None
         self.current_regime_context: Optional[RegimeContext] = None
         self.regime_performance_history: Dict[str, List[float]] = {}
         logger.info("✅ PerformanceAnalyzer implements IRegimeAware (Rule 2 - Regime-First)")
-        
+
         # Initialize audit trail for institutional compliance
         self.initialize_audit_trail()
-        
+
         logger.info("🔍 Performance Analyzer initialized")
-    
+
     def initialize_audit_trail(self):
         """Initialize audit trail for institutional compliance"""
         self._audit_trail = []
         logger.info("Audit trail initialized for Performance Analyzer")
-    
+
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
-    
+
     def register_with_orchestrator(self, orchestrator) -> str:
         """Register component with HierarchicalSystemOrchestrator"""
         from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
-        
+
         self.orchestrator = orchestrator
         self.component_id = orchestrator.register_component(
             name="PerformanceAnalyzer",
@@ -527,30 +527,30 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             authority_level=AuthorityLevel.OPERATIONAL,
             initialization_order=33  # After metrics calculator
         )
-        
+
         logger.info(f"✅ PerformanceAnalyzer registered with orchestrator: {self.component_id}")
         return self.component_id
-    
+
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""
         if not self.orchestrator or not self.component_id:
             logger.warning("No orchestrator available for authorization request")
             return False
-        
+
         return await self.orchestrator.request_system_authorization(
             operation, self.component_id, details
         )
-    
+
     # ========================================
     # ISYSTEMCOMPONENT INTERFACE IMPLEMENTATION
     # ========================================
-    
+
     async def initialize(self) -> bool:
         """Initialize the performance analyzer"""
-        
+
         try:
             logger.info("🔄 Initializing PerformanceAnalyzer...")
-            
+
             # Initialize component calculators
             if hasattr(self.risk_calculator, 'initialize'):
                 success = await self.risk_calculator.initialize()
@@ -558,102 +558,102 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     logger.error("❌ Failed to initialize risk calculator")
                     self.last_error = "Failed to initialize risk calculator"
                     return False
-            
+
             if hasattr(self.benchmark_analyzer, 'initialize'):
                 success = await self.benchmark_analyzer.initialize()
                 if not success:
                     logger.error("❌ Failed to initialize benchmark analyzer")
                     return False
-            
+
             if hasattr(self.trading_calculator, 'initialize'):
                 success = await self.trading_calculator.initialize()
                 if not success:
                     logger.error("❌ Failed to initialize trading calculator")
                     return False
-            
+
             # Initialize data caches
             self._performance_cache.clear()
             self._benchmark_data.clear()
             self._risk_free_rates.clear()
-            
+
             self.is_initialized = True
             logger.info("✅ PerformanceAnalyzer initialized successfully")
             return True
-            
+
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"❌ PerformanceAnalyzer initialization failed: {e}")
             return False
-    
+
     async def start(self) -> bool:
         """Start the performance analyzer operations"""
-        
+
         try:
             if not self.is_initialized:
                 logger.error("❌ Cannot start - PerformanceAnalyzer not initialized")
                 return False
-            
+
             logger.info("🚀 Starting PerformanceAnalyzer operations...")
-            
+
             # Start component calculators
             if hasattr(self.risk_calculator, 'start'):
                 success = await self.risk_calculator.start()
                 if not success:
                     logger.warning("⚠️ Failed to start risk calculator")
-            
+
             if hasattr(self.benchmark_analyzer, 'start'):
                 success = await self.benchmark_analyzer.start()
                 if not success:
                     logger.warning("⚠️ Failed to start benchmark analyzer")
-            
+
             if hasattr(self.trading_calculator, 'start'):
                 success = await self.trading_calculator.start()
                 if not success:
                     logger.warning("⚠️ Failed to start trading calculator")
-            
+
             self.is_operational = True
             logger.info("✅ PerformanceAnalyzer operational")
             return True
-            
+
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"❌ PerformanceAnalyzer start failed: {e}")
             return False
-    
+
     async def stop(self) -> bool:
         """Stop the performance analyzer operations"""
-        
+
         try:
             logger.info("🔄 Stopping PerformanceAnalyzer...")
-            
+
             # Stop component calculators
             if hasattr(self.risk_calculator, 'stop'):
                 await self.risk_calculator.stop()
-            
+
             if hasattr(self.benchmark_analyzer, 'stop'):
                 await self.benchmark_analyzer.stop()
-            
+
             if hasattr(self.trading_calculator, 'stop'):
                 await self.trading_calculator.stop()
-            
+
             # Clear caches
             with self._lock:
                 cache_size = len(self._performance_cache)
                 self._performance_cache.clear()
                 self._benchmark_data.clear()
-            
+
             self.is_operational = False
             logger.info(f"✅ PerformanceAnalyzer stopped (cleared {cache_size} cached entries)")
             return True
-            
+
         except Exception as e:
             self.last_error = str(e)
             logger.error(f"❌ PerformanceAnalyzer stop failed: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check of the performance analyzer"""
-        
+
         try:
             health_status = {
                 'healthy': True,
@@ -667,14 +667,14 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'last_error': self.last_error,
                 'calculators_status': {}
             }
-            
+
             # Check calculator health
             calculators = {
                 'risk_calculator': self.risk_calculator,
                 'benchmark_analyzer': self.benchmark_analyzer,
                 'trading_calculator': self.trading_calculator
             }
-            
+
             for calc_name, calculator in calculators.items():
                 if hasattr(calculator, 'health_check'):
                     calc_health = await calculator.health_check()
@@ -683,24 +683,24 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                         health_status['healthy'] = False
                 else:
                     health_status['calculators_status'][calc_name] = {'healthy': True}
-            
+
             # Check cache health
             if len(self._performance_cache) > 10000:  # Large cache warning
                 health_status['healthy'] = False
                 health_status['warning'] = "Performance cache size exceeds recommended limit"
-            
+
             return health_status
-            
+
         except Exception as e:
             return {
                 'healthy': False,
                 'error': str(e),
                 'component_type': 'PerformanceAnalyzer'
             }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get current status of the performance analyzer"""
-        
+
         return {
             'component_id': self.component_id,
             'component_type': 'PerformanceAnalyzer',
@@ -718,67 +718,67 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'cache_ttl': self.config.cache_ttl
             }
         }
-    
+
     # ================================================================
     # IRegimeAware Implementation (Rule 2 - Regime-First Principle)
     # ================================================================
-    
+
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Inject regime engine dependency
-        
+
         Args:
             regime_engine: EnhancedRegimeEngine instance
         """
         self.regime_engine = regime_engine
         logger.info("✅ RegimeEngine injected into PerformanceAnalyzer (IRegimeAware)")
-    
+
     async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
         """
         Handle regime change events
-        
+
         Args:
             new_regime_context: New regime context
         """
         try:
             old_regime = self.current_regime_context.primary_regime if self.current_regime_context else "none"
             self.current_regime_context = new_regime_context
-            
+
             logger.info(
                 f"📊 PerformanceAnalyzer regime change: {old_regime} → "
                 f"{new_regime_context.primary_regime} "
                 f"(confidence: {new_regime_context.regime_confidence:.2%})"
             )
-            
+
             # Track performance by regime
             regime_name = new_regime_context.primary_regime
             if regime_name not in self.regime_performance_history:
                 self.regime_performance_history[regime_name] = []
-            
+
             # Adapt analysis parameters to new regime
             await self.adapt_to_regime(new_regime_context)
-            
+
         except Exception as e:
             logger.error(f"Error handling regime change in PerformanceAnalyzer: {e}")
-    
+
     def get_current_regime_context(self) -> Optional[RegimeContext]:
         """Get current regime context"""
         return self.current_regime_context
-    
+
     async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
         """
         Adapt performance analysis to current regime
-        
+
         Args:
             regime_context: Current regime context
-            
+
         Returns:
             Adaptation results
         """
         try:
             regime = regime_context.primary_regime
             volatility_regime = getattr(regime_context, 'volatility_regime', 'normal')
-            
+
             # Regime-specific adjustments
             adaptations = {
                 'regime': regime,
@@ -788,7 +788,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'var_confidence': self.config.confidence_level,
                 }
             }
-            
+
             # Adjust risk-free rate for regime (if using dynamic rates)
             if regime == 'high_volatility' or volatility_regime == 'high_volatility':
                 # In high vol, investors demand higher risk-free rate
@@ -800,28 +800,28 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 adaptations['adjusted_risk_free_rate'] = adjusted_risk_free
             else:
                 adaptations['adjusted_risk_free_rate'] = self.config.custom_risk_free_rate
-            
+
             # Adjust VaR confidence level for regime
             if volatility_regime == 'extreme_volatility':
                 # Use higher confidence in extreme conditions
                 adaptations['adjusted_var_confidence'] = min(self.config.confidence_level * 1.05, 0.99)
             else:
                 adaptations['adjusted_var_confidence'] = self.config.confidence_level
-            
+
             adaptations['adapted'] = True
-            
+
             logger.debug(
                 f"📊 PerformanceAnalyzer adapted to {regime} regime: "
                 f"risk_free_rate={adaptations['adjusted_risk_free_rate']:.4f}, "
                 f"var_confidence={adaptations['adjusted_var_confidence']:.4f}"
             )
-            
+
             return adaptations
-            
+
         except Exception as e:
             logger.error(f"Error adapting PerformanceAnalyzer to regime: {e}")
             return {'adapted': False, 'error': str(e)}
-    
+
     def validate_regime_dependency(self) -> bool:
         """Validate regime engine is properly configured"""
         has_regime_engine = self.regime_engine is not None
@@ -830,11 +830,11 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         else:
             logger.warning("⚠️  PerformanceAnalyzer regime engine not configured")
         return has_regime_engine
-    
+
     # ================================================================
     # Performance Analysis Methods
     # ================================================================
-    
+
     async def analyze_performance(
         self,
         returns: pd.Series,
@@ -845,7 +845,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         end_date: Optional[datetime] = None
     ) -> PerformanceMetrics:
         """Analyze performance for a given return series"""
-        
+
         if returns.empty:
             logger.warning(f"Empty returns series for {symbol}")
             return PerformanceMetrics(
@@ -854,7 +854,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 end_date=end_date or datetime.now(),
                 period=period
             )
-        
+
         # Filter returns by date range if specified
         if start_date or end_date:
             # Only filter by date if the index is datetime-like
@@ -863,11 +863,11 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     returns = returns[returns.index >= start_date]
                 if end_date:
                     returns = returns[returns.index <= end_date]
-        
+
         # Determine actual date range
         actual_start = returns.index.min() if not returns.empty else (start_date or datetime.now())
         actual_end = returns.index.max() if not returns.empty else (end_date or datetime.now())
-        
+
         # Initialize metrics
         metrics = PerformanceMetrics(
             symbol=symbol,
@@ -876,20 +876,20 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             period=period,
             risk_free_rate=self._get_risk_free_rate()
         )
-        
+
         try:
             # Basic return metrics
             metrics.total_return = (1 + returns).prod() - 1
-            
+
             # Annualized return
             if len(returns) > 0:
                 periods_per_year = self._get_periods_per_year(returns)
                 metrics.annualized_return = (1 + metrics.total_return) ** (periods_per_year / len(returns)) - 1
-            
+
             # Volatility metrics
             metrics.volatility = returns.std() * np.sqrt(self._get_periods_per_year(returns))
             metrics.downside_volatility = self.risk_calculator.calculate_downside_volatility(returns)
-            
+
             # Risk metrics
             try:
                 metrics.maximum_drawdown, metrics.maximum_drawdown_duration = \
@@ -899,29 +899,29 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     f"Failed to calculate maximum drawdown: {e}. "
                     "Real performance data required for risk calculations."
                 ) from e
-            
+
             # VaR metrics
             metrics.var_95 = self.risk_calculator.calculate_var(returns, self.config.confidence_level)
             metrics.cvar_95 = self.risk_calculator.calculate_cvar(returns, self.config.confidence_level)
-            
+
             # Distribution metrics
             metrics.skewness = returns.skew()
             metrics.kurtosis = returns.kurtosis()
-            
+
             # Risk-adjusted return metrics
             excess_returns = returns - metrics.risk_free_rate / self._get_periods_per_year(returns)
-            
+
             if metrics.volatility > 0:
                 metrics.sharpe_ratio = excess_returns.mean() * np.sqrt(self._get_periods_per_year(returns)) / metrics.volatility
-            
+
             if metrics.downside_volatility > 0:
                 metrics.sortino_ratio = excess_returns.mean() * np.sqrt(self._get_periods_per_year(returns)) / metrics.downside_volatility
-            
+
             if metrics.maximum_drawdown > 0:
                 metrics.calmar_ratio = metrics.annualized_return / metrics.maximum_drawdown
-            
+
             metrics.omega_ratio = self.risk_calculator.calculate_omega_ratio(returns)
-            
+
             # Trading metrics
             trading_stats = self.trading_calculator.calculate_trading_statistics(returns)
             metrics.win_rate = trading_stats.get('win_rate', 0.0)
@@ -933,46 +933,46 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             metrics.total_trades = int(trading_stats.get('total_trades', 0))
             metrics.winning_trades = int(trading_stats.get('winning_trades', 0))
             metrics.losing_trades = int(trading_stats.get('losing_trades', 0))
-            
+
             # Benchmark-relative metrics
             if benchmark_returns is not None and not benchmark_returns.empty:
                 metrics.benchmark_symbol = getattr(benchmark_returns, 'name', 'Benchmark')
-                
+
                 # Align returns with benchmark
                 aligned_returns, aligned_benchmark = returns.align(benchmark_returns, join='inner')
-                
+
                 if len(aligned_returns) > 1:
                     metrics.beta, metrics.alpha = self.benchmark_analyzer.calculate_beta(
                         aligned_returns, aligned_benchmark
                     )
-                    
+
                     metrics.tracking_error = self.benchmark_analyzer.calculate_tracking_error(
                         aligned_returns, aligned_benchmark
                     )
-                    
+
                     metrics.information_ratio = self.benchmark_analyzer.calculate_information_ratio(
                         aligned_returns, aligned_benchmark
                     )
-                    
+
                     if metrics.beta != 0:
                         metrics.treynor_ratio = (metrics.annualized_return - metrics.risk_free_rate) / metrics.beta
-            
+
             logger.debug(f"Performance analysis completed for {symbol}: "
                         f"Return: {metrics.annualized_return:.2%}, "
                         f"Sharpe: {metrics.sharpe_ratio:.2f}, "
                         f"MaxDD: {metrics.maximum_drawdown:.2%}")
-            
+
             return metrics
-            
+
         except Exception as e:
             logger.error(f"Error analyzing performance for {symbol}: {e}")
             return metrics
-    
+
     async def analyze_performance_by_period(self, returns: pd.Series) -> Dict[str, Any]:
         """Analyze performance by different periods"""
         if returns.empty:
             raise PerformanceDataUnavailableError("No returns data available for period analysis")
-        
+
         try:
             # Calculate performance for different periods
             period_analysis = {
@@ -980,16 +980,16 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'quarterly': await self._calculate_period_metrics(returns, 'Q'),
                 'yearly': await self._calculate_period_metrics(returns, 'Y')
             }
-            
+
             return period_analysis
         except Exception as e:
             raise PerformanceDataUnavailableError(f"Failed to analyze performance by period: {e}") from e
-    
+
     async def analyze_performance_by_strategy(self, strategy_returns: Dict[str, pd.Series]) -> Dict[str, Any]:
         """Analyze performance by strategy"""
         if not strategy_returns:
             raise PerformanceDataUnavailableError("No strategy returns data available")
-        
+
         try:
             strategy_analysis = {}
             for strategy_name, returns in strategy_returns.items():
@@ -997,25 +997,25 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     strategy_analysis[strategy_name] = await self.analyze_performance(returns, strategy_name)
                 else:
                     strategy_analysis[strategy_name] = None
-            
+
             return strategy_analysis
         except Exception as e:
             raise PerformanceDataUnavailableError(f"Failed to analyze performance by strategy: {e}") from e
-    
+
     async def _calculate_period_metrics(self, returns: pd.Series, period: str) -> Dict[str, Any]:
         """Calculate metrics for a specific period"""
         try:
             # Resample returns to the specified period
             period_returns = returns.resample(period).apply(lambda x: (1 + x).prod() - 1)
-            
+
             if period_returns.empty:
                 return {}
-            
+
             # Calculate basic metrics
             total_return = period_returns.sum()
             volatility = period_returns.std() * np.sqrt(252 / self._get_period_days(period))
             sharpe_ratio = total_return / volatility if volatility > 0 else 0.0
-            
+
             return {
                 'total_return': total_return,
                 'volatility': volatility,
@@ -1024,7 +1024,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             }
         except Exception as e:
             raise PerformanceDataUnavailableError(f"Failed to calculate {period} metrics: {e}") from e
-    
+
     def _get_period_days(self, period: str) -> int:
         """Get number of days for a period"""
         period_days = {
@@ -1033,19 +1033,19 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             'Y': 365
         }
         return period_days.get(period, 30)
-    
+
     def _get_periods_per_year(self, returns: pd.Series) -> float:
         """Determine periods per year based on data frequency"""
-        
+
         if len(returns) < 2:
             return self.config.trading_days_per_year
-        
+
         # Check if index is datetime-like
         if isinstance(returns.index, pd.DatetimeIndex) or pd.api.types.is_datetime64_any_dtype(returns.index):
             # Calculate average time difference
             time_diffs = returns.index.to_series().diff().dropna()
             avg_diff = time_diffs.mean()
-            
+
             if avg_diff <= pd.Timedelta(days=1):
                 return self.config.trading_days_per_year  # Daily
             elif avg_diff <= pd.Timedelta(weeks=1):
@@ -1057,17 +1057,17 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         else:
             # For non-datetime indices, assume daily frequency
             return self.config.trading_days_per_year
-    
+
     def _get_risk_free_rate(self) -> float:
         """Get current risk-free rate"""
-        
+
         if self.config.risk_free_rate_source == RiskFreeRateSource.CUSTOM:
             return self.config.custom_risk_free_rate
-        
+
         # In a real implementation, this would fetch from a data source
         # For now, return the custom rate
         return self.config.custom_risk_free_rate
-    
+
     async def generate_performance_report(
         self,
         portfolio_returns: pd.Series,
@@ -1078,15 +1078,15 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         end_date: Optional[datetime] = None
     ) -> PerformanceReport:
         """Generate comprehensive performance report"""
-        
+
         report_id = f"{portfolio_name}_{int(time.time())}"
-        
+
         # Determine date range
         if not start_date:
             start_date = portfolio_returns.index.min() if not portfolio_returns.empty else datetime.now()
         if not end_date:
             end_date = portfolio_returns.index.max() if not portfolio_returns.empty else datetime.now()
-        
+
         # Initialize report
         # First calculate portfolio metrics
         portfolio_metrics = await self.analyze_performance(
@@ -1097,7 +1097,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             start_date,
             end_date
         )
-        
+
         report = PerformanceReport(
             portfolio_name=portfolio_name,
             report_id=report_id,
@@ -1106,13 +1106,13 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             end_date=end_date,
             portfolio_metrics=portfolio_metrics
         )
-        
+
         try:
             # Period breakdown
             for period in self.config.analysis_periods:
                 if period == PerformancePeriod.INCEPTION:
                     continue  # Already calculated above
-                
+
                 period_returns = self._get_period_returns(portfolio_returns, period)
                 if not period_returns.empty:
                     period_metrics = await self.analyze_performance(
@@ -1122,7 +1122,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                         period
                     )
                     report.period_metrics[period] = period_metrics
-            
+
             # Position-level analysis
             if position_returns:
                 for symbol, returns in position_returns.items():
@@ -1136,42 +1136,42 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                             end_date
                         )
                         report.position_metrics[symbol] = position_metrics
-            
+
             # Rolling metrics
             report.rolling_sharpe = self._calculate_rolling_sharpe(portfolio_returns)
             report.rolling_volatility = self._calculate_rolling_volatility(portfolio_returns)
             report.rolling_drawdown = self._calculate_rolling_drawdown(portfolio_returns)
-            
+
             # Equity curve
             report.equity_curve = (1 + portfolio_returns).cumprod()
-            
+
             # Drawdown series
             report.drawdown_series = self._calculate_drawdown_series(portfolio_returns)
-            
+
             # Monthly returns table
             report.monthly_returns = self._create_monthly_returns_table(portfolio_returns)
-            
+
             # Summary statistics
             report.summary_stats = self._create_summary_statistics(report)
-            
+
             # Add notes and warnings
             report.notes = self._generate_report_notes(report)
             report.warnings = self._generate_report_warnings(report)
-            
+
             logger.info(f"Performance report generated for {portfolio_name}: "
                        f"Return: {report.portfolio_metrics.annualized_return:.2%}, "
                        f"Sharpe: {report.portfolio_metrics.sharpe_ratio:.2f}")
-            
+
             return report
-            
+
         except Exception as e:
             logger.error(f"Error generating performance report for {portfolio_name}: {e}")
             report.warnings.append(f"Report generation error: {str(e)}")
             return report
-    
+
     def _get_period_returns(self, returns: pd.Series, period: PerformancePeriod) -> pd.Series:
         """Get returns for a specific period"""
-        
+
         if period == PerformancePeriod.DAILY:
             return returns
         elif period == PerformancePeriod.WEEKLY:
@@ -1184,81 +1184,81 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             return returns.resample('Y').apply(lambda x: (1 + x).prod() - 1)
         else:
             return returns
-    
+
     def _calculate_rolling_sharpe(self, returns: pd.Series, window: int = 252) -> pd.Series:
         """Calculate rolling Sharpe ratio"""
-        
+
         if len(returns) < window:
             return pd.Series(dtype=float)
-        
+
         risk_free_daily = self._get_risk_free_rate() / self._get_periods_per_year(returns)
         excess_returns = returns - risk_free_daily
-        
+
         rolling_mean = excess_returns.rolling(window).mean()
         rolling_std = returns.rolling(window).std()
-        
+
         return rolling_mean / rolling_std * np.sqrt(self._get_periods_per_year(returns))
-    
+
     def _calculate_rolling_volatility(self, returns: pd.Series, window: int = 252) -> pd.Series:
         """Calculate rolling volatility"""
-        
+
         if len(returns) < window:
             return pd.Series(dtype=float)
-        
+
         return returns.rolling(window).std() * np.sqrt(self._get_periods_per_year(returns))
-    
+
     def _calculate_rolling_drawdown(self, returns: pd.Series) -> pd.Series:
         """Calculate rolling drawdown"""
-        
+
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
-        
+
         return (cumulative - running_max) / running_max
-    
+
     def _calculate_drawdown_series(self, returns: pd.Series) -> pd.Series:
         """Calculate drawdown series"""
-        
+
         return self._calculate_rolling_drawdown(returns)
-    
+
     def _create_monthly_returns_table(self, returns: pd.Series) -> pd.DataFrame:
         """Create monthly returns table"""
-        
+
         try:
             monthly_returns = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
-            
+
             # Create year-month matrix
             monthly_table = monthly_returns.to_frame('Returns')
             monthly_table['Year'] = monthly_table.index.year
             monthly_table['Month'] = monthly_table.index.month
-            
+
             pivot_table = monthly_table.pivot_table(
                 values='Returns',
                 index='Year',
                 columns='Month',
                 aggfunc='first'
             )
-            
+
             # Add month names as columns
             month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            
+
             pivot_table.columns = [month_names[i-1] for i in pivot_table.columns]
-            
+
             # Add annual totals
             annual_returns = returns.resample('Y').apply(lambda x: (1 + x).prod() - 1)
             pivot_table['Annual'] = annual_returns.groupby(annual_returns.index.year).first()
-            
+
             return pivot_table
-            
+
         except Exception as e:
             logger.error(f"Error creating monthly returns table: {e}")
             return pd.DataFrame()
-    
+
     def _create_summary_statistics(self, report: PerformanceReport) -> Dict[str, Any]:
         """Create summary statistics"""
-        
+
         metrics = report.portfolio_metrics
-        
+
         return {
             'performance_summary': {
                 'total_return': f"{metrics.total_return:.2%}",
@@ -1279,75 +1279,75 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'total_trades': metrics.total_trades
             }
         }
-    
+
     def _generate_report_notes(self, report: PerformanceReport) -> List[str]:
         """Generate report notes"""
-        
+
         notes = []
         metrics = report.portfolio_metrics
-        
+
         # Performance notes
         if metrics.annualized_return > 0.15:
             notes.append("Exceptional annual return performance")
         elif metrics.annualized_return > 0.10:
             notes.append("Strong annual return performance")
-        
+
         # Risk notes
         if metrics.sharpe_ratio > 2.0:
             notes.append("Excellent risk-adjusted returns")
         elif metrics.sharpe_ratio > 1.0:
             notes.append("Good risk-adjusted returns")
-        
+
         # Drawdown notes
         if metrics.maximum_drawdown < 0.05:
             notes.append("Low maximum drawdown indicates good risk control")
-        
+
         return notes
-    
+
     def _generate_report_warnings(self, report: PerformanceReport) -> List[str]:
         """Generate report warnings"""
-        
+
         warnings = []
         metrics = report.portfolio_metrics
-        
+
         # Risk warnings
         if metrics.maximum_drawdown > 0.20:
             warnings.append("High maximum drawdown - review risk management")
-        
+
         if metrics.volatility > 0.30:
             warnings.append("High volatility - consider position sizing")
-        
+
         if metrics.sharpe_ratio < 0:
             warnings.append("Negative Sharpe ratio - strategy may need review")
-        
+
         # Data quality warnings
         if metrics.total_trades < 30:
             warnings.append("Limited trade data - results may not be statistically significant")
-        
+
         return warnings
-    
+
     def cache_performance_metrics(self, symbol: str, metrics: PerformanceMetrics) -> None:
         """Cache performance metrics"""
-        
+
         with self._lock:
             self._performance_cache[symbol] = metrics
-    
+
     def get_cached_metrics(self, symbol: str) -> Optional[PerformanceMetrics]:
         """Get cached performance metrics"""
-        
+
         with self._lock:
             return self._performance_cache.get(symbol)
-    
+
     def clear_cache(self) -> None:
         """Clear performance cache"""
-        
+
         with self._lock:
             self._performance_cache.clear()
             logger.info("Performance cache cleared")
-    
+
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get performance analysis summary"""
-        
+
         with self._lock:
             return {
                 'cached_metrics': len(self._performance_cache),
@@ -1366,14 +1366,14 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     async def generate_compliance_report(self, compliance_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate compliance report for regulatory requirements
-        
+
         Args:
             compliance_data: Compliance parameters including:
                 - compliance_period: Reporting period (e.g., '2024-Q3')
                 - regulatory_framework: Applicable regulations
                 - risk_limits: Current risk limits
                 - breach_incidents: Any limit breaches
-                
+
         Returns:
             Comprehensive compliance report
         """
@@ -1382,7 +1382,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             regulatory_framework = compliance_data.get('regulatory_framework', 'SEC')
             risk_limits = compliance_data.get('risk_limits', {})
             breach_incidents = compliance_data.get('breach_incidents', [])
-            
+
             # Generate compliance metrics
             compliance_metrics = {
                 'risk_limit_compliance': len(breach_incidents) == 0,
@@ -1392,7 +1392,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'documentation_compliance': True,  # Would check documentation
                 'audit_trail_compliance': True  # Would check audit trail
             }
-            
+
             compliance_report = {
                 'report_type': 'compliance',
                 'compliance_period': compliance_period,
@@ -1413,15 +1413,15 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'valid_until': (datetime.now() + timedelta(days=90)).isoformat()
                 }
             }
-            
+
             # Log audit event
             self.log_audit_event('compliance_report_generated', {
                 'compliance_period': compliance_period,
                 'status': compliance_report['compliance_status']
             })
-            
+
             return compliance_report
-            
+
         except Exception as e:
             logger.error(f"Error generating compliance report: {e}")
             return {
@@ -1433,7 +1433,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     async def generate_institutional_report(self, report_params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate institutional-grade performance report
-        
+
         Args:
             report_params: Report parameters including:
                 - time_period: Analysis period
@@ -1441,7 +1441,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 - reporting_standard: GIPS, AIMR, etc.
                 - include_risk_metrics: Whether to include risk analysis
                 - include_attribution: Whether to include performance attribution
-                
+
         Returns:
             Comprehensive institutional performance report
         """
@@ -1451,7 +1451,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             reporting_standard = report_params.get('reporting_standard', 'GIPS')
             include_risk_metrics = report_params.get('include_risk_metrics', True)
             include_attribution = report_params.get('include_attribution', True)
-            
+
             # Generate institutional metrics
             institutional_metrics = {
                 'total_return': 0.0,
@@ -1463,7 +1463,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'tracking_error': 0.0,
                 'information_ratio': 0.0
             }
-            
+
             # Risk attribution if requested
             risk_attribution = {}
             if include_risk_metrics:
@@ -1473,7 +1473,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'idiosyncratic_risk': 0.0,
                     'liquidity_risk': 0.0
                 }
-            
+
             # Performance attribution if requested
             performance_attribution = {}
             if include_attribution:
@@ -1483,7 +1483,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'market_timing': 0.0,
                     'strategy_contribution': 0.0
                 }
-            
+
             institutional_report = {
                 'report_type': 'institutional_performance',
                 'reporting_standard': reporting_standard,
@@ -1503,15 +1503,15 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'Performance figures are preliminary and subject to audit'
                 ]
             }
-            
+
             # Log audit event
             self.log_audit_event('institutional_report_generated', {
                 'time_period': time_period,
                 'reporting_standard': reporting_standard
             })
-            
+
             return institutional_report
-            
+
         except Exception as e:
             logger.error(f"Error generating institutional report: {e}")
             return {
@@ -1523,7 +1523,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     async def generate_regulatory_report(self, regulatory_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate regulatory reporting for compliance filings
-        
+
         Args:
             regulatory_data: Regulatory parameters including:
                 - reporting_period: Period for reporting
@@ -1531,7 +1531,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 - strategy_types: List of strategies employed
                 - risk_disclosures: Required risk disclosures
                 - performance_history: Years of performance history
-                
+
         Returns:
             Regulatory-compliant report
         """
@@ -1541,7 +1541,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             strategy_types = regulatory_data.get('strategy_types', [])
             risk_disclosures = regulatory_data.get('risk_disclosures', [])
             performance_history = regulatory_data.get('performance_history', 5)
-            
+
             # Generate regulatory metrics
             regulatory_metrics = {
                 'assets_under_management': aum,
@@ -1552,7 +1552,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'best_month_return': 0.0,
                 'annualized_volatility': 0.0
             }
-            
+
             regulatory_report = {
                 'report_type': 'regulatory_filing',
                 'reporting_period': reporting_period,
@@ -1572,15 +1572,15 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'certification_date': datetime.now().isoformat()
                 }
             }
-            
+
             # Log audit event
             self.log_audit_event('regulatory_report_generated', {
                 'reporting_period': reporting_period,
                 'filing_type': regulatory_report['filing_type']
             })
-            
+
             return regulatory_report
-            
+
         except Exception as e:
             logger.error(f"Error generating regulatory report: {e}")
             return {
@@ -2512,7 +2512,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 raise PerformanceDataUnavailableError(
                     "No performance data available. Cannot generate institutional report without real performance data."
                 )
-            
+
             # Get actual performance metrics
             performance_metrics = await self.calculate_performance_metrics(portfolio_returns, benchmark_returns)
             institutional_report['performance_summary'] = {
@@ -2633,41 +2633,41 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'report_type': 'regulatory',
                 'error': str(e)
             }
-    
+
     # ========================================
     # ANALYTICS INTEGRATION METHODS
     # ========================================
-    
+
     def calculate_total_return(self, returns: pd.Series) -> float:
         """Calculate total return from returns series"""
         if returns.empty:
             return 0.0
-        
+
         # Calculate cumulative return
         cumulative_return = (1 + returns).prod() - 1
         return float(cumulative_return)
-    
+
     def calculate_volatility(self, returns: pd.Series) -> float:
         """Calculate annualized volatility - delegates to core_metrics"""
         return core_volatility(returns, periods_per_year=252)
-    
+
     def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
         """Calculate Sortino ratio - delegates to core_metrics"""
         from .core_metrics import calculate_sortino_ratio as core_sortino
         return core_sortino(returns, risk_free_rate=risk_free_rate, periods_per_year=252)
-    
+
     def calculate_calmar_ratio(self, returns: pd.Series) -> float:
         """Calculate Calmar ratio - delegates to core_metrics"""
         from .core_metrics import calculate_calmar_ratio as core_calmar
         return core_calmar(returns, periods_per_year=252)
-    
+
     def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
         """
         Calculate performance metrics for analytics integration
-        
+
         Args:
             returns: Series of returns data
-            
+
         Returns:
             Dictionary containing performance metrics
         """
@@ -2678,44 +2678,44 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'error': 'Empty returns series',
                     'calculation_timestamp': datetime.now()
                 }
-            
+
             # Calculate basic performance metrics
             total_return = returns.sum()
             annualized_return = returns.mean() * 252
             volatility = returns.std() * np.sqrt(252)
             sharpe_ratio = annualized_return / volatility if volatility > 0 else 0.0
-            
+
             # Calculate drawdown metrics
             cumulative_returns = (1 + returns).cumprod()
             running_max = cumulative_returns.expanding().max()
             drawdown = (cumulative_returns - running_max) / running_max
             max_drawdown = drawdown.min()
-            
+
             # Calculate additional metrics
             positive_returns = returns[returns > 0]
             negative_returns = returns[returns < 0]
-            
+
             win_rate = len(positive_returns) / len(returns) if len(returns) > 0 else 0.0
             avg_win = positive_returns.mean() if len(positive_returns) > 0 else 0.0
             avg_loss = negative_returns.mean() if len(negative_returns) > 0 else 0.0
             profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 0.0
-            
+
             # Calculate risk metrics
             var_95 = np.percentile(returns, 5)
             cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95
-            
+
             # Skewness and kurtosis
             skewness = returns.skew()
             kurtosis = returns.kurtosis()
-            
+
             # Calmar ratio
             calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0.0
-            
+
             # Sortino ratio (downside deviation)
             downside_returns = returns[returns < 0]
             downside_deviation = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0.0
             sortino_ratio = annualized_return / downside_deviation if downside_deviation > 0 else 0.0
-            
+
             result = {
                 'performance_calculated': True,
                 'calculation_timestamp': datetime.now(),
@@ -2725,25 +2725,25 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'total_return': float(total_return),
                     'annualized_return': float(annualized_return),
                     'volatility': float(volatility),
-                    
+
                     # Risk-adjusted metrics
                     'sharpe_ratio': float(sharpe_ratio),
                     'sortino_ratio': float(sortino_ratio),
                     'calmar_ratio': float(calmar_ratio),
-                    
+
                     # Drawdown metrics
                     'max_drawdown': float(max_drawdown),
-                    
+
                     # Trade statistics
                     'win_rate': float(win_rate),
                     'avg_win': float(avg_win),
                     'avg_loss': float(avg_loss),
                     'profit_factor': float(profit_factor),
-                    
+
                     # Risk metrics
                     'var_95': float(var_95),
                     'cvar_95': float(cvar_95),
-                    
+
                     # Distribution metrics
                     'skewness': float(skewness),
                     'kurtosis': float(kurtosis)
@@ -2754,9 +2754,9 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'consistency_score': self._calculate_consistency_score(returns)
                 }
             }
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Performance metrics calculation failed: {e}")
             return {
@@ -2764,7 +2764,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'error': str(e),
                 'calculation_timestamp': datetime.now()
             }
-    
+
     def _grade_performance(self, sharpe_ratio: float, max_drawdown: float) -> str:
         """Grade overall performance"""
         if sharpe_ratio > 2.0 and max_drawdown > -0.05:
@@ -2777,7 +2777,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             return "Poor"
         else:
             return "Unacceptable"
-    
+
     def _assess_risk_level(self, volatility: float, max_drawdown: float) -> str:
         """Assess risk level"""
         if volatility < 0.10 and max_drawdown > -0.05:
@@ -2788,7 +2788,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             return "High"
         else:
             return "Very High"
-    
+
     def _calculate_consistency_score(self, returns: pd.Series) -> float:
         """Calculate consistency score (0-100)"""
         try:
@@ -2796,15 +2796,15 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             rolling_sharpe = returns.rolling(window=30).apply(
                 lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else 0
             ).dropna()
-            
+
             if len(rolling_sharpe) == 0:
                 return 50.0  # Neutral score
-            
+
             # Consistency is inverse of volatility of rolling Sharpe ratios
             sharpe_volatility = rolling_sharpe.std()
             consistency_score = max(0, 100 - sharpe_volatility * 50)
-            
+
             return float(min(100, consistency_score))
-            
+
         except Exception:
             return 50.0  # Neutral score on error

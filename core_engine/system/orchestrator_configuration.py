@@ -43,25 +43,25 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SystemOrchestrationConfig:
     """Configuration for system orchestration"""
-    
+
     # Initialization settings
     component_startup_timeout: int = 60  # seconds
     initialization_retry_attempts: int = 3
     graceful_shutdown_timeout: int = 30  # seconds
-    
+
     # Monitoring settings
     health_check_interval: int = 30      # seconds
     performance_monitoring_interval: int = 5  # seconds
-    
+
     # Authority and governance
     enforce_hierarchical_control: bool = True
     require_risk_manager_authorization: bool = True
     emergency_override_enabled: bool = True
-    
+
     # Escalation settings
     max_component_errors: int = 5
     escalation_timeout: int = 300  # 5 minutes
-    
+
     # Resource management
     max_concurrent_operations: int = 100
     resource_allocation_timeout: int = 10  # seconds
@@ -104,163 +104,163 @@ class PerformanceConfig:
 
 class ConfigurationManager:
     """Manages system configuration, validation, and runtime updates"""
-    
+
     def __init__(self, config_dict: Optional[Dict[str, Any]] = None):
         """Initialize configuration manager"""
-        
+
         # Load base configuration
         self.system_config = SystemOrchestrationConfig(**(config_dict or {}))
-        
+
         # Initialize sub-configurations
         self.component_configs: Dict[str, ComponentConfig] = {}
         self.security_config = SecurityConfig()
         self.performance_config = PerformanceConfig()
-        
+
         # Configuration metadata
         self.config_version = "1.0.0"
         self.last_updated = datetime.now()
         self.config_source = "default"
-        
+
         # Validation results
         self.validation_errors: List[str] = []
         self.is_valid = True
-        
+
         # Validate configuration on initialization
         self._validate_configuration()
-        
+
         logger.info("📋 ConfigurationManager initialized")
-    
+
     def _validate_configuration(self) -> None:
         """Validate all configuration settings"""
-        
+
         self.validation_errors.clear()
-        
+
         try:
             # Validate system configuration
             self._validate_system_config()
-            
+
             # Validate security configuration
             self._validate_security_config()
-            
+
             # Validate performance configuration
             self._validate_performance_config()
-            
+
             # Validate component configurations
             self._validate_component_configs()
-            
+
             self.is_valid = len(self.validation_errors) == 0
-            
+
             if self.is_valid:
                 logger.info("✅ Configuration validation passed")
             else:
                 logger.warning(f"⚠️ Configuration validation failed: {len(self.validation_errors)} errors")
                 for error in self.validation_errors:
                     logger.warning(f"  - {error}")
-                    
+
         except Exception as e:
             self.validation_errors.append(f"Configuration validation error: {e}")
             self.is_valid = False
             logger.error(f"❌ Configuration validation exception: {e}")
-    
+
     def _validate_system_config(self) -> None:
         """Validate system orchestration configuration"""
-        
+
         config = self.system_config
-        
+
         # Validate timeouts
         if config.component_startup_timeout <= 0:
             self.validation_errors.append("component_startup_timeout must be positive")
-        
+
         if config.graceful_shutdown_timeout <= 0:
             self.validation_errors.append("graceful_shutdown_timeout must be positive")
-        
+
         # Validate intervals
         if config.health_check_interval <= 0:
             self.validation_errors.append("health_check_interval must be positive")
-        
+
         if config.performance_monitoring_interval <= 0:
             self.validation_errors.append("performance_monitoring_interval must be positive")
-        
+
         # Validate limits
         if config.max_component_errors <= 0:
             self.validation_errors.append("max_component_errors must be positive")
-        
+
         if config.max_concurrent_operations <= 0:
             self.validation_errors.append("max_concurrent_operations must be positive")
-    
+
     def _validate_security_config(self) -> None:
         """Validate security configuration"""
-        
+
         config = self.security_config
-        
+
         # Validate audit settings
         if config.max_audit_entries <= 0:
             self.validation_errors.append("max_audit_entries must be positive")
-        
+
         if config.audit_log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             self.validation_errors.append("audit_log_level must be a valid log level")
-        
+
         # Validate session settings
         if config.session_timeout <= 0:
             self.validation_errors.append("session_timeout must be positive")
-        
+
         if config.max_failed_attempts <= 0:
             self.validation_errors.append("max_failed_attempts must be positive")
-    
+
     def _validate_performance_config(self) -> None:
         """Validate performance configuration"""
-        
+
         config = self.performance_config
-        
+
         # Validate monitoring settings
         if config.metrics_collection_interval <= 0:
             self.validation_errors.append("metrics_collection_interval must be positive")
-        
+
         if config.max_metrics_history <= 0:
             self.validation_errors.append("max_metrics_history must be positive")
-        
+
         # Validate thresholds
         if config.memory_threshold_mb <= 0:
             self.validation_errors.append("memory_threshold_mb must be positive")
-        
+
         if not (0 < config.cpu_threshold_percent <= 100):
             self.validation_errors.append("cpu_threshold_percent must be between 0 and 100")
-    
+
     def _validate_component_configs(self) -> None:
         """Validate component configurations"""
-        
+
         for name, config in self.component_configs.items():
             if config.initialization_order < 0:
                 self.validation_errors.append(f"Component {name}: initialization_order must be non-negative")
-            
+
             if config.health_check_interval <= 0:
                 self.validation_errors.append(f"Component {name}: health_check_interval must be positive")
-            
+
             if config.max_error_count <= 0:
                 self.validation_errors.append(f"Component {name}: max_error_count must be positive")
-            
+
             if config.timeout <= 0:
                 self.validation_errors.append(f"Component {name}: timeout must be positive")
-    
+
     def add_component_config(self, name: str, config: ComponentConfig) -> None:
         """Add configuration for a specific component"""
-        
+
         self.component_configs[name] = config
         self.last_updated = datetime.now()
-        
+
         # Re-validate after adding component config
         self._validate_component_configs()
-        
+
         logger.info(f"📋 Added configuration for component: {name}")
-    
+
     def get_component_config(self, name: str) -> Optional[ComponentConfig]:
         """Get configuration for a specific component"""
-        
+
         return self.component_configs.get(name)
-    
+
     def update_system_config(self, **kwargs) -> None:
         """Update system configuration parameters"""
-        
+
         try:
             # Update configuration
             for key, value in kwargs.items():
@@ -269,18 +269,18 @@ class ConfigurationManager:
                     logger.info(f"📋 Updated system config: {key} = {value}")
                 else:
                     logger.warning(f"⚠️ Unknown system config parameter: {key}")
-            
+
             self.last_updated = datetime.now()
-            
+
             # Re-validate configuration
             self._validate_configuration()
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to update system configuration: {e}")
-    
+
     def update_security_config(self, **kwargs) -> None:
         """Update security configuration parameters"""
-        
+
         try:
             for key, value in kwargs.items():
                 if hasattr(self.security_config, key):
@@ -288,16 +288,16 @@ class ConfigurationManager:
                     logger.info(f"🔒 Updated security config: {key} = {value}")
                 else:
                     logger.warning(f"⚠️ Unknown security config parameter: {key}")
-            
+
             self.last_updated = datetime.now()
             self._validate_security_config()
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to update security configuration: {e}")
-    
+
     def update_performance_config(self, **kwargs) -> None:
         """Update performance configuration parameters"""
-        
+
         try:
             for key, value in kwargs.items():
                 if hasattr(self.performance_config, key):
@@ -305,49 +305,49 @@ class ConfigurationManager:
                     logger.info(f"⚡ Updated performance config: {key} = {value}")
                 else:
                     logger.warning(f"⚠️ Unknown performance config parameter: {key}")
-            
+
             self.last_updated = datetime.now()
             self._validate_performance_config()
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to update performance configuration: {e}")
-    
+
     def load_from_file(self, file_path: str) -> bool:
         """Load configuration from JSON file"""
-        
+
         try:
             if not os.path.exists(file_path):
                 logger.error(f"❌ Configuration file not found: {file_path}")
                 return False
-            
+
             with open(file_path, 'r') as f:
                 config_data = json.load(f)
-            
+
             # Update configurations from file
             if 'system' in config_data:
                 self.update_system_config(**config_data['system'])
-            
+
             if 'security' in config_data:
                 self.update_security_config(**config_data['security'])
-            
+
             if 'performance' in config_data:
                 self.update_performance_config(**config_data['performance'])
-            
+
             if 'components' in config_data:
                 for name, comp_config in config_data['components'].items():
                     self.add_component_config(name, ComponentConfig(name=name, **comp_config))
-            
+
             self.config_source = file_path
             logger.info(f"✅ Configuration loaded from: {file_path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to load configuration from {file_path}: {e}")
             return False
-    
+
     def save_to_file(self, file_path: str) -> bool:
         """Save current configuration to JSON file"""
-        
+
         try:
             config_data = {
                 'metadata': {
@@ -398,20 +398,20 @@ class ConfigurationManager:
                     for name, config in self.component_configs.items()
                 }
             }
-            
+
             with open(file_path, 'w') as f:
                 json.dump(config_data, f, indent=2)
-            
+
             logger.info(f"✅ Configuration saved to: {file_path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to save configuration to {file_path}: {e}")
             return False
-    
+
     def get_configuration_summary(self) -> Dict[str, Any]:
         """Get comprehensive configuration summary"""
-        
+
         return {
             'metadata': {
                 'version': self.config_version,
@@ -440,22 +440,22 @@ class ConfigurationManager:
             },
             'component_count': len(self.component_configs)
         }
-    
+
     def reset_to_defaults(self) -> None:
         """Reset all configuration to default values"""
-        
+
         try:
             self.system_config = SystemOrchestrationConfig()
             self.security_config = SecurityConfig()
             self.performance_config = PerformanceConfig()
             self.component_configs.clear()
-            
+
             self.last_updated = datetime.now()
             self.config_source = "default"
-            
+
             self._validate_configuration()
-            
+
             logger.info("🔄 Configuration reset to defaults")
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to reset configuration: {e}")

@@ -30,10 +30,10 @@ Usage Example:
 --------------
 ```python
 from core_engine.regime import (
-    RegimeManager, 
-    RegimeDetector, 
+    RegimeManager,
+    RegimeDetector,
     RegimeClassifier,
-    RegimeType, 
+    RegimeType,
     RegimeConfig
 )
 
@@ -63,7 +63,7 @@ implications = regime_state.portfolio_implications
 
 # Generate strategy adaptations
 adaptation = regime_manager.generate_regime_adaptation(
-    regime_state, 
+    regime_state,
     current_strategies
 )
 ```
@@ -155,42 +155,42 @@ __all__ = [
     'RegimeIndicatorEngine',
     'MarketRegimeAnalyzer',
     'RegimeTransitionManager',
-    
+
     # RegimeManager Types
     'RegimeManagerStatus',
     'AdaptationMode',
     'RegimeState',
     'RegimeAdaptation',
-    
+
     # RegimeDetector Types
     'RegimeType',
     'RegimeDetection',
     'DetectionMethod',
     'ConfidenceLevel',
-    
+
     # RegimeClassifier Types
     'RegimeClassification',
     'MLModel',
     'FeatureType',
     'FeatureImportance',
     'ModelPerformance',
-    
+
     # Engine Types
-    
+
     # Indicator Types
     'RegimeIndicator',
     'IndicatorType',
     'TransitionSignal',
     'RegimeStrengthMeasure',
     'SignalStrength',
-    
+
     # Analyzer Types
     'MacroRegime',
     'MarketCycle',
     'RiskEnvironment',
     'AssetRegimeProfile',
     'CrossAssetRegime',
-    
+
     # Transition Manager Types
     'TransitionPhase',
     'TransitionType',

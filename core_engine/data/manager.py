@@ -71,26 +71,26 @@ except ImportError:
     except ImportError:
         # Fallback: define minimal interface
         from abc import ABC, abstractmethod
-        
+
         class BaseDataManager(ABC):
             def __init__(self, config: Dict[str, Any]):
                 pass
-            
+
             @abstractmethod
-            def get_historical_data(self, symbol: str, start_date: datetime, 
+            def get_historical_data(self, symbol: str, start_date: datetime,
                                   end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
                 pass
-        
+
         class DataProvider(ABC):
             pass
-            
+
         class DataConfig:
             def __init__(self, **kwargs):
                 for k, v in kwargs.items():
                     setattr(self, k, v)
-        
+
         class MarketData:
-            def __init__(self, symbol: str, timestamp: datetime, open: float, 
+            def __init__(self, symbol: str, timestamp: datetime, open: float,
                         high: float, low: float, close: float, volume: int):
                 self.symbol = symbol
                 self.timestamp = timestamp
@@ -109,7 +109,7 @@ except ImportError:
         @abstractmethod
         async def on_market_data(self, data: Any) -> None:
             pass
-    
+
     MarketDataPoint = None
     CoreDataManager = None
 
@@ -128,10 +128,10 @@ CONNECTION_TEST_TIMEOUT_SECONDS = 5  # Connection test timeout
 class ClickHouseDataConfig(DataConfig):
     """
     DEPRECATED: Legacy ClickHouse data configuration
-    
+
     This class provides backward compatibility. New code should use:
         from core_engine.config import DataConfig
-    
+
     Automatically converts to centralized DataConfig format.
     """
     # Legacy parameters (for backward compatibility)
@@ -144,7 +144,7 @@ class ClickHouseDataConfig(DataConfig):
     clickhouse_database: str = "polygon_data"
     enable_caching: bool = True
     cache_ttl: int = 300
-    
+
     def __post_init__(self):
         """Convert to centralized config format"""
         import warnings
@@ -153,7 +153,7 @@ class ClickHouseDataConfig(DataConfig):
             DeprecationWarning,
             stacklevel=2
         )
-        
+
         # Initialize inherited DataConfig attributes for backward compatibility
         if not hasattr(self, 'provider'):
             self.provider = "clickhouse"
@@ -161,17 +161,17 @@ class ClickHouseDataConfig(DataConfig):
             self.update_frequency = "1min"
         if not hasattr(self, 'cache_enabled'):
             self.cache_enabled = self.enable_caching
-            
+
         if self.symbols is None:
             self.symbols = ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
-        
+
         # Date range validation
         self._validate_date_configuration()
-    
+
     def _validate_date_configuration(self):
         """Validate and normalize date configuration"""
         from datetime import datetime
-        
+
         if self.start_date and self.end_date:
             try:
                 start_dt = datetime.strptime(self.start_date, "%Y-%m-%d")
@@ -180,12 +180,12 @@ class ClickHouseDataConfig(DataConfig):
                     raise ValueError(f"start_date ({self.start_date}) must be <= end_date ({self.end_date})")
             except ValueError as e:
                 raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
-        
+
         elif not (self.start_date or self.end_date):
             # No date configuration provided. Using default.
             self.start_date = "2024-12-20"
             self.end_date = "2024-12-20"
-    
+
     def to_centralized_config(self) -> 'CentralizedDataConfig':
         """Convert to centralized DataConfig format"""
         if CentralizedDataConfig is None or ConnectionConfig is None or CachingConfig is None:
@@ -212,7 +212,7 @@ class EnhancedMarketData(MarketData):
     """Enhanced market data structure extending core_engine MarketData"""
     transactions: Optional[int] = None
     source: str = "clickhouse"
-    
+
     def to_core_format(self) -> MarketData:
         """Convert to core_engine MarketData format"""
         return MarketData(
@@ -228,25 +228,25 @@ class EnhancedMarketData(MarketData):
 class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     """
     Architecturally Compliant ClickHouse Data Manager
-    
+
     Extends core_engine BaseDataManager with ClickHouse capabilities.
     Follows established architectural patterns:
     - Configuration-driven initialization
     - Subscriber pattern for data distribution
     - Manager pattern with clean interfaces
     - High-quality fallbacks and error handling
-    
+
     Integration Points:
     - Implements core_engine data management interface
     - Provides data to regime engine and strategy components
     - Supports real-time and historical data access
     - Compatible with existing portfolio and risk managers
     """
-    
+
     def __init__(self, config: Optional[Union[ClickHouseDataConfig, 'CentralizedDataConfig', Dict[str, Any]]] = None):
         """
         Initialize ClickHouse Data Manager
-        
+
         Args:
             config: Configuration (supports multiple formats):
                 - CentralizedDataConfig (from core_engine.config) - RECOMMENDED
@@ -281,14 +281,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         else:
             # Unknown type - try to use as-is
             self.enhanced_config = config or ClickHouseDataConfig()
-        
+
         # Create a compatible DataConfig for BaseDataManager with fallback provider
         base_config = DataConfig(
             provider="yahoo",  # Use yahoo as fallback for BaseDataManager
             update_frequency=self.enhanced_config.interval,
             cache_enabled=self.enhanced_config.enable_caching
         )
-        
+
         # Initialize base data manager (for interface compatibility)
         try:
             super().__init__(base_config)
@@ -297,33 +297,33 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.provider = None
             self._data_cache = {}
             self._last_update = {}
-        
+
         self.logger = logging.getLogger("enhanced_data_manager")
-        
+
         # HTTP endpoint for ClickHouse
         self.clickhouse_url = f"http://{self.enhanced_config.clickhouse_host}:{self.enhanced_config.clickhouse_port}"
-        
+
         # HTTP session for connection reuse (performance optimization)
         import requests
         self._http_session = requests.Session()
-        
+
         # Data cache for performance
         self._cache: Dict[str, Any] = {}
         self._cache_timestamps: Dict[str, datetime] = {}
-        
+
         # Subscriber pattern for data distribution (core_engine architecture)
         self.subscribers: List[IDataSubscriber] = []
         self.data_callbacks: List[Callable] = []
-        
+
         # ISystemComponent state management
         self.is_initialized: bool = False
         self.is_operational: bool = False
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
-        
+
         # Regime-aware integration (Rule 2 (Regime-First Principle))
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
-        
+
         # Test ClickHouse connection - FAIL FAST if unavailable
         self._connection_available = False
         try:
@@ -339,11 +339,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             raise ClickHouseConnectionError(
                 f"ClickHouse connection test failed: {e}. Cannot proceed without real market data."
             ) from e
-        
+
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
         )
-    
+
     @staticmethod
     def _coerce_bool(value: Any, default: bool = False, _depth: int = 0) -> bool:
         """Safely convert mock/async values to a deterministic boolean."""
@@ -367,15 +367,15 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return bool(value)
         except Exception:
             return default
-    
+
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
-    
+
     def register_with_orchestrator(self, orchestrator) -> str:
         """Register component with HierarchicalSystemOrchestrator"""
         from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
-        
+
         self.orchestrator = orchestrator
         self.component_id = orchestrator.register_component(
             name="ClickHouseDataManager",
@@ -384,45 +384,45 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             authority_level=AuthorityLevel.OPERATIONAL,
             initialization_order=10  # Early initialization for data access
         )
-        
+
         self.logger.info(f"✅ ClickHouseDataManager registered with orchestrator: {self.component_id}")
         return self.component_id
-    
+
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
         """Request authorization from orchestrator for privileged operations"""
         if not self.orchestrator or not self.component_id:
             self.logger.warning("No orchestrator available for authorization request")
             return False
-        
+
         return await self.orchestrator.request_system_authorization(
             operation, self.component_id, details
         )
-    
+
     def set_regime_engine(self, regime_engine: Any) -> None:
         """
         Inject regime engine reference for regime-aware data processing (Rule 2 Regime-First)
-        
+
         Args:
             regime_engine: EnhancedRegimeEngine instance
         """
         self.regime_engine = regime_engine
         self.logger.info(f"✅ RegimeEngine injected into DataManager (Regime-First Principle)")
-    
+
     def get_current_regime(self) -> Optional[Any]:
         """Get current market regime from regime engine"""
         if self.regime_engine and hasattr(self.regime_engine, 'current_regime'):
             return self.regime_engine.current_regime
         return None
-    
+
     # ========================================
     # ISystemComponent Interface Implementation
     # ========================================
-    
+
     async def initialize(self) -> bool:
         """Initialize the data manager component"""
         try:
             self.logger.info("Initializing ClickHouseDataManager...")
-            
+
             # Test connection - FAIL FAST if unavailable
             connection_result = self._test_connection()
             self._connection_available = self._coerce_bool(connection_result, default=False)
@@ -430,11 +430,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 raise ClickHouseConnectionError(
                     "ClickHouse database unavailable during initialization. Cannot proceed without real market data."
                 )
-            
+
             # Validate configuration
             if not self.enhanced_config.symbols:
                 self.logger.warning("No symbols configured for data manager")
-            
+
             # Pre-warm cache with available symbols if connection is available
             if self._connection_available:
                 try:
@@ -442,21 +442,21 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     self.logger.info(f"Found {len(available_symbols)} available symbols")
                 except Exception as e:
                     self.logger.warning(f"Could not pre-load available symbols: {e}")
-            
+
             self.is_initialized = True
             self.logger.info("✅ ClickHouseDataManager initialization completed")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"❌ ClickHouseDataManager initialization failed: {e}")
             return False
-    
+
     async def start(self) -> bool:
         """Start the data manager operations"""
         if not self.is_initialized:
             self.logger.error("Cannot start ClickHouseDataManager - not initialized")
             return False
-        
+
         try:
             self.is_operational = True
             self.logger.info("✅ ClickHouseDataManager started and operational")
@@ -464,21 +464,21 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         except Exception as e:
             self.logger.error(f"❌ ClickHouseDataManager start failed: {e}")
             return False
-    
+
     async def stop(self) -> bool:
         """Stop the data manager operations"""
         try:
             self.is_operational = False
-            
+
             # Clear cache on shutdown
             self.clear_cache()
-            
+
             self.logger.info("✅ ClickHouseDataManager stopped")
             return True
         except Exception as e:
             self.logger.error(f"❌ ClickHouseDataManager stop failed: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on the data manager"""
         connection_available = self._coerce_bool(self._connection_available, default=False)
@@ -495,7 +495,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'end_date': self.enhanced_config.end_date
             }
         }
-        
+
         # Test connection if operational - FAIL FAST if unavailable
         if self.is_operational:
             try:
@@ -508,9 +508,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 health_status['connection_error'] = str(e)
                 health_status['healthy'] = False
                 health_status['error'] = f'ClickHouse connection test failed: {e}'
-        
+
         return health_status
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get component status"""
         return {
@@ -526,17 +526,17 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'caching_enabled': self.enhanced_config.enable_caching
             }
         }
-    
+
     def add_subscriber(self, subscriber: IDataSubscriber) -> None:
         """Add data subscriber following core_engine pattern"""
         self.subscribers.append(subscriber)
         self.logger.info(f"Added data subscriber: {type(subscriber).__name__}")
-    
+
     def remove_subscriber(self, subscriber: IDataSubscriber) -> None:
         """Remove data subscriber"""
         if subscriber in self.subscribers:
             self.subscribers.remove(subscriber)
-    
+
     async def notify_subscribers(self, data: EnhancedMarketData) -> None:
         """Notify all subscribers of new data"""
         for subscriber in self.subscribers:
@@ -544,13 +544,13 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 await subscriber.on_market_data(data)
             except Exception as e:
                 self.logger.warning(f"Subscriber notification failed: {e}")
-    
+
     def _test_connection(self) -> bool:
         """Test ClickHouse connection using reusable HTTP session"""
         try:
             response = self._http_session.post(
-                self.clickhouse_url, 
-                data="SELECT 1", 
+                self.clickhouse_url,
+                data="SELECT 1",
                 timeout=CONNECTION_TEST_TIMEOUT_SECONDS
             )
             if response.status_code == 200 and response.text.strip() == "1":
@@ -563,21 +563,21 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 e,
             )
             return False
-    
+
     @staticmethod
     def _escape_sql_string(value: str) -> str:
         """Escape single quotes in SQL string to prevent SQL injection"""
         return value.replace("'", "''")
-    
+
     def _escape_symbols(self, symbols: List[str]) -> str:
         """Escape and join symbols for safe SQL IN clause"""
         escaped = [self._escape_sql_string(s) for s in symbols]
         return "', '".join(escaped)
-    
+
     def _execute_query(self, query: str) -> pd.DataFrame:
         """
         Execute ClickHouse query and return DataFrame with proper timezone handling
-        
+
         CRITICAL: All timestamps returned from ClickHouse queries are handled here at the source.
         ClickHouse toTimeZone() converts timestamp values to NY time but returns timezone-naive datetimes.
         This method ensures all timestamps are properly localized to America/New_York timezone.
@@ -585,19 +585,19 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         try:
             # Add TSVWithNames format to get proper column names
             formatted_query = f"{query} FORMAT TSVWithNames"
-            
+
             response = self._http_session.post(
-                self.clickhouse_url, 
+                self.clickhouse_url,
                 data=formatted_query,
                 headers={'Content-Type': 'text/plain'},
                 timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
             )
             response.raise_for_status()
-            
+
             # Parse response as TSV with headers
             from io import StringIO
             df = pd.read_csv(StringIO(response.text), sep='\t')
-            
+
             # FIX TIMEZONE AT SOURCE: Handle timestamp timezone conversion immediately after query
             # This ensures ALL data returned from ClickHouse has correct timezone, regardless of caller
             if 'timestamp' in df.columns and not df.empty:
@@ -606,8 +606,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 # Localize directly to America/New_York (NOT UTC!) to avoid 5-hour offset
                 if df['timestamp'].dt.tz is None:
                     df['timestamp'] = df['timestamp'].dt.tz_localize(
-                        'America/New_York', 
-                        ambiguous='infer', 
+                        'America/New_York',
+                        ambiguous='infer',
                         nonexistent='shift_forward'
                     )
                 else:
@@ -615,25 +615,25 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     sample_tz_name = str(df['timestamp'].iloc[0].tz) if len(df) > 0 else None
                     if sample_tz_name and 'America/New_York' not in sample_tz_name and 'US/Eastern' not in sample_tz_name:
                         df['timestamp'] = df['timestamp'].dt.tz_convert('America/New_York')
-            
+
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Query execution failed: {e}")
             self.logger.error(f"Query: {query}")
             raise
-    
+
     def get_available_symbols(self) -> List[str]:
         """Get list of available symbols for target date"""
         query = f"""
         SELECT ticker, COUNT(*) as records
-        FROM {self.enhanced_config.clickhouse_database}.ticks 
+        FROM {self.enhanced_config.clickhouse_database}.ticks
         WHERE toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
         HAVING records >= {MIN_RECORDS_FOR_SYMBOL}
         ORDER BY records DESC
         """
-        
+
         try:
             result = self._execute_query(query)
             symbols = result['ticker'].tolist()
@@ -642,7 +642,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         except Exception as e:
             self.logger.error(f"Failed to get available symbols: {e}")
             return []
-    
+
     def load_market_data(
         self,
         symbols: Optional[List[str]] = None,
@@ -652,19 +652,19 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     ) -> pd.DataFrame:
         """
         Load market data from ClickHouse
-        
+
         Args:
             symbols: List of symbols to load
             start_time: Start time (defaults to beginning of date range)
-            end_time: End time (defaults to end of date range)  
+            end_time: End time (defaults to end of date range)
             interval: Data interval (1min, 5min, 15min, 1h)
-            
+
         Returns:
             DataFrame with OHLCV data
         """
         symbols = symbols or self.enhanced_config.symbols
         interval = interval or self.enhanced_config.interval
-        
+
         # Default to full date range if no times specified
         if start_time is None:
             start_time = datetime.strptime(
@@ -674,27 +674,27 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             end_time = datetime.strptime(
                 f"{self.enhanced_config.end_date} 23:59:59", "%Y-%m-%d %H:%M:%S"
             )
-        
+
         # Check cache
         cache_key = f"{'-'.join(symbols)}_{start_time}_{end_time}_{interval}"
         if self._is_cached(cache_key):
             self.logger.debug(f"Returning cached data for {cache_key}")
             return self._cache[cache_key]
-        
+
         # Verify ClickHouse connection is available - FAIL FAST if not
         if not self._connection_available:
             raise ClickHouseConnectionError(
                 "ClickHouse database unavailable. Cannot load market data without real database connection."
             )
-        
+
         # Build query based on interval
         query = self._build_query(symbols, start_time, end_time, interval)
-        
+
         try:
             start_query_time = time.time()
             df = self._execute_query(query)
             query_time = time.time() - start_query_time
-            
+
             if df.empty:
                 raise DataUnavailableError(
                     f"No data returned for symbols {symbols}. Real market data required."
@@ -714,22 +714,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             raise DataUnavailableError(
                 f"Failed to load market data from ClickHouse: {e}. Real market data required."
             ) from e
-        
+
         # Cache the result (real or synthetic)
         self._cache[cache_key] = df
         self._cache_timestamps[cache_key] = datetime.now()
         return df
 
-    
+
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
         """Build ClickHouse query for market data with SQL injection protection"""
         # Escape symbols to prevent SQL injection
         symbols_str = self._escape_symbols(symbols)
-        
+
         # Convert datetime to string format for timezone-aware querying
         start_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
         end_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
-        
+
         # Convert datetime to nanoseconds for window_start comparisons (used in aggregated intervals)
         # ClickHouse stores window_start as nanoseconds since epoch
         # Handle timezone-aware datetimes by converting to UTC timestamp first
@@ -750,15 +750,15 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 # Fallback: use system timezone (less accurate but works without pytz)
                 start_ts = time.mktime(start_time.timetuple())
                 end_ts = time.mktime(end_time.timetuple())
-        
+
         # Convert to nanoseconds (ClickHouse window_start format)
         start_ns = int(start_ts * 1e9)
         end_ns = int(end_ts * 1e9)
-        
+
         if interval == "1min":
             # Use raw 1-minute data with timezone conversion
             query = f"""
-            SELECT 
+            SELECT
                 toTimeZone(toDateTime(window_start / 1000000000), 'America/New_York') as timestamp,
                 ticker as symbol,
                 open,
@@ -776,7 +776,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         elif interval == "5min":
             # Aggregate to 5-minute bars
             query = f"""
-            SELECT 
+            SELECT
                 toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
@@ -795,7 +795,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         elif interval == "15min":
             # Aggregate to 15-minute bars
             query = f"""
-            SELECT 
+            SELECT
                 toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
@@ -814,7 +814,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         elif interval == "1h":
             # Aggregate to 1-hour bars
             query = f"""
-            SELECT 
+            SELECT
                 toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour), 'America/New_York') as timestamp,
                 ticker as symbol,
                 argMin(open, window_start) as open,
@@ -832,14 +832,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             """
         else:
             raise ValueError(f"Unsupported interval: {interval}")
-        
+
         return query
-    
+
     def _standardize_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """Standardize DataFrame format"""
         if df.empty:
             return df
-        
+
         # Ensure timestamp is datetime (timezone already handled in _execute_query at source)
         # Note: Timezone conversion is now done in _execute_query() to fix it at the data source
         # This ensures all ClickHouse queries return properly timezone-aware timestamps
@@ -849,45 +849,45 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if df['timestamp'].dt.tz is None:
                 self.logger.warning("Timestamp timezone missing - applying fix (should be handled in _execute_query)")
                 df['timestamp'] = df['timestamp'].dt.tz_localize(
-                    'America/New_York', 
-                    ambiguous='infer', 
+                    'America/New_York',
+                    ambiguous='infer',
                     nonexistent='shift_forward'
                 )
-        
+
         # Ensure numeric columns are float
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        
+
         # Sort by symbol and timestamp
         df = df.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
-        
+
         return df
-    
+
     def _is_cached(self, cache_key: str) -> bool:
         """Check if data is cached and still valid"""
         if not self.enhanced_config.enable_caching:
             return False
-        
+
         if cache_key not in self._cache:
             return False
-        
+
         cache_time = self._cache_timestamps.get(cache_key)
         if cache_time is None:
             return False
-        
+
         age = (datetime.now() - cache_time).total_seconds()
         return age < self.enhanced_config.cache_ttl
-    
+
     def get_latest_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, float]:
         """Get latest prices for symbols"""
         symbols = symbols or self.enhanced_config.symbols
         # Escape symbols to prevent SQL injection
         symbols_str = self._escape_symbols(symbols)
-        
+
         query = f"""
-        SELECT 
+        SELECT
             ticker as symbol,
             argMax(close, window_start) as latest_price
         FROM {self.enhanced_config.clickhouse_database}.ticks
@@ -895,20 +895,20 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         AND toDate(toDateTime(window_start / 1000000000)) BETWEEN '{self.enhanced_config.start_date}' AND '{self.enhanced_config.end_date}'
         GROUP BY ticker
         """
-        
+
         try:
             df = self._execute_query(query)
             return dict(zip(df['symbol'], df['latest_price']))
         except Exception as e:
             self.logger.error(f"Failed to get latest prices: {e}")
             return {}
-    
+
     def clear_cache(self):
         """Clear data cache"""
         self._cache.clear()
         self._cache_timestamps.clear()
         self.logger.info("Data cache cleared")
-    
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
         return {
@@ -916,21 +916,21 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             'cache_keys': list(self._cache.keys()),
             'cache_timestamps': {k: v.isoformat() for k, v in self._cache_timestamps.items()}
         }
-    
+
     # ========================================================================================
     # CORE ENGINE INTERFACE COMPLIANCE METHODS
     # ========================================================================================
-    
-    def get_market_data(self, symbol: str, start_time: Optional[str] = None, 
+
+    def get_market_data(self, symbol: str, start_time: Optional[str] = None,
                        end_time: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
         Core Engine compatible market data interface
-        
+
         Args:
             symbol: Trading symbol
             start_time: Start time in 'YYYY-MM-DD' or 'HH:MM' format (optional)
             end_time: End time in 'YYYY-MM-DD' or 'HH:MM' format (optional)
-            
+
         Returns:
             DataFrame with OHLCV data following core_engine standards
         """
@@ -938,7 +938,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Convert string times to datetime objects for load_market_data
             start_dt = None
             end_dt = None
-            
+
             if start_time:
                 # Check format and parse accordingly
                 if ' ' in start_time:  # Full datetime format (YYYY-MM-DD HH:MM:SS)
@@ -947,7 +947,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     start_dt = datetime.strptime(f"{start_time} 09:30:00", "%Y-%m-%d %H:%M:%S")
                 else:  # Time format (HH:MM)
                     start_dt = datetime.strptime(f"{self.enhanced_config.start_date} {start_time}:00", "%Y-%m-%d %H:%M:%S")
-            
+
             if end_time:
                 # Check format and parse accordingly
                 if ' ' in end_time:  # Full datetime format (YYYY-MM-DD HH:MM:SS)
@@ -956,7 +956,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     end_dt = datetime.strptime(f"{end_time} 16:00:00", "%Y-%m-%d %H:%M:%S")
                 else:  # Time format (HH:MM)
                     end_dt = datetime.strptime(f"{self.enhanced_config.end_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
-            
+
             # Use existing load_market_data method
             df = self.load_market_data(
                 symbols=[symbol],
@@ -964,22 +964,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 end_time=end_dt,
                 interval=self.enhanced_config.interval
             )
-            
+
             if df.empty:
                 return None
-            
+
             # Filter for specific symbol and convert to core_engine format
             symbol_df = df[df['symbol'] == symbol].copy()
             if symbol_df.empty:
                 return None
-            
+
             # Keep timestamp as column for feature engineering compatibility
             # Don't set as index to avoid ambiguity errors
             symbol_df = symbol_df[['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']]
-            
+
             # Sort by timestamp for time-series operations
             symbol_df = symbol_df.sort_values('timestamp').reset_index(drop=True)
-            
+
             # Notify subscribers asynchronously
             if not symbol_df.empty:
                 # Use asyncio.create_task only if there's a running event loop
@@ -989,22 +989,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 except RuntimeError:
                     # No event loop running, skip async notification
                     pass
-            
+
             return symbol_df
-            
+
         except Exception as e:
             self.logger.error(f"Error in get_market_data for {symbol}: {e}")
             return None
-    
+
     async def _notify_latest_data_point(self, symbol: str, df: pd.DataFrame) -> None:
         """Notify subscribers of latest data point (core_engine pattern)"""
         try:
             if df.empty:
                 return
-                
+
             # Get the latest row
             latest_row = df.iloc[-1]
-            
+
             # Create EnhancedMarketData object
             market_data = EnhancedMarketData(
                 symbol=symbol,
@@ -1016,47 +1016,47 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 volume=float(latest_row['volume']),
                 source="clickhouse"
             )
-            
+
             # Note: Subscriber notification not implemented yet
             # await self.notify_subscribers(market_data)
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to notify subscribers: {e}")
-    
-    def get_historical_data(self, symbol: str, start_date: datetime, 
+
+    def get_historical_data(self, symbol: str, start_date: datetime,
                           end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
         """
         Core Engine compatible historical data interface
-        
+
         Implements BaseDataManager interface for backward compatibility
         """
         try:
             # Check if requested date range overlaps with our configured date range
             config_start = datetime.strptime(self.enhanced_config.start_date, "%Y-%m-%d").date()
             config_end = datetime.strptime(self.enhanced_config.end_date, "%Y-%m-%d").date()
-            
+
             # Handle different date input types
             if isinstance(start_date, str):
                 start_date = datetime.strptime(start_date, "%Y-%m-%d")
             if isinstance(end_date, str):
                 end_date = datetime.strptime(end_date, "%Y-%m-%d")
-            
+
             # Convert to date objects if they're datetime objects
             start_date_obj = start_date.date() if hasattr(start_date, 'date') else start_date
             end_date_obj = end_date.date() if hasattr(end_date, 'date') else end_date
-            
+
             if start_date_obj <= config_end and end_date_obj >= config_start:
                 df = self.get_market_data(symbol)
                 if df is not None and not df.empty:
                     return df
-            
+
             # Fallback to empty DataFrame with required columns
             return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
-            
+
         except Exception as e:
             self.logger.error(f"Error in get_historical_data for {symbol}: {e}")
             return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
-    
+
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price (latest close price from our data)"""
         try:
@@ -1067,7 +1067,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         except Exception as e:
             self.logger.error(f"Error getting current price for {symbol}: {e}")
             return None
-    
+
     def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols"""
         prices = {}
@@ -1076,38 +1076,38 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if price is not None:
                 prices[symbol] = price
         return prices
-    
-    def load_data(self, symbols: Optional[List[str]] = None, 
+
+    def load_data(self, symbols: Optional[List[str]] = None,
                   start_time: Optional[datetime] = None,
                   end_time: Optional[datetime] = None,
                   interval: Optional[str] = None) -> pd.DataFrame:
         """
         Load data from ClickHouse database
-        
+
         This is the primary data loading method for institutional backtesting.
         Provides comprehensive data loading with validation and caching.
-        
+
         Args:
             symbols: List of symbols to load (defaults to config symbols)
             start_time: Start time for data (defaults to beginning of target date)
             end_time: End time for data (defaults to end of target date)
             interval: Data interval (1min, 5min, 15min, 1h)
-            
+
         Returns:
             DataFrame with loaded market data
         """
         return self.load_market_data(symbols, start_time, end_time, interval)
-    
+
     def validate_data(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
         Validate loaded data quality and integrity
-        
+
         Performs comprehensive validation checks on loaded market data
         including completeness, consistency, and anomaly detection.
-        
+
         Args:
             data: DataFrame to validate
-            
+
         Returns:
             Dictionary with validation results and quality metrics
         """
@@ -1118,14 +1118,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'issues': ['Empty dataset'],
                 'metrics': {}
             }
-        
+
         validation_results = {
             'valid': True,
             'score': 1.0,
             'issues': [],
             'metrics': {}
         }
-        
+
         try:
             # Check for required columns
             required_cols = ['symbol', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -1134,21 +1134,21 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 validation_results['issues'].append(f"Missing required columns: {missing_cols}")
                 validation_results['valid'] = False
                 validation_results['score'] -= 0.3
-            
+
             # Check for null values
             null_counts = data.isnull().sum()
             total_nulls = null_counts.sum()
             if total_nulls > 0:
                 validation_results['issues'].append(f"Found {total_nulls} null values")
                 validation_results['score'] -= 0.1
-            
+
             # Check timestamp ordering
             if 'timestamp' in data.columns:
                 timestamps = pd.to_datetime(data['timestamp'])
                 if not timestamps.is_monotonic_increasing:
                     validation_results['issues'].append("Timestamps not in chronological order")
                     validation_results['score'] -= 0.2
-            
+
             # Check price consistency (high >= low, close between high/low)
             if all(col in data.columns for col in ['open', 'high', 'low', 'close']):
                 invalid_prices = (
@@ -1159,14 +1159,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 if invalid_prices > 0:
                     validation_results['issues'].append(f"Found {invalid_prices} invalid price relationships")
                     validation_results['score'] -= 0.3  # More severe penalty for price inconsistencies
-            
+
             # Check volume is non-negative
             if 'volume' in data.columns:
                 negative_volume = (data['volume'] < 0).sum()
                 if negative_volume > 0:
                     validation_results['issues'].append(f"Found {negative_volume} negative volume values")
                     validation_results['score'] -= 0.2  # More severe penalty for negative volume
-            
+
             # Calculate quality metrics
             validation_results['metrics'] = {
                 'total_records': len(data),
@@ -1178,47 +1178,47 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'null_percentage': (total_nulls / (len(data) * len(data.columns))) * 100,
                 'completeness_score': 1.0 - (total_nulls / (len(data) * len(data.columns)))
             }
-            
+
             # Ensure score doesn't go below 0
             validation_results['score'] = max(0.0, validation_results['score'])
-            
+
             # Mark as invalid if score too low
             if validation_results['score'] < 0.7:
                 validation_results['valid'] = False
-            
+
         except Exception as e:
             validation_results['valid'] = False
             validation_results['score'] = 0.0
             validation_results['issues'].append(f"Validation error: {str(e)}")
-        
+
         return validation_results
-    
+
     # ========================================
     # STANDARDIZED DATA FLOW METHODS
     # ========================================
-    
+
     def process_market_data(self, symbol: str, **kwargs) -> pd.DataFrame:
         """Standardized method for processing market data (alias for get_market_data)"""
         return self.get_market_data(symbol, **kwargs)
-    
+
     def fetch_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
         """Standardized method for fetching data (alias for load_data)"""
         return self.load_data(symbols, **kwargs)
-    
+
     def process_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
         """Standardized method for data processing (alias for load_market_data)"""
         return self.load_market_data(symbols, **kwargs)
-    
+
     # ========================================
     # ANALYTICS INTEGRATION METHODS
     # ========================================
-    
+
     def calculate_metrics(self, data: Any = None) -> Dict[str, Any]:
         """Calculate data analytics metrics"""
         try:
             # Get data manager state from correct attributes
             symbols_count = len(self.enhanced_config.symbols)
-            
+
             # Calculate data metrics using correct attribute references
             data_metrics = {
                 'symbols_managed': symbols_count,
@@ -1228,14 +1228,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'data_quality_score': self._calculate_data_quality_score(),
                 'coverage_metrics': self._calculate_coverage_metrics()
             }
-            
+
             return {
                 'metrics_calculated': True,
                 'calculation_timestamp': datetime.now(),
                 'data_metrics': data_metrics,
                 'component': 'ClickHouseDataManager'
             }
-            
+
         except Exception as e:
             self.logger.error(f"Data metrics calculation failed: {e}")
             return {
@@ -1243,7 +1243,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'error': str(e),
                 'calculation_timestamp': datetime.now()
             }
-    
+
     def analyze_performance(self, data: Any = None) -> Dict[str, Any]:
         """Analyze data manager performance"""
         try:
@@ -1263,14 +1263,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     'data_pipeline_status': 'active'
                 }
             }
-            
+
             return {
                 'performance_analyzed': True,
                 'analysis_timestamp': datetime.now(),
                 'performance_analysis': performance_analysis,
                 'component': 'ClickHouseDataManager'
             }
-            
+
         except Exception as e:
             self.logger.error(f"Data performance analysis failed: {e}")
             return {
@@ -1278,14 +1278,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'error': str(e),
                 'analysis_timestamp': datetime.now()
             }
-    
+
     def generate_analytics(self, data: Any = None) -> Dict[str, Any]:
         """Generate comprehensive data analytics"""
         try:
             # Combine metrics and performance analysis
             metrics = self.calculate_metrics(data)
             performance = self.analyze_performance(data)
-            
+
             analytics = {
                 'analytics_generated': True,
                 'generation_timestamp': datetime.now(),
@@ -1299,9 +1299,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'recommendations': self._generate_data_recommendations(),
                 'component': 'ClickHouseDataManager'
             }
-            
+
             return analytics
-            
+
         except Exception as e:
             self.logger.error(f"Data analytics generation failed: {e}")
             return {
@@ -1309,7 +1309,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'error': str(e),
                 'generation_timestamp': datetime.now()
             }
-    
+
     def track_performance(self, data: Any = None) -> Dict[str, Any]:
         """Track data manager performance over time"""
         try:
@@ -1322,9 +1322,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'alerts': self._generate_data_alerts(),
                 'component': 'ClickHouseDataManager'
             }
-            
+
             return performance_tracking
-            
+
         except Exception as e:
             self.logger.error(f"Data performance tracking failed: {e}")
             return {
@@ -1332,45 +1332,45 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'error': str(e),
                 'tracking_timestamp': datetime.now()
             }
-    
+
     def monitor_performance(self, data: Any = None) -> Dict[str, Any]:
         """Monitor data performance (alias for track_performance)"""
         return self.track_performance(data)
-    
+
     def _calculate_data_quality_score(self) -> float:
         """Calculate data quality score (0-100) based on connection and cache state"""
         try:
             score = 50.0  # Base score
-            
+
             # Connection availability (+35 points)
             if self._connection_available:
                 score += 35.0
-            
+
             # Cache utilization (+15 points)
             if self.enhanced_config.enable_caching and len(self._cache) > 0:
                 score += 15.0
-            
+
             return min(score, 100.0)
-                
+
         except Exception:
             return 50.0  # Default moderate quality
-    
+
     def _calculate_coverage_metrics(self) -> Dict[str, Any]:
         """Calculate data coverage metrics based on actual cached data"""
         try:
             symbols_count = len(self.enhanced_config.symbols)
             cached_symbols = len(self._cache)
-            
+
             # Calculate completeness based on cache state
             completeness = (cached_symbols / max(symbols_count, 1)) * 100 if symbols_count > 0 else 0.0
-            
+
             return {
                 'symbols_covered': symbols_count,
                 'symbols_cached': cached_symbols,
                 'coverage_percentage': min(100.0, symbols_count * 10),
                 'data_completeness': min(completeness, 100.0) if self._connection_available else 0.0
             }
-            
+
         except Exception:
             return {
                 'symbols_covered': 0,
@@ -1378,7 +1378,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 'coverage_percentage': 0.0,
                 'data_completeness': 0.0
             }
-    
+
     def _assess_data_availability(self) -> str:
         """Assess data availability based on connection state"""
         try:
@@ -1386,28 +1386,28 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 return "High"
             else:
                 return "Unavailable"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _assess_query_performance(self) -> str:
         """Assess query performance"""
         try:
             # Mock performance assessment
             return "Good"  # Assume good performance
-            
+
         except Exception:
             return "Unknown"
-    
+
     def _assess_data_freshness(self) -> str:
         """Assess data freshness"""
         try:
             # Mock freshness assessment
             return "Current"  # Assume current data
-            
+
         except Exception:
             return "Unknown"
-    
+
     def _calculate_cache_utilization(self) -> float:
         """Calculate cache utilization percentage"""
         try:
@@ -1415,10 +1415,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 return 75.0  # Mock good cache utilization
             else:
                 return 0.0  # No caching
-                
+
         except Exception:
             return 0.0
-    
+
     def _assess_data_health(self) -> str:
         """Assess overall data health based on connection and configuration"""
         try:
@@ -1430,10 +1430,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     return "No symbols configured"
             else:
                 return "Disconnected"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _calculate_reliability_score(self) -> float:
         """Calculate reliability score (0-100) based on connection state"""
         try:
@@ -1441,44 +1441,44 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 return 90.0  # High reliability when connected
             else:
                 return 30.0  # Low reliability when disconnected
-                
+
         except Exception:
             return 50.0  # Default moderate reliability
-    
+
     def _calculate_efficiency_score(self) -> float:
         """Calculate efficiency score (0-100) based on cache, connection, and symbols"""
         try:
             cache_score = 25.0 if self.enhanced_config.enable_caching else 0.0
             connection_score = 50.0 if self._connection_available else 0.0
             symbols_score = min(25.0, len(self.enhanced_config.symbols) * 2.5)
-            
+
             return cache_score + connection_score + symbols_score
-            
+
         except Exception:
             return 50.0  # Default moderate efficiency
-    
+
     def _generate_data_recommendations(self) -> List[str]:
         """Generate data recommendations based on current state"""
         try:
             recommendations = []
-            
+
             if not self._connection_available:
                 recommendations.append("Establish database connection")
-            
+
             if not self.enhanced_config.enable_caching:
                 recommendations.append("Enable caching for better performance")
-            
+
             symbols_count = len(self.enhanced_config.symbols)
             if symbols_count == 0:
                 recommendations.append("Configure symbols for data management")
             elif symbols_count < 5:
                 recommendations.append("Consider adding more symbols for diversification")
-            
+
             return recommendations
-            
+
         except Exception:
             return ["Unable to generate recommendations"]
-    
+
     def _assess_performance_trend(self) -> str:
         """Assess performance trend based on connection state"""
         try:
@@ -1486,23 +1486,23 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 return "Stable"
             else:
                 return "Declining"
-                
+
         except Exception:
             return "Unknown"
-    
+
     def _generate_data_alerts(self) -> List[str]:
         """Generate data alerts based on current state"""
         try:
             alerts = []
-            
+
             if not self._connection_available:
                 alerts.append("Database connection lost")
-            
+
             symbols_count = len(self.enhanced_config.symbols)
             if symbols_count == 0:
                 alerts.append("No symbols configured")
-            
+
             return alerts
-            
+
         except Exception:
             return []

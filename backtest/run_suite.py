@@ -8,13 +8,13 @@ Master script to run backtest experiments.
 Usage:
     # Run single experiment
     python run_suite.py --experiment smoke_test
-    
+
     # Run with custom config
     python run_suite.py --experiment baseline --config configs/my_config.yaml
-    
+
     # Run full suite
     python run_suite.py --suite all
-    
+
     # List available experiments
     python run_suite.py --list
 
@@ -32,7 +32,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -117,12 +117,12 @@ def list_experiments():
     print("\n" + "="*80)
     print("📋 AVAILABLE EXPERIMENTS")
     print("="*80)
-    
+
     for exp_name, exp_info in EXPERIMENTS.items():
         print(f"\n{exp_name}")
         print(f"  Description: {exp_info['description']}")
         print(f"  Config:      {exp_info['default_config']}")
-    
+
     print("\n" + "="*80)
 
 
@@ -133,12 +133,12 @@ async def run_experiment(
 ) -> bool:
     """
     Run a single experiment.
-    
+
     Args:
         experiment_name: Name of experiment to run
         config_path: Optional custom config path
         base_config_path: Base config path
-        
+
     Returns:
         True if experiment succeeded
     """
@@ -146,36 +146,36 @@ async def run_experiment(
         logger.error(f"Unknown experiment: {experiment_name}")
         logger.info("Run with --list to see available experiments")
         return False
-    
+
     exp_info = EXPERIMENTS[experiment_name]
-    
+
     # Use default config if not provided
     if config_path is None:
         config_path = exp_info['default_config']
-    
+
     logger.info(f"🚀 Starting experiment: {experiment_name}")
     logger.info(f"   Config: {config_path}")
-    
+
     try:
         # Load config
         config = load_config(config_path, base_config_path)
-        
+
         # Instantiate experiment
         experiment_class = exp_info['class']
         experiment = experiment_class(config)
-        
+
         # Run experiment (ORCHESTRATION ONLY - engine is black box)
         logger.info(f"   {experiment.get_description()}")
         result = await experiment.run()
-        
+
         # Print summary
         experiment.print_summary(result)
-        
+
         # Save results
         experiment.save_results(result)
-        
+
         return result.success
-        
+
     except Exception as e:
         logger.error(f"❌ Experiment failed: {e}", exc_info=True)
         return False
@@ -184,10 +184,10 @@ async def run_experiment(
 async def run_suite(suite_name: str = "all") -> bool:
     """
     Run experiment suite.
-    
+
     Args:
         suite_name: Suite name ('all' or custom)
-        
+
     Returns:
         True if all experiments succeeded
     """
@@ -197,34 +197,34 @@ async def run_suite(suite_name: str = "all") -> bool:
         # Add custom suite definitions here
         logger.error(f"Unknown suite: {suite_name}")
         return False
-    
+
     logger.info(f"🧪 Running experiment suite: {suite_name}")
     logger.info(f"   Experiments: {len(experiments_to_run)}")
-    
+
     results = []
     for exp_name in experiments_to_run:
         success = await run_experiment(exp_name)
         results.append((exp_name, success))
-        
+
         if not success:
             logger.warning(f"⚠️  Experiment failed: {exp_name}")
-    
+
     # Print suite summary
     print("\n" + "="*80)
     print("📊 SUITE SUMMARY")
     print("="*80)
-    
+
     passed = sum(1 for _, success in results if success)
     total = len(results)
-    
+
     for exp_name, success in results:
         status = "✅ PASS" if success else "❌ FAIL"
         print(f"{status}  {exp_name}")
-    
+
     print()
     print(f"Results: {passed}/{total} experiments passed")
     print("="*80)
-    
+
     return passed == total
 
 
@@ -237,61 +237,61 @@ def main():
 Examples:
   # Run smoke test
   python run_suite.py --experiment smoke_test
-  
+
   # Run with custom config
   python run_suite.py --experiment baseline --config my_config.yaml
-  
+
   # Run full suite
   python run_suite.py --suite all
-  
+
   # List experiments
   python run_suite.py --list
         """
     )
-    
+
     parser.add_argument(
         '--experiment',
         type=str,
         help='Experiment to run (e.g., smoke_test, baseline)'
     )
-    
+
     parser.add_argument(
         '--config',
         type=str,
         help='Path to experiment config file (YAML)'
     )
-    
+
     parser.add_argument(
         '--base-config',
         type=str,
         default='backtest/configs/base_config.yaml',
         help='Path to base config file (default: backtest/configs/base_config.yaml)'
     )
-    
+
     parser.add_argument(
         '--suite',
         type=str,
         help='Run experiment suite (e.g., all)'
     )
-    
+
     parser.add_argument(
         '--list',
         action='store_true',
         help='List available experiments'
     )
-    
+
     args = parser.parse_args()
-    
+
     # Handle list
     if args.list:
         list_experiments()
         return 0
-    
+
     # Handle suite
     if args.suite:
         success = asyncio.run(run_suite(args.suite))
         return 0 if success else 1
-    
+
     # Handle single experiment
     if args.experiment:
         success = asyncio.run(
@@ -302,7 +302,7 @@ Examples:
             )
         )
         return 0 if success else 1
-    
+
     # No arguments - show help
     parser.print_help()
     return 0

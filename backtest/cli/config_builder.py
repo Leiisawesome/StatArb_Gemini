@@ -11,36 +11,36 @@ from datetime import datetime, timedelta
 class ConfigurationBuilder:
     """
     Build backtest configurations from templates
-    
+
     Provides ready-to-use configuration templates for common scenarios:
     - Simple single-strategy backtest
     - Momentum strategy
     - Mean reversion strategy
     - Multi-strategy portfolio
     """
-    
+
     def create_template(self, template_name: str) -> Dict[str, Any]:
         """Create configuration from template"""
-        
+
         templates = {
             'simple': self._simple_template,
             'momentum': self._momentum_template,
             'mean_reversion': self._mean_reversion_template,
             'multi_strategy': self._multi_strategy_template
         }
-        
+
         template_func = templates.get(template_name)
         if not template_func:
             raise ValueError(f"Unknown template: {template_name}")
-        
+
         return template_func()
-    
+
     def _simple_template(self) -> Dict[str, Any]:
         """Simple single-strategy backtest"""
-        
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=90)  # 3 months
-        
+
         return {
             'backtest_name': 'simple_backtest',
             'backtest_mode': 'historical',
@@ -82,13 +82,13 @@ class ConfigurationBuilder:
                 'generate_json_report': True
             }
         }
-    
+
     def _momentum_template(self) -> Dict[str, Any]:
         """Momentum strategy template"""
-        
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=180)  # 6 months
-        
+
         return {
             'backtest_name': 'momentum_backtest',
             'backtest_mode': 'historical',
@@ -134,13 +134,13 @@ class ConfigurationBuilder:
                 'generate_csv_trades': True
             }
         }
-    
+
     def _mean_reversion_template(self) -> Dict[str, Any]:
         """Mean reversion strategy template"""
-        
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=90)  # 3 months
-        
+
         return {
             'backtest_name': 'mean_reversion_backtest',
             'backtest_mode': 'historical',
@@ -183,13 +183,13 @@ class ConfigurationBuilder:
                 'generate_json_report': True
             }
         }
-    
+
     def _multi_strategy_template(self) -> Dict[str, Any]:
         """Multi-strategy portfolio template"""
-        
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=180)  # 6 months
-        
+
         return {
             'backtest_name': 'multi_strategy_backtest',
             'backtest_mode': 'historical',

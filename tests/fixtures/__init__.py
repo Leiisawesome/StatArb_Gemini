@@ -16,12 +16,12 @@ __all__ = [
     'strategy_manager_fixture',
     'execution_engine_fixture',
     'orchestrator_fixture',
-    
+
     # Data fixtures
     'sample_market_data',
     'sample_signals',
     'sample_positions',
-    
+
     # Mock factories
     'create_mock_strategy',
     'create_mock_execution',

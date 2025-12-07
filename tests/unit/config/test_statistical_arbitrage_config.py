@@ -42,7 +42,7 @@ class TestStatisticalArbitrageConfig:
     def test_inheritance_from_base(self):
         """Test that StatisticalArbitrageConfig inherits from BaseStrategyConfig."""
         config = StatisticalArbitrageConfig()
-        
+
         # Test inherited properties
         assert hasattr(config, 'name')
         assert hasattr(config, 'strategy_type')
@@ -57,7 +57,7 @@ class TestStatisticalArbitrageConfig:
         """Test that StatisticalArbitrageConfig can be serialized to dict."""
         config = StatisticalArbitrageConfig()
         config_dict = asdict(config)
-        
+
         assert isinstance(config_dict, dict)
         assert 'name' in config_dict
         assert 'strategy_type' in config_dict
@@ -69,25 +69,25 @@ class TestStatisticalArbitrageConfig:
     def test_strategy_specific_parameters(self):
         """Test strategy-specific parameters are correctly set."""
         config = StatisticalArbitrageConfig()
-        
+
         # Test cointegration parameters
         assert config.cointegration_lookback == 252
         assert config.cointegration_threshold == 0.05
-        
+
         # Test zscore parameters
         assert config.entry_zscore_threshold == 2.0
         assert config.exit_zscore_threshold == 0.5
-        
+
         # Test correlation parameters
         assert config.min_correlation == 0.7
-        
+
         # Test holding period
         assert config.max_holding_period == 20
 
     def test_parameter_validation(self):
         """Test parameter validation."""
         config = StatisticalArbitrageConfig()
-        
+
         # Test that all parameters are within expected ranges
         assert config.cointegration_lookback > 0
         assert config.entry_zscore_threshold > 0
@@ -101,7 +101,7 @@ class TestStatisticalArbitrageConfig:
             name="custom_stat_arb",
             strategy_id="stat_arb_001"
         )
-        
+
         assert config.name == "custom_stat_arb"
         assert config.strategy_id == "stat_arb_001"
         assert config.strategy_type == StrategyType.STATISTICAL_ARBITRAGE
@@ -109,10 +109,10 @@ class TestStatisticalArbitrageConfig:
     def test_zscore_thresholds_relationship(self):
         """Test that zscore thresholds have proper relationship."""
         config = StatisticalArbitrageConfig()
-        
+
         # Entry threshold should be higher than exit threshold
         assert config.entry_zscore_threshold > config.exit_zscore_threshold
-        
+
         # Both should be positive
         assert config.entry_zscore_threshold > 0
         assert config.exit_zscore_threshold > 0
@@ -120,9 +120,9 @@ class TestStatisticalArbitrageConfig:
     def test_correlation_parameters(self):
         """Test correlation-related parameters."""
         config = StatisticalArbitrageConfig()
-        
+
         # Min correlation should be within valid range
         assert 0 < config.min_correlation < 1
-        
+
         # Should be a reasonable threshold for pair selection
         assert config.min_correlation >= 0.5  # At least moderate correlation
