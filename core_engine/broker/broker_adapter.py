@@ -14,6 +14,7 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 import uuid
 import warnings
+from unittest.mock import Mock
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -168,6 +169,7 @@ class StandardPosition:
     """Standardized position representation"""
     symbol: str
     quantity: float
+    side: str  # "long" or "short"
     avg_cost: float
     market_value: float
     unrealized_pnl: float
@@ -283,6 +285,15 @@ class MockBrokerAdapter(BrokerAdapterInterface):
         super().__init__(credentials)
         self._orders = {}
         self._positions = {}
+        # Mock client for testing
+        self.client = Mock()
+        self.client.placeOrder = Mock()
+        self.client.reqMktData = Mock()
+        self.client.cancelOrder = Mock()
+        # Mock wrapper for testing
+        self.wrapper = Mock()
+        self.wrapper.quotes = {}
+        self.wrapper.orders = {}
 
     async def connect(self) -> bool:
         """Mock connect"""
@@ -329,7 +340,19 @@ class MockBrokerAdapter(BrokerAdapterInterface):
 
     async def get_positions(self, account_id: Optional[str] = None) -> List[StandardPosition]:
         """Mock get positions"""
-        return []
+        positions = []
+        for symbol, pos_data in self._positions.items():
+            side = "long" if pos_data['position'] > 0 else "short"
+            positions.append(StandardPosition(
+                symbol=symbol,
+                quantity=pos_data['position'],
+                side=side,
+                avg_cost=pos_data['avg_cost'],
+                market_value=pos_data['position'] * pos_data['avg_cost'],
+                unrealized_pnl=0.0,
+                last_updated=pos_data['timestamp']
+            ))
+        return positions
 
     async def get_account_info(self, account_id: Optional[str] = None) -> StandardAccount:
         """Mock get account info"""
@@ -337,7 +360,7 @@ class MockBrokerAdapter(BrokerAdapterInterface):
             account_id="MOCK123",
             account_type="PAPER",
             total_equity=100000.00,
-            buying_power=100000.00,
+            buying_power=200000.00,
             cash_balance=100000.00
         )
 
@@ -349,6 +372,30 @@ class MockBrokerAdapter(BrokerAdapterInterface):
             'ask': 100.05,
             'last': 100.02,
             'volume': 10000,
+            'timestamp': datetime.now()
+        }
+
+    def _create_stock_contract(self, symbol: str) -> Any:
+        """Mock create stock contract"""
+        # Return a mock contract object
+        return {'symbol': symbol, 'secType': 'STK', 'exchange': 'SMART'}
+
+    def is_market_open(self) -> bool:
+        """Mock check if market is open"""
+        from datetime import datetime
+        now = datetime.now()
+        # Market is open Monday-Friday, 9:30 AM - 4:00 PM ET
+        # For simplicity, just check weekday (0-4 = Mon-Fri)
+        return now.weekday() < 5
+
+    async def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Mock get latest quote"""
+        return {
+            'bid_price': 100.00,
+            'ask_price': 100.05,
+            'bid_size': 100,
+            'ask_size': 100,
+            'last_price': 100.02,
             'timestamp': datetime.now()
         }
 
