@@ -1214,6 +1214,19 @@ class PolygonAggregatedDataManager:
     
     def _notify_bar_completion(self, symbol: str, timeframe: str, bar: PolygonAggregateBar) -> None:
         """Notify callbacks of bar completion"""
+        # Store the completed bar
+        if symbol not in self._bars:
+            self._bars[symbol] = {}
+        if timeframe not in self._bars[symbol]:
+            self._bars[symbol][timeframe] = []
+        
+        self._bars[symbol][timeframe].append(bar)
+        
+        # Limit storage (keep last 1000 bars per timeframe)
+        if len(self._bars[symbol][timeframe]) > 1000:
+            self._bars[symbol][timeframe] = self._bars[symbol][timeframe][-1000:]
+        
+        # Notify callbacks
         for callback in self._bar_callbacks:
             try:
                 callback(symbol, timeframe, bar)
@@ -1233,7 +1246,8 @@ class PolygonAggregatedDataManager:
         if timeframe not in self._bars[symbol]:
             return []
         
-        return self._bars[symbol][timeframe][-limit:]
+        # Return most recent bars first (reverse chronological order)
+        return list(reversed(self._bars[symbol][timeframe][-limit:]))
     
     def get_latest_price(self, symbol: str) -> Optional[float]:
         """Get latest price for a symbol"""

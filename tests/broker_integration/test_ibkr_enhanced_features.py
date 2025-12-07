@@ -13,7 +13,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core_engine.config.broker_config import load_broker_config
-from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 
 def test_market_status_and_clock():
@@ -24,7 +24,7 @@ def test_market_status_and_clock():
     print("=" * 70)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()
@@ -82,7 +82,7 @@ def test_market_data_and_quotes():
     print("=" * 70)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()
@@ -139,7 +139,7 @@ def test_order_validation():
     print("=" * 70)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()
@@ -196,7 +196,7 @@ def test_stop_orders():
     print("=" * 70)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()

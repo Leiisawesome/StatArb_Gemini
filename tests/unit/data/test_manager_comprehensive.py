@@ -1068,45 +1068,41 @@ class TestExecuteQuery:
             manager = ClickHouseDataManager(config)
             yield manager
     
-    @patch('requests.post')
-    def test_execute_query_success(self, mock_post, data_manager):
+    def test_execute_query_success(self, data_manager):
         """Test _execute_query successfully executes query"""
         # Mock successful response
         mock_response = Mock()
         mock_response.text = 'timestamp\tsymbol\topen\thigh\tlow\tclose\tvolume\n2024-01-01 09:30:00\tAAPL\t150.0\t151.0\t149.0\t150.5\t1000000'
         mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
         
-        query = "SELECT * FROM test"
-        result = data_manager._execute_query(query)
-        
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) > 0
+        with patch.object(data_manager._http_session, 'post', return_value=mock_response) as mock_post:
+            query = "SELECT * FROM test"
+            result = data_manager._execute_query(query)
+            
+            assert isinstance(result, pd.DataFrame)
+            assert len(result) > 0
     
-    @patch('requests.post')
-    def test_execute_query_timezone_handling(self, mock_post, data_manager):
+    def test_execute_query_timezone_handling(self, data_manager):
         """Test _execute_query handles timezone conversion"""
         # Mock response with timestamp
         mock_response = Mock()
         mock_response.text = 'timestamp\tsymbol\topen\n2024-01-01 09:30:00\tAAPL\t150.0'
         mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
         
-        query = "SELECT * FROM test"
-        result = data_manager._execute_query(query)
-        
-        if 'timestamp' in result.columns and not result.empty:
-            # Check timestamp is timezone-aware
-            assert result['timestamp'].iloc[0].tz is not None
+        with patch.object(data_manager._http_session, 'post', return_value=mock_response) as mock_post:
+            query = "SELECT * FROM test"
+            result = data_manager._execute_query(query)
+            
+            if 'timestamp' in result.columns and not result.empty:
+                # Check timestamp is timezone-aware
+                assert result['timestamp'].iloc[0].tz is not None
     
-    @patch('requests.post')
-    def test_execute_query_error_handling(self, mock_post, data_manager):
+    def test_execute_query_error_handling(self, data_manager):
         """Test _execute_query raises exception on error"""
-        mock_post.side_effect = Exception("Connection failed")
-        
-        query = "SELECT * FROM test"
-        with pytest.raises(Exception):
-            data_manager._execute_query(query)
+        with patch.object(data_manager._http_session, 'post', side_effect=Exception("Connection failed")) as mock_post:
+            query = "SELECT * FROM test"
+            with pytest.raises(Exception):
+                data_manager._execute_query(query)
 
 
 class TestGetHistoricalData:

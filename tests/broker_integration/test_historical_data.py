@@ -1,10 +1,10 @@
 """
-Test historical data retrieval from Alpaca.
+Test historical data retrieval from IBKR.
 Tests OHLCV bar data fetching for backtesting and analysis.
 """
 
 from datetime import datetime, timedelta
-from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
 
@@ -15,7 +15,7 @@ def test_get_1min_bars():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Get last 100 1-minute bars
@@ -80,7 +80,7 @@ def test_get_daily_bars():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Get last 30 daily bars
@@ -120,7 +120,7 @@ def test_get_bars_with_date_range():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Get last 5 trading days
@@ -154,7 +154,7 @@ def test_multiple_timeframes():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     timeframes = ["1Min", "5Min", "15Min", "1Hour", "1Day"]
@@ -184,7 +184,7 @@ def test_invalid_inputs():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Invalid timeframe

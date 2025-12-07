@@ -30,7 +30,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core_engine.config.broker_config import load_broker_config
-from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 
 def test_market_order_buy_sell():
@@ -48,13 +48,13 @@ def test_market_order_buy_sell():
     print(f"   Max position size: ${config.risk_limits.max_position_size}")
     
     # Create adapter and connect
-    print("\n[2/10] Connecting to Alpaca...")
+    print("\n[2/10] Connecting to IBKR...")
     
-    # Get Alpaca config from broker config
-    if config.alpaca is None:
-        raise ValueError("Alpaca configuration not found in broker config")
+    # Get IBKR config from broker config
+    if config.interactive_brokers is None:
+        raise ValueError("IBKR configuration not found in broker config")
     
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()

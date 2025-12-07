@@ -34,7 +34,7 @@ def test_invalid_credentials():
         paper_trading=True
     )
     
-    adapter = AlpacaAdapter(invalid_config)
+    adapter = IBKRAdapter(invalid_config)
     
     try:
         print("   ⏳ Attempting connection...")

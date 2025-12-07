@@ -29,7 +29,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core_engine.config.broker_config import load_broker_config
-from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 
 def test_position_tracking():
@@ -46,7 +46,7 @@ def test_position_tracking():
     
     # Create adapter and connect
     print("\n[2/5] Connecting to Alpaca...")
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     
     try:
         adapter.connect()

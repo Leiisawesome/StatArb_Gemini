@@ -4,7 +4,7 @@ Uses delayed data (>15 minutes old) which is available on free tier.
 """
 
 from datetime import datetime, timedelta
-from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
 
@@ -15,7 +15,7 @@ def test_get_daily_bars_delayed():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Request data ending yesterday (free accounts can access this)
@@ -75,7 +75,7 @@ def test_get_hourly_bars_delayed():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Request data from 2-7 days ago (definitely available)
@@ -110,7 +110,7 @@ def test_multiple_symbols_daily():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     symbols = ["SPY", "QQQ", "AAPL", "MSFT"]
@@ -151,7 +151,7 @@ def test_timeframe_variations():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Use data from last week to avoid real-time data restrictions
@@ -187,7 +187,7 @@ def test_error_handling():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Test 1: Invalid timeframe
@@ -232,7 +232,7 @@ def test_backtest_example():
     print("="*80)
     
     config = load_broker_config()
-    adapter = AlpacaAdapter(config.alpaca)
+    adapter = IBKRAdapter(config.interactive_brokers)
     adapter.connect()
     
     # Get 60 days of data for backtesting

@@ -2,6 +2,6 @@
 Broker adapters for real broker integration
 """
 
-from .alpaca_adapter import AlpacaAdapter
+from .ibkr_adapter import IBKRAdapter
 
-__all__ = ['AlpacaAdapter']
+__all__ = ['IBKRAdapter']

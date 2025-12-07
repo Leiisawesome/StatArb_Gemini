@@ -199,14 +199,12 @@ class TestClickHouseDataManager:
         
         logger.info("✅ Connection test success passed")
     
-    @patch('requests.post')
-    def test_connection_test_failure(self, mock_post, data_manager):
+    def test_connection_test_failure(self, data_manager):
         """Test ClickHouse connection failure"""
-        # Mock connection failure
-        mock_post.side_effect = Exception("Connection refused")
-        
-        result = data_manager._test_connection()
-        assert result is False
+        # Mock connection failure on the session
+        with patch.object(data_manager._http_session, 'post', side_effect=Exception("Connection refused")):
+            result = data_manager._test_connection()
+            assert result is False
         
         logger.info("✅ Connection test failure passed")
     

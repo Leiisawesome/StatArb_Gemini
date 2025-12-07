@@ -339,6 +339,126 @@ class IBKRAdapter(BaseBrokerAdapter):
             'timestamp': datetime.now()
         }
     
+    def reconnect(self, max_attempts: int = 3, delay: float = 5.0) -> bool:
+        """
+        Attempt to reconnect to IBKR with retry logic.
+        
+        Args:
+            max_attempts: Maximum number of reconnection attempts
+            delay: Delay between attempts in seconds
+            
+        Returns:
+            bool: True if reconnection successful
+        """
+        logger.info(f"🔄 Attempting to reconnect to IBKR (max {max_attempts} attempts)...")
+        
+        for attempt in range(max_attempts):
+            try:
+                # Disconnect first if still connected
+                if self.is_connected():
+                    self.disconnect()
+                    time.sleep(1)
+                
+                # Clear any error state
+                self.wrapper.errors.clear()
+                self.wrapper.connection_ready.clear()
+                
+                # Attempt reconnection
+                logger.info(f"Reconnection attempt {attempt + 1}/{max_attempts}")
+                if self.connect():
+                    logger.info("✅ Reconnection successful")
+                    return True
+                
+            except Exception as e:
+                logger.warning(f"Reconnection attempt {attempt + 1} failed: {e}")
+            
+            if attempt < max_attempts - 1:
+                logger.info(f"⏳ Waiting {delay}s before next attempt...")
+                time.sleep(delay)
+        
+        logger.error(f"❌ Failed to reconnect after {max_attempts} attempts")
+        return False
+    
+    def handle_connection_error(self, error: Exception) -> bool:
+        """
+        Handle connection errors with appropriate recovery actions.
+        
+        Args:
+            error: The connection error that occurred
+            
+        Returns:
+            bool: True if error was handled successfully
+        """
+        error_msg = str(error).lower()
+        
+        # Categorize error types
+        if any(keyword in error_msg for keyword in ['timeout', 'connection refused', 'connection reset']):
+            logger.warning(f"🔌 Connection error detected: {error}")
+            return self.reconnect(max_attempts=3, delay=3.0)
+        
+        elif any(keyword in error_msg for keyword in ['market data farm', 'subscription']):
+            logger.warning(f"📊 Market data error: {error}")
+            # Try to switch to delayed data
+            try:
+                self.client.reqMarketDataType(3)  # Delayed data
+                logger.info("📊 Switched to delayed market data")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to switch market data type: {e}")
+                return False
+        
+        elif 'next order id' in error_msg or 'duplicate order' in error_msg:
+            logger.warning(f"📋 Order ID error: {error}")
+            # Request fresh order ID
+            try:
+                self.client.reqIds(-1)
+                time.sleep(1)
+                logger.info("📋 Requested fresh order ID")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to request order ID: {e}")
+                return False
+        
+        else:
+            logger.error(f"❓ Unhandled connection error: {error}")
+            return False
+    
+    def monitor_connection(self, interval: float = 30.0) -> None:
+        """
+        Monitor connection health and attempt recovery if needed.
+        This method should be run in a separate thread.
+        
+        Args:
+            interval: Monitoring interval in seconds
+        """
+        logger.info(f"👁️  Starting connection monitor (interval: {interval}s)")
+        
+        while self._connected:
+            try:
+                health = self.check_connection_health()
+                
+                if not health['connected']:
+                    logger.warning("🔌 Connection lost, attempting recovery...")
+                    if not self.reconnect(max_attempts=3, delay=5.0):
+                        logger.error("❌ Connection recovery failed")
+                        break
+                
+                # Check for recent errors
+                if health['errors'] > 0:
+                    last_error = health['last_error']
+                    if last_error and self.handle_connection_error(Exception(last_error)):
+                        logger.info("✅ Error handled successfully")
+                        # Clear handled errors
+                        self.wrapper.errors.clear()
+                
+                time.sleep(interval)
+                
+            except Exception as e:
+                logger.error(f"Connection monitor error: {e}")
+                time.sleep(interval)
+        
+        logger.info("👁️  Connection monitor stopped")
+    
     # ==================== Contract Creation ====================
     
     def _create_stock_contract(self, symbol: str) -> Contract:
@@ -719,6 +839,178 @@ class IBKRAdapter(BaseBrokerAdapter):
             
         except Exception as e:
             logger.error(f"Failed to submit stop-limit order: {e}")
+            raise
+    
+    def submit_bracket_order(
+        self,
+        symbol: str,
+        quantity: float,
+        side: OrderSide,
+        entry_price: Optional[float] = None,
+        profit_target: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        transmit: bool = True
+    ) -> tuple[Order, Order, Order]:
+        """
+        Submit a bracket order (parent + profit taker + stop loss).
+        Bracket orders automatically manage risk and reward.
+        
+        Args:
+            symbol: Trading symbol
+            quantity: Order quantity
+            side: BUY or SELL
+            entry_price: Entry price (None for market entry)
+            profit_target: Profit target price
+            stop_loss: Stop loss price
+            transmit: Whether to transmit the bracket immediately
+            
+        Returns:
+            Tuple of (parent_order, profit_taker_order, stop_loss_order)
+        """
+        try:
+            # Validate parameters
+            valid, error_msg = self.validate_order_params(
+                symbol, quantity, side, 
+                OrderType.LIMIT if entry_price else OrderType.MARKET,
+                entry_price, stop_loss
+            )
+            if not valid:
+                raise ValueError(error_msg)
+            
+            if profit_target is None and stop_loss is None:
+                raise ValueError("Either profit_target or stop_loss must be specified")
+            
+            # Create parent order
+            if entry_price:
+                parent_order = self.submit_limit_order(symbol, quantity, side, entry_price)
+            else:
+                parent_order = self.submit_market_order(symbol, quantity, side)
+            
+            parent_order_id = int(parent_order.order_id)
+            
+            # Create profit taker order (opposite side)
+            profit_taker_order = None
+            if profit_target:
+                profit_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+                profit_taker_order = self.submit_limit_order(
+                    symbol, quantity, profit_side, profit_target
+                )
+                profit_taker_id = int(profit_taker_order.order_id)
+                
+                # Set OCA group for profit taker
+                self.client.reqOneCancelsAll(
+                    reqId=profit_taker_id,
+                    ocaType="OCA",
+                    ocaGroup=f"bracket_{parent_order_id}"
+                )
+            
+            # Create stop loss order
+            stop_loss_order = None
+            if stop_loss:
+                stop_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+                stop_loss_order = self.submit_stop_order(
+                    symbol, quantity, stop_side, stop_loss
+                )
+                stop_loss_id = int(stop_loss_order.order_id)
+                
+                # Set OCA group for stop loss
+                self.client.reqOneCancelsAll(
+                    reqId=stop_loss_id,
+                    ocaType="OCA", 
+                    ocaGroup=f"bracket_{parent_order_id}"
+                )
+            
+            # Set parent-child relationships
+            if profit_taker_order:
+                self.client.reqOneCancelsAll(
+                    reqId=parent_order_id,
+                    ocaType="OCA",
+                    ocaGroup=f"bracket_{parent_order_id}"
+                )
+            
+            logger.info(
+                f"✅ Bracket order submitted: {side.value} {quantity} {symbol} "
+                f"@ {entry_price or 'MKT'} (parent_id={parent_order_id})"
+            )
+            if profit_taker_order:
+                logger.info(f"   Profit target: {profit_target} (order_id={profit_taker_id})")
+            if stop_loss_order:
+                logger.info(f"   Stop loss: {stop_loss} (order_id={stop_loss_id})")
+            
+            return parent_order, profit_taker_order, stop_loss_order
+            
+        except Exception as e:
+            logger.error(f"Failed to submit bracket order: {e}")
+            raise
+    
+    def submit_trailing_stop_order(
+        self,
+        symbol: str,
+        quantity: float,
+        side: OrderSide,
+        trail_amount: float,
+        trail_type: str = "AMOUNT"
+    ) -> Order:
+        """
+        Submit a trailing stop order.
+        
+        Args:
+            symbol: Trading symbol
+            quantity: Order quantity
+            side: BUY or SELL
+            trail_amount: Trail amount (absolute or percentage)
+            trail_type: "AMOUNT" for absolute trailing, "PERCENT" for percentage
+            
+        Returns:
+            Trailing stop order
+        """
+        try:
+            # Validate parameters
+            valid, error_msg = self.validate_order_params(
+                symbol, quantity, side, OrderType.STOP, None, trail_amount
+            )
+            if not valid:
+                raise ValueError(error_msg)
+            
+            # Create IB contract
+            contract = self._create_contract(symbol)
+            
+            # Create trailing stop order
+            order = self._create_base_order(quantity, side)
+            order.orderType = "TRAIL"
+            order.auxPrice = trail_amount  # Trail amount
+            
+            if trail_type == "PERCENT":
+                order.trailStopPrice = trail_amount  # Percentage trail
+            else:
+                order.auxPrice = trail_amount  # Amount trail
+            
+            # Submit order
+            order_id = self._get_next_order_id()
+            self.client.placeOrder(order_id, contract, order)
+            
+            # Create order object
+            trailing_order = Order(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=OrderType.STOP,
+                stop_price=trail_amount,
+                order_id=str(order_id),
+                status=OrderStatus.SUBMITTED,
+                timestamp=datetime.now(),
+                metadata={'broker': 'IBKR', 'trail_type': trail_type}
+            )
+            
+            logger.info(
+                f"✅ Trailing stop order submitted: {side.value} {quantity} {symbol} "
+                f"trail {trail_amount} ({trail_type}) (order_id={order_id})"
+            )
+            
+            return trailing_order
+            
+        except Exception as e:
+            logger.error(f"Failed to submit trailing stop order: {e}")
             raise
     
     def cancel_order(self, order_id: str) -> bool:

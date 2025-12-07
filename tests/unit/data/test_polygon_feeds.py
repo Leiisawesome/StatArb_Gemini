@@ -1229,6 +1229,625 @@ class TestPolygonErrorHandling:
         logger.info("✅ Data service handle message error test passed")
 
 
+# =============================================================================
+# POLYGON REALTIME ADAPTER ADDITIONAL TESTS
+# =============================================================================
+
+class TestPolygonRealtimeAdapterConnection:
+    """Test connection methods and aiohttp functionality"""
+
+    @patch('core_engine.data.feeds.polygon_realtime.aiohttp')
+    @patch('core_engine.data.feeds.polygon_realtime.websockets')
+    async def test_connect_with_aiohttp_success(self, mock_websockets, mock_aiohttp, polygon_feed_config):
+        """Test successful aiohttp connection"""
+        # Mock aiohttp components
+        mock_session = AsyncMock()
+        mock_ws = AsyncMock()
+        mock_aiohttp.ClientSession.return_value = mock_session
+        mock_session.ws_connect.return_value = mock_ws
+        
+        # Mock connection messages
+        connection_msg = {"ev": "status", "status": "connected"}
+        auth_success_msg = {"ev": "status", "status": "auth_success"}
+        
+        mock_ws.receive.side_effect = [
+            AsyncMock(data=json.dumps([connection_msg])),
+            AsyncMock(data=json.dumps([auth_success_msg])),
+        ]
+        
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Force aiohttp usage by mocking websockets to fail
+        mock_websockets.connect.side_effect = Exception("WebSocket failed")
+        
+        # Mock the aiohttp authentication method
+        with patch.object(adapter, '_authenticate_aiohttp', return_value=AsyncMock(return_value=True)) as mock_auth:
+            with patch.object(adapter, '_receive_loop_aiohttp') as mock_receive:
+                result = await adapter._connect_with_aiohttp()
+                
+                assert result is True
+                assert adapter.status == AdapterStatus.AUTHENTICATED
+                mock_aiohttp.ClientSession.assert_called_once()
+                mock_session.ws_connect.assert_called_once()
+                mock_auth.assert_called_once()
+                logger.info("✅ aiohttp connection success test passed")
+
+    # @patch('core_engine.data.feeds.polygon_realtime.aiohttp')
+    # async def test_aiohttp_authentication_success(self, mock_aiohttp, polygon_feed_config):
+    #     """Test aiohttp authentication"""
+    #     from aiohttp import WSMsgType
+        
+    #     mock_ws = AsyncMock()
+        
+    #     # Mock connection confirmation and auth success messages
+    #     connection_msg = AsyncMock()
+    #     connection_msg.type = WSMsgType.TEXT
+    #     connection_msg.data = json.dumps([{"ev": "status", "status": "connected"}])
+        
+    #     auth_success_msg = AsyncMock()
+    #     auth_success_msg.type = WSMsgType.TEXT
+    #     auth_success_msg.data = json.dumps([{"ev": "status", "status": "auth_success"}])
+        
+    #     mock_ws.receive.side_effect = [connection_msg, auth_success_msg]
+        
+    #     adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+    #     adapter._aiohttp_ws = mock_ws
+    #     adapter._use_aiohttp = True
+        
+    #     result = await adapter._authenticate_aiohttp()
+        
+    #     assert result is True
+    #     # Should send auth message
+    #     assert mock_ws.send_str.call_count == 1
+    #     auth_call = mock_ws.send_str.call_args[0][0]
+    #     auth_data = json.loads(auth_call)
+    #     assert auth_data["action"] == "auth"
+    #     assert auth_data["params"] == polygon_feed_config.api_key
+    #     logger.info("✅ aiohttp authentication success test passed")
+
+    @patch('core_engine.data.feeds.polygon_realtime.aiohttp')
+    async def test_aiohttp_authentication_failure(self, mock_aiohttp, polygon_feed_config):
+        """Test aiohttp authentication failure"""
+        mock_ws = AsyncMock()
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        adapter._aiohttp_ws = mock_ws
+        adapter._use_aiohttp = True
+        
+        # Mock auth failure response
+        auth_msg = {"ev": "status", "status": "auth_failed", "message": "Invalid key"}
+        mock_ws.receive.return_value = AsyncMock(data=json.dumps([auth_msg]))
+        
+        result = await adapter._authenticate_aiohttp()
+        
+        assert result is False
+        logger.info("✅ aiohttp authentication failure test passed")
+
+    async def test_websockets_authentication_success(self, polygon_feed_config):
+        """Test websockets authentication success"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock websocket
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        
+        # Mock connection and auth messages
+        connection_msg = {"ev": "status", "status": "connected"}
+        auth_msg = {"ev": "status", "status": "auth_success"}
+        
+        mock_ws.recv.side_effect = [
+            json.dumps([connection_msg]),
+            json.dumps([auth_msg])
+        ]
+        
+        result = await adapter._authenticate()
+        
+        assert result is True
+        logger.info("✅ websockets authentication success test passed")
+
+    async def test_websockets_authentication_failure(self, polygon_feed_config):
+        """Test websockets authentication failure"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock websocket
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        
+        # Mock auth failure
+        auth_msg = {"ev": "status", "status": "auth_failed", "message": "Invalid key"}
+        mock_ws.recv.return_value = json.dumps([auth_msg])
+        
+        result = await adapter._authenticate()
+        
+        assert result is False
+        logger.info("✅ websockets authentication failure test passed")
+
+
+class TestPolygonRealtimeAdapterMessageHandling:
+    """Test message handling for different data types"""
+
+    async def test_handle_quote_message(self, polygon_feed_config):
+        """Test quote message handling"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock message handler
+        mock_handler = Mock()
+        adapter._handle_message = mock_handler
+        
+        # Sample quote message
+        quote_msg = {
+            "ev": "Q",
+            "sym": "AAPL",
+            "bp": 150.25,
+            "bs": 100,
+            "ap": 150.30,
+            "as": 200,
+            "t": 1700000000000000000,  # nanoseconds
+            "bx": 1,
+            "ax": 2,
+            "c": [1, 2]
+        }
+        
+        await adapter._handle_quote(quote_msg)
+        
+        # Verify message was handled
+        assert mock_handler.call_count == 1
+        call_args = mock_handler.call_args[0][0]
+        
+        assert call_args.symbol == "AAPL"
+        assert call_args.message_type == "quote"
+        assert call_args.data['bid'] == 150.25
+        assert call_args.data['ask'] == 150.30
+        assert call_args.data['bid_size'] == 100
+        assert call_args.data['ask_size'] == 200
+        logger.info("✅ quote message handling test passed")
+
+    async def test_handle_trade_message_error_handling(self, polygon_feed_config):
+        """Test trade message error handling"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Invalid trade message (missing required fields)
+        invalid_trade_msg = {
+            "ev": "T",
+            "sym": "AAPL",
+            # Missing price and size
+        }
+        
+        # Should not raise exception
+        await adapter._handle_trade(invalid_trade_msg)
+        
+        # Check that error was logged (we can't easily test logging directly)
+        logger.info("✅ trade message error handling test passed")
+
+    async def test_handle_aggregate_message_error_handling(self, polygon_feed_config):
+        """Test aggregate message error handling"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Invalid aggregate message
+        invalid_agg_msg = {
+            "ev": "A",
+            "sym": "AAPL",
+            # Missing required OHLC fields
+        }
+        
+        # Should not raise exception
+        await adapter._handle_aggregate(invalid_agg_msg, "second")
+        
+        logger.info("✅ aggregate message error handling test passed")
+
+    async def test_process_message_unknown_type(self, polygon_feed_config):
+        """Test processing unknown message types"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock message handler
+        mock_handler = Mock()
+        adapter._handle_message = mock_handler
+        
+        # Unknown message type
+        unknown_msg = {
+            "ev": "UNKNOWN",
+            "data": "test"
+        }
+        
+        await adapter._process_message(json.dumps([unknown_msg]))
+        
+        # Should not call message handler for unknown types
+        assert mock_handler.call_count == 0
+        logger.info("✅ unknown message type handling test passed")
+
+    def test_calculate_latency(self, polygon_feed_config):
+        """Test latency calculation"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Test with past timestamp
+        past_time = datetime.now(timezone.utc) - timedelta(seconds=1)
+        latency = adapter._calculate_latency(past_time)
+        
+        assert latency >= 1000  # At least 1 second in milliseconds
+        assert isinstance(latency, float)
+        logger.info("✅ latency calculation test passed")
+
+    def test_calculate_latency_future_timestamp(self, polygon_feed_config):
+        """Test latency calculation with future timestamp"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Test with future timestamp (should return 0)
+        future_time = datetime.now(timezone.utc) + timedelta(seconds=1)
+        latency = adapter._calculate_latency(future_time)
+        
+        assert latency == 0
+        logger.info("✅ future timestamp latency test passed")
+
+
+class TestPolygonRealtimeAdapterSubscription:
+    """Test subscription and unsubscription functionality"""
+
+    async def test_subscribe_quote_with_starter_tier(self, polygon_feed_config):
+        """Test subscribing to quotes with starter tier (should be rejected)"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock websocket
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        adapter._set_status(AdapterStatus.AUTHENTICATED)
+        
+        # Try to subscribe to quotes (not available in starter tier)
+        result = await adapter.subscribe(["AAPL"], ["quote"])
+        
+        assert result is False  # Should fail
+        mock_ws.send.assert_not_called()  # Should not send subscription
+        logger.info("✅ quote subscription rejection test passed")
+
+    async def test_subscribe_with_invalid_data_type(self, polygon_feed_config):
+        """Test subscribing with invalid data type"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock websocket
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        adapter._set_status(AdapterStatus.AUTHENTICATED)
+        
+        # Try to subscribe with invalid data type
+        result = await adapter.subscribe(["AAPL"], ["invalid_type"])
+        
+        assert result is False
+        mock_ws.send.assert_not_called()
+        logger.info("✅ invalid data type subscription test passed")
+
+    async def test_unsubscribe_not_connected(self, polygon_feed_config):
+        """Test unsubscription when not connected"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Should return True (already "unsubscribed")
+        result = await adapter.unsubscribe(["AAPL"])
+        
+        assert result is True
+        logger.info("✅ unsubscription when not connected test passed")
+
+    async def test_send_message_websockets(self, polygon_feed_config):
+        """Test sending message via websockets"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        
+        test_message = "test message"
+        await adapter._send_message(test_message)
+        
+        mock_ws.send.assert_called_once_with(test_message)
+        logger.info("✅ websockets send message test passed")
+
+    async def test_send_message_aiohttp(self, polygon_feed_config):
+        """Test sending message via aiohttp"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        mock_ws = AsyncMock()
+        adapter._aiohttp_ws = mock_ws
+        adapter._use_aiohttp = True
+        
+        test_message = "test message"
+        await adapter._send_message(test_message)
+        
+        mock_ws.send_str.assert_called_once_with(test_message)
+        logger.info("✅ aiohttp send message test passed")
+
+
+class TestPolygonRealtimeAdapterReconnection:
+    """Test reconnection and heartbeat functionality"""
+
+    async def test_attempt_reconnect_max_attempts_exceeded(self, polygon_feed_config):
+        """Test reconnection when max attempts exceeded"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        adapter._reconnect_count = polygon_feed_config.max_reconnect_attempts
+        
+        await adapter._attempt_reconnect()
+        
+        assert adapter.status == AdapterStatus.ERROR
+        logger.info("✅ max reconnection attempts test passed")
+
+    async def test_attempt_reconnect_success(self, polygon_feed_config):
+        """Test successful reconnection"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        adapter._reconnect_count = 1
+        
+        # Set up some active subscriptions
+        adapter._active_subscriptions['trade'].add('AAPL')
+        adapter._active_subscriptions['second_agg'].add('AAPL')
+        
+        # Mock successful reconnect
+        with patch.object(adapter, 'connect', return_value=AsyncMock(return_value=True)) as mock_connect:
+            with patch.object(adapter, 'subscribe') as mock_subscribe:
+                await adapter._attempt_reconnect()
+                
+                mock_connect.assert_called_once()
+                mock_subscribe.assert_called_once()
+                # Check that subscribe was called with the right arguments
+                call_args = mock_subscribe.call_args
+                assert call_args[0][0] == ['AAPL']  # symbols
+                assert set(call_args[0][1]) == {'trade', 'second_agg'}  # data_types
+                logger.info("✅ successful reconnection test passed")
+
+    async def test_heartbeat_monitor_no_messages(self, polygon_feed_config):
+        """Test heartbeat monitor detects lack of messages"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        adapter._set_status(AdapterStatus.ACTIVE)
+        adapter._subscriptions.add("AAPL")
+        
+        # Mock asyncio.sleep and time passage
+        original_count = adapter._message_count
+        
+        with patch('asyncio.sleep', side_effect=asyncio.CancelledError()):
+            try:
+                await adapter._heartbeat_monitor()
+            except asyncio.CancelledError:
+                pass
+        
+        # Message count should remain the same (no messages received)
+        assert adapter._message_count == original_count
+        logger.info("✅ heartbeat monitor no messages test passed")
+
+
+class TestPolygonRealtimeAdapterUtilities:
+    """Test utility methods"""
+
+    def test_get_latest_bar(self, polygon_feed_config, sample_aggregate_bar):
+        """Test getting latest cached bar"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Cache a bar
+        adapter._latest_bars["AAPL_minute"] = sample_aggregate_bar
+        
+        # Retrieve it
+        bar = adapter.get_latest_bar("AAPL", "minute")
+        
+        assert bar == sample_aggregate_bar
+        logger.info("✅ get latest bar test passed")
+
+    def test_get_latest_bar_not_found(self, polygon_feed_config):
+        """Test getting latest bar when not cached"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        bar = adapter.get_latest_bar("AAPL", "minute")
+        
+        assert bar is None
+        logger.info("✅ get latest bar not found test passed")
+
+    def test_get_statistics(self, polygon_feed_config):
+        """Test getting adapter statistics"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Set some test data
+        adapter._message_count = 100
+        adapter._last_message_time = datetime.now()
+        adapter._reconnect_count = 2
+        adapter._active_subscriptions['trade'].add('AAPL')
+        adapter._active_subscriptions['second_agg'].add('TSLA')
+        adapter._latest_bars['AAPL_minute'] = Mock()
+        
+        stats = adapter.get_statistics()
+        
+        assert stats['polygon_message_count'] == 100
+        assert stats['reconnect_count'] == 2
+        assert stats['active_subscriptions']['trade'] == 1
+        assert stats['active_subscriptions']['second_agg'] == 1
+        assert stats['cached_bars'] == 1
+        assert stats['subscription_tier'] == 'starter'
+        logger.info("✅ get statistics test passed")
+
+    def test_is_connected_websockets(self, polygon_feed_config):
+        """Test connection check for websockets"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Not connected
+        assert not adapter.is_connected()
+        
+        # Mock websocket connection
+        mock_ws = Mock()
+        mock_ws.open = True
+        adapter._ws = mock_ws
+        adapter._set_status(AdapterStatus.AUTHENTICATED)
+        
+        assert adapter.is_connected()
+        logger.info("✅ websockets connection check test passed")
+
+    def test_is_connected_aiohttp(self, polygon_feed_config):
+        """Test connection check for aiohttp"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        
+        # Mock aiohttp connection
+        mock_ws = Mock()
+        mock_ws.closed = False
+        adapter._aiohttp_ws = mock_ws
+        adapter._use_aiohttp = True
+        adapter._set_status(AdapterStatus.AUTHENTICATED)
+        
+        assert adapter.is_connected()
+        logger.info("✅ aiohttp connection check test passed")
+
+
+class TestPolygonAggregatedDataManagerAdvanced:
+    """Test advanced functionality of PolygonAggregatedDataManager"""
+
+    async def test_update_custom_bars_minute_aggregation(self, polygon_feed_config):
+        """Test custom timeframe bar aggregation from minute bars"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+        
+        # Create 5 minute bars (5-minute period) + 1 more to trigger completion
+        base_time = datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc)
+        
+        bars = []
+        for i in range(6):  # 6 bars: 30-35, the 6th triggers completion
+            bar = PolygonAggregateBar(
+                symbol="AAPL",
+                open=150.0 + i,
+                high=151.0 + i,
+                low=149.0 + i,
+                close=150.5 + i,
+                volume=100000.0,
+                vwap=150.25 + i,
+                timestamp_start=base_time + timedelta(minutes=i),
+                timestamp_end=base_time + timedelta(minutes=i+1),
+                num_trades=1000,
+                bar_type="minute",
+            )
+            bars.append(bar)
+        
+        # Process bars
+        for bar in bars:
+            feed_msg = FeedMessage(
+                provider=FeedProvider.POLYGON,
+                symbol="AAPL",
+                message_type="minute_agg",
+                timestamp=bar.timestamp_end,
+                data={
+                    'open': bar.open,
+                    'high': bar.high,
+                    'low': bar.low,
+                    'close': bar.close,
+                    'volume': bar.volume,
+                    'vwap': bar.vwap,
+                    'num_trades': bar.num_trades,
+                    'bar_type': bar.bar_type,
+                    'timestamp_start': bar.timestamp_start.isoformat(),
+                    'timestamp_end': bar.timestamp_end.isoformat(),
+                }
+            )
+            await manager.process_aggregate(feed_msg)
+        
+        # Check that 5-minute bar was created
+        five_min_bars = manager.get_bars("AAPL", "5m")
+        assert len(five_min_bars) == 1
+        
+        aggregated_bar = five_min_bars[0]
+        assert aggregated_bar.bar_type == "5m"
+        assert aggregated_bar.open == 150.0  # First bar's open
+        assert aggregated_bar.close == 154.5  # Last bar's close
+        assert aggregated_bar.high == 155.0  # Max of all highs
+        assert aggregated_bar.low == 149.0   # Min of all lows
+        assert aggregated_bar.volume == 500000.0  # Sum of volumes
+        logger.info("✅ custom bar aggregation test passed")
+
+    def test_complete_aggregated_bar(self, polygon_feed_config):
+        """Test completing an aggregated bar from minute bars"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+        
+        # Create test minute bars
+        bars = [
+            PolygonAggregateBar(
+                symbol="AAPL",
+                open=150.0, high=151.0, low=149.0, close=150.5,
+                volume=100000.0, vwap=150.25, num_trades=1000,
+                timestamp_start=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+                timestamp_end=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+                bar_type="minute"
+            ),
+            PolygonAggregateBar(
+                symbol="AAPL",
+                open=150.5, high=152.0, low=150.0, close=151.5,
+                volume=120000.0, vwap=151.0, num_trades=1200,
+                timestamp_start=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+                timestamp_end=datetime(2024, 12, 6, 9, 32, tzinfo=timezone.utc),
+                bar_type="minute"
+            )
+        ]
+        
+        result = manager._complete_aggregated_bar(bars, "5m")
+        
+        assert result is not None
+        assert result.symbol == "AAPL"
+        assert result.bar_type == "5m"
+        assert result.open == 150.0
+        assert result.high == 152.0
+        assert result.low == 149.0
+        assert result.close == 151.5
+        assert result.volume == 220000.0
+        assert result.num_trades == 2200
+        logger.info("✅ complete aggregated bar test passed")
+
+    def test_complete_aggregated_bar_empty(self, polygon_feed_config):
+        """Test completing aggregated bar with empty input"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+        
+        result = manager._complete_aggregated_bar([], "5m")
+        
+        assert result is None
+        logger.info("✅ complete aggregated bar empty test passed")
+
+    def test_get_bars_with_limit(self, polygon_feed_config):
+        """Test getting bars with limit"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+        
+        # Initialize bars structure for AAPL
+        if "AAPL" not in manager._bars:
+            manager._bars["AAPL"] = {"minute": []}
+        
+        # Add multiple bars
+        bars = []
+        for i in range(10):
+            bar = PolygonAggregateBar(
+                symbol="AAPL",
+                open=150.0, high=151.0, low=149.0, close=150.5,
+                volume=100000.0, vwap=150.25, num_trades=1000,
+                timestamp_start=datetime(2024, 12, 6, 9, 30 + i, tzinfo=timezone.utc),
+                timestamp_end=datetime(2024, 12, 6, 9, 31 + i, tzinfo=timezone.utc),
+                bar_type="minute"
+            )
+            bars.append(bar)
+            manager._bars["AAPL"]["minute"].append(bar)
+        
+        # Get limited results
+        limited_bars = manager.get_bars("AAPL", "minute", limit=3)
+        
+        assert len(limited_bars) == 3
+        # Should return most recent bars
+        assert limited_bars[0].timestamp_end > limited_bars[1].timestamp_end
+        logger.info("✅ get bars with limit test passed")
+
+    def test_get_latest_price_from_cache(self, polygon_feed_config):
+        """Test getting latest price from adapter cache"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+        
+        # Cache a second bar (higher priority)
+        second_bar = PolygonAggregateBar(
+            symbol="AAPL",
+            open=150.0, high=151.0, low=149.0, close=150.75,
+            volume=100000.0, vwap=150.25, num_trades=1000,
+            timestamp_start=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            timestamp_end=datetime(2024, 12, 6, 9, 30, 1, tzinfo=timezone.utc),
+            bar_type="second"
+        )
+        adapter._latest_bars["AAPL_second"] = second_bar
+        
+        price = manager.get_latest_price("AAPL")
+        
+        assert price == 150.75
+        logger.info("✅ get latest price from cache test passed")
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
 

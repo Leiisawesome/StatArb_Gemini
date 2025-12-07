@@ -93,22 +93,23 @@ class TestClickHouseDataManager:
 
     def test_initialization(self, data_manager):
         """Test ClickHouseDataManager initialization."""
-        assert isinstance(data_manager.enhanced_config, ClickHouseDataConfig)
-        assert data_manager.subscribers == []
-        assert data_manager.clickhouse_url == "http://localhost:8123"
+        with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
+            assert isinstance(data_manager.enhanced_config, ClickHouseDataConfig)
+            assert data_manager.subscribers == []
+            assert data_manager.clickhouse_url == "http://localhost:8123"
 
-    @patch('requests.post')
-    def test_test_connection_success(self, mock_post, data_manager):
+    def test_test_connection_success(self):
         """Test successful ClickHouse connection test."""
+        config = ClickHouseDataConfig()
+        data_manager = ClickHouseDataManager(config)
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.text = "1"
-        mock_post.return_value = mock_response
+        with patch.object(data_manager._http_session, 'post', return_value=mock_response) as mock_post:
+            result = data_manager._test_connection()
 
-        result = data_manager._test_connection()
-
-        assert result is True
-        mock_post.assert_called_once()
+            assert result is True
+            mock_post.assert_called_once()
 
 
 class TestAlternativeDataPoint:

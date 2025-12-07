@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 class BrokerType(Enum):
     """Supported broker types"""
     INTERACTIVE_BROKERS = "interactive_brokers"
-    ALPACA = "alpaca"
     TD_AMERITRADE = "td_ameritrade"
     E_TRADE = "e_trade"
     CHARLES_SCHWAB = "charles_schwab"
@@ -269,12 +268,11 @@ class BrokerAdapterInterface(ABC):
 # 1. InteractiveBrokersAdapter (~330 LOC) - REMOVED
 #    Use instead: core_engine.broker.adapters.ibkr_adapter.IBKRAdapter
 #
-# 2. AlpacaAdapter (~230 LOC) - REMOVED  
-#    Use instead: core_engine.broker.adapters.alpaca_adapter.AlpacaAdapter
+# 2. AlpacaAdapter - REMOVED (Alpaca adapter has been removed from the codebase)
+#    Previously: core_engine.broker.adapters.alpaca_adapter.AlpacaAdapter
 #
 # For production trading, import directly from the adapters module:
 #   from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
-#   from core_engine.broker.adapters.alpaca_adapter import AlpacaAdapter
 # ============================================================================
 
 
@@ -361,14 +359,12 @@ class BrokerAdapterFactory:
     
     Note: For production trading, use the specific adapters directly:
     - core_engine.broker.adapters.ibkr_adapter.IBKRAdapter
-    - core_engine.broker.adapters.alpaca_adapter.AlpacaAdapter
     
     This factory uses MockBrokerAdapter for testing purposes.
     """
     
     _adapters = {
         BrokerType.INTERACTIVE_BROKERS: MockBrokerAdapter,  # Use IBKRAdapter for production
-        BrokerType.ALPACA: MockBrokerAdapter,               # Use AlpacaAdapter for production
         BrokerType.TD_AMERITRADE: MockBrokerAdapter,
         BrokerType.E_TRADE: MockBrokerAdapter,
         BrokerType.CHARLES_SCHWAB: MockBrokerAdapter,

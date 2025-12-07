@@ -1105,7 +1105,8 @@ class TestFeedMessageHandling:
         
         handler.assert_called_once_with(mock_message)
     
-    def test_handle_feed_message_caches(self, data_engine):
+    @patch('asyncio.create_task')
+    def test_handle_feed_message_caches(self, mock_create_task, data_engine):
         """Test that feed messages are cached"""
         mock_message = Mock()
         mock_message.feed_id = "test_feed"
@@ -1113,15 +1114,18 @@ class TestFeedMessageHandling:
         mock_message.data = {"price": 150.0}
         
         mock_cache = Mock()
-        mock_cache.set = AsyncMock()
+        # Use regular Mock instead of AsyncMock since the task is created but not awaited
+        mock_cache.set = Mock()
         data_engine.cache_manager = mock_cache
         
         data_engine._handle_feed_message(mock_message)
-        
-        # Should create task to cache (async, so check if called)
-        # Note: asyncio.create_task doesn't execute immediately in sync context
-        # This is a basic check that the method doesn't raise
-        
+
+        # Should create task to cache
+        mock_create_task.assert_called_once()
+        args, kwargs = mock_create_task.call_args
+        # Verify the task was created with the cache set call
+        assert len(args) == 1
+
         assert data_engine.cache_manager is not None
     
     def test_handle_feed_message_error(self, data_engine):
