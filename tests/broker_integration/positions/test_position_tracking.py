@@ -149,6 +149,8 @@ def test_position_tracking():
         print("  ✓ P&L calculation validation")
         print("  ✓ Specific position lookup")
 
+        return True
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback

@@ -167,6 +167,8 @@ def test_limit_order_lifecycle():
         print("  ✓ Order cancellation")
         print("  ✓ No unintended positions created")
 
+        return True
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback

@@ -40,6 +40,7 @@ class IBKRWrapper(EWrapper):
         self.next_order_id = None
         self.positions = {}
         self.account_values = {}
+        self.managed_accounts = []
         self.quotes = {}
         self.orders = {}
         self.errors = []
@@ -104,6 +105,23 @@ class IBKRWrapper(EWrapper):
     def accountSummaryEnd(self, reqId: int):
         """Callback when account summary is complete"""
         logger.debug("Account summary complete")
+
+    def managedAccounts(self, accountsList: str):
+        """Callback for managed accounts list"""
+        logger.info(f"📊 Managed accounts: {accountsList}")
+        self.managed_accounts = accountsList.split(',')
+
+    def updateAccountValue(self, key: str, val: str, currency: str, accountName: str):
+        """Callback for account value updates"""
+        self.account_values[key] = {
+            'value': val,
+            'currency': currency,
+            'account': accountName
+        }
+
+    def updateAccountTime(self, timeStamp: str):
+        """Callback for account time updates"""
+        logger.debug(f"Account time: {timeStamp}")
 
     def tickPrice(self, reqId: TickerId, tickType: int, price: float, attrib):
         """Callback for price tick updates"""
@@ -1282,12 +1300,18 @@ class IBKRAdapter(BaseBrokerAdapter):
     def get_account_info(self) -> AccountInfo:
         """Get account information"""
         try:
-            # Request fresh account summary
-            self.client.reqAccountSummary(9001, "All", "$LEDGER")
-            time.sleep(0.5)  # Wait for response
+            # Clear previous account values
+            self.wrapper.account_values = {}
+
+            # Request account updates (real-time account data)
+            self.client.reqAccountUpdates(True, self.config.account_id or "")
+
+            # Wait for response
+            time.sleep(3.0)
 
             # Extract values
             values = self.wrapper.account_values
+            logger.info(f"📊 Retrieved {len(values)} account value fields")
 
             cash = float(values.get('TotalCashValue', {}).get('value', 0))
             buying_power = float(values.get('BuyingPower', {}).get('value', cash))
@@ -1310,6 +1334,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
+            logger.error(f"Account values at time of error: {self.wrapper.account_values}")
             raise
 
     # ==================== Validation & Safety ====================

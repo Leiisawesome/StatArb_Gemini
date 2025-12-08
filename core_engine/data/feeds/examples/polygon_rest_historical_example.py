@@ -26,7 +26,11 @@ import sys
 from datetime import datetime, timezone
 
 # Add parent directories to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../')))
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 from core_engine.data.feeds.polygon_rest import (
     create_polygon_rest_service,

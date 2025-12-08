@@ -292,6 +292,8 @@ def test_market_order_buy_sell():
         print("  ✓ Position closure verification")
         print("  ✓ Account balance tracking")
 
+        return True
+
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback

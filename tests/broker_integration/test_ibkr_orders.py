@@ -2,16 +2,28 @@
 Test IBKR Order Placement
 Tests order submission, modification, and cancellation via Interactive Brokers API.
 """
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import pytest
 import time
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
+# Counter for unique client IDs
+_client_id_counter = 1
 
 @pytest.fixture
 def ibkr_adapter():
     """Create and connect IBKR adapter for testing"""
+    global _client_id_counter
     config = load_broker_config()
+    # Use unique client ID for each test to avoid conflicts
+    config.interactive_brokers.client_id = _client_id_counter
+    _client_id_counter += 1
     adapter = IBKRAdapter(config.interactive_brokers)
     yield adapter
     # Cleanup: disconnect after test

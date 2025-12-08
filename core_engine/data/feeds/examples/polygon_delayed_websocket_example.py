@@ -12,7 +12,7 @@ The delayed feed provides 15-minute delayed data including:
 - Trades (T.*)
 
 Prerequisites:
-    1. Polygon.io Stock Starter subscription
+    1. Polygon.io Stock Starter subscription (includes delayed websockets!)
     2. API key set as environment variable: POLYGON_API_KEY
     3. Install websockets: pip install websockets
 
@@ -24,20 +24,32 @@ Author: StatArb_Gemini Core Engine
 """
 
 import asyncio
+import json
 import logging
 import os
+import ssl
 import sys
 from datetime import datetime
 
-# Add parent directories to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../..')))
+import websockets
 
-from core_engine.data.feeds.polygon_realtime import (
-    PolygonRealtimeFeedAdapter,
-    PolygonFeedConfig,
-    PolygonSubscriptionTier,
-    PolygonCluster,
-)
+# Disable proxy usage for websockets
+os.environ['HTTP_PROXY'] = ''
+os.environ['HTTPS_PROXY'] = ''
+os.environ['http_proxy'] = ''
+os.environ['https_proxy'] = ''
+
+# Create SSL context that doesn't verify certificates
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
+# Add parent directories to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../')))
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -54,7 +66,7 @@ logger = logging.getLogger('polygon_delayed_example')
 
 async def delayed_websocket_example():
     """
-    Example using the 15-minute delayed WebSocket feed
+    Example using the 15-minute delayed WebSocket feed with raw websockets
     """
     logger.info("=" * 60)
     logger.info("POLYGON.IO DELAYED WEBSOCKET FEED EXAMPLE")
@@ -71,88 +83,114 @@ async def delayed_websocket_example():
     symbols = ["TSLA", "AAPL", "NVDA"]
 
     logger.info(f"Testing delayed WebSocket feed for symbols: {symbols}")
-    logger.info("This should provide 15-minute delayed data...")
+    logger.info("This provides 15-minute delayed data from live markets...")
+
+    # Message counter
+    message_count = {"bars": 0, "trades": 0, "total": 0}
+
+    uri = "wss://delayed.massive.com/stocks"
 
     try:
-        # Create config for DELAYED cluster
-        config = PolygonFeedConfig(
-            api_key=api_key,
-            symbols=symbols,
-            subscription_tier=PolygonSubscriptionTier.STARTER,
-            cluster=PolygonCluster.STOCKS_DELAYED,  # Use delayed endpoint
-            data_types=["second_agg", "minute_agg", "trade"],  # Available in Starter
-            name="polygon-delayed-test",
-        )
+        async with websockets.connect(uri, proxy=None, ssl=ssl_context) as websocket:
+            logger.info("✅ Connected to delayed websocket")
 
-        logger.info(f"WebSocket URL: {config.ws_url}")
-        logger.info(f"Subscription tier: {config.subscription_tier.value}")
-        logger.info(f"Data types: {config.data_types}")
+            # Send authentication
+            auth_msg = {"action": "auth", "params": api_key}
+            await websocket.send(json.dumps(auth_msg))
+            logger.info("✅ Sent authentication")
 
-        # Create adapter
-        adapter = PolygonRealtimeFeedAdapter(config)
-        logger.info("✅ Adapter created")
+            # Wait for auth response - check next few messages
+            auth_success = False
+            for i in range(3):  # Check next 3 messages
+                try:
+                    response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                    data = json.loads(response)
+                    logger.info(f"Message {i+1}: {data}")
 
-        # Set up event handlers
-        message_count = {"bars": 0, "trades": 0, "total": 0}
+                    if isinstance(data, list):
+                        for msg in data:
+                            if msg.get('status') == 'auth_success':
+                                auth_success = True
+                                logger.info("✅ Authentication successful")
+                                break
+                    elif isinstance(data, dict) and data.get('status') == 'auth_success':
+                        auth_success = True
+                        logger.info("✅ Authentication successful")
+                        break
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout waiting for message {i+1}")
+                    break
 
-        def on_bar_received(bar_data):
-            message_count["bars"] += 1
-            message_count["total"] += 1
-            symbol = bar_data.get("symbol", "UNKNOWN")
-            price = bar_data.get("close", 0)
-            volume = bar_data.get("volume", 0)
-            timestamp = bar_data.get("timestamp", datetime.now())
+            if not auth_success:
+                logger.error("❌ Authentication failed - no auth_success message received")
+                return
 
-            logger.info(f"📊 BAR [{symbol}] ${price:.2f} Vol:{volume} @ {timestamp}")
+            # Subscribe to data streams
+            subscribe_msg = {"action": "subscribe", "params": "A.TSLA,A.AAPL,A.NVDA,AM.TSLA,AM.AAPL,AM.NVDA,T.TSLA,T.AAPL,T.NVDA"}
+            await websocket.send(json.dumps(subscribe_msg))
+            logger.info("✅ Subscribed to data streams")
+            logger.info("Note: Data is 15 minutes delayed from real-time")
 
-            # Stop after receiving some data
-            if message_count["total"] >= 10:
-                logger.info("Received 10 messages, stopping...")
-                asyncio.create_task(adapter.disconnect())
+            # Listen for data
+            logger.info("Waiting for delayed market data...")
 
-        def on_trade_received(trade_data):
-            message_count["trades"] += 1
-            message_count["total"] += 1
-            symbol = trade_data.get("symbol", "UNKNOWN")
-            price = trade_data.get("price", 0)
-            size = trade_data.get("size", 0)
-            timestamp = trade_data.get("timestamp", datetime.now())
+            timeout = 30  # Initial timeout
+            max_messages = 20  # Increased limit for better analysis
+            try:
+                while message_count["total"] < max_messages:
+                    response = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+                    data = json.loads(response)
 
-            logger.info(f"💰 TRADE [{symbol}] ${price:.2f} Size:{size} @ {timestamp}")
+                    if isinstance(data, list):
+                        for msg in data:
+                            message_count["total"] += 1
 
-            # Stop after receiving some data
-            if message_count["total"] >= 10:
-                logger.info("Received 10 messages, stopping...")
-                asyncio.create_task(adapter.disconnect())
+                            # Extract timestamp based on message type
+                            timestamp = None
+                            if msg.get('ev') in ['A', 'AM']:  # Aggregates use 's' (start timestamp)
+                                timestamp = msg.get('s')
+                            elif msg.get('ev') == 'T':  # Trades use 't' (trade timestamp)
+                                timestamp = msg.get('t')
+                            
+                            if timestamp:
+                                try:
+                                    timestamp_dt = datetime.fromtimestamp(timestamp / 1000.0)
+                                    logger.info(f"🕒 TIMESTAMP: {timestamp_dt}")
+                                except Exception as e:
+                                    logger.warning(f"🕒 TIMESTAMP: Failed to convert {timestamp}: {e}")
+                            else:
+                                logger.warning(f"🕒 TIMESTAMP: No timestamp found in {msg.get('ev')} message")
 
-        def on_status_changed(status):
-            logger.info(f"🔄 Status changed: {status}")
+                            if msg.get('ev') == 'A':  # Second aggregate
+                                message_count["bars"] += 1
+                                logger.info(f"📊 BAR [{msg.get('sym')}] ${msg.get('c'):.2f} Vol:{msg.get('v')} | Full msg: {msg}")
+                            elif msg.get('ev') == 'AM':  # Minute aggregate
+                                message_count["bars"] += 1
+                                logger.info(f"📊 MIN BAR [{msg.get('sym')}] ${msg.get('c'):.2f} Vol:{msg.get('v')} | Full msg: {msg}")
+                            elif msg.get('ev') == 'T':  # Trade
+                                message_count["trades"] += 1
+                                logger.info(f"💰 TRADE [{msg.get('sym')}] ${msg.get('p'):.2f} Size:{msg.get('s')} | Full msg: {msg}")
+                            else:
+                                # Handle status messages specially
+                                if msg.get('ev') == 'status':
+                                    status = msg.get('status', 'unknown')
+                                    message = msg.get('message', '')
+                                    if status == 'error':
+                                        logger.warning(f"❌ Status Error: {message}")
+                                    elif status == 'success':
+                                        logger.info(f"✅ Status Success: {message}")
+                                    else:
+                                        logger.debug(f"📨 Status: {status} - {message}")
+                                else:
+                                    logger.info(f"📨 Other message: {msg}")
+                    else:
+                        logger.info(f"📨 Single message: {data}")
 
-        def on_error(error_msg):
-            logger.error(f"❌ Error: {error_msg}")
+                    # Reset timeout after receiving first data
+                    timeout = 10
 
-        # Connect to event handlers
-        adapter.on_bar = on_bar_received
-        adapter.on_trade = on_trade_received
-        adapter.on_status_change = on_status_changed
-        adapter.on_error = on_error
-
-        # Connect and subscribe
-        logger.info("Connecting to delayed WebSocket feed...")
-        await adapter.connect()
-
-        logger.info("Subscribing to data streams...")
-        await adapter.subscribe(symbols, ["second_agg", "minute_agg", "trade"])
-
-        logger.info("✅ Connected and subscribed! Waiting for delayed data...")
-        logger.info("Note: Data will be 15 minutes delayed from real-time")
-
-        # Wait for data or timeout
-        logger.info("Waiting for delayed data (30 seconds)...")
-        await asyncio.sleep(30.0)  # Wait 30 seconds for data
-
-        logger.info("Timeout reached, disconnecting...")
-        await adapter.disconnect()
+            except asyncio.TimeoutError:
+                logger.info("Timeout reached, disconnecting...")
 
         # Summary
         logger.info("\n📈 Session Summary:")
