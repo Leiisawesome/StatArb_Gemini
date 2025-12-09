@@ -84,6 +84,24 @@ async def delayed_websocket_example():
 
     logger.info(f"Testing delayed WebSocket feed for symbols: {symbols}")
     logger.info("This provides 15-minute delayed data from live markets...")
+    
+    # Check market status
+    try:
+        import requests
+        market_url = f"https://api.polygon.io/v1/marketstatus/now?apiKey={api_key}"
+        market_response = requests.get(market_url, timeout=5)
+        if market_response.status_code == 200:
+            market_data = market_response.json()
+            market_status = market_data.get('market', 'unknown')
+            logger.info(f"📊 Market Status: {market_status.upper()}")
+            if market_status == 'closed':
+                logger.warning("⚠️  Market is closed - delayed feed may not stream data until market opens")
+            else:
+                logger.info("✅ Market is open - expecting live delayed data")
+        else:
+            logger.warning("⚠️  Could not check market status")
+    except Exception as e:
+        logger.warning(f"⚠️  Market status check failed: {e}")
 
     # Message counter
     message_count = {"bars": 0, "trades": 0, "total": 0}
@@ -134,7 +152,7 @@ async def delayed_websocket_example():
             # Listen for data
             logger.info("Waiting for delayed market data...")
 
-            timeout = 30  # Initial timeout
+            timeout = 60  # Increased timeout for testing
             max_messages = 20  # Increased limit for better analysis
             try:
                 while message_count["total"] < max_messages:
@@ -200,10 +218,11 @@ async def delayed_websocket_example():
 
         if message_count["total"] == 0:
             logger.warning("⚠️ No data received. This could mean:")
-            logger.warning("  - Market is closed")
+            logger.warning("  - Market is closed (no trading activity)")
             logger.warning("  - No trading activity in the symbols")
             logger.warning("  - Network connectivity issues")
             logger.warning("  - API key permissions")
+            logger.info("💡 Try running during market hours (9:30 AM - 4:00 PM ET)")
         else:
             logger.info("✅ Successfully received delayed market data!")
 
