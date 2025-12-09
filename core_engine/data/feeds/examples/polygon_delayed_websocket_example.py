@@ -163,21 +163,23 @@ async def delayed_websocket_example():
                         for msg in data:
                             message_count["total"] += 1
 
-                            # Extract timestamp based on message type
-                            timestamp = None
-                            if msg.get('ev') in ['A', 'AM']:  # Aggregates use 's' (start timestamp)
-                                timestamp = msg.get('s')
-                            elif msg.get('ev') == 'T':  # Trades use 't' (trade timestamp)
-                                timestamp = msg.get('t')
-                            
-                            if timestamp:
-                                try:
-                                    timestamp_dt = datetime.fromtimestamp(timestamp / 1000.0)
-                                    logger.info(f"🕒 TIMESTAMP: {timestamp_dt}")
-                                except Exception as e:
-                                    logger.warning(f"🕒 TIMESTAMP: Failed to convert {timestamp}: {e}")
-                            else:
-                                logger.warning(f"🕒 TIMESTAMP: No timestamp found in {msg.get('ev')} message")
+                            # Extract timestamp based on message type - only for data messages
+                            msg_type = msg.get('ev')
+                            if msg_type in ['A', 'AM', 'T']:  # Only check timestamps for data messages
+                                timestamp = None
+                                if msg_type in ['A', 'AM']:  # Aggregates use 's' (start timestamp)
+                                    timestamp = msg.get('s')
+                                elif msg_type == 'T':  # Trades use 't' (trade timestamp)
+                                    timestamp = msg.get('t')
+                                
+                                if timestamp:
+                                    try:
+                                        timestamp_dt = datetime.fromtimestamp(timestamp / 1000.0)
+                                        logger.info(f"🕒 TIMESTAMP: {timestamp_dt}")
+                                    except Exception as e:
+                                        logger.warning(f"🕒 TIMESTAMP: Failed to convert {timestamp}: {e}")
+                                else:
+                                    logger.warning(f"🕒 TIMESTAMP: No timestamp found in {msg_type} message")
 
                             if msg.get('ev') == 'A':  # Second aggregate
                                 message_count["bars"] += 1
@@ -190,17 +192,21 @@ async def delayed_websocket_example():
                                 logger.info(f"💰 TRADE [{msg.get('sym')}] ${msg.get('p'):.2f} Size:{msg.get('s')} | Full msg: {msg}")
                             else:
                                 # Handle status messages specially
-                                if msg.get('ev') == 'status':
+                                if msg_type == 'status':
                                     status = msg.get('status', 'unknown')
                                     message = msg.get('message', '')
                                     if status == 'error':
-                                        logger.warning(f"❌ Status Error: {message}")
+                                        # Only log as warning if it's not a normal subscription message
+                                        if 'not authorized' in message.lower():
+                                            logger.debug(f"📨 Subscription status: {message}")
+                                        else:
+                                            logger.warning(f"❌ Status Error: {message}")
                                     elif status == 'success':
                                         logger.info(f"✅ Status Success: {message}")
                                     else:
                                         logger.debug(f"📨 Status: {status} - {message}")
                                 else:
-                                    logger.info(f"📨 Other message: {msg}")
+                                    logger.debug(f"📨 Other message type '{msg_type}': {msg}")
                     else:
                         logger.info(f"📨 Single message: {data}")
 
