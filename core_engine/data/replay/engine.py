@@ -63,7 +63,7 @@ class ReplayConfig:
     Controls how historical data is streamed to simulate real-time feeds.
     """
     # Data source
-    symbols: List[str] = field(default_factory=lambda: ["AAPL", "TSLA", "NVDA"])
+    symbols: List[str] = field(default_factory=lambda: ["TSLA"])
     start_date: str = "2024-12-20"
     end_date: str = "2024-12-20"
     interval: str = "1min"  # 1min, 5min, etc.

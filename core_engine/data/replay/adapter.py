@@ -43,7 +43,7 @@ class ReplayFeedConfig(FeedAdapterConfig):
     Extends FeedAdapterConfig with replay-specific settings.
     """
     # Replay-specific settings
-    replay_symbols: List[str] = field(default_factory=lambda: ["AAPL", "TSLA", "NVDA"])
+    replay_symbols: List[str] = field(default_factory=lambda: ["TSLA"])
     replay_start_date: str = "2024-12-20"
     replay_end_date: str = "2024-12-20"
     replay_interval: str = "1min"
