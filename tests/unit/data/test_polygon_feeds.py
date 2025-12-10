@@ -1846,6 +1846,150 @@ class TestPolygonAggregatedDataManagerAdvanced:
         logger.info("✅ get latest price from cache test passed")
 
 
+class TestPolygonAggregatedDataManagerCallbacks:
+    """Test data manager callback functionality"""
+
+    async def test_bar_callback_invocation(self, polygon_feed_config):
+        """Test bar callback is invoked on bar completion"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+
+        callback_called = False
+        callback_data = {}
+
+        def test_callback(symbol, timeframe, bar):
+            nonlocal callback_called, callback_data
+            callback_called = True
+            callback_data = {'symbol': symbol, 'timeframe': timeframe, 'bar': bar}
+
+        manager.add_bar_callback(test_callback)
+
+        # Create a message that will trigger custom bar completion
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="minute_agg",
+            timestamp=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            data={
+                'open': 150.0, 'high': 151.0, 'low': 149.0, 'close': 150.5,
+                'volume': 100000.0, 'vwap': 150.25, 'num_trades': 500,
+                'bar_type': 'minute',
+                'timestamp_start': '2024-12-06T09:30:00+00:00',
+                'timestamp_end': '2024-12-06T09:31:00+00:00'
+            }
+        )
+
+        # Process multiple bars to trigger completion
+        for i in range(5):  # 5-minute bar
+            await manager.process_aggregate(message)
+
+        # Manually trigger completion for testing
+        completed_bar = PolygonAggregateBar(
+            symbol="AAPL", open=150.0, high=151.0, low=149.0, close=150.5,
+            volume=500000.0, vwap=150.25, num_trades=2500,
+            timestamp_start=datetime(2024, 12, 6, 9, 25, tzinfo=timezone.utc),
+            timestamp_end=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            bar_type="5m"
+        )
+        manager._notify_bar_completion("AAPL", "5m", completed_bar)
+
+        assert callback_called
+        assert callback_data['symbol'] == "AAPL"
+        assert callback_data['timeframe'] == "5m"
+        assert callback_data['bar'] == completed_bar
+        logger.info("✅ bar callback invocation test passed")
+
+    async def test_bar_callback_error_handling(self, polygon_feed_config):
+        """Test bar callback error handling"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+        manager = PolygonAggregatedDataManager(adapter)
+
+        def failing_callback(symbol, timeframe, bar):
+            raise Exception("Callback failed")
+
+        manager.add_bar_callback(failing_callback)
+
+        # This should not raise an exception
+        completed_bar = PolygonAggregateBar(
+            symbol="AAPL", open=150.0, high=151.0, low=149.0, close=150.5,
+            volume=100000.0, vwap=150.25, num_trades=500,
+            timestamp_start=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            timestamp_end=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+            bar_type="minute"
+        )
+        manager._notify_bar_completion("AAPL", "minute", completed_bar)
+
+        # Bar should still be stored
+        bars = manager.get_bars("AAPL", "minute")
+        assert len(bars) == 1
+        logger.info("✅ bar callback error handling test passed")
+
+
+class TestPolygonRealtimeAdapterConfigValidation:
+    """Test configuration validation edge cases"""
+
+    def test_config_validation_missing_api_key(self):
+        """Test config validation with missing API key"""
+        with pytest.raises(ValueError, match="Polygon API key is required"):
+            PolygonFeedConfig(api_key="")
+
+    def test_config_validation_invalid_data_type_for_tier(self):
+        """Test config validation with invalid data type for subscription tier"""
+        with pytest.raises(ValueError, match="Data types .* not available with .* tier"):
+            PolygonFeedConfig(
+                api_key="test_key",
+                subscription_tier=PolygonSubscriptionTier.STARTER,
+                data_types=["quote"]  # Quotes require Developer+ tier
+            )
+
+    def test_config_ws_url_stocks(self, polygon_api_key):
+        """Test WebSocket URL generation for stocks cluster"""
+        config = PolygonFeedConfig(
+            api_key=polygon_api_key,
+            cluster=PolygonCluster.STOCKS
+        )
+        assert config.ws_url == "wss://socket.polygon.io/stocks"
+
+    def test_config_ws_url_delayed(self, polygon_api_key):
+        """Test WebSocket URL generation for delayed stocks cluster"""
+        config = PolygonFeedConfig(
+            api_key=polygon_api_key,
+            cluster=PolygonCluster.STOCKS_DELAYED
+        )
+        assert config.ws_url == "wss://delayed.polygon.io/stocks"
+    """Test configuration validation edge cases"""
+
+    def test_config_validation_missing_api_key(self):
+        """Test config validation with missing API key"""
+        with pytest.raises(ValueError, match="Polygon API key is required"):
+            PolygonFeedConfig(api_key="")
+
+    def test_config_validation_invalid_data_type_for_tier(self):
+        """Test config validation with invalid data type for subscription tier"""
+        with pytest.raises(ValueError, match="Data types .* not available with .* tier"):
+            PolygonFeedConfig(
+                api_key="test_key",
+                subscription_tier=PolygonSubscriptionTier.STARTER,
+                data_types=["quote"]  # Quotes require Developer+ tier
+            )
+
+    def test_config_ws_url_stocks(self, polygon_api_key):
+        """Test WebSocket URL generation for stocks cluster"""
+        config = PolygonFeedConfig(
+            api_key=polygon_api_key,
+            cluster=PolygonCluster.STOCKS
+        )
+        assert config.ws_url == "wss://socket.polygon.io/stocks"
+
+    def test_config_ws_url_delayed(self, polygon_api_key):
+        """Test WebSocket URL generation for delayed stocks cluster"""
+        config = PolygonFeedConfig(
+            api_key=polygon_api_key,
+            cluster=PolygonCluster.STOCKS_DELAYED
+        )
+        assert config.ws_url == "wss://delayed.polygon.io/stocks"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
 

@@ -132,7 +132,7 @@ def test_account_information_querying():
         # Data freshness
         print(f"\n   Data Information:")
         print(f"   Timestamp: {account_info.timestamp}")
-        age_seconds = (datetime.datetime.now() - account_info.timestamp).total_seconds()
+        age_seconds = (datetime.now() - account_info.timestamp).total_seconds()
         print(f"   Data Age: {age_seconds:.1f} seconds")
 
         # Validate data is reasonably fresh (within last 5 minutes)

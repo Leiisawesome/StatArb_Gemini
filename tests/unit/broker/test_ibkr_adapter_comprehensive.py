@@ -4,15 +4,12 @@ Focus: Connection, Order Execution, and Data Retrieval
 """
 
 import pytest
-import threading
-import time
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
-from zoneinfo import ZoneInfo
+from datetime import datetime
+from unittest.mock import Mock, patch
 
-from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter, IBKRWrapper, IBKRClient
+from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter, IBKRWrapper
 from core_engine.type_definitions.broker_types import (
-    Order, OrderSide, OrderType, OrderStatus, Position, AccountInfo
+    OrderSide, OrderType, OrderStatus
 )
 
 

@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from core_engine.config.broker_config import (
-    AlpacaConfig,
     InteractiveBrokersConfig,
     BrokerConfig,
     BrokerConfigLoader,
@@ -37,31 +36,6 @@ class TestRiskLimitsValidation:
         """Test validation fails with position size > 500."""
         limits = RiskLimits(max_position_size=600)
         assert limits.validate() is False
-
-
-class TestAlpacaConfigValidation:
-    """Test AlpacaConfig validation edge cases."""
-
-    def test_validate_paper_flag_mismatch_live_url(self):
-        """Test validation fails when paper flag is True but URL is live."""
-        config = AlpacaConfig(
-            api_key="key",
-            secret_key="secret",
-            base_url="https://api.alpaca.markets",  # Live URL
-            paper_trading=True
-        )
-        assert config.validate() is False
-
-    def test_validate_live_trading_warning(self):
-        """Test validation logs warning for live trading."""
-        config = AlpacaConfig(
-            api_key="key",
-            secret_key="secret",
-            base_url="https://api.alpaca.markets",
-            paper_trading=False
-        )
-        # Should return True but log warning
-        assert config.validate() is True
 
 
 class TestInteractiveBrokersConfigValidation:
@@ -97,35 +71,12 @@ class TestBrokerConfigValidation:
         config = BrokerConfig(trading_mode=TradingMode.LIVE)
         assert config.validate() is False
 
-    def test_validate_alpaca_not_configured(self):
-        """Test validation fails when Alpaca selected but not configured."""
-        config = BrokerConfig(
-            trading_mode=TradingMode.PAPER,
-            active_broker=BrokerType.ALPACA,
-            alpaca=None
-        )
-        assert config.validate() is False
-
     def test_validate_ib_not_configured(self):
         """Test validation fails when IB selected but not configured."""
         config = BrokerConfig(
             trading_mode=TradingMode.PAPER,
             active_broker=BrokerType.INTERACTIVE_BROKERS,
             interactive_brokers=None
-        )
-        assert config.validate() is False
-
-    def test_validate_alpaca_invalid(self):
-        """Test validation fails when Alpaca config is invalid."""
-        invalid_alpaca = AlpacaConfig(
-            api_key="",  # Missing key
-            secret_key="secret",
-            base_url="https://paper-api.alpaca.markets"
-        )
-        config = BrokerConfig(
-            trading_mode=TradingMode.PAPER,
-            active_broker=BrokerType.ALPACA,
-            alpaca=invalid_alpaca
         )
         assert config.validate() is False
 
@@ -145,15 +96,16 @@ class TestBrokerConfigValidation:
 
     def test_validate_success(self):
         """Test validation succeeds with valid config."""
-        alpaca = AlpacaConfig(
-            api_key="key",
-            secret_key="secret",
-            base_url="https://paper-api.alpaca.markets"
+        ib = InteractiveBrokersConfig(
+            host="127.0.0.1",
+            port=7497,
+            client_id=1,
+            paper_trading=True
         )
         config = BrokerConfig(
             trading_mode=TradingMode.PAPER,
-            active_broker=BrokerType.ALPACA,
-            alpaca=alpaca
+            active_broker=BrokerType.INTERACTIVE_BROKERS,
+            interactive_brokers=ib
         )
         assert config.validate() is True
 
@@ -164,11 +116,11 @@ class TestBrokerConfigLoader:
     @patch.dict(os.environ, {}, clear=True)
     def test_load_from_env_with_file(self):
         """Test loading from specified env file."""
-        env_content = """ALPACA_PAPER_API_KEY=test_key
-ALPACA_PAPER_SECRET_KEY=test_secret
-ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
+        env_content = """IB_PAPER_HOST=127.0.0.1
+IB_PAPER_PORT=7497
+IB_PAPER_CLIENT_ID=1
 PHASE_9_TRADING_MODE=paper
-PHASE_9_ACTIVE_BROKER=alpaca
+PHASE_9_ACTIVE_BROKER=interactive_brokers
 """
         with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
             f.write(env_content)
@@ -176,9 +128,9 @@ PHASE_9_ACTIVE_BROKER=alpaca
 
         try:
             config = BrokerConfigLoader.load_from_env(env_path)
-            assert config.alpaca is not None
-            assert config.alpaca.api_key == "test_key"
-            assert config.alpaca.secret_key == "test_secret"
+            assert config.interactive_brokers is not None
+            assert config.interactive_brokers.host == "127.0.0.1"
+            assert config.interactive_brokers.port == 7497
         finally:
             Path(env_path).unlink()
 
@@ -229,17 +181,6 @@ PHASE_9_ACTIVE_BROKER=alpaca
         assert config.trading_mode == TradingMode.PAPER
 
     @patch.dict(os.environ, {
-        'ALPACA_API_KEY': 'key',  # Legacy var without PAPER prefix
-        'ALPACA_SECRET_KEY': 'secret',
-        'ALPACA_PAPER_BASE_URL': 'https://paper-api.alpaca.markets'
-    }, clear=False)
-    def test_load_from_env_legacy_alpaca_vars(self):
-        """Test loading Alpaca config from legacy env vars."""
-        config = BrokerConfigLoader.load_from_env()
-        assert config.alpaca is not None
-        assert config.alpaca.api_key == "key"
-
-    @patch.dict(os.environ, {
         'IB_HOST': '127.0.0.1',  # Legacy var without PAPER prefix
         'IB_PORT': '7497',
         'IB_PAPER_CLIENT_ID': '1'
@@ -281,7 +222,6 @@ PHASE_9_ACTIVE_BROKER=alpaca
 
             content = Path(sample_path).read_text()
             assert "Phase 9 Broker Credentials" in content
-            assert "ALPACA_PAPER_API_KEY" in content
             assert "IB_PAPER_HOST" in content
             assert "PHASE_9_TRADING_MODE" in content
         finally:
@@ -293,17 +233,17 @@ class TestLoadBrokerConfig:
     """Test load_broker_config convenience function."""
 
     @patch.dict(os.environ, {
-        'ALPACA_PAPER_API_KEY': 'key',
-        'ALPACA_PAPER_SECRET_KEY': 'secret',
-        'ALPACA_PAPER_BASE_URL': 'https://paper-api.alpaca.markets',
+        'IB_PAPER_HOST': '127.0.0.1',
+        'IB_PAPER_PORT': '7497',
+        'IB_PAPER_CLIENT_ID': '1',
         'PHASE_9_TRADING_MODE': 'paper',
-        'PHASE_9_ACTIVE_BROKER': 'alpaca'
+        'PHASE_9_ACTIVE_BROKER': 'interactive_brokers'
     }, clear=False)
     def test_load_broker_config_success(self):
         """Test load_broker_config succeeds with valid config."""
         config = load_broker_config()
         assert config is not None
-        assert config.alpaca is not None
+        assert config.interactive_brokers is not None
         assert config.validate() is True
 
     @patch('core_engine.config.broker_config.load_dotenv')  # Prevent loading from .env file

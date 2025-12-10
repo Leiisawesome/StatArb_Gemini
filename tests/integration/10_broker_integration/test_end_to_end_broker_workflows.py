@@ -21,21 +21,16 @@ Date: December 7, 2025
 """
 
 import pytest
-import asyncio
 import logging
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Dict, List, Optional, Any
+from unittest.mock import Mock, patch
 
 from core_engine.broker.broker_manager import BrokerManager
-from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
-from core_engine.broker.adapters.base_adapter import BaseBrokerAdapter
 from core_engine.broker.broker_adapter import BrokerType, BrokerCredentials, StandardOrder, OrderAction, OrderType, ConnectionStatus
 from core_engine.type_definitions.broker_types import (
-    Order, OrderSide, OrderType, OrderStatus, Position, AccountInfo
+    OrderType
 )
 from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
-from core_engine.system.central_risk_manager import CentralRiskManager
 
 logger = logging.getLogger(__name__)
 
@@ -815,11 +810,11 @@ class TestComplianceIntegrationWorkflow:
 
         # STEP 3: Attempt trade outside market hours
         # Check market open status
-        with patch('core_engine.broker.adapters.ibkr_adapter.datetime') as mock_datetime:
+        with patch('datetime.datetime') as mock_datetime_class:
             # Set time to weekend
             mock_now = Mock()
             mock_now.weekday.return_value = 5  # Saturday
-            mock_datetime.now.return_value = mock_now
+            mock_datetime_class.now.return_value = mock_now
 
             is_open = broker_adapter._adapter.is_market_open()
             assert is_open == False

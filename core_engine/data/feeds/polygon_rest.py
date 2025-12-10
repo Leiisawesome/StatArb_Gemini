@@ -338,9 +338,10 @@ class PolygonRestService:
 
         if data.get('status') == 'OK' and data.get('results'):
             bars = []
+            timestamps = []
             for r in data['results']:
+                timestamps.append(datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc))
                 bars.append({
-                    'timestamp': datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc),
                     'open': r['o'],
                     'high': r['h'],
                     'low': r['l'],
@@ -350,8 +351,8 @@ class PolygonRestService:
                     'num_trades': r.get('n'),
                 })
 
-            df = pd.DataFrame(bars)
-            df.set_index('timestamp', inplace=True)
+            df = pd.DataFrame(bars, index=timestamps)
+            df.index.name = 'timestamp'
             return df
 
         # Return empty DataFrame

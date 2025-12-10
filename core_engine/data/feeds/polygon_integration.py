@@ -381,21 +381,21 @@ class PolygonDataService(ISystemComponent):
         if not bars:
             return pd.DataFrame(columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'vwap', 'num_trades'
-            ])
+            ]).set_index('timestamp')
 
+        timestamps = [bar.timestamp_end for bar in bars]
         data = [{
-            'timestamp': bar.timestamp_end,
             'open': bar.open,
             'high': bar.high,
             'low': bar.low,
             'close': bar.close,
             'volume': bar.volume,
-            'vwap': bar.vwap,
-            'num_trades': bar.num_trades,
+            'vwap': bar.vwap if bar.vwap is not None else pd.NA,
+            'num_trades': bar.num_trades if bar.num_trades is not None else pd.NA,
         } for bar in bars]
 
-        df = pd.DataFrame(data)
-        df.set_index('timestamp', inplace=True)
+        df = pd.DataFrame(data, index=timestamps)
+        df.index.name = 'timestamp'
         return df
 
     def get_latest_trades(

@@ -11,7 +11,7 @@ Tests the data feed adapter infrastructure including:
 
 import asyncio
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from core_engine.data.feeds.adapters import (
     AdapterStatus,
@@ -221,20 +221,100 @@ class TestSimulatedFeedAdapter:
         # Check that messages were generated (implementation detail)
         # This tests the internal message generation logic
 
-    def test_add_message_handler(self, adapter):
-        """Test adding message handlers."""
-        handler = MagicMock()
-        adapter.add_message_handler(handler)
-        assert handler in adapter._message_handlers
+    @pytest.mark.asyncio
+    async def test_connect_exception_handling(self, adapter):
+        """Test exception handling in connect method."""
+        # Mock asyncio.sleep to raise an exception
+        with patch('asyncio.sleep', side_effect=Exception("Connection failed")):
+            result = await adapter.connect()
+            assert result is False
+            assert adapter.status == AdapterStatus.ERROR
 
-    def test_remove_message_handler(self, adapter):
-        """Test removing message handlers."""
+    @pytest.mark.asyncio
+    async def test_subscribe_exception_handling(self, adapter):
+        """Test exception handling in subscribe method."""
+        def mock_set_status(status):
+            if status == AdapterStatus.ACTIVE:
+                raise Exception("Subscribe failed")
+            # For other statuses, do nothing
+        
+        with patch.object(adapter, '_set_status', side_effect=mock_set_status):
+            await adapter.connect()
+            result = await adapter.subscribe(["AAPL"], ["trade"])
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_simulate_data_exception_handling(self, adapter):
+        """Test exception handling in _simulate_data method."""
+        await adapter.connect()
+        await adapter.subscribe(["AAPL"], ["trade"])
+        
+        # Wait a bit for simulation to start
+        await asyncio.sleep(0.1)
+        
+        # The simulation should handle exceptions internally
+        # This tests the try/except block in _simulate_data
+
+    def test_add_error_handler(self, adapter):
+        """Test adding error handlers."""
+        handler = MagicMock()
+        adapter.add_error_handler(handler)
+        assert handler in adapter._error_handlers
+
+    def test_add_status_handler(self, adapter):
+        """Test adding status handlers."""
+        handler = MagicMock()
+        adapter.add_status_handler(handler)
+        assert handler in adapter._status_handlers
+
+    def test_get_statistics(self, adapter):
+        """Test getting adapter statistics."""
+        stats = adapter.get_statistics()
+        assert isinstance(stats, dict)
+        assert 'messages_received' in stats
+        assert 'messages_processed' in stats
+        assert 'errors' in stats
+
+    def test_status_handler_notification(self, adapter):
+        """Test status handler gets called on status changes."""
+        handler = MagicMock()
+        adapter.add_status_handler(handler)
+        
+        # Manually call _set_status to trigger handler
+        adapter._set_status(AdapterStatus.CONNECTED)
+        
+        handler.assert_called_with(AdapterStatus.CONNECTED)
+
+    def test_error_handler_notification(self, adapter):
+        """Test error handler gets called."""
+        handler = MagicMock()
+        adapter.add_error_handler(handler)
+        
+        # Manually call _handle_error to trigger handler
+        test_error = Exception("Test error")
+        adapter._handle_error(test_error)
+        
+        handler.assert_called_with(test_error)
+
+    def test_message_handler_notification(self, adapter):
+        """Test message handler gets called."""
+        from datetime import datetime
         handler = MagicMock()
         adapter.add_message_handler(handler)
-        # Since there's no remove method, we test that we can add multiple
-        handler2 = MagicMock()
-        adapter.add_message_handler(handler2)
-        assert len(adapter._message_handlers) == 2
+        
+        # Create a test message
+        message = FeedMessage(
+            provider=FeedProvider.SIMULATED,
+            symbol="AAPL",
+            message_type="trade",
+            timestamp=datetime.now(),
+            data={"price": 150.0}
+        )
+        
+        # Manually call _handle_message to trigger handler
+        adapter._handle_message(message)
+        
+        handler.assert_called_with(message)
 
 
 class TestStubAdapters:
@@ -286,19 +366,43 @@ class TestStubAdapters:
         assert adapter.config == ib_config
 
     @pytest.mark.asyncio
-    async def test_stub_adapter_delegation(self, alpaca_config):
-        """Test that stub adapters delegate to simulated adapter."""
-        adapter = AlpacaFeedAdapter(alpaca_config)
-
-        # The stub adapter creates its own simulated adapter internally
-        # We can test that it behaves like a working adapter
+    async def test_polygon_adapter_simulated_fallback(self, polygon_config):
+        """Test PolygonFeedAdapter falls back to simulated when no production adapter."""
+        # Create config without api_key to force simulated fallback
+        config = FeedAdapterConfig(
+            provider=FeedProvider.POLYGON,
+            name="polygon_adapter",
+            api_key=None  # No API key
+        )
+        adapter = PolygonFeedAdapter(config)
+        
+        # Should use simulated adapter
         result = await adapter.connect()
         assert result is True
         assert adapter.is_connected()
-
+        
         result = await adapter.subscribe(["AAPL"], ["trade"])
         assert result is True
+        
+        await adapter.disconnect()
+        assert not adapter.is_connected()
 
+    @pytest.mark.asyncio
+    async def test_ib_adapter_simulated_methods(self, ib_config):
+        """Test InteractiveBrokersFeedAdapter simulated methods."""
+        adapter = InteractiveBrokersFeedAdapter(ib_config)
+        
+        result = await adapter.connect()
+        assert result is True
+        
+        result = await adapter.subscribe(["AAPL"], ["trade"])
+        assert result is True
+        
+        result = await adapter.unsubscribe(["AAPL"])
+        assert result is True
+        
+        assert adapter.is_connected()
+        
         await adapter.disconnect()
         assert not adapter.is_connected()
 
@@ -367,6 +471,19 @@ class TestFeedAdapterFactory:
             FeedProvider.INTERACTIVE_BROKERS
         }
         assert set(providers) == expected_providers
+
+    def test_get_implemented_providers(self):
+        """Test getting implemented providers."""
+        implemented = FeedAdapterFactory.get_implemented_providers()
+        assert FeedProvider.SIMULATED in implemented
+        assert FeedProvider.ALPACA not in implemented
+        assert FeedProvider.POLYGON not in implemented
+        assert FeedProvider.INTERACTIVE_BROKERS not in implemented
+
+    def test_register_adapter_invalid_class(self):
+        """Test registering invalid adapter class raises error."""
+        with pytest.raises(TypeError, match="Adapter class must extend DataFeedAdapter"):
+            FeedAdapterFactory.register(FeedProvider.CUSTOM, str)  # str doesn't extend DataFeedAdapter
 
 
 class TestIntegration:

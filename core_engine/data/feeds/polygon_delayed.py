@@ -41,24 +41,21 @@ import json
 import logging
 import os
 import ssl
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import websockets
 
-from adapters import (
-    AdapterStatus,
+from .adapters import (
     DataFeedAdapter,
     FeedAdapterConfig,
     FeedMessage,
     FeedProvider,
 )
-from polygon_realtime import (
+from .polygon_realtime import (
     PolygonAggregateBar,
     PolygonTrade,
-    PolygonFeedConfig,
 )
 
 # Disable proxy usage for websockets
@@ -356,7 +353,7 @@ class PolygonDelayedFeedAdapter(DataFeedAdapter):
             )
 
             # Notify subscribers
-            await self._notify_subscribers(feed_message)
+            super()._handle_message(feed_message)
 
         except Exception as e:
             self.logger.error(f"Error handling aggregate: {e}")
@@ -388,7 +385,7 @@ class PolygonDelayedFeedAdapter(DataFeedAdapter):
             )
 
             # Notify subscribers
-            await self._notify_subscribers(feed_message)
+            super()._handle_message(feed_message)
 
         except Exception as e:
             self.logger.error(f"Error handling trade: {e}")
