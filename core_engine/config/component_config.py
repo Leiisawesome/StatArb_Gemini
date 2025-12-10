@@ -1660,6 +1660,54 @@ class DataPerformanceConfig:
 
 
 @dataclass
+class ReplayConfig:
+    """
+    Configuration for historical data replay engine
+
+    Controls how historical market data is replayed for testing live trading components.
+    Used when DataConfig.mode is set to 'replay'.
+    """
+    speed: str = "FAST_100X"
+    """
+    Replay speed multiplier.
+    Valid: 'PAUSED', 'REALTIME', 'FAST_2X', 'FAST_5X', 'FAST_10X', 'FAST_50X', 'FAST_100X', 'INSTANT'
+    Default: FAST_100X (100x speed for fastest testing)
+    """
+
+    enable_progress_tracking: bool = True
+    """Enable progress tracking and logging during replay"""
+
+    progress_log_interval: int = 5
+    """Progress logging interval in seconds. Default: 5"""
+
+    enable_market_hours_simulation: bool = True
+    """Simulate market hours (9:30 AM - 4:00 PM ET) during replay"""
+
+    enable_pause_resume: bool = True
+    """Enable pause/resume functionality during replay"""
+
+    max_replay_speed: float = 1000.0
+    """Maximum allowed replay speed multiplier. Default: 1000.0"""
+
+    def __post_init__(self):
+        """Validate replay configuration"""
+        from core_engine.data.replay.engine import ReplaySpeed
+
+        # Validate speed
+        valid_speeds = [speed.name for speed in ReplaySpeed]
+        if self.speed not in valid_speeds:
+            raise ValueError(f"speed must be one of {valid_speeds}, got {self.speed}")
+
+        # Validate intervals
+        if self.progress_log_interval <= 0:
+            raise ValueError(f"progress_log_interval must be positive")
+
+        # Validate speed limits
+        if self.max_replay_speed <= 0:
+            raise ValueError(f"max_replay_speed must be positive")
+
+
+@dataclass
 class DataConfig:
     """
     Centralized data configuration using composition pattern
@@ -1670,7 +1718,7 @@ class DataConfig:
     3. FeedConfiguration (feeds/manager.py:72)
     4. ValidationConfiguration (validation/validator.py:116)
 
-    Total parameters: 87 consolidated into 6 sub-configs + core params.
+    Total parameters: 87 consolidated into 7 sub-configs + core params.
     Zero duplication (DRY principle enforced).
 
     Usage:
@@ -1702,8 +1750,11 @@ class DataConfig:
     performance: DataPerformanceConfig = field(default_factory=DataPerformanceConfig)
     """Performance and monitoring configuration"""
 
+    replay: ReplayConfig = field(default_factory=ReplayConfig)
+    """Historical data replay configuration"""
+
     # Core data parameters
-    symbols: List[str] = field(default_factory=lambda: ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ'])
+    symbols: List[str] = field(default_factory=lambda: ['TSLA'])
     """
     Symbols to trade/analyze.
     Default: Top liquid symbols from ClickHouse data.
