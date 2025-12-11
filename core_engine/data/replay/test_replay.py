@@ -20,13 +20,12 @@ from typing import List
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, project_root)
 
+from core_engine.data.replay.config import ReplayConfig, ReplaySpeed
 from core_engine.data.replay.engine import (
     HistoricalDataReplayEngine,
-    ReplayConfig,
-    ReplaySpeed,
     ReplayStatus
 )
-from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter, ReplayFeedConfig
+from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter
 from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
 
 
@@ -58,12 +57,11 @@ async def test_replay_adapter_initialization():
     """Test replay adapter initialization"""
     print("🧪 Testing replay adapter initialization...")
 
-    config = ReplayFeedConfig(
-        provider=FeedProvider.SIMULATED,
-        replay_symbols=["AAPL"],
-        replay_start_date="2024-12-20",
-        replay_end_date="2024-12-20",
-        replay_speed=ReplaySpeed.REALTIME
+    config = ReplayConfig.create_for_symbol(
+        symbol="AAPL",
+        start_date="2024-12-20",
+        end_date="2024-12-20",
+        speed=ReplaySpeed.REALTIME
     )
 
     adapter = HistoricalReplayFeedAdapter(config)

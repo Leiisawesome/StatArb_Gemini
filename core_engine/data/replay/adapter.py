@@ -20,10 +20,12 @@ Version: 1.0.0
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 
-from .engine import HistoricalDataReplayEngine, ReplayConfig, ReplaySpeed, ReplayStatus
+from .engine import HistoricalDataReplayEngine, ReplayStatus
+from .config import ReplayConfig, ReplaySpeed
 from core_engine.data.feeds.adapters import (
     DataFeedAdapter,
     FeedAdapterConfig,
@@ -35,34 +37,14 @@ from core_engine.data.feeds.adapters import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ReplayFeedConfig(FeedAdapterConfig):
-    """
-    Configuration for replay feed adapter
-
-    Extends FeedAdapterConfig with replay-specific settings.
-    """
-    # Replay-specific settings
-    replay_symbols: List[str] = field(default_factory=lambda: ["TSLA"])
-    replay_start_date: str = "2024-12-20"
-    replay_end_date: str = "2024-12-20"
-    replay_interval: str = "1min"
-    replay_speed: ReplaySpeed = ReplaySpeed.REALTIME
-
-    # Feed adapter settings
-    name: str = "historical-replay"
-
-    def __post_init__(self):
-        """Set provider to SIMULATED"""
-        self.provider = FeedProvider.SIMULATED
-
-
 class HistoricalReplayFeedAdapter(DataFeedAdapter):
     """
     Feed adapter for historical data replay
 
     Implements the DataFeedAdapter interface to provide historical data
     streams that simulate real-time market feeds for testing purposes.
+    
+    Uses centralized ReplayConfig for all configuration settings.
     """
 
     # Adapter metadata
@@ -70,34 +52,49 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
     PROVIDER = FeedProvider.SIMULATED
     SUPPORTED_DATA_TYPES = ['bar', 'quote', 'trade']
 
-    def __init__(self, config: ReplayFeedConfig):
-        # Initialize base adapter
-        super().__init__(config)
-
-        # Replay-specific components
-        self.replay_config = ReplayConfig(
-            symbols=config.replay_symbols,
-            start_date=config.replay_start_date,
-            end_date=config.replay_end_date,
-            interval=config.replay_interval,
-            speed=config.replay_speed
+    def __init__(self, config: ReplayConfig):
+        """
+        Initialize the replay feed adapter
+        
+        Args:
+            config: ReplayConfig instance with all replay settings
+        """
+        # Create minimal FeedAdapterConfig for base class
+        base_config = FeedAdapterConfig(
+            name=config.adapter_name,
+            provider=FeedProvider.SIMULATED
         )
+        
+        # Initialize base adapter
+        super().__init__(base_config)
 
+        # Store replay configuration
+        self.replay_config = config
         self.replay_engine: Optional[HistoricalDataReplayEngine] = None
 
         # Adapter state
         self._replay_task: Optional[asyncio.Task] = None
 
-        logger.info(f"✅ HistoricalReplayFeedAdapter initialized for {len(config.replay_symbols)} symbols")
+        logger.info(f"✅ HistoricalReplayFeedAdapter initialized for {len(config.symbols)} symbols")
 
     async def connect(self) -> bool:
         """
         Connect to the replay feed
 
+        Initializes the replay engine and sets up message handlers.
+
         Returns:
-            bool: True if connection successful
+            bool: True if connection successful, False otherwise
+
+        Raises:
+            RuntimeError: If replay engine initialization fails
         """
         try:
+            # Check if already connected
+            if self.status == AdapterStatus.CONNECTED:
+                logger.warning("Already connected to replay feed")
+                return True
+
             self.status = AdapterStatus.CONNECTING
             logger.info("Connecting to historical replay feed...")
 
@@ -106,11 +103,15 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             success = await self.replay_engine.initialize()
 
             if not success:
+                self.status = AdapterStatus.ERROR
                 raise RuntimeError("Failed to initialize replay engine")
 
             # Set up message handling
             self.replay_engine.add_message_handler(self._handle_replay_message)
             self.replay_engine.add_status_handler(self._handle_replay_status)
+
+            # Update connection statistics
+            self._stats['connection_time'] = datetime.now().isoformat()
 
             self.status = AdapterStatus.CONNECTED
             logger.info("✅ Connected to historical replay feed")
@@ -118,27 +119,44 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
 
         except Exception as e:
             self.status = AdapterStatus.ERROR
-            logger.error(f"❌ Failed to connect to replay feed: {e}")
+            logger.error(f"❌ Failed to connect to replay feed: {e}", exc_info=True)
             return False
 
     async def disconnect(self) -> None:
-        """Disconnect from the replay feed"""
+        """
+        Disconnect from the replay feed
+        
+        Stops the replay engine and cleans up resources. Safe to call multiple times.
+        """
         try:
+            # Check if already disconnected
+            if self.status == AdapterStatus.DISCONNECTED:
+                logger.debug("Already disconnected from replay feed")
+                return
+
+            logger.info("Disconnecting from replay feed...")
+
+            # Stop replay engine
             if self.replay_engine:
                 await self.replay_engine.stop_replay()
 
+            # Cancel replay task if running
             if self._replay_task and not self._replay_task.done():
                 self._replay_task.cancel()
                 try:
                     await self._replay_task
                 except asyncio.CancelledError:
-                    pass
+                    logger.debug("Replay task cancelled successfully")
+
+            # Clear subscriptions
+            self._subscriptions.clear()
 
             self.status = AdapterStatus.DISCONNECTED
             logger.info("✅ Disconnected from historical replay feed")
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            self.status = AdapterStatus.ERROR
+            logger.error(f"❌ Error during disconnect: {e}", exc_info=True)
 
     async def subscribe(self, symbols: List[str], data_types: List[str]) -> bool:
         """
@@ -381,11 +399,11 @@ async def create_replay_adapter(
     Returns:
         Connected replay feed adapter
     """
-    config = ReplayFeedConfig(
-        replay_symbols=symbols,
-        replay_start_date=start_date,
-        replay_end_date=end_date,
-        replay_speed=speed
+    config = ReplayConfig.create_for_symbols(
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        speed=speed
     )
 
     adapter = HistoricalReplayFeedAdapter(config)

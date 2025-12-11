@@ -29,20 +29,9 @@ import pandas as pd
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
 from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
 from core_engine.type_definitions.data import MarketData
+from .config import ReplayConfig, ReplaySpeed
 
 logger = logging.getLogger(__name__)
-
-
-class ReplaySpeed(Enum):
-    """Replay speed multipliers"""
-    PAUSED = 0.0
-    REALTIME = 1.0
-    FAST_2X = 2.0
-    FAST_5X = 5.0
-    FAST_10X = 10.0
-    FAST_50X = 50.0
-    FAST_100X = 100.0
-    INSTANT = float('inf')  # Replay all data instantly
 
 
 class ReplayStatus(Enum):
@@ -53,54 +42,6 @@ class ReplayStatus(Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     ERROR = "error"
-
-
-@dataclass
-class ReplayConfig:
-    """
-    Configuration for historical data replay
-
-    Controls how historical data is streamed to simulate real-time feeds.
-    """
-    # Data source
-    symbols: List[str] = field(default_factory=lambda: ["TSLA"])
-    start_date: str = "2024-12-20"
-    end_date: str = "2024-12-20"
-    interval: str = "1min"  # 1min, 5min, etc.
-
-    # Replay timing
-    speed: ReplaySpeed = ReplaySpeed.REALTIME
-    start_time: time = time(9, 30)  # 9:30 AM ET
-    end_time: time = time(16, 0)    # 4:00 PM ET
-
-    # Market hours simulation
-    simulate_market_hours: bool = True
-    skip_weekends: bool = True
-    skip_holidays: bool = True  # TODO: Implement holiday calendar
-
-    # Data processing
-    batch_size: int = 1000  # Records to load at once
-    buffer_size: int = 10000  # Internal buffer size
-
-    # Performance
-    max_concurrent_symbols: int = 10
-    prefetch_multiplier: int = 2  # Load ahead by this factor
-
-    def __post_init__(self):
-        """Validate configuration"""
-        if not self.symbols:
-            raise ValueError("At least one symbol must be specified")
-
-        # Validate date format
-        try:
-            datetime.strptime(self.start_date, "%Y-%m-%d")
-            datetime.strptime(self.end_date, "%Y-%m-%d")
-        except ValueError as e:
-            raise ValueError(f"Invalid date format. Use YYYY-MM-DD: {e}")
-
-        # Validate time format
-        if not isinstance(self.start_time, time) or not isinstance(self.end_time, time):
-            raise ValueError("start_time and end_time must be time objects")
 
 
 @dataclass
@@ -154,12 +95,23 @@ class HistoricalDataReplayEngine:
         """
         Initialize the replay engine
 
+        Initializes the ClickHouse data manager and pre-loads the initial data buffer.
+        Must be called before start_replay().
+
         Returns:
-            bool: True if initialization successful
+            bool: True if initialization successful, False otherwise
+
+        Raises:
+            RuntimeError: If ClickHouse initialization fails
         """
         try:
             self.status = ReplayStatus.INITIALIZING
             logger.info("Initializing Historical Data Replay Engine...")
+
+            # Validate engine not already initialized
+            if self.data_manager is not None:
+                logger.warning("Engine already initialized")
+                return True
 
             # Initialize ClickHouse data manager
             ch_config = ClickHouseDataConfig(
@@ -173,10 +125,15 @@ class HistoricalDataReplayEngine:
             success = await self.data_manager.initialize()
 
             if not success:
+                self.status = ReplayStatus.ERROR
                 raise RuntimeError("Failed to initialize ClickHouse data manager")
 
             # Pre-load initial data buffer
             await self._preload_data_buffer()
+
+            # Validate data was loaded
+            if self.stats.total_records == 0:
+                logger.warning("No data loaded - check symbols and date range")
 
             # Update statistics
             self.stats.market_hours_simulated = self.config.simulate_market_hours
@@ -188,28 +145,39 @@ class HistoricalDataReplayEngine:
 
         except Exception as e:
             self.status = ReplayStatus.ERROR
-            logger.error(f"❌ Failed to initialize replay engine: {e}")
+            logger.error(f"❌ Failed to initialize replay engine: {e}", exc_info=True)
             return False
 
     async def start_replay(self) -> bool:
         """
         Start the data replay
 
+        Begins streaming historical data through registered message handlers.
+        Must be called after initialize().
+
         Returns:
-            bool: True if replay started successfully
+            bool: True if replay started successfully, False otherwise
+
+        Raises:
+            RuntimeError: If engine not initialized or already running
         """
         if self.status == ReplayStatus.RUNNING:
             logger.warning("Replay already running")
             return True
 
         if not self.data_manager:
-            logger.error("Engine not initialized")
+            logger.error("Engine not initialized - call initialize() first")
+            return False
+
+        if self.stats.total_records == 0:
+            logger.warning("No data available for replay - check configuration")
             return False
 
         try:
             self.status = ReplayStatus.RUNNING
             self._running = True
             self.stats.start_time = datetime.now()
+            self.stats.records_processed = 0  # Reset progress
 
             # Notify status handlers
             await self._notify_status_handlers()
@@ -218,11 +186,12 @@ class HistoricalDataReplayEngine:
             asyncio.create_task(self._replay_loop())
 
             logger.info(f"🚀 Started data replay at {self._speed_multiplier}x speed")
+            logger.info(f"   Total records to process: {self.stats.total_records}")
             return True
 
         except Exception as e:
             self.status = ReplayStatus.ERROR
-            logger.error(f"❌ Failed to start replay: {e}")
+            logger.error(f"❌ Failed to start replay: {e}", exc_info=True)
             return False
 
     async def stop_replay(self) -> None:
@@ -293,13 +262,19 @@ class HistoricalDataReplayEngine:
         logger.info(f"✅ Pre-loaded {self.stats.total_records} total records")
 
     async def _replay_loop(self) -> None:
-        """Main replay loop"""
+        """
+        Main replay loop
+        
+        Iterates through all timestamps and processes data at the configured speed.
+        Handles pause/resume and graceful shutdown.
+        """
         try:
             # Get all timestamps across all symbols
             all_timestamps = await self._get_all_timestamps()
             if not all_timestamps:
                 logger.warning("No data available for replay")
                 self.status = ReplayStatus.COMPLETED
+                await self._notify_status_handlers()
                 return
 
             # Sort timestamps
@@ -307,8 +282,9 @@ class HistoricalDataReplayEngine:
 
             logger.info(f"Starting replay of {len(all_timestamps)} timestamps")
 
-            for timestamp in all_timestamps:
+            for idx, timestamp in enumerate(all_timestamps):
                 if not self._running:
+                    logger.info("Replay stopped by user")
                     break
 
                 # Wait for pause/resume
@@ -320,15 +296,27 @@ class HistoricalDataReplayEngine:
                 # Calculate delay based on speed
                 await self._apply_timing_delay(timestamp)
 
-            self.status = ReplayStatus.COMPLETED
+                # Log progress periodically
+                if (idx + 1) % 100 == 0:
+                    progress = (idx + 1) / len(all_timestamps) * 100
+                    logger.debug(f"Replay progress: {progress:.1f}% ({idx + 1}/{len(all_timestamps)} timestamps)")
+
+            if self._running:
+                self.status = ReplayStatus.COMPLETED
+                logger.info("✅ Replay completed successfully")
+            else:
+                self.status = ReplayStatus.STOPPED
+                logger.info("🛑 Replay stopped before completion")
+                
             self.stats.end_time = datetime.now()
 
         except Exception as e:
             self.status = ReplayStatus.ERROR
-            logger.error(f"❌ Error in replay loop: {e}")
+            logger.error(f"❌ Error in replay loop: {e}", exc_info=True)
 
         finally:
             await self._notify_status_handlers()
+            logger.info(f"Replay session ended: {self.stats.records_processed} records processed")
 
     async def _get_all_timestamps(self) -> List[datetime]:
         """Get all unique timestamps across all symbols"""

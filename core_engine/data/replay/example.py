@@ -17,9 +17,9 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, project_root)
 
-from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter, ReplayFeedConfig
-from core_engine.data.replay.engine import ReplaySpeed
-from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
+from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter
+from core_engine.data.replay.config import ReplayConfig, ReplaySpeed
+from core_engine.data.feeds.adapters import FeedMessage
 
 # Set up logging
 logging.basicConfig(
@@ -31,15 +31,21 @@ logger = logging.getLogger(__name__)
 
 async def on_market_data(message: FeedMessage) -> None:
     """
-    Handle incoming market data - just print it out
+    Handle incoming market data - format and print OHLCV data
+    
+    Args:
+        message: FeedMessage containing market data
     """
-    data = message.data
-    # Format timestamp properly
-    timestamp_str = message.timestamp.strftime('%Y-%m-%d %H:%M:%S%z') if message.timestamp else 'N/A'
-    print(f"{message.symbol} | {timestamp_str} | "
-          f"O:{data.get('open', 'N/A'):>8} H:{data.get('high', 'N/A'):>8} "
-          f"L:{data.get('low', 'N/A'):>8} C:{data.get('close', 'N/A'):>8} "
-          f"V:{data.get('volume', 'N/A'):>8}")
+    try:
+        data = message.data
+        # Format timestamp properly
+        timestamp_str = message.timestamp.strftime('%Y-%m-%d %H:%M:%S%z') if message.timestamp else 'N/A'
+        print(f"{message.symbol} | {timestamp_str} | "
+              f"O:{data.get('open', 'N/A'):>8} H:{data.get('high', 'N/A'):>8} "
+              f"L:{data.get('low', 'N/A'):>8} C:{data.get('close', 'N/A'):>8} "
+              f"V:{data.get('volume', 'N/A'):>8}")
+    except Exception as e:
+        logger.error(f"Error handling market data: {e}")
 
 
 async def main():
@@ -48,23 +54,17 @@ async def main():
     """
     logger.info("🚀 Starting Simple TSLA Data Replay")
 
-    # Simple configuration for TSLA
-    symbols = ["TSLA"]
-    start_date = "2024-12-20"
-    end_date = "2024-12-20"
-    speed = ReplaySpeed.FAST_10X  # Fast replay for demo
-
-    logger.info(f"Replaying TSLA data from {start_date} to {end_date} at {speed.name} speed")
-
-    # Create replay feed adapter
-    config = ReplayFeedConfig(
-        provider=FeedProvider.SIMULATED,
-        replay_symbols=symbols,
-        replay_start_date=start_date,
-        replay_end_date=end_date,
-        replay_speed=speed
+    # Simple configuration using centralized ReplayConfig
+    config = ReplayConfig.create_for_symbol(
+        symbol="TSLA",
+        start_date="2024-12-20",
+        end_date="2024-12-20",
+        speed=ReplaySpeed.FAST_100X
     )
 
+    logger.info(f"Replaying {', '.join(config.symbols)} data from {config.start_date} to {config.end_date} at {config.speed.name} speed")
+
+    # Create replay feed adapter with unified config
     adapter = HistoricalReplayFeedAdapter(config)
 
     try:
@@ -76,10 +76,10 @@ async def main():
             return
 
         # Subscribe to market data
-        logger.info("📡 Subscribing to TSLA...")
-        subscribed = await adapter.subscribe(symbols, ['bar'])
+        logger.info(f"📡 Subscribing to {', '.join(config.symbols)}...")
+        subscribed = await adapter.subscribe(config.symbols, ['bar'])
         if not subscribed:
-            logger.error("❌ Failed to subscribe to TSLA")
+            logger.error(f"❌ Failed to subscribe to {', '.join(config.symbols)}")
             return
 
         # Add message handler

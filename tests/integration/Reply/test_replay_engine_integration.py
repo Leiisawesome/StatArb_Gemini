@@ -25,9 +25,9 @@ import pytest
 # Add project root to path
 sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
 
-from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter, ReplayFeedConfig
-from core_engine.data.replay.engine import ReplaySpeed
-from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
+from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter
+from core_engine.data.replay.config import ReplayConfig, ReplaySpeed
+from core_engine.data.feeds.adapters import FeedMessage
 
 # Set up logging
 logging.basicConfig(
@@ -103,13 +103,12 @@ async def test_replay_engine_basic_functionality():
     # Create data collector
     collector = ReplayDataCollector()
 
-    # Create replay feed adapter
-    config = ReplayFeedConfig(
-        provider=FeedProvider.SIMULATED,
-        replay_symbols=symbols,
-        replay_start_date=start_date,
-        replay_end_date=end_date,
-        replay_speed=replay_speed
+    # Create replay configuration
+    config = ReplayConfig.create_for_symbol(
+        symbol="TSLA",
+        start_date=start_date,
+        end_date=end_date,
+        speed=replay_speed
     )
 
     adapter = HistoricalReplayFeedAdapter(config)
@@ -203,7 +202,6 @@ async def test_replay_engine_speed_configurations():
     """
     logger.info("⚡ Testing replay speed configurations")
 
-    symbols = ["TSLA"]
     speeds_to_test = [ReplaySpeed.FAST_2X, ReplaySpeed.FAST_10X, ReplaySpeed.FAST_50X]
 
     for speed in speeds_to_test:
@@ -211,12 +209,11 @@ async def test_replay_engine_speed_configurations():
 
         collector = ReplayDataCollector()
 
-        config = ReplayFeedConfig(
-            provider=FeedProvider.SIMULATED,
-            replay_symbols=symbols,
-            replay_start_date="2024-12-20",
-            replay_end_date="2024-12-20",
-            replay_speed=speed
+        config = ReplayConfig.create_for_symbol(
+            symbol="TSLA",
+            start_date="2024-12-20",
+            end_date="2024-12-20",
+            speed=speed
         )
 
         adapter = HistoricalReplayFeedAdapter(config)
@@ -224,7 +221,7 @@ async def test_replay_engine_speed_configurations():
         try:
             # Quick connect and test
             await adapter.connect()
-            await adapter.subscribe(symbols, ['bar'])
+            await adapter.subscribe(config.symbols, ['bar'])
             adapter.add_message_handler(collector.on_market_data)
 
             # Start replay
