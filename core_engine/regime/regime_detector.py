@@ -51,7 +51,6 @@ from ..type_definitions.regime import MarketRegime as RegimeType
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class DetectionMethod(Enum):
     """Regime detection methods"""
     MARKOV_SWITCHING = "markov_switching"
@@ -63,7 +62,6 @@ class DetectionMethod(Enum):
     CORRELATION_BASED = "correlation_based"
     MACHINE_LEARNING = "machine_learning"
 
-
 class ConfidenceLevel(Enum):
     """Confidence levels for regime detection"""
     VERY_LOW = 0.50
@@ -71,7 +69,6 @@ class ConfidenceLevel(Enum):
     MEDIUM = 0.75
     HIGH = 0.85
     VERY_HIGH = 0.95
-
 
 @dataclass
 class RegimeDetection:
@@ -110,7 +107,6 @@ class RegimeDetection:
     data_quality: float = 1.0
     warning_flags: List[str] = field(default_factory=list)
 
-
 @dataclass
 class RegimeTransition:
     """Regime transition information"""
@@ -133,7 +129,6 @@ class RegimeTransition:
     # Performance impact
     performance_impact: float = 0.0
     risk_impact: float = 0.0
-
 
 @dataclass
 class RegimeDetectionConfig:
@@ -169,7 +164,6 @@ class RegimeDetectionConfig:
     switching_variance: bool = True
     n_clusters: int = 3
     random_state: int = 42
-
 
 @dataclass
 class RegimeAnalysisConfig:
@@ -211,7 +205,6 @@ class RegimeAnalysisConfig:
     # Risk parameters
     var_confidence: float = 0.05
     expected_shortfall_confidence: float = 0.05
-
 
 class MarkovSwitchingDetector:
     """Markov switching model for regime detection"""
@@ -377,7 +370,6 @@ class MarkovSwitchingDetector:
             logger.warning(f"Error mapping regime index: {e}")
             return RegimeType.UNKNOWN
 
-
 class GaussianMixtureDetector:
     """Gaussian mixture model for regime detection"""
 
@@ -516,7 +508,6 @@ class GaussianMixtureDetector:
             logger.error(f"Error mapping cluster to regime: {e}")
             return RegimeType.UNKNOWN
 
-
 class VolatilityBasedDetector:
     """Volatility-based regime detection"""
 
@@ -633,7 +624,6 @@ class VolatilityBasedDetector:
         except Exception as e:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0
-
 
 class ThresholdBasedDetector:
     """Threshold-based regime detection"""
@@ -757,7 +747,6 @@ class ThresholdBasedDetector:
         except Exception as e:
             logger.error(f"Error calculating trend strength: {e}")
             return 0.0
-
 
 class RegimeDetector(ISystemComponent):
     """

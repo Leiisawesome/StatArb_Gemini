@@ -24,7 +24,6 @@ import pytest
 
 from core_engine.system.central_risk_manager import AuthorizationLevel
 
-
 class TestExecutionPlanning:
     """Integration tests for execution planning"""
 

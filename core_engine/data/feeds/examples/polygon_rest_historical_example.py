@@ -44,7 +44,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('polygon_rest_example')
 
-
 # ============================================================================
 # EXAMPLE 1: Basic Historical Data Retrieval
 # ============================================================================
@@ -109,7 +108,6 @@ async def basic_historical_example():
     except Exception as e:
         logger.error(f"Example failed: {e}")
 
-
 # ============================================================================
 # EXAMPLE 2: Multiple Days Historical Data
 # ============================================================================
@@ -159,7 +157,6 @@ async def multi_day_example():
 
     except Exception as e:
         logger.error(f"Multi-day example failed: {e}")
-
 
 # ============================================================================
 # EXAMPLE 3: Multiple Symbols Comparison
@@ -214,7 +211,6 @@ async def multi_symbol_example():
     except Exception as e:
         logger.error(f"Multi-symbol example failed: {e}")
 
-
 # ============================================================================
 # EXAMPLE 4: Previous Day Data
 # ============================================================================
@@ -260,7 +256,6 @@ async def previous_day_example():
 
     except Exception as e:
         logger.error(f"Previous day example failed: {e}")
-
 
 async def second_aggregates_example():
     """
@@ -319,7 +314,6 @@ async def second_aggregates_example():
     except Exception as e:
         logger.error(f"Second aggregates example failed: {e}")
 
-
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
@@ -360,7 +354,6 @@ async def main():
     #     except Exception as e:
     #         logger.error(f"{name} failed: {e}")
     #     await asyncio.sleep(1)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

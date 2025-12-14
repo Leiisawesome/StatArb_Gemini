@@ -35,7 +35,6 @@ except ImportError:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ReportFormat(Enum):
     """Report output formats"""
     HTML = "html"
@@ -44,7 +43,6 @@ class ReportFormat(Enum):
     CSV = "csv"
     XLSX = "xlsx"
     MARKDOWN = "markdown"
-
 
 class ChartType(Enum):
     """Chart types"""
@@ -59,7 +57,6 @@ class ChartType(Enum):
     BOX = "box"
     VIOLIN = "violin"
 
-
 class ReportSection(Enum):
     """Report sections"""
     EXECUTIVE_SUMMARY = "executive_summary"
@@ -72,7 +69,6 @@ class ReportSection(Enum):
     DETAILED_METRICS = "detailed_metrics"
     CHARTS = "charts"
     APPENDIX = "appendix"
-
 
 @dataclass
 class ChartConfig:
@@ -108,7 +104,6 @@ class ChartConfig:
     show_confidence_bands: bool = False
     show_moving_average: bool = False
     moving_average_periods: int = 20
-
 
 @dataclass
 class ReportConfig:
@@ -150,7 +145,6 @@ class ReportConfig:
     max_data_points: int = 10000
     chart_quality: str = "high"  # low, medium, high
 
-
 @dataclass
 class ReportData:
     """Container for report data"""
@@ -177,7 +171,6 @@ class ReportData:
 
     # Custom data
     custom_data: Dict[str, Any] = field(default_factory=dict)
-
 
 class ChartGenerator:
     """Chart generation engine"""
@@ -394,7 +387,6 @@ class ChartGenerator:
             plt.close(fig)
             logger.error(f"Error creating matplotlib chart: {e}")
             return ""
-
 
 class HTMLReportBuilder:
     """HTML report builder"""
@@ -859,7 +851,6 @@ class HTMLReportBuilder:
 
         html.append('</div>')
         return '\n'.join(html)
-
 
 class ReportGenerator:
     """

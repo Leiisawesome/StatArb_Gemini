@@ -17,7 +17,6 @@ from core_engine.config.broker_config import (
     load_broker_config
 )
 
-
 class TestRiskLimitsValidation:
     """Test RiskLimits validation edge cases."""
 
@@ -36,7 +35,6 @@ class TestRiskLimitsValidation:
         """Test validation fails with position size > 500."""
         limits = RiskLimits(max_position_size=600)
         assert limits.validate() is False
-
 
 class TestInteractiveBrokersConfigValidation:
     """Test InteractiveBrokersConfig validation edge cases."""
@@ -61,7 +59,6 @@ class TestInteractiveBrokersConfigValidation:
             paper_trading=False  # Live trading
         )
         assert config.validate() is False
-
 
 class TestBrokerConfigValidation:
     """Test BrokerConfig validation edge cases."""
@@ -108,7 +105,6 @@ class TestBrokerConfigValidation:
             interactive_brokers=ib
         )
         assert config.validate() is True
-
 
 class TestBrokerConfigLoader:
     """Test BrokerConfigLoader edge cases."""
@@ -228,7 +224,6 @@ PHASE_9_ACTIVE_BROKER=interactive_brokers
             if Path(sample_path).exists():
                 Path(sample_path).unlink()
 
-
 class TestLoadBrokerConfig:
     """Test load_broker_config convenience function."""
 
@@ -259,7 +254,6 @@ class TestLoadBrokerConfig:
         with pytest.raises(ValueError, match="Broker configuration validation failed"):
             load_broker_config()
 
-
 class TestBackwardCompatibility:
     """Test backward compatibility aliases."""
 
@@ -274,7 +268,6 @@ class TestBackwardCompatibility:
         assert Phase9Config == BrokerConfig
         assert Phase9ConfigLoader == BrokerConfigLoader
         assert load_phase9_config == load_broker_config
-
 
 class TestMainBlock:
     """Test __main__ block execution."""

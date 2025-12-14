@@ -26,7 +26,6 @@ from core_engine.trading.strategies.manager import EnhancedStrategyFactory
 # StrategyConfig is StrategyManagerConfig in manager.py
 from core_engine.type_definitions.strategy import StrategyType
 
-
 class TestStrategyManagerCoordination:
     """Integration tests for strategy manager coordination"""
 

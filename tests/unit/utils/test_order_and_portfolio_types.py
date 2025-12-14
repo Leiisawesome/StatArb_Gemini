@@ -12,7 +12,6 @@ from core_engine.type_definitions.portfolio import (
     Position, PortfolioSnapshot, PortfolioConfig, Portfolio, PortfolioManager
 )
 
-
 class TestOrders:
     """Test order-related types"""
 
@@ -136,7 +135,6 @@ class TestOrders:
         assert isinstance(result.metadata, dict)
         assert isinstance(result.execution_id, str)
         assert isinstance(result.timestamp, datetime)
-
 
 class TestPortfolio:
     """Test portfolio-related types"""
@@ -364,5 +362,4 @@ class TestPortfolio:
         # Invalid trade - position size limit exceeded
         manager.execute_trade("AAPL", 150, 100.0)  # Create $15,000 position
         assert manager.can_trade("AAPL", 100, 100.0) is False  # Would exceed 20% limit
-
 

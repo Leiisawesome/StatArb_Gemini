@@ -9,7 +9,6 @@ from datetime import datetime
 
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer, FeatureConfig
 
-
 class TestMissingCoverage:
     """Test methods and branches that are missing coverage"""
 

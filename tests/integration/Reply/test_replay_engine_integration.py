@@ -36,7 +36,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 class ReplayDataCollector:
     """
     Test utility to collect and validate replayed data
@@ -79,7 +78,6 @@ class ReplayDataCollector:
                 'end': max(self.timestamps) if self.timestamps else None
             }
         }
-
 
 @pytest.mark.asyncio
 async def test_replay_engine_basic_functionality():
@@ -194,7 +192,6 @@ async def test_replay_engine_basic_functionality():
         except Exception as e:
             logger.warning(f"⚠️ Cleanup error: {e}")
 
-
 @pytest.mark.asyncio
 async def test_replay_engine_speed_configurations():
     """
@@ -241,7 +238,6 @@ async def test_replay_engine_speed_configurations():
 
         finally:
             await adapter.disconnect()
-
 
 if __name__ == "__main__":
     # Run the tests

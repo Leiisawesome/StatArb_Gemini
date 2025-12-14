@@ -25,7 +25,6 @@ from core_engine.data.feeds.manager import (
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -48,7 +47,6 @@ def feed_config():
         fields=["price", "volume"]
     )
 
-
 @pytest.fixture
 def http_feed_config():
     """Create HTTP feed configuration"""
@@ -63,13 +61,11 @@ def http_feed_config():
         data_format=DataFormat.JSON
     )
 
-
 @pytest.fixture
 def feed_manager():
     """Create feed manager instance"""
     manager = FeedManager()
     return manager
-
 
 @pytest.fixture
 def sample_feed_message():
@@ -84,7 +80,6 @@ def sample_feed_message():
         data={"price": 150.25, "volume": 1000},
         latency_ms=5.0
     )
-
 
 # =============================================================================
 # CATEGORY 1: FEED CONFIGURATION (3 tests)
@@ -127,7 +122,6 @@ class TestFeedConfiguration:
         assert feed_config.custom_params['debug'] is True
         logger.info("✅ Feed config custom params test passed")
 
-
 # =============================================================================
 # CATEGORY 2: FEED MESSAGE (3 tests)
 # =============================================================================
@@ -159,7 +153,6 @@ class TestFeedMessage:
         sample_feed_message.validation_status = "valid"
         assert sample_feed_message.validation_status == "valid"
         logger.info("✅ Feed message validation status test passed")
-
 
 # =============================================================================
 # CATEGORY 3: FEED STATISTICS (3 tests)
@@ -204,7 +197,6 @@ class TestFeedStatistics:
         assert stats.bytes_received == 1024 * 1024
         logger.info("✅ Feed statistics performance metrics test passed")
 
-
 # =============================================================================
 # CATEGORY 4: FEED MANAGER INITIALIZATION (3 tests)
 # =============================================================================
@@ -234,7 +226,6 @@ class TestFeedManagerInitialization:
         assert feed_manager._feed_types['websocket'] == WebSocketFeed
         assert feed_manager._feed_types['http'] == HTTPFeed
         logger.info("✅ Feed manager supported types test passed")
-
 
 # =============================================================================
 # CATEGORY 5: FEED REGISTRATION (3 tests)
@@ -270,7 +261,6 @@ class TestFeedRegistration:
         assert len(registered) == 1
         assert feed_config.feed_id in registered
         logger.info("✅ Get registered feeds test passed")
-
 
 # =============================================================================
 # CATEGORY 6: MESSAGE HANDLING (4 tests)
@@ -320,7 +310,6 @@ class TestMessageHandling:
         handler.assert_called_once_with(sample_feed_message)
         logger.info("✅ Route message to feed handler test passed")
 
-
 # =============================================================================
 # CATEGORY 7: ERROR HANDLING (3 tests)
 # =============================================================================
@@ -361,7 +350,6 @@ class TestErrorHandling:
         assert handler.call_count == 1
         logger.info("✅ Route error to handler test passed")
 
-
 # =============================================================================
 # CATEGORY 8: FEED STATUS (3 tests)
 # =============================================================================
@@ -392,7 +380,6 @@ class TestFeedStatus:
         assert isinstance(active, list)
         assert len(active) == 0
         logger.info("✅ Get active feeds (empty) test passed")
-
 
 # =============================================================================
 # CATEGORY 9: SUBSCRIPTIONS (4 tests)
@@ -448,7 +435,6 @@ class TestSubscriptions:
         # Feed config should be removed
         assert feed_config.feed_id not in feed_manager._feed_configs
         logger.info("✅ Unregister feed cleans subscriptions test passed")
-
 
 # =============================================================================
 # CATEGORY 10: DATA FEED ABSTRACT CLASS (3 tests)
@@ -508,7 +494,6 @@ class TestDataFeedBase:
         assert stats.feed_id == feed_config.feed_id
         assert stats.total_messages == 0
         logger.info("✅ Feed get statistics test passed")
-
 
 # =============================================================================
 # CATEGORY 11: ISYSTEMCOMPONENT LIFECYCLE (6 tests)
@@ -603,7 +588,6 @@ class TestFeedManagerLifecycle:
         assert health_task is None or health_task.cancelled() or health_task.done()
         logger.info("✅ Stop cancels monitoring test passed")
 
-
 # =============================================================================
 # CATEGORY 12: HEALTH CHECK & STATUS (4 tests)
 # =============================================================================
@@ -661,7 +645,6 @@ class TestFeedManagerHealthCheck:
 
         await feed_manager.stop()
         logger.info("✅ Get status after start test passed")
-
 
 # =============================================================================
 # CATEGORY 13: FEED CONNECTION/DISCONNECTION (6 tests)
@@ -773,7 +756,6 @@ class TestFeedConnection:
             assert result is True
             assert feed_config.feed_id not in feed_manager._feeds
             logger.info("✅ Disconnect feed test passed")
-
 
 # =============================================================================
 # CATEGORY 14: SYMBOL SUBSCRIPTION (6 tests)
@@ -918,7 +900,6 @@ class TestSymbolSubscription:
         assert result is False
         logger.info("✅ Unsubscribe symbol not subscribed test passed")
 
-
 # =============================================================================
 # CATEGORY 15: DATA FEED MESSAGE STATISTICS (4 tests)
 # =============================================================================
@@ -1054,7 +1035,6 @@ class TestFeedMessageStatistics:
         assert recent[-1].data["price"] == 159.0
         logger.info("✅ Get recent messages test passed")
 
-
 # =============================================================================
 # CATEGORY 16: FEED STATUS HANDLERS (3 tests)
 # =============================================================================
@@ -1134,7 +1114,6 @@ class TestFeedStatusHandling:
         # Handler shouldn't be called again for same status
         handler.assert_not_called()
         logger.info("✅ Set status only on change test passed")
-
 
 # =============================================================================
 # CATEGORY 17: CLEANUP & MONITORING (4 tests)
@@ -1229,7 +1208,6 @@ class TestCleanupAndMonitoring:
 
         logger.info("✅ Health check timeout test passed")
 
-
 # =============================================================================
 # CATEGORY 18: ERROR HANDLING SCENARIOS (4 tests)
 # =============================================================================
@@ -1303,7 +1281,6 @@ class TestErrorHandlingScenarios:
         assert handler2.call_count == 1
         assert handler3.call_count == 1  # Should still be called
         logger.info("✅ Error handler exception test passed")
-
 
 # =============================================================================
 # CATEGORY 19: DATA FEED BASE CLASS ADVANCED (3 tests)
@@ -1394,7 +1371,6 @@ class TestDataFeedAdvanced:
         stats = feed.get_statistics()
         assert stats.total_messages == 5
         logger.info("✅ Feed message sequence tracking test passed")
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

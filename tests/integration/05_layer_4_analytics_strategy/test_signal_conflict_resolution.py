@@ -26,7 +26,6 @@ from core_engine.trading.strategies.multi_strategy_coordinator import EnhancedSi
 from core_engine.trading.strategies.strategy_engine import SignalType
 import uuid
 
-
 class TestSignalConflictResolution:
     """Integration tests for signal conflict resolution"""
 

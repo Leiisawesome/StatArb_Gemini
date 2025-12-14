@@ -54,7 +54,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class TradingDecisionType(Enum):
     """Types of trading decisions requiring authorization"""
     STRATEGY_ACTIVATION = "strategy_activation"
@@ -66,7 +65,6 @@ class TradingDecisionType(Enum):
     EMERGENCY_LIQUIDATION = "emergency_liquidation"
     RISK_LIMIT_ADJUSTMENT = "risk_limit_adjustment"
 
-
 class AuthorizationLevel(Enum):
     """Authorization levels for different decision types"""
     AUTOMATIC = "automatic"      # Auto-approved within normal parameters
@@ -74,7 +72,6 @@ class AuthorizationLevel(Enum):
     ELEVATED = "elevated"        # Requires elevated review
     EMERGENCY = "emergency"      # Emergency authorization
     REJECTED = "rejected"        # Authorization denied
-
 
 @dataclass
 class TradingDecisionRequest:
@@ -112,7 +109,6 @@ class TradingDecisionRequest:
     justification: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class TradingAuthorization:
     """Authorization result for trading decisions"""
@@ -149,11 +145,9 @@ class TradingAuthorization:
     is_valid: bool = True
     rejection_reason: str = ""
 
-
 # RiskManagerConfig removed - using centralized RiskConfig from core_engine.config
 # See: core_engine/config/component_config.py → RiskConfig
 # Rationale: Eliminates 60 lines of duplicate configuration (Rule 1, Section 7)
-
 
 class CentralRiskManager(ISystemComponent):
     """
@@ -208,7 +202,8 @@ class CentralRiskManager(ISystemComponent):
                 risk_limits=risk_limits,
                 auto_approval_threshold=config.get('auto_approval_threshold', 0.01),
                 elevated_review_threshold=config.get('elevated_review_threshold', 0.05),
-                emergency_threshold=config.get('emergency_threshold', 0.10)
+                emergency_threshold=config.get('emergency_threshold', 0.10),
+                max_total_risk=config.get('max_total_risk', 0.20)
             )
 
             # Store allow_shorts config (not part of RiskConfig dataclass)
@@ -2565,7 +2560,6 @@ class CentralRiskManager(ISystemComponent):
             logger.error(f"Risk impact assessment failed: {e}")
             return 0.5  # Default medium risk
 
-
     def _determine_escalation_target(self, current_level: AuthorizationLevel, reason: str) -> AuthorizationLevel:
         """
         Determine escalation target based on current level and reason
@@ -2701,7 +2695,6 @@ class CentralRiskManager(ISystemComponent):
                 'generation_timestamp': datetime.now().isoformat()
             }
 
-
     # ========================================
     # POSITION AUTHORIZATION METHODS
     # ========================================
@@ -2766,7 +2759,6 @@ class CentralRiskManager(ISystemComponent):
         except Exception as e:
             logger.error(f"Position risk assessment failed: {e}")
             return {'risk_score': 1.0, 'error': str(e)}
-
 
     # ========================================
     # RISK LIMIT VALIDATION METHODS
@@ -2861,4 +2853,421 @@ class CentralRiskManager(ISystemComponent):
                 'validation_timestamp': datetime.now().isoformat()
             }
 
+    # ========================================
+    # 6-GATE AUTHORIZATION PIPELINE (Paper Trading Evolution)
+    # ========================================
+    #
+    # Gates (from plan Section 5):
+    # - Gate 0: Circuit Breakers (existing)
+    # - Gate 1: Session Gate
+    # - Gate 2: Price-Aware Validation
+    # - Gate 3: Position-Aware Validation
+    # - Gate 4: Regime-Aware Adjustment
+    # - Gate 5: P&L-Aware Risk Budget
+    # - Gate 6: Final Authorization
+
+    def set_session_gate(self, session_gate: Any) -> None:
+        """Inject TradingSessionGate reference."""
+        self._session_gate = session_gate
+        logger.info("✅ TradingSessionGate injected into CentralRiskManager")
+
+    def set_risk_budget(self, risk_budget: Any) -> None:
+        """Inject RiskBudgetState reference."""
+        self._risk_budget = risk_budget
+        logger.info("✅ RiskBudgetState injected into CentralRiskManager")
+
+    def set_price_source_config(
+        self,
+        mode: str = 'BAR_ONLY',
+        adv_table: Optional[Dict[str, float]] = None,
+        spread_table: Optional[Dict[str, float]] = None,
+        default_adv: float = 1_000_000,
+        default_spread_bps: float = 5.0,
+        impact_coefficient: float = 10.0,
+    ) -> None:
+        """
+        Configure price source for Gate 2.
+
+        Args:
+            mode: 'BAR_ONLY' or 'QUOTE_ENABLED'
+            adv_table: Symbol -> 20-day ADV in shares
+            spread_table: Symbol -> median spread in bps
+            default_adv: Default ADV if symbol not in table
+            default_spread_bps: Default spread if not available
+            impact_coefficient: Market impact coefficient
+        """
+        self._price_source_mode = mode
+        self._adv_table = adv_table or {}
+        self._spread_table = spread_table or {}
+        self._default_adv = default_adv
+        self._default_spread_bps = default_spread_bps
+        self._impact_coefficient = impact_coefficient
+
+    async def authorize_signal_6gate(
+        self,
+        signal: Dict[str, Any],
+        current_price: float,
+        portfolio_value: float,
+    ) -> Dict[str, Any]:
+        """
+        6-Gate authorization pipeline for trading signals.
+
+        Args:
+            signal: EnhancedTradingSignal-like dict with:
+                - symbol, side, requested_quantity, signal_strength
+                - strategy_id, signal_timestamp, arrival_price
+                - stop_price or stop_loss_pct (at least one)
+                - optional: take_profit_price, take_profit_pct
+            current_price: Latest price for validation
+            portfolio_value: Current portfolio value
+
+        Returns:
+            Authorization result with:
+            - authorized: bool
+            - authorized_quantity: float (may be resized)
+            - rejection_reason: str (if rejected)
+            - gate_passed: str (last gate that passed)
+            - estimated_fill_price: float
+            - max_loss_estimate: float
+        """
+
+        result = {
+            'authorized': False,
+            'authorized_quantity': 0.0,
+            'rejection_reason': '',
+            'gate_passed': 'NONE',
+            'estimated_fill_price': current_price,
+            'max_loss_estimate': 0.0,
+            'gates': {},
+        }
+
+        symbol = signal.get('symbol', '')
+        side = signal.get('side', '')
+        requested_qty = signal.get('requested_quantity', 0.0)
+        arrival_price = signal.get('arrival_price', current_price)
+        candidate_qty = requested_qty
+
+        # === GATE 0: Circuit Breakers ===
+        gate0_result = self._gate0_circuit_breakers()
+        result['gates']['gate0_circuit_breakers'] = gate0_result
+
+        if not gate0_result['passed']:
+            result['rejection_reason'] = gate0_result['reason']
+            return result
+        result['gate_passed'] = 'G0'
+
+        # === GATE 1: Session Gate ===
+        gate1_result = self._gate1_session(symbol)
+        result['gates']['gate1_session'] = gate1_result
+
+        if not gate1_result['passed']:
+            result['rejection_reason'] = gate1_result['reason']
+            return result
+        result['gate_passed'] = 'G1'
+
+        # === GATE 2: Price-Aware Validation ===
+        gate2_result = self._gate2_price_validation(
+            symbol, side, candidate_qty, arrival_price, current_price
+        )
+        result['gates']['gate2_price'] = gate2_result
+
+        if not gate2_result['passed']:
+            result['rejection_reason'] = gate2_result['reason']
+            return result
+
+        result['estimated_fill_price'] = gate2_result['estimated_fill_price']
+        result['gate_passed'] = 'G2'
+
+        # === GATE 3: Position-Aware Validation ===
+        gate3_result = await self._gate3_position_validation(
+            symbol, side, candidate_qty, current_price, portfolio_value
+        )
+        result['gates']['gate3_position'] = gate3_result
+
+        if not gate3_result['passed']:
+            result['rejection_reason'] = gate3_result['reason']
+            return result
+
+        candidate_qty = min(candidate_qty, gate3_result.get('max_quantity', candidate_qty))
+        result['gate_passed'] = 'G3'
+
+        # === GATE 4: Regime-Aware Adjustment ===
+        gate4_result = self._gate4_regime_adjustment(signal.get('strategy_id', ''))
+        result['gates']['gate4_regime'] = gate4_result
+
+        if not gate4_result['passed']:
+            result['rejection_reason'] = gate4_result['reason']
+            return result
+
+        # Apply regime scaling
+        regime_multiplier = gate4_result.get('size_multiplier', 1.0)
+        candidate_qty = candidate_qty * regime_multiplier
+        result['gate_passed'] = 'G4'
+
+        # === GATE 5: P&L-Aware Risk Budget ===
+        stop_price = signal.get('stop_price')
+        stop_loss_pct = signal.get('stop_loss_pct', 0.02)
+
+        # Resolve effective stop price
+        if stop_price is None:
+            if side == 'buy':
+                stop_price = arrival_price * (1 - stop_loss_pct)
+            else:
+                stop_price = arrival_price * (1 + stop_loss_pct)
+
+        gate5_result = self._gate5_risk_budget(
+            candidate_qty, result['estimated_fill_price'], stop_price, side
+        )
+        result['gates']['gate5_risk_budget'] = gate5_result
+
+        if not gate5_result['passed']:
+            result['rejection_reason'] = gate5_result['reason']
+            return result
+
+        candidate_qty = min(candidate_qty, gate5_result.get('max_quantity', candidate_qty))
+        result['max_loss_estimate'] = gate5_result.get('max_loss', 0.0)
+        result['gate_passed'] = 'G5'
+
+        # === GATE 6: Final Authorization ===
+        min_order_size = self.config.position_limits.min_order_size if hasattr(self.config, 'position_limits') else 1.0
+
+        if candidate_qty < min_order_size:
+            result['rejection_reason'] = f"Quantity {candidate_qty} below minimum {min_order_size}"
+            result['gates']['gate6_final'] = {'passed': False, 'reason': result['rejection_reason']}
+            return result
+
+        result['gates']['gate6_final'] = {'passed': True}
+        result['gate_passed'] = 'G6'
+        result['authorized'] = True
+        result['authorized_quantity'] = candidate_qty
+
+        return result
+
+    def _gate0_circuit_breakers(self) -> Dict[str, Any]:
+        """Gate 0: Check circuit breakers."""
+        # Check if circuit breakers are tripped
+        if hasattr(self, 'circuit_breakers') and self.circuit_breakers:
+            level = self.circuit_breakers.get_current_level()
+            if level in (CircuitBreakerLevel.HALT, CircuitBreakerLevel.EMERGENCY):
+                return {'passed': False, 'reason': f'Circuit breaker tripped: {level.name}'}
+
+        # Check kill switch
+        if getattr(self, '_kill_switch_active', False):
+            return {'passed': False, 'reason': 'Kill switch active'}
+
+        return {'passed': True}
+
+    def _gate1_session(self, symbol: str) -> Dict[str, Any]:
+        """Gate 1: Check session/trading hours."""
+        session_gate = getattr(self, '_session_gate', None)
+
+        if session_gate is None:
+            # No session gate configured, allow
+            return {'passed': True, 'reason': 'No session gate configured'}
+
+        check_result = session_gate.check(symbol=symbol)
+
+        if check_result.decision.name == 'ALLOW':
+            return {'passed': True, 'session': check_result.current_session.name}
+        else:
+            return {'passed': False, 'reason': check_result.reason}
+
+    def _gate2_price_validation(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        arrival_price: float,
+        current_price: float,
+    ) -> Dict[str, Any]:
+        """Gate 2: Price-aware validation with slippage estimation."""
+        import math
+
+        getattr(self, '_price_source_mode', 'BAR_ONLY')
+        adv_table = getattr(self, '_adv_table', {})
+        spread_table = getattr(self, '_spread_table', {})
+        default_adv = getattr(self, '_default_adv', 1_000_000)
+        default_spread = getattr(self, '_default_spread_bps', 5.0)
+        impact_coef = getattr(self, '_impact_coefficient', 10.0)
+
+        # Get ADV and spread
+        adv = adv_table.get(symbol, default_adv)
+        spread_bps = spread_table.get(symbol, default_spread)
+
+        # Calculate slippage
+        spread_cost_bps = spread_bps / 2
+        participation = quantity / adv if adv > 0 else 0
+        impact_cost_bps = math.sqrt(participation) * impact_coef
+        slippage_bps = spread_cost_bps + impact_cost_bps
+
+        # Estimated fill price
+        if side == 'buy':
+            estimated_fill = current_price * (1 + slippage_bps / 10000)
+        else:
+            estimated_fill = current_price * (1 - slippage_bps / 10000)
+
+        # Check price move from arrival
+        price_move_pct = abs(current_price - arrival_price) / arrival_price if arrival_price > 0 else 0
+        stale_threshold = getattr(self.config, 'stale_signal_threshold_pct', 0.01)
+
+        if price_move_pct > stale_threshold:
+            return {
+                'passed': False,
+                'reason': f'Stale signal: price moved {price_move_pct:.1%} > {stale_threshold:.1%}',
+                'price_move_pct': price_move_pct,
+            }
+
+        # Check slippage
+        max_slippage = getattr(self.config, 'max_acceptable_slippage_bps', 50.0)
+        if slippage_bps > max_slippage:
+            return {
+                'passed': False,
+                'reason': f'Excessive slippage: {slippage_bps:.1f}bps > {max_slippage:.1f}bps',
+                'slippage_bps': slippage_bps,
+            }
+
+        return {
+            'passed': True,
+            'estimated_fill_price': estimated_fill,
+            'slippage_bps': slippage_bps,
+            'spread_bps': spread_bps,
+            'adv': adv,
+        }
+
+    async def _gate3_position_validation(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        current_price: float,
+        portfolio_value: float,
+    ) -> Dict[str, Any]:
+        """Gate 3: Position-aware validation."""
+        # Get current position
+        current_position = 0.0
+        if hasattr(self, 'position_book') and self.position_book:
+            pos = self.position_book.get_position(symbol)
+            if pos:
+                current_position = pos.quantity
+
+        # Get pending exposure from OMS
+        pending_buy_qty = 0.0
+        pending_sell_qty = 0.0
+        if hasattr(self, 'order_management_system') and self.order_management_system:
+            oms = self.order_management_system
+            if hasattr(oms, 'get_pending_exposure'):
+                pending = oms.get_pending_exposure(symbol)
+                if pending:
+                    pending_buy_qty = pending.get('pending_buy_qty', 0.0)
+                    pending_sell_qty = pending.get('pending_sell_qty', 0.0)
+
+        pending_qty = pending_buy_qty - pending_sell_qty
+
+        # Calculate post-trade position
+        side_multiplier = 1.0 if side == 'buy' else -1.0
+        post_trade_position = current_position + pending_qty + (side_multiplier * quantity)
+        post_trade_value = abs(post_trade_position) * current_price
+
+        # Check position limits
+        max_position_pct = self.config.position_limits.max_position_pct if hasattr(self.config, 'position_limits') else 0.05
+        max_position_value = portfolio_value * max_position_pct
+
+        position_pct = post_trade_value / portfolio_value if portfolio_value > 0 else 0
+
+        max_qty = quantity
+        if post_trade_value > max_position_value:
+            # Resize to fit
+            allowed_value = max_position_value - abs(current_position + pending_qty) * current_price
+            max_qty = allowed_value / current_price if current_price > 0 else 0
+            max_qty = max(0, max_qty)
+
+        # Check sell constraint (can't sell more than we have)
+        if side == 'sell':
+            sellable = current_position + pending_buy_qty
+            if quantity > sellable:
+                max_qty = min(max_qty, max(0, sellable))
+
+        return {
+            'passed': max_qty > 0,
+            'reason': '' if max_qty > 0 else 'Position limits exceeded',
+            'max_quantity': max_qty,
+            'position_pct': position_pct,
+            'current_position': current_position,
+            'pending_qty': pending_qty,
+        }
+
+    def _gate4_regime_adjustment(self, strategy_id: str) -> Dict[str, Any]:
+        """Gate 4: Regime-aware size adjustment."""
+        # Get current regime
+        regime_engine = getattr(self, 'regime_engine', None)
+        if regime_engine is None:
+            return {'passed': True, 'size_multiplier': 1.0, 'reason': 'No regime engine'}
+
+        current_regime = regime_engine.get_current_regime_context()
+        if current_regime is None:
+            return {'passed': True, 'size_multiplier': 1.0, 'reason': 'No regime context'}
+
+        # Get volatility regime
+        vol_regime = getattr(current_regime, 'volatility_regime', 'normal')
+
+        # Size multipliers by volatility
+        vol_multipliers = {
+            'low': 1.10,
+            'normal': 1.00,
+            'high': 0.60,
+            'extreme': 0.30,
+            'crisis': 0.0,  # Reject in crisis
+        }
+
+        multiplier = vol_multipliers.get(str(vol_regime).lower(), 1.0)
+
+        if multiplier <= 0:
+            return {
+                'passed': False,
+                'reason': f'Trading suspended in {vol_regime} regime',
+                'size_multiplier': 0.0,
+            }
+
+        # Strategy-regime compatibility (simplified)
+        # Could be enhanced with strategy registry
+
+        return {
+            'passed': True,
+            'size_multiplier': multiplier,
+            'volatility_regime': str(vol_regime),
+        }
+
+    def _gate5_risk_budget(
+        self,
+        quantity: float,
+        estimated_fill_price: float,
+        stop_price: float,
+        side: str,
+    ) -> Dict[str, Any]:
+        """Gate 5: P&L-aware risk budget check."""
+        risk_budget = getattr(self, '_risk_budget', None)
+
+        if risk_budget is None:
+            # No risk budget configured, allow but warn
+            return {
+                'passed': True,
+                'max_quantity': quantity,
+                'max_loss': 0.0,
+                'reason': 'No risk budget configured',
+            }
+
+        check = risk_budget.check_trade_risk(
+            candidate_quantity=quantity,
+            estimated_fill_price=estimated_fill_price,
+            effective_stop_price=stop_price,
+            side=side,
+        )
+
+        return {
+            'passed': check['allowed'],
+            'max_quantity': check['max_quantity'],
+            'max_loss': check['max_loss'],
+            'available_risk': check.get('available_risk', 0),
+            'reason': check.get('resize_reason', ''),
+        }
 

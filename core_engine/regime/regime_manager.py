@@ -63,7 +63,6 @@ from .regime_transition_manager import (RegimeTransitionManager, TransitionPredi
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class RegimeManagerStatus(Enum):
     """Regime manager operational status"""
     INITIALIZING = "initializing"
@@ -75,14 +74,12 @@ class RegimeManagerStatus(Enum):
     ERROR = "error"
     MAINTENANCE = "maintenance"
 
-
 class AdaptationMode(Enum):
     """Strategy adaptation modes"""
     CONSERVATIVE = "conservative"
     MODERATE = "moderate"
     AGGRESSIVE = "aggressive"
     CUSTOM = "custom"
-
 
 @dataclass
 class RegimeState:
@@ -123,7 +120,6 @@ class RegimeState:
     update_frequency_achieved: float = 1.0  # Actual vs target frequency
     confidence_in_state: float = 0.0  # Overall confidence in regime state
 
-
 @dataclass
 class RegimeAdaptation:
     """Regime-based strategy adaptation"""
@@ -160,7 +156,6 @@ class RegimeAdaptation:
     # Validation
     adaptation_confidence: float = 0.0
     back_test_validation: Optional[Dict[str, float]] = None
-
 
 class RegimeAwarePortfolioManager:
     """Regime-aware portfolio management"""
@@ -415,7 +410,6 @@ class RegimeAwarePortfolioManager:
             logger.error(f"Error adjusting for confidence: {e}")
             return allocation
 
-
 class RegimePerformanceAttribution:
     """Regime-based performance attribution"""
 
@@ -548,7 +542,6 @@ class RegimePerformanceAttribution:
 
         except Exception as e:
             logger.error(f"Error updating regime performance history: {e}")
-
 
 class RegimeManager(ISystemComponent):
     """

@@ -21,7 +21,6 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class FactorType(Enum):
     """Factor types"""
     MARKET = "market"
@@ -40,7 +39,6 @@ class FactorType(Enum):
     MACRO = "macro"
     CUSTOM = "custom"
 
-
 class FactorModel(Enum):
     """Factor model types"""
     SINGLE_FACTOR = "single_factor"
@@ -52,7 +50,6 @@ class FactorModel(Enum):
     STATISTICAL_FACTOR = "statistical_factor"
     FUNDAMENTAL_FACTOR = "fundamental_factor"
 
-
 class RiskModel(Enum):
     """Risk model types"""
     COVARIANCE = "covariance"
@@ -60,7 +57,6 @@ class RiskModel(Enum):
     SHRINKAGE = "shrinkage"
     ROBUST = "robust"
     BAYESIAN = "bayesian"
-
 
 @dataclass
 class FactorDefinition:
@@ -91,7 +87,6 @@ class FactorDefinition:
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class FactorExposure:
     """Factor exposure for a security"""
@@ -114,7 +109,6 @@ class FactorExposure:
     sector: Optional[str] = None
     market_cap: Optional[float] = None
 
-
 @dataclass
 class FactorReturn:
     """Factor return data"""
@@ -133,7 +127,6 @@ class FactorReturn:
 
     # Attribution
     contribution: Optional[float] = None
-
 
 @dataclass
 class FactorModel:
@@ -166,7 +159,6 @@ class FactorModel:
     factor_loadings: Dict[str, float] = field(default_factory=dict)
     residual_volatility: Optional[float] = None
 
-
 @dataclass
 class FactorAnalysisResult:
     """Factor analysis result"""
@@ -195,7 +187,6 @@ class FactorAnalysisResult:
     # Quality metrics
     data_coverage: float = 1.0
     factor_significance: Dict[str, float] = field(default_factory=dict)
-
 
 class FactorCalculator(ABC):
     """Abstract factor calculator"""
@@ -241,7 +232,6 @@ class FactorCalculator(ABC):
         # Z-score normalization
         return (values - values.mean()) / values.std()
 
-
 class MomentumFactorCalculator(FactorCalculator):
     """Momentum factor calculator"""
 
@@ -270,7 +260,6 @@ class MomentumFactorCalculator(FactorCalculator):
         momentum_series = pd.Series([momentum_return], index=[data.index[-1]])
 
         return self._normalize_values(momentum_series)
-
 
 class ValueFactorCalculator(FactorCalculator):
     """Value factor calculator"""
@@ -303,7 +292,6 @@ class ValueFactorCalculator(FactorCalculator):
 
         return self._normalize_values(value_series)
 
-
 class QualityFactorCalculator(FactorCalculator):
     """Quality factor calculator"""
 
@@ -334,7 +322,6 @@ class QualityFactorCalculator(FactorCalculator):
 
         return self._normalize_values(quality_series)
 
-
 class VolatilityFactorCalculator(FactorCalculator):
     """Volatility factor calculator"""
 
@@ -361,7 +348,6 @@ class VolatilityFactorCalculator(FactorCalculator):
 
         return self._normalize_values(volatility_series)
 
-
 class SizeFactorCalculator(FactorCalculator):
     """Size factor calculator"""
 
@@ -385,7 +371,6 @@ class SizeFactorCalculator(FactorCalculator):
         size_series = pd.Series([log_market_cap], index=[data.index[-1]])
 
         return self._normalize_values(size_series)
-
 
 class FactorAnalyzer:
     """

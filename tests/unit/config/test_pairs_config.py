@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import PairsConfig, StrategyType
 
-
 class TestPairsConfig:
     """Test suite for PairsConfig class."""
 

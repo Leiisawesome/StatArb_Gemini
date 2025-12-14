@@ -45,7 +45,6 @@ from core_engine.trading.position_book import PositionBook, IPositionBook
 
 logger = logging.getLogger(__name__)
 
-
 class InstitutionalBacktestEngine:
     """
     Institutional-Grade Backtest Engine
@@ -4324,8 +4323,6 @@ class InstitutionalBacktestEngine:
                         current_price = current_bar.get('close', 0)
                         decision_price = current_price
 
-
-
                     # Get regime context (Rule 2 Regime-First)
                     regime_context = None
                     if self.regime_engine:
@@ -4636,7 +4633,6 @@ class InstitutionalBacktestEngine:
             f")"
         )
 
-
 # ============================================================
 # Helper function for quick engine creation
 # ============================================================
@@ -4665,6 +4661,4 @@ async def create_backtest_engine(config_path: Path) -> InstitutionalBacktestEngi
     await engine.initialize()
 
     return engine
-
-
 

@@ -22,8 +22,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestExecutionQualityAnalysis:
     """Integration tests for execution quality analysis"""
 

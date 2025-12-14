@@ -34,7 +34,6 @@ from .regime_detector import RegimeType
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class MacroRegime(Enum):
     """Macro economic regimes"""
     EXPANSION = "expansion"
@@ -47,7 +46,6 @@ class MacroRegime(Enum):
     CREDIT_EXPANSION = "credit_expansion"
     UNKNOWN = "unknown"
 
-
 class MarketCycle(Enum):
     """Market cycle phases"""
     ACCUMULATION = "accumulation"
@@ -58,7 +56,6 @@ class MarketCycle(Enum):
     BREAKOUT = "breakout"
     UNKNOWN = "unknown"
 
-
 class RiskEnvironment(Enum):
     """Risk environment types"""
     RISK_ON = "risk_on"
@@ -68,7 +65,6 @@ class RiskEnvironment(Enum):
     CARRY_TRADE = "carry_trade"
     DELEVERAGING = "deleveraging"
     UNKNOWN = "unknown"
-
 
 @dataclass
 class AssetRegimeProfile:
@@ -99,7 +95,6 @@ class AssetRegimeProfile:
     # Relative performance
     relative_strength: float = 0.0
     sector_rotation_signal: float = 0.0
-
 
 @dataclass
 class CrossAssetRegime:
@@ -149,7 +144,6 @@ class CrossAssetRegime:
     # Supporting data
     asset_profiles: Dict[str, AssetRegimeProfile] = field(default_factory=dict)
     correlation_matrix: Optional[pd.DataFrame] = None
-
 
 class FactorAnalyzer:
     """Analyze market factors and their regime implications"""
@@ -286,7 +280,6 @@ class FactorAnalyzer:
         except Exception as e:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0
-
 
 class CrossAssetAnalyzer:
     """Analyze cross-asset relationships and regimes"""
@@ -910,7 +903,6 @@ class CrossAssetAnalyzer:
             logger.error(f"Error calculating max drawdown: {e}")
             return 0.0
 
-
 class SectorRotationAnalyzer:
     """Analyze sector rotation patterns and regime implications"""
 
@@ -1161,7 +1153,6 @@ class SectorRotationAnalyzer:
         except Exception as e:
             logger.error(f"Error analyzing economic cycle: {e}")
             return {}
-
 
 class MarketRegimeAnalyzer:
     """

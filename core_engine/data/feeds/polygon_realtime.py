@@ -77,7 +77,6 @@ from .adapters import (
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # POLYGON-SPECIFIC ENUMS AND CONFIGURATION
 # ============================================================================
@@ -87,7 +86,6 @@ class PolygonSubscriptionTier(Enum):
     STARTER = "starter"      # Second/Minute aggregates, Trades
     DEVELOPER = "developer"  # + Real-time NBBO quotes
     ADVANCED = "advanced"    # + Level 2 order book
-
 
 class PolygonMessageType(Enum):
     """Polygon.io WebSocket message types"""
@@ -109,7 +107,6 @@ class PolygonMessageType(Enum):
     # Control
     SUBSCRIPTION = "subscription"
 
-
 class PolygonCluster(Enum):
     """Polygon.io WebSocket clusters"""
     STOCKS = "stocks"
@@ -117,7 +114,6 @@ class PolygonCluster(Enum):
     OPTIONS = "options"
     FOREX = "forex"
     CRYPTO = "crypto"
-
 
 @dataclass
 class PolygonFeedConfig:
@@ -192,7 +188,6 @@ class PolygonFeedConfig:
             return "wss://delayed.polygon.io/stocks"
         return f"wss://socket.polygon.io/{self.cluster.value}"
 
-
 @dataclass
 class PolygonAggregateBar:
     """Polygon.io aggregated bar data"""
@@ -212,7 +207,6 @@ class PolygonAggregateBar:
     average_trade_size: Optional[float] = None
     otc: bool = False  # OTC market indicator
 
-
 @dataclass
 class PolygonTrade:
     """Polygon.io trade data"""
@@ -224,7 +218,6 @@ class PolygonTrade:
     exchange: int = 0
     tape: int = 0
     sequence_number: Optional[int] = None
-
 
 @dataclass
 class PolygonQuote:
@@ -238,7 +231,6 @@ class PolygonQuote:
     bid_exchange: int = 0
     ask_exchange: int = 0
     conditions: List[int] = field(default_factory=list)
-
 
 # ============================================================================
 # POLYGON REAL-TIME FEED ADAPTER
@@ -446,7 +438,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                 self.polygon_config.ws_url,
                 heartbeat=self.polygon_config.heartbeat_interval_seconds,
             )
-        except Exception as e:
+        except Exception:
             # Cleanup on failure
             await self._aiohttp_session.close()
             self._aiohttp_session = None
@@ -818,6 +810,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON decode error: {e}")
+            self._handle_error(e)
         except Exception as e:
             self.logger.error(f"Message processing error: {e}")
             self._handle_error(e)
@@ -875,6 +868,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
         except Exception as e:
             self.logger.error(f"Trade parsing error: {e}")
+            self._handle_error(e)
 
     async def _handle_aggregate(self, msg: Dict[str, Any], bar_type: str) -> None:
         """Handle aggregate bar message (second or minute)"""
@@ -935,6 +929,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
         except Exception as e:
             self.logger.error(f"Aggregate parsing error: {e}")
+            self._handle_error(e)
 
     async def _handle_quote(self, msg: Dict[str, Any]) -> None:
         """Handle real-time quote message (Developer+ tier)"""
@@ -977,6 +972,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
         except Exception as e:
             self.logger.error(f"Quote parsing error: {e}")
+            self._handle_error(e)
 
     def _calculate_latency(self, data_timestamp: datetime) -> float:
         """Calculate message latency in milliseconds"""
@@ -1065,7 +1061,6 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         })
 
         return stats
-
 
 # ============================================================================
 # AGGREGATED DATA MANAGER
@@ -1258,7 +1253,6 @@ class PolygonAggregatedDataManager:
             return bar.close
 
         return None
-
 
 # ============================================================================
 # EXPORTS

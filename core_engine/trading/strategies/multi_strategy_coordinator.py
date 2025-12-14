@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 
 # SignalType imported from type_definitions.strategy (canonical source)
 
-
 class ConflictResolutionMethod(Enum):
     """Conflict resolution methods"""
     CONFIDENCE_WEIGHTED = "confidence_weighted"
@@ -66,7 +65,6 @@ class ConflictResolutionMethod(Enum):
     MAJORITY_VOTE = "majority_vote"
     HIGHEST_CONFIDENCE = "highest_confidence"
     RISK_ADJUSTED = "risk_adjusted"
-
 
 @dataclass
 class EnhancedSignal:
@@ -104,7 +102,6 @@ class EnhancedSignal:
             metadata=self.metadata.copy()
         )
 
-
 @dataclass
 class StrategyRegistration:
     """Strategy registration information"""
@@ -118,7 +115,6 @@ class StrategyRegistration:
     risk_limit: float
     is_active: bool = True
     performance_metrics: Dict[str, float] = field(default_factory=dict)
-
 
 class MultiStrategySignalAggregator(ISystemComponent):
     """
@@ -531,7 +527,6 @@ class MultiStrategySignalAggregator(ISystemComponent):
             await self.conflict_resolver.start()
 
         return await self.conflict_resolver.resolve_conflicts(signals)
-
 
 class SignalConflictResolver(ISystemComponent):
     """

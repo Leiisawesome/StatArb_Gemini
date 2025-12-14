@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestMultiAssetSignalGeneration:
     """Test multi-asset-specific signal calculation logic"""
 
@@ -79,7 +78,6 @@ class TestMultiAssetSignalGeneration:
         # High correlation should affect allocation
         assert isinstance(signals, list)
 
-
 class TestMultiAssetPositionSizing:
     """Test position sizing logic"""
 
@@ -128,7 +126,6 @@ class TestMultiAssetPositionSizing:
         assert position_size >= 0
         max_weight = getattr(strategy.config, 'max_asset_weight', getattr(strategy.config, 'max_position_pct', getattr(strategy.config.position_limits, 'max_position_size', 0.1)))
         assert position_size <= max_weight
-
 
 class TestMultiAssetEntryExitConditions:
     """Test entry and exit condition logic"""

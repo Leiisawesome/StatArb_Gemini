@@ -29,7 +29,6 @@ from core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # REGIME ENGINE MOCK
 # =============================================================================
@@ -58,7 +57,6 @@ class MockRegimeEngine:
     def set_regime_context(self, regime_context):
         """Set regime context for testing"""
         self.current_regime_context = regime_context
-
 
 # =============================================================================
 # REGIME ENGINE INJECTION TESTS
@@ -132,7 +130,6 @@ class TestRegimeEngineInjection:
 
         # Should return None or handle gracefully
         assert context is None or isinstance(context, dict)
-
 
 # =============================================================================
 # REGIME-AWARE POSITION SIZING TESTS
@@ -277,7 +274,6 @@ class TestRegimeAwarePositionSizing:
         # In crisis, should be very conservative
         assert size >= 0
 
-
 # =============================================================================
 # REGIME-AWARE SIGNAL FILTERING TESTS
 # =============================================================================
@@ -350,7 +346,6 @@ class TestRegimeAwareSignalFiltering:
 
         # In crisis, may generate fewer signals
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # REGIME CHANGE HANDLING TESTS
@@ -428,7 +423,6 @@ class TestRegimeChangeHandling:
         # Both should be valid
         assert size_normal > 0
         assert size_high_vol >= 0
-
 
 # =============================================================================
 # REGIME-AWARE STRATEGY BEHAVIOR TESTS
@@ -518,7 +512,6 @@ class TestRegimeAwareStrategyBehavior:
         context = strategy.get_current_regime_context()
 
         assert context is not None
-
 
 # =============================================================================
 # REGIME CONTEXT VALIDATION TESTS

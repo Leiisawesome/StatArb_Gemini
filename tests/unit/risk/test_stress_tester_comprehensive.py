@@ -32,7 +32,6 @@ from core_engine.risk.stress_tester import (
     PortfolioStressResult
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -47,7 +46,6 @@ def stress_tester():
     }
     return StressTester(config)
 
-
 @pytest.fixture
 def sample_portfolio():
     """Sample portfolio data"""
@@ -60,7 +58,6 @@ def sample_portfolio():
         'total_value': 37000
     }
 
-
 @pytest.fixture
 def sample_market_shock():
     """Sample market shock"""
@@ -70,7 +67,6 @@ def sample_market_shock():
         magnitude=-0.10,
         description="10% equity market decline"
     )
-
 
 @pytest.fixture
 def sample_stress_scenario(sample_market_shock):
@@ -84,7 +80,6 @@ def sample_stress_scenario(sample_market_shock):
         time_horizon_days=1
     )
 
-
 # =============================================================================
 # TEST CATEGORY 1: SCENARIO LOADING AND MANAGEMENT
 # =============================================================================
@@ -96,7 +91,6 @@ def test_stress_tester_initialization(stress_tester):
     assert len(stress_tester.confidence_levels) == 2
     assert stress_tester.correlation_decay == 0.94
 
-
 def test_historical_scenarios_loaded(stress_tester):
     """Test historical scenarios are loaded"""
     # Check that historical scenarios exist
@@ -105,12 +99,10 @@ def test_historical_scenarios_loaded(stress_tester):
     # Should have at least a few historical scenarios
     assert len(stress_tester._historical_scenarios) >= 0
 
-
 def test_scenarios_dictionary(stress_tester):
     """Test scenarios dictionary structure"""
     assert hasattr(stress_tester, '_scenarios')
     assert isinstance(stress_tester._scenarios, dict)
-
 
 def test_configuration_defaults():
     """Test default configuration values"""
@@ -119,7 +111,6 @@ def test_configuration_defaults():
     assert tester.monte_carlo_runs == 10000  # Default
     assert 0.95 in tester.confidence_levels
     assert tester.correlation_decay == 0.94
-
 
 # =============================================================================
 # TEST CATEGORY 2: HISTORICAL SCENARIOS
@@ -134,7 +125,6 @@ def test_market_shock_creation(sample_market_shock):
     assert shock.magnitude == -0.10
     assert shock.description == "10% equity market decline"
 
-
 def test_stress_scenario_creation(sample_stress_scenario):
     """Test StressScenario creation"""
     scenario = sample_stress_scenario
@@ -144,7 +134,6 @@ def test_stress_scenario_creation(sample_stress_scenario):
     assert len(scenario.shocks) == 1
     assert scenario.probability == 0.05
 
-
 def test_stress_test_type_enum():
     """Test StressTestType enum values"""
     assert StressTestType.HISTORICAL.value == "historical"
@@ -153,14 +142,12 @@ def test_stress_test_type_enum():
     assert StressTestType.SENSITIVITY.value == "sensitivity"
     assert StressTestType.REVERSE.value == "reverse"
 
-
 def test_shock_type_enum():
     """Test ShockType enum values"""
     assert ShockType.ABSOLUTE.value == "absolute"
     assert ShockType.RELATIVE.value == "relative"
     assert ShockType.VOLATILITY.value == "volatility"
     assert ShockType.CORRELATION.value == "correlation"
-
 
 # =============================================================================
 # TEST CATEGORY 3: HYPOTHETICAL SHOCK TESTING
@@ -184,7 +171,6 @@ def test_hypothetical_scenario_with_multiple_shocks():
     assert len(scenario.shocks) == 3
     assert scenario.test_type == StressTestType.HYPOTHETICAL
 
-
 def test_shock_magnitude_variations():
     """Test different shock magnitudes"""
     mild_shock = MarketShock("EQUITY", ShockType.RELATIVE, -0.05, "Mild shock")
@@ -193,7 +179,6 @@ def test_shock_magnitude_variations():
     assert mild_shock.magnitude > severe_shock.magnitude
     assert abs(severe_shock.magnitude) > abs(mild_shock.magnitude)
 
-
 def test_absolute_vs_relative_shocks():
     """Test absolute and relative shock types"""
     absolute_shock = MarketShock("RATES", ShockType.ABSOLUTE, 0.02, "200 bps")
@@ -201,7 +186,6 @@ def test_absolute_vs_relative_shocks():
 
     assert absolute_shock.shock_type == ShockType.ABSOLUTE
     assert relative_shock.shock_type == ShockType.RELATIVE
-
 
 def test_scenario_metadata():
     """Test scenario metadata handling"""
@@ -216,7 +200,6 @@ def test_scenario_metadata():
     assert 'region' in scenario.metadata
     assert scenario.metadata['region'] == 'US'
 
-
 # =============================================================================
 # TEST CATEGORY 4: MONTE CARLO SIMULATIONS
 # =============================================================================
@@ -227,7 +210,6 @@ def test_monte_carlo_configuration(stress_tester):
     assert isinstance(stress_tester.monte_carlo_runs, int)
     assert stress_tester.monte_carlo_runs > 0
 
-
 def test_confidence_levels_configuration(stress_tester):
     """Test confidence levels for VaR calculation"""
     assert len(stress_tester.confidence_levels) == 2
@@ -235,12 +217,10 @@ def test_confidence_levels_configuration(stress_tester):
     assert 0.99 in stress_tester.confidence_levels
     assert all(0 < level < 1 for level in stress_tester.confidence_levels)
 
-
 def test_correlation_decay_parameter(stress_tester):
     """Test correlation decay parameter"""
     assert stress_tester.correlation_decay == 0.94
     assert 0 < stress_tester.correlation_decay < 1
-
 
 # =============================================================================
 # TEST CATEGORY 5: REVERSE STRESS TESTING
@@ -257,7 +237,6 @@ def test_reverse_stress_scenario_type():
 
     assert scenario.test_type == StressTestType.REVERSE
 
-
 def test_sensitivity_analysis_type():
     """Test sensitivity analysis scenario type"""
     scenario = StressScenario(
@@ -268,7 +247,6 @@ def test_sensitivity_analysis_type():
     )
 
     assert scenario.test_type == StressTestType.SENSITIVITY
-
 
 def test_scenario_probability_handling():
     """Test scenario probability assignment"""
@@ -290,7 +268,6 @@ def test_scenario_probability_handling():
 
     assert high_prob.probability > low_prob.probability
 
-
 # =============================================================================
 # TEST CATEGORY 6: CORRELATION BREAKDOWN
 # =============================================================================
@@ -306,7 +283,6 @@ def test_correlation_breakdown_scenario_type():
 
     assert scenario.test_type == StressTestType.CORRELATION_BREAKDOWN
 
-
 def test_correlation_shock():
     """Test correlation shock specification"""
     corr_shock = MarketShock(
@@ -319,12 +295,10 @@ def test_correlation_shock():
     assert corr_shock.shock_type == ShockType.CORRELATION
     assert corr_shock.magnitude == 0.9
 
-
 def test_factor_mappings_structure(stress_tester):
     """Test factor mappings dictionary"""
     assert hasattr(stress_tester, '_factor_mappings')
     assert isinstance(stress_tester._factor_mappings, dict)
-
 
 # =============================================================================
 # TEST CATEGORY 7: EDGE CASES AND ERROR HANDLING
@@ -341,7 +315,6 @@ def test_empty_shock_list():
 
     assert len(scenario.shocks) == 0
 
-
 def test_extreme_shock_magnitude():
     """Test handling of extreme shock magnitude"""
     extreme_shock = MarketShock(
@@ -353,7 +326,6 @@ def test_extreme_shock_magnitude():
 
     assert extreme_shock.magnitude == -0.99
 
-
 def test_zero_shock_magnitude():
     """Test zero magnitude shock"""
     zero_shock = MarketShock(
@@ -364,7 +336,6 @@ def test_zero_shock_magnitude():
     )
 
     assert zero_shock.magnitude == 0.0
-
 
 def test_stress_test_result_creation():
     """Test StressTestResult dataclass"""
@@ -382,7 +353,6 @@ def test_stress_test_result_creation():
     assert result.pnl_percentage == -0.10
     assert result.timestamp is not None
 
-
 def test_portfolio_stress_result_creation():
     """Test PortfolioStressResult dataclass"""
     result = PortfolioStressResult(
@@ -397,19 +367,16 @@ def test_portfolio_stress_result_creation():
     assert result.worst_case_var == 10000
     assert len(result.position_results) == 0
 
-
 def test_test_results_deque(stress_tester):
     """Test results storage with deque"""
     assert hasattr(stress_tester, '_test_results')
     # Deque should have maxlen set
     assert stress_tester._test_results.maxlen == 1000
 
-
 def test_volatility_estimates_structure(stress_tester):
     """Test volatility estimates dictionary"""
     assert hasattr(stress_tester, '_volatility_estimates')
     assert isinstance(stress_tester._volatility_estimates, dict)
-
 
 # =============================================================================
 # TEST EXECUTION SUMMARY

@@ -22,8 +22,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestGracefulDegradationIntegration:
     """Integration tests for graceful degradation integration"""
 

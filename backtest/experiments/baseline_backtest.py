@@ -24,7 +24,6 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 
-
 class BaselineBacktest(BaseExperiment):
     """
     Baseline backtest experiment.
@@ -173,7 +172,6 @@ class BaselineBacktest(BaseExperiment):
 
         return BacktestConfig(**config_dict)
 
-
 # Standalone run function
 async def run_baseline_backtest(config: Dict[str, Any] = None):
     """
@@ -216,7 +214,6 @@ async def run_baseline_backtest(config: Dict[str, Any] = None):
     experiment.save_results(result)
 
     return result
-
 
 if __name__ == "__main__":
     # Run baseline backtest directly

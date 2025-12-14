@@ -11,7 +11,6 @@ from core_engine.config.system_config import (
     BacktestMode
 )
 
-
 class TestSystemConfig:
     """Test suite for SystemConfig class."""
 
@@ -26,7 +25,6 @@ class TestSystemConfig:
         assert config.max_components == 50
         assert config.health_check_interval == 60
         assert config.log_level == "DEBUG"
-
 
 class TestBacktestConfig:
     """Comprehensive test suite for BacktestConfig class."""
@@ -398,5 +396,4 @@ class TestBacktestConfig:
         assert "NVDA" in summary
         assert "$5,000,000" in summary
         assert "results" in summary
-
 

@@ -22,8 +22,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestStrategyManagerRegimeIntegration:
     """Integration tests for strategy manager-regime integration"""
 

@@ -1468,3 +1468,154 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     def analyze_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
         """Standardized method for analyzing indicators data (consumption interface)"""
         return self.process_indicators(indicators)
+
+    # ========================================
+    # STREAMING MODE METHODS (Paper Trading Evolution)
+    # ========================================
+
+    def fit_scalers(self, historical_df: pd.DataFrame) -> None:
+        """
+        Fit scalers on historical data for streaming use.
+
+        Call this offline with 30+ RTH days of data before paper trading.
+        The scalers will be used by transform_single() during streaming.
+
+        Args:
+            historical_df: DataFrame with features (output of create_features)
+        """
+
+        # Identify numeric feature columns (exclude metadata)
+        metadata_cols = {'timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'date'}
+        feature_cols = [
+            col for col in historical_df.columns
+            if col not in metadata_cols and historical_df[col].dtype in ['float64', 'float32', 'int64', 'int32']
+        ]
+
+        if not feature_cols:
+            self.logger.warning("No feature columns found for scaler fitting")
+            return
+
+        # Fit scalers based on config
+        with self._lock:
+            if self.config.normalization_method == 'zscore':
+                scaler = StandardScaler()
+            else:
+                scaler = RobustScaler()
+
+            # Extract feature data, drop NaN rows
+            feature_data = historical_df[feature_cols].dropna()
+
+            if len(feature_data) < 100:
+                self.logger.warning(f"Only {len(feature_data)} rows for scaler fitting, recommend 1000+")
+
+            # Fit the scaler
+            scaler.fit(feature_data)
+
+            self.scalers['main'] = scaler
+            self.feature_columns = feature_cols
+
+            self.logger.info(f"Fitted scalers on {len(feature_cols)} features with {len(feature_data)} samples")
+
+    def save_scalers(self, path: str) -> None:
+        """
+        Save fitted scalers to file for later loading.
+
+        Args:
+            path: Path to save scalers (e.g., 'scalers.pkl')
+        """
+        import pickle
+
+        with self._lock:
+            state = {
+                'scalers': self.scalers,
+                'feature_columns': self.feature_columns,
+                'config_normalization': self.config.normalization_method,
+            }
+
+            with open(path, 'wb') as f:
+                pickle.dump(state, f)
+
+            self.logger.info(f"Saved scalers to {path}")
+
+    def load_scalers(self, path: str) -> None:
+        """
+        Load pre-fitted scalers from file.
+
+        Args:
+            path: Path to saved scalers
+        """
+        import pickle
+
+        with self._lock:
+            with open(path, 'rb') as f:
+                state = pickle.load(f)
+
+            self.scalers = state['scalers']
+            self.feature_columns = state['feature_columns']
+
+            self.logger.info(f"Loaded scalers from {path} with {len(self.feature_columns)} features")
+
+    def transform_single(self, row: Dict[str, float]) -> Dict[str, float]:
+        """
+        Transform a single row of indicator/feature values using pre-fitted scalers.
+
+        This is the streaming-mode transform method. NO fitting is performed.
+        Scalers must be loaded via load_scalers() before calling this.
+
+        Args:
+            row: Dict of feature_name -> raw_value
+
+        Returns:
+            Dict of feature_name -> scaled_value
+
+        Raises:
+            RuntimeError: If scalers not loaded
+        """
+        with self._lock:
+            if 'main' not in self.scalers:
+                raise RuntimeError(
+                    "Scalers not fitted/loaded. Call fit_scalers() or load_scalers() first."
+                )
+
+            scaler = self.scalers['main']
+
+            # Build feature vector in correct column order
+            feature_vector = []
+            valid_features = []
+
+            for col in self.feature_columns:
+                if col in row:
+                    value = row[col]
+                    if pd.notna(value) and np.isfinite(value):
+                        feature_vector.append(value)
+                        valid_features.append(col)
+                    else:
+                        # Use 0 for missing/invalid (will become mean after scaling)
+                        feature_vector.append(0.0)
+                        valid_features.append(col)
+                else:
+                    # Feature not present, use 0
+                    feature_vector.append(0.0)
+                    valid_features.append(col)
+
+            if not feature_vector:
+                return {}
+
+            # Transform
+            try:
+                scaled = scaler.transform([feature_vector])[0]
+
+                # Build result dict
+                result = {}
+                for i, col in enumerate(self.feature_columns):
+                    result[col] = float(scaled[i])
+
+                return result
+
+            except Exception as e:
+                self.logger.error(f"Transform error: {e}")
+                return {}
+
+    def get_feature_names(self) -> List[str]:
+        """Get list of feature names expected by transform_single()."""
+        return list(self.feature_columns)

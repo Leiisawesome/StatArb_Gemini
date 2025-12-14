@@ -19,14 +19,12 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-
 class ComponentLayer(Enum):
     """Component layers in hierarchical control"""
     ORCHESTRATION = "orchestration"    # Layer 1: System control
     GOVERNANCE = "governance"          # Layer 2: Risk/Trading governance
     EXECUTION = "execution"            # Layer 3: Trading operations
     SUPPORT = "support"                # Support components
-
 
 class AuthorityLevel(Enum):
     """Authority levels for different operations"""
@@ -36,7 +34,6 @@ class AuthorityLevel(Enum):
     TACTICAL = "tactical"                    # Tactical operations
     OPERATIONAL = "operational"              # Component operations
     READ_ONLY = "read_only"                 # Monitoring only
-
 
 @dataclass
 class ComponentRegistration:
@@ -78,7 +75,6 @@ class ComponentRegistration:
         if error:
             self.last_error = error
             self.error_count += 1
-
 
 class ComponentManager:
     """Manages component registration, lifecycle, and health monitoring"""

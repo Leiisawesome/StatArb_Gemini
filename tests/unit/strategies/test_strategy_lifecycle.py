@@ -27,7 +27,6 @@ from core_engine.trading.strategies.implementations.breakout.enhanced_breakout i
 from core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs_trading import EnhancedPairsTradingStrategy
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # STRATEGY STOP TESTS
 # =============================================================================
@@ -119,7 +118,6 @@ class TestStrategyStop:
         # Strategy should remain stopped
         assert not strategy.is_operational
 
-
 # =============================================================================
 # PREPARE FOR SHUTDOWN TESTS
 # =============================================================================
@@ -169,7 +167,6 @@ class TestPrepareForShutdown:
 
         # Strategy should be cleaned up
         assert not strategy.is_operational
-
 
 # =============================================================================
 # RESOURCE CLEANUP TESTS
@@ -237,7 +234,6 @@ class TestResourceCleanup:
         # Market data may be cleared or kept
         assert True
 
-
 # =============================================================================
 # LIFECYCLE STATE TRANSITIONS
 # =============================================================================
@@ -293,7 +289,6 @@ class TestLifecycleStateTransitions:
         await strategy.start()
         assert strategy.is_operational
 
-
 # =============================================================================
 # ERROR HANDLING IN LIFECYCLE
 # =============================================================================
@@ -347,7 +342,6 @@ class TestLifecycleErrorHandling:
 
         # Should handle gracefully (may return False or initialize first)
         assert isinstance(result, bool)
-
 
 # =============================================================================
 # CROSS-STRATEGY LIFECYCLE TESTS

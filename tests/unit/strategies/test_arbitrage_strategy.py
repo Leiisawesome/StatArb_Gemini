@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestArbitrageSignalGeneration:
     """Test arbitrage-specific signal calculation logic"""
 
@@ -41,8 +40,8 @@ class TestArbitrageSignalGeneration:
         )
 
         # Create price discrepancy (simulate arbitrage opportunity)
-        df1 = enriched_data['AAPL']
-        df2 = enriched_data['MSFT']
+        enriched_data['AAPL']
+        enriched_data['MSFT']
 
         # Ensure prices exist
         for symbol in enriched_data:
@@ -74,7 +73,6 @@ class TestArbitrageSignalGeneration:
 
         # Only signals above minimum discrepancy threshold should be generated
         assert isinstance(signals, list)
-
 
 class TestArbitragePositionSizing:
     """Test position sizing logic"""
@@ -121,7 +119,6 @@ class TestArbitragePositionSizing:
 
         # Higher profit opportunity should support larger position
         assert position_size_high >= position_size_low
-
 
 class TestArbitrageEntryExitConditions:
     """Test entry and exit condition logic"""

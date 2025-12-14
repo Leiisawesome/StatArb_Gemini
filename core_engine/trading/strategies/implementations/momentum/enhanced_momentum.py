@@ -50,7 +50,6 @@ from core_engine.config import MomentumConfig
 
 logger = logging.getLogger(__name__)
 
-
 class MomentumSignal(Enum):
     """Momentum signal types"""
     BULLISH_MOMENTUM = "bullish_momentum"
@@ -58,10 +57,8 @@ class MomentumSignal(Enum):
     MOMENTUM_CONTINUATION = "momentum_continuation"
     MOMENTUM_EXHAUSTION = "momentum_exhaustion"
 
-
 # Note: MomentumConfig now imported from core_engine.config (Rule 1 Section 7)
 # Local definition removed - use centralized configuration
-
 
 class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     """
@@ -673,7 +670,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Ensure non-negative
             return max(final_pct, 0.0)
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"❌ [{signal.symbol}] Position size calculation failed")
             return 0.0
 
@@ -1714,14 +1711,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             logger.error(f"❌ [{symbol}] Missing required columns in current_bar: {e}", exc_info=True)
             logger.error(f"   Available columns: {list(current_bar.index) if hasattr(current_bar, 'index') else 'N/A'}")
             raise  # Re-raise to surface data pipeline issues
-        except Exception as e:
+        except Exception:
             logger.exception(f"❌ [{symbol}] Unexpected error getting composite signals")
             raise  # Don't mask unexpected errors
 
         logger.debug(f"🔍 [{symbol}] Step 2: Checking if regime columns exist...")
         # DEBUG Phase 4C: Check if regime columns exist
-        has_primary = 'primary_regime' in current_bar.index if hasattr(current_bar, 'index') else 'primary_regime' in current_bar
-        has_volatility = 'volatility_regime' in current_bar.index if hasattr(current_bar, 'index') else 'volatility_regime' in current_bar
+        'primary_regime' in current_bar.index if hasattr(current_bar, 'index') else 'primary_regime' in current_bar
+        'volatility_regime' in current_bar.index if hasattr(current_bar, 'index') else 'volatility_regime' in current_bar
         # SIMPLIFIED LOGGING (original line 1540 was causing silent exceptions)
         logger.debug(f"🔍 {symbol} composite check: composite_z={composite_z}, composite_pct={composite_pct}")
 
@@ -2350,7 +2347,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # Safely get the current bar index
         idx = min(current_idx, len(data) - 1) if current_idx >= 0 else len(data) - 1
 
-
         # Try to get timestamp from the data
         current_ts = None
 
@@ -2724,7 +2720,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         direction = pos_info['direction']  # 1=LONG, -1=SHORT
         entry_price = pos_info['avg_entry_price']
         high_water_mark = pos_info['high_water_mark']
-        trailing_activated = pos_info['trailing_stop_activated']
+        pos_info['trailing_stop_activated']
 
         # Get ATR
         atr = current_bar.get('ATR_14', None)

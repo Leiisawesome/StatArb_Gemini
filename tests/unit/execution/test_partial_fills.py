@@ -16,7 +16,6 @@ from core_engine.system.unified_execution_engine import (
 )
 from core_engine.system.central_risk_manager import ExecutionAuthorization
 
-
 class TestPartialFillSimulation:
     """Test partial fill simulation based on order size"""
 
@@ -284,7 +283,6 @@ class TestPartialFillSimulation:
         # Both executions should have same fill rate (deterministic)
         assert abs(results[0].filled_quantity - results[1].filled_quantity) < 0.01, \
             "Same timestamp should produce same fill rate"
-
 
 if __name__ == '__main__':
     # Run tests with verbose output

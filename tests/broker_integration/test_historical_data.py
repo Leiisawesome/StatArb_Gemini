@@ -13,14 +13,12 @@ from datetime import datetime, timedelta
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
-
 def create_ibkr_adapter(client_id: int = 1):
     """Create IBKR adapter with specified client ID"""
     config = load_broker_config()
     # Modify client_id for this test
     config.interactive_brokers.client_id = client_id
     return IBKRAdapter(config.interactive_brokers)
-
 
 def test_get_1min_bars():
     """Test retrieving 1-minute bars."""
@@ -85,7 +83,6 @@ def test_get_1min_bars():
 
     adapter.disconnect()
 
-
 def test_get_daily_bars():
     """Test retrieving daily bars."""
     print("\n" + "="*80)
@@ -124,7 +121,6 @@ def test_get_daily_bars():
 
     adapter.disconnect()
 
-
 def test_get_bars_with_date_range():
     """Test retrieving bars with specific date range."""
     print("\n" + "="*80)
@@ -157,7 +153,6 @@ def test_get_bars_with_date_range():
 
     adapter.disconnect()
 
-
 def test_multiple_timeframes():
     """Test different timeframe options."""
     print("\n" + "="*80)
@@ -185,7 +180,6 @@ def test_multiple_timeframes():
     print("\n✅ All timeframes working")
 
     adapter.disconnect()
-
 
 def test_invalid_inputs():
     """Test error handling for invalid inputs."""
@@ -229,7 +223,6 @@ def test_invalid_inputs():
     print("\n✅ Error handling working correctly")
 
     adapter.disconnect()
-
 
 if __name__ == "__main__":
     # Run tests directly

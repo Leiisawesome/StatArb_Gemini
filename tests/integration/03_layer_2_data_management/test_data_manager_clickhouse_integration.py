@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestDataManagerClickHouseIntegration:
     """Integration tests for ClickHouse data manager integration"""
 

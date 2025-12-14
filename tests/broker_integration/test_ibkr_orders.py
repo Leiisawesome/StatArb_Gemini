@@ -30,7 +30,6 @@ def ibkr_adapter():
     if adapter.is_connected:
         adapter.disconnect()
 
-
 class TestIBKROrders:
     """Test suite for IBKR order operations."""
 
@@ -311,7 +310,6 @@ class TestIBKROrders:
         assert order_status.get('avg_fill_price', 0) > 0, "Should have fill price"
 
         print("\n✅ Market order fill test passed!")
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

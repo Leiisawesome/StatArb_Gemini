@@ -18,7 +18,6 @@ from tests.unit.strategies.test_regime_aware_helpers import (
     get_regime_config
 )
 
-
 class TestFactorRegimeAwareness:
     """Test factor strategy regime awareness"""
 

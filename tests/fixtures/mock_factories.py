@@ -14,7 +14,6 @@ from core_engine.data.manager import ClickHouseDataManager
 from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.trading.portfolio.manager_enhanced import EnhancedPortfolioManager
 
-
 # ========================================
 # DATA MANAGER MOCKS
 # ========================================
@@ -46,7 +45,6 @@ def create_mock_data_manager(
     mock.is_market_open = Mock(return_value=True)
 
     return mock
-
 
 # ========================================
 # REGIME ENGINE MOCKS
@@ -84,7 +82,6 @@ def create_mock_regime_engine(
 
     return mock
 
-
 # ========================================
 # PORTFOLIO MANAGER MOCKS
 # ========================================
@@ -116,7 +113,6 @@ def create_mock_portfolio_manager(
     })
 
     return mock
-
 
 # ========================================
 # STRATEGY MOCKS
@@ -162,7 +158,6 @@ def create_mock_strategy(
 
     return mock
 
-
 # ========================================
 # EXECUTION ALGORITHM MOCKS
 # ========================================
@@ -193,7 +188,6 @@ def create_mock_execution_algorithm(
 
     return mock
 
-
 # ========================================
 # BROKER ADAPTER MOCKS
 # ========================================
@@ -218,6 +212,13 @@ def create_mock_broker_adapter(
         'timestamp': datetime.now()
     })
 
+    mock.execute_order = AsyncMock(return_value={
+        'filled': True,
+        'fill_price': 100.0,
+        'fill_quantity': 100.0,  # Mock fill quantity
+        'venue': 'MOCK'
+    })
+
     mock.cancel_order = AsyncMock(return_value=True)
 
     mock.get_order_status = AsyncMock(return_value={
@@ -234,7 +235,6 @@ def create_mock_broker_adapter(
     })
 
     return mock
-
 
 # ========================================
 # MONITORING MOCKS
@@ -262,7 +262,6 @@ def create_mock_monitor() -> Mock:
 
     return mock
 
-
 # ========================================
 # AUDIT TRAIL MOCKS
 # ========================================
@@ -285,7 +284,6 @@ def create_mock_audit_trail() -> Mock:
 
     return mock
 
-
 # ========================================
 # UTILITY FUNCTIONS
 # ========================================
@@ -307,7 +305,6 @@ def create_mock_with_methods(spec_class, method_returns: Dict[str, Any]) -> Mock
             setattr(mock, method_name, Mock(return_value=return_value))
 
     return mock
-
 
 def reset_all_mocks(*mocks) -> None:
     """Reset all provided mocks"""

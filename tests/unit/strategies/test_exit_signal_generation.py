@@ -30,7 +30,6 @@ from core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs
 from core_engine.trading.strategies.strategy_engine import SignalType
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -49,7 +48,6 @@ def create_market_data_with_price(symbol: str, price: float, rows: int = 100) ->
         'RSI_14': [50] * rows,
         'ADX_14': [25] * rows
     }, index=dates)
-
 
 # =============================================================================
 # BREAKOUT STRATEGY - EXIT SIGNALS
@@ -202,7 +200,6 @@ class TestBreakoutExitSignals:
         # Position should be removed or marked as closed
         assert True
 
-
 # =============================================================================
 # TREND FOLLOWING STRATEGY - EXIT SIGNALS
 # =============================================================================
@@ -272,7 +269,6 @@ class TestTrendFollowingExitSignals:
 
         # Should detect weak trend
         assert True
-
 
 # =============================================================================
 # MEAN REVERSION STRATEGY - EXIT SIGNALS
@@ -345,7 +341,6 @@ class TestMeanReversionExitSignals:
 
         # Should exit on stop loss
         assert True
-
 
 # =============================================================================
 # STATISTICAL ARBITRAGE STRATEGY - EXIT SIGNALS
@@ -531,7 +526,6 @@ class TestStatisticalArbitrageExitSignals:
         assert isinstance(exit_signals, list)
         assert len(exit_signals) >= 0
 
-
 # =============================================================================
 # PAIRS TRADING STRATEGY - EXIT SIGNALS
 # =============================================================================
@@ -583,7 +577,6 @@ class TestPairsTradingExitSignals:
         # Should exit on convergence
         assert True
 
-
 # =============================================================================
 # MOMENTUM STRATEGY - EXIT SIGNALS
 # =============================================================================
@@ -623,7 +616,6 @@ class TestMomentumExitSignals:
 
         # Should exit on momentum reversal
         assert True
-
 
 # =============================================================================
 # CROSS-STRATEGY EXIT SIGNAL PATTERNS
@@ -706,7 +698,6 @@ class TestCrossStrategyExitPatterns:
 
             # Should detect profit target
             assert True
-
 
 # =============================================================================
 # EDGE CASE EXIT SIGNALS

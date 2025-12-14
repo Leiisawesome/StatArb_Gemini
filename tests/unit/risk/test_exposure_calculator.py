@@ -16,7 +16,6 @@ from core_engine.risk.exposure_calculator import (
     ExposureViolation
 )
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -25,7 +24,6 @@ from core_engine.risk.exposure_calculator import (
 def calculator():
     """Default exposure calculator"""
     return ExposureCalculator()
-
 
 @pytest.fixture
 def calculator_custom():
@@ -37,7 +35,6 @@ def calculator_custom():
         'base_currency': 'EUR'
     }
     return ExposureCalculator(config)
-
 
 @pytest.fixture
 def sample_positions_long():
@@ -56,7 +53,6 @@ def sample_positions_long():
             'currency': 'USD'
         }
     }
-
 
 @pytest.fixture
 def sample_positions_mixed():
@@ -82,7 +78,6 @@ def sample_positions_mixed():
         }
     }
 
-
 @pytest.fixture
 def sample_positions_multi_sector():
     """Sample positions across multiple sectors"""
@@ -92,7 +87,6 @@ def sample_positions_multi_sector():
         'JPM': {'quantity': 30, 'market_value': 8000.0},      # Financials
         'JNJ': {'quantity': 20, 'market_value': 5000.0}       # Healthcare
     }
-
 
 @pytest.fixture
 def sample_positions_multi_currency():
@@ -115,12 +109,10 @@ def sample_positions_multi_currency():
         }
     }
 
-
 @pytest.fixture
 def portfolio_value():
     """Standard portfolio value"""
     return 100000.0
-
 
 # ============================================================================
 # Category 1: Enums and Dataclasses (3 tests)
@@ -204,7 +196,6 @@ class TestEnumsAndDataclasses:
         assert violation.severity == 'WARNING'
         assert violation.violation_amount == 2.0
 
-
 # ============================================================================
 # Category 2: Initialization (3 tests)
 # ============================================================================
@@ -245,7 +236,6 @@ class TestInitialization:
         assert 'AAPL' in calculator._geographic_mappings
         assert calculator._geographic_mappings['AAPL'] == 'North America'
         assert len(calculator._geographic_mappings) == 9
-
 
 # ============================================================================
 # Category 3: Market Exposure (4 tests)
@@ -301,7 +291,6 @@ class TestMarketExposure:
         assert result.net_exposure == 0.0
         assert result.gross_exposure == 0.0
         assert len(result.exposures) == 0
-
 
 # ============================================================================
 # Category 4: Sector/Region/Currency Exposure (6 tests)
@@ -384,7 +373,6 @@ class TestSectorRegionCurrencyExposure:
         assert len(unknown_exposures) == 1
         assert unknown_exposures[0].value == 10000.0
 
-
 # ============================================================================
 # Category 5: Factor and Single Name Exposure (4 tests)
 # ============================================================================
@@ -445,7 +433,6 @@ class TestFactorAndSingleNameExposure:
         msft = result.exposures[1]
         assert msft.identifier == 'MSFT'
         assert msft.percentage == 10.0
-
 
 # ============================================================================
 # Category 6: Exposure Limits and Violations (7 tests)
@@ -603,7 +590,6 @@ class TestExposureLimitsAndViolations:
         current_violations = calculator.get_exposure_violations()
         assert all(v.timestamp >= datetime.now() - timedelta(hours=24) for v in current_violations)
 
-
 # ============================================================================
 # Category 7: Calculate Exposures Integration (5 tests)
 # ============================================================================
@@ -698,7 +684,6 @@ class TestCalculateExposuresIntegration:
         stock_position = {'quantity': 100, 'asset_type': 'STOCK', 'market_value': 15000}
         assert calculator_custom._should_include_position(stock_position) is True
 
-
 # ============================================================================
 # Category 8: Utility Methods (3 tests)
 # ============================================================================
@@ -740,7 +725,6 @@ class TestUtilityMethods:
 
         # Currently just logs, but verify method exists and is callable
         assert hasattr(calculator, 'cleanup')
-
 
 # ============================================================================
 # Category 9: Edge Cases (2 tests)

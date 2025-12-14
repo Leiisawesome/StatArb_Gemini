@@ -17,7 +17,6 @@ from core_engine.processing.signals.combiners import (
     CombinationConfig
 )
 
-
 class TestSignalCombinerBase:
     """Test base SignalCombiner class"""
 
@@ -211,7 +210,6 @@ class TestSignalCombinerBase:
         combiner.clear_cache()
 
         assert len(combiner.combination_cache) == 0
-
 
 class TestSignalCombiner:
     """Test SignalCombiner class"""
@@ -446,7 +444,6 @@ class TestSignalCombiner:
         assert result.price == 150.0
         assert result.confidence > 0
         assert result.quantity > 0
-
 
 class TestSignalCombiner:
     """Test SignalCombiner class"""
@@ -717,7 +714,6 @@ class TestSignalCombiner:
         assert combiner.performance_metrics['combinations_performed'] > initial_metrics['combinations_performed']
         assert combiner.performance_metrics['avg_combination_time'] > 0
 
-
 class TestSignalCombiner:
     """Test SignalCombiner class"""
 
@@ -906,7 +902,6 @@ class TestSignalCombiner:
         # Check that metrics are updated
         assert combiner.performance_metrics['combinations_performed'] > initial_metrics['combinations_performed']
         assert combiner.performance_metrics['avg_combination_time'] > 0
-
 
 class TestSignalCombiner:
     """Test SignalCombiner class"""
@@ -1119,7 +1114,6 @@ class TestSignalCombiner:
         assert combiner.strategy_weights == {}
         assert combiner.performance_history == {}
 
-
 class TestEdgeCasesAndErrorHandling:
     """Test edge cases and error handling"""
 
@@ -1300,7 +1294,6 @@ class TestEdgeCasesAndErrorHandling:
         assert result.confidence > 0
         assert result.quantity > 0
 
-
 class TestPerformanceAndOptimization:
     """Test performance and optimization features"""
 
@@ -1396,7 +1389,6 @@ class TestPerformanceAndOptimization:
         assert result.price == 150.0
         assert result.confidence > 0
         assert result.quantity > 0
-
 
 class TestIntegrationAndCompatibility:
     """Test integration and compatibility with other components"""
@@ -1494,7 +1486,6 @@ class TestIntegrationAndCompatibility:
             # SQLite not available, skip test
             pass
 
-
 class TestRegimeAwareSignalCombining:
     """Test regime-aware signal combining"""
 
@@ -1591,7 +1582,6 @@ class TestRegimeAwareSignalCombining:
 
         # Results should be different due to trend adaptation
         assert result_trending.confidence != result_ranging.confidence
-
 
 class TestAdvancedSignalCombining:
     """Test advanced signal combining techniques"""

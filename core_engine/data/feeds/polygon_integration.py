@@ -84,9 +84,7 @@ except ImportError:
         @abstractmethod
         def get_status(self) -> Dict[str, Any]: pass
 
-
 logger = logging.getLogger(__name__)
-
 
 # ============================================================================
 # CONFIGURATION
@@ -140,7 +138,6 @@ class PolygonServiceConfig:
                 "Polygon API key not set. Set POLYGON_API_KEY environment variable "
                 "or pass api_key to config."
             )
-
 
 # ============================================================================
 # POLYGON DATA SERVICE
@@ -423,15 +420,15 @@ class PolygonDataService(ISystemComponent):
         if not trades:
             return pd.DataFrame(columns=['timestamp', 'price', 'size', 'conditions'])
 
+        timestamps = [trade.timestamp for trade in trades]
         data = [{
-            'timestamp': trade.timestamp,
             'price': trade.price,
             'size': trade.size,
             'conditions': trade.conditions,
         } for trade in trades]
 
-        df = pd.DataFrame(data)
-        df.set_index('timestamp', inplace=True)
+        df = pd.DataFrame(data, index=timestamps)
+        df.index.name = 'timestamp'
         return df
 
     def get_latest_price(self, symbol: str) -> Optional[float]:
@@ -481,7 +478,15 @@ class PolygonDataService(ISystemComponent):
             df = df[df.index <= end_time]
 
         # Ensure standard column order for pipeline
-        return df[['open', 'high', 'low', 'close', 'volume']].copy()
+        # Create new DataFrame with only required columns to avoid numpy compatibility issues
+        result_df = pd.DataFrame({
+            'open': df['open'],
+            'high': df['high'],
+            'low': df['low'],
+            'close': df['close'],
+            'volume': df['volume']
+        }, index=df.index)
+        return result_df
 
     # ========================================================================
     # CALLBACK REGISTRATION
@@ -529,7 +534,7 @@ class PolygonDataService(ISystemComponent):
 
         if success:
             for symbol in symbols:
-                if symbol.upper() not in self.config.symbols:
+                if symbol and symbol.upper() not in self.config.symbols:
                     self.config.symbols.append(symbol.upper())
 
         return success
@@ -659,7 +664,6 @@ class PolygonDataService(ISystemComponent):
         if bid and ask:
             self._latest_prices[symbol] = (bid + ask) / 2
 
-
 # ============================================================================
 # CONVENIENCE FUNCTIONS
 # ============================================================================
@@ -702,7 +706,6 @@ async def create_polygon_service(
             raise RuntimeError("Failed to start Polygon service")
 
     return service
-
 
 # ============================================================================
 # EXPORTS

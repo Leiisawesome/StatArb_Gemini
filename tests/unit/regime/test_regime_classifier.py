@@ -11,7 +11,6 @@ from unittest.mock import Mock, patch
 
 # Import regime component classes
 
-
 from core_engine.regime.regime_classifier import (
     MLModel,
     FeatureType,
@@ -29,9 +28,6 @@ from core_engine.regime.regime_detector import (
 
 from core_engine.config.component_config import RegimeConfig
 
-
-
-
 class TestMLModel:
     """Test MLModel enum."""
 
@@ -41,7 +37,6 @@ class TestMLModel:
         assert MLModel.GRADIENT_BOOSTING.value == "gradient_boosting"
         assert MLModel.SVM.value == "svm"
         assert MLModel.NEURAL_NETWORK.value == "neural_network"
-
 
 class TestFeatureType:
     """Test FeatureType enum."""
@@ -56,7 +51,6 @@ class TestFeatureType:
         assert FeatureType.TECHNICAL_INDICATORS.value == "technical_indicators"
         assert FeatureType.MACRO_INDICATORS.value == "macro_indicators"
         assert FeatureType.SENTIMENT_INDICATORS.value == "sentiment_indicators"
-
 
 class TestRegimeConfig:
     """Test RegimeConfig dataclass."""
@@ -102,7 +96,6 @@ class TestRegimeConfig:
         assert config.update_frequency_hours == 2
         assert config.regime_persistence == 0.9
 
-
 class TestFeatureImportance:
     """Test FeatureImportance dataclass."""
 
@@ -125,7 +118,6 @@ class TestFeatureImportance:
         assert importance.std_value == 10.0
         assert importance.correlation_with_target == 0.65
         assert importance.regime_specific_importance == {"bull": 0.8, "bear": 0.9}
-
 
 class TestModelPerformance:
     """Test ModelPerformance dataclass."""
@@ -161,7 +153,6 @@ class TestModelPerformance:
         assert performance.training_time == 45.2
         assert performance.last_trained == datetime(2024, 1, 1)
 
-
 class TestRegimeClassification:
     """Test RegimeClassification dataclass."""
 
@@ -195,7 +186,6 @@ class TestRegimeClassification:
         assert classification.recent_regime_changes == 2
         assert classification.prediction_horizon_days == 5
         assert classification.prediction_decay == 0.95
-
 
 class TestFeatureEngineer:
     """Test FeatureEngineer class."""
@@ -246,7 +236,6 @@ class TestFeatureEngineer:
         # Features may have 0 rows due to NaN filtering with small test data
         # but should have many columns (features)
         assert len(features.columns) > len(sample_price_data.columns)
-
 
 class TestRegimeModelTrainer:
     """Test RegimeModelTrainer class."""
@@ -324,7 +313,6 @@ class TestRegimeModelTrainer:
         prediction = trainer.predict_regime(single_sample)
 
         assert isinstance(prediction, RegimeClassification)
-
 
 class TestRegimeClassifier:
     """Test RegimeClassifier class."""
@@ -407,5 +395,4 @@ class TestRegimeClassifier:
 
         result = classifier.classify_regime(sample_market_data)
         assert result is None
-
 

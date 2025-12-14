@@ -15,14 +15,12 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class RegimeSignalAdjustment(Enum):
     """Signal adjustment strategies based on regime"""
     AMPLIFY = "amplify"       # Increase signal confidence
     REDUCE = "reduce"          # Decrease signal confidence
     FILTER = "filter"          # Filter out signals
     MAINTAIN = "maintain"      # Keep signal unchanged
-
 
 @dataclass
 class RegimeAwareSignal:
@@ -34,7 +32,6 @@ class RegimeAwareSignal:
     adjusted_confidence: float
     regime_compatible: bool
     adjustment_reason: str
-
 
 class RegimeAwareSignalEnhancer:
     """

@@ -15,7 +15,6 @@ from datetime import time, datetime
 from typing import List
 from enum import Enum
 
-
 class ReplaySpeed(Enum):
     """Replay speed multipliers"""
     PAUSED = 0.0
@@ -27,12 +26,11 @@ class ReplaySpeed(Enum):
     FAST_100X = 100.0
     INSTANT = float('inf')  # Replay all data instantly
 
-
 @dataclass
 class ReplayConfig:
     """
     Centralized configuration for historical data replay
-    
+
     This is the single source of truth for replay settings. Both the
     replay engine and adapter reference this configuration.
     """
@@ -88,7 +86,7 @@ class ReplayConfig:
     def create_default(cls) -> "ReplayConfig":
         """
         Create a default configuration
-        
+
         Returns:
             ReplayConfig: Configuration with default settings
         """
@@ -104,13 +102,13 @@ class ReplayConfig:
     ) -> "ReplayConfig":
         """
         Create configuration for a single symbol
-        
+
         Args:
             symbol: Stock symbol
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             speed: Replay speed multiplier
-            
+
         Returns:
             ReplayConfig: Configuration for the specified symbol
         """
@@ -132,14 +130,14 @@ class ReplayConfig:
     ) -> "ReplayConfig":
         """
         Create configuration for multiple symbols
-        
+
         Args:
             symbols: List of stock symbols
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             speed: Replay speed multiplier
             interval: Data interval
-            
+
         Returns:
             ReplayConfig: Configuration for the specified symbols
         """
@@ -154,16 +152,15 @@ class ReplayConfig:
     def copy(self, **changes) -> "ReplayConfig":
         """
         Create a copy of the configuration with changes
-        
+
         Args:
             **changes: Fields to override
-            
+
         Returns:
             ReplayConfig: New configuration with changes applied
         """
         from dataclasses import replace
         return replace(self, **changes)
-
 
 # Default configuration instance
 DEFAULT_REPLAY_CONFIG = ReplayConfig.create_default()

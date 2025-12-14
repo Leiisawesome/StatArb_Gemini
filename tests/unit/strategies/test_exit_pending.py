@@ -12,7 +12,6 @@ sys.path.insert(0, '/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini')
 from core_engine.trading.strategies.implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
 from core_engine.config import MomentumConfig
 
-
 async def test_exit_pending_flow():
     """Test that exit_pending flag works correctly"""
 
@@ -165,7 +164,6 @@ async def test_exit_pending_flow():
 
     print()
     print("🎉 All tests passed! exit_pending mechanism works correctly")
-
 
 if __name__ == '__main__':
     asyncio.run(test_exit_pending_flow())

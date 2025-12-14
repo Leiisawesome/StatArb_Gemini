@@ -23,7 +23,6 @@ from core_engine.processing.signals.validators import (
     ValidationStatus
 )
 
-
 class TestValidationRule:
     """Test ValidationRule dataclass"""
 
@@ -87,7 +86,6 @@ class TestValidationRule:
         assert rule.required_context == ["market_data"]
         assert rule.custom_params == {"param1": "value1", "param2": 42}
 
-
 class TestValidationResult:
     """Test ValidationResult dataclass"""
 
@@ -134,7 +132,6 @@ class TestValidationResult:
         assert result.details == {"key1": "value1", "key2": 42}
         assert result.suggestions == ["suggestion1", "suggestion2"]
         assert result.execution_time_ms == 1.5
-
 
 class TestSignalValidationReport:
     """Test SignalValidationReport dataclass"""
@@ -216,7 +213,6 @@ class TestSignalValidationReport:
         assert len(report.risk_warnings) == 1
         assert report.validation_duration_ms == 5.2
 
-
 class TestPortfolioValidationReport:
     """Test PortfolioValidationReport dataclass"""
 
@@ -283,7 +279,6 @@ class TestPortfolioValidationReport:
         assert len(report.portfolio_issues) == 2
         assert len(report.risk_alerts) == 1
         assert len(report.signal_reports) == 2
-
 
 class TestValidationRuleEngine:
     """Test ValidationRuleEngine class"""
@@ -701,7 +696,6 @@ class TestValidationRuleEngine:
         assert result.status == ValidationStatus.PASSED
         assert result.score == 0.5
         assert "No historical performance data available" in result.message
-
 
 class TestSignalValidator:
     """Test SignalValidator class"""
@@ -1145,7 +1139,6 @@ class TestSignalValidator:
             assert len(result.portfolio_issues) > 0
             assert any("error" in issue.lower() for issue in result.portfolio_issues)
 
-
 class TestEdgeCasesAndErrorHandling:
     """Test edge cases and error handling"""
 
@@ -1372,7 +1365,6 @@ class TestEdgeCasesAndErrorHandling:
         assert 'validation_details' in result
         assert 'warnings' in result
 
-
 class TestPerformanceAndOptimization:
     """Test performance and optimization features"""
 
@@ -1522,7 +1514,6 @@ class TestPerformanceAndOptimization:
             assert 'overall_status' in result
             assert 'validation_details' in result
             assert 'warnings' in result
-
 
 class TestIntegrationAndCompatibility:
     """Test integration and compatibility with other components"""

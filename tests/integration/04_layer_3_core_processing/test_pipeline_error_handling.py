@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestPipelineErrorHandling:
     """Integration tests for pipeline error handling"""
 

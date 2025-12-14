@@ -50,7 +50,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class LiquidityRegime(Enum):
     """Liquidity regime classification"""
     HIGH_LIQUIDITY = "high_liquidity"
@@ -58,7 +57,6 @@ class LiquidityRegime(Enum):
     LOW_LIQUIDITY = "low_liquidity"
     ILLIQUID = "illiquid"
     CRISIS_LIQUIDITY = "crisis_liquidity"
-
 
 @dataclass
 class LiquidityScore:
@@ -129,7 +127,6 @@ class LiquidityScore:
             'bars_analyzed': self.bars_analyzed,
             'data_quality': self.data_quality
         }
-
 
 class LiquidityAssessmentEngine(ISystemComponent):
     """
@@ -305,7 +302,7 @@ class LiquidityAssessmentEngine(ISystemComponent):
 
             # Historical spread analysis
             spread_history = self._calculate_spread_history(window)
-            avg_spread = np.mean(spread_history) if len(spread_history) > 0 else spread_proxy_bps
+            np.mean(spread_history) if len(spread_history) > 0 else spread_proxy_bps
             spread_percentile = self._calculate_percentile(spread_proxy_bps, spread_history)
 
             # Calculate volatility for Kyle's lambda

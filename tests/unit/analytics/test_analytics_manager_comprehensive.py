@@ -21,7 +21,6 @@ from core_engine.analytics.attribution_analyzer import AttributionAnalyzer
 from core_engine.analytics.benchmark_analyzer import BenchmarkAnalyzer
 from core_engine.analytics.report_generator import ReportGenerator
 
-
 class TestAnalyticsManagerEnhanced:
     """Comprehensive test suite for AnalyticsManagerEnhanced - 27% coverage enhancement"""
 
@@ -364,7 +363,6 @@ class TestAnalyticsManagerEnhanced:
         assert 'analytics_components' in status
         assert 'processing_status' in status
 
-
 class TestMetricsCalculator:
     """Test suite for MetricsCalculator - analytics metrics component"""
 
@@ -422,7 +420,6 @@ class TestMetricsCalculator:
         assert 'rolling_volatility' in rolling_metrics
         assert 'rolling_sharpe' in rolling_metrics
         assert 'rolling_max_drawdown' in rolling_metrics
-
 
 class TestPerformanceAnalyzer:
     """Test suite for PerformanceAnalyzer - performance analysis component"""
@@ -484,7 +481,6 @@ class TestPerformanceAnalyzer:
         assert 'strategy_attribution' in attribution
         assert 'factor_attribution' in attribution
         assert 'time_attribution' in attribution
-
 
 class TestAttributionAnalyzer:
     """Test suite for AttributionAnalyzer - attribution analysis component"""
@@ -552,7 +548,6 @@ class TestAttributionAnalyzer:
         assert 'weekly_attribution' in time_attribution
         assert 'monthly_attribution' in time_attribution
 
-
 class TestBenchmarkAnalyzer:
     """Test suite for BenchmarkAnalyzer - benchmark analysis component"""
 
@@ -599,7 +594,6 @@ class TestBenchmarkAnalyzer:
         assert 'benchmark_risk' in risk_analysis
         assert 'relative_risk' in risk_analysis
         assert 'correlation' in risk_analysis
-
 
 class TestReportGenerator:
     """Test suite for ReportGenerator - report generation component"""
@@ -688,7 +682,6 @@ class TestReportGenerator:
         assert 'risk_section' in report
         assert 'attribution_section' in report
         assert 'benchmark_section' in report
-
 
 class TestAnalyticsManagerIntegration:
     """Integration tests for analytics manager components"""

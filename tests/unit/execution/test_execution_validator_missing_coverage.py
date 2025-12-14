@@ -20,7 +20,6 @@ from core_engine.trading.execution.execution_validator import (
     ExecutionValidator,
 )
 
-
 # ==================== Test Market Hours Validation Missing Lines ====================
 
 class TestMarketHoursValidationMissing:
@@ -76,7 +75,6 @@ class TestMarketHoursValidationMissing:
         assert 'market_hours' in result.details
         assert result.details['submission_time'] == after_hours.isoformat()
         assert result.message.startswith("Order submitted outside market hours")
-
 
 # ==================== Test Real-Time Validation Missing Lines ====================
 
@@ -302,7 +300,6 @@ class TestRealTimeValidationMissing:
             # Should pass when no threshold
             assert impact_result.passed is True
 
-
 # ==================== Test Post-Trade Validation Missing Lines ====================
 
 class TestPostTradeValidationMissing:
@@ -313,7 +310,7 @@ class TestPostTradeValidationMissing:
         validator = PostTradeValidator()
 
         # Patch one of the validation methods to raise exception
-        original_analyze = validator._analyze_best_execution
+        validator._analyze_best_execution
 
         def failing_analyze(rule, context, results, result):
             raise ValueError("Test exception in best execution analysis")
@@ -341,7 +338,6 @@ class TestPostTradeValidationMissing:
         if best_exec_result:
             assert best_exec_result.passed is False
             assert 'Post-trade validation error' in best_exec_result.message
-
 
 # ==================== Test ExecutionValidator Missing Lines ====================
 
@@ -622,7 +618,6 @@ class TestExecutionValidatorMissing:
         # Callbacks should have been called (even if some failed)
         assert len(callback_invocations) > 0
 
-
 # ==================== Test Reporting Missing Lines ====================
 
 class TestReportingMissing:
@@ -773,7 +768,6 @@ class TestReportingMissing:
             # Should show declining or stable trend
             assert isinstance(trend['trend'], (int, float))
             assert trend['description'] in ['Declining', 'Stable', 'Improving']
-
 
 # ==================== Test Start/Stop Methods ====================
 

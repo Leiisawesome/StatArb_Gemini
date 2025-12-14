@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestPipelineRegimeAwareProcessing:
     """Integration tests for pipeline regime-aware processing"""
 

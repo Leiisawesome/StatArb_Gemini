@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestRegimeExecutionIntegration:
     """Integration tests for regime-execution cross-layer integration"""
 
@@ -31,7 +29,7 @@ class TestRegimeExecutionIntegration:
         Expected: Optimal execution algorithms selected
         """
         # Get regime context (not async, so no await needed)
-        regime_context = regime_engine.get_current_regime_context() if regime_engine else None
+        regime_engine.get_current_regime_context() if regime_engine else None
 
         # Execution engine would optimize for regime
         # Verify both components exist

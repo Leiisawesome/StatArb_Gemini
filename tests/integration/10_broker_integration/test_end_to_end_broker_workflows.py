@@ -34,7 +34,6 @@ from core_engine.system.unified_execution_engine import UnifiedExecutionEngine
 
 logger = logging.getLogger(__name__)
 
-
 # ==============================================================================
 # BROKER FIXTURES
 # ==============================================================================
@@ -51,7 +50,6 @@ def mock_broker_config():
         account_id="TEST123"
     )
 
-
 @pytest.fixture
 def mock_broker_credentials():
     """Mock broker credentials for testing"""
@@ -64,13 +62,11 @@ def mock_broker_credentials():
         account_id="TEST123"
     )
 
-
 @pytest.fixture
 def broker_manager():
     """Create broker manager for testing"""
     manager = BrokerManager()
     return manager
-
 
 @pytest.fixture
 async def execution_engine_with_broker():
@@ -86,7 +82,6 @@ async def execution_engine_with_broker():
     await engine.initialize()
     yield engine
     await engine.stop()
-
 
 # ==============================================================================
 # END-TO-END BROKER WORKFLOW TESTS
@@ -173,7 +168,7 @@ class TestBrokerConnectionWorkflow:
                 # First attempt fails
                 result1 = await broker_adapter.connect()
                 assert result1 == False
-                
+
                 # STEP 3: Second attempt (reconnection) succeeds
                 result2 = await broker_adapter.connect()
                 assert result2 == True
@@ -212,7 +207,6 @@ class TestBrokerConnectionWorkflow:
         for broker_id in broker_ids:
             broker = broker_manager.get_broker(broker_id)
             assert broker is not None
-
 
 class TestOrderExecutionWorkflow:
     """Test complete order execution workflows"""
@@ -267,7 +261,7 @@ class TestOrderExecutionWorkflow:
         }
 
         # STEP 4: Verify position update
-        positions = await broker_adapter.get_positions()
+        await broker_adapter.get_positions()
         # Note: Position update would happen through execution engine
 
         # STEP 5: Verify account update
@@ -299,7 +293,7 @@ class TestOrderExecutionWorkflow:
             limit_price=250.00
         )
 
-        broker_order_id = await broker_adapter.submit_order(order)
+        await broker_adapter.submit_order(order)
 
         assert order.order_type == OrderType.LIMIT
         assert order.limit_price == 250.00
@@ -346,7 +340,7 @@ class TestOrderExecutionWorkflow:
             order_type=OrderType.MARKET
         )
 
-        broker_order_id = await broker_adapter.submit_order(order)
+        await broker_adapter.submit_order(order)
 
         # STEP 3: Simulate rejection by updating mock adapter's order status
         rejection_data = {
@@ -359,7 +353,6 @@ class TestOrderExecutionWorkflow:
         # STEP 4: Retry logic would happen here (in execution engine)
         # For now, verify rejection captured
         assert rejection_data['status'] == 'REJECTED'
-
 
 class TestPositionManagementWorkflow:
     """Test position management and reconciliation workflows"""
@@ -437,7 +430,7 @@ class TestPositionManagementWorkflow:
             order_type=OrderType.MARKET
         )
 
-        broker_order_id = await broker_adapter.submit_order(order)
+        await broker_adapter.submit_order(order)
 
         # STEP 3: Simulate fill and position update
         # In real system, this would be handled by execution engine
@@ -448,7 +441,6 @@ class TestPositionManagementWorkflow:
         positions = await broker_adapter.get_positions()
         aapl_pos = next(p for p in positions if p.symbol == 'AAPL')
         assert aapl_pos.quantity == 150.0
-
 
 class TestAccountManagementWorkflow:
     """Test account management and cash flow workflows"""
@@ -522,7 +514,6 @@ class TestAccountManagementWorkflow:
         # STEP 4: Attempt order exceeding buying power (would be rejected by broker)
         # This would typically be caught by risk management before broker submission
 
-
 class TestMultiBrokerWorkflow:
     """Test multi-broker coordination workflows"""
 
@@ -566,7 +557,7 @@ class TestMultiBrokerWorkflow:
             order_type=OrderType.MARKET
         )
 
-        broker_order_id = await primary_broker.submit_order(order)
+        await primary_broker.submit_order(order)
 
         # STEP 2: Simulate failover to second broker if needed
         # In real system, execution engine would handle this
@@ -626,7 +617,6 @@ class TestMultiBrokerWorkflow:
         # STEP 4: Verify backup broker available
         assert backup_broker is not None
         assert broker_manager.get_broker_count() == 2
-
 
 class TestErrorRecoveryWorkflow:
     """Test error recovery and circuit breaker workflows"""
@@ -700,7 +690,6 @@ class TestErrorRecoveryWorkflow:
         assert broker_manager.get_broker_count() == 3  # All registered
         # But only 2 operational
 
-
 class TestMarketDataIntegrationWorkflow:
     """Test market data integration with broker workflows"""
 
@@ -739,7 +728,7 @@ class TestMarketDataIntegrationWorkflow:
                 order_type=OrderType.LIMIT,
                 limit_price=150.00  # From quote
             )
-            broker_order_id = await broker_adapter.submit_order(order)
+            await broker_adapter.submit_order(order)
 
             assert order.limit_price == 150.00
 
@@ -777,12 +766,11 @@ class TestMarketDataIntegrationWorkflow:
                 'timestamp': old_time  # 30 minutes old
             }
 
-            quote = await broker_adapter._adapter.get_latest_quote("AAPL")
+            await broker_adapter._adapter.get_latest_quote("AAPL")
             # In real system, stale quotes would be rejected for order placement
 
         # STEP 3: System would validate quote freshness before order submission
         # This validation would happen in execution engine or risk manager
-
 
 class TestComplianceIntegrationWorkflow:
     """Test compliance integration with broker workflows"""
@@ -856,7 +844,7 @@ class TestComplianceIntegrationWorkflow:
                 order_type=OrderType.MARKET
             )
 
-            broker_order_id = await broker_adapter.submit_order(order)
+            await broker_adapter.submit_order(order)
 
         # STEP 3: Simulate fill
         fill_data = {

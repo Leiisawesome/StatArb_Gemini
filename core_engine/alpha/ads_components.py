@@ -23,7 +23,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # §1. SIGNAL MATURITY SCORE (SMS) - Multiplicative Formula
 # =============================================================================
@@ -130,7 +129,6 @@ class SignalMaturityScore:
         return (f"SMS(E={self.exhaustion:.3f}, P_rev={self.reversal_prob:.3f}, "
                 f"OFI={self.ofi_shift:.3f}, VC={self.vol_compression:.3f}, "
                 f"bars={self.pending_bars})")
-
 
 # =============================================================================
 # §3. EXPECTED RISK-ADJUSTED RETURN (ERAR)
@@ -264,7 +262,6 @@ class ERAR:
     def __repr__(self) -> str:
         return f"ERAR({self.compute():.3f}, cost={self.cost():.2f}bps)"
 
-
 # =============================================================================
 # §8. COOLDOWN (PVSI) - PnL Volatility Spike Index
 # =============================================================================
@@ -392,7 +389,6 @@ class Cooldown:
             'trade_count': len(self.pnl_history)
         }
 
-
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -453,7 +449,6 @@ def compute_exhaustion(
 
     return np.clip(score, 0.0, 1.0)
 
-
 def compute_reversal_probability(
     zscore: float,
     rsi: float,
@@ -500,7 +495,6 @@ def compute_reversal_probability(
 
     return np.clip(prob, 0.0, 1.0)
 
-
 def compute_vol_compression(
     short_vol: float,
     long_vol: float
@@ -522,7 +516,6 @@ def compute_vol_compression(
 
     ratio = short_vol / long_vol
     return np.clip(ratio, 0.5, 2.0)
-
 
 def estimate_expected_pnl(
     zscore: float,
@@ -565,7 +558,6 @@ def estimate_expected_pnl(
 
     return expected_pnl_bps
 
-
 def estimate_cvar_95(
     volatility: float,
     holding_days: float = 1.0
@@ -591,7 +583,6 @@ def estimate_cvar_95(
 
     return cvar_95
 
-
 # =============================================================================
 # PENDING SIGNAL QUEUE
 # =============================================================================
@@ -611,7 +602,6 @@ class PendingSignalContext:
     def increment_pending(self):
         """Increment pending bar count."""
         self.sms.increment_pending()
-
 
 class PendingSignalQueue:
     """

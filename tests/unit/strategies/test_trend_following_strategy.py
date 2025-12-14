@@ -19,7 +19,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestTrendFollowingSignalGeneration:
     """Test trend following-specific signal calculation logic"""
 
@@ -88,7 +87,6 @@ class TestTrendFollowingSignalGeneration:
         # Weak trends should generate fewer or no signals
         assert isinstance(signals, list)
 
-
 class TestTrendFollowingPositionSizing:
     """Test position sizing logic"""
 
@@ -138,7 +136,6 @@ class TestTrendFollowingPositionSizing:
         # High volatility should reduce position size
         assert position_size >= 0
         assert position_size <= strategy.config.max_position_pct
-
 
 class TestTrendFollowingEntryExitConditions:
     """Test entry and exit condition logic"""

@@ -15,14 +15,12 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ValidationSeverity(Enum):
     """Validation severity levels"""
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
-
 
 class ValidationCategory(Enum):
     """Validation categories"""
@@ -33,7 +31,6 @@ class ValidationCategory(Enum):
     RISK = "risk"
     PERFORMANCE = "performance"
 
-
 class ValidationAction(Enum):
     """Actions to take on validation failure"""
     LOG_ONLY = "log_only"
@@ -42,7 +39,6 @@ class ValidationAction(Enum):
     CANCEL = "cancel"
     REDUCE_SIZE = "reduce_size"
     ALERT = "alert"
-
 
 @dataclass
 class ValidationRule:
@@ -80,7 +76,6 @@ class ValidationRule:
     created_at: datetime = field(default_factory=datetime.now)
     last_modified: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class ValidationResult:
     """Result of validation check"""
@@ -106,7 +101,6 @@ class ValidationResult:
     # Actions taken
     action_taken: Optional[str] = None
     action_details: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class ExecutionContext:
@@ -145,7 +139,6 @@ class ExecutionContext:
 
     # Previous executions
     recent_executions: List[Dict[str, Any]] = field(default_factory=list)
-
 
 class PreTradeValidator:
     """Pre-trade execution validation"""
@@ -478,7 +471,6 @@ class PreTradeValidator:
             market_open <= time_part <= market_close
         )
 
-
 class RealTimeValidator:
     """Real-time execution validation during trading"""
 
@@ -669,7 +661,6 @@ class RealTimeValidator:
             }
 
         return result
-
 
 class PostTradeValidator:
     """Post-trade execution validation and compliance"""
@@ -889,7 +880,6 @@ class PostTradeValidator:
             result.message = "No special reporting required"
 
         return result
-
 
 class ExecutionValidator:
     """

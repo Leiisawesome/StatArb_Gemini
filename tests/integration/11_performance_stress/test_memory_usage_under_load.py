@@ -16,8 +16,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestMemoryUsageUnderLoad:
     """Integration tests for memory usage under load"""
 

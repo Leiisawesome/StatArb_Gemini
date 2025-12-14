@@ -19,8 +19,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestBrokerOrderFlow:
     """Integration tests for broker order flow"""
 

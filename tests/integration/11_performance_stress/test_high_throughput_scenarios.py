@@ -28,7 +28,6 @@ import asyncio
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestHighThroughputScenarios:
     """Integration tests for high throughput scenarios"""
 

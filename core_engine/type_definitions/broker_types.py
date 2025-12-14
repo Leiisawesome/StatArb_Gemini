@@ -11,7 +11,6 @@ from enum import Enum
 # Import existing types from orders module
 from .orders import Order, OrderType, OrderSide, OrderStatus
 
-
 class TimeInForce(Enum):
     """Time-in-force enumeration"""
     DAY = "day"  # Day order
@@ -19,7 +18,6 @@ class TimeInForce(Enum):
     IOC = "ioc"  # Immediate-or-cancel
     FOK = "fok"  # Fill-or-kill
     GTD = "gtd"  # Good-til-date
-
 
 @dataclass
 class Position:
@@ -37,7 +35,6 @@ class Position:
     # Optional fields
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class AccountInfo:
@@ -62,7 +59,6 @@ class AccountInfo:
     initial_margin: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 # Export all types
 __all__ = [

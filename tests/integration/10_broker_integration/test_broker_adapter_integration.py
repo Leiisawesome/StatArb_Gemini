@@ -38,8 +38,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestBrokerAdapterIntegration:
     """Integration tests for broker adapter integration"""
 

@@ -15,8 +15,6 @@ Date: November 4, 2025
 import pytest
 import time
 
-
-
 class TestPipelinePerformance:
     """Integration tests for pipeline performance"""
 
@@ -54,7 +52,7 @@ class TestPipelinePerformance:
         # Measure performance
         start = time.time()
         # Pipeline would process large data
-        elapsed = time.time() - start
+        time.time() - start
 
         # Performance should scale reasonably
         assert pipeline_orchestrator is not None

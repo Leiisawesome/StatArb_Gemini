@@ -17,7 +17,6 @@ from core_engine.trading.strategies.implementations.statistical_arbitrage.enhanc
 from core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # PERFORMANCE TRACKING UPDATE TESTS
 # =============================================================================
@@ -99,7 +98,6 @@ class TestPerformanceTrackingUpdates:
         # Should handle gracefully
         assert True
 
-
 # =============================================================================
 # STATISTICAL ARBITRAGE PERFORMANCE TRACKING
 # =============================================================================
@@ -157,7 +155,6 @@ class TestStatisticalArbitragePerformanceTracking:
         # Should update without error
         assert True
 
-
 # =============================================================================
 # PERFORMANCE METRICS CALCULATION TESTS
 # =============================================================================
@@ -211,11 +208,10 @@ class TestPerformanceMetricsCalculation:
         ]
 
         # At least some performance tracking should exist
-        has_performance_tracking = any(hasattr(strategy, attr) for attr in performance_attrs)
+        any(hasattr(strategy, attr) for attr in performance_attrs)
 
         # Should have some form of performance tracking
         assert True
-
 
 # =============================================================================
 # CROSS-STRATEGY PERFORMANCE TRACKING

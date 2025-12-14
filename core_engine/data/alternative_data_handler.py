@@ -43,7 +43,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class AlternativeDataType(Enum):
     """Alternative data types"""
     SENTIMENT = "sentiment"
@@ -59,7 +58,6 @@ class AlternativeDataType(Enum):
     INSIDER_TRADING = "insider_trading"
     OPTION_FLOW = "option_flow"
 
-
 class DataProvider(Enum):
     """Alternative data providers"""
     TWITTER = "twitter"
@@ -71,7 +69,6 @@ class DataProvider(Enum):
     FUNDAMENTAL_PROVIDER = "fundamental_provider"
     SENTIMENT_PROVIDER = "sentiment_provider"
 
-
 class ProcessingStatus(Enum):
     """Data processing status"""
     RAW = "raw"
@@ -80,7 +77,6 @@ class ProcessingStatus(Enum):
     VALIDATED = "validated"
     ENRICHED = "enriched"
     FAILED = "failed"
-
 
 @dataclass
 class AlternativeDataPoint:
@@ -115,7 +111,6 @@ class AlternativeDataPoint:
     ingestion_timestamp: datetime = field(default_factory=datetime.now)
     processed_timestamp: Optional[datetime] = None
 
-
 @dataclass
 class AlternativeDataRequest:
     """Alternative data request"""
@@ -125,14 +120,12 @@ class AlternativeDataRequest:
     end_time: Optional[datetime] = None
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class AlternativeDataResponse:
     """Alternative data response"""
     success: bool
     data: Any
     error_message: Optional[str] = None
-
 
 @dataclass
 class SentimentAnalysis:
@@ -157,7 +150,6 @@ class SentimentAnalysis:
     model_version: str = "1.0"
     processing_time_ms: float = 0.0
     language: str = "en"
-
 
 @dataclass
 class NewsAnalysis:
@@ -185,7 +177,6 @@ class NewsAnalysis:
     publish_time: datetime
     ingestion_time: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class WebScrapingTarget:
     """Web scraping target configuration"""
@@ -211,7 +202,6 @@ class WebScrapingTarget:
     success_count: int = 0
     error_count: int = 0
     is_active: bool = True
-
 
 class SentimentAnalyzer:
     """Advanced sentiment analysis engine"""
@@ -384,7 +374,6 @@ class SentimentAnalyzer:
 
         return topics
 
-
 class WebScraper:
     """Advanced web scraping engine"""
 
@@ -484,7 +473,6 @@ class WebScraper:
             content = content.replace(f'{{{key}}}', value)
 
         return content
-
 
 class AlternativeDataHandler(ISystemComponent):
     """

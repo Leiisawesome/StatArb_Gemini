@@ -30,7 +30,6 @@ from datetime import datetime
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestCompleteTradingCycle:
     """Integration tests for complete trading cycle"""
 
@@ -386,7 +385,7 @@ class TestCompleteTradingCycle:
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )
 
-        authorization = await system['risk_manager'].authorize_trading_decision(request)
+        await system['risk_manager'].authorize_trading_decision(request)
 
         # Verify audit trail
         assert hasattr(system['risk_manager'], 'authorization_history')

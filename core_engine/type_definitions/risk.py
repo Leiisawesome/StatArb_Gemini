@@ -9,14 +9,12 @@ from enum import Enum
 from typing import Dict, List, Optional
 from datetime import datetime
 
-
 class RiskLevel(Enum):
     """Risk level enumeration"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
-
 
 @dataclass
 class RiskConfig:
@@ -34,7 +32,6 @@ class RiskConfig:
     # Risk monitoring
     var_confidence: float = 0.95  # 95% VaR
     lookback_days: int = 252  # 1 year lookback
-
 
 @dataclass
 class RiskMetrics:
@@ -56,7 +53,6 @@ class RiskMetrics:
 
     timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class RiskResult:
     """Risk check result"""
@@ -75,7 +71,6 @@ class RiskResult:
     def add_warning(self, warning: str):
         """Add warning message"""
         self.warnings.append(warning)
-
 
 class RiskManager:
     """Core risk management"""

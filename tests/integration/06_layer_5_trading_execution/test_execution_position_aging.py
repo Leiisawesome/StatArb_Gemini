@@ -14,8 +14,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestExecutionPositionAging:
     """Integration tests for execution position aging"""
 

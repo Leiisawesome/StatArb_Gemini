@@ -5,10 +5,8 @@ This module has 0% test coverage and needs comprehensive testing.
 Target: Achieve 60% coverage in Phase 1
 """
 
-
 from core_engine.system.system_validator import SystemValidator, ValidationLevel
 # from core_engine.type_definitions.analytics import ValidationResult, ValidationStatus
-
 
 class TestSystemValidator:
     """Test suite for SystemValidator - 0% coverage module"""
@@ -156,7 +154,6 @@ class TestSystemValidator:
         assert hasattr(self.validator, 'validation_results')
         assert isinstance(self.validator.validation_results, list)
 
-
 class TestSystemValidatorIntegration:
     """Integration tests for SystemValidator"""
 
@@ -179,7 +176,6 @@ class TestSystemValidatorIntegration:
     def test_validation_persistence(self):
         """Test validation result persistence"""
         # This would test saving and retrieving validation results
-
 
 class TestSystemValidatorPerformance:
     """Performance tests for SystemValidator"""

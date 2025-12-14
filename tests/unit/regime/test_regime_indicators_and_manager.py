@@ -11,8 +11,6 @@ from unittest.mock import MagicMock
 
 # Import regime component classes
 
-
-
 from core_engine.regime.regime_detector import (
     RegimeType,
     DetectionMethod,
@@ -42,7 +40,6 @@ from core_engine.regime.regime_manager import (
     RegimeManager
 )
 from core_engine.config.component_config import RegimeConfig as RegimeManagerConfig
-
 
 class TestVolatilityRegimeIndicators:
     """Test VolatilityRegimeIndicators class."""
@@ -94,7 +91,6 @@ class TestVolatilityRegimeIndicators:
                 assert isinstance(indicator, RegimeIndicator)
                 assert indicator.indicator_type == IndicatorType.VOLATILITY_REGIME
 
-
 class TestMomentumRegimeIndicators:
     """Test MomentumRegimeIndicators class."""
 
@@ -145,7 +141,6 @@ class TestMomentumRegimeIndicators:
                 assert isinstance(indicator, RegimeIndicator)
                 assert indicator.indicator_type == IndicatorType.MOMENTUM_REGIME
 
-
 class TestMeanReversionIndicators:
     """Test MeanReversionIndicators class."""
 
@@ -192,7 +187,6 @@ class TestMeanReversionIndicators:
             for name, indicator in result.items():
                 assert isinstance(indicator, RegimeIndicator)
                 assert indicator.indicator_type == IndicatorType.MEAN_REVERSION
-
 
 class TestTransitionSignalDetector:
     """Test TransitionSignalDetector class."""
@@ -254,7 +248,6 @@ class TestTransitionSignalDetector:
         for signal in result:
             assert isinstance(signal, TransitionSignal)
 
-
 class TestRegimeIndicatorEngine:
     """Test RegimeIndicatorEngine class."""
 
@@ -307,7 +300,6 @@ class TestRegimeIndicatorEngine:
         assert isinstance(result, dict)
         assert len(result) == 0
 
-
 class TestRegimeState:
     """Test RegimeState dataclass."""
 
@@ -336,7 +328,6 @@ class TestRegimeState:
         assert state.recommended_portfolio_adjustments['max_position'] == 0.1
         assert state.current_regime_performance == 0.05
         assert state.last_update == timestamp
-
 
 class TestRegimeAdaptation:
     """Test RegimeAdaptation dataclass."""
@@ -367,7 +358,6 @@ class TestRegimeAdaptation:
         assert adaptation.asset_allocation_changes == {'stocks': -0.1, 'bonds': 0.1}
         assert adaptation.implementation_urgency == "high"
         assert adaptation.phased_implementation == True
-
 
 class TestRegimeAwarePortfolioManager:
     """Test RegimeAwarePortfolioManager class."""
@@ -435,7 +425,6 @@ class TestRegimeAwarePortfolioManager:
         assert isinstance(allocation, dict)
         # Note: allocation may be empty if assets don't match expected patterns
 
-
 class TestRegimePerformanceAttribution:
     """Test RegimePerformanceAttribution class."""
 
@@ -487,7 +476,6 @@ class TestRegimePerformanceAttribution:
 
         assert isinstance(attribution_result, dict)
         assert len(attribution_result) > 0
-
 
 class TestRegimeManager:
     """Test RegimeManager class."""

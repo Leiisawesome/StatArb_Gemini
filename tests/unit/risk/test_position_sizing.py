@@ -10,7 +10,6 @@ Date: 2024-11-15
 
 import pytest
 
-
 class TestPositionSizingNoCompounding:
     """Test that position sizing does NOT compound with portfolio growth"""
 
@@ -182,7 +181,6 @@ class TestPositionSizingNoCompounding:
         print(f"  Correct (no compound): {return_pct_correct:.2f}% return")
         print(f"  Bug (compounding): {return_pct_bug:.2f}% return")
         print(f"  Inflation from bug: {return_pct_bug - return_pct_correct:.2f}%")
-
 
 if __name__ == "__main__":
     # Run tests with verbose output

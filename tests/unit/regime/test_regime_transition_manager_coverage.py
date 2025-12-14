@@ -26,7 +26,6 @@ from core_engine.regime.regime_detector import RegimeType
 from core_engine.regime.regime_indicators import RegimeIndicator, IndicatorType
 from core_engine.config.component_config import RegimeConfig
 
-
 class TestPrepareTrainingData:
     """Test _prepare_training_data method (lines 302-341)"""
 
@@ -189,7 +188,6 @@ class TestPrepareTrainingData:
             assert isinstance(regime_history, pd.Series)
             assert len(regime_history) == 0
 
-
 class TestTrainHorizonModels:
     """Test _train_horizon_models method (lines 363-409)"""
 
@@ -301,7 +299,6 @@ class TestTrainHorizonModels:
         # Should still work with custom test size
         assert isinstance(performances, dict)
         assert len(performances) > 0
-
 
 class TestCreateVolatilityBasedRecommendation:
     """Test _create_volatility_based_recommendation method (lines 1025-1045)"""
@@ -430,7 +427,6 @@ class TestCreateVolatilityBasedRecommendation:
         assert isinstance(recommendation, RebalancingRecommendation)
         assert recommendation.trigger == RebalancingTrigger.VOLATILITY_SPIKE
 
-
 class TestCreateCorrelationBasedRecommendation:
     """Test _create_correlation_based_recommendation method"""
 
@@ -499,7 +495,6 @@ class TestCreateCorrelationBasedRecommendation:
 
         assert isinstance(recommendation, RebalancingRecommendation)
         assert recommendation.trigger == RebalancingTrigger.CORRELATION_BREAKDOWN
-
 
 class TestTransitionMonitoringMethods:
     """Test transition monitoring methods that are missing coverage"""
@@ -598,7 +593,6 @@ class TestTransitionMonitoringMethods:
         assert len(monitoring.improvement_opportunities) > 0
         assert "excessive volatility" in ' '.join(monitoring.failed_adjustments).lower() or \
                "underperformed" in ' '.join(monitoring.failed_adjustments).lower()
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -28,11 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 async def on_market_data(message: FeedMessage) -> None:
     """
     Handle incoming market data - format and print OHLCV data
-    
+
     Args:
         message: FeedMessage containing market data
     """
@@ -46,7 +45,6 @@ async def on_market_data(message: FeedMessage) -> None:
               f"V:{data.get('volume', 'N/A'):>8}")
     except Exception as e:
         logger.error(f"Error handling market data: {e}")
-
 
 async def main():
     """
@@ -114,7 +112,6 @@ async def main():
         await adapter.disconnect()
 
     logger.info("🏁 Simple TSLA replay example completed")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

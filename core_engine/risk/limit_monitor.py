@@ -15,7 +15,6 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
-
 class LimitType(Enum):
     """Types of risk limits"""
     POSITION_SIZE = "position_size"
@@ -38,7 +37,6 @@ class LimitType(Enum):
     VEGA = "vega"
     THETA = "theta"
 
-
 class LimitScope(Enum):
     """Scope of limit application"""
     PORTFOLIO = "portfolio"
@@ -47,7 +45,6 @@ class LimitScope(Enum):
     TRADER = "trader"
     DESK = "desk"
     LEGAL_ENTITY = "legal_entity"
-
 
 class LimitOperator(Enum):
     """Limit comparison operators"""
@@ -60,14 +57,12 @@ class LimitOperator(Enum):
     BETWEEN = "between"
     NOT_BETWEEN = "not_between"
 
-
 class AlertSeverity(Enum):
     """Alert severity levels"""
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
     BREACH = "breach"
-
 
 @dataclass
 class RiskLimit:
@@ -89,7 +84,6 @@ class RiskLimit:
     last_updated: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class LimitBreach:
     """Risk limit breach event"""
@@ -109,7 +103,6 @@ class LimitBreach:
     acknowledged_at: Optional[datetime] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class MonitoringMetrics:
     """Monitoring system metrics"""
@@ -122,7 +115,6 @@ class MonitoringMetrics:
     checks_per_second: float
     last_check_time: datetime
     system_health: str  # HEALTHY, WARNING, CRITICAL
-
 
 class LimitMonitor:
     """

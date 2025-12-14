@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestRegimeRiskIntegration:
     """Integration tests for regime-risk cross-layer integration"""
 
@@ -31,7 +29,7 @@ class TestRegimeRiskIntegration:
         Expected: Limits adjusted correctly
         """
         # Get regime context (not async, so no await needed)
-        regime_context = regime_engine.get_current_regime_context() if regime_engine else None
+        regime_engine.get_current_regime_context() if regime_engine else None
 
         # Risk manager would adjust limits by regime
         # Verify both components exist

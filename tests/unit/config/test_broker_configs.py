@@ -20,7 +20,6 @@ from core_engine.config.broker_config import (
     BrokerType
 )
 
-
 class TestAlpacaConfig:
     """Test suite for AlpacaConfig class."""
 
@@ -90,7 +89,6 @@ class TestAlpacaConfig:
         assert config_dict["api_key"] == "test"
         assert config_dict["secret_key"] == "secret"
         assert config_dict["base_url"] == "https://paper-api.alpaca.markets"
-
 
 class TestInteractiveBrokersConfig:
     """Test suite for InteractiveBrokersConfig class."""
@@ -162,7 +160,6 @@ class TestInteractiveBrokersConfig:
         assert config_dict["port"] == 1234
         assert config_dict["client_id"] == 1
 
-
 class TestRiskLimits:
     """Test suite for RiskLimits class."""
 
@@ -228,7 +225,6 @@ class TestRiskLimits:
         config_dict = asdict(config)
         assert isinstance(config_dict, dict)
         assert config_dict["max_position_size"] == 150
-
 
 class TestBrokerConfig:
     """Test suite for BrokerConfig class."""
@@ -301,7 +297,6 @@ class TestBrokerConfig:
         assert isinstance(config_dict, dict)
         assert config_dict["active_broker"] == BrokerType.INTERACTIVE_BROKERS
 
-
 class TestBrokerConfigLoader:
     """Test suite for BrokerConfigLoader class."""
 
@@ -373,7 +368,6 @@ PHASE_9_TRADING_MODE=paper
                 content = f.read()
                 assert "ALPACA_PAPER_API_KEY" in content
                 assert "PHASE_9_TRADING_MODE" in content
-
 
 class TestBrokerConfigIntegration:
     """Integration tests for broker configs."""

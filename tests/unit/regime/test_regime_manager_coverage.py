@@ -30,7 +30,6 @@ from core_engine.regime.regime_detector import RegimeDetection
 from core_engine.regime.regime_transition_manager import TransitionPrediction
 from core_engine.config.component_config import RegimeConfig
 
-
 class TestExtractReturnsData:
     """Test _extract_returns_data method"""
 
@@ -107,7 +106,6 @@ class TestExtractReturnsData:
 
         assert isinstance(returns_df, pd.DataFrame)
 
-
 class TestSyncUpdateAnalysis:
     """Test _sync_update_analysis method"""
 
@@ -151,7 +149,6 @@ class TestSyncUpdateAnalysis:
             mock_analyze.assert_called_once()
             mock_indicators.assert_called_once()
             mock_combine.assert_called_once()
-
 
 class TestCombineAnalysisResults:
     """Test _combine_analysis_results method"""
@@ -230,7 +227,6 @@ class TestCombineAnalysisResults:
 
         assert isinstance(result, RegimeState)
 
-
 class TestCalculatePortfolioImplications:
     """Test _calculate_portfolio_implications method"""
 
@@ -301,7 +297,6 @@ class TestCalculatePortfolioImplications:
             result = manager._calculate_portfolio_implications(sample_regime_state, portfolio_data)
 
             assert result.risk_adjustment_factor == 1.5  # Crisis regime
-
 
 class TestGenerateRegimeAdaptation:
     """Test generate_regime_adaptation and related methods"""
@@ -430,7 +425,6 @@ class TestGenerateRegimeAdaptation:
         assert isinstance(adjustments, dict)
         assert 'overall_risk' in adjustments or len(adjustments) == 0
 
-
 class TestGetRegimeSummary:
     """Test get_regime_summary method"""
 
@@ -476,7 +470,6 @@ class TestGetRegimeSummary:
         summary = manager.get_regime_summary()
 
         assert summary['status'] == 'not_initialized'
-
 
 class TestExportRegimeState:
     """Test export_regime_state method"""
@@ -546,7 +539,6 @@ class TestExportRegimeState:
         filename = manager.export_regime_state("test.json")
 
         assert filename == ""
-
 
 class TestISystemComponentMethods:
     """Test ISystemComponent implementation methods"""

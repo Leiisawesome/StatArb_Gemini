@@ -15,8 +15,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestDataManagerValidationIntegration:
     """Integration tests for data manager validation integration"""
 

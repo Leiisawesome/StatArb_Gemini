@@ -23,7 +23,6 @@ from core_engine.system.central_risk_manager import CentralRiskManager
 from core_engine.system.integration_manager import SystemConfiguration
 from core_engine.config.component_config import RiskConfig, DataConfig, PositionLimits, RiskLimits
 
-
 class TestPriority1_RiskManagerConfig:
     """Test Priority 1: CentralRiskManager uses centralized RiskConfig"""
 
@@ -108,7 +107,6 @@ class TestPriority1_RiskManagerConfig:
             CentralRiskManager(123)  # Int not allowed
 
         print("✅ Test 1.5 passed: Invalid config types rejected")
-
 
 class TestPriority2_SystemConfiguration:
     """Test Priority 2: SystemConfiguration has type-safe configs"""
@@ -195,7 +193,6 @@ class TestPriority2_SystemConfiguration:
 
         print("✅ Test 2.4 passed: __post_init__ auto-initializes configs")
 
-
 class TestIntegration:
     """Integration tests for both fixes"""
 
@@ -217,7 +214,6 @@ class TestIntegration:
         assert risk_manager.auto_approval_threshold == 0.02
 
         print("✅ Integration test passed: RiskManager + SystemConfiguration")
-
 
 def run_all_tests():
     """Run all tests and report results"""
@@ -267,7 +263,6 @@ def run_all_tests():
     else:
         print(f"\n⚠️  {failed_tests} test(s) failed. Please review.")
         return 1
-
 
 if __name__ == "__main__":
     exit_code = run_all_tests()

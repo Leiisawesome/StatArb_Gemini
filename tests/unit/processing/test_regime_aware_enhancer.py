@@ -17,7 +17,6 @@ from core_engine.processing.signals.regime_aware_enhancer import (
 )
 from core_engine.type_definitions.strategy import TradingSignal
 
-
 class TestRegimeSignalAdjustment:
     """Test RegimeSignalAdjustment enum"""
 
@@ -27,7 +26,6 @@ class TestRegimeSignalAdjustment:
         assert RegimeSignalAdjustment.REDUCE.value == "reduce"
         assert RegimeSignalAdjustment.FILTER.value == "filter"
         assert RegimeSignalAdjustment.MAINTAIN.value == "maintain"
-
 
 class TestRegimeAwareSignal:
     """Test RegimeAwareSignal dataclass"""
@@ -52,7 +50,6 @@ class TestRegimeAwareSignal:
         assert signal.adjusted_confidence == 0.9
         assert signal.regime_compatible is True
         assert signal.adjustment_reason == "Test reason"
-
 
 class TestRegimeAwareSignalEnhancer:
     """Test RegimeAwareSignalEnhancer class"""
@@ -492,7 +489,6 @@ class TestRegimeAwareSignalEnhancer:
         expected_reason = "momentum signal in trending regime → amplify"
         assert enhanced[0].adjustment_reason == expected_reason
 
-
 class TestRegimeAwareSignalEnhancerIntegration:
     """Integration tests for RegimeAwareSignalEnhancer"""
 
@@ -606,7 +602,6 @@ class TestRegimeAwareSignalEnhancerIntegration:
 
         # All signals should be filtered in crisis regime
         assert len(enhanced) == 0
-
 
 class TestRegimeAwareSignalEnhancerEdgeCases:
     """Test edge cases and error conditions"""

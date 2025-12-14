@@ -11,7 +11,6 @@ from core_engine.type_definitions.broker_types import (
     Order, OrderSide, OrderType, Position, AccountInfo
 )
 
-
 class BaseBrokerAdapter(ABC):
     """
     Abstract base class for all broker adapters

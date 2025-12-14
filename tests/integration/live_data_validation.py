@@ -91,7 +91,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
 def validate_and_convert_quantity(
     signal,
     current_price: float,
@@ -276,7 +275,6 @@ def validate_and_convert_quantity(
     )
 
     return integer_shares
-
 
 class LiveDataSignalGenerationTest:
     """
@@ -2883,7 +2881,6 @@ class LiveDataSignalGenerationTest:
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 
-
 async def main():
     """Main function to run the integration test"""
     test = LiveDataSignalGenerationTest()
@@ -2978,7 +2975,6 @@ async def main():
     except Exception as e:
         logger.error(f"💥 Test runner failed: {e}", exc_info=True)
         return 1
-
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())

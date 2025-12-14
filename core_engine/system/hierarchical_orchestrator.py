@@ -36,7 +36,6 @@ from .orchestrator_configuration import ConfigurationManager, SystemOrchestratio
 
 logger = logging.getLogger(__name__)
 
-
 class SystemStatus(Enum):
     """System operational status"""
     UNINITIALIZED = "uninitialized"
@@ -48,9 +47,7 @@ class SystemStatus(Enum):
     EMERGENCY = "emergency"
     SHUTDOWN = "shutdown"
 
-
 # Duplicate classes removed - now imported from modular components
-
 
 class HierarchicalSystemOrchestrator(ISystemComponent):
     """
@@ -442,7 +439,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 if reg.status in ["failed", "unhealthy"]
             )
 
-            self.system_metrics.update({
+            # Update the SystemMonitor's metrics directly
+            self.system_monitor.system_metrics.update({
                 'total_components': total_components,
                 'operational_components': operational_components,
                 'failed_components': failed_components,
@@ -465,7 +463,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
             # Check component failure rate
             total_components = len(self.component_registry)
-            failed_components = self.system_metrics['failed_components']
+            failed_components = self.system_monitor.system_metrics.get('failed_components', 0)
 
             if total_components > 0 and (failed_components / total_components) > 0.5:
                 await self._initiate_emergency_response("High component failure rate")
@@ -518,6 +516,42 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
         except Exception as e:
             logger.error(f"❌ Emergency stop failed: {e}")
+
+    async def emergency_stop(self) -> bool:
+        """Initiate emergency stop of the entire system"""
+
+        try:
+            if self.emergency_mode:
+                logger.warning("System already in emergency mode")
+                return True
+
+            # Set emergency mode
+            self.emergency_mode = True
+            self.emergency_initiated_at = datetime.now()
+            self.system_status = SystemStatus.EMERGENCY
+
+            logger.critical("🚨 EMERGENCY STOP INITIATED")
+
+            # Emergency stop trading operations
+            await self._emergency_stop_trading()
+
+            # Notify risk manager
+            if self.central_risk_manager:
+                try:
+                    self.central_risk_manager.emergency_shutdown()
+                except Exception as e:
+                    logger.error(f"RiskManager emergency shutdown failed: {e}")
+
+            # Stop monitoring
+            if hasattr(self, '_monitoring_task') and self._monitoring_task:
+                self._monitoring_task.cancel()
+
+            logger.critical("✅ Emergency stop completed")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Emergency stop failed: {e}")
+            return False
 
     async def request_system_authorization(self, operation: str, component_id: str,
                                          details: Dict[str, Any]) -> bool:
@@ -1736,7 +1770,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             'timestamp': datetime.now().isoformat()
         })
 
-
 # ========================================
 # INTEGRATION METHODS
 # ========================================
@@ -2396,7 +2429,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"System authorization tracking failed: {e}")
             return {'error': str(e)}
-
 
 # Example usage
 

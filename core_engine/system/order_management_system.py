@@ -43,7 +43,6 @@ from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
-
 class OrderState(Enum):
     """Order lifecycle states per Rule 5"""
     PENDING_NEW = "pending_new"           # Created, not yet submitted
@@ -56,7 +55,6 @@ class OrderState(Enum):
     EXPIRED = "expired"                   # Time-in-force expired
     PENDING_REPLACE = "pending_replace"   # Modification requested
 
-
 class OrderType(Enum):
     """Supported order types"""
     MARKET = "market"
@@ -68,7 +66,6 @@ class OrderType(Enum):
     TWAP = "twap"
     VWAP = "vwap"
 
-
 class TimeInForce(Enum):
     """Time in force options"""
     DAY = "day"                 # Valid for the day
@@ -79,7 +76,6 @@ class TimeInForce(Enum):
     OPG = "opg"                 # At the opening
     CLS = "cls"                 # At the close
 
-
 @dataclass
 class OrderStateChange:
     """Record of order state transition"""
@@ -88,7 +84,6 @@ class OrderStateChange:
     to_state: OrderState
     reason: str
     user_id: Optional[str] = None
-
 
 @dataclass
 class Fill:
@@ -100,7 +95,6 @@ class Fill:
     venue: str = "primary"
     commission: float = 0.0
     fees: float = 0.0
-
 
 @dataclass
 class Order:
@@ -158,7 +152,6 @@ class Order:
         self.remaining_quantity = self.quantity
         if not self.client_order_id:
             self.client_order_id = f"CO-{self.order_id[:8]}"
-
 
 class OrderManagementSystem(ISystemComponent):
     """
@@ -702,4 +695,173 @@ class OrderManagementSystem(ISystemComponent):
     def set_settlement_callback(self, callback: Callable):
         """Set callback for settlement manager"""
         self._settlement_callback = callback
+
+    # ===== Pending Exposure API (Paper Trading Evolution) =====
+    #
+    # Per plan Section 5.5 - Gate 3: Position-Aware Validation
+    # OMS must expose read API for risk calculations
+
+    def get_working_orders_sync(
+        self,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+    ) -> List[Order]:
+        """
+        Synchronous version of get_working_orders with filters.
+
+        Returns orders in states: PENDING_NEW, NEW, PARTIALLY_FILLED
+
+        Args:
+            symbol: Optional symbol filter
+            side: Optional side filter ('buy' or 'sell')
+
+        Returns:
+            List of WorkingOrder-like Order objects
+        """
+        working_states = [
+            OrderState.PENDING_NEW,
+            OrderState.NEW,
+            OrderState.PARTIALLY_FILLED,
+        ]
+
+        orders = [
+            o for o in self.orders.values()
+            if o.state in working_states
+        ]
+
+        if symbol:
+            orders = [o for o in orders if o.symbol == symbol]
+
+        if side:
+            orders = [o for o in orders if o.side == side]
+
+        return orders
+
+    def get_pending_exposure(
+        self,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get pre-computed aggregate pending exposure.
+
+        Called on every risk check; cached for O(1) access.
+
+        Args:
+            symbol: Optional symbol filter (None = all)
+
+        Returns:
+            PendingExposure dict with:
+            - by_symbol: Dict of per-symbol exposures
+            - total_pending_buy_notional: float
+            - total_pending_sell_notional: float
+            - total_pending_buy_count: int
+            - total_pending_sell_count: int
+        """
+        working_orders = self.get_working_orders_sync(symbol=symbol)
+
+        # Aggregate by symbol
+        by_symbol: Dict[str, Dict[str, float]] = defaultdict(lambda: {
+            'pending_buy_qty': 0.0,
+            'pending_sell_qty': 0.0,
+            'pending_buy_notional': 0.0,
+            'pending_sell_notional': 0.0,
+        })
+
+        total_buy_notional = 0.0
+        total_sell_notional = 0.0
+        buy_count = 0
+        sell_count = 0
+
+        for order in working_orders:
+            remaining = order.remaining_quantity
+
+            # Determine price for notional calculation
+            if order.limit_price:
+                price = order.limit_price
+            elif order.stop_price:
+                price = order.stop_price
+            else:
+                # Market order - use a reference price if available
+                # For now, use 0 (caller should handle this case)
+                price = 0.0
+
+            notional = remaining * price
+            sym_data = by_symbol[order.symbol]
+
+            if order.side == 'buy':
+                sym_data['pending_buy_qty'] += remaining
+                sym_data['pending_buy_notional'] += notional
+                total_buy_notional += notional
+                buy_count += 1
+            else:
+                sym_data['pending_sell_qty'] += remaining
+                sym_data['pending_sell_notional'] += notional
+                total_sell_notional += notional
+                sell_count += 1
+
+        # Convert defaultdict to regular dict with symbol key
+        by_symbol_result = {
+            sym: {
+                'symbol': sym,
+                'pending_buy_qty': data['pending_buy_qty'],
+                'pending_sell_qty': data['pending_sell_qty'],
+                'pending_buy_notional': data['pending_buy_notional'],
+                'pending_sell_notional': data['pending_sell_notional'],
+            }
+            for sym, data in by_symbol.items()
+        }
+
+        return {
+            'by_symbol': by_symbol_result,
+            'total_pending_buy_notional': total_buy_notional,
+            'total_pending_sell_notional': total_sell_notional,
+            'total_pending_buy_count': buy_count,
+            'total_pending_sell_count': sell_count,
+        }
+
+    def get_pending_risk_at_price(
+        self,
+        symbol: str,
+        price: float,
+    ) -> Dict[str, Any]:
+        """
+        Returns exposure if orders fill at given price.
+
+        Used for what-if analysis in Gate 3.
+
+        Args:
+            symbol: Symbol to check
+            price: Hypothetical fill price
+
+        Returns:
+            Dict with pending exposure at the given price
+        """
+        working_orders = self.get_working_orders_sync(symbol=symbol)
+
+        pending_buy_qty = 0.0
+        pending_sell_qty = 0.0
+        pending_buy_notional = 0.0
+        pending_sell_notional = 0.0
+
+        for order in working_orders:
+            remaining = order.remaining_quantity
+            notional = remaining * price
+
+            if order.side == 'buy':
+                pending_buy_qty += remaining
+                pending_buy_notional += notional
+            else:
+                pending_sell_qty += remaining
+                pending_sell_notional += notional
+
+        return {
+            'symbol': symbol,
+            'price': price,
+            'pending_buy_qty': pending_buy_qty,
+            'pending_sell_qty': pending_sell_qty,
+            'pending_buy_notional': pending_buy_notional,
+            'pending_sell_notional': pending_sell_notional,
+            'net_pending_qty': pending_buy_qty - pending_sell_qty,
+            'net_pending_notional': pending_buy_notional - pending_sell_notional,
+        }
 

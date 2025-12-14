@@ -41,7 +41,6 @@ from core_engine.analytics.report_generator import (
     ReportData
 )
 
-
 class TestEnhancedAnalyticsManager:
     """Test suite for EnhancedAnalyticsManager class."""
 
@@ -72,7 +71,6 @@ class TestEnhancedAnalyticsManager:
         # Create a dummy task_id
         status = analytics_manager.get_task_status("nonexistent_task")
         assert status is None  # Should return None for nonexistent task
-
 
 class TestPerformanceAnalyzer:
     """Test suite for PerformanceAnalyzer class."""
@@ -139,7 +137,6 @@ class TestPerformanceAnalyzer:
         result = asyncio.run(performance_analyzer.analyze_performance(portfolio_returns, "TEST", benchmark_returns))
         assert result is not None
 
-
 class TestEnhancedMetricsCalculator:
     """Test suite for MetricsCalculator class."""
 
@@ -200,7 +197,6 @@ class TestEnhancedMetricsCalculator:
         assert result is not None
         assert isinstance(result, dict)
 
-
 class TestAttributionAnalyzer:
     """Test suite for AttributionAnalyzer class."""
 
@@ -244,7 +240,6 @@ class TestAttributionAnalyzer:
         result = asyncio.run(attribution_analyzer.analyze_attribution(portfolio_returns))
         assert result is not None
 
-
 class TestBenchmarkAnalyzer:
     """Test suite for BenchmarkAnalyzer class."""
 
@@ -284,7 +279,6 @@ class TestBenchmarkAnalyzer:
 
         result = asyncio.run(benchmark_analyzer.analyze_against_benchmark(portfolio_returns, "TEST"))
         assert result is not None
-
 
 class TestReportGenerator:
     """Test suite for ReportGenerator class."""

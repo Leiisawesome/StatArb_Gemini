@@ -41,7 +41,6 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # ENUMS AND CONFIGURATION
 # ============================================================================
@@ -59,7 +58,6 @@ class AdapterStatus(Enum):
     ERROR = "error"
     CLOSED = "closed"
 
-
 class FeedProvider(Enum):
     """Supported feed providers
 
@@ -73,7 +71,6 @@ class FeedProvider(Enum):
     BINANCE = "binance"          # ⚠️  Stub - for crypto
     COINBASE = "coinbase"        # ⚠️  Stub - for crypto
     CUSTOM = "custom"            # For custom implementations
-
 
 @dataclass
 class FeedAdapterConfig:
@@ -114,7 +111,6 @@ class FeedAdapterConfig:
                     UserWarning
                 )
 
-
 @dataclass
 class FeedMessage:
     """Standardized feed message"""
@@ -128,7 +124,6 @@ class FeedMessage:
     sequence_number: Optional[int] = None
     latency_ms: Optional[float] = None
     raw_data: Optional[bytes] = None
-
 
 # ============================================================================
 # BASE ADAPTER INTERFACE
@@ -275,7 +270,6 @@ class DataFeedAdapter(ABC):
             except Exception as e:
                 self.logger.error(f"Error in error handler: {e}")
 
-
 # ============================================================================
 # SIMULATED ADAPTER (FOR TESTING)
 # ============================================================================
@@ -417,7 +411,6 @@ class SimulatedFeedAdapter(DataFeedAdapter):
                 self._handle_error(e)
                 await asyncio.sleep(1.0)
 
-
 # ============================================================================
 # STUB ADAPTERS (FOR FUTURE IMPLEMENTATION)
 # ============================================================================
@@ -470,7 +463,6 @@ class AlpacaFeedAdapter(DataFeedAdapter):
     def is_connected(self) -> bool:
         """Check simulated connection."""
         return self._simulated.is_connected()
-
 
 class PolygonFeedAdapter(DataFeedAdapter):
     """
@@ -573,7 +565,6 @@ class PolygonFeedAdapter(DataFeedAdapter):
         else:
             super().add_message_handler(handler)
 
-
 class InteractiveBrokersFeedAdapter(DataFeedAdapter):
     """
     Interactive Brokers data feed adapter.
@@ -617,7 +608,6 @@ class InteractiveBrokersFeedAdapter(DataFeedAdapter):
 
     def is_connected(self) -> bool:
         return self._simulated.is_connected()
-
 
 # ============================================================================
 # ADAPTER FACTORY

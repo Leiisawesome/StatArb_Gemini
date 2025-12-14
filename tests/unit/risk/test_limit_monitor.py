@@ -24,7 +24,6 @@ from core_engine.risk.limit_monitor import (
     LimitMonitor
 )
 
-
 # ============================================================================
 # CATEGORY 1: Enums and Dataclasses (7 tests)
 # ============================================================================
@@ -44,7 +43,6 @@ def test_limit_type_enum_values():
     # Verify total count
     assert len(list(LimitType)) == 19
 
-
 def test_limit_scope_enum_values():
     """Test LimitScope enum has all 6 expected values"""
     assert LimitScope.PORTFOLIO.value == "portfolio"
@@ -55,7 +53,6 @@ def test_limit_scope_enum_values():
     assert LimitScope.LEGAL_ENTITY.value == "legal_entity"
 
     assert len(list(LimitScope)) == 6
-
 
 def test_limit_operator_enum_values():
     """Test LimitOperator enum has all 8 expected values"""
@@ -70,7 +67,6 @@ def test_limit_operator_enum_values():
 
     assert len(list(LimitOperator)) == 8
 
-
 def test_alert_severity_enum_values():
     """Test AlertSeverity enum has all 4 expected values"""
     assert AlertSeverity.INFO.value == "info"
@@ -79,7 +75,6 @@ def test_alert_severity_enum_values():
     assert AlertSeverity.BREACH.value == "breach"
 
     assert len(list(AlertSeverity)) == 4
-
 
 def test_risk_limit_dataclass_creation():
     """Test RiskLimit dataclass with all fields"""
@@ -110,7 +105,6 @@ def test_risk_limit_dataclass_creation():
     assert limit.warning_threshold == 90000.0
     assert limit.is_active is True
 
-
 def test_limit_breach_dataclass_creation():
     """Test LimitBreach dataclass with all fields"""
     timestamp = datetime.now()
@@ -134,7 +128,6 @@ def test_limit_breach_dataclass_creation():
     assert breach.severity == AlertSeverity.CRITICAL
     assert breach.acknowledged is False
 
-
 def test_monitoring_metrics_dataclass_creation():
     """Test MonitoringMetrics dataclass"""
     timestamp = datetime.now()
@@ -156,7 +149,6 @@ def test_monitoring_metrics_dataclass_creation():
     assert metrics.current_breaches == 2
     assert metrics.system_health == "WARNING"
 
-
 # ============================================================================
 # CATEGORY 2: Initialization (3 tests)
 # ============================================================================
@@ -176,7 +168,6 @@ def test_limit_monitor_default_initialization():
     assert monitor.enable_real_time_alerts is True
     assert monitor.alert_suppression_window == 5
 
-
 def test_limit_monitor_custom_configuration():
     """Test LimitMonitor initialization with custom config"""
     config = {
@@ -192,7 +183,6 @@ def test_limit_monitor_custom_configuration():
     assert monitor.enable_real_time_alerts is False
     assert monitor.alert_suppression_window == 10
 
-
 def test_limit_monitor_attribute_initialization():
     """Test all LimitMonitor attributes are initialized correctly"""
     monitor = LimitMonitor()
@@ -207,7 +197,6 @@ def test_limit_monitor_attribute_initialization():
     assert hasattr(monitor, '_last_check_time')
     assert hasattr(monitor, '_performance_metrics')
     assert hasattr(monitor, '_alert_suppression')
-
 
 # ============================================================================
 # CATEGORY 3: Limit Management (6 tests)
@@ -232,7 +221,6 @@ def test_add_limit():
     assert "limit_001" in monitor._limits
     assert monitor._limits["limit_001"] == limit
 
-
 def test_add_multiple_limits():
     """Test adding multiple limits"""
     monitor = LimitMonitor()
@@ -250,7 +238,6 @@ def test_add_multiple_limits():
         monitor.add_limit(limit)
 
     assert len(monitor._limits) == 5
-
 
 def test_update_limit():
     """Test updating existing limit"""
@@ -281,14 +268,12 @@ def test_update_limit():
     assert updated_limit.is_active is False
     assert updated_limit.warning_threshold == 140000.0
 
-
 def test_update_nonexistent_limit_raises_error():
     """Test updating non-existent limit raises ValueError"""
     monitor = LimitMonitor()
 
     with pytest.raises(ValueError, match="Limit not found"):
         monitor.update_limit("nonexistent", {'threshold_value': 100})
-
 
 def test_remove_limit():
     """Test removing a limit"""
@@ -308,7 +293,6 @@ def test_remove_limit():
 
     monitor.remove_limit("limit_001")
     assert "limit_001" not in monitor._limits
-
 
 def test_get_limit():
     """Test getting limit by ID"""
@@ -331,7 +315,6 @@ def test_get_limit():
     # Test non-existent
     none_result = monitor.get_limit("nonexistent")
     assert none_result is None
-
 
 def test_get_all_limits():
     """Test getting all limits with and without scope filter"""
@@ -363,7 +346,6 @@ def test_get_all_limits():
     strategy_limits = monitor.get_all_limits(scope=LimitScope.STRATEGY)
     assert len(strategy_limits) == 1
 
-
 # ============================================================================
 # CATEGORY 4: Value Calculations (9 tests)
 # ============================================================================
@@ -385,7 +367,6 @@ def test_calculate_total_leverage():
     # = (30000 + 20000 + 25000) / 100000 = 0.75
     assert leverage == 0.75
 
-
 def test_calculate_net_exposure():
     """Test net exposure calculation"""
     monitor = LimitMonitor()
@@ -403,7 +384,6 @@ def test_calculate_net_exposure():
     # = abs(30000 - 20000 + 25000) / 100000 = 35000 / 100000 = 0.35
     assert net_exposure == 0.35
 
-
 def test_calculate_gross_exposure():
     """Test gross exposure calculation"""
     monitor = LimitMonitor()
@@ -420,7 +400,6 @@ def test_calculate_gross_exposure():
     # Gross exposure = sum(abs(market_values)) / total_value
     # = (30000 + 20000 + 25000) / 100000 = 0.75
     assert gross_exposure == 0.75
-
 
 def test_calculate_position_size():
     """Test position size calculation"""
@@ -442,7 +421,6 @@ def test_calculate_position_size():
     # Non-existent position
     size_none = monitor._calculate_position_size('TSLA', positions)
     assert size_none == 0
-
 
 def test_calculate_sector_exposure():
     """Test sector exposure calculation"""
@@ -467,7 +445,6 @@ def test_calculate_sector_exposure():
     # Non-existent sector
     energy_exposure = monitor._calculate_sector_exposure('ENERGY', positions, portfolio_data)
     assert energy_exposure == 0
-
 
 def test_calculate_concentration():
     """Test concentration calculation (top N positions)"""
@@ -494,7 +471,6 @@ def test_calculate_concentration():
     top10 = monitor._calculate_concentration('invalid', positions, portfolio_data)
     assert top10 == 1.0  # All positions
 
-
 def test_calculations_with_empty_positions():
     """Test calculations with empty positions"""
     monitor = LimitMonitor()
@@ -508,7 +484,6 @@ def test_calculations_with_empty_positions():
     assert monitor._calculate_sector_exposure('TECH', positions, portfolio_data) == 0
     assert monitor._calculate_concentration('3', positions, portfolio_data) == 0
 
-
 def test_calculations_with_zero_total_value():
     """Test calculations with zero total_value"""
     monitor = LimitMonitor()
@@ -519,7 +494,6 @@ def test_calculations_with_zero_total_value():
     assert monitor._calculate_total_leverage(portfolio_data, positions) == 0
     assert monitor._calculate_net_exposure(portfolio_data, positions) == 0
     assert monitor._calculate_gross_exposure(portfolio_data, positions) == 0
-
 
 @pytest.mark.asyncio
 async def test_calculate_limit_value_dispatching():
@@ -561,7 +535,6 @@ async def test_calculate_limit_value_dispatching():
     limit.limit_type = LimitType.DRAWDOWN
     value = await monitor._calculate_limit_value(limit, portfolio_data, positions, None)
     assert value == 0.08
-
 
 # ============================================================================
 # CATEGORY 5: Breach Detection (5 tests)
@@ -605,7 +578,6 @@ def test_compare_values_all_operators():
     assert monitor._compare_values(15.0, [0.0, 10.0], LimitOperator.NOT_BETWEEN) is True
     assert monitor._compare_values(5.0, [0.0, 10.0], LimitOperator.NOT_BETWEEN) is False
 
-
 def test_evaluate_limit_breach_no_breach():
     """Test breach evaluation with no breach - operator not satisfied"""
     monitor = LimitMonitor()
@@ -625,7 +597,6 @@ def test_evaluate_limit_breach_no_breach():
 
     assert is_breached is False
     assert severity == AlertSeverity.INFO
-
 
 def test_evaluate_limit_breach_warning_threshold():
     """Test breach evaluation with warning threshold breached"""
@@ -648,7 +619,6 @@ def test_evaluate_limit_breach_warning_threshold():
     assert is_breached is True
     assert severity == AlertSeverity.WARNING
 
-
 def test_evaluate_limit_breach_critical_threshold():
     """Test breach evaluation with main threshold breached"""
     monitor = LimitMonitor()
@@ -667,7 +637,6 @@ def test_evaluate_limit_breach_critical_threshold():
 
     assert is_breached is True
     assert severity == AlertSeverity.CRITICAL
-
 
 def test_evaluate_limit_breach_both_thresholds():
     """Test breach evaluation with both thresholds breached"""
@@ -689,7 +658,6 @@ def test_evaluate_limit_breach_both_thresholds():
 
     assert is_breached is True
     assert severity == AlertSeverity.BREACH  # Escalated from WARNING
-
 
 # ============================================================================
 # CATEGORY 6: Monitoring Core (5 tests)
@@ -721,7 +689,6 @@ async def test_check_limits_no_breaches():
     assert monitor._check_count == 1
     assert monitor._last_check_time is not None
 
-
 @pytest.mark.asyncio
 async def test_check_limits_with_breaches():
     """Test check_limits with breaches detected"""
@@ -749,7 +716,6 @@ async def test_check_limits_with_breaches():
     assert breaches[0].current_value == 0.6
     assert len(monitor._breaches) == 1
 
-
 @pytest.mark.asyncio
 async def test_check_single_limit():
     """Test _check_single_limit method"""
@@ -774,7 +740,6 @@ async def test_check_single_limit():
     assert breach.limit_id == "limit_001"
     assert breach.current_value == 60000.0
     assert breach.breach_amount == 10000.0
-
 
 @pytest.mark.asyncio
 async def test_check_limits_performance_metrics():
@@ -809,7 +774,6 @@ async def test_check_limits_performance_metrics():
     assert 'limits_checked' in metric
     assert 'breaches_found' in metric
 
-
 @pytest.mark.asyncio
 async def test_check_limits_inactive_limits_skipped():
     """Test that inactive limits are skipped"""
@@ -836,7 +800,6 @@ async def test_check_limits_inactive_limits_skipped():
     # Should be no breaches since limit is inactive
     assert len(breaches) == 0
 
-
 # ============================================================================
 # CATEGORY 7: Breach Management (5 tests)
 # ============================================================================
@@ -862,7 +825,6 @@ def test_store_breach():
 
     assert len(monitor._breaches) == 1
     assert list(monitor._breaches)[0] == breach
-
 
 def test_breach_cleanup_old_breaches():
     """Test old breach cleanup"""
@@ -904,7 +866,6 @@ def test_breach_cleanup_old_breaches():
     assert len(monitor._breaches) == 1
     assert list(monitor._breaches)[0].limit_id == "limit_002"
 
-
 def test_get_current_breaches():
     """Test getting current breaches"""
     monitor = LimitMonitor()
@@ -933,7 +894,6 @@ def test_get_current_breaches():
     critical_breaches = monitor.get_current_breaches(severity=AlertSeverity.CRITICAL)
     assert len(critical_breaches) == 1
     assert critical_breaches[0].severity == AlertSeverity.CRITICAL
-
 
 def test_get_current_breaches_time_filtering():
     """Test breach time filtering (last hour)"""
@@ -975,7 +935,6 @@ def test_get_current_breaches_time_filtering():
     assert len(current_breaches) == 1
     assert current_breaches[0].limit_id == "limit_002"
 
-
 def test_acknowledge_breach():
     """Test acknowledging a breach"""
     monitor = LimitMonitor()
@@ -1003,7 +962,6 @@ def test_acknowledge_breach():
     assert acknowledged_breach.acknowledged_by == "risk_manager"
     assert acknowledged_breach.acknowledged_at is not None
 
-
 # ============================================================================
 # CATEGORY 8: Alert System (4 tests)
 # ============================================================================
@@ -1018,7 +976,6 @@ def test_add_alert_handler():
     assert len(monitor._alert_handlers) == 1
     assert handler in monitor._alert_handlers
 
-
 def test_remove_alert_handler():
     """Test removing alert handler"""
     monitor = LimitMonitor()
@@ -1029,7 +986,6 @@ def test_remove_alert_handler():
 
     monitor.remove_alert_handler(handler)
     assert len(monitor._alert_handlers) == 0
-
 
 @pytest.mark.asyncio
 async def test_send_breach_alerts():
@@ -1059,7 +1015,6 @@ async def test_send_breach_alerts():
     # Verify both handlers called
     handler1.assert_called_once_with(breach)
     handler2.assert_called_once_with(breach)
-
 
 @pytest.mark.asyncio
 async def test_alert_suppression():
@@ -1098,7 +1053,6 @@ async def test_alert_suppression():
     await monitor._send_breach_alerts([breach])
     assert handler.call_count == 2
 
-
 # ============================================================================
 # CATEGORY 9: Automated Monitoring (4 tests)
 # ============================================================================
@@ -1128,7 +1082,6 @@ async def test_start_monitoring():
         # Cleanup
         await monitor.stop_monitoring()
 
-
 @pytest.mark.asyncio
 async def test_stop_monitoring():
     """Test stopping automated monitoring"""
@@ -1152,7 +1105,6 @@ async def test_stop_monitoring():
         await monitor.stop_monitoring()
         assert monitor._monitoring_active is False
         assert monitor._monitoring_task.cancelled()
-
 
 @pytest.mark.asyncio
 async def test_monitoring_loop_execution():
@@ -1185,7 +1137,6 @@ async def test_monitoring_loop_execution():
     # Verify multiple checks occurred
     assert call_count >= 2
 
-
 @pytest.mark.asyncio
 async def test_cleanup():
     """Test cleanup stops monitoring"""
@@ -1203,7 +1154,6 @@ async def test_cleanup():
 
     await monitor.cleanup()
     assert monitor._monitoring_active is False
-
 
 # ============================================================================
 # CATEGORY 10: Metrics and Reporting (2 tests)
@@ -1255,7 +1205,6 @@ def test_get_monitoring_metrics():
     assert metrics.breach_alerts == 0
     assert metrics.system_health == "HEALTHY"
 
-
 @pytest.mark.skip(reason="Threading deadlock in limit_monitor.py _lock - implementation bug")
 def test_system_health_determination():
     """Test system health status determination"""
@@ -1301,7 +1250,6 @@ def test_system_health_determination():
 
     metrics = monitor.get_monitoring_metrics()
     assert metrics.system_health == "CRITICAL"
-
 
 # ============================================================================
 # Test Summary

@@ -36,7 +36,6 @@ from core_engine.config import PairsConfig
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.config import IndicatorConfig
 
-
 class ClickHouseDirectReader:
     """
     Direct ClickHouse reader for polygon_data.ticks table.
@@ -142,7 +141,6 @@ class ClickHouseDirectReader:
                 return df
 
         return pd.DataFrame()
-
 
 class SESPairsRealDataTest:
     """
@@ -403,13 +401,10 @@ class SESPairsRealDataTest:
         # Determine spread direction
         if current_zscore < -2.0:
             spread_direction = SpreadDirection.LONG
-            direction_str = "LONG (Buy spread)"
         elif current_zscore > 2.0:
             spread_direction = SpreadDirection.SHORT
-            direction_str = "SHORT (Sell spread)"
         else:
             spread_direction = SpreadDirection.NEUTRAL
-            direction_str = "NEUTRAL (No trade)"
 
         # Get enriched data for SES
         stock1_enriched = self.enriched_data.get(stock1, pd.DataFrame())
@@ -564,7 +559,6 @@ class SESPairsRealDataTest:
         logger.info("\n✅ Test completed successfully!")
         return True
 
-
 def main():
     """Main entry point."""
     import argparse
@@ -587,7 +581,6 @@ def main():
 
     success = test.run()
     sys.exit(0 if success else 1)
-
 
 if __name__ == "__main__":
     main()

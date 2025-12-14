@@ -10,14 +10,12 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 import uuid
 
-
 class OrderType(Enum):
     """Order type enumeration"""
     MARKET = "market"
     LIMIT = "limit"
     STOP = "stop"
     STOP_LIMIT = "stop_limit"
-
 
 class OrderStatus(Enum):
     """Order status enumeration"""
@@ -28,12 +26,10 @@ class OrderStatus(Enum):
     CANCELLED = "cancelled"
     REJECTED = "rejected"
 
-
 class OrderSide(Enum):
     """Order side enumeration"""
     BUY = "buy"
     SELL = "sell"
-
 
 @dataclass
 class Order:
@@ -58,7 +54,6 @@ class Order:
     # Metadata
     strategy_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class ExecutionResult:

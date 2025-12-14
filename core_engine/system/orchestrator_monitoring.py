@@ -20,7 +20,6 @@ from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class SystemMetrics:
     """System performance metrics"""
@@ -33,7 +32,6 @@ class SystemMetrics:
     cpu_usage: float
     error_rate: float
     throughput: float
-
 
 class SystemMonitor(ISystemComponent):
     """

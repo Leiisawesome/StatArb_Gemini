@@ -26,7 +26,6 @@ from core_engine.trading.execution.execution_validator import (
     ExecutionValidator
 )
 
-
 # ============================================================================
 # 1. ENUM TESTS (3 tests)
 # ============================================================================
@@ -67,7 +66,6 @@ class TestEnums:
 
         # Test all values exist
         assert len(ValidationAction) == 6
-
 
 # ============================================================================
 # 2. DATACLASS TESTS (3 tests)
@@ -215,7 +213,6 @@ class TestDataClasses:
         # History
         assert len(context.recent_executions) == 1
         assert context.recent_executions[0]['symbol'] == 'AAPL'
-
 
 # ============================================================================
 # 3. PRE-TRADE VALIDATOR TESTS (8 tests)
@@ -427,7 +424,6 @@ class TestPreTradeValidator:
         msft_results = [r for r in results if r.rule_id == 'msft_only']
         assert len(msft_results) == 0
 
-
 # ============================================================================
 # 4. REAL-TIME VALIDATOR TESTS (5 tests)
 # ============================================================================
@@ -554,7 +550,6 @@ class TestRealTimeValidator:
         assert impact_result.passed is False
         assert 'High market impact' in impact_result.message
         assert impact_result.details['market_impact'] == 0.01
-
 
 # ============================================================================
 # 5. POST-TRADE VALIDATOR TESTS (5 tests)
@@ -685,7 +680,6 @@ class TestPostTradeValidator:
         assert reporting.details['notional'] == 15000000
         assert reporting.details['requires_reporting'] is True
         assert reporting.details['reporting_type'] == 'large_trade'
-
 
 # ============================================================================
 # 6. EXECUTION VALIDATOR CORE TESTS (6 tests)
@@ -849,7 +843,6 @@ class TestExecutionValidatorCore:
         assert len(callback_results) > 0
         assert all(isinstance(r, ValidationResult) for r in callback_results)
 
-
 # ============================================================================
 # 7. HISTORY & REPORTING TESTS (4 tests)
 # ============================================================================
@@ -988,7 +981,6 @@ class TestHistoryAndReporting:
         assert 'trend' in trend
         assert 'description' in trend
         assert trend['description'] in ['Improving', 'Declining', 'Stable']
-
 
 # ============================================================================
 # 8. THREAD SAFETY TEST (1 test)

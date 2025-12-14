@@ -86,14 +86,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class DataEngineMode(Enum):
     """Data engine operating modes"""
     LIVE = "live"
     SIMULATION = "simulation"
     BACKTEST = "backtest"
     RESEARCH = "research"
-
 
 class DataPriority(Enum):
     """Data priority levels"""
@@ -102,7 +100,6 @@ class DataPriority(Enum):
     NORMAL = "normal"
     LOW = "low"
     BATCH = "batch"
-
 
 class DataSourcePriority(Enum):
     """Data source priority types - defines which data source to try first
@@ -115,7 +112,6 @@ class DataSourcePriority(Enum):
     BACKUP = "backup"
     DERIVED = "derived"
     CACHED = "cached"
-
 
 @dataclass
 class DataEngineConfig:
@@ -214,7 +210,6 @@ class DataEngineConfig:
             ) if FeedManagementConfig else None
         )
 
-
 @dataclass
 class DataRequest:
     """Unified data request"""
@@ -253,7 +248,6 @@ class DataRequest:
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class DataResponse:
     """Unified data response"""
@@ -280,7 +274,6 @@ class DataResponse:
 
     # Response timestamp
     response_timestamp: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class DataEngineStatistics:
@@ -320,7 +313,6 @@ class DataEngineStatistics:
     uptime_seconds: float = 0.0
     last_reset_time: datetime = field(default_factory=datetime.now)
     last_update_time: datetime = field(default_factory=datetime.now)
-
 
 class DataEngine(ISystemComponent):
     """

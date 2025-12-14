@@ -33,7 +33,6 @@ from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage
 from core_engine.trading.strategies.strategy_engine import StrategyState
 from tests.unit.strategies.conftest import BaseStrategyTest
 
-
 # All strategies and their configs
 ALL_STRATEGIES = [
     (EnhancedMomentumStrategy, MomentumConfig, 'momentum'),
@@ -47,7 +46,6 @@ ALL_STRATEGIES = [
     (EnhancedVolatilityStrategy, VolatilityConfig, 'volatility'),
     (EnhancedArbitrageStrategy, ArbitrageConfig, 'arbitrage'),
 ]
-
 
 class TestAllStrategies(BaseStrategyTest):
     """Test suite for all 10 strategies"""
@@ -191,7 +189,6 @@ class TestAllStrategies(BaseStrategyTest):
 
             print(f"✅ {strategy_name}: Performance metrics available")
 
-
 class TestStrategyCoordination:
     """Test strategy coordination and interaction"""
 
@@ -221,7 +218,6 @@ class TestStrategyCoordination:
         assert mean_rev_signals is not None
 
         print(f"✅ Multi-strategy coordination: Momentum({len(momentum_signals)}) + MeanRev({len(mean_rev_signals)})")
-
 
 class TestStrategyEdgeCases:
     """Test edge cases and error handling"""

@@ -38,7 +38,6 @@ from .regime_detector import RegimeType
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class MLModel(Enum):
     """Machine learning model types"""
     RANDOM_FOREST = "random_forest"
@@ -48,7 +47,6 @@ class MLModel(Enum):
     LOGISTIC_REGRESSION = "logistic_regression"
     NAIVE_BAYES = "naive_bayes"
     ENSEMBLE = "ensemble"
-
 
 class FeatureType(Enum):
     """Feature engineering types"""
@@ -60,7 +58,6 @@ class FeatureType(Enum):
     TECHNICAL_INDICATORS = "technical_indicators"
     MACRO_INDICATORS = "macro_indicators"
     SENTIMENT_INDICATORS = "sentiment_indicators"
-
 
 @dataclass
 class FeatureImportance:
@@ -77,7 +74,6 @@ class FeatureImportance:
 
     # Regime-specific importance
     regime_specific_importance: Dict[str, float] = field(default_factory=dict)
-
 
 @dataclass
 class ModelPerformance:
@@ -106,7 +102,6 @@ class ModelPerformance:
     training_samples: int = 0
     training_time: float = 0.0
     last_trained: Optional[datetime] = None
-
 
 @dataclass
 class RegimeClassification:
@@ -138,7 +133,6 @@ class RegimeClassification:
     # Prediction horizon
     prediction_horizon_days: int = 1
     prediction_decay: float = 1.0  # Confidence decay over time
-
 
 class FeatureEngineer:
     """Advanced feature engineering for regime classification"""
@@ -530,7 +524,6 @@ class FeatureEngineer:
         except Exception as e:
             logger.error(f"Error removing correlated features: {e}")
             return features
-
 
 class RegimeModelTrainer:
     """Train and validate regime classification models"""
@@ -1014,7 +1007,6 @@ class RegimeModelTrainer:
             logger.error(f"Error loading models: {e}")
             return False
 
-
 class RegimeClassifier(ISystemComponent):
     """
     Advanced Regime Classifier
@@ -1109,7 +1101,6 @@ class RegimeClassifier(ISystemComponent):
         except Exception as e:
             logger.error(f"Error training regime classifier: {e}")
             return {}
-
 
     def train_on_historical_data(self, symbols: List[str], lookback_days: int = 252) -> bool:
         """

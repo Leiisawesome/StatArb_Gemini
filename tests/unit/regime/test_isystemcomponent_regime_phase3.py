@@ -26,7 +26,6 @@ from core_engine.regime import (
 )
 from core_engine.config.component_config import RegimeConfig
 
-
 class TestRegimeManagerISystemComponent:
     """Test RegimeManager ISystemComponent implementation"""
 
@@ -82,7 +81,6 @@ class TestRegimeManagerISystemComponent:
         assert 'initialized' in status
         assert 'operational' in status
 
-
 class TestRegimeDetectorISystemComponent:
     """Test RegimeDetector ISystemComponent implementation"""
 
@@ -131,7 +129,6 @@ class TestRegimeDetectorISystemComponent:
         assert isinstance(status, dict)
         assert status['component_type'] == 'RegimeDetector'
 
-
 class TestRegimeClassifierISystemComponent:
     """Test RegimeClassifier ISystemComponent implementation"""
 
@@ -179,7 +176,6 @@ class TestRegimeClassifierISystemComponent:
         status = self.classifier.get_status()
         assert isinstance(status, dict)
         assert status['component_type'] == 'RegimeClassifier'
-
 
 class TestLifecycleSequence:
     """Test full lifecycle sequence for all components"""
@@ -232,7 +228,6 @@ class TestLifecycleSequence:
         health = await classifier.health_check()
         assert health['healthy'] is True
         assert await classifier.stop() is True
-
 
 if __name__ == "__main__":
     # Run tests

@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestBrokerConnectionManagement:
     """Integration tests for broker connection management"""
 

@@ -24,7 +24,6 @@ from datetime import datetime
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestStrategyRiskDataIntegration:
     """Integration tests for strategy-risk-data integration"""
 
@@ -37,7 +36,7 @@ class TestStrategyRiskDataIntegration:
         Expected: Authorization request flows correctly
         """
         system = complete_system
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
         risk_manager = system['risk_manager']
 
         # Create signal (simulate strategy generation)
@@ -78,7 +77,7 @@ class TestStrategyRiskDataIntegration:
         Expected: Enriched data provided correctly
         """
         system = complete_system
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
 
         # Create enriched data
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
@@ -116,7 +115,7 @@ class TestStrategyRiskDataIntegration:
         Expected: Flow executes correctly
         """
         system = complete_system
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
         risk_manager = system['risk_manager']
 
         # STEP 1: Get enriched data
@@ -158,7 +157,6 @@ class TestStrategyRiskDataIntegration:
         Scenario: Same data used by Strategy and Risk
         Expected: Data consistency maintained
         """
-        system = complete_system
 
         # Create enriched data
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)

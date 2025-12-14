@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestStrategyManagerExecutionIntegration:
     """Integration tests for strategy manager-execution integration"""
 

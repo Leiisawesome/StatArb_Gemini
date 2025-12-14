@@ -13,7 +13,6 @@ from unittest.mock import Mock, AsyncMock
 
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 
-
 class TestEnhancedFeatureEngineerInitialization:
     """Test initialization and configuration"""
 
@@ -38,7 +37,6 @@ class TestEnhancedFeatureEngineerInitialization:
         assert engineer.config is not None
         assert hasattr(engineer.config, 'enable_caching')
         assert engineer.config.enable_caching == True
-
 
 class TestSystemComponentInterface:
     """Test ISystemComponent interface implementation"""
@@ -85,7 +83,6 @@ class TestSystemComponentInterface:
         assert isinstance(status, dict)
         assert 'initialized' in status
         assert 'operational' in status
-
 
 class TestRegimeAwareInterface:
     """Test IRegimeAware interface implementation"""
@@ -136,7 +133,6 @@ class TestRegimeAwareInterface:
         result = engineer.validate_regime_dependency()
         assert result == True
 
-
 class TestOrchestratorIntegration:
     """Test orchestrator integration methods"""
 
@@ -170,7 +166,6 @@ class TestOrchestratorIntegration:
             "test_op", "test_id", {"param": "value"}
         )
 
-
 class TestFeatureMetadata:
     """Test feature metadata management"""
 
@@ -195,7 +190,6 @@ class TestFeatureMetadata:
 
         # Should identify target columns
         assert isinstance(engineer.target_columns, list)
-
 
 class TestDataValidation:
     """Test data validation methods"""
@@ -252,7 +246,6 @@ class TestDataValidation:
         # The method is designed to be defensive and log warnings instead of raising exceptions
         result = engineer._validate_data_integrity(corrupted_data)
         assert result is None  # No exception raised, but warnings logged
-
 
 class TestFeatureMethods:
     """Test feature-related methods"""
@@ -327,7 +320,6 @@ class TestFeatureMethods:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == len(sample_data)
 
-
 class TestErrorHandling:
     """Test error handling and edge cases"""
 
@@ -382,7 +374,6 @@ class TestErrorHandling:
         assert 'timestamp' in result.columns
         assert 'symbol' in result.columns
         assert 'close' in result.columns
-
 
 class TestHealthMetrics:
     """Test health metrics and performance tracking"""

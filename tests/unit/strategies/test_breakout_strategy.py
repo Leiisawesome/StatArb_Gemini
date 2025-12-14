@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestBreakoutSignalGeneration:
     """Test breakout-specific signal calculation logic"""
 
@@ -71,7 +70,6 @@ class TestBreakoutSignalGeneration:
 
         assert isinstance(signals, list)
 
-
 class TestBreakoutPositionSizing:
     """Test position sizing logic"""
 
@@ -97,7 +95,6 @@ class TestBreakoutPositionSizing:
 
         assert position_size_high >= position_size_low
         assert position_size_high <= strategy.config.max_position_pct
-
 
 class TestBreakoutEntryExitConditions:
     """Test entry and exit condition logic"""

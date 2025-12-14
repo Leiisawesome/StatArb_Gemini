@@ -41,7 +41,6 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class PnLSnapshot:
     """
@@ -67,7 +66,6 @@ class PnLSnapshot:
     # Attribution
     position_pnl: Dict[str, float] = field(default_factory=dict)
     strategy_pnl: Dict[str, float] = field(default_factory=dict)
-
 
 class RealTimePnLTracker:
     """
@@ -173,10 +171,7 @@ class RealTimePnLTracker:
                 # Update total unrealized P&L
                 self.unrealized_pnl += (position_pnl - old_pnl)
 
-                # Update strategy attribution
-                if symbol in self.position_strategy_map:
-                    strategy_id = self.position_strategy_map[symbol]
-                    self.strategy_pnl[strategy_id] = self.strategy_pnl.get(strategy_id, 0.0) + (position_pnl - old_pnl)
+                # Note: Strategy P&L is only updated on position close (realized P&L)
 
         # Update total P&L
         self._update_total_pnl()

@@ -38,7 +38,6 @@ from backtest.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-
 class FillModel(Enum):
     """Fill price models for historical simulation"""
     MIDPOINT = "midpoint"                      # Fill at mid price (no spread cost)
@@ -46,7 +45,6 @@ class FillModel(Enum):
     WORST_CASE = "worst_case"                  # Fill at ask (buy) or bid (sell)
     REALISTIC = "realistic"                    # Spread + impact + slippage
     AGGRESSIVE = "aggressive"                  # Minimal cost (optimistic)
-
 
 @dataclass
 class ExecutionCosts:
@@ -74,7 +72,6 @@ class ExecutionCosts:
     fill_model: str = "realistic"
     regime: Optional[str] = None
     liquidity_score: Optional[float] = None
-
 
 @dataclass
 class SimulatedFill:
@@ -108,7 +105,6 @@ class SimulatedFill:
     fill_id: str = ""
     authorization_id: str = ""
     strategy_id: str = ""
-
 
 class HistoricalExecutionSimulator:
     """
@@ -689,7 +685,7 @@ class HistoricalExecutionSimulator:
 
         # Extract market conditions
         market_price = market_data.get('close', 100.0)
-        volatility = market_data.get('volatility', 0.02)
+        market_data.get('volatility', 0.02)
         volume = market_data.get('volume', 1000000)
 
         # Get regime

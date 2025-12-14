@@ -20,7 +20,6 @@ from core_engine.system.order_rejection_handler import (
     RetryAction
 )
 
-
 class TestOrderRejectionHandler:
     """Test suite for OrderRejectionHandler"""
 
@@ -123,8 +122,7 @@ class TestOrderRejectionHandler:
         assert resolution1.action == RetryAction.RETRY_WITH_BACKOFF
         assert resolution1.wait_seconds == 5  # 5 * 2^0 = 5
 
-        # Second retry (simulate)
-        handler.active_retries[sample_order['order_id']].retry_count = 1
+        # Second retry - retry_count automatically incremented
         resolution2 = await handler.handle_rejection(
             sample_order,
             "Connection timeout to broker"
@@ -133,7 +131,6 @@ class TestOrderRejectionHandler:
         assert resolution2.wait_seconds == 10  # 5 * 2^1 = 10
 
         # Third retry
-        handler.active_retries[sample_order['order_id']].retry_count = 2
         resolution3 = await handler.handle_rejection(
             sample_order,
             "Connection timeout to broker"
@@ -200,13 +197,13 @@ class TestOrderRejectionHandler:
     @pytest.mark.asyncio
     async def test_max_retries_escalates(self, handler, sample_order):
         """Test that max retries triggers escalation"""
-        # Simulate 3 retries
+        # Simulate 3 retries (should not escalate yet)
         for i in range(3):
-            await handler.handle_rejection(
+            resolution = await handler.handle_rejection(
                 sample_order,
                 "Insufficient margin"
             )
-            handler.active_retries[sample_order['order_id']].retry_count = i + 1
+            assert resolution.action != RetryAction.ESCALATE
 
         # 4th attempt should escalate
         resolution = await handler.handle_rejection(
@@ -292,7 +289,6 @@ class TestOrderRejectionHandler:
         await handler.handle_rejection(sample_order, "Insufficient margin")
         assert handler._get_retry_count(sample_order['order_id']) == 3
 
-
 # Integration Test
 class TestRejectionHandlerIntegration:
     """Integration tests for rejection handler"""
@@ -377,7 +373,6 @@ class TestRejectionHandlerIntegration:
         # Verify all tracked
         assert handler.total_rejections == 3
         assert len(handler.rejection_history) == 3
-
 
 if __name__ == '__main__':
     # Run tests

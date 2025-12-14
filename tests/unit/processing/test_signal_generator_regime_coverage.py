@@ -29,7 +29,6 @@ from core_engine.processing.signals.generator import (
     SignalConfig
 )
 
-
 class MockRegimeContext:
     """Mock regime context for testing"""
     def __init__(self, primary_regime='normal_volatility', volatility_regime='normal_volatility',
@@ -38,7 +37,6 @@ class MockRegimeContext:
         self.primary_regime.value = primary_regime
         self.volatility_regime = volatility_regime
         self.regime_confidence = regime_confidence
-
 
 class TestRegimeAwareSignalFiltering:
     """Test regime-aware signal filtering"""
@@ -184,7 +182,6 @@ class TestRegimeAwareSignalFiltering:
         # Should filter out extreme volatility signals
         assert len(filtered) == 0
 
-
 class TestStrategyRegimeAppropriateness:
     """Test strategy-regime appropriateness calculations"""
 
@@ -274,7 +271,6 @@ class TestStrategyRegimeAppropriateness:
         # Should return default appropriateness
         assert 0.1 <= appropriateness <= 1.0
 
-
 class TestRegimeAdaptation:
     """Test regime adaptation methods"""
 
@@ -360,7 +356,6 @@ class TestRegimeAdaptation:
         assert isinstance(adaptations, dict)
         # May or may not succeed depending on implementation
 
-
 class TestRegimeChangeCallbacks:
     """Test regime change callback methods"""
 
@@ -406,7 +401,6 @@ class TestRegimeChangeCallbacks:
 
         # Should adapt configuration
         assert signal_generator.current_regime == new_regime
-
 
 class TestStrategySpecificSignalGeneration:
     """Test strategy-specific signal generation methods"""
@@ -530,7 +524,6 @@ class TestStrategySpecificSignalGeneration:
             assert all(isinstance(s, TradingSignal) for s in signals)
             assert all(s.symbol == 'AAPL' for s in signals)
 
-
 class TestMLSignalGeneration:
     """Test ML signal generation"""
 
@@ -582,7 +575,6 @@ class TestMLSignalGeneration:
         # Should return zero scores when features missing
         assert isinstance(ml_scores, pd.Series)
         assert (ml_scores == 0.0).all()
-
 
 class TestSignalGenerationWithRegimeContext:
     """Test signal generation with regime context"""
@@ -679,7 +671,6 @@ class TestSignalGenerationWithRegimeContext:
         symbols = set(s.symbol for s in signals) if signals else set()
         assert len(symbols) <= 2  # Should handle multiple symbols
 
-
 class TestSignalSummaryAndUtilities:
     """Test signal summary and utility methods"""
 
@@ -744,7 +735,6 @@ class TestSignalSummaryAndUtilities:
         summary = signal_generator.get_signal_summary([])
 
         assert summary == {"total_signals": 0}
-
 
 class TestTradingSignalUtilities:
     """Test TradingSignal utility methods"""

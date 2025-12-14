@@ -9,7 +9,6 @@ import pytest
 from datetime import datetime, time, timezone
 from core_engine.data.market_calendar import MarketCalendar, AssetClass, MarketSession
 
-
 class TestAssetClass:
     """Test AssetClass enum values."""
 
@@ -26,7 +25,6 @@ class TestAssetClass:
         expected_classes = {"us_equity", "crypto", "forex", "futures", "intl_equity"}
         actual_classes = {cls.value for cls in AssetClass}
         assert actual_classes == expected_classes
-
 
 class TestMarketSession:
     """Test MarketSession dataclass."""
@@ -55,7 +53,6 @@ class TestMarketSession:
             timezone="America/New_York"
         )
         assert session1 == session2
-
 
 class TestMarketCalendar:
     """Test MarketCalendar class functionality."""

@@ -16,7 +16,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class PeriodAnalysisResult:
     """Results from analyzing a specific period"""
@@ -40,7 +39,6 @@ class PeriodAnalysisResult:
             'metrics': self.metrics,
             'metadata': self.metadata or {}
         }
-
 
 class PeriodScannerBase(ABC):
     """
@@ -354,5 +352,4 @@ class PeriodScannerBase(ABC):
             json.dump(serializable_report, f, indent=2)
 
         self.logger.info(f"📄 Report saved to: {output_path}")
-
 

@@ -28,7 +28,6 @@ from core_engine.trading.execution.execution_validator import (
     ExecutionValidator,
 )
 
-
 # ==================== Test Rule Filtering Edge Cases ====================
 
 class TestPreTradeValidatorRuleFiltering:
@@ -212,7 +211,6 @@ class TestPreTradeValidatorRuleFiltering:
         business_results = [r for r in results if r.rule_id == 'business_day_rule']
         assert len(business_results) >= 0
 
-
 # ==================== Test Custom Validator and Exception Handling ====================
 
 class TestPreTradeValidatorCustomRules:
@@ -295,7 +293,6 @@ class TestPreTradeValidatorCustomRules:
         assert 'Validation error' in failing_results[0].message
         assert 'error' in failing_results[0].details
 
-
 # ==================== Test Market Hours Validation Edge Cases ====================
 
 class TestPreTradeValidatorMarketHours:
@@ -371,7 +368,6 @@ class TestPreTradeValidatorMarketHours:
         if hours_result:
             assert hours_result.passed is True
 
-
 # ==================== Test Position Concentration Edge Cases ====================
 
 class TestPreTradeValidatorPositionConcentration:
@@ -445,7 +441,6 @@ class TestPreTradeValidatorPositionConcentration:
         conc_result = next((r for r in results if r.rule_id == 'position_concentration'), None)
         if conc_result and not conc_result.passed:
             assert 'concentration' in conc_result.message.lower()
-
 
 # ==================== Test Duplicate Order Edge Cases ====================
 
@@ -556,7 +551,6 @@ class TestPreTradeValidatorDuplicateOrder:
         dup_result = next((r for r in results if r.rule_id == 'duplicate_order'), None)
         if dup_result:
             assert dup_result.passed is True  # Should pass
-
 
 # ==================== Test Real-Time Validation Exception Handling ====================
 
@@ -684,7 +678,6 @@ class TestRealTimeValidatorExceptionHandling:
         assert len(failing_results) > 0
         assert failing_results[0].passed is False
         assert 'Real-time validation error' in failing_results[0].message
-
 
 # ==================== Test Post-Trade Validation Edge Cases ====================
 
@@ -844,7 +837,6 @@ class TestPostTradeValidatorEdgeCases:
         assert failing_results[0].passed is False
         assert 'Post-trade validation error' in failing_results[0].message
 
-
 # ==================== Test ExecutionValidator Error Handling ====================
 
 class TestExecutionValidatorErrorHandling:
@@ -997,7 +989,6 @@ class TestExecutionValidatorErrorHandling:
 
         # Validation should still proceed
         assert isinstance(should_proceed, bool)
-
 
 # ==================== Test Advanced Reporting and History ====================
 
@@ -1243,7 +1234,6 @@ class TestExecutionValidatorReporting:
         assert 'failure_count' in most_failed[0]
         assert most_failed[0]['failure_count'] > 0
 
-
 # ==================== Test Advanced ExecutionContext Edge Cases ====================
 
 class TestExecutionContextEdgeCases:
@@ -1301,7 +1291,6 @@ class TestExecutionContextEdgeCases:
         assert context.strategy_id == "momentum"
         assert context.current_position == 5000
         assert len(context.recent_executions) == 1
-
 
 # ==================== Test Validation Rule Edge Cases ====================
 

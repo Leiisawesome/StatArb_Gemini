@@ -53,7 +53,6 @@ from core_engine.trading.strategies.implementations.momentum.enhanced_momentum i
 from core_engine.system.central_risk_manager import CentralRiskManager
 from core_engine.trading.strategies.strategy_engine import SignalType
 
-
 @dataclass
 class Trade:
     """Represents a completed trade"""
@@ -69,7 +68,6 @@ class Trade:
     duration_minutes: int
     entry_reason: str = ""
     exit_reason: str = ""
-
 
 @dataclass
 class BacktestResults:
@@ -111,7 +109,6 @@ class BacktestResults:
     # Detailed trades
     trades: List[Trade] = field(default_factory=list)
     equity_curve: List[Dict[str, Any]] = field(default_factory=list)
-
 
 class MomentumBacktest:
     """
@@ -393,7 +390,7 @@ class MomentumBacktest:
 
         pos = self.current_position
         entry_bar_idx = pos.get('entry_bar_idx', current_bar_idx - 1)
-        bars_held = current_bar_idx - entry_bar_idx
+        current_bar_idx - entry_bar_idx
 
         # Handle both datetime and integer indices for duration
         if isinstance(current_time, (int, np.integer)) and isinstance(pos['entry_time'], (int, np.integer)):
@@ -432,7 +429,7 @@ class MomentumBacktest:
         # EXIT CONDITION 4: Momentum reversal (composite signals)
         else:
             composite_z = current_bar.get('composite_z', 0)
-            composite_pct = current_bar.get('composite_pct', 50)
+            current_bar.get('composite_pct', 50)
 
             if pos['side'] == 'long':
                 # Exit LONG if momentum turns negative
@@ -645,7 +642,6 @@ class MomentumBacktest:
 
         logger.info("✅ Cleanup complete")
 
-
 async def main():
     """Run backtest"""
 
@@ -662,7 +658,6 @@ async def main():
     )
 
     return results
-
 
 if __name__ == "__main__":
     # Run backtest

@@ -32,7 +32,6 @@ from core_engine.system.central_risk_manager import (
     TradingDecisionRequest, TradingDecisionType, AuthorizationLevel
 )
 
-
 # =============================================================================
 # AUTHORIZATION FLOW TESTS
 # =============================================================================
@@ -430,7 +429,7 @@ class TestAuthorizationFlow:
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )
 
-        authorization = await risk_manager.authorize_trading_decision(request)
+        await risk_manager.authorize_trading_decision(request)
 
         # Verify audit trail
         assert hasattr(risk_manager, 'authorization_history')

@@ -23,14 +23,12 @@ from typing import Union, Tuple
 from scipy import stats
 from enum import Enum
 
-
 class VarMethod(Enum):
     """VaR calculation methods"""
     HISTORICAL = "historical"
     PARAMETRIC = "parametric"
     MONTE_CARLO = "monte_carlo"
     CORNISH_FISHER = "cornish_fisher"
-
 
 # =============================================================================
 # VALUE AT RISK (VaR) - Single Source of Truth
@@ -103,7 +101,6 @@ def calculate_var(
         # Default to historical
         return float(np.percentile(returns, alpha * 100))
 
-
 def calculate_cvar(
     returns: Union[np.ndarray, pd.Series],
     confidence_level: float = 0.95,
@@ -135,7 +132,6 @@ def calculate_cvar(
         return var
 
     return float(np.mean(tail_losses))
-
 
 # =============================================================================
 # SHARPE RATIO - Single Source of Truth
@@ -181,7 +177,6 @@ def calculate_sharpe_ratio(
 
     return float(sharpe)
 
-
 def calculate_sortino_ratio(
     returns: Union[np.ndarray, pd.Series],
     risk_free_rate: float = 0.02,
@@ -221,7 +216,6 @@ def calculate_sortino_ratio(
 
     return float(sortino)
 
-
 # =============================================================================
 # DRAWDOWN METRICS - Single Source of Truth
 # =============================================================================
@@ -243,7 +237,6 @@ def calculate_max_drawdown(
     """
     _, max_dd, _ = calculate_drawdown(returns)
     return max_dd
-
 
 def calculate_drawdown(
     returns: Union[np.ndarray, pd.Series]
@@ -292,7 +285,6 @@ def calculate_drawdown(
 
     return drawdown, max_dd, int(max_duration)
 
-
 def calculate_calmar_ratio(
     returns: Union[np.ndarray, pd.Series],
     periods_per_year: int = 252
@@ -326,7 +318,6 @@ def calculate_calmar_ratio(
 
     return float(annualized_return / abs(max_dd))
 
-
 # =============================================================================
 # VOLATILITY METRICS - Single Source of Truth
 # =============================================================================
@@ -354,7 +345,6 @@ def calculate_volatility(
     std = np.std(returns, ddof=1)
     return float(std * np.sqrt(periods_per_year))
 
-
 def calculate_downside_volatility(
     returns: Union[np.ndarray, pd.Series],
     target_return: float = 0.0,
@@ -381,7 +371,6 @@ def calculate_downside_volatility(
     downside_std = np.std(downside, ddof=1)
 
     return float(downside_std * np.sqrt(periods_per_year))
-
 
 # =============================================================================
 # RETURN METRICS - Single Source of Truth
@@ -413,7 +402,6 @@ def calculate_annualized_return(
     annualized = (1 + total_return) ** (periods_per_year / n_periods) - 1
     return float(annualized)
 
-
 def calculate_total_return(
     returns: Union[np.ndarray, pd.Series]
 ) -> float:
@@ -434,7 +422,6 @@ def calculate_total_return(
 
     return float(np.prod(1 + returns) - 1)
 
-
 # =============================================================================
 # HIGHER MOMENTS - Single Source of Truth
 # =============================================================================
@@ -451,7 +438,6 @@ def calculate_skewness(
 
     return float(stats.skew(returns))
 
-
 def calculate_kurtosis(
     returns: Union[np.ndarray, pd.Series]
 ) -> float:
@@ -463,7 +449,6 @@ def calculate_kurtosis(
         return 0.0
 
     return float(stats.kurtosis(returns))
-
 
 # =============================================================================
 # BENCHMARK-RELATIVE METRICS
@@ -502,7 +487,6 @@ def calculate_beta(
         return 1.0
 
     return float(covariance / variance)
-
 
 def calculate_alpha(
     returns: Union[np.ndarray, pd.Series],
@@ -546,7 +530,6 @@ def calculate_alpha(
     # Annualize
     return float(alpha_per_period * periods_per_year)
 
-
 def calculate_information_ratio(
     returns: Union[np.ndarray, pd.Series],
     benchmark_returns: Union[np.ndarray, pd.Series],
@@ -585,7 +568,6 @@ def calculate_information_ratio(
 
     # Annualize
     return float((mean_active / tracking_error) * np.sqrt(periods_per_year))
-
 
 def calculate_tracking_error(
     returns: Union[np.ndarray, pd.Series],

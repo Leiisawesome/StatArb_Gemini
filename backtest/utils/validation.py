@@ -23,7 +23,6 @@ from backtest.exceptions import (
 
 logger = logging.getLogger(__name__)
 
-
 def validate_market_data_bar(
     bar: Dict[str, Any],
     symbol: str,
@@ -153,7 +152,6 @@ def validate_market_data_bar(
         )
         raise BacktestDataError(error_msg)
 
-
 def validate_signal(
     signal: Dict[str, Any],
     bar_index: int,
@@ -242,7 +240,6 @@ def validate_signal(
             )
         )
         raise BacktestValidationError(error_msg)
-
 
 def validate_regime_context(
     regime_context: Dict[str, Any],
@@ -333,7 +330,6 @@ def validate_regime_context(
             f"Valid regimes: {', '.join(valid_regimes)}"
         )
 
-
 def validate_component_initialized(
     component: Any,
     component_name: str,
@@ -388,7 +384,6 @@ def validate_component_initialized(
         )
         from backtest.exceptions import BacktestConfigurationError
         raise BacktestConfigurationError(error_msg)
-
 
 def validate_price_positive(
     price: float,

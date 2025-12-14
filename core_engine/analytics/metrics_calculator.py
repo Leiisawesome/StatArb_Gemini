@@ -39,7 +39,6 @@ from ..exceptions import PerformanceDataUnavailableError, ConfigurationRequiredE
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class MetricCategory(Enum):
     """Metric categories"""
     RETURN = "return"
@@ -51,7 +50,6 @@ class MetricCategory(Enum):
     BEHAVIORAL = "behavioral"
     TAIL_RISK = "tail_risk"
 
-
 class MetricFrequency(Enum):
     """Metric calculation frequencies"""
     DAILY = "daily"
@@ -61,7 +59,6 @@ class MetricFrequency(Enum):
     YEARLY = "yearly"
     ROLLING = "rolling"
 
-
 class BenchmarkType(Enum):
     """Benchmark types for relative metrics"""
     MARKET_INDEX = "market_index"
@@ -69,7 +66,6 @@ class BenchmarkType(Enum):
     PEER_GROUP = "peer_group"
     RISK_FREE = "risk_free"
     CUSTOM = "custom"
-
 
 @dataclass
 class MetricConfig:
@@ -107,7 +103,6 @@ class MetricConfig:
     enable_factor_metrics: bool = True
     factor_models: List[str] = field(default_factory=lambda: ['market', 'fama_french', 'carhart'])
 
-
 @dataclass
 class MetricResult:
     """Individual metric calculation result"""
@@ -137,7 +132,6 @@ class MetricResult:
     calculation_method: str = "standard"
     notes: List[str] = field(default_factory=list)
 
-
 @dataclass
 class MetricsBundle:
     """Collection of related metrics"""
@@ -160,7 +154,6 @@ class MetricsBundle:
     # Quality assessment
     data_quality: float = 0.0
     completeness: float = 0.0
-
 
 class ReturnMetricsCalculator:
     """Return-based metrics calculator"""
@@ -246,7 +239,6 @@ class ReturnMetricsCalculator:
             return 12  # Monthly
         else:
             return 4  # Quarterly
-
 
 class RiskMetricsCalculator:
     """Risk metrics calculator"""
@@ -336,7 +328,6 @@ class RiskMetricsCalculator:
     def _calculate_cvar(self, returns: pd.Series, confidence_level: float) -> float:
         """Calculate Conditional Value at Risk - delegates to core_metrics"""
         return calculate_cvar(returns, confidence_level)
-
 
 class RiskAdjustedMetricsCalculator:
     """Risk-adjusted metrics calculator"""
@@ -450,7 +441,6 @@ class RiskAdjustedMetricsCalculator:
             return np.inf if positive_returns > 0 else 1.0
 
         return positive_returns / negative_returns
-
 
 class DrawdownMetricsCalculator:
     """Drawdown metrics calculator"""
@@ -603,7 +593,6 @@ class DrawdownMetricsCalculator:
             'rate': len(recovery_times) / max(len(drawdown_starts), 1)
         }
 
-
 class DistributionMetricsCalculator:
     """Distribution and higher moment metrics calculator"""
 
@@ -717,7 +706,6 @@ class DistributionMetricsCalculator:
             )
 
         return metrics
-
 
 class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     """

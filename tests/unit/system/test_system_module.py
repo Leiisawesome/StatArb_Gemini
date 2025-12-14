@@ -36,7 +36,6 @@ from core_engine.system.unified_execution_engine import (
     UnifiedExecutionEngine
 )
 
-
 class TestISystemComponent:
     """Test ISystemComponent interface."""
 
@@ -49,7 +48,6 @@ class TestISystemComponent:
         assert hasattr(ISystemComponent, 'stop')
         assert hasattr(ISystemComponent, 'health_check')
         assert hasattr(ISystemComponent, 'get_status')
-
 
 class TestSystemStatus:
     """Test SystemStatus enum."""
@@ -65,7 +63,6 @@ class TestSystemStatus:
         assert SystemStatus.EMERGENCY.value == "emergency"
         assert SystemStatus.SHUTDOWN.value == "shutdown"
 
-
 class TestComponentLayer:
     """Test ComponentLayer enum."""
 
@@ -75,7 +72,6 @@ class TestComponentLayer:
         assert ComponentLayer.GOVERNANCE.value == "governance"
         assert ComponentLayer.EXECUTION.value == "execution"
         assert ComponentLayer.SUPPORT.value == "support"
-
 
 class TestAuthorityLevel:
     """Test AuthorityLevel enum."""
@@ -88,7 +84,6 @@ class TestAuthorityLevel:
         assert AuthorityLevel.TACTICAL.value == "tactical"
         assert AuthorityLevel.OPERATIONAL.value == "operational"
         assert AuthorityLevel.READ_ONLY.value == "read_only"
-
 
 class TestComponentRegistration:
     """Test ComponentRegistration dataclass."""
@@ -118,7 +113,6 @@ class TestComponentRegistration:
         assert registration.status == "error"
         assert registration.last_error == "Test error"
         assert registration.error_count == 1
-
 
 class TestHierarchicalSystemOrchestrator:
     """Test HierarchicalSystemOrchestrator class."""
@@ -281,7 +275,6 @@ class TestHierarchicalSystemOrchestrator:
         assert "healthy" in health_status
         assert "system_status" in health_status
 
-
 class TestTradingDecisionType:
     """Test TradingDecisionType enum."""
 
@@ -296,7 +289,6 @@ class TestTradingDecisionType:
         assert TradingDecisionType.EMERGENCY_LIQUIDATION.value == "emergency_liquidation"
         assert TradingDecisionType.RISK_LIMIT_ADJUSTMENT.value == "risk_limit_adjustment"
 
-
 class TestAuthorizationLevel:
     """Test AuthorizationLevel enum."""
 
@@ -307,7 +299,6 @@ class TestAuthorizationLevel:
         assert AuthorizationLevel.ELEVATED.value == "elevated"
         assert AuthorizationLevel.EMERGENCY.value == "emergency"
         assert AuthorizationLevel.REJECTED.value == "rejected"
-
 
 class TestTradingDecisionRequest:
     """Test TradingDecisionRequest dataclass."""
@@ -331,7 +322,6 @@ class TestTradingDecisionRequest:
         assert request.quantity == 100.0
         assert request.expected_return == 0.05
         assert request.confidence == 0.8
-
 
 class TestCentralRiskManager:
     """Test CentralRiskManager class."""
@@ -438,7 +428,6 @@ class TestCentralRiskManager:
         risk_manager = CentralRiskManager(updated_config)
         assert risk_manager.config.max_position_size == 0.15
 
-
 class TestExecutionStatus:
     """Test ExecutionStatus enum."""
 
@@ -453,7 +442,6 @@ class TestExecutionStatus:
         assert ExecutionStatus.REJECTED.value == "rejected"
         assert ExecutionStatus.FAILED.value == "failed"
         assert ExecutionStatus.EXPIRED.value == "expired"
-
 
 class TestExecutionAlgorithm:
     """Test ExecutionAlgorithm enum."""
@@ -472,7 +460,6 @@ class TestExecutionAlgorithm:
         assert ExecutionAlgorithm.ADAPTIVE.value == "adaptive"
         assert ExecutionAlgorithm.SMART_ROUTING.value == "smart_routing"
 
-
 class TestExecutionUrgency:
     """Test ExecutionUrgency enum."""
 
@@ -484,7 +471,6 @@ class TestExecutionUrgency:
         assert ExecutionUrgency.URGENT.value == "urgent"
         assert ExecutionUrgency.EMERGENCY.value == "emergency"
 
-
 class TestVenueType:
     """Test VenueType enum."""
 
@@ -495,7 +481,6 @@ class TestVenueType:
         assert VenueType.DARK_POOL.value == "dark_pool"
         assert VenueType.MARKET_MAKER.value == "market_maker"
         assert VenueType.CROSSING_NETWORK.value == "crossing_network"
-
 
 class TestExecutionAuthorization:
     """Test ExecutionAuthorization dataclass."""
@@ -513,7 +498,6 @@ class TestExecutionAuthorization:
         assert auth.symbol == "AAPL"
         assert auth.side == "buy"
         assert auth.quantity == 100.0
-
 
 class TestExecutionRequest:
     """Test ExecutionRequest dataclass."""
@@ -533,7 +517,6 @@ class TestExecutionRequest:
         assert request.authorization.symbol == "AAPL"
         assert request.authorization.side == "buy"
         assert request.authorization.quantity == 100.0
-
 
 class TestUnifiedExecutionEngine:
     """Test UnifiedExecutionEngine class."""

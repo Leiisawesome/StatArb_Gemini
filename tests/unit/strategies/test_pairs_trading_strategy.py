@@ -21,7 +21,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestPairsTradingSignalGeneration:
     """Test pairs trading-specific signal calculation logic"""
 
@@ -84,7 +83,6 @@ class TestPairsTradingSignalGeneration:
         # Low correlation pairs should not generate signals
         assert isinstance(signals, list)
 
-
 class TestPairsTradingPositionSizing:
     """Test position sizing logic"""
 
@@ -109,7 +107,6 @@ class TestPairsTradingPositionSizing:
         # Check against reasonable limit (PairsConfig inherits from BaseStrategyConfig)
         max_allowed = getattr(strategy.config, 'max_position_pct', getattr(strategy.config.position_limits, 'max_position_size', 0.1))
         assert position_size <= max_allowed
-
 
 class TestPairsTradingEntryExitConditions:
     """Test entry and exit condition logic"""
@@ -165,7 +162,7 @@ class TestPairsTradingEntryExitConditions:
             rows=300
         )
 
-        signals = await strategy.generate_signals(enriched_data)
+        await strategy.generate_signals(enriched_data)
 
         # Should not exceed max pairs
         assert len(strategy.active_pairs) <= max_pairs

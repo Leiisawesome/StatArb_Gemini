@@ -93,7 +93,6 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
-
 class SystemPhase(Enum):
     """System integration phases"""
     INITIALIZATION = "initialization"
@@ -101,7 +100,6 @@ class SystemPhase(Enum):
     OPERATIONAL = "operational"
     SHUTDOWN = "shutdown"
     ERROR = "error"
-
 
 class ComponentStatus(Enum):
     """Component status levels"""
@@ -113,7 +111,6 @@ class ComponentStatus(Enum):
     STOPPING = "stopping"
     STOPPED = "stopped"
     ERROR = "error"
-
 
 @dataclass
 class SystemConfiguration:
@@ -214,7 +211,6 @@ class SystemConfiguration:
             'disaster_recovery_config': self.disaster_recovery_config,
         }
 
-
 @dataclass
 class SystemMetrics:
     """System-wide performance metrics"""
@@ -228,7 +224,6 @@ class SystemMetrics:
     cpu_usage: float = 0.0
     health_score: float = 0.0
     performance_score: float = 0.0
-
 
 class SystemIntegrationManager(ISystemComponent):
     """
@@ -1211,7 +1206,6 @@ class SystemIntegrationManager(ISystemComponent):
             self.logger.error(f"Failed to stop orchestrator: {e}")
             raise
 
-
 # Production Configuration Templates
 
 def create_production_config() -> SystemConfiguration:
@@ -1328,7 +1322,6 @@ def create_production_config() -> SystemConfiguration:
             'rpo_minutes': 5
         }
     )
-
 
 def create_development_config() -> SystemConfiguration:
     """Create development-friendly system configuration"""

@@ -39,7 +39,6 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
-
 class CircuitBreakerLevel(Enum):
     """Circuit breaker alert levels"""
     NORMAL = "normal"           # 🟢 All systems operational
@@ -48,7 +47,6 @@ class CircuitBreakerLevel(Enum):
     HALT = "halt"              # 🔴 Trading stopped
     EMERGENCY = "emergency"     # ⚫ System shutdown
 
-
 class CircuitBreakerType(Enum):
     """Types of circuit breakers"""
     MANUAL_KILL_SWITCH = "manual_kill_switch"
@@ -56,7 +54,6 @@ class CircuitBreakerType(Enum):
     DAILY_LOSS_LIMIT = "daily_loss_limit"
     DRAWDOWN_LIMIT = "drawdown_limit"
     POSITION_CONCENTRATION = "position_concentration"
-
 
 @dataclass
 class CircuitBreakerStatus:
@@ -85,7 +82,6 @@ class CircuitBreakerStatus:
     drawdown_status: Dict = field(default_factory=dict)
     concentration_status: Dict = field(default_factory=dict)
 
-
 @dataclass
 class CircuitBreakerConfig:
     """Configuration for circuit breakers"""
@@ -112,7 +108,6 @@ class CircuitBreakerConfig:
     enable_email_alerts: bool = True
     enable_sms_alerts: bool = False
     enable_slack_alerts: bool = False
-
 
 class TradingCircuitBreakers:
     """
@@ -360,7 +355,9 @@ class TradingCircuitBreakers:
         # Warning at 80% of limit
         warning_level = self.config.daily_loss_limit_pct * self.config.warning_threshold_pct
         warning = None
-        if self.daily_pnl_pct <= warning_level:
+        # Use small tolerance for floating point comparison
+        tolerance = 1e-10
+        if self.daily_pnl_pct <= warning_level + tolerance:
             warning = (
                 f"Approaching daily loss limit: {self.daily_pnl_pct:.2%} "
                 f"(limit: {self.config.daily_loss_limit_pct:.2%})"
@@ -396,7 +393,9 @@ class TradingCircuitBreakers:
         # Warning at 80% of limit
         warning_level = self.config.max_drawdown_from_high_pct * self.config.warning_threshold_pct
         warning = None
-        if self.current_drawdown_pct <= warning_level:
+        # Use small tolerance for floating point comparison
+        tolerance = 1e-10
+        if self.current_drawdown_pct <= warning_level + tolerance:
             warning = (
                 f"Approaching drawdown limit: {self.current_drawdown_pct:.2%} from high "
                 f"(limit: {self.config.max_drawdown_from_high_pct:.2%})"

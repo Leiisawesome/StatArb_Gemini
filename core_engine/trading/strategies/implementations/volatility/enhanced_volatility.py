@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ✅ VolatilityConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
     """Enhanced Volatility Strategy with ISystemComponent Integration"""
 

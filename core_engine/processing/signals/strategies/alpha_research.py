@@ -24,7 +24,6 @@ from core_engine.processing.indicators.talib_indicators import calculate_rsi
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class AlphaType(Enum):
     """Alpha strategy types"""
     CROSS_SECTIONAL = "cross_sectional"
@@ -40,7 +39,6 @@ class AlphaType(Enum):
     ARBITRAGE = "arbitrage"
     MULTI_ASSET = "multi_asset"
 
-
 class AlphaFrequency(Enum):
     """Alpha signal frequencies"""
     INTRADAY = "intraday"
@@ -48,7 +46,6 @@ class AlphaFrequency(Enum):
     WEEKLY = "weekly"
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
-
 
 class AlphaStatus(Enum):
     """Alpha research status"""
@@ -59,14 +56,12 @@ class AlphaStatus(Enum):
     PRODUCTION = "production"
     RETIRED = "retired"
 
-
 class BacktestMode(Enum):
     """Backtesting modes"""
     WALK_FORWARD = "walk_forward"
     EXPANDING_WINDOW = "expanding_window"
     ROLLING_WINDOW = "rolling_window"
     MONTE_CARLO = "monte_carlo"
-
 
 @dataclass
 class AlphaParameters:
@@ -98,7 +93,6 @@ class AlphaParameters:
 
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class AlphaSignal:
@@ -132,7 +126,6 @@ class AlphaSignal:
     # Metadata
     model_version: str = "1.0"
     data_vintage: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class BacktestResult:
@@ -176,7 +169,6 @@ class BacktestResult:
     num_periods: int = 0
     num_securities: int = 0
 
-
 @dataclass
 class AlphaDecayAnalysis:
     """Alpha decay analysis results"""
@@ -205,7 +197,6 @@ class AlphaDecayAnalysis:
     # Recommendations
     recommended_holding_period: int
     recommended_decay_adjustment: float
-
 
 class AlphaStrategy(ABC):
     """Abstract alpha strategy"""
@@ -252,7 +243,6 @@ class AlphaStrategy(ABC):
                 return False
 
         return True
-
 
 class MomentumAlphaStrategy(AlphaStrategy):
     """Momentum-based alpha strategy"""
@@ -339,7 +329,6 @@ class MomentumAlphaStrategy(AlphaStrategy):
         predictions = self.model.predict(X)
 
         return pd.Series(predictions, index=features.index)
-
 
 class MeanReversionAlphaStrategy(AlphaStrategy):
     """Mean reversion alpha strategy"""
@@ -474,7 +463,6 @@ class MeanReversionAlphaStrategy(AlphaStrategy):
 
         return pd.Series(predictions, index=features.index)
 
-
 class FactorAlphaStrategy(AlphaStrategy):
     """Factor-based alpha strategy"""
 
@@ -559,7 +547,6 @@ class FactorAlphaStrategy(AlphaStrategy):
         predictions = self.model.predict(X)
 
         return pd.Series(predictions, index=features.index)
-
 
 class AlphaResearcher:
     """

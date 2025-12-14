@@ -30,7 +30,6 @@ from core_engine.trading.portfolio.manager_enhanced import (
     EnhancedPortfolioManager
 )
 
-
 class TestStrategyManagerBasics:
     """Test suite for Strategy Manager basic functionality"""
 
@@ -117,7 +116,6 @@ class TestStrategyManagerBasics:
         assert 'active_strategies' in status
         assert 'component_connections' in status
 
-
 class TestEnhancedTradingEngineBasics:
     """Test suite for Enhanced Trading Engine basic functionality"""
 
@@ -198,7 +196,6 @@ class TestEnhancedTradingEngineBasics:
         assert 'configuration' in status
         assert 'health_metrics' in status
 
-
 class TestUnifiedExecutionEngineBasics:
     """Test suite for Unified Execution Engine basic functionality"""
 
@@ -277,7 +274,6 @@ class TestUnifiedExecutionEngineBasics:
         # UnifiedExecutionEngine has different status structure
         assert 'active_executions' in status
         assert 'execution_metrics' in status
-
 
 class TestEnhancedPortfolioManagerBasics:
     """Test suite for Enhanced Portfolio Manager basic functionality"""
@@ -358,7 +354,6 @@ class TestEnhancedPortfolioManagerBasics:
         assert status['initialized'] is True
         assert 'configuration' in status
         assert 'health_metrics' in status
-
 
 class TestIntegrationWorkflow:
     """Test suite for integration of enhanced trading components"""
@@ -516,7 +511,6 @@ class TestIntegrationWorkflow:
         # Cleanup
         for component in [strategy_manager, trading_engine, execution_engine, portfolio_manager]:
             await component.stop()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

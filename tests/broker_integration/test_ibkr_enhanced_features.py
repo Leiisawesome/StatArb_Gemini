@@ -15,7 +15,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.config.broker_config import load_broker_config
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
-
 def test_market_status_and_clock():
     """Test market status checking and clock information"""
 
@@ -73,7 +72,6 @@ def test_market_status_and_clock():
     finally:
         adapter.disconnect()
 
-
 def test_market_data_and_quotes():
     """Test market data retrieval and quote fetching"""
 
@@ -130,7 +128,6 @@ def test_market_data_and_quotes():
     finally:
         adapter.disconnect()
 
-
 def test_order_validation():
     """Test order parameter validation"""
 
@@ -186,7 +183,6 @@ def test_order_validation():
 
     finally:
         adapter.disconnect()
-
 
 def test_stop_orders():
     """Test stop and stop-limit order submission"""
@@ -291,7 +287,6 @@ def test_stop_orders():
     finally:
         adapter.disconnect()
 
-
 def test_all_enhanced_features():
     """Run all enhanced feature tests"""
 
@@ -344,7 +339,6 @@ def test_all_enhanced_features():
     else:
         print(f"\n⚠️  {total_tests - total_passed} test(s) failed")
         assert False, f"{total_tests - total_passed} test(s) failed"
-
 
 if __name__ == "__main__":
     exit_code = test_all_enhanced_features()

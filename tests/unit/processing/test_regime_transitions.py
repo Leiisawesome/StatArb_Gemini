@@ -25,7 +25,6 @@ from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
 from core_engine.system.interfaces import RegimeContext
 
-
 class TestRegimeTransitionEdgeCases:
     """Test edge cases during regime transitions"""
 
@@ -381,7 +380,6 @@ class TestRegimeTransitionEdgeCases:
         # Verify component health
         health = await signal_generator.health_check()
         assert health['healthy'] is True
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

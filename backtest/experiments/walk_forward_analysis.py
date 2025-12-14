@@ -33,7 +33,6 @@ from backtest.engine.institutional_backtest_engine import InstitutionalBacktestE
 from core_engine.config import BacktestConfig
 import itertools
 
-
 class WalkForwardAnalysis(BaseExperiment):
     """
     Walk-forward analysis experiment.
@@ -352,7 +351,6 @@ class WalkForwardAnalysis(BaseExperiment):
         df = pd.DataFrame(wf_results)
         csv_path = self.output_dir / f"{experiment_slug}_wf_{timestamp}.csv"
         df.to_csv(csv_path, index=False)
-
 
 if __name__ == "__main__":
     # Example usage

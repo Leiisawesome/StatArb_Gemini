@@ -149,7 +149,6 @@ class StrategyManagerConfig:
     enable_pipeline_integration: bool = True  # Use ProcessingPipelineOrchestrator
     pipeline_config: Optional[Any] = None      # Pipeline configuration
 
-
 class EnhancedStrategyFactory:
     """Factory for creating enhanced strategy instances"""
 
@@ -1541,7 +1540,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """Get list of active symbols to analyze"""
         # Return default symbols for now
         return ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']
-
 
     async def _initialize_performance_tracking(self):
         """Initialize strategy performance tracking"""

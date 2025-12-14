@@ -41,7 +41,6 @@ from .core_metrics import (
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class PerformanceMetric(Enum):
     """Performance metrics"""
     TOTAL_RETURN = "total_return"
@@ -64,7 +63,6 @@ class PerformanceMetric(Enum):
     WIN_RATE = "win_rate"
     PROFIT_FACTOR = "profit_factor"
 
-
 class PerformancePeriod(Enum):
     """Performance calculation periods"""
     DAILY = "daily"
@@ -75,7 +73,6 @@ class PerformancePeriod(Enum):
     INCEPTION = "inception"
     CUSTOM = "custom"
 
-
 class RiskFreeRateSource(Enum):
     """Risk-free rate sources"""
     TREASURY_3M = "treasury_3m"
@@ -83,7 +80,6 @@ class RiskFreeRateSource(Enum):
     LIBOR = "libor"
     SOFR = "sofr"
     CUSTOM = "custom"
-
 
 @dataclass
 class PerformanceConfig:
@@ -126,7 +122,6 @@ class PerformanceConfig:
     def risk_free_rate(self) -> float:
         """Get risk-free rate"""
         return self.custom_risk_free_rate
-
 
 @dataclass
 class PerformanceMetrics:
@@ -183,7 +178,6 @@ class PerformanceMetrics:
     benchmark_symbol: Optional[str] = None
     risk_free_rate: float = 0.0
 
-
 @dataclass
 class PerformanceReport:
     """Comprehensive performance report"""
@@ -227,7 +221,6 @@ class PerformanceReport:
     # Warnings and notes
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
-
 
 class RiskMetricsCalculator:
     """Advanced risk metrics calculator - delegates to core_metrics"""
@@ -289,7 +282,6 @@ class RiskMetricsCalculator:
             return np.inf if positive_returns > 0 else 1.0
 
         return positive_returns / negative_returns
-
 
 class BenchmarkAnalyzer:
     """Benchmark comparison and beta calculation"""
@@ -362,7 +354,6 @@ class BenchmarkAnalyzer:
         excess_return_mean = excess_returns.mean() * self.config.trading_days_per_year
         return excess_return_mean / tracking_error
 
-
 class TradingMetricsCalculator:
     """Trading-specific performance metrics"""
 
@@ -413,7 +404,6 @@ class TradingMetricsCalculator:
         }
 
         return stats
-
 
 class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     """

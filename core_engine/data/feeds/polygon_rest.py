@@ -46,7 +46,6 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -79,7 +78,6 @@ class PolygonRestConfig:
                 "Polygon API key required. Set POLYGON_API_KEY env var or pass api_key."
             )
 
-
 @dataclass
 class AggregateBar:
     """OHLCV aggregate bar"""
@@ -92,7 +90,6 @@ class AggregateBar:
     volume: float
     vwap: Optional[float] = None
     num_trades: Optional[int] = None
-
 
 # ============================================================================
 # POLYGON REST SERVICE
@@ -430,7 +427,6 @@ class PolygonRestService:
 
         return df[['open', 'high', 'low', 'close', 'volume']].copy()
 
-
 # ============================================================================
 # CONVENIENCE FUNCTIONS
 # ============================================================================
@@ -457,7 +453,6 @@ async def create_polygon_rest_service(
         raise RuntimeError("Failed to initialize Polygon REST service")
 
     return service
-
 
 # ============================================================================
 # EXPORTS

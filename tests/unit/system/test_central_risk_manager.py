@@ -33,7 +33,6 @@ from core_engine.system.unified_execution_engine import (
 )
 from core_engine.config import RiskConfig
 
-
 # ============================================================================
 # FIXTURES
 # ============================================================================
@@ -56,12 +55,10 @@ def default_config():
         'real_time_monitoring': False  # Disable for tests
     }
 
-
 @pytest.fixture
 def risk_manager(default_config):
     """Initialize risk manager with default config"""
     return CentralRiskManager(default_config)
-
 
 @pytest.fixture
 async def initialized_risk_manager(default_config):
@@ -71,7 +68,6 @@ async def initialized_risk_manager(default_config):
     yield manager
     # Cleanup
     await manager.stop()
-
 
 @pytest.fixture
 def buy_request_with_cash():
@@ -101,7 +97,6 @@ def buy_request_with_cash():
         }
     )
 
-
 @pytest.fixture
 def buy_request_insufficient_cash():
     """BUY request with insufficient cash"""
@@ -123,7 +118,6 @@ def buy_request_insufficient_cash():
         }
     )
 
-
 @pytest.fixture
 def sell_request_with_position():
     """SELL request with existing position"""
@@ -144,7 +138,6 @@ def sell_request_with_position():
         }
     )
 
-
 @pytest.fixture
 def sell_request_no_position():
     """SELL request with no position"""
@@ -164,7 +157,6 @@ def sell_request_no_position():
             'price': 100.0
         }
     )
-
 
 @pytest.fixture
 def low_confidence_request():
@@ -187,7 +179,6 @@ def low_confidence_request():
         }
     )
 
-
 @pytest.fixture
 def high_volatility_request():
     """Request in high volatility environment"""
@@ -208,7 +199,6 @@ def high_volatility_request():
             'price': 100.0
         }
     )
-
 
 # ============================================================================
 # TEST CLASS 1: INITIALIZATION AND CONFIGURATION
@@ -270,7 +260,6 @@ class TestInitialization:
         assert risk_manager.strategy_manager == mock_strategy_manager
         assert risk_manager.trading_engine == mock_trading_engine
         assert risk_manager.regime_engine == mock_regime_engine
-
 
 # ============================================================================
 # TEST CLASS 2: AUTHORIZATION FLOW - BASIC
@@ -337,7 +326,6 @@ class TestAuthorizationBasic:
             assert "No position" in authorization.rejection_reason or authorization.authorized_quantity == 0.0
         else:
             assert authorization.authorized_quantity == 0.0
-
 
 # ============================================================================
 # TEST CLASS 3: SIGNAL CONFIDENCE VALIDATION
@@ -410,7 +398,6 @@ class TestSignalConfidence:
         assert authorization.authorization_level in [AuthorizationLevel.AUTOMATIC, AuthorizationLevel.STANDARD]
         assert authorization.authorized_quantity > 0
 
-
 # ============================================================================
 # TEST CLASS 4: RISK ASSESSMENT METHODS
 # ============================================================================
@@ -476,7 +463,6 @@ class TestRiskAssessment:
         # Low volatility regime has 0.7 multiplier, high confidence (0.9)
         # Expected: 0.7 * 0.9 = 0.63
         assert 0.6 < adjustment < 0.7
-
 
 # ============================================================================
 # TEST CLASS 5: QUANTITY CALCULATION WITH CONSTRAINTS
@@ -591,7 +577,6 @@ class TestQuantityCalculation:
         # Should be rounded to 2 decimals
         assert authorized_qty == round(authorized_qty, 2)
 
-
 # ============================================================================
 # TEST CLASS 6: POSITION TRACKING AND MONITORING
 # ============================================================================
@@ -645,7 +630,6 @@ class TestPositionTracking:
         positions["AAPL"] = 999.0
         assert initialized_risk_manager.current_positions["AAPL"] == 100.0
 
-
 # ============================================================================
 # TEST CLASS 7: EMERGENCY CONTROL
 # ============================================================================
@@ -696,7 +680,6 @@ class TestEmergencyControl:
 
         assert initialized_risk_manager.is_operational is False
 
-
 # ============================================================================
 # TEST CLASS 8: ORCHESTRATOR INTEGRATION
 # ============================================================================
@@ -745,7 +728,6 @@ class TestOrchestratorIntegration:
 
         assert result is True
         assert initialized_risk_manager.is_operational is False
-
 
 # ============================================================================
 # TEST CLASS 9: ADDITIONAL INTEGRATION SCENARIOS
@@ -845,7 +827,6 @@ class TestIntegrationScenarios:
         total_position = initialized_risk_manager.get_current_position("AAPL")
         expected_total = auth1.authorized_quantity + auth2.authorized_quantity
         assert total_position == pytest.approx(expected_total, rel=0.01)
-
 
 # ============================================================================
 # RUN TESTS

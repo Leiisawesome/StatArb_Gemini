@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestAnalyticsPortfolioIntegration:
     """Integration tests for analytics-portfolio cross-layer integration"""
 

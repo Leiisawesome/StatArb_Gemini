@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import FactorConfig, StrategyType
 
-
 class TestFactorConfig:
     """Test suite for FactorConfig class."""
 

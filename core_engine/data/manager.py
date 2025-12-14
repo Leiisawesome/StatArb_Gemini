@@ -123,7 +123,6 @@ DEFAULT_CACHE_TTL_SECONDS = 300  # 5 minutes cache TTL
 DEFAULT_QUERY_TIMEOUT_SECONDS = 30  # Query timeout
 CONNECTION_TEST_TIMEOUT_SECONDS = 5  # Connection test timeout
 
-
 @dataclass
 class ClickHouseDataConfig(DataConfig):
     """
@@ -719,7 +718,6 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self._cache[cache_key] = df
         self._cache_timestamps[cache_key] = datetime.now()
         return df
-
 
     def _build_query(self, symbols: List[str], start_time: datetime, end_time: datetime, interval: str) -> str:
         """Build ClickHouse query for market data with SQL injection protection"""

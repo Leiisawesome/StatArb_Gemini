@@ -10,7 +10,6 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-
 @dataclass
 class PerformanceMetrics:
     """Performance analytics metrics"""
@@ -89,7 +88,6 @@ class PerformanceMetrics:
         if hasattr(returns.index, 'min') and hasattr(returns.index, 'max'):
             self.start_date = pd.to_datetime(returns.index.min())
             self.end_date = pd.to_datetime(returns.index.max())
-
 
 class AnalyticsEngine:
     """Core analytics and performance measurement"""

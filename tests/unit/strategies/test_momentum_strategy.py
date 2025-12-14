@@ -21,7 +21,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestMomentumSignalGeneration:
     """Test momentum-specific signal calculation logic"""
 
@@ -158,7 +157,6 @@ class TestMomentumSignalGeneration:
                 # Confidence should be lower for weak trends
                 assert signal.confidence < 1.0
 
-
 class TestMomentumPositionSizing:
     """Test position sizing logic"""
 
@@ -268,7 +266,6 @@ class TestMomentumPositionSizing:
 
         # Should be capped at max_position_pct
         assert position_size <= strategy.config.max_position_pct
-
 
 class TestMomentumEntryExitConditions:
     """Test entry and exit condition logic"""
@@ -396,7 +393,6 @@ class TestMomentumEntryExitConditions:
             if signal.symbol == 'AAPL':
                 # Confidence should be lower without volume confirmation
                 assert signal.confidence < 1.0
-
 
 class TestMomentumEdgeCases:
     """Test edge cases and error handling"""

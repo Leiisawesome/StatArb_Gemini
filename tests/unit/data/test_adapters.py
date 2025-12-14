@@ -26,7 +26,6 @@ from core_engine.data.feeds.adapters import (
     FeedAdapterFactory,
 )
 
-
 class TestEnums:
     """Test enum classes."""
 
@@ -43,7 +42,6 @@ class TestEnums:
         assert FeedProvider.ALPACA.value == "alpaca"
         assert FeedProvider.POLYGON.value == "polygon"
         assert FeedProvider.INTERACTIVE_BROKERS.value == "ib"
-
 
 class TestDataclasses:
     """Test dataclass structures."""
@@ -79,7 +77,6 @@ class TestDataclasses:
         assert message.symbol == "AAPL"
         assert message.message_type == "trade"
         assert message.data["price"] == 150.0
-
 
 class TestDataFeedAdapter:
     """Test the abstract DataFeedAdapter base class."""
@@ -121,7 +118,6 @@ class TestDataFeedAdapter:
         # Check is_connected method signature
         is_connected_sig = inspect.signature(DataFeedAdapter.is_connected)
         assert 'self' in is_connected_sig.parameters
-
 
 class TestSimulatedFeedAdapter:
     """Test the SimulatedFeedAdapter implementation."""
@@ -237,7 +233,7 @@ class TestSimulatedFeedAdapter:
             if status == AdapterStatus.ACTIVE:
                 raise Exception("Subscribe failed")
             # For other statuses, do nothing
-        
+
         with patch.object(adapter, '_set_status', side_effect=mock_set_status):
             await adapter.connect()
             result = await adapter.subscribe(["AAPL"], ["trade"])
@@ -248,10 +244,10 @@ class TestSimulatedFeedAdapter:
         """Test exception handling in _simulate_data method."""
         await adapter.connect()
         await adapter.subscribe(["AAPL"], ["trade"])
-        
+
         # Wait a bit for simulation to start
         await asyncio.sleep(0.1)
-        
+
         # The simulation should handle exceptions internally
         # This tests the try/except block in _simulate_data
 
@@ -279,21 +275,21 @@ class TestSimulatedFeedAdapter:
         """Test status handler gets called on status changes."""
         handler = MagicMock()
         adapter.add_status_handler(handler)
-        
+
         # Manually call _set_status to trigger handler
         adapter._set_status(AdapterStatus.CONNECTED)
-        
+
         handler.assert_called_with(AdapterStatus.CONNECTED)
 
     def test_error_handler_notification(self, adapter):
         """Test error handler gets called."""
         handler = MagicMock()
         adapter.add_error_handler(handler)
-        
+
         # Manually call _handle_error to trigger handler
         test_error = Exception("Test error")
         adapter._handle_error(test_error)
-        
+
         handler.assert_called_with(test_error)
 
     def test_message_handler_notification(self, adapter):
@@ -301,7 +297,7 @@ class TestSimulatedFeedAdapter:
         from datetime import datetime
         handler = MagicMock()
         adapter.add_message_handler(handler)
-        
+
         # Create a test message
         message = FeedMessage(
             provider=FeedProvider.SIMULATED,
@@ -310,12 +306,11 @@ class TestSimulatedFeedAdapter:
             timestamp=datetime.now(),
             data={"price": 150.0}
         )
-        
+
         # Manually call _handle_message to trigger handler
         adapter._handle_message(message)
-        
-        handler.assert_called_with(message)
 
+        handler.assert_called_with(message)
 
 class TestStubAdapters:
     """Test the stub adapter implementations."""
@@ -375,15 +370,15 @@ class TestStubAdapters:
             api_key=None  # No API key
         )
         adapter = PolygonFeedAdapter(config)
-        
+
         # Should use simulated adapter
         result = await adapter.connect()
         assert result is True
         assert adapter.is_connected()
-        
+
         result = await adapter.subscribe(["AAPL"], ["trade"])
         assert result is True
-        
+
         await adapter.disconnect()
         assert not adapter.is_connected()
 
@@ -391,21 +386,20 @@ class TestStubAdapters:
     async def test_ib_adapter_simulated_methods(self, ib_config):
         """Test InteractiveBrokersFeedAdapter simulated methods."""
         adapter = InteractiveBrokersFeedAdapter(ib_config)
-        
+
         result = await adapter.connect()
         assert result is True
-        
+
         result = await adapter.subscribe(["AAPL"], ["trade"])
         assert result is True
-        
+
         result = await adapter.unsubscribe(["AAPL"])
         assert result is True
-        
+
         assert adapter.is_connected()
-        
+
         await adapter.disconnect()
         assert not adapter.is_connected()
-
 
 class TestFeedAdapterFactory:
     """Test the FeedAdapterFactory."""
@@ -484,7 +478,6 @@ class TestFeedAdapterFactory:
         """Test registering invalid adapter class raises error."""
         with pytest.raises(TypeError, match="Adapter class must extend DataFeedAdapter"):
             FeedAdapterFactory.register(FeedProvider.CUSTOM, str)  # str doesn't extend DataFeedAdapter
-
 
 class TestIntegration:
     """Integration tests for adapter functionality."""

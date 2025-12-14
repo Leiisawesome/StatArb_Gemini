@@ -26,7 +26,6 @@ from core_engine.data.manager import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 # Module-level fixtures
 @pytest.fixture
 def data_config() -> ClickHouseDataConfig:
@@ -68,7 +67,6 @@ def sample_market_data() -> pd.DataFrame:
         })
 
     return pd.DataFrame(data)
-
 
 class TestClickHouseDataConfig:
     """Test suite for ClickHouseDataConfig"""
@@ -114,7 +112,6 @@ class TestClickHouseDataConfig:
         assert config.end_date == "2024-01-15"
 
         logger.info("✅ Backward compatibility test passed")
-
 
 class TestClickHouseDataManager:
     """Comprehensive test suite for ClickHouseDataManager"""
@@ -651,7 +648,6 @@ class TestClickHouseDataManager:
 
         logger.info("✅ Concurrent data access test passed")
 
-
 class TestEnhancedMarketData:
     """Test suite for EnhancedMarketData"""
 
@@ -680,7 +676,6 @@ class TestEnhancedMarketData:
         assert core_data.volume == 1000
 
         logger.info("✅ EnhancedMarketData test passed")
-
 
 class TestDataManagerIntegration:
     """Integration tests for data manager with other components"""
@@ -737,7 +732,6 @@ class TestDataManagerIntegration:
             await data_manager.stop()
 
             logger.info("✅ Full data pipeline integration test passed")
-
 
 if __name__ == "__main__":
     # Run tests with pytest

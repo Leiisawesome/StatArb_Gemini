@@ -31,7 +31,6 @@ import pytest
 from core_engine.trading.strategies.manager import EnhancedStrategyFactory
 from core_engine.type_definitions.strategy import StrategyType
 
-
 class TestIndividualStrategyIntegrations:
     """Integration tests for individual strategy integrations"""
 
@@ -45,7 +44,7 @@ class TestIndividualStrategyIntegrations:
         """
         system = complete_system
         risk_manager = system['risk_manager']
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
 
         # Create momentum strategy
         factory = EnhancedStrategyFactory()
@@ -68,7 +67,6 @@ class TestIndividualStrategyIntegrations:
         Scenario: Momentum strategy consumes enriched data
         Expected: Enriched data consumed correctly
         """
-        system = complete_system
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
 
         # Strategy would consume enriched data
@@ -138,7 +136,6 @@ class TestIndividualStrategyIntegrations:
         """
         Test: Statistical Arbitrage Strategy → DataManager integration
         """
-        system = complete_system
         enriched_data = create_enriched_data(symbols=['AAPL', 'MSFT'], rows=300)
 
         # Strategy would consume enriched data for pairs
@@ -242,7 +239,6 @@ class TestIndividualStrategyIntegrations:
         """
         Test: Breakout Strategy → DataManager integration
         """
-        system = complete_system
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
 
         # Strategy would consume enriched data
@@ -348,7 +344,6 @@ class TestIndividualStrategyIntegrations:
         """
         Test: Arbitrage Strategy → DataManager integration
         """
-        system = complete_system
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
 
         # Strategy would consume enriched data

@@ -22,7 +22,6 @@ import pytest
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestCircuitBreakers:
     """Integration tests for circuit breakers"""
 

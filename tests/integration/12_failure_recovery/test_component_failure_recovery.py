@@ -35,8 +35,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestComponentFailureRecovery:
     """Integration tests for component failure recovery"""
 

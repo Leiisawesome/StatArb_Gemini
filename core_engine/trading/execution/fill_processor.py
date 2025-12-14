@@ -17,7 +17,6 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class FillStatus(Enum):
     """Fill processing status"""
     PENDING = "pending"
@@ -27,7 +26,6 @@ class FillStatus(Enum):
     REJECTED = "rejected"
     CANCELLED = "cancelled"
 
-
 class ReconciliationStatus(Enum):
     """Trade reconciliation status"""
     MATCHED = "matched"
@@ -36,7 +34,6 @@ class ReconciliationStatus(Enum):
     DISPUTED = "disputed"
     PENDING_INVESTIGATION = "pending_investigation"
 
-
 class ReportingFrequency(Enum):
     """Reporting frequency options"""
     REAL_TIME = "real_time"
@@ -44,7 +41,6 @@ class ReportingFrequency(Enum):
     HOURLY = "hourly"
     DAILY = "daily"
     WEEKLY = "weekly"
-
 
 @dataclass
 class TradeExecution:
@@ -96,7 +92,6 @@ class TradeExecution:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class PositionUpdate:
     """Position update from trade execution"""
@@ -115,7 +110,6 @@ class PositionUpdate:
     commission: float = 0.0
     fees: float = 0.0
 
-
 @dataclass
 class FillEvent:
     """Fill event data"""
@@ -126,7 +120,6 @@ class FillEvent:
     timestamp: datetime
     commission: float = 0.0
 
-
 @dataclass
 class FillMetrics:
     """Fill processing metrics"""
@@ -134,7 +127,6 @@ class FillMetrics:
     total_quantity: float = 0.0
     average_price: float = 0.0
     total_commission: float = 0.0
-
 
 @dataclass
 class FillValidationRule:
@@ -159,7 +151,6 @@ class FillValidationRule:
     # Enabled/disabled
     enabled: bool = True
     priority: int = 1  # Higher number = higher priority
-
 
 class FillValidator:
     """Validates trade fills against business rules"""
@@ -375,7 +366,6 @@ class FillValidator:
                 return True
             return False
 
-
 class TradeReconciler:
     """Reconciles trades with counterparties and venues"""
 
@@ -537,7 +527,6 @@ class TradeReconciler:
         with self._lock:
             return list(self._discrepancies.values())
 
-
 class PositionManager:
     """
     ⚠️ DEPRECATED: This class is a legacy duplicate of position tracking.
@@ -688,7 +677,6 @@ class PositionManager:
                         'avg_cost': self._avg_costs[account][symbol]
                     }
             return positions
-
 
 class TradeReporter:
     """Generates trade reports and analytics"""
@@ -890,7 +878,6 @@ class TradeReporter:
             filtered = [e for e in filtered if e.strategy_id == strategy_id]
 
         return filtered
-
 
 class FillProcessor:
     """

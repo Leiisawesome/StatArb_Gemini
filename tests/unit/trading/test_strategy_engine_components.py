@@ -34,7 +34,6 @@ from core_engine.trading.strategies.strategy_validator import (
 logging.basicConfig(level=logging.WARNING)  # Reduce noise
 logger = logging.getLogger(__name__)
 
-
 class SimpleTestStrategy(BaseStrategy):
     """Simple test strategy for unit testing"""
 
@@ -57,7 +56,6 @@ class SimpleTestStrategy(BaseStrategy):
     def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         pass
 
-
 @pytest.fixture
 def sample_market_data():
     """Create simple sample market data"""
@@ -72,14 +70,12 @@ def sample_market_data():
     })
     return {'TEST': data}
 
-
 @pytest.fixture
 def temp_dir():
     """Create temporary directory for testing"""
     temp_dir = tempfile.mkdtemp(prefix="test_phase_2_4_")
     yield Path(temp_dir)
     shutil.rmtree(temp_dir)
-
 
 class TestStrategyExecutionEngineBasics:
     """Basic tests for StrategyExecutionEngine"""
@@ -153,7 +149,6 @@ class TestStrategyExecutionEngineBasics:
         assert 'component_type' in status
         assert 'initialized' in status
         assert 'operational' in status
-
 
 class TestStrategyRegistryBasics:
     """Basic tests for EnhancedStrategyRegistry"""
@@ -251,7 +246,6 @@ class TestStrategyRegistryBasics:
             assert strategy_id is not None
             assert strategy_id in registry.strategies
 
-
 class TestStrategyValidatorBasics:
     """Basic tests for EnhancedStrategyValidator"""
 
@@ -348,7 +342,6 @@ class TestStrategyValidatorBasics:
         assert hasattr(result, 'overall_status')
         assert result.overall_score >= 0
 
-
 class TestIntegrationWorkflow:
     """Test integration between components"""
 
@@ -434,7 +427,6 @@ class TestIntegrationWorkflow:
         assert engine_health['component_type'] == 'StrategyExecutionEngine'
         assert registry_health['component_type'] == 'EnhancedStrategyRegistry'
         assert validator_health['component_type'] == 'EnhancedStrategyValidator'
-
 
 if __name__ == "__main__":
     # Run tests with pytest

@@ -22,7 +22,6 @@ from core_engine.system.system_validator import SystemValidator, ValidationLevel
 from core_engine.system.orchestrator_monitoring import SystemMonitor
 from core_engine.system.interfaces import ISystemComponent
 
-
 async def test_system_validator_interface():
     """Test SystemValidator implements ISystemComponent"""
     print("\n" + "="*80)
@@ -67,7 +66,6 @@ async def test_system_validator_interface():
     print("✅ Test 1.6: stop() works correctly")
 
     print("\n🎉 SystemValidator: ALL TESTS PASSED (6/6)")
-
 
 async def test_system_monitor_interface():
     """Test SystemMonitor implements ISystemComponent"""
@@ -120,7 +118,6 @@ async def test_system_monitor_interface():
 
     print("\n🎉 SystemMonitor: ALL TESTS PASSED (6/6)")
 
-
 async def main():
     """Run all tests"""
     print("\n" + "="*80)
@@ -166,7 +163,6 @@ async def main():
     else:
         print(f"\n⚠️  {failed_tests} test(s) failed. Please review.")
         return 1
-
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())

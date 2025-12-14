@@ -67,14 +67,12 @@ from .strategy_engine import (
 
 logger = logging.getLogger(__name__)
 
-
 class StrategyHealthStatus(Enum):
     """Strategy health status levels"""
     HEALTHY = "healthy"
     WARNING = "warning"
     CRITICAL = "critical"
     FAILED = "failed"
-
 
 @dataclass
 class StrategyPerformanceMetrics:
@@ -106,7 +104,6 @@ class StrategyPerformanceMetrics:
     warning_count: int = 0
     last_error: Optional[str] = None
     last_health_check: Optional[datetime] = None
-
 
 class EnhancedBaseStrategy(ISystemComponent, ABC):
     """

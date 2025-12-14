@@ -35,7 +35,6 @@ from core_engine.data.validation.validator import (
     AnomalyType
 )
 
-
 class TestClickHouseDataConfig:
     """Test suite for ClickHouseDataConfig class."""
 
@@ -50,7 +49,6 @@ class TestClickHouseDataConfig:
         assert config.clickhouse_database == "polygon_data"
         assert config.enable_caching is True
         assert config.cache_ttl == 300
-
 
 class TestEnhancedMarketData:
     """Test suite for EnhancedMarketData class."""
@@ -79,14 +77,12 @@ class TestEnhancedMarketData:
         assert data.transactions == 500
         assert data.source == "clickhouse"
 
-
 @pytest.fixture
 def data_manager():
     """Fixture for ClickHouseDataManager instance."""
     config = ClickHouseDataConfig()
     with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=True):
         return ClickHouseDataManager(config)
-
 
 class TestClickHouseDataManager:
     """Test suite for ClickHouseDataManager class."""
@@ -111,7 +107,6 @@ class TestClickHouseDataManager:
             assert result is True
             mock_post.assert_called_once()
 
-
 class TestAlternativeDataPoint:
     """Test suite for AlternativeDataPoint class."""
 
@@ -132,7 +127,6 @@ class TestAlternativeDataPoint:
         assert data.provider == DataProvider.TWITTER
         assert data.raw_content == "Great earnings report from Apple!"
         assert data.structured_data == {"sentiment": 0.75, "confidence": 0.85}
-
 
 class TestMarketDataPoint:
     """Test suite for MarketDataPoint class."""
@@ -161,7 +155,6 @@ class TestMarketDataPoint:
         assert data.ask_price == 149.55
         assert data.bid_size == 100
         assert data.ask_size == 200
-
 
 class TestValidationResult:
     """Test suite for ValidationResult class."""
@@ -209,7 +202,6 @@ class TestValidationResult:
         assert result.anomalies == []
         assert result.validation_time_ms == 0.0
         assert isinstance(result.timestamp, datetime)
-
 
 class TestDataQualityMetrics:
     """Test suite for DataQualityMetrics class."""

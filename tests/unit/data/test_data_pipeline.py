@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-
 class TestDataConfigurationEnums:
     """Test data configuration enums and types"""
 
@@ -50,7 +49,6 @@ class TestDataConfigurationEnums:
         assert config.enable_caching is True
         assert config.cache_ttl == 300
 
-
 class TestDataManagerImports:
     """Test data manager component imports"""
 
@@ -67,7 +65,6 @@ class TestDataManagerImports:
         except (ImportError, AttributeError):
             # Some modules may not have this class
             pytest.skip("AlternativeDataHandler not found")
-
 
 class TestDataStructures:
     """Test data structures and dataframes"""
@@ -106,7 +103,6 @@ class TestDataStructures:
 
         # Validate volume > 0
         assert (data['volume'] > 0).all()
-
 
 class TestDataTransformations:
     """Test data transformation functions"""
@@ -147,7 +143,6 @@ class TestDataTransformations:
         resampled = data.resample('5min').last()
         assert len(resampled) <= len(data)
 
-
 class TestDataCaching:
     """Test data caching functionality"""
 
@@ -172,7 +167,6 @@ class TestDataCaching:
             enable_caching=False
         )
         assert config.enable_caching is False
-
 
 class TestDataValidation:
     """Test data validation functions"""
@@ -200,7 +194,6 @@ class TestDataValidation:
             assert isinstance(interval, str)
             assert len(interval) > 0
 
-
 class TestDataFeeds:
     """Test data feed components"""
 
@@ -225,7 +218,6 @@ class TestDataFeeds:
         assert status['connected'] is True
         assert status['error_count'] == 0
 
-
 class TestAlternativeData:
     """Test alternative data handling"""
 
@@ -247,7 +239,6 @@ class TestAlternativeData:
         assert 'sentiment_score' in sentiment_data.columns
         assert (sentiment_data['sentiment_score'] >= 0).all()
         assert (sentiment_data['sentiment_score'] <= 1).all()
-
 
 class TestDataQuality:
     """Test data quality checks"""
@@ -283,7 +274,6 @@ class TestDataQuality:
         duplicates = data.duplicated()
         assert duplicates.sum() > 0
 
-
 class TestDataAggregation:
     """Test data aggregation functions"""
 
@@ -304,7 +294,6 @@ class TestDataAggregation:
 
         vwap = (data['price'] * data['volume']).sum() / data['volume'].sum()
         assert pytest.approx(vwap, 0.01) == 101.0
-
 
 class TestDataPipelineIntegration:
     """Test data pipeline integration"""
@@ -338,7 +327,6 @@ class TestDataPipelineIntegration:
         assert len(results) == 3
         assert all(isinstance(df, pd.DataFrame) for df in results.values())
 
-
 # Performance test for data operations
 class TestDataPerformance:
     """Test data operation performance"""
@@ -362,7 +350,6 @@ class TestDataPerformance:
 
         # Should complete quickly (< 1 second)
         assert duration < 1.0
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

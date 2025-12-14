@@ -33,7 +33,6 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 
-
 class MonteCarloSimulation(BaseExperiment):
     """
     Monte Carlo simulation experiment.
@@ -307,7 +306,6 @@ class MonteCarloSimulation(BaseExperiment):
                 'simulations': mc_results,
                 'analysis': analysis
             }, f, indent=2, default=str)
-
 
 if __name__ == "__main__":
     # Example usage

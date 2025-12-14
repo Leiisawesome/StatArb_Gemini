@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestAnalyticsManagerIntegration:
     """Integration tests for analytics manager integration"""
 

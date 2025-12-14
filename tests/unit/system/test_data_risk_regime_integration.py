@@ -24,7 +24,6 @@ from core_engine.regime.engine import (
     EnhancedRegimeEngine
 )
 
-
 class TestIntegrationWorkflow:
     """Test suite for integration of enhanced data and risk components"""
 
@@ -166,7 +165,6 @@ class TestIntegrationWorkflow:
         # Cleanup
         for component in [data_manager, risk_manager, regime_engine]:
             await component.stop()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

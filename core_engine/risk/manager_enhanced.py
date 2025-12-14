@@ -13,7 +13,6 @@ from dataclasses import dataclass, field, asdict
 import time
 from collections import deque
 
-
 # Import centralized risk utility configs (Rule 1 Section 7)
 
 # Import risk components
@@ -24,7 +23,6 @@ from .limit_monitor import LimitMonitor, RiskLimit, LimitBreach, AlertSeverity
 from .correlation_analyzer import CorrelationAnalyzer, CorrelationMatrix
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class RiskSnapshot:
@@ -40,7 +38,6 @@ class RiskSnapshot:
     risk_score: float  # Overall risk score 0-100
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class RiskAlert:
     """Risk alert notification"""
@@ -51,7 +48,6 @@ class RiskAlert:
     details: Dict[str, Any]
     timestamp: datetime = field(default_factory=datetime.now)
     acknowledged: bool = False
-
 
 class EnhancedRiskManager:
     """

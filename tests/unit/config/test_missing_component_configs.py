@@ -49,7 +49,6 @@ from core_engine.config.component_config import (
     PerformanceConfig
 )
 
-
 class TestAnalyticsConfig:
     """Test suite for AnalyticsConfig class."""
 
@@ -113,7 +112,6 @@ class TestAnalyticsConfig:
         assert hasattr(config, 'benchmark')
         assert hasattr(config, 'reporting')
 
-
 class TestAttributionAnalyticsConfig:
     """Test suite for AttributionAnalyticsConfig class."""
 
@@ -153,7 +151,6 @@ class TestAttributionAnalyticsConfig:
         # Test invalid factor_model
         with pytest.raises(ValueError, match="factor_model must be one of"):
             AttributionAnalyticsConfig(factor_model="invalid")
-
 
 class TestBenchmarkAnalyticsConfig:
     """Test suite for BenchmarkAnalyticsConfig class."""
@@ -201,7 +198,6 @@ class TestBenchmarkAnalyticsConfig:
 
         # Test that default_benchmarks is not empty
         assert len(config.default_benchmarks) > 0
-
 
 class TestReportGenerationConfig:
     """Test suite for ReportGenerationConfig class."""
@@ -256,7 +252,6 @@ class TestReportGenerationConfig:
         # Test invalid default_format
         with pytest.raises(ValueError, match="default_format must be one of"):
             ReportGenerationConfig(default_format="invalid")
-
 
 class TestMetricsCalculatorConfig:
     """Test suite for MetricsCalculatorConfig class."""
@@ -325,7 +320,6 @@ class TestMetricsCalculatorConfig:
         with pytest.raises(ValueError, match="var_confidence_level must be \\(0, 1\\)"):
             MetricsCalculatorConfig(var_confidence_level=1.5)
 
-
 class TestPerformanceAnalyticsConfig:
     """Test suite for PerformanceAnalyticsConfig class."""
 
@@ -383,7 +377,6 @@ class TestPerformanceAnalyticsConfig:
         # Test invalid annualization_factor
         with pytest.raises(ValueError, match="annualization_factor must be \\[200, 365\\]"):
             PerformanceAnalyticsConfig(annualization_factor=100)
-
 
 class TestExecutionConfig:
     """Test suite for ExecutionConfig class."""
@@ -444,7 +437,6 @@ class TestExecutionConfig:
         # Test composition pattern
         assert hasattr(config.timing, 'health_check_interval')
 
-
 class TestPortfolioConfig:
     """Test suite for PortfolioConfig class."""
 
@@ -491,7 +483,6 @@ class TestPortfolioConfig:
         # Test composition pattern
         assert hasattr(config.position_limits, 'max_position_size')
         assert hasattr(config.timing, 'health_check_interval')
-
 
 class TestRegimeConfig:
     """Test suite for RegimeConfig class."""
@@ -546,7 +537,6 @@ class TestRegimeConfig:
         assert hasattr(config, 'confidence_threshold')
         assert hasattr(config, 'update_frequency')
         assert hasattr(config, 'update_frequency_hours')
-
 
 class TestSignalConfig:
     """Test suite for SignalConfig class."""
@@ -626,7 +616,6 @@ class TestSignalConfig:
         assert hasattr(config, 'rsi_overbought_threshold')
         assert hasattr(config, 'zscore_threshold')
 
-
 class TestFeatureConfig:
     """Test suite for FeatureConfig class."""
 
@@ -684,7 +673,6 @@ class TestFeatureConfig:
         assert hasattr(config, 'lookback_periods')
         assert hasattr(config, 'enable_scaling')
         assert hasattr(config, 'enable_caching')
-
 
 class TestIndicatorConfig:
     """Test suite for IndicatorConfig class."""
@@ -773,7 +761,6 @@ class TestIndicatorConfig:
         assert hasattr(config, 'adx_period')
         assert hasattr(config, 'performance')
 
-
 class TestConnectionConfig:
     """Test suite for ConnectionConfig class."""
 
@@ -824,7 +811,6 @@ class TestConnectionConfig:
         with pytest.raises(ValueError, match="max_retry_attempts must be non-negative"):
             ConnectionConfig(max_retry_attempts=-1)
 
-
 class TestCachingConfig:
     """Test suite for CachingConfig class."""
 
@@ -858,8 +844,6 @@ class TestCachingConfig:
         # Test invalid max_cache_size
         with pytest.raises(ValueError, match="max_cache_size must be positive"):
             CachingConfig(max_cache_size=0)
-
-
 
 class TestDataValidationConfig:
     """Test suite for DataValidationConfig class."""
@@ -935,7 +919,6 @@ class TestDataValidationConfig:
         with pytest.raises(ValueError, match="outlier_threshold_std must be positive"):
             DataValidationConfig(outlier_threshold_std=0)
 
-
 class TestFeedManagementConfig:
     """Test suite for FeedManagementConfig class."""
 
@@ -995,7 +978,6 @@ class TestFeedManagementConfig:
         with pytest.raises(ValueError, match="heartbeat_interval must be positive"):
             FeedManagementConfig(heartbeat_interval=0)
 
-
 class TestDataPerformanceConfig:
     """Test suite for DataPerformanceConfig class."""
 
@@ -1039,7 +1021,6 @@ class TestDataPerformanceConfig:
         # Test invalid data_retention_days
         with pytest.raises(ValueError, match="data_retention_days must be positive"):
             DataPerformanceConfig(data_retention_days=0)
-
 
 class TestCorrelationConfig:
     """Test suite for CorrelationConfig class."""
@@ -1086,7 +1067,6 @@ class TestCorrelationConfig:
         assert hasattr(config, 'regime_detection_method')
         assert hasattr(config, 'n_regimes')
         assert hasattr(config, 'enable_tail_dependence')
-
 
 class TestExposureConfig:
     """Test suite for ExposureConfig class."""
@@ -1138,7 +1118,6 @@ class TestExposureConfig:
         assert hasattr(config, 'max_sector_exposure')
         assert hasattr(config, 'max_single_position')
 
-
 class TestVarConfig:
     """Test suite for VarConfig class."""
 
@@ -1188,8 +1167,6 @@ class TestVarConfig:
         assert hasattr(config, 'enable_cvar')
         assert hasattr(config, 'cache_results')
         assert hasattr(config, 'cache_ttl_seconds')
-
-
 
 class TestStressTestConfig:
     """Test suite for StressTestConfig class."""
@@ -1241,7 +1218,6 @@ class TestStressTestConfig:
         assert hasattr(config, 'correlation_increase')
         assert hasattr(config, 'liquidity_reduction')
 
-
 class TestLimitConfig:
     """Test suite for LimitConfig class."""
 
@@ -1288,8 +1264,6 @@ class TestLimitConfig:
         assert hasattr(config, 'warning_threshold')
         assert hasattr(config, 'critical_threshold')
 
-
-
 class TestTimingConfig:
     """Test suite for TimingConfig class."""
 
@@ -1327,8 +1301,6 @@ class TestTimingConfig:
             assert len(w) == 1
             assert "update_frequency 'invalid' not in standard frequencies" in str(w[0].message)
 
-
-
 class TestPerformanceConfig:
     """Test suite for PerformanceConfig class."""
 
@@ -1365,7 +1337,6 @@ class TestPerformanceConfig:
         # Just test that it can be created
         config = PerformanceConfig()
         assert config.enable_caching is True
-
 
 class TestComponentConfigIntegration:
     """Integration tests for component configs."""

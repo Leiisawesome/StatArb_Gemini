@@ -14,7 +14,6 @@ from typing import Dict, List, Any
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 from core_engine.system.unified_execution_engine import ExecutionAuthorization, ExecutionRequest, ExecutionAlgorithm, ExecutionUrgency
 
-
 # ========================================
 # MARKET DATA FIXTURES
 # ========================================
@@ -43,7 +42,6 @@ def sample_market_data() -> Dict[str, pd.DataFrame]:
 
     return market_data
 
-
 @pytest.fixture
 def sample_intraday_data() -> pd.DataFrame:
     """Generate sample intraday data"""
@@ -63,14 +61,12 @@ def sample_intraday_data() -> pd.DataFrame:
         'symbol': 'AAPL'
     }).set_index('timestamp')
 
-
 @pytest.fixture
 def sample_returns_series() -> pd.Series:
     """Generate sample returns series"""
     dates = pd.date_range(end=datetime.now(), periods=252, freq='D')  # 1 year
     returns = np.random.randn(252) * 0.01  # 1% daily volatility
     return pd.Series(returns, index=dates)
-
 
 # ========================================
 # SIGNAL FIXTURES
@@ -100,7 +96,6 @@ def sample_signals() -> List[StrategySignal]:
 
     return signals
 
-
 @pytest.fixture
 def high_confidence_signal() -> StrategySignal:
     """Generate a high-confidence signal"""
@@ -122,7 +117,6 @@ def high_confidence_signal() -> StrategySignal:
         signal_reason='Strong momentum breakout'
     )
 
-
 @pytest.fixture
 def low_confidence_signal() -> StrategySignal:
     """Generate a low-confidence signal"""
@@ -140,7 +134,6 @@ def low_confidence_signal() -> StrategySignal:
         signal_source='mean_reversion_strategy',
         signal_reason='Weak mean reversion signal'
     )
-
 
 # ========================================
 # POSITION FIXTURES
@@ -179,7 +172,6 @@ def sample_positions() -> Dict[str, Dict[str, Any]]:
         }
     }
 
-
 # ========================================
 # EXECUTION FIXTURES
 # ========================================
@@ -205,7 +197,6 @@ def sample_execution_authorization() -> ExecutionAuthorization:
         is_valid=True
     )
 
-
 @pytest.fixture
 def sample_execution_request(sample_execution_authorization) -> ExecutionRequest:
     """Generate sample execution request"""
@@ -219,7 +210,6 @@ def sample_execution_request(sample_execution_authorization) -> ExecutionRequest
         min_fill_size=10,
         max_slice_size=50
     )
-
 
 # ========================================
 # PERFORMANCE DATA FIXTURES
@@ -245,7 +235,6 @@ def sample_performance_data() -> Dict[str, Any]:
         'losing_trades': 35
     }
 
-
 # ========================================
 # RISK DATA FIXTURES
 # ========================================
@@ -263,7 +252,6 @@ def sample_risk_metrics() -> Dict[str, float]:
         'beta_to_market': 0.9,
         'correlation_to_spy': 0.75
     }
-
 
 # ========================================
 # REGIME DATA FIXTURES
@@ -284,7 +272,6 @@ def sample_regime_data() -> Dict[str, Any]:
             {'regime': 'normal_volatility', 'duration': 45, 'end_date': datetime.now()}
         ]
     }
-
 
 # ========================================
 # ORDER BOOK FIXTURES

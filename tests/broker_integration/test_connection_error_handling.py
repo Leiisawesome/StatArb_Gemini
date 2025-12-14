@@ -16,7 +16,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
-
 def test_ibkr_connection_errors():
     """Test IBKR connection error handling"""
     print("=" * 60)
@@ -132,7 +131,6 @@ def test_ibkr_connection_errors():
     print("   ✅ Valid connection verified")
     print("   ✅ Error code handling implemented")
     print("\n📝 IBKR Connection Error Handling Complete! ✨")
-
 
 if __name__ == "__main__":
     test_ibkr_connection_errors()

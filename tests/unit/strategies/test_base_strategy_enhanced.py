@@ -38,7 +38,6 @@ from core_engine.trading.strategies.strategy_engine import (
     StrategyState
 )
 
-
 class MockStrategy(EnhancedBaseStrategy):
     """Mock strategy implementation for testing"""
 
@@ -74,7 +73,6 @@ class MockStrategy(EnhancedBaseStrategy):
             'mock_setting': 'test_value'
         }
 
-
 @pytest.fixture
 def strategy_config():
     """Configuration for test strategy"""
@@ -87,14 +85,12 @@ def strategy_config():
         paper_trading_mode=True
     )
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Mock risk manager for testing"""
     risk_manager = Mock()
     risk_manager.process_signal = AsyncMock(return_value=True)
     return risk_manager
-
 
 @pytest.fixture
 def sample_market_data():
@@ -118,14 +114,12 @@ def sample_market_data():
     }
     return data
 
-
 @pytest.fixture
 def mock_strategy(strategy_config, mock_risk_manager):
     """Mock strategy instance for testing"""
     strategy = MockStrategy(strategy_config)
     strategy.set_risk_manager(mock_risk_manager)
     return strategy
-
 
 class TestEnhancedBaseStrategyInterface:
     """Test ISystemComponent interface compliance"""
@@ -230,7 +224,6 @@ class TestEnhancedBaseStrategyInterface:
         assert status['component_type'] == 'Strategy'
         assert status['strategy_id'] == 'test_strategy_001'
 
-
 class TestStrategyLifecycle:
     """Test strategy lifecycle management"""
 
@@ -287,7 +280,6 @@ class TestStrategyLifecycle:
         assert mock_strategy.last_error is not None
         assert "Mock initialization error" in mock_strategy.last_error
         assert mock_strategy.performance_metrics.error_count > 0
-
 
 class TestPerformanceTracking:
     """Test performance tracking functionality"""
@@ -362,7 +354,6 @@ class TestPerformanceTracking:
         # Should be 2/3 = 0.667
         expected_rate = 2.0 / 3.0
         assert abs(mock_strategy._calculate_success_rate() - expected_rate) < 0.001
-
 
 class TestHealthMonitoring:
     """Test health monitoring functionality"""
@@ -449,7 +440,6 @@ class TestHealthMonitoring:
         assert warning_entry['message'] == "Test warning message"
         assert warning_entry['strategy_id'] == mock_strategy.strategy_id
 
-
 class TestRiskManagementIntegration:
     """Test risk management integration"""
 
@@ -506,7 +496,6 @@ class TestRiskManagementIntegration:
         # Stop strategy - should handle gracefully without risk manager
         result = await strategy.stop()
         assert result is True
-
 
 class TestUtilityMethods:
     """Test utility methods"""
@@ -587,7 +576,6 @@ class TestUtilityMethods:
         assert summary['strategy_id'] == mock_strategy.strategy_id
         assert summary['strategy_type'] == mock_strategy.strategy_type.value
 
-
 class TestStrategyIntegration:
     """Integration tests for enhanced base strategy"""
 
@@ -649,7 +637,6 @@ class TestStrategyIntegration:
         assert isinstance(results[0], list)  # signals
         assert results[1] is None  # update_positions returns None
         assert isinstance(results[2], dict)  # health check
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -40,14 +40,12 @@ from .benchmark_analyzer import BenchmarkAnalyzer, BenchmarkConfig
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class AnalyticsMode(Enum):
     """Analytics operation modes"""
     REALTIME = "realtime"
     BATCH = "batch"
     SCHEDULED = "scheduled"
     ON_DEMAND = "on_demand"
-
 
 class AnalyticsPriority(Enum):
     """Analytics task priorities"""
@@ -56,14 +54,12 @@ class AnalyticsPriority(Enum):
     NORMAL = "normal"
     LOW = "low"
 
-
 class AnalyticsStatus(Enum):
     """Analytics system status"""
     RUNNING = "running"
     PAUSED = "paused"
     ERROR = "error"
     MAINTENANCE = "maintenance"
-
 
 @dataclass
 class AnalyticsConfig:
@@ -108,7 +104,6 @@ class AnalyticsConfig:
     archive_old_results: bool = True
     max_archive_days: int = 90
 
-
 @dataclass
 class AnalyticsTask:
     """Analytics task definition"""
@@ -139,7 +134,6 @@ class AnalyticsTask:
     status: str = "pending"
     progress: float = 0.0
 
-
 @dataclass
 class AnalyticsResults:
     """Comprehensive analytics results"""
@@ -164,7 +158,6 @@ class AnalyticsResults:
     execution_time: float = 0.0
     data_points: int = 0
     components_analyzed: List[str] = field(default_factory=list)
-
 
 class TaskScheduler:
     """Analytics task scheduler"""
@@ -249,7 +242,6 @@ class TaskScheduler:
                 }
 
         return None
-
 
 class AlertSystem:
     """Analytics alert system"""
@@ -355,7 +347,6 @@ class AlertSystem:
 
         return False
 
-
 class DataValidator:
     """Analytics data validator"""
 
@@ -438,7 +429,6 @@ class DataValidator:
             quality_score -= jump_ratio * 0.2
 
         return max(quality_score, 0.0)
-
 
 class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     """

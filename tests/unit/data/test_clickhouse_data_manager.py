@@ -19,7 +19,6 @@ from core_engine.data.manager import (
     ClickHouseDataManager, ClickHouseDataConfig
 )
 
-
 class TestClickHouseDataManagerBasics:
     """Test suite for ClickHouse Data Manager basic functionality"""
 
@@ -88,7 +87,7 @@ class TestClickHouseDataManagerBasics:
         with patch('core_engine.data.manager.ClickHouseDataManager._test_connection', return_value=False):
             with pytest.raises(ClickHouseConnectionError):
                 # Exception should be raised during __init__, not initialize()
-                manager = ClickHouseDataManager(data_config)
+                ClickHouseDataManager(data_config)
 
     @pytest.mark.asyncio
     async def test_data_manager_health_check_with_clickhouse(self, data_manager):
@@ -115,7 +114,6 @@ class TestClickHouseDataManagerBasics:
         assert 'configuration' in status
         # ClickHouseDataManager has different status structure
         assert 'cache_stats' in status
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

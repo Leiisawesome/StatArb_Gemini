@@ -1,7 +1,6 @@
 from core_engine.config import FeatureConfig
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 
-
 def test_feature_adapt_to_liquidity_modes():
     engine = EnhancedFeatureEngineer(FeatureConfig())
     base_method = engine.config.normalization_method

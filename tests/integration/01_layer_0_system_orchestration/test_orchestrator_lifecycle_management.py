@@ -21,7 +21,6 @@ from core_engine.system.orchestrator_components import ComponentLayer, Authority
 from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.config.component_config import RegimeConfig
 
-
 # =============================================================================
 # LIFECYCLE MANAGEMENT TESTS
 # =============================================================================

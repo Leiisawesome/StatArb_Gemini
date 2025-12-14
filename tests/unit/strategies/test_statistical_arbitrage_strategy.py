@@ -20,7 +20,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestStatisticalArbitrageSignalGeneration:
     """Test statistical arbitrage-specific signal calculation logic"""
 
@@ -74,7 +73,6 @@ class TestStatisticalArbitrageSignalGeneration:
 
         # Strategy should analyze pairs and select cointegrated ones
         assert isinstance(signals, list)
-
 
 class TestStatisticalArbitragePositionSizing:
     """Test position sizing logic"""
@@ -142,7 +140,6 @@ class TestStatisticalArbitragePositionSizing:
         # StatisticalArbitrageConfig uses base_position_size, check against reasonable limit
         max_allowed = getattr(strategy.config, 'base_position_size', 0.1) * 3  # Allow up to 3x base
         assert position_size <= max_allowed
-
 
 class TestStatisticalArbitrageEntryExitConditions:
     """Test entry and exit condition logic"""

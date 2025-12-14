@@ -69,7 +69,6 @@ ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
 
-
 @dataclass
 class PolygonDelayedFeedConfig(FeedAdapterConfig):
     """Configuration for Polygon delayed WebSocket feed"""
@@ -77,7 +76,6 @@ class PolygonDelayedFeedConfig(FeedAdapterConfig):
     reconnect_delay: float = 5.0
     max_reconnect_attempts: int = 10
     heartbeat_interval: float = 30.0
-
 
 class PolygonDelayedFeedAdapter(DataFeedAdapter):
     """

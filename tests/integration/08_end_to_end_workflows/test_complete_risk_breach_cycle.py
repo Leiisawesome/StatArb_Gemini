@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestCompleteRiskBreachCycle:
     """Integration tests for complete risk breach cycle"""
 

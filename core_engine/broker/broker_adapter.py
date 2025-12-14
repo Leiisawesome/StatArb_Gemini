@@ -19,7 +19,6 @@ from unittest.mock import Mock
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class BrokerType(Enum):
     """Supported broker types"""
     INTERACTIVE_BROKERS = "interactive_brokers"
@@ -32,7 +31,6 @@ class BrokerType(Enum):
     PRIME_BROKERAGE = "prime_brokerage"
     CRYPTO_EXCHANGE = "crypto_exchange"
 
-
 class ConnectionStatus(Enum):
     """Connection status"""
     DISCONNECTED = "disconnected"
@@ -43,14 +41,12 @@ class ConnectionStatus(Enum):
     ERROR = "error"
     RECONNECTING = "reconnecting"
 
-
 class OrderAction(Enum):
     """Order actions"""
     BUY = "BUY"
     SELL = "SELL"
     SHORT = "SHORT"
     COVER = "COVER"
-
 
 class OrderType(Enum):
     """Order types"""
@@ -63,7 +59,6 @@ class OrderType(Enum):
     ICEBERG = "ICEBERG"
     HIDDEN = "HIDDEN"
 
-
 class TimeInForce(Enum):
     """Time in force"""
     DAY = "DAY"
@@ -71,7 +66,6 @@ class TimeInForce(Enum):
     FOK = "FOK"  # Fill or Kill
     GTC = "GTC"  # Good Till Cancel
     GTD = "GTD"  # Good Till Date
-
 
 @dataclass
 class BrokerCredentials:
@@ -97,7 +91,6 @@ class BrokerCredentials:
     paper_trading: bool = False
     sandbox_mode: bool = False
     extra_params: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class StandardOrder:
@@ -129,7 +122,6 @@ class StandardOrder:
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     submitted_at: Optional[datetime] = None
-
 
 @dataclass
 class StandardExecution:
@@ -163,7 +155,6 @@ class StandardExecution:
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class StandardPosition:
     """Standardized position representation"""
@@ -180,7 +171,6 @@ class StandardPosition:
 
     # Timestamps
     last_updated: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class StandardAccount:
@@ -199,7 +189,6 @@ class StandardAccount:
     # Metadata
     currency: str = "USD"
     last_updated: datetime = field(default_factory=datetime.now)
-
 
 class BrokerAdapterInterface(ABC):
     """Abstract base class for broker adapters"""
@@ -261,7 +250,6 @@ class BrokerAdapterInterface(ABC):
             except Exception as e:
                 logger.error(f"Error in event callback: {e}")
 
-
 # ============================================================================
 # DEPRECATED ADAPTER CLASSES REMOVED
 # ============================================================================
@@ -276,7 +264,6 @@ class BrokerAdapterInterface(ABC):
 # For production trading, import directly from the adapters module:
 #   from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 # ============================================================================
-
 
 class MockBrokerAdapter(BrokerAdapterInterface):
     """Mock broker adapter for testing"""
@@ -399,7 +386,6 @@ class MockBrokerAdapter(BrokerAdapterInterface):
             'timestamp': datetime.now()
         }
 
-
 class BrokerAdapterFactory:
     """
     Factory for creating broker adapters
@@ -442,7 +428,6 @@ class BrokerAdapterFactory:
     def get_supported_brokers(cls) -> List[BrokerType]:
         """Get list of supported broker types"""
         return list(cls._adapters.keys())
-
 
 class BrokerAdapter:
     """

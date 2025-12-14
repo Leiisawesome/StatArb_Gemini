@@ -28,7 +28,6 @@ from core_engine.system.unified_execution_engine import ExecutionUrgency
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 # Module-level fixtures
 @pytest.fixture
 def risk_manager_config() -> Dict[str, Any]:
@@ -63,7 +62,6 @@ def sample_trading_request() -> TradingDecisionRequest:
         regime_confidence=0.9,
         urgency=ExecutionUrgency.NORMAL
     )
-
 
 class TestCentralRiskManager:
     """Comprehensive test suite for CentralRiskManager"""
@@ -530,7 +528,6 @@ class TestCentralRiskManager:
 
         logger.info("✅ Risk status reporting test passed")
 
-
 # ========================================
 # INTEGRATION TEST FIXTURES
 # ========================================
@@ -545,7 +542,6 @@ def mock_execution_engine():
         avg_fill_price=150.0
     )
     return mock_engine
-
 
 class TestCentralRiskManagerIntegration:
     """Integration tests for CentralRiskManager with other components"""
@@ -583,7 +579,6 @@ class TestCentralRiskManagerIntegration:
 
         logger.info("✅ Full authorization flow integration test passed")
 
-
 # ========================================
 # TEST UTILITIES
 # ========================================
@@ -602,7 +597,6 @@ def create_test_request(symbol: str = "AAPL", side: str = "buy",
         regime_confidence=0.9,
         urgency=ExecutionUrgency.NORMAL
     )
-
 
 # ========================================
 # PERFORMANCE BENCHMARKS
@@ -647,7 +641,6 @@ class TestCentralRiskManagerPerformance:
         assert avg_time_per_auth < 0.1  # Less than 100ms per authorization
 
         logger.info(f"✅ Concurrent authorizations test passed: {avg_time_per_auth:.3f}s average per authorization")
-
 
 if __name__ == "__main__":
     # Run tests with pytest

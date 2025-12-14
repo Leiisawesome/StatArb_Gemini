@@ -54,7 +54,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-
 class FeedType(Enum):
     """Data feed types"""
     MARKET_DATA = "market_data"
@@ -64,7 +63,6 @@ class FeedType(Enum):
     ALTERNATIVE = "alternative"
     REFERENCE = "reference"
     ANALYTICS = "analytics"
-
 
 class FeedStatus(Enum):
     """Feed connection status"""
@@ -78,7 +76,6 @@ class FeedStatus(Enum):
     RECONNECTING = "reconnecting"
     SUSPENDED = "suspended"
 
-
 class DataFormat(Enum):
     """Data format types"""
     JSON = "json"
@@ -89,7 +86,6 @@ class DataFormat(Enum):
     AVRO = "avro"
     PARQUET = "parquet"
 
-
 class SubscriptionType(Enum):
     """Subscription types"""
     REAL_TIME = "real_time"
@@ -97,7 +93,6 @@ class SubscriptionType(Enum):
     SNAPSHOT = "snapshot"
     HISTORICAL = "historical"
     ON_DEMAND = "on_demand"
-
 
 @dataclass
 class FeedConfiguration:
@@ -164,7 +159,6 @@ class FeedConfiguration:
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class FeedMessage:
     """Feed message container"""
@@ -187,7 +181,6 @@ class FeedMessage:
     # Source metadata
     source_timestamp: Optional[datetime] = None
     received_timestamp: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class FeedStatistics:
@@ -225,7 +218,6 @@ class FeedStatistics:
     first_message_time: Optional[datetime] = None
     last_message_time: Optional[datetime] = None
     last_update_time: datetime = field(default_factory=datetime.now)
-
 
 class DataFeed(ABC):
     """Abstract data feed interface"""
@@ -374,7 +366,6 @@ class DataFeed(ABC):
         """Get feed statistics"""
         with self._lock:
             return self.statistics
-
 
 class WebSocketFeed(DataFeed):
     """WebSocket data feed implementation"""
@@ -539,7 +530,6 @@ class WebSocketFeed(DataFeed):
         """WebSocket close handler"""
         self._set_status(FeedStatus.DISCONNECTED)
 
-
 class HTTPFeed(DataFeed):
     """HTTP polling data feed implementation"""
 
@@ -672,7 +662,6 @@ class HTTPFeed(DataFeed):
             except Exception as e:
                 self._handle_error("HTTP polling failed", e)
                 await asyncio.sleep(DataIntervals.WS_RECONNECT_WAIT_SECONDS)  # Wait before retry
-
 
 class FeedManager(ISystemComponent):
     """

@@ -27,7 +27,6 @@ from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
 from core_engine.system.interfaces import RegimeContext
 
-
 class TestConcurrentAccess:
     """Test processing components under concurrent access"""
 
@@ -248,7 +247,6 @@ class TestConcurrentAccess:
         for health in health_results:
             assert 'healthy' in health
             assert isinstance(health['healthy'], bool)
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

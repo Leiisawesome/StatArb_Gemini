@@ -42,7 +42,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class DataSource(Enum):
     """Market data source types"""
     EXCHANGE = "exchange"
@@ -51,7 +50,6 @@ class DataSource(Enum):
     INTERNAL = "internal"
     ALTERNATIVE = "alternative"
     SYNTHETIC = "synthetic"
-
 
 class DataType(Enum):
     """Market data types"""
@@ -64,7 +62,6 @@ class DataType(Enum):
     FUNDAMENTAL = "fundamental"
     TECHNICAL = "technical"
 
-
 class DataQuality(Enum):
     """Data quality levels"""
     REAL_TIME = "real_time"
@@ -73,7 +70,6 @@ class DataQuality(Enum):
     HISTORICAL = "historical"
     ESTIMATED = "estimated"
     DERIVED = "derived"
-
 
 @dataclass
 class MarketDataPoint:
@@ -111,7 +107,6 @@ class MarketDataPoint:
     timestamp: datetime = field(default_factory=datetime.now)
     received_timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class DataSubscription:
     """Data subscription configuration"""
@@ -139,7 +134,6 @@ class DataSubscription:
     last_update: Optional[datetime] = None
     received_count: int = 0
     error_count: int = 0
-
 
 @dataclass
 class DataFeed:
@@ -176,7 +170,6 @@ class DataFeed:
     average_latency_ms: float = 0.0
     peak_latency_ms: float = 0.0
     message_rate_per_second: float = 0.0
-
 
 class DataFeedAdapter(ABC):
     """Abstract base class for data feed adapters.
@@ -216,7 +209,6 @@ class DataFeedAdapter(ABC):
     def is_connected(self) -> bool:
         """Check connection status"""
 
-
 @dataclass
 class MarketDataRequest:
     """Market data request"""
@@ -226,14 +218,12 @@ class MarketDataRequest:
     end_time: Optional[datetime] = None
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class MarketDataResponse:
     """Market data response"""
     success: bool
     data: Any
     error_message: Optional[str] = None
-
 
 class SimulatedDataFeed(DataFeedAdapter):
     """Simulated data feed for testing.
@@ -419,7 +409,6 @@ class SimulatedDataFeed(DataFeedAdapter):
                 ask_price=ask_price,
                 exchange=self.config.provider
             )
-
 
 class MarketDataHandler(ISystemComponent):
     """

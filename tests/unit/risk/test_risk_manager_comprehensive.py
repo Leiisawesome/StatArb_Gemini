@@ -27,8 +27,6 @@ from core_engine.system.central_risk_manager import (
 from core_engine.config.component_config import RiskConfig as RiskManagerConfig
 from core_engine.system.unified_execution_engine import ExecutionUrgency
 
-
-
 class TestCentralRiskManagerLifecycle:
     """Test component lifecycle and initialization"""
 
@@ -94,7 +92,6 @@ class TestCentralRiskManagerLifecycle:
         assert rm.strategy_manager is mock_strategy
         assert rm.trading_engine is mock_trading
         assert rm.regime_engine is mock_regime
-
 
 class TestTradingAuthorization:
     """Test trading authorization workflows"""
@@ -210,7 +207,6 @@ class TestTradingAuthorization:
         assert auth.authorized_quantity > 0  # Should be approved with scaling
         assert auth.is_valid  # Authorization should be valid
 
-
 class TestRiskLimitEnforcement:
     """Test risk limit checks and enforcement"""
 
@@ -303,7 +299,6 @@ class TestRiskLimitEnforcement:
         assert auth is not None
         assert isinstance(auth.authorized_quantity, (int, float))
 
-
 class TestRegimeAwareRisk:
     """Test regime-aware risk adjustments"""
 
@@ -356,7 +351,6 @@ class TestRegimeAwareRisk:
         # Should allow larger positions in low volatility
         assert auth.is_valid
 
-
 class TestEmergencyControls:
     """Test emergency controls and circuit breakers"""
 
@@ -395,7 +389,6 @@ class TestEmergencyControls:
         assert auth.authorization_level == AuthorizationLevel.REJECTED
         assert 'emergency' in auth.rejection_reason.lower()
 
-
 class TestPositionTracking:
     """Test position tracking and management"""
 
@@ -423,7 +416,6 @@ class TestPositionTracking:
 
         assert rm.current_positions['GOOGL'] == 0.0
 
-
 class TestAuthorizationAudit:
     """Test authorization audit trail"""
 
@@ -437,7 +429,6 @@ class TestAuthorizationAudit:
         # Trading authorizations are tracked differently
         assert hasattr(rm, 'authorization_audit')
         assert isinstance(rm.authorization_audit, list)
-
 
 class TestPerformance:
     """Test performance and concurrency"""
@@ -490,7 +481,6 @@ class TestPerformance:
 
         # Authorization should be fast (< 100ms in tests)
         assert duration < 0.1
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])

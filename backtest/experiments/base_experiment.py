@@ -18,7 +18,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class ExperimentResult:
     """Structured experiment result"""
@@ -65,7 +64,6 @@ class ExperimentResult:
             'success': self.success,
             'error_message': self.error_message,
         }
-
 
 class BaseExperiment(ABC):
     """
@@ -329,5 +327,4 @@ class BaseExperiment(ABC):
             'total_trades': total_trades,
             'win_rate': win_rate,
         }
-
 

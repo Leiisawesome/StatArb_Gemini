@@ -31,7 +31,6 @@ from .period_scanner_base import PeriodScannerBase, PeriodAnalysisResult
 
 logger = logging.getLogger(__name__)
 
-
 class MomentumPeriodScanner(PeriodScannerBase):
     """
     Scanner to identify momentum-favorable periods in historical data.
@@ -306,7 +305,6 @@ class MomentumPeriodScanner(PeriodScannerBase):
             self.logger.info(f"         Trend Persistence: {m['trend_persistence']*100:4.1f}% | High-Mom Days: {m['high_momentum_pct']:.1f}%")
             self.logger.info("")
 
-
 # Standalone execution script
 async def main():
     """Main execution for standalone usage"""
@@ -337,7 +335,6 @@ async def main():
     logger.info("2. Run baseline backtest on primary test period")
     logger.info("3. Proceed with parameter optimization")
     logger.info("")
-
 
 if __name__ == "__main__":
     import asyncio

@@ -31,12 +31,9 @@ from core_engine.regime.market_regime_analyzer import (
 )
 from core_engine.regime.regime_detector import RegimeAnalysisConfig
 
-
 from core_engine.regime.regime_detector import (
     RegimeType
 )
-
-
 
 from core_engine.regime.regime_transition_manager import (
     TransitionPhase,
@@ -69,7 +66,6 @@ class TestMarketRegime:
             assert isinstance(regime.value, str)
             assert len(regime.value) > 0
 
-
 class TestTimeframeRegime:
     """Test TimeframeRegime dataclass."""
 
@@ -92,7 +88,6 @@ class TestTimeframeRegime:
         assert regime.volatility == 0.12
         assert regime.regime_duration == 10
         assert regime.transition_probability == 0.15
-
 
 class TestTransitionPrediction:
     """Test TransitionPrediction dataclass."""
@@ -142,7 +137,6 @@ class TestTransitionPrediction:
         assert prediction.contradicting_indicators == ["strong_trend"]
         assert prediction.similar_historical_transitions == 3
 
-
 class TestRegimeAnalysis:
     """Test RegimeAnalysis dataclass."""
 
@@ -186,7 +180,6 @@ class TestRegimeAnalysis:
         assert analysis.regime_consensus == 0.85
         assert analysis.dominant_timeframe == "1D"
 
-
 class TestRegimeEngineConfig:
     """Test RegimeEngineConfig dataclass."""
 
@@ -218,7 +211,6 @@ class TestRegimeEngineConfig:
         assert config.regime_change_threshold == 0.8
         assert config.update_frequency == 600
         assert config.enable_enhanced_detection == False
-
 
 class TestEnhancedRegimeEngine:
     """Test EnhancedRegimeEngine class."""
@@ -417,7 +409,6 @@ class TestEnhancedRegimeEngine:
         # Should still work since engine uses any available data
         assert len(engine.market_data_buffer) > 0
 
-
 class TestMacroRegime:
     """Test MacroRegime enum."""
 
@@ -434,7 +425,6 @@ class TestMacroRegime:
         assert MacroRegime.UNKNOWN.value == "unknown"
         assert MacroRegime.STAGFLATION.value == "stagflation"
 
-
 class TestMarketCycle:
     """Test MarketCycle enum."""
 
@@ -444,7 +434,6 @@ class TestMarketCycle:
         assert MarketCycle.MARKUP.value == "markup"
         assert MarketCycle.DISTRIBUTION.value == "distribution"
         assert MarketCycle.MARKDOWN.value == "markdown"
-
 
 class TestRiskEnvironment:
     """Test RiskEnvironment enum."""
@@ -458,7 +447,6 @@ class TestRiskEnvironment:
         assert RiskEnvironment.CARRY_TRADE.value == "carry_trade"
         assert RiskEnvironment.DELEVERAGING.value == "deleveraging"
         assert RiskEnvironment.UNKNOWN.value == "unknown"
-
 
 class TestRegimeAnalysisConfig:
     """Test RegimeAnalysisConfig dataclass."""
@@ -525,7 +513,6 @@ class TestRegimeAnalysisConfig:
         assert config.var_confidence == 0.01
         assert config.expected_shortfall_confidence == 0.01
 
-
 class TestAssetRegimeProfile:
     """Test AssetRegimeProfile dataclass."""
 
@@ -566,7 +553,6 @@ class TestAssetRegimeProfile:
         assert profile.relative_strength == 1.05
         assert profile.sector_rotation_signal == 0.2
 
-
 class TestCrossAssetRegime:
     """Test CrossAssetRegime dataclass."""
 
@@ -603,7 +589,6 @@ class TestCrossAssetRegime:
         assert cross_regime.risk_on_off_signal == 0.7
         assert cross_regime.confidence == 0.85
         assert cross_regime.data_quality == 0.95
-
 
 class TestFactorAnalyzer:
     """Test FactorAnalyzer class."""
@@ -653,7 +638,6 @@ class TestFactorAnalyzer:
         assert 'factor_returns' in result
         assert 'factor_loadings' in result
         assert 'factor_correlations' in result
-
 
 class TestCrossAssetAnalyzer:
     """Test CrossAssetAnalyzer class."""
@@ -706,7 +690,6 @@ class TestCrossAssetAnalyzer:
         assert hasattr(regime, 'macro_regime')
         assert hasattr(regime, 'market_cycle')
 
-
 class TestSectorRotationAnalyzer:
     """Test SectorRotationAnalyzer class."""
 
@@ -757,7 +740,6 @@ class TestSectorRotationAnalyzer:
 
         # The method may return empty dict if data is insufficient
         # Just check it's a dict for now
-
 
 class TestMarketRegimeAnalyzer:
     """Test MarketRegimeAnalyzer class."""
@@ -854,5 +836,4 @@ class TestMarketRegimeAnalyzer:
         except Exception:
             # Expected for insufficient data
             pass
-
 

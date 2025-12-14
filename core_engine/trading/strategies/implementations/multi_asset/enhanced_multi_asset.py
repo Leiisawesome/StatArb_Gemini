@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ✅ MultiAssetConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
     """Enhanced Multi-Asset Strategy with ISystemComponent Integration"""
 

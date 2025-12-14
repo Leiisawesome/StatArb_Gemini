@@ -20,7 +20,6 @@ from core_engine.data.manager import (
 )
 from core_engine.exceptions import ClickHouseConnectionError, DataUnavailableError
 
-
 class TestInitializationErrorPaths:
     """Test initialization error paths and edge cases"""
 
@@ -117,7 +116,6 @@ class TestInitializationErrorPaths:
                 result = await manager.stop()
                 # The method logs the error but may return False
                 assert isinstance(result, bool)
-
 
 class TestLoadMarketData:
     """Test load_market_data method comprehensively"""
@@ -234,7 +232,6 @@ class TestLoadMarketData:
             with pytest.raises(DataUnavailableError):
                 data_manager.load_market_data(['AAPL'])
 
-
 class TestBuildQuery:
     """Test _build_query method for all interval types"""
 
@@ -308,7 +305,6 @@ class TestBuildQuery:
 
         query = data_manager._build_query(['AAPL', 'TSLA'], start_time, end_time, '1min')
         assert "ticker IN ('AAPL', 'TSLA')" in query
-
 
 class TestStandardizeData:
     """Test _standardize_data method"""
@@ -389,7 +385,6 @@ class TestStandardizeData:
         assert result.iloc[1]['symbol'] == 'AAPL'
         assert result.iloc[2]['symbol'] == 'TSLA'
 
-
 class TestCacheMethods:
     """Test cache-related methods"""
 
@@ -461,7 +456,6 @@ class TestCacheMethods:
         assert len(data_manager._cache) == 0
         assert len(data_manager._cache_timestamps) == 0
 
-
 class TestGetLatestPrices:
     """Test get_latest_prices method"""
 
@@ -509,7 +503,6 @@ class TestGetLatestPrices:
 
             prices = data_manager.get_latest_prices()
             assert len(prices) == 2
-
 
 class TestGetMarketDataInterface:
     """Test get_market_data core engine interface"""
@@ -614,7 +607,6 @@ class TestGetMarketDataInterface:
 
             result = data_manager.get_market_data('AAPL')
             assert result is None
-
 
 class TestValidateData:
     """Test validate_data method comprehensively"""
@@ -761,7 +753,6 @@ class TestValidateData:
         assert result['valid'] is False
         assert result['score'] == 0.0
         assert len(result['issues']) > 0
-
 
 class TestHelperMethods:
     """Test helper methods like calculate_metrics"""
@@ -967,7 +958,6 @@ class TestHelperMethods:
             result = data_manager.process_data(['AAPL'])
             mock_load.assert_called_once_with(['AAPL'])
 
-
 class TestSubscriberMethods:
     """Test subscriber notification methods"""
 
@@ -1051,7 +1041,6 @@ class TestSubscriberMethods:
         # Should not raise exception
         await data_manager.notify_subscribers(market_data)
 
-
 class TestExecuteQuery:
     """Test _execute_query method"""
 
@@ -1102,7 +1091,6 @@ class TestExecuteQuery:
             query = "SELECT * FROM test"
             with pytest.raises(Exception):
                 data_manager._execute_query(query)
-
 
 class TestGetHistoricalData:
     """Test get_historical_data interface method"""

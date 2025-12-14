@@ -21,7 +21,6 @@ from core_engine.system.realtime_pnl_tracker import (
     PnLSnapshot
 )
 
-
 class TestRealTimePnLTracker:
     """Test suite for RealTimePnLTracker"""
 
@@ -290,7 +289,6 @@ class TestRealTimePnLTracker:
 
         assert len(series) == 3
 
-
 # Integration Test
 class TestPnLTrackerIntegration:
     """Integration tests for P&L tracker"""
@@ -382,7 +380,6 @@ class TestPnLTrackerIntegration:
         assert tracker.position_pnl['AAPL'] == 500.0
         assert tracker.position_pnl['TSLA'] == 500.0
         assert tracker.position_pnl['MSFT'] == -750.0
-
 
 if __name__ == '__main__':
     # Run tests

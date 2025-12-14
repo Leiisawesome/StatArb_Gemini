@@ -12,7 +12,6 @@ from core_engine.type_definitions.broker_types import (
     OrderSide, OrderType, OrderStatus
 )
 
-
 class TestIBKRAdapterConnection:
     """Test IBKR adapter connection management"""
 
@@ -192,7 +191,6 @@ class TestIBKRAdapterConnection:
         assert health['errors'] == 1
         assert 'timestamp' in health
 
-
 class TestIBKRAdapterOrderExecution:
     """Test IBKR adapter order execution"""
 
@@ -324,7 +322,6 @@ class TestIBKRAdapterOrderExecution:
                     side=OrderSide.SELL,
                     stop_price=240.00
                 )
-
 
 class TestIBKRAdapterDataRetrieval:
     """Test IBKR adapter data retrieval"""
@@ -515,7 +512,6 @@ class TestIBKRAdapterDataRetrieval:
 
             assert connected_adapter.is_market_open() == False
 
-
 class TestIBKRAdapterErrorHandling:
     """Test IBKR adapter error handling"""
 
@@ -570,7 +566,6 @@ class TestIBKRAdapterErrorHandling:
 
                 assert result == False
                 mock_connect.assert_called_once()
-
 
 class TestIBKRWrapper:
     """Test IBKR wrapper callback methods"""

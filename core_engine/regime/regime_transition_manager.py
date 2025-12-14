@@ -27,7 +27,6 @@ from .regime_indicators import RegimeIndicator, SignalStrength
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class TransitionPhase(Enum):
     """Regime transition phases"""
     STABLE = "stable"
@@ -37,7 +36,6 @@ class TransitionPhase(Enum):
     TRANSITION_COMPLETION = "transition_completion"
     CONSOLIDATION = "consolidation"
 
-
 class TransitionType(Enum):
     """Types of regime transitions"""
     GRADUAL = "gradual"
@@ -45,7 +43,6 @@ class TransitionType(Enum):
     OSCILLATING = "oscillating"
     FAILED = "failed"
     PARTIAL = "partial"
-
 
 class RebalancingTrigger(Enum):
     """Portfolio rebalancing triggers"""
@@ -57,7 +54,6 @@ class RebalancingTrigger(Enum):
     STRESS_INDICATOR_ALERT = "stress_indicator_alert"
     TIME_BASED = "time_based"
     PERFORMANCE_DEVIATION = "performance_deviation"
-
 
 @dataclass
 class TransitionPrediction:
@@ -98,7 +94,6 @@ class TransitionPrediction:
     similar_historical_transitions: int = 0
     historical_accuracy: float = 0.0
 
-
 @dataclass
 class RebalancingRecommendation:
     """Portfolio rebalancing recommendation"""
@@ -133,7 +128,6 @@ class RebalancingRecommendation:
     recommendation_confidence: float = 0.0
     alternative_recommendations: List[Dict[str, Any]] = field(default_factory=list)
 
-
 @dataclass
 class TransitionMonitoring:
     """Transition monitoring status"""
@@ -164,7 +158,6 @@ class TransitionMonitoring:
     successful_adjustments: List[str] = field(default_factory=list)
     failed_adjustments: List[str] = field(default_factory=list)
     improvement_opportunities: List[str] = field(default_factory=list)
-
 
 class TransitionPredictor:
     """Predict regime transitions using machine learning"""
@@ -734,7 +727,6 @@ class TransitionPredictor:
             logger.error(f"Error loading transition models: {e}")
             return False
 
-
 class RebalancingManager:
     """Manage portfolio rebalancing during regime transitions"""
 
@@ -1141,7 +1133,6 @@ class RebalancingManager:
 
         return urgency_map.get(urgency, 3)
 
-
 class TransitionMonitor:
     """Monitor ongoing regime transitions"""
 
@@ -1216,7 +1207,6 @@ class TransitionMonitor:
         except Exception as e:
             logger.error(f"Error completing transition monitoring: {e}")
             return False
-
 
     def complete_transition_monitoring(self, transition_id: str,
                                      final_regime: RegimeType) -> Optional[TransitionMonitoring]:
@@ -1300,7 +1290,6 @@ class TransitionMonitor:
 
         except Exception as e:
             logger.error(f"Error generating lessons learned: {e}")
-
 
 class RegimeTransitionManager:
     """

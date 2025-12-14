@@ -20,7 +20,6 @@ except ImportError:
     class DataUnavailableError(Exception):
         """Raised when required data is unavailable"""
 
-
 @dataclass
 class DataConfig:
     """Data source configuration"""
@@ -34,7 +33,6 @@ class DataConfig:
     validate_data: bool = True
     outlier_detection: bool = True
     outlier_threshold: float = 3.0  # Standard deviations
-
 
 @dataclass
 class MarketData:
@@ -72,7 +70,6 @@ class MarketData:
         """Create from dictionary"""
         return cls(**data)
 
-
 class DataProvider(ABC):
     """Abstract data provider interface"""
 
@@ -88,7 +85,6 @@ class DataProvider(ABC):
     @abstractmethod
     def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols"""
-
 
 class YahooDataProvider(DataProvider):
     """Yahoo Finance data provider (lightweight implementation)"""
@@ -160,8 +156,6 @@ class YahooDataProvider(DataProvider):
             if price is not None:
                 prices[symbol] = price
         return prices
-
-
 
 class DataManager:
     """Core data management"""

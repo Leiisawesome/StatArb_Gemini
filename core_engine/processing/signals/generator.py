@@ -1102,7 +1102,7 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                         vol_series = all_scores['volume']['volume_score']
                         if idx in vol_series.index:
                             metadata['volume_score'] = vol_series.loc[idx]
-                except Exception as meta_e:
+                except Exception:
                     # Non-critical - metadata enhancement failed, continue with basic metadata
                     pass
 

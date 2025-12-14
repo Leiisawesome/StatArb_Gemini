@@ -21,7 +21,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestMeanReversionSignalGeneration:
     """Test mean reversion-specific signal calculation logic"""
 
@@ -115,7 +114,6 @@ class TestMeanReversionSignalGeneration:
 
         assert isinstance(signals, list)
 
-
 class TestMeanReversionPositionSizing:
     """Test position sizing logic"""
 
@@ -144,7 +142,7 @@ class TestMeanReversionPositionSizing:
 
         # Set up indicators needed for position sizing
         if 'AAPL' in market_data:
-            df = market_data['AAPL']
+            market_data['AAPL']
             strategy.indicators['AAPL'] = pd.Series({'zscore': -2.5})
 
         position_size = strategy.calculate_position_size(signal, market_data)
@@ -173,7 +171,6 @@ class TestMeanReversionPositionSizing:
         position_size_low = strategy.calculate_position_size(signal_low, market_data)
 
         assert position_size_high >= position_size_low
-
 
 class TestMeanReversionEntryExitConditions:
     """Test entry and exit condition logic"""

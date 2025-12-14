@@ -21,7 +21,6 @@ from .regime_detector import RegimeType
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class IndicatorType(Enum):
     """Regime indicator types"""
     VOLATILITY_REGIME = "volatility_regime"
@@ -34,7 +33,6 @@ class IndicatorType(Enum):
     REGIME_STRENGTH = "regime_strength"
     EARLY_WARNING = "early_warning"
 
-
 class SignalStrength(Enum):
     """Signal strength levels"""
     VERY_WEAK = "very_weak"
@@ -42,7 +40,6 @@ class SignalStrength(Enum):
     MODERATE = "moderate"
     STRONG = "strong"
     VERY_STRONG = "very_strong"
-
 
 @dataclass
 class RegimeIndicator:
@@ -73,7 +70,6 @@ class RegimeIndicator:
     regime_implications: Dict[RegimeType, float] = field(default_factory=dict)
     related_indicators: Dict[str, float] = field(default_factory=dict)
 
-
 @dataclass
 class TransitionSignal:
     """Regime transition signal"""
@@ -103,7 +99,6 @@ class TransitionSignal:
     risk_increase: float = 0.0  # Expected risk increase during transition
     uncertainty_increase: float = 0.0
 
-
 @dataclass
 class RegimeStrengthMeasure:
     """Measure of current regime strength"""
@@ -129,7 +124,6 @@ class RegimeStrengthMeasure:
     # Historical context
     typical_duration: int = 0
     historical_strength_percentile: float = 0.5
-
 
 class VolatilityRegimeIndicators:
     """Volatility regime specific indicators"""
@@ -472,7 +466,6 @@ class VolatilityRegimeIndicators:
             logger.error(f"Error calculating volatility regime classification: {e}")
             return {}
 
-
 class MomentumRegimeIndicators:
     """Momentum regime specific indicators"""
 
@@ -739,7 +732,6 @@ class MomentumRegimeIndicators:
         except Exception as e:
             logger.error(f"Error calculating momentum acceleration indicators: {e}")
             return {}
-
 
 class MeanReversionIndicators:
     """Mean reversion regime indicators"""
@@ -1024,7 +1016,6 @@ class MeanReversionIndicators:
             logger.error(f"Error calculating oversold/overbought indicators: {e}")
             return {}
 
-
 class TransitionSignalDetector:
     """Detect regime transition signals"""
 
@@ -1260,7 +1251,6 @@ class TransitionSignalDetector:
             logger.error(f"Error detecting multi-indicator transitions: {e}")
             return []
 
-
 class RegimeStrengthCalculator:
     """Calculate regime strength measures"""
 
@@ -1351,7 +1341,6 @@ class RegimeStrengthCalculator:
         except Exception as e:
             logger.error(f"Error calculating regime strength: {e}")
             return RegimeStrengthMeasure(regime_type=current_regime)
-
 
 class RegimeIndicatorEngine:
     """

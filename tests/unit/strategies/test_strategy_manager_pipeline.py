@@ -28,7 +28,6 @@ from core_engine.processing.pipeline_orchestrator import EnrichedMarketData
 # Import interfaces
 from core_engine.system.interfaces import RegimeContext
 
-
 class TestPhase3PipelineIntegration:
     """Test suite for Phase 3: StrategyManager pipeline integration"""
 
@@ -121,7 +120,6 @@ class TestPhase3PipelineIntegration:
             regime_duration_minutes=120
         )
 
-
 class TestPipelineInitialization(TestPhase3PipelineIntegration):
     """Test pipeline initialization and lifecycle"""
 
@@ -198,7 +196,6 @@ class TestPipelineInitialization(TestPhase3PipelineIntegration):
 
         # Verify pipeline was stopped
         mock_pipeline.stop.assert_called_once()
-
 
 class TestSignalGenerationWithPipeline(TestPhase3PipelineIntegration):
     """Test signal generation using pipeline"""
@@ -328,7 +325,6 @@ class TestSignalGenerationWithPipeline(TestPhase3PipelineIntegration):
             data_to_strategy2['AAPL'].reset_index(drop=True)
         )
 
-
 class TestEnrichedDataValidation(TestPhase3PipelineIntegration):
     """Test that enriched data is properly validated"""
 
@@ -369,7 +365,6 @@ class TestEnrichedDataValidation(TestPhase3PipelineIntegration):
         assert validation['has_features'] is True
         assert validation['raw_columns_present'] is True
 
-
 class TestBackwardCompatibility(TestPhase3PipelineIntegration):
     """Test backward compatibility with legacy methods"""
 
@@ -408,7 +403,6 @@ class TestBackwardCompatibility(TestPhase3PipelineIntegration):
 
         # Verify legacy method was called as fallback
         manager.generate_signals.assert_called_once()
-
 
 class TestErrorHandling(TestPhase3PipelineIntegration):
     """Test error handling and graceful degradation"""
@@ -498,7 +492,6 @@ class TestErrorHandling(TestPhase3PipelineIntegration):
         # Working strategy should have been called despite failing strategy
         working_strategy.generate_signals.assert_called_once()
 
-
 class TestSignalMetadata(TestPhase3PipelineIntegration):
     """Test that signals have correct metadata"""
 
@@ -559,7 +552,6 @@ class TestSignalMetadata(TestPhase3PipelineIntegration):
             assert signal.metadata['pipeline_processed'] is True
             assert 'enriched_data' in signal.metadata
             assert signal.metadata['enriched_data'] is True
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])

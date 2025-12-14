@@ -37,7 +37,6 @@ from core_engine.type_definitions.enums import (
     OrderStatus,
 )
 
-
 # ==============================================================================
 # SYSTEM INITIALIZATION FIXTURES
 # ==============================================================================
@@ -128,7 +127,6 @@ async def integrated_system():
     await strategy_manager.shutdown()
     await execution_engine.shutdown()
 
-
 @pytest_asyncio.fixture
 async def risk_controlled_execution():
     """
@@ -163,7 +161,6 @@ async def risk_controlled_execution():
     await risk_manager.shutdown()
     await execution_engine.shutdown()
 
-
 @pytest_asyncio.fixture
 async def strategy_risk_pipeline():
     """
@@ -195,7 +192,6 @@ async def strategy_risk_pipeline():
 
     await strategy_manager.shutdown()
     await risk_manager.shutdown()
-
 
 # ==============================================================================
 # MARKET DATA GENERATORS
@@ -258,7 +254,6 @@ def market_data_generator():
         return updates
 
     return generate
-
 
 @pytest.fixture
 def market_crash_generator():
@@ -330,7 +325,6 @@ def market_crash_generator():
 
     return generate
 
-
 @pytest.fixture
 def high_frequency_data_generator():
     """
@@ -380,7 +374,6 @@ def high_frequency_data_generator():
 
     return generate
 
-
 # ==============================================================================
 # SIGNAL GENERATORS
 # ==============================================================================
@@ -419,7 +412,6 @@ def trading_signal_generator():
         }
 
     return generate
-
 
 # ==============================================================================
 # MOCK BROKER FIXTURE
@@ -477,7 +469,6 @@ async def mock_broker():
     broker = MockBroker()
     yield broker
 
-
 # ==============================================================================
 # PERFORMANCE MONITORING FIXTURE
 # ==============================================================================
@@ -527,7 +518,6 @@ def performance_monitor():
             self.start_times = {}
 
     return PerformanceMonitor()
-
 
 # ==============================================================================
 # HELPER FIXTURES

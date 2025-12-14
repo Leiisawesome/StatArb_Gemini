@@ -14,7 +14,6 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-
 class MarketRegime(Enum):
     """
     Canonical market regime classifications - Professional Grade
@@ -113,11 +112,9 @@ class MarketRegime(Enum):
             self.LOW_VOLATILITY, self.NORMAL_VOLATILITY
         )
 
-
 # === LEGACY ALIAS for backward compatibility ===
 RegimeType = MarketRegime  # Alias for code using RegimeType
 RegimeState = MarketRegime  # Alias for code using RegimeState
-
 
 @dataclass
 class RegimeConfig:
@@ -136,7 +133,6 @@ class RegimeConfig:
     bollinger_period: int = 20
     bollinger_std: float = 2.0
 
-
 @dataclass
 class RegimeSignal:
     """Regime detection signal"""
@@ -149,7 +145,6 @@ class RegimeSignal:
     volatility: float = 0.0
     trend_strength: float = 0.0
     momentum: float = 0.0
-
 
 class RegimeEngine:
     """Lightweight regime detection engine"""

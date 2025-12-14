@@ -32,7 +32,6 @@ from core_engine.trading.strategies.manager import (
 )
 from core_engine.type_definitions.strategy import StrategyType
 
-
 @pytest.fixture
 def strategy_config():
     """Configuration for strategy manager"""
@@ -45,7 +44,6 @@ def strategy_config():
         'enable_correlation_filtering': True,
         'signal_aggregation_method': 'weighted_average'
     }
-
 
 @pytest.fixture
 def mock_risk_manager():
@@ -61,7 +59,6 @@ def mock_risk_manager():
     })
     return risk_manager
 
-
 @pytest.fixture
 def mock_data_manager():
     """Mock data manager for testing"""
@@ -74,7 +71,6 @@ def mock_data_manager():
     data_manager.get_current_price = Mock(return_value=101.5)
     return data_manager
 
-
 @pytest.fixture
 def mock_regime_engine():
     """Mock regime engine for testing"""
@@ -86,7 +82,6 @@ def mock_regime_engine():
     ))
     return regime_engine
 
-
 @pytest.fixture
 def strategy_manager(strategy_config, mock_risk_manager, mock_data_manager, mock_regime_engine):
     """StrategyManager instance for testing"""
@@ -95,7 +90,6 @@ def strategy_manager(strategy_config, mock_risk_manager, mock_data_manager, mock
     manager.set_data_manager(mock_data_manager)
     manager.set_regime_engine(mock_regime_engine)
     return manager
-
 
 @pytest.fixture
 def sample_trading_signal():
@@ -118,7 +112,6 @@ def sample_trading_signal():
         metadata={'source': 'test'},
         created_at=datetime.now()
     )
-
 
 class MockStrategy:
     """Mock strategy for testing"""
@@ -152,7 +145,6 @@ class MockStrategy:
         """Mock health check"""
         return {'healthy': True, 'strategy_id': self.strategy_id}
 
-
 class MockSubscriber(IStrategySubscriber):
     """Mock strategy subscriber"""
 
@@ -167,7 +159,6 @@ class MockSubscriber(IStrategySubscriber):
     async def on_strategy_status_change(self, strategy_event: Dict[str, Any]) -> None:
         """Handle strategy status changes"""
         self.received_events.append(strategy_event)
-
 
 class TestStrategyManagerInterface:
     """Test ISystemComponent interface compliance"""
@@ -253,7 +244,6 @@ class TestStrategyManagerInterface:
         assert 'component_connections' in status
         assert status['component_type'] == 'StrategyManager'
 
-
 class TestStrategyManagement:
     """Test strategy management functionality"""
 
@@ -312,7 +302,6 @@ class TestStrategyManagement:
         assert health['healthy'] is False
         assert 'unhealthy_strategies' in health
         assert 'unhealthy_strategy' in health['unhealthy_strategies']
-
 
 class TestSignalProcessing:
     """Test signal generation and processing"""
@@ -425,7 +414,6 @@ class TestSignalProcessing:
         assert low_confidence_signal.confidence < strategy_manager.config.min_confidence_threshold
         assert high_confidence_signal.confidence >= strategy_manager.config.min_confidence_threshold
 
-
 class TestComponentIntegration:
     """Test integration with other components"""
 
@@ -465,7 +453,6 @@ class TestComponentIntegration:
         status = strategy_manager.get_status()
         assert status['component_connections']['regime_engine_connected'] is True
 
-
 class TestSubscriberPattern:
     """Test subscriber pattern implementation"""
 
@@ -494,7 +481,6 @@ class TestSubscriberPattern:
         assert len(subscriber.received_signals) == 1
         assert subscriber.received_signals[0] == sample_trading_signal
 
-
 class TestPerformanceTracking:
     """Test performance tracking functionality"""
 
@@ -521,7 +507,6 @@ class TestPerformanceTracking:
         # Check status reflects history
         status = strategy_manager.get_status()
         assert status['signal_history_count'] == 1
-
 
 class TestErrorHandling:
     """Test error handling and recovery"""
@@ -572,7 +557,6 @@ class TestErrorHandling:
         assert connections['risk_manager_connected'] is False
         assert connections['data_manager_connected'] is False
         assert connections['regime_engine_connected'] is False
-
 
 class TestStrategyManagerIntegration:
     """Integration tests for strategy manager"""
@@ -636,7 +620,6 @@ class TestStrategyManagerIntegration:
         health = await strategy_manager.health_check()
         assert health['healthy'] is True
         assert health['active_strategies'] == 1
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

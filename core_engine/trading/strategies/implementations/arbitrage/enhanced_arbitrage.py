@@ -50,14 +50,12 @@ logger = logging.getLogger(__name__)
 # ✅ ArbitrageConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class ArbitrageType(Enum):
     """Types of arbitrage opportunities"""
     PRICE_ARBITRAGE = "price_arbitrage"
     STATISTICAL_ARBITRAGE = "statistical_arbitrage"
     CROSS_ASSET_ARBITRAGE = "cross_asset_arbitrage"
     TEMPORAL_ARBITRAGE = "temporal_arbitrage"
-
 
 class EnhancedArbitrageStrategy(EnhancedBaseStrategy):
     """

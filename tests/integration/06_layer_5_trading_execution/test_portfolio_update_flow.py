@@ -22,8 +22,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestPortfolioUpdateFlow:
     """Integration tests for portfolio update flow"""
 
@@ -36,7 +34,7 @@ class TestPortfolioUpdateFlow:
         Expected: Position updated via RiskManager callback
         """
         system = execution_engine_with_risk
-        execution_engine = system['execution_engine']
+        system['execution_engine']
         risk_manager = system['risk_manager']
 
         # Simulate execution result

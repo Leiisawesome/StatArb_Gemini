@@ -39,7 +39,6 @@ import os
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class SystemOrchestrationConfig:
     """Configuration for system orchestration"""
@@ -66,7 +65,6 @@ class SystemOrchestrationConfig:
     max_concurrent_operations: int = 100
     resource_allocation_timeout: int = 10  # seconds
 
-
 @dataclass
 class ComponentConfig:
     """Configuration for individual components"""
@@ -79,7 +77,6 @@ class ComponentConfig:
     retry_attempts: int = 3
     custom_settings: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class SecurityConfig:
     """Security configuration for the orchestrator"""
@@ -90,7 +87,6 @@ class SecurityConfig:
     session_timeout: int = 3600  # 1 hour
     max_failed_attempts: int = 5
 
-
 @dataclass
 class PerformanceConfig:
     """Performance configuration for the orchestrator"""
@@ -100,7 +96,6 @@ class PerformanceConfig:
     enable_profiling: bool = False
     memory_threshold_mb: int = 1024
     cpu_threshold_percent: float = 80.0
-
 
 class ConfigurationManager:
     """Manages system configuration, validation, and runtime updates"""

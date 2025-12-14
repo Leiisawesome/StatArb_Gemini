@@ -29,7 +29,6 @@ from core_engine.trading.execution.fill_processor import (
     FillMetrics
 )
 
-
 class TestExecutionEngine:
     """Test suite for ExecutionEngine class."""
 
@@ -125,7 +124,6 @@ class TestExecutionEngine:
         assert hasattr(metrics, 'total_executions')
         assert hasattr(metrics, 'successful_executions')
         assert hasattr(metrics, 'failed_executions')
-
 
 class TestExecutionValidator:
     """Test suite for ExecutionValidator class."""
@@ -361,7 +359,6 @@ class TestExecutionValidator:
         assert len(results_list) == 5
         # All should be valid normal orders
         assert all(is_valid for is_valid, _ in results_list)
-
 
 class TestFillProcessor:
     """Test suite for FillProcessor class."""

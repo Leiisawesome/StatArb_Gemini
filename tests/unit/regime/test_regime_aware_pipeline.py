@@ -41,7 +41,6 @@ class MockRegimeContext:
         if self.regime_start_time is None:
             self.regime_start_time = datetime.now()
 
-
 class TestIRegimeAwareCompliance:
     """Test IRegimeAware interface compliance"""
 
@@ -338,7 +337,6 @@ class TestIRegimeAwareCompliance:
         await generator.on_regime_change(normal_regime)
         assert generator.config.signal_threshold == 0.4  # Normal threshold
 
-
 class TestRegimeAdaptationMetrics:
     """Test regime adaptation metrics and reporting"""
 
@@ -387,7 +385,6 @@ class TestRegimeAdaptationMetrics:
         assert 'new_regime' in result
         # With None primary_regime, it should default to 'unknown'
         assert result['new_regime'] == 'unknown'
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -18,7 +18,6 @@ from core_engine.regime.engine import (
     EnhancedRegimeEngine
 )
 
-
 class TestEnhancedRegimeEngineBasics:
     """Test suite for Enhanced Regime Engine basic functionality"""
 
@@ -100,7 +99,6 @@ class TestEnhancedRegimeEngineBasics:
         assert status['initialized'] is True
         assert 'configuration' in status
         assert 'health_metrics' in status
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

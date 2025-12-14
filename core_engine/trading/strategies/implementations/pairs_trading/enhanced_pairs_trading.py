@@ -54,14 +54,12 @@ logger = logging.getLogger(__name__)
 # ✅ PairsConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class PairStatus(Enum):
     """Pair trading status"""
     NEUTRAL = "neutral"
     LONG_SPREAD = "long_spread"      # Long stock1, short stock2
     SHORT_SPREAD = "short_spread"    # Short stock1, long stock2
     MONITORING = "monitoring"
-
 
 @dataclass
 class PairMetrics:
@@ -88,7 +86,6 @@ class PairMetrics:
     status: PairStatus = PairStatus.NEUTRAL
     entry_time: Optional[datetime] = None
     last_update: Optional[datetime] = None
-
 
 class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
     """

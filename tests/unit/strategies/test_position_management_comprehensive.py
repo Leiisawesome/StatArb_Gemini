@@ -27,7 +27,6 @@ from core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # SHARED HELPERS
 # =============================================================================
@@ -46,7 +45,6 @@ def create_market_data_with_price(symbol: str, price: float, rows: int = 100) ->
         'RSI_14': [50] * rows,
         'ADX_14': [25] * rows
     }, index=dates)
-
 
 # =============================================================================
 # BREAKOUT STRATEGY - POSITION MANAGEMENT
@@ -293,7 +291,6 @@ class TestBreakoutPositionManagement:
         # Should detect position aging
         assert True
 
-
 # =============================================================================
 # TREND FOLLOWING STRATEGY - POSITION MANAGEMENT
 # =============================================================================
@@ -387,7 +384,6 @@ class TestTrendFollowingPositionManagement:
             await strategy._check_exit_conditions()
 
         assert True
-
 
 # =============================================================================
 # MOMENTUM STRATEGY - POSITION MANAGEMENT
@@ -497,7 +493,6 @@ class TestMomentumPositionManagement:
 
         assert True
 
-
 # =============================================================================
 # MEAN REVERSION STRATEGY - POSITION MANAGEMENT
 # =============================================================================
@@ -590,7 +585,6 @@ class TestMeanReversionPositionManagement:
 
         assert True
 
-
 # =============================================================================
 # PAIRS TRADING STRATEGY - POSITION MANAGEMENT
 # =============================================================================
@@ -673,7 +667,6 @@ class TestPairsTradingPositionManagement:
 
         assert True
 
-
 # =============================================================================
 # STATISTICAL ARBITRAGE STRATEGY - POSITION MANAGEMENT
 # =============================================================================
@@ -730,7 +723,6 @@ class TestStatisticalArbitragePositionManagement:
         await strategy._update_cointegration_analysis()
 
         assert True
-
 
 # =============================================================================
 # EXIT SIGNAL GENERATION TESTS
@@ -1008,7 +1000,6 @@ class TestExitSignalGeneration:
             # Method doesn't exist, just verify position exists
             assert 'AAPL' in strategy.active_positions
 
-
 # =============================================================================
 # POSITION SIZING TESTS
 # =============================================================================
@@ -1160,7 +1151,6 @@ class TestPositionSizing:
 
         # Risk-parity sizing should return calculated size
         assert size > 0
-
 
 # =============================================================================
 # CROSS-STRATEGY POSITION MANAGEMENT TESTS

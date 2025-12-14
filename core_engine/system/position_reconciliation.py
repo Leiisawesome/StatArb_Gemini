@@ -41,7 +41,6 @@ from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
-
 class DiscrepancySeverity(Enum):
     """Severity classification for position discrepancies"""
     NONE = "none"           # No discrepancy
@@ -50,7 +49,6 @@ class DiscrepancySeverity(Enum):
     SEVERE = "severe"       # >$10K
     CRITICAL = "critical"   # >$100K or complete mismatch
 
-
 class ReconciliationAction(Enum):
     """Actions taken during reconciliation"""
     NO_ACTION = "no_action"
@@ -58,7 +56,6 @@ class ReconciliationAction(Enum):
     ALERT_TEAM = "alert_team"
     AUTO_CORRECT = "auto_correct"
     MANUAL_REVIEW = "manual_review"
-
 
 @dataclass
 class PositionDiscrepancy:
@@ -89,7 +86,6 @@ class PositionDiscrepancy:
     timestamp: datetime
     resolution_notes: Optional[str] = None
 
-
 @dataclass
 class ReconciliationReport:
     """
@@ -116,7 +112,6 @@ class ReconciliationReport:
         self.total_value_discrepancy = sum(
             abs(d.value_diff) for d in self.discrepancies
         )
-
 
 class PositionReconciliation:
     """
@@ -183,22 +178,8 @@ class PositionReconciliation:
 
         while self.is_running:
             try:
-                # Perform reconciliation
-                report = await self.reconcile_positions()
-
-                # Adjust interval based on results
-                if report.discrepancies_found > 0:
-                    self.current_interval = self.fast_interval
-                    self.consecutive_discrepancies += 1
-                    self.logger.warning(
-                        f"⚠️ Discrepancies found ({report.discrepancies_found}), "
-                        f"switching to fast interval ({self.fast_interval}s)"
-                    )
-                else:
-                    if self.consecutive_discrepancies > 0:
-                        self.logger.info("✅ No discrepancies, returning to normal interval")
-                    self.current_interval = self.normal_interval
-                    self.consecutive_discrepancies = 0
+                # Perform reconciliation (interval adjustment happens inside)
+                await self.reconcile_positions()
 
                 # Wait for next reconciliation
                 await asyncio.sleep(self.current_interval)
@@ -262,6 +243,20 @@ class PositionReconciliation:
 
             # STEP 7: Log summary
             self._log_reconciliation_summary(report)
+
+            # STEP 8: Adjust interval based on results
+            if report.discrepancies_found > 0:
+                self.current_interval = self.fast_interval
+                self.consecutive_discrepancies += 1
+                self.logger.warning(
+                    f"⚠️ Discrepancies found ({report.discrepancies_found}), "
+                    f"switching to fast interval ({self.fast_interval}s)"
+                )
+            else:
+                if self.consecutive_discrepancies > 0:
+                    self.logger.info("✅ No discrepancies, returning to normal interval")
+                self.current_interval = self.normal_interval
+                self.consecutive_discrepancies = 0
 
             return report
 
@@ -405,7 +400,10 @@ class PositionReconciliation:
         if severity == DiscrepancySeverity.MINOR:
             return ReconciliationAction.LOG_ONLY
         elif severity == DiscrepancySeverity.MODERATE:
-            return ReconciliationAction.ALERT_TEAM
+            if self.auto_correct_enabled and value_diff >= self.auto_correct_threshold:
+                return ReconciliationAction.AUTO_CORRECT
+            else:
+                return ReconciliationAction.ALERT_TEAM
         elif severity in [DiscrepancySeverity.SEVERE, DiscrepancySeverity.CRITICAL]:
             if self.auto_correct_enabled and value_diff >= self.auto_correct_threshold:
                 return ReconciliationAction.AUTO_CORRECT

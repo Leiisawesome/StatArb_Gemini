@@ -20,7 +20,6 @@ from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
-
 class CorrelationMethod(Enum):
     """Correlation calculation methods"""
     PEARSON = "pearson"
@@ -30,14 +29,12 @@ class CorrelationMethod(Enum):
     DCC = "dcc"   # Dynamic conditional correlation
     SHRINKAGE = "shrinkage"  # Ledoit-Wolf shrinkage
 
-
 class CorrelationRegime(Enum):
     """Correlation regime types"""
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
     CRISIS = "crisis"
-
 
 @dataclass
 class CorrelationResult:
@@ -52,7 +49,6 @@ class CorrelationResult:
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class CorrelationMatrix:
     """Correlation matrix with metadata"""
@@ -66,7 +62,6 @@ class CorrelationMatrix:
     is_positive_definite: bool
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class RegimeDetectionResult:
     """Correlation regime detection result"""
@@ -78,7 +73,6 @@ class RegimeDetectionResult:
     confidence: float
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class TailDependenceResult:
     """Tail dependence analysis result"""
@@ -89,7 +83,6 @@ class TailDependenceResult:
     tail_correlation: float
     extreme_percentile: float = 0.05
     timestamp: datetime = field(default_factory=datetime.now)
-
 
 class CorrelationAnalyzer:
     """

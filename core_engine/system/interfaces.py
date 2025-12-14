@@ -18,7 +18,6 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-
 class ISystemComponent(ABC):
     """Interface for system components under orchestrator control"""
 
@@ -41,7 +40,6 @@ class ISystemComponent(ABC):
     @abstractmethod
     def get_status(self) -> Dict[str, Any]:
         """Get component status"""
-
 
 @dataclass
 class RegimeContext:
@@ -131,7 +129,6 @@ class RegimeContext:
             'last_update': self.last_update.isoformat(),
             'analysis_version': self.analysis_version
         }
-
 
 class IRegimeAware(ABC):
     """

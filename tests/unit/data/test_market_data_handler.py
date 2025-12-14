@@ -20,7 +20,6 @@ from core_engine.data.sources.market_data import (
 
 logger = __import__('logging').getLogger(__name__)
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -29,7 +28,6 @@ logger = __import__('logging').getLogger(__name__)
 def market_data_handler():
     """Create market data handler instance"""
     return MarketDataHandler()
-
 
 @pytest.fixture
 def sample_data_feed():
@@ -51,7 +49,6 @@ def sample_data_feed():
         completeness_score=0.98
     )
 
-
 @pytest.fixture
 def sample_market_data_point():
     """Create sample market data point"""
@@ -68,7 +65,6 @@ def sample_market_data_point():
         timestamp=datetime.now(),
         latency_ms=2.0
     )
-
 
 # =============================================================================
 # TEST INITIALIZATION AND LIFECYCLE
@@ -156,7 +152,6 @@ class TestInitialization:
         assert 'operational' in status
         assert 'component_type' in status
 
-
 # =============================================================================
 # TEST FEED MANAGEMENT
 # =============================================================================
@@ -238,7 +233,6 @@ class TestFeedManagement:
             assert 'BLOOMBERG_FEED' in feed_ids or any('BLOOMBERG' in fid for fid in feed_ids)
             assert 'QUANDL_FUNDAMENTAL' in feed_ids or any('QUANDL' in fid for fid in feed_ids)
 
-
 # =============================================================================
 # TEST SUBSCRIPTIONS
 # =============================================================================
@@ -305,7 +299,6 @@ class TestSubscriptions:
         result = await market_data_handler.unsubscribe("NON_EXISTENT")
 
         assert result is False
-
 
 # =============================================================================
 # TEST DATA HANDLING
@@ -423,7 +416,6 @@ class TestDataHandling:
         order_book = await market_data_handler.get_order_book('UNKNOWN')
 
         assert order_book is None
-
 
 # =============================================================================
 # TEST QUALITY MONITORING
@@ -572,7 +564,6 @@ class TestQualityMonitoring:
         assert 'source_quality' in report
         assert 'performance_stats' in report
 
-
 # =============================================================================
 # TEST SUBSCRIPTION STATUS
 # =============================================================================
@@ -630,7 +621,6 @@ class TestSubscriptionStatus:
         status = market_data_handler.get_subscription_status('NON_EXISTENT')
 
         assert 'error' in status
-
 
 # =============================================================================
 # TEST ERROR HANDLING
@@ -697,7 +687,6 @@ class TestErrorHandling:
 
         # Error should be tracked
         assert sub.error_count > 0
-
 
 # =============================================================================
 # TEST SIMULATED DATA FEED

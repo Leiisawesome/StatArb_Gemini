@@ -31,7 +31,6 @@ from datetime import datetime
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 
-
 class TestStrategyRiskIntegration:
     """Integration tests for strategy-risk integration"""
 
@@ -44,7 +43,7 @@ class TestStrategyRiskIntegration:
         Expected: RiskManager processes and authorizes
         """
         system = strategy_manager_with_risk
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
         risk_manager = system['risk_manager']
 
         # Create signal (simulate strategy generation)
@@ -391,7 +390,7 @@ class TestStrategyRiskIntegration:
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )
 
-        authorization1 = await risk_manager.authorize_trading_decision(request)
+        await risk_manager.authorize_trading_decision(request)
 
         # Retry with higher confidence
         request.confidence = 0.75
@@ -470,7 +469,7 @@ class TestStrategyRiskIntegration:
             metadata={'available_cash': 200000.0, 'price': 150.0}
         )
 
-        authorization = await risk_manager.authorize_trading_decision(request)
+        await risk_manager.authorize_trading_decision(request)
 
         # Verify audit trail
         assert hasattr(risk_manager, 'authorization_history')

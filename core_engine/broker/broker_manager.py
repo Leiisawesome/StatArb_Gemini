@@ -60,14 +60,12 @@ warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 import uuid
 
-
 @dataclass
 class BrokerConfig:
     """Broker manager configuration"""
     # Basic settings
     enable_performance_monitoring: bool = True
     metrics_collection_interval: float = 60.0
-
 
 class BrokerManager(ISystemComponent, IRegimeAware):
     """

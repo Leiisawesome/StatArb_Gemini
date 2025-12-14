@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestExecutionOrderRejectionHandling:
     """Integration tests for execution order rejection handling"""
 

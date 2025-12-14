@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import BreakoutConfig, StrategyType
 
-
 class TestBreakoutConfig:
     """Test suite for BreakoutConfig class."""
 

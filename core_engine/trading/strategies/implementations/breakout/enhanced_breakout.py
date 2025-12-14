@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 # ✅ BreakoutConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class EnhancedBreakoutStrategy(EnhancedBaseStrategy):
     """Enhanced Breakout Strategy with ISystemComponent Integration"""
 

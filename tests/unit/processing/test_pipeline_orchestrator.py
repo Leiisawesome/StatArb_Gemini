@@ -13,6 +13,7 @@ Version: 1.0.0
 
 import pytest
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock
 
@@ -21,7 +22,6 @@ from core_engine.processing.pipeline_orchestrator import (
     EnrichedMarketData
 )
 from core_engine.system.interfaces import RegimeContext
-
 
 # ============================================================================
 # FIXTURES
@@ -40,7 +40,6 @@ def mock_raw_data():
         'volume': 1000000 + pd.Series(range(100)) * 1000
     })
 
-
 @pytest.fixture
 def mock_indicators_data(mock_raw_data):
     """Create mock data with indicators"""
@@ -54,7 +53,6 @@ def mock_indicators_data(mock_raw_data):
     df['ATR_14'] = 2.0
     return df
 
-
 @pytest.fixture
 def mock_features_data(mock_indicators_data):
     """Create mock data with features"""
@@ -67,7 +65,6 @@ def mock_features_data(mock_indicators_data):
     df['volume_ratio'] = 1.2
     return df
 
-
 @pytest.fixture
 def mock_signals_data(mock_features_data):
     """Create mock data with signals"""
@@ -77,7 +74,6 @@ def mock_signals_data(mock_features_data):
     df['signal_strength'] = 2
     df['confidence'] = 0.7
     return df
-
 
 @pytest.fixture
 def mock_regime_context():
@@ -92,7 +88,6 @@ def mock_regime_context():
         liquidity_regime='high_liquidity'
     )
 
-
 @pytest.fixture
 def mock_data_manager(mock_raw_data):
     """Create mock DataManager"""
@@ -105,7 +100,6 @@ def mock_data_manager(mock_raw_data):
     })
     return manager
 
-
 @pytest.fixture
 def mock_indicators_engine(mock_indicators_data):
     """Create mock TechnicalIndicators engine"""
@@ -115,8 +109,8 @@ def mock_indicators_engine(mock_indicators_data):
     engine.calculate_indicators = Mock(return_value=mock_indicators_data)
     engine.set_regime_engine = Mock()
     engine.on_regime_change = AsyncMock()
+    engine.adapt_to_regime = AsyncMock()
     return engine
-
 
 @pytest.fixture
 def mock_feature_engineer(mock_features_data):
@@ -127,8 +121,8 @@ def mock_feature_engineer(mock_features_data):
     engineer.create_features = Mock(return_value=mock_features_data)
     engineer.set_regime_engine = Mock()
     engineer.on_regime_change = AsyncMock()
+    engineer.adapt_to_regime = AsyncMock()
     return engineer
-
 
 @pytest.fixture
 def mock_signal_generator(mock_signals_data):
@@ -141,12 +135,10 @@ def mock_signal_generator(mock_signals_data):
     generator.on_regime_change = AsyncMock()
     return generator
 
-
 @pytest.fixture
 def pipeline_orchestrator():
     """Create pipeline orchestrator instance"""
     return ProcessingPipelineOrchestrator()
-
 
 # ============================================================================
 # ENRICHED MARKET DATA TESTS
@@ -246,7 +238,6 @@ class TestEnrichedMarketData:
         assert summary['raw_rows'] > 0
         assert summary['total_columns'] > 0
         assert summary['enrichment_valid'] is True
-
 
 # ============================================================================
 # PIPELINE ORCHESTRATOR TESTS
@@ -352,19 +343,22 @@ class TestPipelineOrchestrator:
 
     def test_clear_cache(self, pipeline_orchestrator):
         """Test clearing cache"""
-        # Add some cache entries
-        pipeline_orchestrator.enriched_data_cache['AAPL'] = Mock()
-        pipeline_orchestrator.enriched_data_cache['TSLA'] = Mock()
+        # Add some cache entries using proper method
+        mock_data1 = Mock()
+        mock_data2 = Mock()
+        pipeline_orchestrator._cache_put('AAPL', mock_data1)
+        pipeline_orchestrator._cache_put('TSLA', mock_data2)
 
         count = pipeline_orchestrator.clear_cache()
 
         assert count == 2
+        assert len(pipeline_orchestrator._cache_entries) == 0
         assert len(pipeline_orchestrator.enriched_data_cache) == 0
 
     def test_get_cached_data(self, pipeline_orchestrator):
         """Test getting cached data"""
         mock_data = Mock()
-        pipeline_orchestrator.enriched_data_cache['AAPL'] = mock_data
+        pipeline_orchestrator._cache_put('AAPL', mock_data)
 
         result = pipeline_orchestrator.get_cached_data('AAPL')
         assert result == mock_data
@@ -385,6 +379,160 @@ class TestPipelineOrchestrator:
         assert 'avg_processing_times' in metrics
         assert 'data_loading' in metrics['avg_processing_times']
 
+    def test_cache_operations(self, pipeline_orchestrator):
+        """Test cache put and get operations"""
+        mock_data = Mock()
+        mock_data.symbol = 'AAPL'
+
+        # Test cache put
+        pipeline_orchestrator._cache_put('AAPL', mock_data)
+        assert len(pipeline_orchestrator._cache_entries) == 1
+
+        # Test cache get
+        retrieved = pipeline_orchestrator._cache_get('AAPL')
+        assert retrieved == mock_data
+
+        # Test cache miss
+        retrieved = pipeline_orchestrator._cache_get('TSLA')
+        assert retrieved is None
+
+    def test_cache_eviction(self, pipeline_orchestrator):
+        """Test cache eviction on size limit"""
+        # Set small cache size for testing
+        pipeline_orchestrator._cache_max_size = 2
+
+        mock_data1 = Mock()
+        mock_data1.symbol = 'AAPL'
+        mock_data2 = Mock()
+        mock_data2.symbol = 'TSLA'
+        mock_data3 = Mock()
+        mock_data3.symbol = 'GOOGL'
+
+        # Add entries
+        pipeline_orchestrator._cache_put('AAPL', mock_data1)
+        pipeline_orchestrator._cache_put('TSLA', mock_data2)
+        pipeline_orchestrator._cache_put('GOOGL', mock_data3)  # Should evict oldest
+
+        assert len(pipeline_orchestrator._cache_entries) == 2
+        assert 'AAPL' not in pipeline_orchestrator._cache_entries  # Should be evicted
+        assert 'TSLA' in pipeline_orchestrator._cache_entries
+        assert 'GOOGL' in pipeline_orchestrator._cache_entries
+
+    def test_cache_ttl_eviction(self, pipeline_orchestrator):
+        """Test cache eviction based on TTL"""
+        from datetime import timedelta
+
+        mock_data = Mock()
+        mock_data.symbol = 'AAPL'
+
+        # Mock expired timestamp
+        expired_time = datetime.now() - timedelta(seconds=pipeline_orchestrator._cache_ttl.total_seconds() + 1)
+        pipeline_orchestrator._cache_entries['AAPL'] = (mock_data, expired_time)
+
+        # Access should trigger eviction
+        retrieved = pipeline_orchestrator._cache_get('AAPL')
+        assert retrieved is None
+        assert 'AAPL' not in pipeline_orchestrator._cache_entries
+
+    def test_validate_dataframe_valid(self, pipeline_orchestrator, mock_raw_data):
+        """Test dataframe validation with valid data"""
+        is_valid, error = pipeline_orchestrator._validate_dataframe(
+            mock_raw_data, "Test Phase", ['open', 'high', 'low', 'close', 'volume']
+        )
+
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_dataframe_missing_columns(self, pipeline_orchestrator):
+        """Test dataframe validation with missing columns"""
+        invalid_df = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=10, freq='1min'),
+            'open': [100.0] * 10,
+            # Missing required columns
+        })
+
+        is_valid, error = pipeline_orchestrator._validate_dataframe(
+            invalid_df, "Test Phase", ['open', 'high', 'low', 'close', 'volume']
+        )
+
+        assert is_valid is False
+        assert "Missing required columns" in error
+
+    def test_validate_dataframe_with_inf(self, pipeline_orchestrator):
+        """Test dataframe validation with infinite values"""
+        df_with_inf = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=10, freq='1min'),
+            'open': [100.0] * 9 + [float('inf')],
+            'high': [101.0] * 10,
+            'low': [99.0] * 10,
+            'close': [100.5] * 10,
+            'volume': [1000000] * 10
+        })
+
+        is_valid, error = pipeline_orchestrator._validate_dataframe(
+            df_with_inf, "Test Phase", ['open', 'high', 'low', 'close', 'volume']
+        )
+
+        assert is_valid is False
+        assert "Inf values" in error
+
+    def test_clean_dataframe(self, pipeline_orchestrator):
+        """Test dataframe cleaning functionality"""
+        df_with_nans = pd.DataFrame({
+            'timestamp': pd.date_range('2024-01-01', periods=5, freq='1min'),
+            'open': [100.0, np.nan, 102.0, 103.0, 104.0],
+            'high': [101.0, 102.0, np.nan, 104.0, 105.0],
+            'low': [99.0, 100.0, 101.0, np.nan, 103.0],
+            'close': [100.5, 101.5, 102.5, 103.5, np.nan],
+            'volume': [1000000, 1000000, 1000000, 1000000, 1000000]
+        })
+
+        cleaned = pipeline_orchestrator._clean_dataframe(df_with_nans, "Test Phase")
+
+        # Should have no NaN values after cleaning
+        assert not cleaned.isna().any().any()
+
+    def test_calculate_data_quality_metrics(self, pipeline_orchestrator, mock_raw_data):
+        """Test data quality metrics calculation"""
+        metrics = pipeline_orchestrator._calculate_data_quality_metrics(mock_raw_data, "Test Phase")
+
+        assert metrics['phase'] == "Test Phase"
+        assert metrics['row_count'] == len(mock_raw_data)
+        assert 'quality_score' in metrics
+        assert 'missing_values' in metrics
+        assert 'data_types' in metrics
+
+    def test_assess_liquidity(self, pipeline_orchestrator, mock_raw_data):
+        """Test liquidity assessment"""
+        # Mock liquidity engine
+        mock_liquidity_engine = Mock()
+        mock_liquidity_engine.assess_liquidity_score = Mock(return_value={
+            'liquidity_score': 0.8,
+            'liquidity_regime': 'high'
+        })
+        pipeline_orchestrator.set_liquidity_engine(mock_liquidity_engine)
+
+        sequence = pipeline_orchestrator._assess_liquidity('AAPL', mock_raw_data)
+
+        assert isinstance(sequence, list)
+        mock_liquidity_engine.assess_liquidity_score.assert_called()
+
+    def test_identify_regime_segments(self, pipeline_orchestrator, mock_raw_data):
+        """Test regime segment identification"""
+        # Create proper regime_sequence format: List[Dict[str, Any]]
+        regime_sequence = [
+            {'bar_index': 0, 'regime': 'normal', 'timestamp': mock_raw_data.iloc[0]['timestamp']},
+            {'bar_index': 50, 'regime': 'volatile', 'timestamp': mock_raw_data.iloc[50]['timestamp']}
+        ]
+
+        segments = pipeline_orchestrator._identify_regime_segments(
+            symbol_data=mock_raw_data,
+            regime_sequence=regime_sequence,
+            symbol='AAPL'
+        )
+
+        assert isinstance(segments, list)
+        assert len(segments) > 0
 
 # ============================================================================
 # INTEGRATION TESTS (WITH MOCKS)
@@ -477,6 +625,187 @@ class TestPipelineIntegration:
         mock_feature_engineer.on_regime_change.assert_called_once()
         mock_signal_generator.on_regime_change.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_process_market_data_with_cache_hit(
+        self,
+        pipeline_orchestrator,
+        mock_data_manager,
+        mock_raw_data
+    ):
+        """Test process_market_data with cache hit"""
+        pipeline_orchestrator.data_manager = mock_data_manager
+        pipeline_orchestrator.is_initialized = True
+        pipeline_orchestrator.is_operational = True
+
+        # Pre-populate cache
+        enriched_data = EnrichedMarketData(
+            symbol='AAPL',
+            timeframe='1min',
+            raw_data=mock_raw_data,
+            indicators=mock_raw_data,
+            features=mock_raw_data,
+            signals=mock_raw_data,
+            processing_timestamp=datetime.now()
+        )
+        pipeline_orchestrator._cache_put('AAPL', enriched_data)
+
+        # Process - should use cache
+        result = await pipeline_orchestrator.process_market_data(
+            symbols=['AAPL'],
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            timeframe='1min'
+        )
+
+        assert 'AAPL' in result
+        # Check that cached data is returned (same object reference)
+        assert result['AAPL'] is enriched_data
+        # Should not call data manager since cache hit
+        mock_data_manager.load_market_data.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_market_data_empty_result(
+        self,
+        pipeline_orchestrator,
+        mock_data_manager
+    ):
+        """Test process_market_data with empty data result"""
+        pipeline_orchestrator.data_manager = mock_data_manager
+        pipeline_orchestrator.is_initialized = True
+        pipeline_orchestrator.is_operational = True
+
+        # Mock empty data
+        mock_data_manager.load_market_data = AsyncMock(return_value={})
+
+        result = await pipeline_orchestrator.process_market_data(
+            symbols=['AAPL'],
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            timeframe='1min'
+        )
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_process_market_data_with_regime_processing(
+        self,
+        pipeline_orchestrator,
+        mock_data_manager,
+        mock_indicators_engine,
+        mock_feature_engineer,
+        mock_signal_generator,
+        mock_raw_data
+    ):
+        """Test process_market_data with regime engine"""
+        # Setup
+        pipeline_orchestrator.data_manager = mock_data_manager
+        pipeline_orchestrator.indicators_engine = mock_indicators_engine
+        pipeline_orchestrator.feature_engineer = mock_feature_engineer
+        pipeline_orchestrator.signal_generator = mock_signal_generator
+        pipeline_orchestrator.is_initialized = True
+        pipeline_orchestrator.is_operational = True
+
+        # Mock regime engine
+        mock_regime_engine = Mock()
+        mock_regime_engine.process_market_data = Mock(return_value={
+            'regime_sequence': [{'timestamp': ts, 'regime': 'normal'} for ts in mock_raw_data['timestamp']],
+            'regime_changes_count': 0
+        })
+        pipeline_orchestrator.regime_engine = mock_regime_engine
+
+        # Mock data manager to return data
+        mock_data_manager.load_market_data = Mock(return_value={'AAPL': mock_raw_data})
+
+        result = await pipeline_orchestrator.process_market_data(
+            symbols=['AAPL'],
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            timeframe='1min'
+        )
+
+        assert 'AAPL' in result
+        mock_regime_engine.process_market_data.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_process_market_data_with_liquidity_assessment(
+        self,
+        pipeline_orchestrator,
+        mock_data_manager,
+        mock_indicators_engine,
+        mock_feature_engineer,
+        mock_signal_generator,
+        mock_raw_data
+    ):
+        """Test process_market_data with liquidity assessment"""
+        # Setup
+        pipeline_orchestrator.data_manager = mock_data_manager
+        pipeline_orchestrator.indicators_engine = mock_indicators_engine
+        pipeline_orchestrator.feature_engineer = mock_feature_engineer
+        pipeline_orchestrator.signal_generator = mock_signal_generator
+        pipeline_orchestrator.is_initialized = True
+        pipeline_orchestrator.is_operational = True
+
+        # Mock liquidity engine
+        mock_liquidity_engine = Mock()
+        mock_liquidity_engine.assess_liquidity_score = Mock(return_value={
+            'liquidity_score': 0.8,
+            'liquidity_regime': 'normal'
+        })
+        pipeline_orchestrator.liquidity_engine = mock_liquidity_engine
+
+        # Mock data manager to return data
+        mock_data_manager.load_market_data = Mock(return_value={'AAPL': mock_raw_data})
+
+        result = await pipeline_orchestrator.process_market_data(
+            symbols=['AAPL'],
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            timeframe='1min'
+        )
+
+        assert 'AAPL' in result
+        mock_liquidity_engine.assess_liquidity_score.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_process_market_data_error_handling(
+        self,
+        pipeline_orchestrator,
+        mock_data_manager
+    ):
+        """Test process_market_data error handling"""
+        pipeline_orchestrator.data_manager = mock_data_manager
+        pipeline_orchestrator.is_initialized = True
+        pipeline_orchestrator.is_operational = True
+
+        # Mock data manager to raise exception
+        mock_data_manager.load_market_data = AsyncMock(side_effect=Exception("Data loading failed"))
+
+        result = await pipeline_orchestrator.process_market_data(
+            symbols=['AAPL'],
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            timeframe='1min'
+        )
+
+        assert result == {}
+
+    def test_enriched_data_post_init_calculation(self, mock_raw_data, mock_indicators_data,
+                                                 mock_features_data, mock_signals_data):
+        """Test EnrichedMarketData statistics calculation in __post_init__"""
+        enriched = EnrichedMarketData(
+            symbol='AAPL',
+            timeframe='1min',
+            raw_data=mock_raw_data,
+            indicators=mock_indicators_data,
+            features=mock_features_data,
+            signals=mock_signals_data,
+            processing_timestamp=datetime.now()
+        )
+
+        assert enriched.raw_rows == len(mock_raw_data)
+        assert enriched.indicator_columns == len(mock_indicators_data.columns) - len(mock_raw_data.columns)
+        assert enriched.feature_columns == len(mock_features_data.columns) - len(mock_indicators_data.columns)
+        assert enriched.signal_columns == len(mock_signals_data.columns) - len(mock_features_data.columns)
 
 # ============================================================================
 # RULE 3 COMPLIANCE TESTS
@@ -535,7 +864,6 @@ class TestRule3Compliance:
         assert pipeline_orchestrator.indicators_engine is not None, "Phase 2 missing"
         assert pipeline_orchestrator.feature_engineer is not None, "Phase 3 missing"
         assert pipeline_orchestrator.signal_generator is not None, "Phase 4 missing"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

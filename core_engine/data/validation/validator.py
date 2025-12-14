@@ -50,7 +50,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 class ValidationStatus(Enum):
     """Data validation status"""
     PENDING = "pending"
@@ -58,7 +57,6 @@ class ValidationStatus(Enum):
     FAILED = "failed"
     WARNING = "warning"
     SKIPPED = "skipped"
-
 
 class ValidationRule(Enum):
     """Data validation rules"""
@@ -73,7 +71,6 @@ class ValidationRule(Enum):
     CROSS_VALIDATION = "cross_validation"
     STATISTICAL_CHECK = "statistical_check"
 
-
 class AnomalyType(Enum):
     """Types of data anomalies"""
     PRICE_SPIKE = "price_spike"
@@ -84,7 +81,6 @@ class AnomalyType(Enum):
     STALE_DATA = "stale_data"
     SEQUENCE_GAP = "sequence_gap"
     OUTLIER = "outlier"
-
 
 @dataclass
 class ValidationResult:
@@ -107,7 +103,6 @@ class ValidationResult:
 
     # Temporal information
     timestamp: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class DataQualityMetrics:
@@ -144,7 +139,6 @@ class DataQualityMetrics:
     update_frequency_seconds: float = 0.0
 
     timestamp: datetime = field(default_factory=datetime.now)
-
 
 @dataclass
 class ValidationConfiguration:
@@ -220,7 +214,6 @@ class ValidationConfiguration:
             enable_cross_validation=self.enable_cross_validation,
             max_cross_validation_diff_pct=self.max_cross_validation_diff_pct
         )
-
 
 class AnomalyDetector:
     """Advanced anomaly detection engine"""
@@ -483,7 +476,6 @@ class AnomalyDetector:
                         anomalies.append(AnomalyType.OUTLIER)
 
         return anomalies
-
 
 class DataValidator(ISystemComponent):
     """

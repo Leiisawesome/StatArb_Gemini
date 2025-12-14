@@ -6,7 +6,6 @@ from core_engine.config import DataConfig, RegimeConfig
 from core_engine.data.manager import ClickHouseDataManager
 from core_engine.regime.engine import EnhancedRegimeEngine
 
-
 @pytest.mark.asyncio
 async def test_regime_engine_persists_bar_by_bar_state():
     # Load real market data via ClickHouseDataManager

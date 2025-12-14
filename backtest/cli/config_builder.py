@@ -7,7 +7,6 @@ Provides pre-configured templates for common backtest scenarios.
 from typing import Dict, Any
 from datetime import datetime, timedelta
 
-
 class ConfigurationBuilder:
     """
     Build backtest configurations from templates

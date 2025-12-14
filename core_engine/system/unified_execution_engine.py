@@ -50,7 +50,6 @@ from .interfaces import ISystemComponent
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ExecutionStatus(Enum):
     """Execution status"""
     PENDING_AUTHORIZATION = "pending_authorization"
@@ -62,7 +61,6 @@ class ExecutionStatus(Enum):
     REJECTED = "rejected"
     FAILED = "failed"
     EXPIRED = "expired"
-
 
 class ExecutionAlgorithm(Enum):
     """Execution algorithm types"""
@@ -78,7 +76,6 @@ class ExecutionAlgorithm(Enum):
     ADAPTIVE = "adaptive"
     SMART_ROUTING = "smart_routing"
 
-
 class ExecutionUrgency(Enum):
     """Execution urgency levels"""
     LOW = "low"
@@ -87,7 +84,6 @@ class ExecutionUrgency(Enum):
     URGENT = "urgent"
     EMERGENCY = "emergency"
 
-
 class VenueType(Enum):
     """Trading venue types"""
     EXCHANGE = "exchange"
@@ -95,7 +91,6 @@ class VenueType(Enum):
     DARK_POOL = "dark_pool"
     MARKET_MAKER = "market_maker"
     CROSSING_NETWORK = "crossing_network"
-
 
 @dataclass
 class ExecutionAuthorization:
@@ -156,7 +151,6 @@ class ExecutionAuthorization:
 
         return True
 
-
 @dataclass
 class ExecutionRequest:
     """Execution request with risk authorization"""
@@ -182,7 +176,6 @@ class ExecutionRequest:
     created_at: datetime = field(default_factory=datetime.now)
     priority: int = 5  # 1-10 scale
     strategy_context: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class ExecutionResult:
@@ -223,7 +216,6 @@ class ExecutionResult:
     # Fill details
     fills: List[Dict[str, Any]] = field(default_factory=list)
     execution_log: List[str] = field(default_factory=list)
-
 
 @dataclass
 class MarketImpactModel:
@@ -271,7 +263,6 @@ class MarketImpactModel:
             logger.error(f"Error estimating market impact: {e}")
             return 0.01  # Conservative default
 
-
 class IExecutionAlgorithm(ABC):
     """Interface for execution algorithms"""
 
@@ -286,7 +277,6 @@ class IExecutionAlgorithm(ABC):
     @abstractmethod
     async def estimate_market_impact(self, request: ExecutionRequest) -> float:
         """Estimate market impact"""
-
 
 class TWAPAlgorithm(IExecutionAlgorithm):
     """Time-Weighted Average Price execution algorithm"""
@@ -406,7 +396,6 @@ class TWAPAlgorithm(IExecutionAlgorithm):
             current_price,
             request.urgency
         ) * 0.7  # TWAP typically reduces impact
-
 
 class MarketAlgorithm(IExecutionAlgorithm):
     """Market order execution algorithm"""
@@ -563,7 +552,6 @@ class MarketAlgorithm(IExecutionAlgorithm):
             request.urgency
         )
 
-
 class AdaptiveAlgorithm(IExecutionAlgorithm):
     """Adaptive execution algorithm that selects optimal strategy"""
 
@@ -640,7 +628,6 @@ class AdaptiveAlgorithm(IExecutionAlgorithm):
         """Estimate market impact"""
         algorithm = self._select_algorithm(request)
         return await algorithm.estimate_market_impact(request)
-
 
 class VWAPAlgorithm(IExecutionAlgorithm):
     """
@@ -885,7 +872,6 @@ class VWAPAlgorithm(IExecutionAlgorithm):
             urgency=request.urgency
         ) * 0.7  # 30% reduction vs aggressive execution
 
-
 class OrderManager:
     """
     Manages order lifecycle and fill tracking
@@ -1031,7 +1017,6 @@ class OrderManager:
         """Get all active orders"""
         return self.active_orders.copy()
 
-
 class ExecutionValidator:
     """Validates execution requests against authorization and risk limits"""
 
@@ -1062,7 +1047,6 @@ class ExecutionValidator:
             errors.append(f"Time horizon {request.time_horizon}s exceeds limit {max_time}s")
 
         return len(errors) == 0, errors
-
 
 class UnifiedExecutionEngine(ISystemComponent):
     """
@@ -1627,7 +1611,7 @@ class UnifiedExecutionEngine(ISystemComponent):
 
             for result in executions:
                 # Get algorithm type from execution result
-                algorithm = getattr(result, 'algorithm', 'adaptive')
+                algorithm = result.algorithm_used.value
 
                 algorithm_stats[algorithm]['count'] += 1
                 if result.status == ExecutionStatus.FILLED:
@@ -1665,7 +1649,12 @@ class UnifiedExecutionEngine(ISystemComponent):
                     await self._update_position_via_risk_manager(symbol, side, filled_quantity, avg_price)
                 except Exception as e:
                     logger.error(f"❌ Risk Manager position update failed: {e}")
-
+            # Fallback to direct position update callback
+            elif self.position_update_callback:
+                try:
+                    await self._update_position_via_callback(symbol, side, filled_quantity, avg_price)
+                except Exception as e:
+                    logger.error(f"❌ Position callback update failed: {e}")
             else:
                 logger.error("❌ No position update mechanism available")
                 raise ConfigurationRequiredError("No position update mechanism available")
@@ -1732,5 +1721,181 @@ class UnifiedExecutionEngine(ISystemComponent):
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
 
+    # ========================================
+    # EXECUTION MODE ROUTING (Paper Trading Evolution)
+    # ========================================
+    #
+    # Per plan Section 6.2 - Mode-Aware Execution Routing
+    # Routes execution to paper or live broker based on mode
 
+    def set_paper_broker(self, paper_broker: Any) -> None:
+        """
+        Set the paper broker adapter for paper trading mode.
+
+        Args:
+            paper_broker: PaperBrokerAdapter instance
+        """
+        self._paper_broker = paper_broker
+        logger.info("✅ Paper broker set for execution routing")
+
+    def set_live_broker(self, live_broker: Any) -> None:
+        """
+        Set the live broker adapter for live trading mode.
+
+        Args:
+            live_broker: Live broker adapter (IBKR, etc.)
+        """
+        self._live_broker = live_broker
+        logger.info("✅ Live broker set for execution routing")
+
+    def set_execution_mode(self, mode: str) -> None:
+        """
+        Set execution mode.
+
+        Args:
+            mode: 'PAPER' or 'LIVE'
+        """
+        if mode not in ('PAPER', 'LIVE'):
+            raise ValueError(f"Invalid execution mode: {mode}")
+        self._execution_mode = mode
+        logger.info(f"📊 Execution mode set to: {mode}")
+
+    def get_execution_mode(self) -> str:
+        """Get current execution mode."""
+        return getattr(self, '_execution_mode', 'PAPER')
+
+    async def execute_with_mode_routing(
+        self,
+        request: ExecutionRequest,
+    ) -> ExecutionResult:
+        """
+        Execute trade with mode-aware broker routing.
+
+        Routes to paper or live broker based on current execution mode.
+
+        Args:
+            request: Execution request with authorization
+
+        Returns:
+            ExecutionResult from appropriate broker
+        """
+        mode = self.get_execution_mode()
+
+        if mode == 'PAPER':
+            return await self._execute_paper(request)
+        elif mode == 'LIVE':
+            return await self._execute_live(request)
+        else:
+            return ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=request.authorization.authorization_id,
+                status=ExecutionStatus.FAILED,
+                execution_log=[f"Unknown execution mode: {mode}"],
+                algorithm_used=request.algorithm,
+            )
+
+    async def _execute_paper(self, request: ExecutionRequest) -> ExecutionResult:
+        """Execute using paper broker."""
+        paper_broker = getattr(self, '_paper_broker', None)
+
+        if paper_broker is None:
+            logger.error("Paper broker not set")
+            return ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=request.authorization.authorization_id,
+                status=ExecutionStatus.FAILED,
+                execution_log=["Paper broker not configured"],
+                algorithm_used=request.algorithm,
+            )
+
+        # Convert request to broker order format
+        auth = request.authorization
+        side = auth.side.upper() if hasattr(auth.side, 'upper') else str(auth.side)
+
+        from ..type_definitions.broker_types import OrderSide, OrderType
+
+        order_side = OrderSide.BUY if side in ('BUY', 'buy') else OrderSide.SELL
+
+        # Determine order type
+        if hasattr(auth, 'order_type'):
+            order_type = auth.order_type
+        elif hasattr(request, 'algorithm'):
+            # Default to market for most algorithms
+            order_type = OrderType.MARKET
+        else:
+            order_type = OrderType.MARKET
+
+        # Submit to paper broker
+        try:
+            if order_type == OrderType.LIMIT and hasattr(auth, 'limit_price'):
+                order = paper_broker.submit_limit_order(
+                    symbol=auth.symbol,
+                    quantity=auth.quantity,
+                    side=order_side,
+                    limit_price=auth.limit_price,
+                )
+            else:
+                order = paper_broker.submit_market_order(
+                    symbol=auth.symbol,
+                    quantity=auth.quantity,
+                    side=order_side,
+                )
+
+            # Wait for fill (paper broker fills quickly)
+            import asyncio
+            for _ in range(50):  # Wait up to 5 seconds
+                await asyncio.sleep(0.1)
+                updated_order = paper_broker.get_order(order.id)
+                if updated_order and updated_order.status in ('filled', 'rejected', 'cancelled'):
+                    break
+
+            # Build result
+            if updated_order and updated_order.status == 'filled':
+                result = ExecutionResult(
+                    request_id=request.request_id,
+                    authorization_id=auth.authorization_id,
+                    status=ExecutionStatus.COMPLETED,
+                    algorithm_used=request.algorithm,
+                )
+                result.fill_quantity = updated_order.filled_quantity
+                result.fill_price = updated_order.avg_fill_price
+                result.execution_log.append(f"Paper fill: {updated_order.filled_quantity} @ {updated_order.avg_fill_price}")
+            else:
+                result = ExecutionResult(
+                    request_id=request.request_id,
+                    authorization_id=auth.authorization_id,
+                    status=ExecutionStatus.FAILED,
+                    algorithm_used=request.algorithm,
+                )
+                result.execution_log.append(f"Paper order not filled: {updated_order.status if updated_order else 'unknown'}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Paper execution error: {e}")
+            return ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=auth.authorization_id,
+                status=ExecutionStatus.FAILED,
+                execution_log=[f"Paper execution error: {e}"],
+                algorithm_used=request.algorithm,
+            )
+
+    async def _execute_live(self, request: ExecutionRequest) -> ExecutionResult:
+        """Execute using live broker."""
+        live_broker = getattr(self, '_live_broker', None)
+
+        if live_broker is None:
+            logger.error("Live broker not set")
+            return ExecutionResult(
+                request_id=request.request_id,
+                authorization_id=request.authorization.authorization_id,
+                status=ExecutionStatus.FAILED,
+                execution_log=["Live broker not configured"],
+                algorithm_used=request.algorithm,
+            )
+
+        # For live, use the standard authorized trade execution
+        # which handles the full algorithm flow
+        return await self.execute_authorized_trade(request)
 

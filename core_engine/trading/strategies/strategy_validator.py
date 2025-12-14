@@ -70,7 +70,6 @@ class BacktestResult:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ValidationLevel(Enum):
     """Validation levels"""
     BASIC = "basic"           # Basic syntax and interface validation
@@ -78,14 +77,12 @@ class ValidationLevel(Enum):
     COMPREHENSIVE = "comprehensive"  # Full validation with extensive testing
     PRODUCTION = "production"  # Production-ready validation
 
-
 class ValidationStatus(Enum):
     """Validation status"""
     PASSED = "passed"
     WARNING = "warning"
     FAILED = "failed"
     SKIPPED = "skipped"
-
 
 class ValidationCategory(Enum):
     """Validation categories"""
@@ -97,7 +94,6 @@ class ValidationCategory(Enum):
     PERFORMANCE = "performance"
     BACKTESTING = "backtesting"
     STATISTICAL = "statistical"
-
 
 @dataclass
 class ValidationIssue:
@@ -114,7 +110,6 @@ class ValidationIssue:
     # Metadata
     timestamp: datetime = field(default_factory=datetime.now)
     validator_name: str = ""
-
 
 @dataclass
 class ValidationResult:
@@ -150,7 +145,6 @@ class ValidationResult:
     # Metadata
     validation_timestamp: datetime = field(default_factory=datetime.now)
     validator_version: str = "1.0.0"
-
 
 class CodeAnalyzer:
     """Analyze strategy code quality and compliance"""
@@ -417,7 +411,6 @@ class CodeAnalyzer:
             logger.error(f"Error analyzing code quality: {e}")
             return {}
 
-
 class ParameterValidator:
     """Validate strategy parameters"""
 
@@ -571,7 +564,6 @@ class ParameterValidator:
                 consistency_checks['stop_loss_take_profit']['message'] = "Stop loss is larger than take profit"
 
         return consistency_checks
-
 
 class DataValidator:
     """Validate strategy data handling"""
@@ -756,7 +748,6 @@ class DataValidator:
         except Exception as e:
             logger.error(f"Error testing data performance: {e}")
             return {'error': str(e)}
-
 
 class EnhancedStrategyValidator(ISystemComponent):
     """
@@ -1917,7 +1908,6 @@ class EnhancedStrategyValidator(ISystemComponent):
         except Exception as e:
             logger.error(f"Statistics generation failed: {e}")
             return {}
-
 
 # Maintain backward compatibility
 StrategyValidator = EnhancedStrategyValidator

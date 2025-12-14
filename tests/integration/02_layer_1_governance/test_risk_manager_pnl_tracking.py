@@ -18,8 +18,6 @@ Date: November 4, 2025
 import pytest
 from datetime import datetime
 
-
-
 class TestPnLTracking:
     """Integration tests for P&L tracking"""
 

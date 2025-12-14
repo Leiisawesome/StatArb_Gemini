@@ -27,7 +27,6 @@ from core_engine.system.hierarchical_orchestrator import (
 
 logger = logging.getLogger(__name__)
 
-
 # ========================================
 # FIXTURES
 # ========================================
@@ -71,7 +70,6 @@ def mock_risk_manager():
     risk_manager.set_controlled_components = Mock()
     risk_manager.emergency_shutdown = Mock()
     return risk_manager
-
 
 # ========================================
 # CATEGORY 1: EMERGENCY RESPONSE (3 tests)
@@ -137,7 +135,6 @@ class TestEmergencyResponse:
 
         logger.info("✅ Emergency conditions check test passed")
 
-
 # ========================================
 # CATEGORY 2: SYSTEM MONITORING (2 tests)
 # ========================================
@@ -186,7 +183,6 @@ class TestSystemMonitoring:
 
         logger.info("✅ Update system metrics test passed")
 
-
 # ========================================
 # CATEGORY 3: SYSTEM STATUS (1 test)
 # ========================================
@@ -214,7 +210,6 @@ class TestSystemStatus:
         assert 'risk_manager_status' in status
 
         logger.info("✅ Get system status test passed")
-
 
 # ========================================
 # CATEGORY 4: ERROR TRACKING (1 test)
@@ -250,7 +245,6 @@ class TestErrorTracking:
 
         logger.info("✅ Track error test passed")
 
-
 # ========================================
 # CATEGORY 5: RECOVERY ACTIONS (1 test)
 # ========================================
@@ -285,7 +279,6 @@ class TestRecoveryActions:
 
         logger.info("✅ Initiate recovery test passed")
 
-
 # ========================================
 # CATEGORY 6: SYSTEM DIAGNOSTICS (1 test)
 # ========================================
@@ -311,7 +304,6 @@ class TestSystemDiagnostics:
         assert 'diagnostics' in diagnostics or 'emergency_mode' in diagnostics
 
         logger.info("✅ Run system diagnostics test passed")
-
 
 # ========================================
 # CATEGORY 7: PERFORMANCE MONITORING (1 test)
@@ -352,7 +344,6 @@ class TestPerformanceMonitoring:
             assert component_id in performance_data
             logger.info("✅ Monitor component performance test passed")
 
-
 # ========================================
 # CATEGORY 8: AUDIT TRAIL (1 test)
 # ========================================
@@ -386,7 +377,6 @@ class TestAuditTrail:
         assert 'details' in event
 
         logger.info("✅ Log audit event test passed")
-
 
 # ========================================
 # MAIN TEST EXECUTION

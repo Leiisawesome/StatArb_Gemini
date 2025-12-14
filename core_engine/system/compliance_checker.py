@@ -32,7 +32,6 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class ComplianceViolationType(Enum):
     """Types of compliance violations"""
     RESTRICTED_SECURITY = "restricted_security"
@@ -42,7 +41,6 @@ class ComplianceViolationType(Enum):
     PATTERN_DAY_TRADING = "pattern_day_trading"
     CONCENTRATION_LIMIT = "concentration_limit"
     WATCH_LIST = "watch_list"
-
 
 @dataclass
 class ComplianceResult:
@@ -68,7 +66,6 @@ class ComplianceResult:
         """Validate compliance result"""
         if not self.approved and not self.rejection_reason:
             raise ValueError("Rejection reason required when not approved")
-
 
 class PreTradeComplianceChecker:
     """
@@ -310,7 +307,8 @@ class PreTradeComplianceChecker:
         # Calculate new ownership after trade
         # Note: Would need shares outstanding from market data in production
         shares_outstanding = 1_000_000_000  # Placeholder
-        new_shares = self.current_ownership.get(f"{symbol}_shares", 0) + quantity
+        current_shares = current_ownership * shares_outstanding
+        new_shares = current_shares + quantity
         new_ownership = new_shares / shares_outstanding
 
         if new_ownership >= self.ownership_threshold:

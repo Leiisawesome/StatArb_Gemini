@@ -33,7 +33,6 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 
-
 class ParameterSweep(BaseExperiment):
     """
     Parameter sweep experiment.
@@ -221,7 +220,7 @@ class ParameterSweep(BaseExperiment):
         """Analyze sweep results for parameter sensitivity"""
 
         # Convert to DataFrame for analysis
-        df = pd.DataFrame(sweep_results)
+        pd.DataFrame(sweep_results)
 
         # Parameter sensitivity analysis
         sensitivity = {}
@@ -284,7 +283,6 @@ class ParameterSweep(BaseExperiment):
         with open(json_path, 'w') as f:
             json.dump(sweep_results, f, indent=2, default=str)
 
-
 # Standalone run function
 async def run_parameter_sweep(config: Dict[str, Any] = None):
     """
@@ -317,7 +315,6 @@ async def run_parameter_sweep(config: Dict[str, Any] = None):
     experiment.save_results(result)
 
     return result
-
 
 if __name__ == "__main__":
     # Run parameter sweep directly

@@ -26,7 +26,6 @@ from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
 from core_engine.system.interfaces import RegimeContext
 
-
 class TestExtremeMarketConditions:
     """Test processing components under extreme market stress"""
 
@@ -501,7 +500,6 @@ class TestExtremeMarketConditions:
         # Component should still be healthy after memory stress
         health = await feature_engineer.health_check()
         assert health['healthy'] is True
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -34,7 +34,6 @@ from core_engine.trading.position_book import (
     PositionEventType,
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -43,7 +42,6 @@ from core_engine.trading.position_book import (
 def position_book():
     """Create a fresh PositionBook with $100,000 initial capital"""
     return PositionBook(initial_cash=Decimal('100000'))
-
 
 @pytest.fixture
 def book_with_long_position(position_book):
@@ -58,7 +56,6 @@ def book_with_long_position(position_book):
     position_book.on_fill(fill)
     return position_book
 
-
 @pytest.fixture
 def book_with_short_position(position_book):
     """PositionBook with an existing SHORT position in TSLA"""
@@ -71,7 +68,6 @@ def book_with_short_position(position_book):
     )
     position_book.on_fill(fill)
     return position_book
-
 
 # =============================================================================
 # TEST: POSITION OPENING
@@ -171,7 +167,6 @@ class TestPositionOpening:
         expected_cash = initial_cash + (Decimal('50') * Decimal('200.00')) - Decimal('5.00')
         assert position_book.get_cash_balance() == expected_cash
 
-
 # =============================================================================
 # TEST: POSITION UPDATES (ADDING)
 # =============================================================================
@@ -229,7 +224,6 @@ class TestPositionAdding:
         pos = book.get_position('TSLA')
         expected_avg = (Decimal('50') * Decimal('200') + Decimal('30') * Decimal('190')) / Decimal('80')
         assert pos.avg_entry_price == expected_avg
-
 
 # =============================================================================
 # TEST: POSITION REDUCTION (PARTIAL CLOSE)
@@ -319,7 +313,6 @@ class TestPositionReduction:
         # Realized P&L: 30 * (200 - 220) = -600
         assert update.realized_pnl == Decimal('-600')
 
-
 # =============================================================================
 # TEST: POSITION CLOSING
 # =============================================================================
@@ -374,7 +367,6 @@ class TestPositionClosing:
 
         pos = book.get_position('TSLA')
         assert pos is None
-
 
 # =============================================================================
 # TEST: POSITION FLIPPING
@@ -432,7 +424,6 @@ class TestPositionFlipping:
         assert pos.side == PositionSide.LONG
         assert pos.quantity == Decimal('30')
         assert pos.avg_entry_price == Decimal('190.00')
-
 
 # =============================================================================
 # TEST: P&L CALCULATIONS
@@ -506,7 +497,6 @@ class TestPnLCalculations:
         assert book.get_realized_pnl() == Decimal('1500')
         assert book.get_total_pnl() == Decimal('2000')
 
-
 # =============================================================================
 # TEST: CASH BALANCE
 # =============================================================================
@@ -546,7 +536,6 @@ class TestCashBalance:
         # 100000 - 10000 - 10 - 5 = 89985
         assert position_book.get_cash_balance() == Decimal('89985')
 
-
 # =============================================================================
 # TEST: PORTFOLIO VALUE
 # =============================================================================
@@ -576,7 +565,6 @@ class TestPortfolioValue:
 
         assert pos.market_value == Decimal('100') * Decimal('200.00')
         assert book.get_portfolio_value() == cash + Decimal('20000')
-
 
 # =============================================================================
 # TEST: NET EXPOSURE
@@ -610,7 +598,6 @@ class TestNetExposure:
 
         total_exposure = book.get_net_exposure()
         assert total_exposure == Decimal('5000')  # 15000 - 10000
-
 
 # =============================================================================
 # TEST: EVENT PUBLISHING
@@ -683,7 +670,6 @@ class TestEventPublishing:
 
         assert len(events) == 1
 
-
 # =============================================================================
 # TEST: SNAPSHOTS
 # =============================================================================
@@ -717,7 +703,6 @@ class TestSnapshots:
         # Original snapshot unchanged
         assert snapshot1.total_positions == 1
         assert snapshot2.total_positions == 0
-
 
 # =============================================================================
 # TEST: THREAD SAFETY
@@ -802,7 +787,6 @@ class TestThreadSafety:
         pos = book.get_position('AAPL')
         assert pos.quantity == Decimal('50')
 
-
 # =============================================================================
 # TEST: EDGE CASES
 # =============================================================================
@@ -860,7 +844,7 @@ class TestEdgeCases:
     def test_very_small_quantities(self, position_book):
         """Test handling of very small fractional quantities"""
         fill = Fill.create('AAPL', 'buy', 0.001, 150.00)
-        update = position_book.on_fill(fill)
+        position_book.on_fill(fill)
 
         pos = position_book.get_position('AAPL')
         assert pos.quantity == Decimal('0.001')
@@ -868,11 +852,10 @@ class TestEdgeCases:
     def test_very_large_quantities(self, position_book):
         """Test handling of very large quantities"""
         fill = Fill.create('AAPL', 'buy', 1000000, 150.00)
-        update = position_book.on_fill(fill)
+        position_book.on_fill(fill)
 
         pos = position_book.get_position('AAPL')
         assert pos.quantity == Decimal('1000000')
-
 
 # =============================================================================
 # TEST: SERIALIZATION
@@ -920,7 +903,6 @@ class TestSerialization:
         assert summary['short_count'] == 0
         assert 'portfolio_value' in summary
         assert 'return_pct' in summary
-
 
 # =============================================================================
 # TEST: FILL FACTORY
@@ -975,7 +957,6 @@ class TestFillFactory:
         fill = Fill.create('AAPL', 'buy', 100, 150.00)
 
         assert fill.notional_value == Decimal('15000')
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

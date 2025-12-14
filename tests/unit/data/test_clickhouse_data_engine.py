@@ -28,7 +28,6 @@ from core_engine.data.sources.clickhouse import (
 # Mock dependencies
 from unittest.mock import Mock, AsyncMock
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -46,7 +45,6 @@ def basic_config():
         enable_circuit_breaker=False
     )
 
-
 @pytest.fixture
 def data_engine(basic_config):
     """Create DataEngine instance"""
@@ -55,7 +53,6 @@ def data_engine(basic_config):
     # Cleanup
     if engine.is_operational:
         asyncio.run(engine.stop())
-
 
 @pytest.fixture
 def sample_data_request():
@@ -71,7 +68,6 @@ def sample_data_request():
         validate_data=False
     )
 
-
 @pytest.fixture
 def sample_data_response(sample_data_request):
     """Create sample DataResponse"""
@@ -81,7 +77,6 @@ def sample_data_response(sample_data_request):
         data={"AAPL": 150.0, "TSLA": 250.0},
         metadata={"source": "test", "timestamp": datetime.now()}
     )
-
 
 # =============================================================================
 # TEST INITIALIZATION
@@ -177,7 +172,6 @@ class TestInitialization:
         assert data_engine._statistics.total_requests == 0
         assert data_engine._statistics.successful_requests == 0
         assert data_engine._statistics.failed_requests == 0
-
 
 # =============================================================================
 # TEST ISystemComponent LIFECYCLE
@@ -308,7 +302,6 @@ class TestLifecycle:
         # Fix: DataEngineStatistics uses cached_requests, not cache_hits
         assert 'total_requests' in status['statistics']
 
-
 # =============================================================================
 # TEST DATA REQUEST HANDLING
 # =============================================================================
@@ -400,7 +393,6 @@ class TestDataRequestHandling:
             assert response.success is False
             assert response.error_code == "PROCESSING_ERROR"
             assert "Test error" in response.error_message
-
 
 # =============================================================================
 # TEST REQUEST ROUTING
@@ -530,7 +522,6 @@ class TestRequestRouting:
         assert response.success is False
         assert response.error_code == "ALTERNATIVE_DATA_ERROR"
 
-
 # =============================================================================
 # TEST CACHING
 # =============================================================================
@@ -642,7 +633,6 @@ class TestCaching:
         key = data_engine._generate_cache_key(request)
         assert 'none' in key.lower()
 
-
 # =============================================================================
 # TEST VALIDATION
 # =============================================================================
@@ -724,7 +714,6 @@ class TestValidation:
 
         assert result.success is False
         assert result.error_code == "VALIDATION_ERROR"
-
 
 # =============================================================================
 # TEST CIRCUIT BREAKER
@@ -808,7 +797,6 @@ class TestCircuitBreaker:
         assert engine._circuit_breaker_open is True
         assert engine._circuit_breaker_failures == 5
 
-
 # =============================================================================
 # TEST STATISTICS
 # =============================================================================
@@ -880,7 +868,6 @@ class TestStatistics:
 
         assert data_engine._statistics.average_response_time_ms > 0
         assert data_engine._statistics.average_response_time_ms == 200.0  # 0.2 seconds = 200ms
-
 
 # =============================================================================
 # TEST DATA LINEAGE
@@ -965,7 +952,6 @@ class TestDataLineage:
         lineage = engine.get_data_lineage(sample_data_request.request_id)
 
         assert lineage['request_id'] == sample_data_request.request_id
-
 
 # =============================================================================
 # TEST HELPER METHODS
@@ -1056,7 +1042,6 @@ class TestHelperMethods:
         mock_cache.cleanup.assert_called_once()
         mock_feed.cleanup.assert_called_once()
 
-
 # =============================================================================
 # TEST ERROR RESPONSE CREATION
 # =============================================================================
@@ -1077,7 +1062,6 @@ class TestErrorResponse:
         assert response.error_message == "Test error message"
         assert response.error_code == "TEST_ERROR"
         assert response.data is None
-
 
 # =============================================================================
 # TEST FEED MESSAGE HANDLING
@@ -1139,7 +1123,6 @@ class TestFeedMessageHandling:
 
         # Should not raise exception
         data_engine._handle_feed_message(mock_message)
-
 
 # =============================================================================
 # TEST GET_DATA COMPREHENSIVE
@@ -1281,7 +1264,6 @@ class TestGetDataComprehensive:
         assert response.success is True
         assert sample_data_request.request_id in engine._data_lineage
 
-
 # =============================================================================
 # TEST ROUTE REQUEST COMPREHENSIVE
 # =============================================================================
@@ -1403,7 +1385,6 @@ class TestRouteRequestComprehensive:
             data_engine.market_data_handler = original_market_handler
             data_engine.alternative_data_handler = original_alt_handler
 
-
 # =============================================================================
 # TEST CIRCUIT BREAKER COMPREHENSIVE
 # =============================================================================
@@ -1461,7 +1442,6 @@ class TestCircuitBreakerComprehensive:
         assert engine._circuit_breaker_open is True
         assert engine._circuit_breaker_failures == 6
 
-
 # =============================================================================
 # TEST STATISTICS COMPREHENSIVE
 # =============================================================================
@@ -1511,7 +1491,6 @@ class TestStatisticsComprehensive:
         data_engine._update_statistics(sample_data_request, response, 0.1)
 
         assert data_engine._statistics.data_quality_average > 0
-
 
 # =============================================================================
 # TEST MONITORING METHODS
@@ -1604,7 +1583,6 @@ class TestMonitoringMethods:
 
         # Test completed without error
 
-
 # =============================================================================
 # TEST FEED MESSAGE HANDLING COMPREHENSIVE
 # =============================================================================
@@ -1648,7 +1626,6 @@ class TestFeedMessageHandlingComprehensive:
         # Should not raise and not cache (no symbol)
         data_engine._handle_feed_message(mock_message)
 
-
 # =============================================================================
 # TEST HEALTH CHECK COMPREHENSIVE
 # =============================================================================
@@ -1688,7 +1665,6 @@ class TestHealthCheckComprehensive:
 
         assert health['healthy'] is False
         assert health['active_components'] == 0
-
 
 # =============================================================================
 # TEST ADDITIONAL COVERAGE - ROUTING EDGE CASES
@@ -1858,7 +1834,6 @@ class TestRoutingEdgeCases:
         assert response.success is False
         assert response.error_code == "NO_HANDLER"
 
-
 # =============================================================================
 # TEST CACHE KEY GENERATION EDGE CASES
 # =============================================================================
@@ -1919,7 +1894,6 @@ class TestCacheKeyGeneration:
         assert isinstance(key, str)
         assert 'AAPL' in key
 
-
 # =============================================================================
 # TEST COMPONENT INITIALIZATION ERROR HANDLING
 # =============================================================================
@@ -1958,7 +1932,6 @@ class TestComponentInitializationErrors:
                 DataEngine(config)
 
             assert "Cache init error" in str(exc_info.value)
-
 
 # =============================================================================
 # TEST WARMUP EDGE CASES
@@ -2000,7 +1973,6 @@ class TestWarmupEdgeCases:
 
         mock_feed.start_monitoring.assert_called_once()
 
-
 # =============================================================================
 # TEST CACHE ERROR HANDLING
 # =============================================================================
@@ -2033,7 +2005,6 @@ class TestCacheErrorHandling:
 
         # Should not raise
         await data_engine._cache_response(sample_data_request, sample_data_response)
-
 
 # =============================================================================
 # TEST VALIDATION EDGE CASES
@@ -2083,7 +2054,6 @@ class TestValidationEdgeCases:
         # Should still validate (empty dict is valid data)
         assert result.quality_score == 0.9
 
-
 # =============================================================================
 # TEST STATISTICS EDGE CASES
 # =============================================================================
@@ -2110,7 +2080,6 @@ class TestStatisticsEdgeCases:
 
         # Quality average should remain unchanged
         assert data_engine._statistics.data_quality_average == initial_quality
-
 
 # =============================================================================
 # TEST FEED MESSAGE HANDLING EDGE CASES
@@ -2160,7 +2129,6 @@ class TestFeedMessageHandlingEdgeCases:
             # If it raises, that's fine - the point is that the method handles exceptions
             pass
 
-
 # =============================================================================
 # TEST MARKET DATA REQUEST EDGE CASES
 # =============================================================================
@@ -2177,7 +2145,6 @@ class TestMarketDataRequestEdgeCases:
             assert response.success is False
             assert response.error_code == "MARKET_DATA_ERROR"
             assert "Request error" in response.error_message
-
 
 # =============================================================================
 # TEST ALTERNATIVE DATA REQUEST EDGE CASES
@@ -2203,7 +2170,6 @@ class TestAlternativeDataRequestEdgeCases:
             assert response.success is False
             assert response.error_code == "ALTERNATIVE_DATA_ERROR"
             assert "Request error" in response.error_message
-
 
 # =============================================================================
 # TEST ROUTE REQUEST FALLBACK EDGE CASES
@@ -2293,7 +2259,6 @@ class TestRouteRequestFallbackEdgeCases:
             data_engine.market_data_handler = original_market_handler
             data_engine.alternative_data_handler = original_alt_handler
 
-
 # =============================================================================
 # TEST GET_DATA LINEAGE EDGE CASES
 # =============================================================================
@@ -2334,7 +2299,6 @@ class TestGetDataLineageEdgeCases:
         lineage = engine.get_data_lineage("nonexistent_request_id")
 
         assert lineage == {}
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

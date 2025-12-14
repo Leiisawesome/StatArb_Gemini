@@ -26,7 +26,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.config.broker_config import load_broker_config
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
-
 def test_historical_data_by_symbol_and_date():
     """Test retrieving historical data for TSLA on 2024-12-20"""
 
@@ -176,7 +175,6 @@ def test_historical_data_by_symbol_and_date():
         adapter.disconnect()
         print("✅ Disconnected")
 
-
 def test_historical_data_different_timeframes():
     """Test historical data retrieval with different timeframes"""
 
@@ -218,7 +216,6 @@ def test_historical_data_different_timeframes():
 
     finally:
         adapter.disconnect()
-
 
 if __name__ == "__main__":
     print("\n" + "=" * 80)

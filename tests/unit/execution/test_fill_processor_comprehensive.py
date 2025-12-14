@@ -25,7 +25,6 @@ from core_engine.trading.execution.fill_processor import (
     FillProcessor,
 )
 
-
 # ==================== Test Fill Validation Edge Cases ====================
 
 class TestFillValidatorEdgeCases:
@@ -320,7 +319,6 @@ class TestFillValidatorEdgeCases:
         # Should handle exception gracefully
         assert isinstance(errors, list)
 
-
 # ==================== Test Reconciliation Logic Edge Cases ====================
 
 class TestTradeReconcilerEdgeCases:
@@ -563,7 +561,6 @@ class TestTradeReconcilerEdgeCases:
         discrepancies = reconciler.get_discrepancies()
         assert isinstance(discrepancies, list)
 
-
 # ==================== Test Advanced Position Management ====================
 
 class TestPositionManagerAdvanced:
@@ -628,7 +625,7 @@ class TestPositionManagerAdvanced:
             execution_time=datetime.now(),
             venue="NYSE"
         )
-        update1 = manager.process_execution(trade1)
+        manager.process_execution(trade1)
 
         # Second trade at different price
         trade2 = TradeExecution(
@@ -712,7 +709,6 @@ class TestPositionManagerAdvanced:
         update = manager.process_execution(trade2)
 
         assert update.new_position == 0.0
-
 
 # ==================== Test Advanced Trade Reporting ====================
 
@@ -919,7 +915,6 @@ class TestTradeReporterAdvanced:
         filtered = reporter._filter_executions(strategy_id="momentum")
         assert all(e.strategy_id == "momentum" for e in filtered)
         assert len(filtered) == 2
-
 
 # ==================== Test Error Handling and Callbacks ====================
 
@@ -1190,7 +1185,6 @@ class TestFillProcessorErrorHandling:
         status = processor.get_fill_status("NONEXISTENT")
         assert status is None
 
-
 # ==================== Test Daily Reports and Statistics ====================
 
 class TestFillProcessorReports:
@@ -1298,7 +1292,6 @@ class TestFillProcessorReports:
 
         processor.stop()
         assert not processor._running
-
 
 # ==================== Test Integration Scenarios ====================
 

@@ -22,7 +22,6 @@ from core_engine.utils.health import (
     create_component_health_check, create_memory_health_check
 )
 
-
 class TestPerformance:
     """Test performance monitoring utilities"""
 
@@ -283,7 +282,6 @@ class TestPerformance:
         profile = monitor.get_operation_profile("global_test_op")
         assert profile is not None
         assert profile.call_count >= 1
-
 
 class TestHealth:
     """Test health monitoring utilities"""
@@ -640,5 +638,4 @@ class TestHealth:
         # Test add_health_check
         add_health_check(db_check)
         assert "database" in get_health_monitor().checks
-
 

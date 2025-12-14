@@ -35,7 +35,6 @@ from core_engine.risk.stress_tester import PortfolioStressResult
 from core_engine.risk.limit_monitor import LimitBreach, AlertSeverity, RiskLimit, LimitType, LimitScope
 from core_engine.risk.correlation_analyzer import CorrelationMatrix, CorrelationRegime, RegimeDetectionResult
 
-
 # ============================================================================
 # Test Fixtures
 # ============================================================================
@@ -58,7 +57,6 @@ def sample_positions():
         }
     }
 
-
 @pytest.fixture
 def sample_returns_data():
     """Sample returns DataFrame."""
@@ -66,7 +64,6 @@ def sample_returns_data():
         'AAPL': [0.01, -0.02, 0.015, 0.005],
         'GOOGL': [0.005, -0.01, 0.02, 0.008]
     })
-
 
 @pytest.fixture
 def mock_risk_metrics():
@@ -86,7 +83,6 @@ def mock_risk_metrics():
         timestamp=datetime.now()
     )
 
-
 @pytest.fixture
 def mock_exposure_breakdown():
     """Mock ExposureBreakdown."""
@@ -105,7 +101,6 @@ def mock_exposure_breakdown():
         )
     }
 
-
 @pytest.fixture
 def mock_stress_result():
     """Mock stress test result."""
@@ -119,7 +114,6 @@ def mock_stress_result():
         scenario_probability=0.01,
         timestamp=datetime.now()
     )
-
 
 @pytest.fixture
 def mock_correlation_matrix():
@@ -141,12 +135,10 @@ def mock_correlation_matrix():
         metadata={}
     )
 
-
 @pytest.fixture
 def risk_manager():
     """Create EnhancedRiskManager with default config."""
     return EnhancedRiskManager()
-
 
 @pytest.fixture
 def risk_manager_custom():
@@ -164,7 +156,6 @@ def risk_manager_custom():
         }
     }
     return EnhancedRiskManager(config)
-
 
 # ============================================================================
 # Category 1: Dataclasses (2 tests)
@@ -213,7 +204,6 @@ class TestDataclasses:
         assert isinstance(alert.timestamp, datetime)
         assert alert.details['risk_score'] == 85.0
 
-
 # ============================================================================
 # Category 2: Initialization (2 tests)
 # ============================================================================
@@ -256,7 +246,6 @@ class TestInitialization:
         assert risk_manager_custom.risk_weights['var'] == 0.30
         assert risk_manager_custom.risk_weights['stress_test'] == 0.30
         assert risk_manager_custom.risk_weights['concentration'] == 0.10
-
 
 # ============================================================================
 # Category 3: Comprehensive Risk Calculation (5 tests)
@@ -420,7 +409,6 @@ class TestComprehensiveRiskCalculation:
         assert 'rate_shock' in called_scenarios
         assert 'geopolitical_crisis' in called_scenarios
 
-
 # ============================================================================
 # Category 4: Risk Scoring (3 tests)
 # ============================================================================
@@ -546,7 +534,6 @@ class TestRiskScoring:
 
         # Should still calculate (lower due to missing data)
         assert 0 <= score <= 100
-
 
 # ============================================================================
 # Category 5: Alerts (5 tests)
@@ -682,7 +669,6 @@ class TestAlerts:
         assert alert.details['limit_id'] == 'L1'
         assert alert.details['breach_amount'] == 50.0
 
-
 # ============================================================================
 # Category 6: Snapshot & Query Methods (4 tests)
 # ============================================================================
@@ -817,7 +803,6 @@ class TestSnapshotAndQuery:
         remaining_snapshots = [s for s in risk_manager._risk_snapshots if s.timestamp >= cutoff]
         assert len(remaining_snapshots) >= 1
 
-
 # ============================================================================
 # Category 7: Monitoring (3 tests)
 # ============================================================================
@@ -899,7 +884,6 @@ class TestMonitoring:
 
             # Verify calculate_comprehensive_risk was called
             assert risk_manager.calculate_comprehensive_risk.call_count >= 1
-
 
 # ============================================================================
 # Category 8: Summary & Limits (3 tests)

@@ -1559,7 +1559,6 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         """Standardized method for consuming data (consumption interface)"""
         return self.process_market_data(data)
 
-
 # ========================================================================================
 # BACKWARD COMPATIBILITY AND ALIASES
 # ========================================================================================

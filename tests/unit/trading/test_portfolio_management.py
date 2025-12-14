@@ -38,7 +38,6 @@ from core_engine.trading.portfolio.rebalancer import (
     RebalanceFrequency
 )
 
-
 class TestEnhancedPortfolioManager:
     """Test suite for EnhancedPortfolioManager class."""
 
@@ -91,7 +90,6 @@ class TestEnhancedPortfolioManager:
             assert snapshot is not None
             assert snapshot.total_value == Decimal('1150000.00')  # 950k + 200k
             assert snapshot.cash_balance == Decimal('200000.00')
-
 
 class TestPositionManager:
     """Test suite for PositionManager class."""
@@ -188,7 +186,6 @@ class TestPositionManager:
         assert summary.total_positions == 2
         assert summary.total_market_value == Decimal('15500.00') + Decimal('127500.00')  # AAPL + GOOGL
 
-
 class TestAllocationEngine:
     """Test suite for AllocationEngine class."""
 
@@ -274,7 +271,6 @@ class TestAllocationEngine:
         """Test allocation constraint checking."""
         # Test that the method exists
         assert hasattr(allocation_engine, '_apply_constraints')
-
 
 class TestCashManager:
     """Test suite for CashManager class."""
@@ -386,7 +382,6 @@ class TestCashManager:
         assert "EUR" in total_balance
         assert total_balance["USD"] == Decimal('1100000.00')  # 1,000,000 + 100,000
         assert total_balance["EUR"] == Decimal('50000.00')
-
 
 class TestPortfolioRebalancer:
     """Test suite for PortfolioRebalancer class."""

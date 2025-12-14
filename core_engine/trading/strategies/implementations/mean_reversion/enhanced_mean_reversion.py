@@ -62,7 +62,6 @@ from core_engine.alpha import (
 
 logger = logging.getLogger(__name__)
 
-
 class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     """
     Enhanced Mean Reversion Strategy with Exhaustion-Based Alpha Logic
@@ -552,7 +551,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
 
             # Set confidence based on SMS score (continuous mapping)
             # Map SMS (0.0-1.0) to confidence (0.50-0.95) with floor at min threshold
-            sms_min = self.ads_config.get('sms_threshold', 0.5)
+            self.ads_config.get('sms_threshold', 0.5)
             confidence = max(0.50, min(0.95, 0.50 + sms_score * 0.45))
 
             # Determine signal reason for logging
@@ -718,7 +717,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 if pos_info and pos_info.get('quantity', 0) > 0:
                     entry_price_pos = pos_info.get('entry_price', 0)
                     current_price = pos_info.get('current_price', 0)
-                    unrealized_pnl = pos_info.get('unrealized_pnl', 0)
+                    pos_info.get('unrealized_pnl', 0)
                     pnl_pct = pos_info.get('pnl_pct', 0)
 
                     # Get price-aware thresholds from config (with defaults)

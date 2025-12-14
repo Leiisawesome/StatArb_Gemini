@@ -45,7 +45,6 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # ENUMS
 # =============================================================================
@@ -56,13 +55,11 @@ class PositionSide(Enum):
     LONG = "long"
     SHORT = "short"
 
-
 class PositionStatus(Enum):
     """Position lifecycle status"""
     OPEN = "open"
     CLOSING = "closing"
     CLOSED = "closed"
-
 
 class PositionEventType(Enum):
     """Types of position events"""
@@ -71,12 +68,10 @@ class PositionEventType(Enum):
     CLOSED = "closed"
     PRICE_UPDATED = "price_updated"
 
-
 class FillSide(Enum):
     """Fill/order side"""
     BUY = "buy"
     SELL = "sell"
-
 
 # =============================================================================
 # DATA CLASSES
@@ -149,7 +144,6 @@ class Fill:
             strategy_id=strategy_id,
             **kwargs
         )
-
 
 @dataclass
 class BookPosition:
@@ -231,7 +225,6 @@ class BookPosition:
             'fill_count': len(self.fills)
         }
 
-
 @dataclass
 class PositionUpdate:
     """
@@ -285,7 +278,6 @@ class PositionUpdate:
             'previous_avg_price': float(self.previous_avg_price)
         }
 
-
 @dataclass
 class PortfolioSnapshot:
     """
@@ -328,7 +320,6 @@ class PortfolioSnapshot:
             'total_positions': self.total_positions,
             'positions': {k: v.to_dict() for k, v in self.positions.items()}
         }
-
 
 # =============================================================================
 # INTERFACE
@@ -409,7 +400,6 @@ class IPositionBook(ABC):
     @abstractmethod
     def unsubscribe(self, handler: Callable[[PositionUpdate], None]) -> None:
         """Unsubscribe from position update events"""
-
 
 # =============================================================================
 # IMPLEMENTATION

@@ -24,7 +24,6 @@ import pytest
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestCompleteMultiStrategyCycle:
     """Integration tests for complete multi-strategy cycle"""
 

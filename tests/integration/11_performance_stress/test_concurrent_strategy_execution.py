@@ -20,7 +20,6 @@ import asyncio
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestConcurrentStrategyExecution:
     """Integration tests for concurrent strategy execution"""
 

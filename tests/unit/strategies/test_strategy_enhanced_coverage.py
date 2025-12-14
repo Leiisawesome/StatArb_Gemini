@@ -32,7 +32,6 @@ from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage
 
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # SHARED FIXTURES
 # =============================================================================
@@ -47,7 +46,6 @@ def enriched_data_sample():
         trend='uptrend'
     )
 
-
 @pytest.fixture
 def mock_regime_engine():
     """Create mock regime engine"""
@@ -58,7 +56,6 @@ def mock_regime_engine():
         'confidence': 0.8
     })
     return regime
-
 
 # =============================================================================
 # TEST CATEGORY: LIFECYCLE METHODS
@@ -108,7 +105,6 @@ class TestMomentumLifecycle:
         assert summary is not None
         assert 'strategy_type' in summary
 
-
 class TestMeanReversionLifecycle:
     """Test mean reversion strategy lifecycle"""
 
@@ -131,7 +127,6 @@ class TestMeanReversionLifecycle:
         health = await strategy._check_strategy_health()
         assert health is not None
 
-
 class TestStatisticalArbitrageLifecycle:
     """Test statistical arbitrage lifecycle"""
 
@@ -146,7 +141,6 @@ class TestStatisticalArbitrageLifecycle:
         """Test component initialization"""
         result = await strategy._initialize_strategy_components()
         assert result is True
-
 
 # =============================================================================
 # TEST CATEGORY: ERROR HANDLING
@@ -203,7 +197,6 @@ class TestStrategyErrorHandling:
             # Expected behavior - validation failed
             pass
 
-
 # =============================================================================
 # TEST CATEGORY: REGIME AWARENESS
 # =============================================================================
@@ -250,7 +243,6 @@ class TestStrategyRegimeAwareness:
 
         assert strategy.regime_engine is not None
 
-
 # =============================================================================
 # TEST CATEGORY: POSITION SIZING
 # =============================================================================
@@ -284,7 +276,6 @@ class TestPositionSizing:
 
         # Test adaptive sizing based on volatility
         assert strategy.config is not None
-
 
 # =============================================================================
 # TEST CATEGORY: EDGE CASES
@@ -367,7 +358,6 @@ class TestEdgeCases:
         signals = await strategy.generate_signals(enriched_data)
         assert isinstance(signals, list)
 
-
 # =============================================================================
 # TEST CATEGORY: PERFORMANCE TRACKING
 # =============================================================================
@@ -397,7 +387,6 @@ class TestPerformanceTracking:
         # Test attribution methods
         assert strategy.config is not None
 
-
 # =============================================================================
 # TEST CATEGORY: CONFIGURATION VALIDATION
 # =============================================================================
@@ -423,7 +412,6 @@ class TestConfigurationValidation:
         config = StatisticalArbitrageConfig(name='test', symbols=['AAPL', 'MSFT'])
         assert config.cointegration_lookback > 0
         assert config.entry_zscore_threshold > 0
-
 
 # =============================================================================
 # TEST CATEGORY: DATA STRUCTURE INITIALIZATION
@@ -452,7 +440,6 @@ class TestDataStructures:
 
         # Check cointegration results structure
         assert hasattr(strategy, 'cointegration_results') or hasattr(strategy, 'config')
-
 
 # =============================================================================
 # TEST CATEGORY: HELPER METHODS

@@ -23,7 +23,6 @@ from ..exceptions import PerformanceDataUnavailableError, BenchmarkDataUnavailab
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class AttributionMethod(Enum):
     """Attribution analysis methods"""
     BRINSON = "brinson"
@@ -32,7 +31,6 @@ class AttributionMethod(Enum):
     HOLDINGS_BASED = "holdings_based"
     MULTI_FACTOR = "multi_factor"
     RISK_MODEL = "risk_model"
-
 
 class AttributionType(Enum):
     """Types of attribution analysis"""
@@ -44,7 +42,6 @@ class AttributionType(Enum):
     CURRENCY = "currency"
     ASSET_CLASS = "asset_class"
 
-
 class PerformanceComponent(Enum):
     """Performance attribution components"""
     ALLOCATION = "allocation"
@@ -53,7 +50,6 @@ class PerformanceComponent(Enum):
     CURRENCY = "currency"
     TIMING = "timing"
     TOTAL = "total"
-
 
 @dataclass
 class AttributionConfig:
@@ -88,7 +84,6 @@ class AttributionConfig:
     # Factor exposure settings
     factor_exposure_method: str = "regression"  # regression, holdings
     rolling_window: int = 60  # Days for rolling attribution
-
 
 @dataclass
 class AttributionResult:
@@ -138,7 +133,6 @@ class AttributionResult:
     analysis_period: Tuple[datetime, datetime] = field(default_factory=lambda: (datetime.now(), datetime.now()))
     confidence_intervals: Dict[str, Tuple[float, float]] = field(default_factory=dict)
 
-
 @dataclass
 class AttributionReport:
     """Comprehensive attribution report"""
@@ -151,7 +145,7 @@ class AttributionReport:
     end_date: datetime
 
     # Overall attribution
-    total_attribution: AttributionResult
+    total_attribution: Optional[AttributionResult] = None
 
     # Time series attribution
     daily_attribution: List[AttributionResult] = field(default_factory=list)
@@ -182,7 +176,6 @@ class AttributionReport:
     # Quality indicators
     model_diagnostics: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
-
 
 class FactorModelAnalyzer:
     """Factor model-based attribution analyzer"""
@@ -339,7 +332,6 @@ class FactorModelAnalyzer:
         result.r_squared = model_result['diagnostics']['r_squared']
 
         return result
-
 
 class SectorAttributionAnalyzer:
     """Sector-based attribution analyzer"""
@@ -505,6 +497,47 @@ class SectorAttributionAnalyzer:
             'sector_contributions': sector_contributions
         }
 
+    def _calculate_allocation_effect(
+        self,
+        portfolio_weights: Dict[str, float],
+        benchmark_weights: Dict[str, float],
+        portfolio_returns: Dict[str, float],
+        benchmark_returns: Dict[str, float],
+        sector_map: Dict[str, str]
+    ) -> Dict[str, float]:
+        """Calculate allocation effect by sector"""
+
+        allocation_effects = {}
+
+        for sector in set(portfolio_weights.keys()) | set(benchmark_weights.keys()):
+            wp = portfolio_weights.get(sector, 0.0)
+            wb = benchmark_weights.get(sector, 0.0)
+            rb = benchmark_returns.get(sector, 0.0)
+
+            allocation_effects[sector] = (wp - wb) * rb
+
+        return allocation_effects
+
+    def _calculate_selection_effect(
+        self,
+        portfolio_weights: Dict[str, float],
+        benchmark_weights: Dict[str, float],
+        portfolio_returns: Dict[str, float],
+        benchmark_returns: Dict[str, float],
+        sector_map: Dict[str, str]
+    ) -> Dict[str, float]:
+        """Calculate selection effect by sector"""
+
+        selection_effects = {}
+
+        for sector in set(portfolio_weights.keys()) | set(benchmark_weights.keys()):
+            wb = benchmark_weights.get(sector, 0.0)
+            rp = portfolio_returns.get(sector, 0.0)
+            rb = benchmark_returns.get(sector, 0.0)
+
+            selection_effects[sector] = wb * (rp - rb)
+
+        return selection_effects
 
 class AttributionAnalyzer:
     """

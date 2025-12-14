@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import TrendFollowingConfig, StrategyType
 
-
 class TestTrendFollowingConfig:
     """Test suite for TrendFollowingConfig class."""
 

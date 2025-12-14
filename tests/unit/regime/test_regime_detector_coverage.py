@@ -26,7 +26,6 @@ from core_engine.regime.regime_detector import (
     RegimeDetectionConfig
 )
 
-
 class TestPrepareFeatures:
     """Test _prepare_features method"""
 
@@ -150,7 +149,6 @@ class TestPrepareFeatures:
         # Should return empty DataFrame on error
         assert isinstance(features, pd.DataFrame)
 
-
 class TestCalculateRSI:
     """Test _calculate_rsi method"""
 
@@ -197,7 +195,6 @@ class TestCalculateRSI:
         single_returns = pd.Series([0.01])
         rsi = detector._calculate_rsi(single_returns)
         assert isinstance(rsi, pd.Series)
-
 
 class TestCombineDetections:
     """Test _combine_detections method"""
@@ -307,7 +304,6 @@ class TestCombineDetections:
         combined = detector._combine_detections([invalid_detection], timestamp)
         assert isinstance(combined, RegimeDetection)
 
-
 class TestCreateTransition:
     """Test _create_transition method"""
 
@@ -406,7 +402,6 @@ class TestCreateTransition:
 
         assert isinstance(transition, RegimeTransition)
 
-
 class TestHistoryMethods:
     """Test history retrieval methods"""
 
@@ -490,7 +485,6 @@ class TestHistoryMethods:
 
         history = detector.get_transition_history()
         assert history == []
-
 
 class TestRegimeStatistics:
     """Test get_regime_statistics and calculation methods"""
@@ -588,7 +582,6 @@ class TestRegimeStatistics:
             assert 'avg_confidence' in stats
             assert 'return_std' in stats
             assert 'count' in stats
-
 
 class TestISystemComponentMethods:
     """Test ISystemComponent implementation methods"""

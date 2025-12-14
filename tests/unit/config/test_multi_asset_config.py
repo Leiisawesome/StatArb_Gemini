@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import MultiAssetConfig, StrategyType
 
-
 class TestMultiAssetConfig:
     """Test suite for MultiAssetConfig class."""
 

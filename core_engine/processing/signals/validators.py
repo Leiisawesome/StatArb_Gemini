@@ -17,14 +17,12 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ValidationLevel(Enum):
     """Validation severity levels"""
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
     CRITICAL = "critical"
-
 
 class ValidationCategory(Enum):
     """Validation categories"""
@@ -36,14 +34,12 @@ class ValidationCategory(Enum):
     COMPLIANCE = "compliance"
     STATISTICAL = "statistical"
 
-
 class ValidationStatus(Enum):
     """Validation status"""
     PASSED = "passed"
     WARNING = "warning"
     FAILED = "failed"
     CRITICAL_FAILURE = "critical_failure"
-
 
 @dataclass
 class ValidationRule:
@@ -74,7 +70,6 @@ class ValidationRule:
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class ValidationResult:
     """Validation result for a single rule"""
@@ -94,7 +89,6 @@ class ValidationResult:
     # Timing
     validation_time: datetime = field(default_factory=datetime.now)
     execution_time_ms: float = 0.0
-
 
 @dataclass
 class SignalValidationReport:
@@ -131,7 +125,6 @@ class SignalValidationReport:
     validation_duration_ms: float = 0.0
     validator_version: str = "1.0"
 
-
 @dataclass
 class PortfolioValidationReport:
     """Portfolio-level validation report"""
@@ -159,7 +152,6 @@ class PortfolioValidationReport:
 
     # Individual signal reports
     signal_reports: List[SignalValidationReport] = field(default_factory=list)
-
 
 class ValidationRuleEngine:
     """Validation rule engine with built-in rules"""
@@ -536,7 +528,6 @@ class ValidationRuleEngine:
             message="No historical performance data available",
             score=0.5
         )
-
 
 class SignalValidator:
     """

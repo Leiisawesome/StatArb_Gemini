@@ -17,7 +17,6 @@ import pytest
 from core_engine.system.central_risk_manager import CentralRiskManager, TradingDecisionRequest, TradingDecisionType
 from core_engine.config.component_config import RiskConfig
 
-
 class TestAuthorizationFlow:
     """Integration tests for authorization flow"""
 
@@ -32,7 +31,7 @@ class TestAuthorizationFlow:
         # Register risk manager
         risk_config = RiskConfig()
         risk_manager = CentralRiskManager(risk_config)
-        risk_id = orchestrator.register_central_risk_manager(risk_manager)
+        orchestrator.register_central_risk_manager(risk_manager)
         await risk_manager.initialize()
 
         # Create authorization request with required price

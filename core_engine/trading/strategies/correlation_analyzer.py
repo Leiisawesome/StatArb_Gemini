@@ -40,14 +40,12 @@ from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
-
 class CorrelationLevel(Enum):
     """Correlation level categories"""
     INDEPENDENT = "independent"       # <0.3
     MODERATE = "moderate"             # 0.3-0.7
     HIGH = "high"                     # 0.7-0.9
     EXTREME = "extreme"               # >0.9
-
 
 @dataclass
 class StrategyPairCorrelation:
@@ -69,7 +67,6 @@ class StrategyPairCorrelation:
     data_points: int
     timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class DiversificationReport:
     """
@@ -89,7 +86,6 @@ class DiversificationReport:
     high_correlations: List[StrategyPairCorrelation] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
     correlation_matrix: Optional[np.ndarray] = None
-
 
 class StrategyCorrelationAnalyzer:
     """

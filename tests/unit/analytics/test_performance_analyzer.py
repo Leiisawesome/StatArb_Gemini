@@ -18,7 +18,6 @@ from core_engine.analytics.performance_analyzer import (
     PerformanceConfig, RiskFreeRateSource
 )
 
-
 class TestPerformanceAnalyzer:
     """Comprehensive tests for PerformanceAnalyzer - Advanced performance analysis"""
 
@@ -442,7 +441,6 @@ class TestPerformanceAnalyzer:
 
         assert result is True
         self.performance_analyzer.handle_analysis_error.assert_called_once_with('portfolio_performance', test_error)
-
 
 if __name__ == '__main__':
     pytest.main([__file__])

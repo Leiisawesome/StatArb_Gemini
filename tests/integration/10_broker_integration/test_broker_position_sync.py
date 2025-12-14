@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestBrokerPositionSync:
     """Integration tests for broker position sync"""
 

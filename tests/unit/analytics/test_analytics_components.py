@@ -7,7 +7,6 @@ import pytest
 import pandas as pd
 import numpy as np
 
-
 class TestPerformanceAnalyzerEnums:
     """Test performance analyzer enums"""
 
@@ -38,7 +37,6 @@ class TestPerformanceAnalyzerEnums:
         assert RiskFreeRateSource.TREASURY_10Y.value == "treasury_10y"
         assert RiskFreeRateSource.SOFR.value == "sofr"
 
-
 class TestPerformanceConfiguration:
     """Test performance analyzer configuration"""
 
@@ -67,7 +65,6 @@ class TestPerformanceConfiguration:
         assert PerformancePeriod.DAILY in config.analysis_periods
         assert PerformancePeriod.MONTHLY in config.analysis_periods
         assert PerformancePeriod.INCEPTION in config.analysis_periods
-
 
 class TestPerformanceMetrics:
     """Test performance metrics calculations"""
@@ -130,7 +127,6 @@ class TestPerformanceMetrics:
 
         assert isinstance(sortino_ratio, float)
 
-
 class TestRiskMetrics:
     """Test risk metrics calculations"""
 
@@ -172,7 +168,6 @@ class TestRiskMetrics:
 
         assert tracking_error > 0
 
-
 class TestAttributionAnalysis:
     """Test attribution analysis"""
 
@@ -207,7 +202,6 @@ class TestAttributionAnalysis:
 
         total_return = sum(sector_contribution.values())
         assert pytest.approx(total_return, 0.01) == 0.12  # Adjusted for floating point
-
 
 class TestMetricsCalculator:
     """Test metrics calculator functionality"""
@@ -256,7 +250,6 @@ class TestMetricsCalculator:
 
         assert max_consecutive >= 1
 
-
 class TestPerformanceReporting:
     """Test performance reporting functionality"""
 
@@ -285,7 +278,6 @@ class TestPerformanceReporting:
 
         assert len(periods) == 3
         assert all('return' in p and 'volatility' in p for p in periods.values())
-
 
 class TestAnalyticsImports:
     """Test analytics component imports"""
@@ -323,7 +315,6 @@ class TestAnalyticsImports:
             assert BenchmarkAnalyzer is not None
         except (ImportError, AttributeError):
             pytest.skip("BenchmarkAnalyzer not found")
-
 
 class TestStatisticalAnalysis:
     """Test statistical analysis functions"""
@@ -363,7 +354,6 @@ class TestStatisticalAnalysis:
 
         assert isinstance(kurtosis, float)
 
-
 class TestPerformanceBenchmarking:
     """Test performance benchmarking"""
 
@@ -395,7 +385,6 @@ class TestPerformanceBenchmarking:
         alpha = portfolio_return - (risk_free_rate + beta * (market_return - risk_free_rate))
 
         assert isinstance(alpha, float)
-
 
 class TestAnalyticsIntegration:
     """Test analytics component integration"""
@@ -442,7 +431,6 @@ class TestAnalyticsIntegration:
 
         assert len(results) == 3
         assert all('return' in r and 'volatility' in r for r in results.values())
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

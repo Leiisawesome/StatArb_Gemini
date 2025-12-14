@@ -59,7 +59,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('polygon_delayed_example')
 
-
 # ============================================================================
 # DELAYED WEBSOCKET EXAMPLE
 # ============================================================================
@@ -84,7 +83,7 @@ async def delayed_websocket_example():
 
     logger.info(f"Testing delayed WebSocket feed for symbols: {symbols}")
     logger.info("This provides 15-minute delayed data from live markets...")
-    
+
     # Check market status
     try:
         import requests
@@ -171,7 +170,7 @@ async def delayed_websocket_example():
                                     timestamp = msg.get('s')
                                 elif msg_type == 'T':  # Trades use 't' (trade timestamp)
                                     timestamp = msg.get('t')
-                                
+
                                 if timestamp:
                                     try:
                                         timestamp_dt = datetime.fromtimestamp(timestamp / 1000.0)
@@ -237,7 +236,6 @@ async def delayed_websocket_example():
         import traceback
         logger.error(traceback.format_exc())
 
-
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
@@ -257,7 +255,6 @@ async def main():
         logger.info("\n⚠️ Interrupted by user")
     except Exception as e:
         logger.error(f"Example failed: {e}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

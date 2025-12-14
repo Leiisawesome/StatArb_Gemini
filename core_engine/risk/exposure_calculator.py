@@ -15,7 +15,6 @@ from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
-
 class ExposureType(Enum):
     """Types of exposure calculations"""
     MARKET = "market"
@@ -28,14 +27,12 @@ class ExposureType(Enum):
     DURATION = "duration"
     VOLATILITY = "volatility"
 
-
 class ExposureDirection(Enum):
     """Direction of exposure"""
     LONG = "long"
     SHORT = "short"
     NET = "net"
     GROSS = "gross"
-
 
 @dataclass
 class ExposureItem:
@@ -48,7 +45,6 @@ class ExposureItem:
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class ExposureBreakdown:
     """Comprehensive exposure breakdown"""
@@ -60,7 +56,6 @@ class ExposureBreakdown:
     exposures: List[ExposureItem] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class ExposureLimit:
     """Exposure limit definition"""
@@ -71,7 +66,6 @@ class ExposureLimit:
     currency: str = "USD"
     is_percentage: bool = True
 
-
 @dataclass
 class ExposureViolation:
     """Exposure limit violation"""
@@ -81,7 +75,6 @@ class ExposureViolation:
     violation_percentage: float
     severity: str  # WARNING, CRITICAL
     timestamp: datetime = field(default_factory=datetime.now)
-
 
 class ExposureCalculator:
     """

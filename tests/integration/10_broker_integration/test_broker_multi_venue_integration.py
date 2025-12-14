@@ -14,8 +14,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestBrokerMultiVenueIntegration:
     """Integration tests for broker multi-venue integration"""
 

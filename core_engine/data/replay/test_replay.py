@@ -13,8 +13,6 @@ Version: 1.0.0
 import asyncio
 import sys
 import os
-from datetime import datetime
-from typing import List
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -26,8 +24,7 @@ from core_engine.data.replay.engine import (
     ReplayStatus
 )
 from core_engine.data.replay.adapter import HistoricalReplayFeedAdapter
-from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
-
+from core_engine.data.feeds.adapters import FeedMessage
 
 async def test_replay_engine_initialization():
     """Test replay engine initialization"""
@@ -52,7 +49,6 @@ async def test_replay_engine_initialization():
 
     return engine
 
-
 async def test_replay_adapter_initialization():
     """Test replay adapter initialization"""
     print("🧪 Testing replay adapter initialization...")
@@ -75,7 +71,6 @@ async def test_replay_adapter_initialization():
         print(f"   ⚠️  Connection failed as expected: {e}")
 
     return adapter
-
 
 async def test_config_validation():
     """Test configuration validation"""
@@ -120,7 +115,6 @@ async def test_config_validation():
 
     return True
 
-
 async def test_speed_enum():
     """Test replay speed functionality"""
     print("🧪 Testing replay speed enum...")
@@ -138,7 +132,6 @@ async def test_speed_enum():
 
     print("   ✅ Speed enum values are correct")
     return True
-
 
 async def test_message_handling():
     """Test message handling without actual replay"""
@@ -172,7 +165,6 @@ async def test_message_handling():
 
     return True
 
-
 async def test_statistics():
     """Test statistics tracking"""
     print("🧪 Testing statistics tracking...")
@@ -196,7 +188,6 @@ async def test_statistics():
     print("   ✅ Statistics have correct initial values")
 
     return True
-
 
 async def run_all_tests():
     """Run all validation tests"""
@@ -236,7 +227,6 @@ async def run_all_tests():
     else:
         print("⚠️  Some tests failed. Check the output above for details.")
         return False
-
 
 if __name__ == "__main__":
     success = asyncio.run(run_all_tests())

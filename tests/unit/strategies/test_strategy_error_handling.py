@@ -30,7 +30,6 @@ from core_engine.trading.strategies.implementations.pairs_trading.enhanced_pairs
 from core_engine.trading.strategies.implementations.volatility.enhanced_volatility import EnhancedVolatilityStrategy
 from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy
 
-
 # =============================================================================
 # SHARED TEST HELPERS
 # =============================================================================
@@ -39,13 +38,11 @@ def create_empty_dataframe() -> pd.DataFrame:
     """Create empty DataFrame"""
     return pd.DataFrame()
 
-
 def create_malformed_dataframe() -> pd.DataFrame:
     """Create DataFrame with missing required columns"""
     return pd.DataFrame({
         'some_column': [1, 2, 3]
     })
-
 
 def create_dataframe_with_nans() -> pd.DataFrame:
     """Create DataFrame with NaN values"""
@@ -57,7 +54,6 @@ def create_dataframe_with_nans() -> pd.DataFrame:
         'volume': [1000, np.nan, 1200, 1100, np.nan]
     })
 
-
 def create_dataframe_with_inf() -> pd.DataFrame:
     """Create DataFrame with infinite values"""
     return pd.DataFrame({
@@ -67,7 +63,6 @@ def create_dataframe_with_inf() -> pd.DataFrame:
         'low': [98, 99, 100, 101, 104],
         'volume': [1000, 1100, 1200, 1100, 1300]
     })
-
 
 def create_dataframe_with_zero_volume() -> pd.DataFrame:
     """Create DataFrame with zero volume"""
@@ -79,7 +74,6 @@ def create_dataframe_with_zero_volume() -> pd.DataFrame:
         'volume': [0, 0, 0, 0, 0]
     })
 
-
 def create_dataframe_with_negative_prices() -> pd.DataFrame:
     """Create DataFrame with negative prices"""
     return pd.DataFrame({
@@ -89,7 +83,6 @@ def create_dataframe_with_negative_prices() -> pd.DataFrame:
         'low': [98, 99, 100, 101, 104],
         'volume': [1000, 1100, 1200, 1100, 1300]
     })
-
 
 # =============================================================================
 # MOMENTUM STRATEGY ERROR HANDLING
@@ -193,7 +186,6 @@ class TestMomentumErrorHandling:
         health = await strategy.health_check()
         assert health is not None
 
-
 # =============================================================================
 # MEAN REVERSION STRATEGY ERROR HANDLING
 # =============================================================================
@@ -260,7 +252,6 @@ class TestMeanReversionErrorHandling:
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
 
-
 # =============================================================================
 # STATISTICAL ARBITRAGE ERROR HANDLING
 # =============================================================================
@@ -325,7 +316,6 @@ class TestStatisticalArbitrageErrorHandling:
         assert result is not None
         assert isinstance(result, dict)
 
-
 # =============================================================================
 # FACTOR STRATEGY ERROR HANDLING
 # =============================================================================
@@ -366,7 +356,6 @@ class TestFactorErrorHandling:
 
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # MULTI-ASSET STRATEGY ERROR HANDLING
@@ -413,7 +402,6 @@ class TestMultiAssetErrorHandling:
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
 
-
 # =============================================================================
 # TREND FOLLOWING ERROR HANDLING
 # =============================================================================
@@ -452,7 +440,6 @@ class TestTrendFollowingErrorHandling:
 
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # BREAKOUT STRATEGY ERROR HANDLING
@@ -505,7 +492,6 @@ class TestBreakoutErrorHandling:
 
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # PAIRS TRADING ERROR HANDLING
@@ -568,12 +554,11 @@ class TestPairsTradingErrorHandling:
             else:
                 # Method doesn't exist, verify strategy is operational
                 assert strategy.is_operational
-        except Exception as e:
+        except Exception:
             # If error occurs, it should be handled gracefully
             # Strategy should still be operational
             health = await strategy.health_check()
             assert health is not None
-
 
 # =============================================================================
 # VOLATILITY STRATEGY ERROR HANDLING
@@ -632,7 +617,6 @@ class TestVolatilityErrorHandling:
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
 
-
 # =============================================================================
 # ARBITRAGE STRATEGY ERROR HANDLING
 # =============================================================================
@@ -671,7 +655,6 @@ class TestArbitrageErrorHandling:
 
         signals = await strategy.generate_signals(invalid_data)
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # CROSS-STRATEGY ERROR HANDLING PATTERNS
@@ -820,7 +803,6 @@ class TestCrossStrategyErrorPatterns:
             signals = await strategy.generate_signals(invalid_data)
             assert isinstance(signals, list)
 
-
 # =============================================================================
 # CONFIGURATION ERROR HANDLING
 # =============================================================================
@@ -876,7 +858,6 @@ class TestConfigurationErrorHandling:
             assert True
         except (ValueError, TypeError):
             pass
-
 
 # =============================================================================
 # EDGE CASE HANDLING

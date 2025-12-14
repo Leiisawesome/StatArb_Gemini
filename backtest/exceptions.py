@@ -12,7 +12,6 @@ Author: StatArb_Gemini Backtest System
 Version: 1.0.0
 """
 
-
 class BacktestError(Exception):
     """
     Base exception for all backtest errors
@@ -21,7 +20,6 @@ class BacktestError(Exception):
     allowing callers to catch all backtest-related errors
     with a single except clause if desired.
     """
-
 
 class BacktestDataError(BacktestError):
     """
@@ -40,7 +38,6 @@ class BacktestDataError(BacktestError):
     3. Adjusting date range to valid data period
     """
 
-
 class BacktestConfigurationError(BacktestError):
     """
     Raised when backtest configuration is invalid or incomplete
@@ -57,7 +54,6 @@ class BacktestConfigurationError(BacktestError):
     2. Validating all component configurations
     3. Ensuring all dependencies are met
     """
-
 
 class BacktestExecutionError(BacktestError):
     """
@@ -76,7 +72,6 @@ class BacktestExecutionError(BacktestError):
     3. Ensuring component robustness
     """
 
-
 class BacktestValidationError(BacktestError):
     """
     Raised when backtest validation fails
@@ -94,7 +89,6 @@ class BacktestValidationError(BacktestError):
     3. Validating data before processing
     """
 
-
 class BacktestIntegrityError(BacktestError):
     """
     Raised when backtest integrity is compromised
@@ -111,7 +105,6 @@ class BacktestIntegrityError(BacktestError):
     2. Debugged to find root cause
     3. Restarted from clean state
     """
-
 
 def format_backtest_error(
     error_type: str,

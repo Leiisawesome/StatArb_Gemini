@@ -25,7 +25,6 @@ from datetime import datetime, timedelta
 
 from core_engine.system.central_risk_manager import TradingAuthorization, AuthorizationLevel
 
-
 class TestExecutionRiskIntegration:
     """Integration tests for execution-risk integration"""
 
@@ -87,7 +86,7 @@ class TestExecutionRiskIntegration:
         Expected: Results reported, position updated
         """
         system = execution_engine_with_risk
-        execution_engine = system['execution_engine']
+        system['execution_engine']
         risk_manager = system['risk_manager']
 
         # Execute trade (simulated)
@@ -280,7 +279,7 @@ class TestExecutionRiskIntegration:
         Expected: Execution not attempted
         """
         system = execution_engine_with_risk
-        execution_engine = system['execution_engine']
+        system['execution_engine']
         risk_manager = system['risk_manager']
 
         # Create request that gets rejected

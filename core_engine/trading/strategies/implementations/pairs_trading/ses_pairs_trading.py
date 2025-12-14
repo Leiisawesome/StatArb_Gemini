@@ -48,7 +48,6 @@ from core_engine.config import PairsConfig
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # ENUMS AND DATA CLASSES
 # ============================================================================
@@ -60,13 +59,11 @@ class PairStatus(Enum):
     SHORT_SPREAD = "short_spread"    # Short stock1, long stock2
     MONITORING = "monitoring"
 
-
 class SpreadDirection(Enum):
     """Spread trade direction"""
     LONG = "long_spread"    # Spread is LOW, expect to rise
     SHORT = "short_spread"  # Spread is HIGH, expect to fall
     NEUTRAL = "neutral"
-
 
 @dataclass
 class PairMetrics:
@@ -114,7 +111,6 @@ class PairMetrics:
         if not self.pair_id:
             self.pair_id = f"{self.stock1}_{self.stock2}"
 
-
 @dataclass
 class SESScoreBreakdown:
     """Detailed breakdown of SES score components"""
@@ -154,7 +150,6 @@ class SESScoreBreakdown:
             'total_score': self.total_score,
             'confidence': self.confidence
         }
-
 
 # ============================================================================
 # MEAN REVERSION CORE (Shared Logic from MR Strategy)
@@ -327,7 +322,6 @@ class MeanReversionCore:
         except Exception as e:
             logger.debug(f"EWMA z-score calculation failed: {e}")
             return 0.0
-
 
 # ============================================================================
 # SPREAD EXHAUSTION SCORER
@@ -547,7 +541,7 @@ class SpreadExhaustionScorer:
             momentum1 = self._safe_get(stock1_data, 'momentum_10', 0)
             momentum2 = self._safe_get(stock2_data, 'momentum_10', 0)
             trend1 = self._safe_get(stock1_data, 'trend_strength', 0)
-            trend2 = self._safe_get(stock2_data, 'trend_strength', 0)
+            self._safe_get(stock2_data, 'trend_strength', 0)
             comp_z1 = self._safe_get(stock1_data, 'composite_z', 0)
             comp_z2 = self._safe_get(stock2_data, 'composite_z', 0)
 
@@ -925,7 +919,6 @@ class SpreadExhaustionScorer:
         else:
             return 0.50
 
-
 # ============================================================================
 # MAIN STRATEGY CLASS
 # ============================================================================
@@ -1226,7 +1219,6 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
         ses_score: float
     ) -> List[StrategySignal]:
         """Create entry signals for a pair"""
-        signals = []
 
         stock1, stock2 = pair_metrics.stock1, pair_metrics.stock2
 
@@ -1290,7 +1282,6 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
         exit_reason: str
     ) -> List[StrategySignal]:
         """Create exit signals for a pair"""
-        signals = []
 
         stock1, stock2 = pair_metrics.stock1, pair_metrics.stock2
 
@@ -1479,7 +1470,6 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
                 pair_metrics.spread_mean = spread_series.mean()
                 pair_metrics.spread_std = spread_series.std()
                 pair_metrics.current_zscore = (current_spread - pair_metrics.spread_mean) / max(pair_metrics.spread_std, 1e-8)
-
 
                 # Update EWMA Z-score
                 pair_metrics.ewma_zscore = MeanReversionCore.calculate_ewma_zscore(spread_series)

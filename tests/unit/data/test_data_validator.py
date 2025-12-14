@@ -28,7 +28,6 @@ from core_engine.data.validation.validator import (
 
 logger = logging.getLogger(__name__)
 
-
 # ========================================
 # FIXTURES
 # ========================================
@@ -67,7 +66,6 @@ async def validator():
     val._initialize_default_validations()
     return val
 
-
 @pytest.fixture
 def valid_quote_data():
     """Create valid quote data for testing"""
@@ -81,7 +79,6 @@ def valid_quote_data():
         'timestamp': datetime.now()
     }
 
-
 @pytest.fixture
 def valid_trade_data():
     """Create valid trade data for testing"""
@@ -92,7 +89,6 @@ def valid_trade_data():
         'volume': 1000,
         'timestamp': datetime.now()
     }
-
 
 @pytest.fixture
 def invalid_quote_data():
@@ -105,12 +101,10 @@ def invalid_quote_data():
         'timestamp': datetime.now()
     }
 
-
 @pytest.fixture
 def anomaly_detector():
     """Create AnomalyDetector instance"""
     return AnomalyDetector()
-
 
 @pytest.fixture
 def validation_config():
@@ -123,7 +117,6 @@ def validation_config():
         max_spread_pct=3.0,
         required_fields=['symbol', 'price', 'timestamp']
     )
-
 
 # ========================================
 # CATEGORY 1: DATA VALIDATOR INITIALIZATION (3 tests)
@@ -195,7 +188,6 @@ class TestDataValidatorInitialization:
 
         logger.info("✅ Validator default validations test passed")
 
-
 # ========================================
 # CATEGORY 2: VALIDATION CONFIGURATION (3 tests)
 # ========================================
@@ -236,7 +228,6 @@ class TestValidationConfiguration:
         assert 'bid_price' in config.required_fields
 
         logger.info("✅ ValidationConfiguration required fields test passed")
-
 
 # ========================================
 # CATEGORY 3: BASIC DATA VALIDATION (5 tests)
@@ -338,7 +329,6 @@ class TestBasicDataValidation:
 
         logger.info("✅ Data with missing timestamp validation test passed")
 
-
 # ========================================
 # CATEGORY 4: PRICE VALIDATION (3 tests)
 # ========================================
@@ -412,7 +402,6 @@ class TestPriceValidation:
         # Should detect extreme price
 
         logger.info("✅ Extreme price detection test passed")
-
 
 # ========================================
 # CATEGORY 5: SPREAD VALIDATION (3 tests)
@@ -489,7 +478,6 @@ class TestSpreadValidation:
 
         logger.info("✅ Negative spread detection test passed")
 
-
 # ========================================
 # CATEGORY 6: VOLUME VALIDATION (2 tests)
 # ========================================
@@ -540,7 +528,6 @@ class TestVolumeValidation:
         assert result.details['volume']['passed'] == False
 
         logger.info("✅ Negative volume detection test passed")
-
 
 # ========================================
 # CATEGORY 7: ANOMALY DETECTION (3 tests)
@@ -615,7 +602,6 @@ class TestAnomalyDetection:
         # Anomaly detection should have processed this
 
         logger.info("✅ Anomaly detection with historical context test passed")
-
 
 # ========================================
 # CATEGORY 8: QUALITY METRICS (3 tests)
@@ -706,7 +692,6 @@ class TestQualityMetrics:
 
         logger.info("✅ Quality metrics components test passed")
 
-
 # ========================================
 # CATEGORY 9: VALIDATION RESULTS STORAGE (2 tests)
 # ========================================
@@ -771,7 +756,6 @@ class TestValidationResultsStorage:
 
         logger.info("✅ Validation results by symbol test passed")
 
-
 # ========================================
 # CATEGORY 10: VALIDATION STATISTICS (3 tests)
 # ========================================
@@ -835,7 +819,6 @@ class TestValidationStatistics:
         assert current_failed >= initial_failed
 
         logger.info("✅ Validation stats failed count test passed")
-
 
 # ========================================
 # CATEGORY 11: INDIVIDUAL VALIDATION CHECK METHODS (10 tests)
@@ -1131,7 +1114,6 @@ class TestIndividualValidationChecks:
 
         logger.info("✅ Calculate quality metrics method test passed")
 
-
 # ========================================
 # CATEGORY 12: ANOMALY DETECTOR METHODS (6 tests)
 # ========================================
@@ -1302,7 +1284,6 @@ class TestAnomalyDetectorMethods:
         assert len(anomalies) >= 2  # Should detect multiple anomalies
 
         logger.info("✅ Anomaly detector integration test passed")
-
 
 # ========================================
 # CATEGORY 13: DATAVALIDATOR UTILITY METHODS (8 tests)
@@ -1488,7 +1469,6 @@ class TestDataValidatorUtilityMethods:
         assert validator._validation_stats['passed_validations'] >= initial_passed
 
         logger.info("✅ Update validation stats method test passed")
-
 
 """
 Test Coverage Summary

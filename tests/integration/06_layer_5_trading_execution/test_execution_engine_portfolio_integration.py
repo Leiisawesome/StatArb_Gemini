@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestExecutionEnginePortfolioIntegration:
     """Integration tests for execution engine-portfolio integration"""
 

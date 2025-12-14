@@ -13,7 +13,6 @@ from core_engine.data.feeds.polygon_delayed import (
 )
 from core_engine.data.feeds.adapters import FeedProvider
 
-
 class TestPolygonDelayedFeedAdapter:
     """Test cases for PolygonDelayedFeedAdapter"""
 
@@ -61,12 +60,12 @@ class TestPolygonDelayedFeedAdapter:
         """Test successful connection"""
         with patch('websockets.connect', new_callable=AsyncMock) as mock_ws_connect, \
              patch.object(adapter, '_authenticate', return_value=True) as mock_auth:
-            
+
             mock_websocket = AsyncMock()
             mock_ws_connect.return_value = mock_websocket
-            
+
             result = await adapter.connect()
-            
+
             assert result is True
             assert adapter._connected is True
             assert adapter.websocket == mock_websocket
@@ -80,7 +79,7 @@ class TestPolygonDelayedFeedAdapter:
         """Test connection failure due to WebSocket error"""
         with patch('websockets.connect', side_effect=Exception("Connection failed")):
             result = await adapter.connect()
-            
+
             assert result is False
             assert adapter._connected is False
             assert adapter.websocket is None
@@ -90,12 +89,12 @@ class TestPolygonDelayedFeedAdapter:
         """Test connection failure due to authentication error"""
         with patch('websockets.connect', new_callable=AsyncMock) as mock_ws_connect, \
              patch.object(adapter, '_authenticate', return_value=False) as mock_auth:
-            
+
             mock_websocket = AsyncMock()
             mock_ws_connect.return_value = mock_websocket
-            
+
             result = await adapter.connect()
-            
+
             assert result is False
             assert adapter._connected is False
             mock_auth.assert_called_once()
@@ -107,15 +106,15 @@ class TestPolygonDelayedFeedAdapter:
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
         adapter._connected = True
-        
+
         # Create separate mock tasks (use regular Mock, not AsyncMock, since cancel() is synchronous)
         heartbeat_task = Mock()
         reconnect_task = Mock()
         adapter._heartbeat_task = heartbeat_task
         adapter._reconnect_task = reconnect_task
-        
+
         await adapter.disconnect()
-        
+
         assert adapter._connected is False
         assert adapter.websocket is None
         assert adapter._heartbeat_task is None
@@ -129,14 +128,14 @@ class TestPolygonDelayedFeedAdapter:
         """Test successful authentication"""
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
-        
+
         # Mock successful auth response
         auth_response = json.dumps([{"ev": "status", "status": "auth_success"}])
         mock_websocket.recv = AsyncMock(return_value=auth_response)
-        
+
         result = await adapter._authenticate()
         assert result is True
-        
+
         # Check that auth message was sent
         mock_websocket.send.assert_called_once()
         sent_message = json.loads(mock_websocket.send.call_args[0][0])
@@ -148,11 +147,11 @@ class TestPolygonDelayedFeedAdapter:
         """Test authentication failure"""
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
-        
+
         # Mock failed auth response
         auth_response = json.dumps([{"ev": "status", "status": "auth_failed"}])
         mock_websocket.recv = AsyncMock(return_value=auth_response)
-        
+
         result = await adapter._authenticate()
         assert result is False
 
@@ -161,10 +160,10 @@ class TestPolygonDelayedFeedAdapter:
         """Test authentication timeout"""
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
-        
+
         # Mock timeout
         mock_websocket.recv = AsyncMock(side_effect=asyncio.TimeoutError())
-        
+
         result = await adapter._authenticate()
         assert result is False
 
@@ -174,12 +173,12 @@ class TestPolygonDelayedFeedAdapter:
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
         adapter._connected = True
-        
+
         result = await adapter.subscribe(["AAPL"], ["second_agg", "trade"])
-        
+
         assert result is True
         assert "AAPL" in adapter._subscribed_symbols
-        
+
         # Check subscription message
         mock_websocket.send.assert_called_once()
         sent_message = json.loads(mock_websocket.send.call_args[0][0])
@@ -191,9 +190,9 @@ class TestPolygonDelayedFeedAdapter:
     async def test_subscribe_not_connected(self, adapter):
         """Test subscription when not connected"""
         adapter._connected = False
-        
+
         result = await adapter.subscribe(["AAPL"], ["second_agg"])
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -202,9 +201,9 @@ class TestPolygonDelayedFeedAdapter:
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
         adapter._connected = True
-        
+
         result = await adapter.subscribe(["AAPL"], ["invalid_type"])
-        
+
         assert result is False
         mock_websocket.send.assert_not_called()
 
@@ -215,12 +214,12 @@ class TestPolygonDelayedFeedAdapter:
         adapter.websocket = mock_websocket
         adapter._connected = True
         adapter._subscribed_symbols.add("AAPL")
-        
+
         result = await adapter.unsubscribe(["AAPL"], ["second_agg", "trade"])
-        
+
         assert result is True
         assert "AAPL" not in adapter._subscribed_symbols
-        
+
         # Check unsubscription message
         mock_websocket.send.assert_called_once()
         sent_message = json.loads(mock_websocket.send.call_args[0][0])
@@ -232,9 +231,9 @@ class TestPolygonDelayedFeedAdapter:
     async def test_unsubscribe_not_connected(self, adapter):
         """Test unsubscription when not connected"""
         adapter._connected = False
-        
+
         result = await adapter.unsubscribe(["AAPL"], ["second_agg"])
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -242,7 +241,7 @@ class TestPolygonDelayedFeedAdapter:
         """Test handling of aggregate bar messages"""
         mock_handler = Mock()
         adapter.add_message_handler(mock_handler)
-        
+
         # Second aggregate message
         agg_msg = {
             "ev": "A",
@@ -258,9 +257,9 @@ class TestPolygonDelayedFeedAdapter:
             "n": 100,
             "av": 500
         }
-        
+
         await adapter._handle_message(json.dumps(agg_msg))
-        
+
         mock_handler.assert_called_once()
         feed_message = mock_handler.call_args[0][0]
         assert feed_message.provider == FeedProvider.POLYGON
@@ -274,7 +273,7 @@ class TestPolygonDelayedFeedAdapter:
         """Test handling of minute aggregate bar messages"""
         mock_handler = Mock()
         adapter.add_message_handler(mock_handler)
-        
+
         # Minute aggregate message
         agg_msg = {
             "ev": "AM",
@@ -290,9 +289,9 @@ class TestPolygonDelayedFeedAdapter:
             "n": 500,
             "av": 2500
         }
-        
+
         await adapter._handle_message(json.dumps(agg_msg))
-        
+
         mock_handler.assert_called_once()
         feed_message = mock_handler.call_args[0][0]
         assert feed_message.message_type == "minute_agg"
@@ -303,7 +302,7 @@ class TestPolygonDelayedFeedAdapter:
         """Test handling of trade messages"""
         mock_handler = Mock()
         adapter.add_message_handler(mock_handler)
-        
+
         trade_msg = {
             "ev": "T",
             "sym": "AAPL",
@@ -315,9 +314,9 @@ class TestPolygonDelayedFeedAdapter:
             "z": 3,
             "i": "12345"
         }
-        
+
         await adapter._handle_message(json.dumps(trade_msg))
-        
+
         mock_handler.assert_called_once()
         feed_message = mock_handler.call_args[0][0]
         assert feed_message.provider == FeedProvider.POLYGON
@@ -333,15 +332,15 @@ class TestPolygonDelayedFeedAdapter:
         # Test connected status
         status_msg = {"ev": "status", "status": "connected", "message": "Connected successfully"}
         await adapter._handle_message(json.dumps(status_msg))
-        
+
         # Test auth_success status
         auth_msg = {"ev": "status", "status": "auth_success", "message": "Authentication successful"}
         await adapter._handle_message(json.dumps(auth_msg))
-        
+
         # Test error status
         error_msg = {"ev": "status", "status": "error", "message": "Connection error"}
         await adapter._handle_message(json.dumps(error_msg))
-        
+
         # Test unknown status
         unknown_msg = {"ev": "status", "status": "unknown", "message": "Unknown status"}
         await adapter._handle_message(json.dumps(unknown_msg))
@@ -372,15 +371,15 @@ class TestPolygonDelayedFeedAdapter:
         mock_websocket = AsyncMock()
         adapter.websocket = mock_websocket
         adapter._connected = True
-        
+
         # Run heartbeat for a short time
         heartbeat_task = asyncio.create_task(adapter._heartbeat())
         await asyncio.sleep(0.1)  # Let it run briefly
-        
+
         # Stop the heartbeat
         adapter._connected = False
         await heartbeat_task
-        
+
         # Verify ping was called
         mock_websocket.ping.assert_called()
 
@@ -388,17 +387,17 @@ class TestPolygonDelayedFeedAdapter:
     async def test_reconnect_functionality(self, adapter):
         """Test reconnection functionality"""
         adapter.config.max_reconnect_attempts = 2
-        
+
         with patch.object(adapter, 'connect', return_value=True) as mock_connect, \
              patch.object(adapter, 'subscribe') as mock_subscribe, \
              patch.object(adapter, 'start_listening') as mock_start_listening, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
-            
+
             # Add a subscribed symbol
             adapter._subscribed_symbols.add("AAPL")
-            
+
             await adapter._reconnect()
-            
+
             # Should attempt to connect
             mock_connect.assert_called_once()
             # Should re-subscribe
@@ -410,11 +409,11 @@ class TestPolygonDelayedFeedAdapter:
     async def test_reconnect_max_attempts_exceeded(self, adapter):
         """Test reconnection when max attempts exceeded"""
         adapter.config.max_reconnect_attempts = 1
-        
+
         with patch.object(adapter, 'connect', return_value=False) as mock_connect, \
              patch('asyncio.sleep', new_callable=AsyncMock):
-            
+
             await adapter._reconnect()
-            
+
             # Should attempt to connect max_reconnect_attempts times
             assert mock_connect.call_count == 1

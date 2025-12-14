@@ -37,7 +37,6 @@ from ..type_definitions.regime import MarketRegime
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TimeframeRegime:
     """Regime analysis for a specific timeframe"""
@@ -1135,3 +1134,236 @@ class EnhancedRegimeEngine(ISystemComponent):
         except Exception as e:
             self.logger.error(f"Error loading regime engine models: {e}")
             return False
+
+    # ========================================
+    # CAUSAL-ONLY MODE (Paper Trading Evolution)
+    # ========================================
+    #
+    # In streaming/paper trading, we can only use causal (filtered) probabilities.
+    # No smoothed/future-looking probabilities allowed for parity with backtest.
+    #
+    # Confirmation State Machine:
+    # - PENDING: New regime detected, awaiting confirmation
+    # - CONFIRMED: Regime confirmed after 2 consecutive agreeing evaluations
+    # - REJECTED: Pending regime did not confirm, reverted to prior
+
+    def enable_causal_only_mode(self) -> None:
+        """
+        Enable causal-only mode for paper trading.
+
+        In this mode:
+        - Only filtered (causal) probabilities are used
+        - No future-looking smoothed probabilities
+        - Regime changes require 2-step confirmation
+        """
+        self._causal_only_mode = True
+        self._confirmation_state = 'CONFIRMED'  # Start with confirmed current regime
+        self._pending_regime: Optional[RegimeAnalysis] = None
+        self._pending_count = 0
+        self._confirmation_required = 2  # Consecutive agreeing evaluations
+        self.logger.info("✅ Causal-only mode enabled for paper trading")
+
+    def disable_causal_only_mode(self) -> None:
+        """Disable causal-only mode (for backtest with full data)."""
+        self._causal_only_mode = False
+        self._confirmation_state = None
+        self._pending_regime = None
+        self.logger.info("Causal-only mode disabled")
+
+    def is_causal_only_mode(self) -> bool:
+        """Check if causal-only mode is enabled."""
+        return getattr(self, '_causal_only_mode', False)
+
+    def get_confirmation_state(self) -> Optional[str]:
+        """Get current confirmation state (PENDING, CONFIRMED, REJECTED)."""
+        return getattr(self, '_confirmation_state', None)
+
+    def evaluate_regime_causal(
+        self,
+        market_data: pd.DataFrame,
+        symbol: Optional[str] = None,
+    ) -> RegimeAnalysis:
+        """
+        Evaluate regime using causal-only data (no look-ahead).
+
+        This is the streaming-mode regime evaluation method. Uses only
+        data up to and including the current bar.
+
+        In causal mode, regime changes go through confirmation:
+        1. New regime detected → PENDING state
+        2. Same regime detected again → CONFIRMED
+        3. Different regime detected → REJECTED, stay with prior
+
+        Args:
+            market_data: DataFrame with OHLCV data up to current bar
+            symbol: Optional symbol for regime tracking
+
+        Returns:
+            Confirmed regime (may be lagged during confirmation)
+        """
+        # Get raw regime detection (using only current data, no smoothing)
+        raw_regime = self.process_market_data(market_data)
+
+        if not self.is_causal_only_mode():
+            # Not in causal mode, return raw regime
+            return raw_regime if isinstance(raw_regime, RegimeAnalysis) else self.current_regime
+
+        # Convert to RegimeAnalysis if needed
+        if isinstance(raw_regime, dict):
+            raw_analysis = self.current_regime
+        else:
+            raw_analysis = raw_regime
+
+        if raw_analysis is None:
+            return None
+
+        # Apply confirmation state machine
+        confirmed_regime = self._apply_confirmation_state_machine(raw_analysis)
+
+        return confirmed_regime
+
+    def _apply_confirmation_state_machine(
+        self,
+        new_regime: RegimeAnalysis
+    ) -> RegimeAnalysis:
+        """
+        Apply 2-step confirmation state machine for regime changes.
+
+        States:
+        - CONFIRMED: Current regime is confirmed
+        - PENDING: New regime detected, awaiting confirmation
+
+        Transitions:
+        - CONFIRMED + same regime → CONFIRMED (no change)
+        - CONFIRMED + different regime → PENDING (start confirmation)
+        - PENDING + same pending regime → CONFIRMED (regime change confirmed)
+        - PENDING + different regime → CONFIRMED (reject pending, keep current)
+
+        Args:
+            new_regime: Newly detected regime
+
+        Returns:
+            The regime that should be used (confirmed regime)
+        """
+        current_confirmed = self.current_regime
+
+        # Initialize if no current regime
+        if current_confirmed is None:
+            self._confirmation_state = 'CONFIRMED'
+            self._pending_regime = None
+            self._pending_count = 0
+            return new_regime
+
+        # Compare regimes
+        current_primary = current_confirmed.primary_regime
+        new_primary = new_regime.primary_regime
+
+        if self._confirmation_state == 'CONFIRMED':
+            if new_primary == current_primary:
+                # Same regime, stay confirmed
+                return new_regime  # Update with fresh data but same regime
+            else:
+                # Different regime detected, start confirmation
+                self._confirmation_state = 'PENDING'
+                self._pending_regime = new_regime
+                self._pending_count = 1
+                self.logger.info(
+                    f"Regime change PENDING: {current_primary} → {new_primary} "
+                    f"(need {self._confirmation_required - self._pending_count} more confirmations)"
+                )
+                # Return current confirmed regime (not the pending one)
+                return current_confirmed
+
+        elif self._confirmation_state == 'PENDING':
+            pending_primary = self._pending_regime.primary_regime if self._pending_regime else None
+
+            if new_primary == pending_primary:
+                # Same as pending regime, increment count
+                self._pending_count += 1
+
+                if self._pending_count >= self._confirmation_required:
+                    # Regime change confirmed!
+                    self._confirmation_state = 'CONFIRMED'
+                    confirmed_regime = new_regime
+                    self.logger.info(
+                        f"Regime change CONFIRMED: {current_primary} → {new_primary}"
+                    )
+                    self._pending_regime = None
+                    self._pending_count = 0
+                    return confirmed_regime
+                else:
+                    # Still pending, need more confirmations
+                    self.logger.debug(
+                        f"Regime change still PENDING: need "
+                        f"{self._confirmation_required - self._pending_count} more confirmations"
+                    )
+                    return current_confirmed
+            else:
+                # Different from pending, reject the pending regime
+                self.logger.info(
+                    f"Regime change REJECTED: {pending_primary} not confirmed, "
+                    f"detected {new_primary} instead"
+                )
+
+                if new_primary == current_primary:
+                    # Back to confirmed regime
+                    self._confirmation_state = 'CONFIRMED'
+                    self._pending_regime = None
+                    self._pending_count = 0
+                    return new_regime
+                else:
+                    # New different regime, start new pending
+                    self._pending_regime = new_regime
+                    self._pending_count = 1
+                    return current_confirmed
+
+        # Fallback
+        return current_confirmed or new_regime
+
+    def get_pending_regime(self) -> Optional[RegimeAnalysis]:
+        """Get the pending regime if in PENDING state."""
+        if self.get_confirmation_state() == 'PENDING':
+            return getattr(self, '_pending_regime', None)
+        return None
+
+    def get_state_for_checkpoint(self) -> Dict[str, Any]:
+        """
+        Get regime engine state for checkpointing.
+
+        Returns serializable state for PaperSessionStateManager.
+        """
+        return {
+            'causal_only_mode': getattr(self, '_causal_only_mode', False),
+            'confirmation_state': getattr(self, '_confirmation_state', None),
+            'pending_count': getattr(self, '_pending_count', 0),
+            'current_regime_primary': (
+                self.current_regime.primary_regime.value
+                if self.current_regime and hasattr(self.current_regime.primary_regime, 'value')
+                else str(self.current_regime.primary_regime) if self.current_regime else None
+            ),
+            'pending_regime_primary': (
+                self._pending_regime.primary_regime.value
+                if getattr(self, '_pending_regime', None) and hasattr(self._pending_regime.primary_regime, 'value')
+                else str(self._pending_regime.primary_regime) if getattr(self, '_pending_regime', None) else None
+            ),
+        }
+
+    def restore_from_checkpoint(self, state: Dict[str, Any]) -> None:
+        """
+        Restore regime engine state from checkpoint.
+
+        Args:
+            state: State dict from get_state_for_checkpoint()
+        """
+        self._causal_only_mode = state.get('causal_only_mode', False)
+        self._confirmation_state = state.get('confirmation_state', 'CONFIRMED')
+        self._pending_count = state.get('pending_count', 0)
+        self._confirmation_required = 2
+
+        # Note: Full regime objects need to be reconstructed from market data
+        # after restore. The checkpoint just preserves the state machine state.
+
+        self.logger.info(
+            f"Restored regime engine state: causal_only={self._causal_only_mode}, "
+            f"confirmation_state={self._confirmation_state}"
+        )

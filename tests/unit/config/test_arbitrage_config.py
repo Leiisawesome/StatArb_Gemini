@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import ArbitrageConfig, StrategyType
 
-
 class TestArbitrageConfig:
     """Test suite for ArbitrageConfig class."""
 

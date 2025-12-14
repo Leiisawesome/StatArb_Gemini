@@ -34,7 +34,6 @@ from core_engine.data.feeds.adapters import AdapterStatus, FeedProvider, FeedMes
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -44,12 +43,10 @@ def polygon_api_key():
     """Test API key"""
     return "test_api_key_12345"
 
-
 @pytest.fixture
 def polygon_rest_config(polygon_api_key):
     """Polygon REST API configuration"""
     return PolygonRestConfig(api_key=polygon_api_key)
-
 
 @pytest.fixture
 def polygon_feed_config(polygon_api_key):
@@ -61,7 +58,6 @@ def polygon_feed_config(polygon_api_key):
         data_types=["second_agg", "minute_agg", "trade"],
     )
 
-
 @pytest.fixture
 def polygon_service_config(polygon_api_key):
     """Polygon service configuration"""
@@ -70,7 +66,6 @@ def polygon_service_config(polygon_api_key):
         symbols=["AAPL", "TSLA", "NVDA"],
         data_types=["second_agg", "minute_agg", "trade"],
     )
-
 
 @pytest.fixture
 def sample_aggregate_bar():
@@ -89,7 +84,6 @@ def sample_aggregate_bar():
         bar_type="minute",
     )
 
-
 @pytest.fixture
 def sample_trade():
     """Sample trade"""
@@ -102,7 +96,6 @@ def sample_trade():
         exchange=1,
         tape=1,
     )
-
 
 # =============================================================================
 # CATEGORY 1: POLYGON REST SERVICE - CONFIGURATION (3 tests)
@@ -135,7 +128,6 @@ class TestPolygonRestConfig:
         with pytest.raises(ValueError, match="API key required"):
             PolygonRestConfig(api_key="")
         logger.info("✅ REST config missing API key test passed")
-
 
 # =============================================================================
 # CATEGORY 2: POLYGON REST SERVICE - INITIALIZATION (4 tests)
@@ -260,7 +252,6 @@ class TestPolygonRestServiceInitialization:
         assert service.is_initialized is False
         logger.info("✅ REST service close test passed")
 
-
 # =============================================================================
 # CATEGORY 3: POLYGON REST SERVICE - RATE LIMITING (3 tests)
 # =============================================================================
@@ -323,7 +314,6 @@ class TestPolygonRestRateLimiting:
             mock_sleep.assert_not_called()
 
         logger.info("✅ Rate limit allows under limit test passed")
-
 
 # =============================================================================
 # CATEGORY 4: POLYGON REST SERVICE - DATA RETRIEVAL (6 tests)
@@ -580,7 +570,6 @@ class TestPolygonRestDataRetrieval:
         assert prices["TSLA"] == 250.5
         logger.info("✅ Get latest prices test passed")
 
-
 # =============================================================================
 # CATEGORY 5: POLYGON FEED CONFIG (3 tests)
 # =============================================================================
@@ -632,7 +621,6 @@ class TestPolygonFeedConfig:
         assert len(config.data_types) == 3
         logger.info("✅ Feed config data type validation test passed")
 
-
 # =============================================================================
 # CATEGORY 6: POLYGON REALTIME ADAPTER - INITIALIZATION (3 tests)
 # =============================================================================
@@ -669,7 +657,6 @@ class TestPolygonRealtimeAdapterInitialization:
             assert 'second_agg' in adapter._active_subscriptions
             assert 'minute_agg' in adapter._active_subscriptions
             logger.info("✅ Adapter subscription tracking test passed")
-
 
 # =============================================================================
 # CATEGORY 7: POLYGON REALTIME ADAPTER - MESSAGE HANDLING (4 tests)
@@ -771,7 +758,6 @@ class TestPolygonRealtimeMessageHandling:
             assert adapter.status in [AdapterStatus.DISCONNECTED, AdapterStatus.ERROR]
             logger.info("✅ Handle invalid JSON test passed")
 
-
 # =============================================================================
 # CATEGORY 8: POLYGON AGGREGATED DATA MANAGER (4 tests)
 # =============================================================================
@@ -864,7 +850,6 @@ class TestPolygonAggregatedDataManager:
             assert price == 150.5
             logger.info("✅ Get latest price test passed")
 
-
 # =============================================================================
 # CATEGORY 9: POLYGON DATA SERVICE - INITIALIZATION (4 tests)
 # =============================================================================
@@ -921,7 +906,6 @@ class TestPolygonDataServiceInitialization:
 
         assert result is False
         logger.info("✅ Data service start requires init test passed")
-
 
 # =============================================================================
 # CATEGORY 10: POLYGON DATA SERVICE - DATA ACCESS (4 tests)
@@ -991,7 +975,6 @@ class TestPolygonDataServiceDataAccess:
         assert len(df.columns) == 5  # Only OHLCV
         logger.info("✅ Get OHLCV for pipeline test passed")
 
-
 # =============================================================================
 # CATEGORY 11: POLYGON DATA SERVICE - CALLBACKS (3 tests)
 # =============================================================================
@@ -1054,7 +1037,6 @@ class TestPolygonDataServiceCallbacks:
         assert callback.called
         logger.info("✅ Bar callback invocation test passed")
 
-
 # =============================================================================
 # CATEGORY 12: POLYGON DATA SERVICE - HEALTH CHECK (3 tests)
 # =============================================================================
@@ -1108,7 +1090,6 @@ class TestPolygonDataServiceHealthCheck:
         assert 'symbols' in status
         logger.info("✅ Get status test passed")
 
-
 # =============================================================================
 # CATEGORY 13: CONVENIENCE FUNCTIONS (2 tests)
 # =============================================================================
@@ -1147,7 +1128,6 @@ class TestConvenienceFunctions:
 
         await service.stop()
         logger.info("✅ Create polygon service test passed")
-
 
 # =============================================================================
 # CATEGORY 14: ERROR HANDLING (3 tests)
@@ -1226,6 +1206,759 @@ class TestPolygonErrorHandling:
         assert service._stats['errors'] >= 0  # May or may not increment
         logger.info("✅ Data service handle message error test passed")
 
+# =============================================================================
+# CATEGORY 15: POLYGON DATA SERVICE - INITIALIZATION ERROR HANDLING
+# =============================================================================
+
+class TestPolygonDataServiceInitializationErrors:
+    """Test initialization error scenarios for PolygonDataService"""
+
+    @pytest.mark.asyncio
+    async def test_initialize_adapter_creation_failure(self, polygon_service_config):
+        """Test initialization fails when adapter creation fails"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter', side_effect=Exception("Adapter creation failed")):
+            result = await service.initialize()
+
+            assert result is False
+            assert not service.is_initialized
+            logger.info("✅ Initialize adapter creation failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_initialize_manager_creation_failure(self, polygon_service_config):
+        """Test initialization fails when manager creation fails"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            MockAdapter.return_value = mock_adapter
+
+            with patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager', side_effect=Exception("Manager creation failed")):
+                result = await service.initialize()
+
+                assert result is False
+                assert not service.is_initialized
+                logger.info("✅ Initialize manager creation failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_initialize_message_handler_registration_failure(self, polygon_service_config):
+        """Test initialization fails when message handler registration fails"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter, \
+             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager') as MockManager:
+
+            mock_adapter = Mock()
+            mock_adapter.add_message_handler.side_effect = Exception("Handler registration failed")
+            MockAdapter.return_value = mock_adapter
+            MockManager.return_value = Mock()
+
+            result = await service.initialize()
+
+            assert result is False
+            assert not service.is_initialized
+            logger.info("✅ Initialize message handler registration failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_initialize_polygon_config_creation_failure(self, polygon_service_config):
+        """Test initialization fails when PolygonFeedConfig creation fails"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonFeedConfig', side_effect=Exception("Config creation failed")):
+            result = await service.initialize()
+
+            assert result is False
+            assert not service.is_initialized
+            logger.info("✅ Initialize config creation failure test passed")
+
+# =============================================================================
+# CATEGORY 16: POLYGON DATA SERVICE - START/STOP ERROR HANDLING
+# =============================================================================
+
+class TestPolygonDataServiceLifecycleErrors:
+    """Test start/stop lifecycle error scenarios"""
+
+    @pytest.mark.asyncio
+    async def test_start_not_initialized(self, polygon_service_config):
+        """Test start fails when not initialized"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        result = await service.start()
+
+        assert result is False
+        assert not service.is_operational
+        logger.info("✅ Start not initialized test passed")
+
+    @pytest.mark.asyncio
+    async def test_start_adapter_connection_failure(self, polygon_service_config):
+        """Test start fails when adapter connection fails"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.connect = AsyncMock(return_value=False)
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()  # Initialize first
+
+            result = await service.start()
+
+            assert result is False
+            assert not service.is_operational
+            logger.info("✅ Start adapter connection failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_start_subscription_failure(self, polygon_service_config):
+        """Test start handles subscription failure gracefully"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.connect = AsyncMock(return_value=True)
+            mock_adapter.subscribe = AsyncMock(return_value=False)  # Subscription fails
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            result = await service.start()
+
+            # Should still succeed (subscription failure is warning, not error)
+            assert result is True
+            assert service.is_operational
+            logger.info("✅ Start subscription failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_start_exception_handling(self, polygon_service_config):
+        """Test start handles unexpected exceptions"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.connect = AsyncMock(side_effect=Exception("Unexpected connection error"))
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            result = await service.start()
+
+            assert result is False
+            assert not service.is_operational
+            logger.info("✅ Start exception handling test passed")
+
+    @pytest.mark.asyncio
+    async def test_stop_adapter_disconnect_failure(self, polygon_service_config):
+        """Test stop handles adapter disconnect failure gracefully"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.connect = AsyncMock(return_value=True)
+            mock_adapter.subscribe = AsyncMock(return_value=True)
+            mock_adapter.disconnect = AsyncMock(side_effect=Exception("Disconnect failed"))
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            await service.start()  # Successfully start first
+
+            result = await service.stop()
+
+            # Should return False due to disconnect failure
+            assert result is False
+            # Operational state remains True since cleanup failed
+            assert service.is_operational
+            logger.info("✅ Stop adapter disconnect failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_stop_exception_handling(self, polygon_service_config):
+        """Test stop handles unexpected exceptions"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.connect = AsyncMock(return_value=True)
+            mock_adapter.subscribe = AsyncMock(return_value=True)
+            mock_adapter.disconnect = AsyncMock(side_effect=Exception("Unexpected stop error"))
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            await service.start()  # Successfully start first
+
+            result = await service.stop()
+
+            # Should return False due to exception
+            assert result is False
+            # Operational state remains True since cleanup failed
+            assert service.is_operational
+            logger.info("✅ Stop exception handling test passed")
+
+# =============================================================================
+# CATEGORY 17: POLYGON DATA SERVICE - DATA ACCESS ERROR HANDLING
+# =============================================================================
+
+class TestPolygonDataServiceDataAccessErrors:
+    """Test data access method error scenarios"""
+
+    def test_get_latest_bars_invalid_symbol(self, polygon_service_config):
+        """Test get_latest_bars with invalid symbol parameters"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Test with None symbol
+        with pytest.raises(AttributeError):
+            service.get_latest_bars(None)
+
+        # Test with empty symbol
+        df = service.get_latest_bars("")
+        assert df.empty
+        assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'vwap', 'num_trades']
+        logger.info("✅ Get latest bars invalid symbol test passed")
+
+    def test_get_latest_bars_invalid_timeframe(self, polygon_service_config):
+        """Test get_latest_bars with invalid timeframe"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Test with None timeframe
+        df = service.get_latest_bars("AAPL", timeframe=None)
+        assert df.empty
+
+        # Test with invalid timeframe
+        df = service.get_latest_bars("AAPL", timeframe="invalid")
+        assert df.empty
+        logger.info("✅ Get latest bars invalid timeframe test passed")
+
+    def test_get_latest_bars_negative_limit(self, polygon_service_config):
+        """Test get_latest_bars with negative limit"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        df = service.get_latest_bars("AAPL", limit=-1)
+        assert df.empty
+        logger.info("✅ Get latest bars negative limit test passed")
+
+    def test_get_latest_trades_invalid_symbol(self, polygon_service_config):
+        """Test get_latest_trades with invalid symbol"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Test with None symbol
+        with pytest.raises(AttributeError):
+            service.get_latest_trades(None)
+
+        # Test with empty symbol
+        df = service.get_latest_trades("")
+        assert df.empty
+        assert list(df.columns) == ['timestamp', 'price', 'size', 'conditions']
+        logger.info("✅ Get latest trades invalid symbol test passed")
+
+    def test_get_latest_price_invalid_symbol(self, polygon_service_config):
+        """Test get_latest_price with invalid symbol"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Test with None symbol
+        with pytest.raises(AttributeError):
+            service.get_latest_price(None)
+
+        # Test with empty symbol
+        price = service.get_latest_price("")
+        assert price is None
+
+        # Test with non-existent symbol
+        price = service.get_latest_price("NONEXISTENT")
+        assert price is None
+        logger.info("✅ Get latest price invalid symbol test passed")
+
+    def test_get_ohlcv_for_pipeline_time_filter_edge_cases(self, polygon_service_config):
+        """Test get_ohlcv_for_pipeline with time filter edge cases"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Add some test data
+        bar = PolygonAggregateBar(
+            symbol="AAPL",
+            open=150.0, high=151.0, low=149.0, close=150.5,
+            volume=100000.0, vwap=150.25, num_trades=1000,
+            timestamp_start=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            timestamp_end=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+            bar_type="minute"
+        )
+        service._bars["AAPL"]["minute"].append(bar)
+
+        # Test with naive datetime (should handle gracefully)
+        naive_start = datetime(2024, 12, 6, 9, 29)
+        df = service.get_ohlcv_for_pipeline("AAPL", start_time=naive_start)
+        assert not df.empty
+
+        # Test with future end time (should return all data)
+        future_end = datetime(2024, 12, 7, tzinfo=timezone.utc)
+        df = service.get_ohlcv_for_pipeline("AAPL", end_time=future_end)
+        assert not df.empty
+
+        # Test with past start time (should return all data)
+        past_start = datetime(2024, 12, 5, tzinfo=timezone.utc)
+        df = service.get_ohlcv_for_pipeline("AAPL", start_time=past_start)
+        assert not df.empty
+        logger.info("✅ Get OHLCV time filter edge cases test passed")
+
+# =============================================================================
+# CATEGORY 18: POLYGON DATA SERVICE - SUBSCRIPTION ERROR HANDLING
+# =============================================================================
+
+class TestPolygonDataServiceSubscriptionErrors:
+    """Test subscription method error scenarios"""
+
+    @pytest.mark.asyncio
+    async def test_subscribe_not_connected(self, polygon_service_config):
+        """Test subscribe fails when not connected"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        result = await service.subscribe(["AAPL"])
+
+        assert result is False
+        logger.info("✅ Subscribe not connected test passed")
+
+    @pytest.mark.asyncio
+    async def test_subscribe_adapter_failure(self, polygon_service_config):
+        """Test subscribe handles adapter failure"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.is_connected.return_value = True
+            mock_adapter.subscribe = AsyncMock(return_value=False)
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            service._adapter = mock_adapter
+
+            result = await service.subscribe(["GOOGL"])
+
+            assert result is False
+            # Should not add to config.symbols on failure
+            assert "GOOGL" not in service.config.symbols
+            logger.info("✅ Subscribe adapter failure test passed")
+
+    @pytest.mark.asyncio
+    async def test_subscribe_empty_symbols(self, polygon_service_config):
+        """Test subscribe with empty symbol list"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.is_connected.return_value = True
+            mock_adapter.subscribe = AsyncMock(return_value=True)
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            service._adapter = mock_adapter
+
+            result = await service.subscribe([])
+
+            assert result is True  # Empty list is valid
+            logger.info("✅ Subscribe empty symbols test passed")
+
+    @pytest.mark.asyncio
+    async def test_subscribe_invalid_symbols(self, polygon_service_config):
+        """Test subscribe with invalid symbol formats"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.is_connected.return_value = True
+            mock_adapter.subscribe = AsyncMock(return_value=True)
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            service._adapter = mock_adapter
+
+            # Test with symbols containing None - should handle gracefully
+            result = await service.subscribe(["AAPL", None, "TSLA"])
+            assert result is True
+            # Should add valid symbols to config (AAPL and TSLA already exist, but that's fine)
+            assert "AAPL" in service.config.symbols
+            assert "TSLA" in service.config.symbols
+            logger.info("✅ Subscribe invalid symbols test passed")
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_no_adapter(self, polygon_service_config):
+        """Test unsubscribe when no adapter exists"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        result = await service.unsubscribe(["AAPL"])
+
+        assert result is True  # Should return True (already "unsubscribed")
+        logger.info("✅ Unsubscribe no adapter test passed")
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_adapter_failure(self, polygon_service_config):
+        """Test unsubscribe handles adapter failure"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
+            mock_adapter = Mock()
+            mock_adapter.unsubscribe = AsyncMock(return_value=False)
+            MockAdapter.return_value = mock_adapter
+
+            await service.initialize()
+            service._adapter = mock_adapter
+
+            # Add symbol to config first
+            service.config.symbols.append("AAPL")
+
+            result = await service.unsubscribe(["AAPL"])
+
+            assert result is False
+            # Should not remove from config.symbols on failure
+            assert "AAPL" in service.config.symbols
+            logger.info("✅ Unsubscribe adapter failure test passed")
+
+# =============================================================================
+# CATEGORY 19: POLYGON DATA SERVICE - MESSAGE HANDLING ERROR HANDLING
+# =============================================================================
+
+class TestPolygonDataServiceMessageHandlingErrors:
+    """Test message handling error scenarios"""
+
+    def test_handle_message_invalid_message_type(self, polygon_service_config):
+        """Test _handle_message with invalid message types"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Test with unknown message type
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="unknown_type",
+            timestamp=datetime.now(timezone.utc),
+            data={},
+        )
+
+        initial_errors = service._stats['errors']
+        initial_messages = service._stats['messages_received']
+        service._handle_message(message)
+
+        # Should increment message count but not error count (unknown types are ignored)
+        assert service._stats['messages_received'] == initial_messages + 1
+        assert service._stats['errors'] == initial_errors  # No error for unknown type
+        logger.info("✅ Handle message invalid type test passed")
+
+    def test_handle_message_missing_data(self, polygon_service_config):
+        """Test _handle_message with missing data"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="second_agg",
+            timestamp=datetime.now(timezone.utc),
+            data=None,  # Missing data
+        )
+
+        initial_errors = service._stats['errors']
+        service._handle_message(message)
+
+        # Should increment error count
+        assert service._stats['errors'] > initial_errors
+        logger.info("✅ Handle message missing data test passed")
+
+    def test_handle_aggregate_missing_required_fields(self, polygon_service_config):
+        """Test _handle_aggregate with missing required fields"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Missing required OHLC fields
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="second_agg",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                'volume': 100000.0,
+                # Missing open, high, low, close
+            },
+        )
+
+        initial_errors = service._stats['errors']
+        service._handle_message(message)
+
+        # Should increment error count due to missing fields
+        assert service._stats['errors'] > initial_errors
+        logger.info("✅ Handle aggregate missing fields test passed")
+
+    def test_handle_aggregate_invalid_timestamp_format(self, polygon_service_config):
+        """Test _handle_aggregate with invalid timestamp format"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="second_agg",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                'open': 150.0, 'high': 151.0, 'low': 149.0, 'close': 150.5,
+                'volume': 100000.0, 'vwap': 150.25, 'num_trades': 1000,
+                'bar_type': 'second',
+                'timestamp_start': 'invalid-timestamp',
+                'timestamp_end': '2024-12-06T09:31:00+00:00',
+            },
+        )
+
+        initial_errors = service._stats['errors']
+        service._handle_message(message)
+
+        # Should increment error count due to invalid timestamp
+        assert service._stats['errors'] > initial_errors
+        logger.info("✅ Handle aggregate invalid timestamp test passed")
+
+    def test_handle_trade_missing_required_fields(self, polygon_service_config):
+        """Test _handle_trade with missing required fields"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="trade",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                'size': 100,
+                # Missing price
+            },
+        )
+
+        initial_errors = service._stats['errors']
+        service._handle_message(message)
+
+        # Should increment error count due to missing price
+        assert service._stats['errors'] > initial_errors
+        logger.info("✅ Handle trade missing fields test passed")
+
+    def test_handle_quote_missing_fields(self, polygon_service_config):
+        """Test _handle_quote with missing fields"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="quote",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                # Missing bid/ask
+            },
+        )
+
+        # Should not raise exception, just skip price update
+        service._handle_message(message)
+
+        # Price should not be updated
+        assert service.get_latest_price("AAPL") is None
+        logger.info("✅ Handle quote missing fields test passed")
+
+    def test_handle_message_callback_error_handling(self, polygon_service_config):
+        """Test message handling with callback errors"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Add a failing callback
+        def failing_callback(symbol, timeframe, bar):
+            raise Exception("Callback failed")
+
+        service.add_bar_callback(failing_callback)
+
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="second_agg",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                'open': 150.0, 'high': 151.0, 'low': 149.0, 'close': 150.5,
+                'volume': 100000.0, 'vwap': 150.25, 'num_trades': 1000,
+                'bar_type': 'second',
+                'timestamp_start': '2024-12-06T09:30:00+00:00',
+                'timestamp_end': '2024-12-06T09:30:01+00:00',
+            },
+        )
+
+        # Should not raise exception despite callback failure
+        service._handle_message(message)
+
+        # Bar should still be stored
+        bars = service.get_latest_bars("AAPL", "second")
+        assert len(bars) == 1
+
+        # Price should be updated
+        assert service.get_latest_price("AAPL") == 150.5
+        logger.info("✅ Handle message callback error test passed")
+
+# =============================================================================
+# CATEGORY 20: POLYGON DATA SERVICE - COMPONENT INTEGRATION TESTING
+# =============================================================================
+
+class TestPolygonDataServiceIntegration:
+    """Test component integration and data flow"""
+
+    @pytest.mark.asyncio
+    async def test_full_lifecycle_data_flow(self, polygon_service_config):
+        """Test complete data flow from initialization to data processing"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Mock the entire adapter creation and connection process
+        mock_adapter = Mock()
+        mock_adapter.connect = AsyncMock(return_value=True)
+        mock_adapter.subscribe = AsyncMock(return_value=True)
+        mock_adapter.is_connected.return_value = True
+        mock_adapter.disconnect = AsyncMock(return_value=True)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter', return_value=mock_adapter), \
+             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager'):
+
+            # Initialize
+            assert await service.initialize()
+            assert service.is_initialized
+
+            # Start
+            assert await service.start()
+            assert service.is_operational
+
+            # Simulate receiving data
+            message = FeedMessage(
+                provider=FeedProvider.POLYGON,
+                symbol="AAPL",
+                message_type="minute_agg",
+                timestamp=datetime.now(timezone.utc),
+                data={
+                    'open': 150.0, 'high': 151.0, 'low': 149.0, 'close': 150.5,
+                    'volume': 100000.0, 'vwap': 150.25, 'num_trades': 1000,
+                    'bar_type': 'minute',
+                    'timestamp_start': '2024-12-06T09:30:00+00:00',
+                    'timestamp_end': '2024-12-06T09:31:00+00:00',
+                },
+            )
+
+            service._handle_message(message)
+
+            # Verify data was processed
+            bars = service.get_latest_bars("AAPL", "minute")
+            assert len(bars) == 1
+            assert bars.iloc[0]['close'] == 150.5
+
+            price = service.get_latest_price("AAPL")
+            assert price == 150.5
+
+            # Stop
+            assert await service.stop()
+            assert not service.is_operational
+
+        logger.info("✅ Full lifecycle data flow test passed")
+
+    @pytest.mark.asyncio
+    async def test_adapter_manager_integration(self, polygon_service_config):
+        """Test integration between adapter and aggregation manager"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter, \
+             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager') as MockManager:
+
+            mock_adapter = Mock()
+            mock_manager = Mock()
+            MockAdapter.return_value = mock_adapter
+            MockManager.return_value = mock_manager
+
+            # Initialize
+            assert await service.initialize()
+
+            # Verify adapter and manager are created and connected
+            assert service._adapter == mock_adapter
+            assert service._aggregation_manager == mock_manager
+
+            # Verify message handler is registered
+            mock_adapter.add_message_handler.assert_called_once()
+            handler = mock_adapter.add_message_handler.call_args[0][0]
+            assert handler == service._handle_message
+
+        logger.info("✅ Adapter manager integration test passed")
+
+    def test_statistics_tracking(self, polygon_service_config):
+        """Test statistics tracking during data processing"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        initial_stats = service._stats.copy()
+
+        # Process a valid message
+        message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="minute_agg",
+            timestamp=datetime.now(timezone.utc),
+            latency_ms=50.0,
+            data={
+                'open': 150.0, 'high': 151.0, 'low': 149.0, 'close': 150.5,
+                'volume': 100000.0, 'vwap': 150.25, 'num_trades': 1000,
+                'bar_type': 'minute',
+                'timestamp_start': '2024-12-06T09:30:00+00:00',
+                'timestamp_end': '2024-12-06T09:31:00+00:00',
+            },
+        )
+
+        service._handle_message(message)
+
+        # Verify statistics updated
+        assert service._stats['messages_received'] == initial_stats['messages_received'] + 1
+        assert service._stats['bars_processed'] == initial_stats['bars_processed'] + 1
+        assert service._stats['latency_sum_ms'] == initial_stats['latency_sum_ms'] + 50.0
+        assert service._stats['latency_count'] == initial_stats['latency_count'] + 1
+
+        # Process an invalid message (missing required fields that will cause an exception)
+        invalid_message = FeedMessage(
+            provider=FeedProvider.POLYGON,
+            symbol="AAPL",
+            message_type="minute_agg",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                'volume': 100000.0,
+                # Missing required OHLC fields - this will cause an exception
+            },
+        )
+
+        service._handle_message(invalid_message)
+
+        # Verify error count increased
+        assert service._stats['errors'] == initial_stats['errors'] + 1
+
+        logger.info("✅ Statistics tracking test passed")
+
+    def test_data_consistency_across_methods(self, polygon_service_config):
+        """Test data consistency between different access methods"""
+        service = PolygonDataService(config=polygon_service_config)
+
+        # Add bar data
+        bar = PolygonAggregateBar(
+            symbol="AAPL",
+            open=150.0, high=151.0, low=149.0, close=150.5,
+            volume=100000.0, vwap=150.25, num_trades=1000,
+            timestamp_start=datetime(2024, 12, 6, 9, 30, tzinfo=timezone.utc),
+            timestamp_end=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+            bar_type="minute"
+        )
+        service._bars["AAPL"]["minute"].append(bar)
+        service._latest_prices["AAPL"] = 150.5
+
+        # Add trade data
+        trade = PolygonTrade(
+            symbol="AAPL",
+            price=150.5,
+            size=100,
+            timestamp=datetime(2024, 12, 6, 9, 31, tzinfo=timezone.utc),
+            conditions=[],
+            exchange=1,
+            tape=1,
+        )
+        service._trades["AAPL"].append(trade)
+
+        # Verify consistency
+        bars_df = service.get_latest_bars("AAPL", "minute")
+        assert bars_df.iloc[0]['close'] == 150.5
+
+        price = service.get_latest_price("AAPL")
+        assert price == 150.5
+
+        trades_df = service.get_latest_trades("AAPL")
+        assert trades_df.iloc[0]['price'] == 150.5
+
+        ohlcv_df = service.get_ohlcv_for_pipeline("AAPL", "minute")
+        assert ohlcv_df.iloc[0]['close'] == 150.5
+
+        logger.info("✅ Data consistency test passed")
 
 # =============================================================================
 # POLYGON REALTIME ADAPTER ADDITIONAL TESTS
@@ -1359,7 +2092,6 @@ class TestPolygonRealtimeAdapterConnection:
         assert result is False
         logger.info("✅ websockets authentication failure test passed")
 
-
 class TestPolygonRealtimeAdapterMessageHandling:
     """Test message handling for different data types"""
 
@@ -1475,6 +2207,86 @@ class TestPolygonRealtimeAdapterMessageHandling:
         assert latency == 0
         logger.info("✅ future timestamp latency test passed")
 
+    async def test_message_processing_json_error(self, polygon_feed_config):
+        """Test handling of malformed JSON messages"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock error handler
+        mock_error_handler = Mock()
+        adapter._handle_error = mock_error_handler
+
+        # Send malformed JSON
+        await adapter._process_message("invalid json")
+
+        # Should handle error gracefully
+        mock_error_handler.assert_called_once()
+        logger.info("✅ malformed JSON message test passed")
+
+    async def test_message_processing_unknown_event_type(self, polygon_feed_config):
+        """Test handling of unknown event types"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock message handler to check it's not called for unknown types
+        mock_handler = Mock()
+        adapter._handle_message = mock_handler
+
+        # Send message with unknown event type
+        unknown_msg = [{"ev": "UNKNOWN", "data": "test"}]
+
+        await adapter._process_message(json.dumps(unknown_msg))
+
+        # Handler should not be called for unknown event
+        mock_handler.assert_not_called()
+        logger.info("✅ unknown event type test passed")
+
+    async def test_trade_message_parsing_error(self, polygon_feed_config):
+        """Test error handling in trade message parsing"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock error handler
+        mock_error_handler = Mock()
+        adapter._handle_error = mock_error_handler
+
+        # Send trade message with invalid data
+        invalid_trade_msg = {
+            "ev": "T",
+            "sym": "AAPL",
+            "p": "invalid_price",  # Invalid price
+            "s": 100,
+            "t": 1700000000000000000
+        }
+
+        await adapter._handle_trade(invalid_trade_msg)
+
+        # Should handle parsing error gracefully
+        mock_error_handler.assert_called_once()
+        logger.info("✅ trade parsing error test passed")
+
+    async def test_aggregate_message_parsing_error(self, polygon_feed_config):
+        """Test error handling in aggregate message parsing"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock error handler
+        mock_error_handler = Mock()
+        adapter._handle_error = mock_error_handler
+
+        # Send aggregate message with invalid data
+        invalid_agg_msg = {
+            "ev": "AM",
+            "sym": "AAPL",
+            "o": "invalid_open",  # Invalid price
+            "h": 152.0,
+            "l": 149.0,
+            "c": 151.0,
+            "v": 1000,
+            "t": 1700000000000000000
+        }
+
+        await adapter._handle_aggregate(invalid_agg_msg, "minute")
+
+        # Should handle parsing error gracefully
+        mock_error_handler.assert_called_once()
+        logger.info("✅ aggregate parsing error test passed")
 
 class TestPolygonRealtimeAdapterSubscription:
     """Test subscription and unsubscription functionality"""
@@ -1548,7 +2360,6 @@ class TestPolygonRealtimeAdapterSubscription:
         mock_ws.send_str.assert_called_once_with(test_message)
         logger.info("✅ aiohttp send message test passed")
 
-
 class TestPolygonRealtimeAdapterReconnection:
     """Test reconnection and heartbeat functionality"""
 
@@ -1603,6 +2414,82 @@ class TestPolygonRealtimeAdapterReconnection:
         assert adapter._message_count == original_count
         logger.info("✅ heartbeat monitor no messages test passed")
 
+class TestPolygonRealtimeAdapterDisconnection:
+    """Test disconnect functionality and cleanup"""
+
+    @patch('core_engine.data.feeds.polygon_realtime.aiohttp')
+    @patch('core_engine.data.feeds.polygon_realtime.websockets')
+    async def test_disconnect_with_aiohttp(self, mock_websockets, mock_aiohttp, polygon_feed_config):
+        """Test disconnecting when using aiohttp WebSocket"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock aiohttp session and WebSocket
+        mock_session = AsyncMock()
+        mock_ws = AsyncMock()
+        adapter._aiohttp_session = mock_session
+        adapter._aiohttp_ws = mock_ws
+        adapter._use_aiohttp = True
+
+        # Disconnect
+        await adapter.disconnect()
+
+        # Verify cleanup
+        mock_ws.close.assert_called_once()
+        mock_session.close.assert_called_once()
+
+        assert adapter._aiohttp_ws is None
+        assert adapter._aiohttp_session is None
+        assert adapter.status == AdapterStatus.DISCONNECTED
+
+    @patch('core_engine.data.feeds.polygon_realtime.websockets')
+    async def test_disconnect_with_websockets(self, mock_websockets, polygon_feed_config):
+        """Test disconnecting when using websockets library"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock WebSocket
+        mock_ws = AsyncMock()
+        adapter._ws = mock_ws
+        adapter._use_aiohttp = False
+
+        # Disconnect
+        await adapter.disconnect()
+
+        # Verify cleanup
+        mock_ws.close.assert_called_once()
+
+        assert adapter._ws is None
+        assert adapter.status == AdapterStatus.DISCONNECTED
+
+    @patch('core_engine.data.feeds.polygon_realtime.aiohttp')
+    async def test_disconnect_exception_handling(self, mock_aiohttp, polygon_feed_config):
+        """Test disconnect handles exceptions gracefully"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Mock aiohttp session and WebSocket that raise exceptions
+        mock_session = AsyncMock()
+        mock_ws = AsyncMock()
+        mock_session.close.side_effect = Exception("Session close error")
+        mock_ws.close.side_effect = Exception("WS close error")
+
+        adapter._aiohttp_session = mock_session
+        adapter._aiohttp_ws = mock_ws
+        adapter._use_aiohttp = True
+
+        # Should not raise exception
+        await adapter.disconnect()
+
+        # Verify calls were made despite exceptions
+        mock_ws.close.assert_called_once()
+        mock_session.close.assert_called_once()
+
+    async def test_disconnect_not_connected(self, polygon_feed_config):
+        """Test disconnecting when not connected"""
+        adapter = PolygonRealtimeFeedAdapter(polygon_feed_config)
+
+        # Should not raise exception
+        await adapter.disconnect()
+
+        assert adapter.status == AdapterStatus.DISCONNECTED
 
 class TestPolygonRealtimeAdapterUtilities:
     """Test utility methods"""
@@ -1680,7 +2567,6 @@ class TestPolygonRealtimeAdapterUtilities:
 
         assert adapter.is_connected()
         logger.info("✅ aiohttp connection check test passed")
-
 
 class TestPolygonAggregatedDataManagerAdvanced:
     """Test advanced functionality of PolygonAggregatedDataManager"""
@@ -1845,7 +2731,6 @@ class TestPolygonAggregatedDataManagerAdvanced:
         assert price == 150.75
         logger.info("✅ get latest price from cache test passed")
 
-
 class TestPolygonAggregatedDataManagerCallbacks:
     """Test data manager callback functionality"""
 
@@ -1924,7 +2809,6 @@ class TestPolygonAggregatedDataManagerCallbacks:
         assert len(bars) == 1
         logger.info("✅ bar callback error handling test passed")
 
-
 class TestPolygonRealtimeAdapterConfigValidation:
     """Test configuration validation edge cases"""
 
@@ -1988,7 +2872,6 @@ class TestPolygonRealtimeAdapterConfigValidation:
             cluster=PolygonCluster.STOCKS_DELAYED
         )
         assert config.ws_url == "wss://delayed.polygon.io/stocks"
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

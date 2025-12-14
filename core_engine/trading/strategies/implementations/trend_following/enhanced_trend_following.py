@@ -49,14 +49,12 @@ from core_engine.config import TrendFollowingConfig
 
 logger = logging.getLogger(__name__)
 
-
 class TrendSignal(Enum):
     """Trend following signal types"""
     UPTREND_ENTRY = "uptrend_entry"
     DOWNTREND_ENTRY = "downtrend_entry"
     TREND_CONTINUATION = "trend_continuation"
     TREND_REVERSAL = "trend_reversal"
-
 
 class TrendStrength(Enum):
     """Trend strength levels"""
@@ -65,10 +63,8 @@ class TrendStrength(Enum):
     STRONG = "strong"
     VERY_STRONG = "very_strong"
 
-
 # ✅ TrendFollowingConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
-
 
 class EnhancedTrendFollowingStrategy(EnhancedBaseStrategy):
     """

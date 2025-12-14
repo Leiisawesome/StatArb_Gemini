@@ -14,7 +14,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load experiment configuration from YAML file.
@@ -52,7 +51,6 @@ def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dic
     logger.info(f"Loaded config: {config_path}")
     return config
 
-
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """
     Deep merge two dictionaries.
@@ -73,7 +71,6 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
             result[key] = value
 
     return result
-
 
 def save_config(config: Dict[str, Any], output_path: str):
     """

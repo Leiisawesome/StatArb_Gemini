@@ -47,7 +47,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger('polygon_example')
 
-
 # ============================================================================
 # EXAMPLE 1: Simple Usage with PolygonDataService
 # ============================================================================
@@ -117,7 +116,6 @@ async def simple_service_example():
         logger.error(f"Error: {e}")
         raise
 
-
 # ============================================================================
 # EXAMPLE 2: With Bar Callbacks for Real-Time Strategy Updates
 # ============================================================================
@@ -171,7 +169,6 @@ async def callback_example():
     except Exception as e:
         logger.error(f"Error: {e}")
         await service.stop()
-
 
 # ============================================================================
 # EXAMPLE 3: Low-Level Adapter Usage
@@ -239,7 +236,6 @@ async def low_level_adapter_example():
         logger.error(f"Error: {e}")
         await adapter.disconnect()
 
-
 # ============================================================================
 # EXAMPLE 4: Integration with Pipeline (Rule 2)
 # ============================================================================
@@ -303,7 +299,6 @@ async def pipeline_integration_example():
         logger.error(f"Error: {e}")
         await service.stop()
 
-
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -340,7 +335,6 @@ async def main():
     #     except Exception as e:
     #         logger.error(f"{name} failed: {e}")
     #     await asyncio.sleep(2)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -11,7 +11,6 @@ from enum import Enum
 
 from .orders import Order, OrderStatus, ExecutionResult
 
-
 class BrokerType(Enum):
     """Broker type enumeration"""
     PAPER = "paper"  # Paper trading
@@ -19,7 +18,6 @@ class BrokerType(Enum):
     ALPACA = "alpaca"
     TD_AMERITRADE = "td"
     CUSTOM = "custom"
-
 
 @dataclass
 class BrokerConfig:
@@ -39,7 +37,6 @@ class BrokerConfig:
     timeout_seconds: int = 30
     retry_attempts: int = 3
     partial_fills_allowed: bool = True
-
 
 class BrokerInterface(ABC):
     """Abstract broker interface"""
@@ -76,7 +73,6 @@ class BrokerInterface(ABC):
     @abstractmethod
     def get_positions(self) -> Dict[str, float]:
         """Get current positions"""
-
 
 class PaperBroker(BrokerInterface):
     """Paper trading broker implementation"""
@@ -222,7 +218,6 @@ class PaperBroker(BrokerInterface):
             self.positions.pop(symbol, None)
         else:
             self.positions[symbol] = quantity
-
 
 class BrokerManager:
     """Broker manager for multiple broker connections"""

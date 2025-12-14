@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestPipelineStrategyRiskIntegration:
     """Integration tests for pipeline-strategy-risk cross-layer integration"""
 

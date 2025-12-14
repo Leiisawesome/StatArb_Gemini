@@ -19,7 +19,6 @@ import pytest
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestCompleteComplianceBreachCycle:
     """Integration tests for complete compliance breach cycle"""
 

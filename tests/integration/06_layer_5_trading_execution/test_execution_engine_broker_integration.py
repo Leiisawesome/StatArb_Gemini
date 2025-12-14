@@ -24,8 +24,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestExecutionEngineBrokerIntegration:
     """Integration tests for execution engine-broker integration"""
 

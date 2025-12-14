@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 from datetime import datetime
 
-
 @dataclass
 class Position:
     """
@@ -41,7 +40,6 @@ class Position:
             return 0.0
         return (self.market_price - self.average_price) * self.quantity
 
-
 @dataclass
 class PortfolioSnapshot:
     """Portfolio state snapshot"""
@@ -66,7 +64,6 @@ class PortfolioSnapshot:
             unrealized_pnl=unrealized_pnl
         )
 
-
 @dataclass
 class PortfolioConfig:
     """Portfolio configuration"""
@@ -75,7 +72,6 @@ class PortfolioConfig:
     min_cash_reserve: float = 1000.0
     max_position_size: float = 0.1  # 10% max per position
     enable_short_selling: bool = False
-
 
 class Portfolio:
     """Core portfolio management"""
@@ -131,7 +127,6 @@ class Portfolio:
     def unrealized_pnl(self) -> float:
         """Current unrealized P&L"""
         return sum(pos.unrealized_pnl for pos in self.positions.values())
-
 
 class PortfolioManager:
     """Portfolio manager for core engine"""

@@ -27,13 +27,11 @@ class SystemConfig:
         """Create config from dictionary"""
         return cls(**config_dict)
 
-
 class BacktestMode(Enum):
     """Backtest execution mode"""
     SINGLE_STRATEGY = "single_strategy"
     MULTI_STRATEGY = "multi_strategy"
     REGIME_ADAPTIVE = "regime_adaptive"
-
 
 @dataclass
 class BacktestConfig:

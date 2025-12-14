@@ -56,7 +56,6 @@ from core_engine.config import StatisticalArbitrageConfig
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class SpreadState(Enum):
     """Spread trading states"""
     NEUTRAL = "neutral"
@@ -65,10 +64,8 @@ class SpreadState(Enum):
     CLOSING = "closing"
     CLOSED = "closed"
 
-
 # ✅ StatisticalArbitrageConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
-
 
 @dataclass
 class SpreadMetrics:
@@ -106,7 +103,6 @@ class SpreadMetrics:
     # Timing metrics
     avg_holding_period: float = 0.0
     last_trade_timestamp: Optional[datetime] = None
-
 
 class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
     """

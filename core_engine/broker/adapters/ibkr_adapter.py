@@ -26,7 +26,6 @@ from core_engine.type_definitions.broker_types import (
 
 logger = logging.getLogger(__name__)
 
-
 class IBKRWrapper(EWrapper):
     """
     Callback handler for IB API events
@@ -217,13 +216,11 @@ class IBKRWrapper(EWrapper):
     def historicalDataUpdate(self, reqId: int, bar):
         """Callback for real-time historical data updates (not used)"""
 
-
 class IBKRClient(EClient):
     """IB API client - handles communication with TWS/Gateway"""
 
     def __init__(self, wrapper):
         super().__init__(wrapper)
-
 
 class IBKRAdapter(BaseBrokerAdapter):
     """

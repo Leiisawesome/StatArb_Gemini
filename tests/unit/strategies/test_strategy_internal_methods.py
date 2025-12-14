@@ -35,7 +35,6 @@ from core_engine.trading.strategies.implementations.arbitrage.enhanced_arbitrage
 
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # MOMENTUM STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -369,7 +368,6 @@ class TestMomentumInternalMethods:
         # Should start tracking
         assert True
 
-
 # =============================================================================
 # MEAN REVERSION STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -569,7 +567,6 @@ class TestMeanReversionInternalMethods:
         # Just verify method executed without error
         assert True
 
-
 # =============================================================================
 # STATISTICAL ARBITRAGE STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -742,7 +739,6 @@ class TestStatisticalArbitrageInternalMethods:
         # Should initialize models
         assert True
 
-
 # =============================================================================
 # PAIRS TRADING STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -895,7 +891,6 @@ class TestPairsTradingInternalMethods:
         # Should check stop losses
         assert True
 
-
 # =============================================================================
 # FACTOR STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -918,7 +913,6 @@ class TestFactorStrategyInternalMethods:
             exposure = strategy._calculate_factor_exposure('AAPL')
             assert isinstance(exposure, dict) or exposure is None
 
-
 # =============================================================================
 # MULTI-ASSET STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -940,7 +934,6 @@ class TestMultiAssetInternalMethods:
         if hasattr(strategy, '_calculate_cross_asset_correlation'):
             correlation = strategy._calculate_cross_asset_correlation(['AAPL', 'MSFT'])
             assert isinstance(correlation, float) or correlation is None
-
 
 # =============================================================================
 # TREND FOLLOWING STRATEGY INTERNAL METHODS
@@ -968,7 +961,6 @@ class TestTrendFollowingInternalMethods:
             direction = strategy._detect_trend_direction('AAPL')
             assert direction in ['bullish', 'bearish', 'neutral'] or direction is None
 
-
 # =============================================================================
 # BREAKOUT STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -995,7 +987,6 @@ class TestBreakoutInternalMethods:
             breakout = strategy._detect_breakout('AAPL')
             assert isinstance(breakout, bool) or breakout is None
 
-
 # =============================================================================
 # VOLATILITY STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -1018,7 +1009,6 @@ class TestVolatilityInternalMethods:
             regime = strategy._calculate_volatility_regime('AAPL')
             assert isinstance(regime, str) or regime is None
 
-
 # =============================================================================
 # ARBITRAGE STRATEGY INTERNAL METHODS
 # =============================================================================
@@ -1040,7 +1030,6 @@ class TestArbitrageInternalMethods:
         if hasattr(strategy, '_detect_arbitrage_opportunity'):
             opportunity = strategy._detect_arbitrage_opportunity('AAPL', 'MSFT')
             assert isinstance(opportunity, dict) or opportunity is None or isinstance(opportunity, bool)
-
 
 # =============================================================================
 # POSITION SIZING TESTS (ALL STRATEGIES)
@@ -1100,7 +1089,6 @@ class TestPositionSizingMethods:
         if hasattr(strategy, 'calculate_position_size'):
             size = strategy.calculate_position_size(signal, {})
             assert size >= 0.0
-
 
 # =============================================================================
 # ERROR HANDLING AND EDGE CASES
@@ -1177,7 +1165,6 @@ class TestStrategyErrorHandling:
         signals = await strategy.generate_signals(enriched_data)
         assert isinstance(signals, list)
 
-
 # =============================================================================
 # REGIME ADAPTATION TESTS
 # =============================================================================
@@ -1231,7 +1218,6 @@ class TestRegimeAdaptation:
             strategy.set_regime_engine(mock_regime)
 
             assert strategy.regime_engine is not None
-
 
 # =============================================================================
 # PERFORMANCE TRACKING TESTS

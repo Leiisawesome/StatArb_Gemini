@@ -18,7 +18,6 @@ from core_engine.data.liquidity_engine import (
 
 logger = __import__('logging').getLogger(__name__)
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -27,7 +26,6 @@ logger = __import__('logging').getLogger(__name__)
 def liquidity_engine():
     """Create liquidity assessment engine instance"""
     return LiquidityAssessmentEngine()
-
 
 @pytest.fixture
 def liquidity_engine_with_config():
@@ -38,7 +36,6 @@ def liquidity_engine_with_config():
         'spread_threshold_bps': 10.0
     }
     return LiquidityAssessmentEngine(config=config)
-
 
 @pytest.fixture
 def sample_market_data():
@@ -51,7 +48,6 @@ def sample_market_data():
         'daily_volume': 5000000
     }
 
-
 @pytest.fixture
 def sample_ohlcv_data():
     """Sample OHLCV DataFrame for comprehensive liquidity assessment"""
@@ -62,7 +58,6 @@ def sample_ohlcv_data():
     # Generate realistic OHLCV data
     base_price = 100.0
     prices = []
-    volumes = []
 
     for i in range(30):
         # Add some random walk to price
@@ -90,7 +85,6 @@ def sample_ohlcv_data():
 
     return pd.DataFrame(prices)
 
-
 @pytest.fixture
 def high_liquidity_data():
     """Sample data representing high liquidity conditions"""
@@ -108,7 +102,6 @@ def high_liquidity_data():
         })
 
     return pd.DataFrame(data)
-
 
 @pytest.fixture
 def low_liquidity_data():
@@ -128,14 +121,12 @@ def low_liquidity_data():
 
     return pd.DataFrame(data)
 
-
 @pytest.fixture
 def mock_orchestrator():
     """Create mock orchestrator"""
     orchestrator = Mock()
     orchestrator.register_component = Mock(return_value='component_123')
     return orchestrator
-
 
 # =============================================================================
 # TEST INITIALIZATION
@@ -172,7 +163,6 @@ class TestInitialization:
         assert liquidity_engine.orchestrator == mock_orchestrator
         assert component_id == liquidity_engine.component_id
         mock_orchestrator.register_component.assert_not_called()  # register_with_orchestrator doesn't call this
-
 
 # =============================================================================
 # TEST COMPONENT LIFECYCLE
@@ -269,7 +259,6 @@ class TestComponentLifecycle:
         assert liquidity_engine.is_initialized is True
         assert liquidity_engine.is_operational is False
 
-
 # =============================================================================
 # TEST HEALTH CHECKS
 # =============================================================================
@@ -333,7 +322,6 @@ class TestHealthChecks:
 
         assert status['initialized'] is True
         assert status['operational'] is True
-
 
 # =============================================================================
 # TEST LIQUIDITY ASSESSMENT
@@ -461,7 +449,6 @@ class TestLiquidityAssessment:
         assert result is not None
         assert result['symbol'] == 'AAPL'
 
-
 # =============================================================================
 # TEST EDGE CASES
 # =============================================================================
@@ -511,7 +498,6 @@ class TestEdgeCases:
                 symbol='AAPL',
                 market_data=None
             )
-
 
 # =============================================================================
 # TEST INTEGRATION
@@ -581,7 +567,6 @@ class TestIntegration:
         assert all(r is not None for r in results)
         assert all(r['liquidity_regime'] == LiquidityRegime.NORMAL_LIQUIDITY
                   for r in results)
-
 
 # =============================================================================
 # TEST COMPREHENSIVE LIQUIDITY ASSESSMENT
@@ -687,7 +672,6 @@ class TestComprehensiveLiquidityAssessment:
         assert result.symbol == 'INVALID'
         assert isinstance(result.overall_score, float)
         assert result.data_quality == 'good'  # No error occurred
-
 
 # =============================================================================
 # TEST HELPER METHODS
@@ -834,7 +818,6 @@ class TestHelperMethods:
         assert score.confidence == 0.3
         assert score.data_quality == 'test_quality'
 
-
 # =============================================================================
 # TEST ADS INTEGRATION HELPERS
 # =============================================================================
@@ -880,7 +863,6 @@ class TestADSIntegration:
         factor = liquidity_engine.get_liquidity_factor('AAPL')
 
         assert factor == 0.8  # Default
-
 
 # =============================================================================
 # TEST LIQUIDITY SCORE DATACLASS
@@ -953,7 +935,6 @@ class TestLiquidityScore:
         assert data_dict['liquidity_regime'] == 'high_liquidity'
         assert data_dict['confidence'] == 0.9
         assert data_dict['liquidity_factor'] == 0.85
-
 
 # =============================================================================
 # TEST LIQUIDITY REGIME ENUM

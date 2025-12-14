@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import VolatilityConfig, StrategyType
 
-
 class TestVolatilityConfig:
     """Test suite for VolatilityConfig class."""
 

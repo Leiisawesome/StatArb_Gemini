@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestCompleteErrorRecoveryCycle:
     """Integration tests for complete error recovery cycle"""
 

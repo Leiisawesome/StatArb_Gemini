@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestFactorSignalGeneration:
     """Test factor-specific signal calculation logic"""
 
@@ -68,7 +67,6 @@ class TestFactorSignalGeneration:
         signals = await strategy.generate_signals(enriched_data)
 
         assert isinstance(signals, list)
-
 
 class TestFactorPositionSizing:
     """Test position sizing logic"""
@@ -122,7 +120,6 @@ class TestFactorPositionSizing:
 
         # Should be capped at max_position_pct
         assert position_size <= strategy.config.max_position_pct
-
 
 class TestFactorEntryExitConditions:
     """Test entry and exit condition logic"""

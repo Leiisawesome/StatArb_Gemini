@@ -20,7 +20,6 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class SignalType(Enum):
     """Signal types"""
     MOMENTUM = "momentum"
@@ -34,7 +33,6 @@ class SignalType(Enum):
     TIME_SERIES = "time_series"
     FACTOR_BASED = "factor_based"
 
-
 class SignalStrength(Enum):
     """Signal strength levels"""
     VERY_WEAK = "very_weak"
@@ -43,13 +41,11 @@ class SignalStrength(Enum):
     STRONG = "strong"
     VERY_STRONG = "very_strong"
 
-
 class SignalDirection(Enum):
     """Signal direction"""
     LONG = "long"
     SHORT = "short"
     NEUTRAL = "neutral"
-
 
 @dataclass
 class SignalParameters:
@@ -83,7 +79,6 @@ class SignalParameters:
 
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class SignalResult:
@@ -132,7 +127,6 @@ class SignalResult:
     signal_age: int = 0
     decayed_strength: Optional[float] = None
 
-
 @dataclass
 class SignalStatistics:
     """Signal generation statistics"""
@@ -163,7 +157,6 @@ class SignalStatistics:
     calculation_errors: int = 0
 
     last_update: datetime = field(default_factory=datetime.now)
-
 
 class SignalStrategy(ABC):
     """Abstract signal generation strategy"""
@@ -205,7 +198,6 @@ class SignalStrategy(ABC):
             return False
 
         return True
-
 
 class MomentumSignalStrategy(SignalStrategy):
     """Momentum-based signal strategy"""
@@ -349,7 +341,6 @@ class MomentumSignalStrategy(SignalStrategy):
 
         stats.last_generation_time = datetime.now()
         stats.last_update = datetime.now()
-
 
 class MeanReversionSignalStrategy(SignalStrategy):
     """Mean reversion signal strategy"""
@@ -522,7 +513,6 @@ class MeanReversionSignalStrategy(SignalStrategy):
 
         stats.last_generation_time = datetime.now()
         stats.last_update = datetime.now()
-
 
 class StatisticalArbitrageSignalStrategy(SignalStrategy):
     """Statistical arbitrage signal strategy"""
@@ -743,7 +733,6 @@ class StatisticalArbitrageSignalStrategy(SignalStrategy):
 
         stats.last_generation_time = datetime.now()
         stats.last_update = datetime.now()
-
 
 class SignalGenerator:
     """

@@ -25,7 +25,6 @@ from core_engine.broker.broker_adapter import (
     OrderType, TimeInForce, BrokerAdapterFactory
 )
 
-
 class TestBrokerAdapterBasic:
     """Basic tests for BrokerAdapter - Multi-broker integration"""
 
@@ -367,7 +366,6 @@ class TestBrokerAdapterBasic:
         assert result['price'] == 150.0
         self.broker_adapter.get_market_data.assert_called_once_with('AAPL')
 
-
 class TestBrokerAdapterFactory:
     """Tests for BrokerAdapterFactory"""
 
@@ -382,7 +380,6 @@ class TestBrokerAdapterFactory:
         # The factory should support different broker types
         # This is a basic test to ensure the factory exists and can be instantiated
         assert hasattr(factory, 'create_adapter')
-
 
 if __name__ == '__main__':
     pytest.main([__file__])

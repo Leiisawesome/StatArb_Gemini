@@ -18,7 +18,6 @@ from core_engine.system.position_aging_monitor import (
     StrategyType
 )
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Mock CentralRiskManager"""
@@ -30,12 +29,10 @@ def mock_risk_manager():
     }
     return risk_manager
 
-
 @pytest.fixture
 def mock_execution_engine():
     """Mock UnifiedExecutionEngine"""
     return Mock()
-
 
 @pytest.fixture
 def aging_monitor(mock_risk_manager, mock_execution_engine):
@@ -49,7 +46,6 @@ def aging_monitor(mock_risk_manager, mock_execution_engine):
         'auto_close_enabled': True
     }
     return PositionAgingMonitor(mock_risk_manager, mock_execution_engine, config)
-
 
 class TestPositionAgingMonitor:
     """Test suite for PositionAgingMonitor"""
@@ -335,7 +331,6 @@ class TestPositionAgingMonitor:
         assert 'Total Checks:' in report_str
         assert 'CURRENT POSITION STATUS:' in report_str
         assert 'STRATEGY HOLDING LIMITS:' in report_str
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])

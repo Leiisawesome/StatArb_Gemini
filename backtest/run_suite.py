@@ -56,7 +56,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 # Experiment registry
 EXPERIMENTS = {
     'smoke_test': {
@@ -111,7 +110,6 @@ EXPERIMENTS = {
     },
 }
 
-
 def list_experiments():
     """Print available experiments"""
     print("\n" + "="*80)
@@ -124,7 +122,6 @@ def list_experiments():
         print(f"  Config:      {exp_info['default_config']}")
 
     print("\n" + "="*80)
-
 
 async def run_experiment(
     experiment_name: str,
@@ -180,7 +177,6 @@ async def run_experiment(
         logger.error(f"❌ Experiment failed: {e}", exc_info=True)
         return False
 
-
 async def run_suite(suite_name: str = "all") -> bool:
     """
     Run experiment suite.
@@ -226,7 +222,6 @@ async def run_suite(suite_name: str = "all") -> bool:
     print("="*80)
 
     return passed == total
-
 
 def main():
     """Main entry point"""
@@ -306,7 +301,6 @@ Examples:
     # No arguments - show help
     parser.print_help()
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

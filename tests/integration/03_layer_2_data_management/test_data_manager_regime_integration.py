@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestDataManagerRegimeIntegration:
     """Integration tests for data manager-regime integration"""
 
@@ -39,9 +37,9 @@ class TestDataManagerRegimeIntegration:
             # Check if method is async or sync
             import inspect
             if inspect.iscoroutinefunction(regime_engine.get_current_regime_context):
-                regime_context = await regime_engine.get_current_regime_context()
+                await regime_engine.get_current_regime_context()
             else:
-                regime_context = regime_engine.get_current_regime_context()
+                regime_engine.get_current_regime_context()
 
             # Regime context may be None if engine not fully started
             # Just verify the method can be called

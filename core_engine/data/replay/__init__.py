@@ -52,7 +52,7 @@ __all__ = [
     'ReplayConfig',
     'ReplaySpeed',
     'DEFAULT_REPLAY_CONFIG',
-    
+
     # Engine components
     'HistoricalDataReplayEngine',
     'ReplayStatus',

@@ -40,7 +40,6 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class RejectionReason(Enum):
     """Broker rejection reasons"""
     INSUFFICIENT_MARGIN = "insufficient_margin"
@@ -52,7 +51,6 @@ class RejectionReason(Enum):
     POSITION_LIMIT = "position_limit_reached"
     UNKNOWN = "unknown_error"
 
-
 class RetryAction(Enum):
     """Actions to take on rejection"""
     RETRY_REDUCED_QUANTITY = "retry_reduced_quantity"
@@ -62,7 +60,6 @@ class RetryAction(Enum):
     WAIT_AND_RETRY = "wait_and_retry"
     CANCEL_ORDER = "cancel_order"
     ESCALATE = "escalate"
-
 
 @dataclass
 class RejectionResolution:
@@ -81,7 +78,6 @@ class RejectionResolution:
     wait_seconds: int = 0
     reason: str = ""
     escalate_immediately: bool = False
-
 
 @dataclass
 class RejectionEvent:
@@ -114,7 +110,6 @@ class RejectionEvent:
     retry_count: int = 0
     resolution: Optional[RejectionResolution] = None
     final_outcome: Optional[str] = None
-
 
 class OrderRejectionHandler:
     """
@@ -207,6 +202,7 @@ class OrderRejectionHandler:
 
             # Market Closed
             'market closed': RejectionReason.MARKET_CLOSED,
+            'closed': RejectionReason.MARKET_CLOSED,
             'outside market hours': RejectionReason.MARKET_CLOSED,
             'after hours': RejectionReason.MARKET_CLOSED,
 

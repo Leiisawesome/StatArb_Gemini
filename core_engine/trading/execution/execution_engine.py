@@ -17,7 +17,6 @@ import warnings
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class ExecutionAlgorithm(Enum):
     """Execution algorithm types"""
     MARKET = "market"
@@ -31,7 +30,6 @@ class ExecutionAlgorithm(Enum):
     GUERRILLA = "guerrilla"
     ADAPTIVE = "adaptive"
 
-
 class ExecutionUrgency(Enum):
     """Execution urgency levels"""
     LOW = "low"
@@ -39,14 +37,12 @@ class ExecutionUrgency(Enum):
     HIGH = "high"
     URGENT = "urgent"
 
-
 class ExecutionStyle(Enum):
     """Execution style preferences"""
     AGGRESSIVE = "aggressive"
     PASSIVE = "passive"
     NEUTRAL = "neutral"
     OPPORTUNISTIC = "opportunistic"
-
 
 class ExecutionStatus(Enum):
     """Execution status"""
@@ -58,7 +54,6 @@ class ExecutionStatus(Enum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     ERROR = "error"
-
 
 @dataclass
 class ExecutionConfig:
@@ -107,7 +102,6 @@ class ExecutionConfig:
     # Emergency controls
     circuit_breaker_threshold: float = 0.05  # 5% adverse move
     emergency_cancel_enabled: bool = True
-
 
 @dataclass
 class ExecutionRequest:
@@ -163,7 +157,6 @@ class ExecutionRequest:
     progress_callback: Optional[Callable] = None
     completion_callback: Optional[Callable] = None
 
-
 @dataclass
 class ExecutionSlice:
     """Individual execution slice"""
@@ -203,7 +196,6 @@ class ExecutionSlice:
     # Risk metrics
     risk_score: Optional[float] = None
     compliance_status: str = "PENDING"
-
 
 @dataclass
 class ExecutionResult:
@@ -250,7 +242,6 @@ class ExecutionResult:
     slice_results: List[ExecutionSlice] = field(default_factory=list)
     error_messages: List[str] = field(default_factory=list)
 
-
 @dataclass
 class ExecutionMetrics:
     """Execution performance metrics"""
@@ -261,7 +252,6 @@ class ExecutionMetrics:
     total_volume: float = 0.0
     avg_slippage: float = 0.0
     completion_rate: float = 0.0
-
 
 class MarketDataProvider:
     """Market data provider for execution"""
@@ -296,7 +286,6 @@ class MarketDataProvider:
         """Update market data"""
         with self._lock:
             self._market_data[symbol] = data
-
 
 class VenueRouter:
     """Smart order routing engine"""
@@ -347,7 +336,6 @@ class VenueRouter:
             'liquidity_score': 0.85,
             'cost_score': 0.90
         }
-
 
 class SlicingEngine:
     """Order slicing engine"""
@@ -484,7 +472,6 @@ class SlicingEngine:
 
         return max(min_size, min(adjusted_size, max_size))
 
-
 class RiskMonitor:
     """Real-time execution risk monitor"""
 
@@ -544,7 +531,6 @@ class RiskMonitor:
 
         with self._lock:
             self._risk_metrics[request_id] = metrics
-
 
 class ExecutionEngine:
     """

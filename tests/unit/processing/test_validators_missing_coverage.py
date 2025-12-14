@@ -20,7 +20,6 @@ from core_engine.processing.signals.validators import (
     PortfolioValidationReport
 )
 
-
 class TestPortfolioValidation:
     """Test portfolio-level validation"""
 
@@ -99,7 +98,6 @@ class TestPortfolioValidation:
         report = await validator.validate_portfolio(bad_signals, context)
 
         assert isinstance(report, PortfolioValidationReport)
-
 
 class TestAdvancedValidationPaths:
     """Test advanced validation code paths"""

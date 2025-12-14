@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ✅ FactorConfig imported from core_engine.config (Rule 1 Section 7)
 # No local config definitions - centralized configuration only
 
-
 class EnhancedFactorStrategy(EnhancedBaseStrategy):
     """Enhanced Factor Strategy with ISystemComponent Integration"""
 

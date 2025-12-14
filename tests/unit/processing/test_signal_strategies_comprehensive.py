@@ -32,7 +32,6 @@ from core_engine.processing.signals.strategies.signal_generator import (
     SignalDirection
 )
 
-
 class TestSignalParameters:
     """Test SignalParameters dataclass"""
 
@@ -63,7 +62,6 @@ class TestSignalParameters:
         assert params.slow_period == 20
         assert params.z_score_threshold == 2.5
         assert params.max_position_size == 0.1
-
 
 class TestSignalStrategyBase:
     """Test SignalStrategy base class"""
@@ -162,7 +160,6 @@ class TestSignalStrategyBase:
         })
 
         assert strategy.validate_data(data) is False
-
 
 class TestMomentumSignalStrategy:
     """Test MomentumSignalStrategy"""
@@ -289,7 +286,6 @@ class TestMomentumSignalStrategy:
         momentum_strategy._update_statistics(signal_result)
 
         assert momentum_strategy.statistics.total_signals_generated > 0
-
 
 class TestMeanReversionSignalStrategy:
     """Test MeanReversionSignalStrategy"""
@@ -429,7 +425,6 @@ class TestMeanReversionSignalStrategy:
         assert 'close' in fields
         assert 'timestamp' in fields
 
-
 class TestStatisticalArbitrageSignalStrategy:
     """Test StatisticalArbitrageSignalStrategy"""
 
@@ -566,7 +561,6 @@ class TestStatisticalArbitrageSignalStrategy:
         # Hedge ratio should be positive (may vary based on correlation strength)
         assert isinstance(ratio, (int, float))
 
-
 class TestSignalGenerator:
     """Test SignalGenerator orchestrator"""
 
@@ -688,7 +682,6 @@ class TestSignalGenerator:
         assert isinstance(results, list)
         # Results may be empty if strategies don't generate signals
 
-
 class TestSignalResult:
     """Test SignalResult dataclass"""
 
@@ -732,7 +725,6 @@ class TestSignalResult:
         assert result.z_score == 2.5
         assert result.suggested_position_size == 0.05
         assert result.entry_price == 100.0
-
 
 class TestSignalStatistics:
     """Test SignalStatistics dataclass"""

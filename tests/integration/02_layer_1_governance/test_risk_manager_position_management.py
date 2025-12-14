@@ -23,8 +23,6 @@ Date: November 4, 2025
 import pytest
 from datetime import datetime
 
-
-
 class TestPositionManagement:
     """Integration tests for position management"""
 
@@ -244,7 +242,7 @@ class TestPositionManagement:
         await risk_manager.update_position('AAPL', 'buy', 100.0, 150.0)
 
         # Exit: SELL at $155 (profit)
-        result = await risk_manager.update_position('AAPL', 'sell', 100.0, 155.0)
+        await risk_manager.update_position('AAPL', 'sell', 100.0, 155.0)
 
         # Verify position closed
         assert risk_manager.current_positions['AAPL'] == 0.0

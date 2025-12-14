@@ -24,7 +24,6 @@ from core_engine.trading.execution.execution_engine import (
     ExecutionAlgorithm
 )
 
-
 # ========================================
 # FIXTURES
 # ========================================
@@ -44,7 +43,6 @@ def execution_config():
         max_acceptable_slippage=0.002
     )
 
-
 @pytest.fixture
 def mock_market_data():
     """Mock market data"""
@@ -54,7 +52,6 @@ def mock_market_data():
     market_data.get_volume = Mock(return_value=1_000_000)
     market_data.get_vwap = Mock(return_value=150.0)
     return market_data
-
 
 @pytest.fixture
 def mock_broker():
@@ -75,7 +72,6 @@ def mock_broker():
 
     return broker
 
-
 @pytest.fixture
 def execution_engine(execution_config, mock_market_data, mock_broker):
     """Execution engine instance"""
@@ -83,7 +79,6 @@ def execution_engine(execution_config, mock_market_data, mock_broker):
     engine.market_data = mock_market_data
     engine.broker = mock_broker
     return engine
-
 
 # ========================================
 # TESTS: LIFECYCLE
@@ -110,7 +105,6 @@ class TestExecutionEngineLifecycle:
         assert config.max_participation_rate == 0.20
         assert config.impact_threshold == 0.005
         assert config.max_order_value == 10_000_000
-
 
 # ========================================
 # TESTS: TWAP ALGORITHM
@@ -142,7 +136,6 @@ class TestTWAPExecution:
         # Test would execute orders at regular intervals
         assert engine.config.slice_interval == 30
 
-
 # ========================================
 # TESTS: VWAP ALGORITHM
 # ========================================
@@ -166,7 +159,6 @@ class TestVWAPExecution:
 
         # Should not exceed 20% participation
         assert max_participation == 0.20
-
 
 # ========================================
 # TESTS: MARKET IMPACT
@@ -192,7 +184,6 @@ class TestMarketImpact:
         # Should be within limits
         assert large_order_value < max_order_value
 
-
 # ========================================
 # TESTS: EXECUTION AUTHORIZATION
 # ========================================
@@ -214,7 +205,6 @@ class TestExecutionAuthorization:
 
         # $10M limit
         assert max_order_value == 10_000_000
-
 
 # ========================================
 # TESTS: SLIPPAGE CONTROL
@@ -240,7 +230,6 @@ class TestSlippageControl:
         # 20 bps slippage
         assert abs(slippage) == pytest.approx(0.002, abs=0.0001)
 
-
 # ========================================
 # TESTS: ADAPTIVE ALGORITHMS
 # ========================================
@@ -260,7 +249,6 @@ class TestAdaptiveExecution:
 
         # Default should be TWAP
         assert engine.config.default_algorithm == ExecutionAlgorithm.TWAP
-
 
 # ========================================
 # TESTS: DARK POOL ROUTING
@@ -284,7 +272,6 @@ class TestDarkPoolRouting:
         preference = engine.config.dark_pool_preference
         assert preference == 0.30
 
-
 # ========================================
 # TESTS: PERFORMANCE
 # ========================================
@@ -305,7 +292,6 @@ class TestPerformance:
 
         # 1 hour max execution time
         assert engine.config.max_execution_time == 3600
-
 
 # ========================================
 # TESTS: ERROR HANDLING
@@ -338,7 +324,6 @@ class TestErrorHandling:
 
         assert config.max_participation_rate > 0
         assert config.impact_threshold > 0
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

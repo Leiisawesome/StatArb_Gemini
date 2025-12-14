@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_enriched_data_dict
 )
 
-
 class TestMeanReversionRegimeFiltering:
     """Test mean reversion strategy regime filtering functionality"""
 
@@ -127,7 +126,6 @@ class TestMeanReversionRegimeFiltering:
         assert isinstance(signals_favorable, list)
         assert isinstance(signals_unfavorable, list)
 
-
 class TestMeanReversionRegimeAwareness:
     """Test mean reversion strategy regime awareness"""
 
@@ -187,7 +185,6 @@ class TestMeanReversionRegimeAwareness:
 
         assert adaptation_result['adapted'] is True
 
-
 class TestMeanReversionHighVolatilityRegime:
     """Test mean reversion in high volatility regime"""
 
@@ -234,7 +231,6 @@ class TestMeanReversionHighVolatilityRegime:
             if signal.symbol == 'AAPL':
                 # Confidence may be reduced by regime filter
                 assert signal.confidence <= 1.0
-
 
 class TestMeanReversionSidewaysRegime:
     """Test mean reversion in sideways/range-bound regime (favorable)"""

@@ -18,7 +18,6 @@ from core_engine.analytics.metrics_calculator import (
     MetricConfig, MetricCategory
 )
 
-
 class TestEnhancedMetricsCalculator:
     """Comprehensive tests for EnhancedMetricsCalculator - Advanced metrics calculation"""
 
@@ -456,7 +455,6 @@ class TestEnhancedMetricsCalculator:
 
         assert result is True
         self.metrics_calculator.handle_calculation_error.assert_called_once_with('return_metrics', test_error)
-
 
 if __name__ == '__main__':
     pytest.main([__file__])

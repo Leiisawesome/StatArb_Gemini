@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 import warnings
 
-
 # ============================================================================
 # SUB-CONFIGS: Reusable Configuration Building Blocks
 # ============================================================================
@@ -54,7 +53,6 @@ class PositionLimits:
 
         if self.max_positions < 1:
             raise ValueError(f"max_positions must be >= 1, got {self.max_positions}")
-
 
 @dataclass
 class RiskLimits:
@@ -101,7 +99,6 @@ class RiskLimits:
         if not 0 < self.confidence_threshold <= 1.0:
             raise ValueError(f"confidence_threshold must be (0, 1.0], got {self.confidence_threshold}")
 
-
 @dataclass
 class TimingConfig:
     """
@@ -142,7 +139,6 @@ class TimingConfig:
         if self.max_holding_period < 1:
             raise ValueError(f"max_holding_period must be >= 1, got {self.max_holding_period}")
 
-
 @dataclass
 class PerformanceConfig:
     """
@@ -168,14 +164,12 @@ class PerformanceConfig:
     batch_size: int = 100
     """Batch size for processing. Default: 100"""
 
-
 # ============================================================================
 # DOMAIN CONFIGS: Using Composition Pattern
 # ============================================================================
 
 # NOTE: DataConfig is now defined in the CENTRALIZED CONFIGS section below (line ~1748)
 # The comprehensive version uses composition pattern with sub-configs.
-
 
 @dataclass
 class RiskConfig:
@@ -207,6 +201,9 @@ class RiskConfig:
 
     enable_pre_trade_risk: bool = True
     """Enable pre-trade risk checks. Default: True"""
+
+    max_total_risk: float = 0.20
+    """Maximum total risk exposure. Default: 20%"""
 
     # Backward compatibility properties
     @property
@@ -274,7 +271,6 @@ class RiskConfig:
         """Backward compatibility: strategy allocation limit. Default: 0.33 (33%)"""
         return 0.33
 
-
 @dataclass
 class ExposureConfig:
     """
@@ -308,7 +304,6 @@ class ExposureConfig:
     max_single_position: float = 0.15
     """Maximum single position as % of portfolio. Default: 15%"""
 
-
 @dataclass
 class VarConfig:
     """
@@ -340,7 +335,6 @@ class VarConfig:
 
     cache_ttl_seconds: int = 300
     """Cache time-to-live in seconds. Default: 300 (5 minutes)"""
-
 
 @dataclass
 class StressTestConfig:
@@ -381,7 +375,6 @@ class StressTestConfig:
 
     max_workers: int = 4
     """Maximum parallel workers. Default: 4"""
-
 
 @dataclass
 class LimitConfig:
@@ -424,7 +417,6 @@ class LimitConfig:
 
     max_breach_history: int = 1000
     """Maximum breach history records. Default: 1000"""
-
 
 @dataclass
 class CorrelationConfig:
@@ -470,7 +462,6 @@ class CorrelationConfig:
     parallel_computation: bool = True
     """Enable parallel correlation computation. Default: True"""
 
-
 @dataclass
 class ProcessingConfig:
     """
@@ -498,7 +489,6 @@ class ProcessingConfig:
     # Signal combination
     min_confidence_threshold: float = 0.6
     """Minimum confidence for signal combination. Default: 60%"""
-
 
 # ============================================================================
 # NEW CONSOLIDATED CONFIGS
@@ -619,7 +609,27 @@ class IndicatorConfig:
     @property
     def timeframes(self) -> List[str]:
         """Backward compatibility: multi-timeframe list"""
-        return ["5min", "1H", "1D", "1W"] if self.enable_multi_timeframe else []
+        return ["5min", "1H", "1D", "1W"] if getattr(self, 'enable_multi_timeframe', False) else []
+
+    @property
+    def timeframe_rsi_periods(self) -> Dict[str, int]:
+        """Timeframe-specific RSI periods"""
+        return {
+            "5min": 14,
+            "1H": 14,
+            "1D": 14,
+            "1W": 14
+        }
+
+    @property
+    def timeframe_ma_periods(self) -> Dict[str, List[int]]:
+        """Timeframe-specific moving average periods"""
+        return {
+            "5min": [20, 50],
+            "1H": [20, 50, 200],
+            "1D": [20, 50, 200],
+            "1W": [20, 50, 200]
+        }
 
     @property
     def enable_macro_indicators(self) -> bool:
@@ -630,7 +640,6 @@ class IndicatorConfig:
     def macro_symbols(self) -> List[str]:
         """Backward compatibility: macro symbol list"""
         return ["VIX", "DXY", "TNX", "TLT", "GLD", "USO", "HYG", "LQD", "EEM", "IWM"]
-
 
 @dataclass
 class FeatureConfig:
@@ -677,7 +686,6 @@ class FeatureConfig:
 
     enable_caching: bool = True
     """Enable feature caching. Default: True"""
-
 
 @dataclass
 class SignalConfig:
@@ -754,7 +762,6 @@ class SignalConfig:
     # Performance
     enable_caching: bool = True
     """Enable signal caching. Default: True"""
-
 
 @dataclass
 class RegimeConfig:
@@ -1270,7 +1277,6 @@ class RegimeConfig:
         if not 1 <= self.max_workers <= 16:
             raise ValueError(f"max_workers must be [1, 16], got {self.max_workers}")
 
-
 # NOTE: AnalyticsConfig is now defined in the CENTRALIZED CONFIGS section below (line ~2117)
 # The comprehensive version uses composition pattern with sub-configs for:
 # - PerformanceAnalyticsConfig
@@ -1278,7 +1284,6 @@ class RegimeConfig:
 # - AttributionAnalyticsConfig
 # - BenchmarkAnalyticsConfig
 # - ReportGenerationConfig
-
 
 @dataclass
 class ExecutionConfig:
@@ -1333,7 +1338,6 @@ class ExecutionConfig:
     enable_pre_trade_risk: bool = True
     """Enable pre-trade risk checks. Default: True"""
 
-
 @dataclass
 class PortfolioConfig:
     """
@@ -1368,7 +1372,6 @@ class PortfolioConfig:
     rebalance_threshold: float = 0.05
     """Rebalance if allocation drift exceeds threshold. Default: 5%"""
 
-
 # ============================================================================
 # CONFIGURATION FACTORY
 # ============================================================================
@@ -1392,7 +1395,6 @@ def create_default_config_set() -> Dict[str, Any]:
         'execution': ExecutionConfig(),
         'portfolio': PortfolioConfig(),
     }
-
 
 def validate_config_compatibility(config: Any) -> bool:
     """
@@ -1422,7 +1424,6 @@ def validate_config_compatibility(config: Any) -> bool:
             raise ValueError("timing must be TimingConfig instance")
 
     return True
-
 
 # ============================================================================
 # DATA BRICK CONFIGURATIONS
@@ -1471,7 +1472,6 @@ class ConnectionConfig:
         if self.max_retry_attempts < 0:
             raise ValueError(f"max_retry_attempts must be non-negative, got {self.max_retry_attempts}")
 
-
 @dataclass
 class CachingConfig:
     """
@@ -1497,7 +1497,6 @@ class CachingConfig:
             raise ValueError(f"cache_ttl must be non-negative, got {self.cache_ttl}")
         if self.max_cache_size <= 0:
             raise ValueError(f"max_cache_size must be positive, got {self.max_cache_size}")
-
 
 @dataclass
 class DataValidationConfig:
@@ -1570,7 +1569,6 @@ class DataValidationConfig:
         if self.outlier_threshold_std <= 0:
             raise ValueError(f"outlier_threshold_std must be positive")
 
-
 @dataclass
 class FeedManagementConfig:
     """
@@ -1623,7 +1621,6 @@ class FeedManagementConfig:
         if self.heartbeat_interval <= 0:
             raise ValueError(f"heartbeat_interval must be positive")
 
-
 @dataclass
 class DataPerformanceConfig:
     """
@@ -1657,7 +1654,6 @@ class DataPerformanceConfig:
             raise ValueError(f"request_timeout_seconds must be positive")
         if self.data_retention_days <= 0:
             raise ValueError(f"data_retention_days must be positive")
-
 
 @dataclass
 class ReplayConfig:
@@ -1705,7 +1701,6 @@ class ReplayConfig:
         # Validate speed limits
         if self.max_replay_speed <= 0:
             raise ValueError(f"max_replay_speed must be positive")
-
 
 @dataclass
 class DataConfig:
@@ -1807,7 +1802,6 @@ class DataConfig:
     storage_path: Optional[str] = None
     """Storage path for persisted data"""
 
-
     def __post_init__(self):
         """Validate data configuration"""
         # Validate date ranges
@@ -1822,7 +1816,6 @@ class DataConfig:
                 if "does not match format" in str(e):
                     raise ValueError(f"Dates must be in YYYY-MM-DD format. Error: {e}")
                 raise
-
 
         # Validate interval
         valid_intervals = ['1min', '5min', '15min', '30min', '1h', '4h', '1D', '1W', '1M']
@@ -1843,7 +1836,6 @@ class DataConfig:
                     UserWarning,
                     stacklevel=2
                 )
-
 
 # ============================================================================
 # ANALYTICS BRICK CONFIGURATIONS (Phase 5 - Analytics Enhancement)
@@ -1908,7 +1900,6 @@ class PerformanceAnalyticsConfig:
 
         if not 0.0 < self.var_confidence_level < 1.0:
             raise ValueError(f"var_confidence_level must be (0, 1), got {self.var_confidence_level}")
-
 
 @dataclass
 class MetricsCalculatorConfig:
@@ -1976,7 +1967,6 @@ class MetricsCalculatorConfig:
         if not 0.0 < self.var_confidence_level < 1.0:
             raise ValueError(f"var_confidence_level must be (0, 1), got {self.var_confidence_level}")
 
-
 @dataclass
 class AttributionAnalyticsConfig:
     """
@@ -2019,7 +2009,6 @@ class AttributionAnalyticsConfig:
         if self.factor_model not in valid_factor_models:
             raise ValueError(f"factor_model must be one of {valid_factor_models}")
 
-
 @dataclass
 class BenchmarkAnalyticsConfig:
     """
@@ -2056,7 +2045,6 @@ class BenchmarkAnalyticsConfig:
         """Validate benchmark configuration"""
         if not self.default_benchmarks:
             warnings.warn("No default benchmarks configured", UserWarning, stacklevel=2)
-
 
 @dataclass
 class ReportGenerationConfig:
@@ -2110,7 +2098,6 @@ class ReportGenerationConfig:
         valid_formats = ['html', 'pdf', 'json', 'excel', 'csv']
         if self.default_format not in valid_formats:
             raise ValueError(f"default_format must be one of {valid_formats}")
-
 
 @dataclass
 class AnalyticsConfig:
@@ -2233,7 +2220,6 @@ class AnalyticsConfig:
         if not 0.0 < self.data_quality_threshold <= 1.0:
             raise ValueError(f"data_quality_threshold must be (0, 1.0], got {self.data_quality_threshold}")
 
-
 # ============================================================================
 # BROKER BRICK CONFIGURATIONS (Phase 6 - Broker Enhancement)
 # ============================================================================
@@ -2301,7 +2287,6 @@ class BrokerConnectionConfig:
         if self.min_pool_size > self.max_pool_size:
             raise ValueError(f"min_pool_size ({self.min_pool_size}) > max_pool_size ({self.max_pool_size})")
 
-
 @dataclass
 class BrokerSessionConfig:
     """
@@ -2358,7 +2343,6 @@ class BrokerSessionConfig:
 
         if self.idle_timeout > self.session_timeout:
             raise ValueError(f"idle_timeout ({self.idle_timeout}) > session_timeout ({self.session_timeout})")
-
 
 @dataclass
 class BrokerSystemConfig:
@@ -2450,7 +2434,6 @@ class BrokerSystemConfig:
         if not 0.0 < self.failover_threshold <= 1.0:
             raise ValueError(f"failover_threshold must be (0, 1.0], got {self.failover_threshold}")
 
-
 # ============================================================================
 # BACKWARD COMPATIBILITY ALIASES
 # ============================================================================
@@ -2460,7 +2443,6 @@ class BrokerSystemConfig:
 LegacyDataConfig = DataConfig
 LegacyRiskConfig = RiskConfig
 LegacyProcessingConfig = ProcessingConfig
-
 
 # Export data configs
 __all__ = [

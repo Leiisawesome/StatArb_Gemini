@@ -20,7 +20,6 @@ from core_engine.trading.position_book import (
 )
 from core_engine.system.central_risk_manager import CentralRiskManager
 
-
 class TestBacktestPositionFlow:
     """Test the complete backtest position tracking flow"""
 
@@ -177,7 +176,6 @@ class TestBacktestPositionFlow:
         assert last_event.event_type == PositionEventType.CLOSED
         assert last_event.realized_pnl == Decimal('500')  # (410-400)*50
 
-
 class TestPositionBookResilience:
     """Test PositionBook handles edge cases correctly"""
 
@@ -240,7 +238,6 @@ class TestPositionBookResilience:
         non_zero = {k: v for k, v in remaining.items() if v != 0}
         assert len(non_zero) == 10
 
-
 class TestPositionBookWithMarketData:
     """Test PositionBook MTM updates with market data"""
 
@@ -271,7 +268,7 @@ class TestPositionBookWithMarketData:
 
     def test_portfolio_value_with_mtm(self, position_book):
         """Test total portfolio value updates with MTM"""
-        initial_cash = float(position_book.get_cash_balance())
+        float(position_book.get_cash_balance())
 
         # Open position
         position_book.on_fill(Fill.create('AMZN', 'buy', 50, 180.00))
@@ -282,7 +279,6 @@ class TestPositionBookWithMarketData:
         snapshot = position_book.get_snapshot()
         expected_value = float(snapshot.cash_balance) + 50 * 180
         assert abs(float(snapshot.total_value) - expected_value) < 1.0
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -16,7 +16,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TCAReport:
     """Comprehensive TCA report"""
@@ -83,7 +82,6 @@ class TCAReport:
             'algorithm_used': self.algorithm_used,
             'timestamp': self.timestamp.isoformat()
         }
-
 
 class EnhancedTCAAnalyzer:
     """

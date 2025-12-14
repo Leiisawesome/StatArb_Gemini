@@ -17,7 +17,6 @@ from core_engine.exceptions import ConfigurationRequiredError
 
 logger = logging.getLogger(__name__)
 
-
 class StressTestType(Enum):
     """Types of stress tests"""
     HISTORICAL = "historical"
@@ -27,14 +26,12 @@ class StressTestType(Enum):
     REVERSE = "reverse"
     CORRELATION_BREAKDOWN = "correlation_breakdown"
 
-
 class ShockType(Enum):
     """Types of market shocks"""
     ABSOLUTE = "absolute"  # Absolute change
     RELATIVE = "relative"  # Percentage change
     VOLATILITY = "volatility"  # Volatility multiplier
     CORRELATION = "correlation"  # Correlation change
-
 
 @dataclass
 class MarketShock:
@@ -44,7 +41,6 @@ class MarketShock:
     magnitude: float
     description: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class StressScenario:
@@ -56,7 +52,6 @@ class StressScenario:
     probability: Optional[float] = None
     time_horizon_days: int = 1
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class StressTestResult:
@@ -71,7 +66,6 @@ class StressTestResult:
     risk_attribution: Dict[str, float] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class PortfolioStressResult:
     """Portfolio-level stress test result"""
@@ -83,7 +77,6 @@ class PortfolioStressResult:
     risk_breakdown: Dict[str, float] = field(default_factory=dict)
     scenario_probability: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
-
 
 class StressTester:
     """

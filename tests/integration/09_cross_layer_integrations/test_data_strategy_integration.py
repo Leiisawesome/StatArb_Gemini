@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestDataStrategyIntegration:
     """Integration tests for data-strategy cross-layer integration"""
 
@@ -31,7 +29,7 @@ class TestDataStrategyIntegration:
         Expected: Data provided correctly
         """
         system = strategy_manager_with_pipeline
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
 
         # Create enriched data
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
@@ -68,7 +66,7 @@ class TestDataStrategyIntegration:
         Expected: Data consumed correctly
         """
         system = strategy_manager_with_pipeline
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
 
         # Create enriched data
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)
@@ -86,7 +84,7 @@ class TestDataStrategyIntegration:
         Expected: Data validated correctly
         """
         system = strategy_manager_with_pipeline
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
 
         # Create enriched data
         enriched_data = create_enriched_data(symbols=['AAPL'], rows=200)

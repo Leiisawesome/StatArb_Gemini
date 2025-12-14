@@ -19,7 +19,6 @@ from core_engine.risk.correlation_analyzer import (
     TailDependenceResult
 )
 
-
 # ============================================================================
 # Test Data Fixtures
 # ============================================================================
@@ -40,7 +39,6 @@ def sample_returns():
 
     return returns
 
-
 @pytest.fixture
 def sample_correlation_matrix():
     """Create sample correlation matrix"""
@@ -51,12 +49,10 @@ def sample_correlation_matrix():
     }, index=['AAPL', 'GOOGL', 'MSFT'])
     return corr_matrix
 
-
 @pytest.fixture
 def correlation_analyzer():
     """Create CorrelationAnalyzer instance"""
     return CorrelationAnalyzer()
-
 
 @pytest.fixture
 def configured_analyzer():
@@ -76,7 +72,6 @@ def configured_analyzer():
     }
     return CorrelationAnalyzer(config)
 
-
 # ============================================================================
 # Category 1: Enums and Dataclasses (6 tests)
 # ============================================================================
@@ -91,7 +86,6 @@ def test_correlation_method_enum_values():
     assert CorrelationMethod.SHRINKAGE.value == "shrinkage"
     assert len(list(CorrelationMethod)) == 6
 
-
 def test_correlation_regime_enum_values():
     """Test CorrelationRegime enum has all expected values"""
     assert CorrelationRegime.LOW.value == "low"
@@ -99,7 +93,6 @@ def test_correlation_regime_enum_values():
     assert CorrelationRegime.HIGH.value == "high"
     assert CorrelationRegime.CRISIS.value == "crisis"
     assert len(list(CorrelationRegime)) == 4
-
 
 def test_correlation_result_dataclass():
     """Test CorrelationResult dataclass creation"""
@@ -124,7 +117,6 @@ def test_correlation_result_dataclass():
     assert result.sample_size == 100
     assert 'test' in result.metadata
 
-
 def test_correlation_matrix_dataclass(sample_correlation_matrix):
     """Test CorrelationMatrix dataclass creation"""
     eigenvalues = [2.1, 0.6, 0.3]
@@ -148,7 +140,6 @@ def test_correlation_matrix_dataclass(sample_correlation_matrix):
     assert result.assets == ['AAPL', 'GOOGL', 'MSFT']
     assert result.is_positive_definite is True
 
-
 def test_regime_detection_result_dataclass():
     """Test RegimeDetectionResult dataclass creation"""
     now = datetime.now()
@@ -170,7 +161,6 @@ def test_regime_detection_result_dataclass():
     assert len(result.regime_history) == 1
     assert result.confidence == 0.75
 
-
 def test_tail_dependence_result_dataclass():
     """Test TailDependenceResult dataclass creation"""
     result = TailDependenceResult(
@@ -189,7 +179,6 @@ def test_tail_dependence_result_dataclass():
     assert result.lower_tail_dependence == 0.7
     assert result.tail_correlation == 0.65
     assert result.extreme_percentile == 0.05
-
 
 # ============================================================================
 # Category 2: Initialization and Configuration (3 tests)
@@ -213,7 +202,6 @@ def test_default_initialization():
     assert analyzer._current_regime == CorrelationRegime.NORMAL
     assert isinstance(analyzer._regime_start_time, datetime)
 
-
 def test_custom_configuration(configured_analyzer):
     """Test CorrelationAnalyzer with custom configuration"""
     assert configured_analyzer.ewma_lambda == 0.95
@@ -227,7 +215,6 @@ def test_custom_configuration(configured_analyzer):
     assert configured_analyzer.regime_thresholds['high'] == 0.75
     assert configured_analyzer.regime_thresholds['crisis'] == 0.85
 
-
 def test_state_initialization(correlation_analyzer):
     """Test internal state initialization"""
     assert hasattr(correlation_analyzer, '_lock')
@@ -239,7 +226,6 @@ def test_state_initialization(correlation_analyzer):
     assert len(correlation_analyzer._correlation_cache) == 0
     assert len(correlation_analyzer._regime_history) == 0
     assert len(correlation_analyzer._calculation_history) == 0
-
 
 # ============================================================================
 # Category 3: Correlation Matrix Calculation (7 tests)
@@ -270,7 +256,6 @@ async def test_calculate_correlation_matrix_pearson(correlation_analyzer, sample
     # Check calculation history
     assert len(correlation_analyzer._calculation_history) == 1
 
-
 @pytest.mark.asyncio
 async def test_calculate_correlation_matrix_spearman(correlation_analyzer, sample_returns):
     """Test Spearman correlation matrix calculation"""
@@ -284,7 +269,6 @@ async def test_calculate_correlation_matrix_spearman(correlation_analyzer, sampl
     assert result.matrix.shape == (3, 3)
     assert np.allclose(np.diag(result.matrix.values), 1.0)
 
-
 @pytest.mark.skip(reason="scipy 1.16.2 + pandas 2.3.3 + Python 3.13 compatibility issue with kendalltau")
 @pytest.mark.asyncio
 async def test_calculate_correlation_matrix_kendall(correlation_analyzer, sample_returns):
@@ -297,7 +281,6 @@ async def test_calculate_correlation_matrix_kendall(correlation_analyzer, sample
     assert isinstance(result, CorrelationMatrix)
     assert result.method == CorrelationMethod.KENDALL
     assert result.matrix.shape == (3, 3)
-
 
 @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13 EWMA compatibility issue")
 @pytest.mark.asyncio
@@ -320,7 +303,6 @@ async def test_calculate_correlation_matrix_ewma(correlation_analyzer, sample_re
     )
     assert not np.allclose(result.matrix.values, pearson_result.matrix.values, atol=0.01)
 
-
 @pytest.mark.asyncio
 async def test_calculate_correlation_matrix_shrinkage(correlation_analyzer, sample_returns):
     """Test Shrinkage correlation matrix calculation"""
@@ -334,7 +316,6 @@ async def test_calculate_correlation_matrix_shrinkage(correlation_analyzer, samp
     assert result.matrix.shape == (3, 3)
     assert np.allclose(np.diag(result.matrix.values), 1.0)
 
-
 @pytest.mark.asyncio
 async def test_calculate_correlation_matrix_insufficient_data(correlation_analyzer):
     """Test correlation matrix with insufficient data"""
@@ -346,7 +327,6 @@ async def test_calculate_correlation_matrix_insufficient_data(correlation_analyz
 
     with pytest.raises(ValueError, match="Insufficient data"):
         await correlation_analyzer.calculate_correlation_matrix(small_returns)
-
 
 @pytest.mark.asyncio
 async def test_calculate_correlation_matrix_eigenvalues(correlation_analyzer, sample_returns):
@@ -365,7 +345,6 @@ async def test_calculate_correlation_matrix_eigenvalues(correlation_analyzer, sa
 
     # For correlation matrix, all eigenvalues should be positive (or very small)
     assert all(e > -1e-10 for e in result.eigenvalues)
-
 
 # ============================================================================
 # Category 4: Pairwise Correlation (5 tests)
@@ -395,7 +374,6 @@ async def test_calculate_pairwise_correlation_pearson(correlation_analyzer, samp
     assert ci_lower < result.correlation < ci_upper
     assert -1.0 <= ci_lower <= 1.0
     assert -1.0 <= ci_upper <= 1.0
-
 
 @pytest.mark.skip(reason="scipy 1.16.2 + pandas 2.3.3 + Python 3.13 compatibility issue with spearmanr/kendalltau")
 @pytest.mark.asyncio
@@ -427,7 +405,6 @@ async def test_calculate_pairwise_correlation_methods(correlation_analyzer, samp
     # But all should have same sign
     assert np.sign(pearson_result.correlation) == np.sign(spearman_result.correlation)
 
-
 @pytest.mark.skip(reason="scipy 1.16.2 + pandas 2.3.3 + Python 3.13 compatibility issue with pearsonr")
 @pytest.mark.asyncio
 async def test_calculate_pairwise_correlation_confidence_levels(correlation_analyzer, sample_returns):
@@ -449,7 +426,6 @@ async def test_calculate_pairwise_correlation_confidence_levels(correlation_anal
     ci_99_width = result_99.confidence_interval[1] - result_99.confidence_interval[0]
     assert ci_99_width > ci_95_width
 
-
 @pytest.mark.skip(reason="scipy 1.16.2 + pandas 2.3.3 + Python 3.13 compatibility issue with pearsonr")
 @pytest.mark.asyncio
 async def test_calculate_pairwise_correlation_data_alignment(correlation_analyzer):
@@ -466,7 +442,6 @@ async def test_calculate_pairwise_correlation_data_alignment(correlation_analyze
     # Should only use overlapping dates
     assert result.sample_size == 96  # 100 - 4 offset days
 
-
 @pytest.mark.asyncio
 async def test_calculate_pairwise_correlation_insufficient_data(correlation_analyzer):
     """Test pairwise correlation with insufficient aligned data"""
@@ -475,7 +450,6 @@ async def test_calculate_pairwise_correlation_insufficient_data(correlation_anal
 
     with pytest.raises(ValueError, match="Insufficient aligned data"):
         await correlation_analyzer.calculate_pairwise_correlation(series1, series2)
-
 
 # ============================================================================
 # Category 5: Regime Detection (6 tests)
@@ -502,7 +476,6 @@ async def test_detect_correlation_regime_low(correlation_analyzer, sample_return
     assert 0.0 <= result.confidence <= 1.0
     assert 'avg_correlation' in result.metadata
 
-
 @pytest.mark.asyncio
 async def test_detect_correlation_regime_normal(correlation_analyzer, sample_returns):
     """Test NORMAL regime detection"""
@@ -521,7 +494,6 @@ async def test_detect_correlation_regime_normal(correlation_analyzer, sample_ret
     assert result.current_regime == CorrelationRegime.NORMAL
     assert result.regime_probability > 0.5
 
-
 @pytest.mark.asyncio
 async def test_detect_correlation_regime_high(correlation_analyzer, sample_returns):
     """Test HIGH regime detection"""
@@ -538,7 +510,6 @@ async def test_detect_correlation_regime_high(correlation_analyzer, sample_retur
     )
 
     assert result.current_regime == CorrelationRegime.HIGH
-
 
 @pytest.mark.asyncio
 async def test_detect_correlation_regime_crisis(correlation_analyzer, sample_returns):
@@ -557,7 +528,6 @@ async def test_detect_correlation_regime_crisis(correlation_analyzer, sample_ret
 
     assert result.current_regime == CorrelationRegime.CRISIS
     assert result.regime_probability > 0.5  # Lower threshold since formula varies
-
 
 @pytest.mark.asyncio
 async def test_detect_correlation_regime_change(correlation_analyzer, sample_returns):
@@ -588,7 +558,6 @@ async def test_detect_correlation_regime_change(correlation_analyzer, sample_ret
     # Check regime history was updated
     assert len(correlation_analyzer._regime_history) >= 1
 
-
 @pytest.mark.asyncio
 async def test_regime_probability_calculation(correlation_analyzer):
     """Test regime probability calculation logic"""
@@ -608,7 +577,6 @@ async def test_regime_probability_calculation(correlation_analyzer):
     # Test CRISIS regime probabilities
     prob_crisis = correlation_analyzer._calculate_regime_probability(0.95, CorrelationRegime.CRISIS)
     assert prob_crisis > 0.7
-
 
 # ============================================================================
 # Category 6: Tail Dependence (4 tests)
@@ -630,7 +598,6 @@ async def test_calculate_tail_dependence_basic(correlation_analyzer, sample_retu
     assert 0.0 <= result.lower_tail_dependence <= 1.0
     assert result.extreme_percentile == 0.05
 
-
 @pytest.mark.asyncio
 async def test_calculate_tail_dependence_various_percentiles(correlation_analyzer, sample_returns):
     """Test tail dependence with different percentiles"""
@@ -651,7 +618,6 @@ async def test_calculate_tail_dependence_various_percentiles(correlation_analyze
 
     # Larger percentile should generally give higher tail dependence
     # (more observations in tail)
-
 
 @pytest.mark.skip(reason="pandas 2.3.3 + Python 3.13 quantile compatibility issue")
 @pytest.mark.asyncio
@@ -679,7 +645,6 @@ async def test_calculate_tail_dependence_extreme_correlation(correlation_analyze
     # Should show high tail dependence
     assert result.upper_tail_dependence > 0.3
 
-
 @pytest.mark.asyncio
 async def test_calculate_tail_dependence_insufficient_data(correlation_analyzer):
     """Test tail dependence with insufficient data"""
@@ -688,7 +653,6 @@ async def test_calculate_tail_dependence_insufficient_data(correlation_analyzer)
 
     with pytest.raises(ValueError, match="Insufficient aligned data"):
         await correlation_analyzer.calculate_tail_dependence(series1, series2)
-
 
 # ============================================================================
 # Category 7: Stress Testing (5 tests)
@@ -709,7 +673,6 @@ async def test_stress_test_correlation_breakdown(correlation_analyzer, sample_co
 
     # Should be identity matrix (all correlations → 0)
     assert np.allclose(stressed_matrix.values, np.eye(3))
-
 
 @pytest.mark.asyncio
 async def test_stress_test_correlation_spike(correlation_analyzer, sample_correlation_matrix):
@@ -736,7 +699,6 @@ async def test_stress_test_correlation_spike(correlation_analyzer, sample_correl
                 if original_val > 0:
                     assert stressed_val >= original_val
 
-
 @pytest.mark.asyncio
 async def test_stress_test_sector_contagion(correlation_analyzer, sample_correlation_matrix):
     """Test sector contagion stress scenario"""
@@ -757,7 +719,6 @@ async def test_stress_test_sector_contagion(correlation_analyzer, sample_correla
     off_diagonal = stressed_matrix.values[~np.eye(3, dtype=bool)]
     assert (off_diagonal >= -0.99).all()
     assert (off_diagonal <= 0.99).all()
-
 
 @pytest.mark.asyncio
 async def test_stress_test_multiple_scenarios(correlation_analyzer, sample_correlation_matrix):
@@ -789,7 +750,6 @@ async def test_stress_test_multiple_scenarios(correlation_analyzer, sample_corre
         assert (off_diagonal >= -0.99).all()
         assert (off_diagonal <= 0.99).all()
 
-
 @pytest.mark.asyncio
 async def test_stress_test_matrix_validity(correlation_analyzer, sample_correlation_matrix):
     """Test that stressed matrices remain valid"""
@@ -809,7 +769,6 @@ async def test_stress_test_matrix_validity(correlation_analyzer, sample_correlat
     off_diagonal = stressed_matrix.values[~np.eye(3, dtype=bool)]
     assert (off_diagonal >= -0.99).all()
     assert (off_diagonal <= 0.99).all()
-
 
 # ============================================================================
 # Category 8: Statistical Analysis (2 tests)
@@ -833,7 +792,6 @@ def test_get_correlation_statistics(correlation_analyzer, sample_correlation_mat
     assert 0.0 <= stats['mean_correlation'] <= 1.0
     assert 0.0 <= stats['positive_correlations'] <= 1.0
     assert 0.0 <= stats['high_correlations'] <= 1.0
-
 
 def test_get_correlation_statistics_various_patterns(correlation_analyzer):
     """Test correlation statistics with various correlation patterns"""
@@ -859,7 +817,6 @@ def test_get_correlation_statistics_various_patterns(correlation_analyzer):
     assert mixed_stats['negative_correlations'] > 0.0
     assert mixed_stats['positive_correlations'] > 0.0
 
-
 # ============================================================================
 # Category 9: History and Cache Management (3 tests)
 # ============================================================================
@@ -882,7 +839,6 @@ async def test_calculation_history(correlation_analyzer, sample_returns):
     assert 'timestamp' in history[0]
     assert 'calculation_time' in history[0]
     assert 'sample_size' in history[0]
-
 
 @pytest.mark.asyncio
 async def test_regime_history(correlation_analyzer, sample_returns):
@@ -909,7 +865,6 @@ async def test_regime_history(correlation_analyzer, sample_returns):
     # Should have at least one regime change recorded
     assert len(history) >= 1
 
-
 def test_clear_cache(correlation_analyzer):
     """Test cache clearing"""
     # Add some items to cache
@@ -923,7 +878,6 @@ def test_clear_cache(correlation_analyzer):
 
     assert len(correlation_analyzer._correlation_cache) == 0
 
-
 # ============================================================================
 # Category 10: Cleanup and Edge Cases (2 tests)
 # ============================================================================
@@ -933,7 +887,6 @@ async def test_cleanup(correlation_analyzer):
     """Test cleanup method"""
     await correlation_analyzer.cleanup()
     # Cleanup should complete without errors
-
 
 @pytest.mark.asyncio
 async def test_regime_confidence_calculation(correlation_analyzer):

@@ -20,7 +20,6 @@ except ImportError:
     # Fallback for development
     from core_engine.config.component_config import PositionLimits, RiskLimits, TimingConfig
 
-
 # ============================================================================
 # STRATEGY TYPE ENUM - Import from canonical source
 # ============================================================================
@@ -29,7 +28,6 @@ except ImportError:
 from core_engine.type_definitions.strategy import StrategyType
 
 # StrategyType is now imported from type_definitions.strategy
-
 
 # ============================================================================
 # BASE STRATEGY CONFIG
@@ -82,7 +80,6 @@ class BaseStrategyConfig:
     # Execution
     execution_timeout: float = 30.0
     """Execution timeout in seconds. Default: 30.0s"""
-
 
 # ============================================================================
 # SPECIFIC STRATEGY CONFIGS
@@ -292,8 +289,6 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"composite_z_entry must be non-negative, got {self.composite_z_entry}")
         if not 0 <= self.composite_pct_entry <= 100:
             raise ValueError(f"composite_pct_entry must be [0, 100], got {self.composite_pct_entry}")
-
-
 
 @dataclass
 class MeanReversionConfig(BaseStrategyConfig):
@@ -594,7 +589,6 @@ class MeanReversionConfig(BaseStrategyConfig):
         """Alias for zscore_exit_threshold"""
         return self.zscore_exit_threshold
 
-
 @dataclass
 class StatisticalArbitrageConfig(BaseStrategyConfig):
     """
@@ -674,7 +668,6 @@ class StatisticalArbitrageConfig(BaseStrategyConfig):
     target_risk_per_position: float = 0.02
     """Target risk per position for risk parity sizing. Default: 0.02 (2%)"""
 
-
 @dataclass
 class FactorConfig(BaseStrategyConfig):
     """
@@ -708,7 +701,6 @@ class FactorConfig(BaseStrategyConfig):
 
     max_position_pct: float = 0.06
     """Maximum position size. Default: 0.06 (6%)"""
-
 
 @dataclass
 class MultiAssetConfig(BaseStrategyConfig):
@@ -761,7 +753,6 @@ class MultiAssetConfig(BaseStrategyConfig):
 
     equal_weight_baseline: bool = True
     """Start with equal weights. Default: True"""
-
 
 @dataclass
 class TrendFollowingConfig(BaseStrategyConfig):
@@ -866,7 +857,6 @@ class TrendFollowingConfig(BaseStrategyConfig):
     duration_confidence_multiplier: float = 2.0
     """Multiplier for trend duration confidence calculation. Default: 2.0"""
 
-
 @dataclass
 class BreakoutConfig(BaseStrategyConfig):
     """
@@ -908,7 +898,6 @@ class BreakoutConfig(BaseStrategyConfig):
 
     profit_target_ratio: float = 2.0
     """Profit target vs stop loss ratio. Default: 2.0"""
-
 
 @dataclass
 class PairsConfig(BaseStrategyConfig):
@@ -975,7 +964,6 @@ class PairsConfig(BaseStrategyConfig):
     ses_high_confidence_threshold: float = 80.0
     """SES threshold for high confidence entries. Default: 80.0"""
 
-
 @dataclass
 class VolatilityConfig(BaseStrategyConfig):
     """
@@ -1008,7 +996,6 @@ class VolatilityConfig(BaseStrategyConfig):
     # Risk management
     vol_target: float = 0.15
     """Target portfolio volatility (15%). Default: 15%"""
-
 
 @dataclass
 class ArbitrageConfig(BaseStrategyConfig):
@@ -1060,7 +1047,6 @@ class ArbitrageConfig(BaseStrategyConfig):
     enable_multi_venue: bool = True
     """Enable multi-venue arbitrage. Default: True"""
 
-
 # ============================================================================
 # STRATEGY FACTORY
 # ============================================================================
@@ -1095,7 +1081,6 @@ def create_strategy_config(strategy_type: StrategyType, **kwargs) -> BaseStrateg
 
     return config_class(**kwargs)
 
-
 def get_all_strategy_configs() -> Dict[StrategyType, BaseStrategyConfig]:
     """
     Get default configurations for all strategy types
@@ -1107,7 +1092,6 @@ def get_all_strategy_configs() -> Dict[StrategyType, BaseStrategyConfig]:
         strategy_type: create_strategy_config(strategy_type)
         for strategy_type in StrategyType
     }
-
 
 # ============================================================================
 # BACKWARD COMPATIBILITY

@@ -42,7 +42,6 @@ from core_engine.risk.correlation_analyzer import (
     CorrelationMethod
 )
 
-
 class TestEnhancedRiskManager:
     """Test suite for EnhancedRiskManager class."""
 
@@ -89,7 +88,6 @@ class TestEnhancedRiskManager:
                     mock_exposure.assert_called_once()
                     # Note: var and correlation may not be called if returns_data is None
 
-
 class TestExposureCalculator:
     """Test suite for ExposureCalculator class."""
 
@@ -121,7 +119,6 @@ class TestExposureCalculator:
         result = await exposure_calculator.calculate_exposures(positions, 100000.0)
         assert result is not None
         assert isinstance(result, dict)
-
 
 class TestVarCalculator:
     """Test suite for VarCalculator class."""
@@ -161,7 +158,6 @@ class TestVarCalculator:
             # If the method requires more setup, just test that it exists
             assert hasattr(var_calculator, 'calculate_var')
 
-
 class TestStressTester:
     """Test suite for StressTester class."""
 
@@ -196,7 +192,6 @@ class TestStressTester:
             # If the method requires more setup, just test that it exists
             assert hasattr(stress_tester, 'run_stress_test')
 
-
 class TestLimitMonitor:
     """Test suite for LimitMonitor class."""
 
@@ -229,7 +224,6 @@ class TestLimitMonitor:
         except Exception:
             # If methods require more setup, just verify the class exists
             assert limit_monitor is not None
-
 
 class TestCorrelationAnalyzer:
     """Test suite for CorrelationAnalyzer class."""

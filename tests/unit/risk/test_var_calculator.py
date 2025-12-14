@@ -33,7 +33,6 @@ from core_engine.risk.var_calculator import (
     StressTestScenario
 )
 
-
 # ============================================================================
 # Test Fixtures
 # ============================================================================
@@ -47,7 +46,6 @@ def sample_returns():
         index=pd.date_range('2024-01-01', periods=100, freq='D')
     )
 
-
 @pytest.fixture
 def sample_portfolio_returns():
     """Generate sample portfolio returns (DataFrame)."""
@@ -58,7 +56,6 @@ def sample_portfolio_returns():
         'MSFT': np.random.normal(0.0005, 0.011, 100)
     }, index=pd.date_range('2024-01-01', periods=100, freq='D'))
 
-
 @pytest.fixture
 def sample_benchmark_returns():
     """Generate sample benchmark returns."""
@@ -67,7 +64,6 @@ def sample_benchmark_returns():
         np.random.normal(0.0004, 0.009, 100),
         index=pd.date_range('2024-01-01', periods=100, freq='D')
     )
-
 
 @pytest.fixture
 def sample_positions():
@@ -99,12 +95,10 @@ def sample_positions():
         }
     }
 
-
 @pytest.fixture
 def var_calculator():
     """Create VarCalculator with default config."""
     return VarCalculator()
-
 
 @pytest.fixture
 def custom_var_calculator():
@@ -118,7 +112,6 @@ def custom_var_calculator():
         'risk_free_rate_annual': 0.03
     }
     return VarCalculator(config)
-
 
 # ============================================================================
 # Category 1: Enums and Dataclasses (5 tests)
@@ -209,7 +202,6 @@ class TestEnumsAndDataclasses:
         assert scenario.correlation_changes[('EQUITY', 'BOND')] == 0.5
         assert scenario.volatility_multipliers['EQUITY'] == 2.0
 
-
 # ============================================================================
 # Category 2: Initialization (3 tests)
 # ============================================================================
@@ -243,7 +235,6 @@ class TestInitialization:
     # NOTE: test_default_stress_scenarios_loaded removed
     # Stress testing functionality has been consolidated into StressTester class
     # VarCalculator no longer maintains stress scenarios (reduces code duplication)
-
 
 # ============================================================================
 # Category 3: Historical VaR (3 tests)
@@ -320,7 +311,6 @@ class TestHistoricalVaR:
         ratio = var_10d / var_1d
         assert 2.5 < ratio < 4.0  # Allow some variance
 
-
 # ============================================================================
 # Category 4: Parametric VaR (2 tests)
 # ============================================================================
@@ -377,7 +367,6 @@ class TestParametricVaR:
         assert abs(z_95) > 1.6 and abs(z_95) < 1.7
         assert abs(z_99) > 2.3 and abs(z_99) < 2.4
 
-
 # ============================================================================
 # Category 5: Monte Carlo VaR (2 tests)
 # ============================================================================
@@ -429,7 +418,6 @@ class TestMonteCarloVaR:
 
         # Results should be identical due to seed=42
         assert results1[0.95].var_value == results2[0.95].var_value
-
 
 # ============================================================================
 # Category 6: Cornish-Fisher VaR (2 tests)
@@ -501,7 +489,6 @@ class TestCornishFisherVaR:
         ratio = cf_var / param_var
         assert 0.8 < ratio < 1.2
 
-
 # ============================================================================
 # Category 7: Filtered Historical VaR (2 tests)
 # ============================================================================
@@ -558,7 +545,6 @@ class TestFilteredHistoricalVaR:
         # Filtered method uses exponential weighting which can significantly change the VaR
         # The ratio can vary widely depending on recent vs historical volatility
         # Just ensure both are positive and computed (not testing specific ratio)
-
 
 # ============================================================================
 # Category 8: Comprehensive Risk Metrics (4 tests)
@@ -651,7 +637,6 @@ class TestComprehensiveRiskMetrics:
         assert metrics.max_drawdown < 0
         assert metrics.max_drawdown > -1.0  # Should be > -100%
 
-
 # ============================================================================
 # Category 9: Stress Testing - REMOVED
 # ============================================================================
@@ -659,7 +644,6 @@ class TestComprehensiveRiskMetrics:
 # VarCalculator no longer maintains stress_test_portfolio(), add_stress_scenario(),
 # or get_stress_scenarios() methods. This eliminates code duplication.
 # See tests/unit/risk/test_stress_tester_comprehensive.py for stress testing tests.
-
 
 # ============================================================================
 # Category 10: Integration and Edge Cases (4 tests)
@@ -748,7 +732,6 @@ class TestIntegrationAndEdgeCases:
         assert 'confidence_levels' in last_entry
         assert 'time_horizon' in last_entry
         assert 'timestamp' in last_entry
-
 
 # ============================================================================
 # Additional Edge Cases

@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_enriched_data_dict
 )
 
-
 class TestMomentumRegimeAwareness:
     """Test momentum strategy regime awareness implementation"""
 
@@ -112,7 +111,6 @@ class TestMomentumRegimeAwareness:
         strategy.set_regime_engine(mock_regime_engine)
         assert strategy.validate_regime_dependency() is True
 
-
 class TestMomentumHighVolatilityRegime:
     """Test momentum strategy behavior in high volatility regime"""
 
@@ -195,7 +193,6 @@ class TestMomentumHighVolatilityRegime:
         assert position_size >= 0
         assert position_size <= strategy.config.max_position_pct
 
-
 class TestMomentumLowVolatilityRegime:
     """Test momentum strategy behavior in low volatility regime"""
 
@@ -253,7 +250,6 @@ class TestMomentumLowVolatilityRegime:
 
         # Low volatility may increase signal confidence
         assert isinstance(signals, list)
-
 
 class TestMomentumRegimeTransition:
     """Test momentum strategy handling of regime transitions"""

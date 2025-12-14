@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 import pandas as pd
 
-
 # =============================================================================
 # CANONICAL STRATEGY TYPE ENUM (Single Source of Truth)
 # =============================================================================
@@ -53,7 +52,6 @@ class StrategyType(Enum):
     # Generic/fallback types
     CUSTOM = "custom"
     OTHER = "other"
-
 
 # =============================================================================
 # CANONICAL SIGNAL TYPE ENUM (Single Source of Truth)
@@ -181,7 +179,6 @@ class SignalType(Enum):
 
         return signal_type
 
-
 class SignalStrength(Enum):
     """
     Canonical signal strength enumeration.
@@ -195,7 +192,6 @@ class SignalStrength(Enum):
     STRONG = "strong"
     VERY_STRONG = "very_strong"
 
-
 @dataclass
 class StrategyConfig:
     """Strategy configuration"""
@@ -206,7 +202,6 @@ class StrategyConfig:
     enabled: bool = True
     risk_limit: float = 0.1  # 10% portfolio risk
     position_limit: float = 0.05  # 5% per position
-
 
 @dataclass
 class TradingSignal:
@@ -231,7 +226,6 @@ class TradingSignal:
     @property
     def is_hold(self) -> bool:
         return self.signal_type.upper() == 'HOLD'
-
 
 @dataclass
 class StrategyMetrics:
@@ -271,7 +265,6 @@ class StrategyMetrics:
         # VaR
         self.var_95 = returns.quantile(0.05)
 
-
 class BaseStrategy(ABC):
     """Base strategy interface"""
 
@@ -296,7 +289,6 @@ class BaseStrategy(ABC):
     def get_metrics(self) -> StrategyMetrics:
         """Get current strategy metrics"""
         return self.metrics
-
 
 class StrategyInterface(BaseStrategy):
     """Enhanced strategy interface with callbacks"""
@@ -323,7 +315,6 @@ class StrategyInterface(BaseStrategy):
     def get_state(self, key: str, default: Any = None) -> Any:
         """Get internal state value"""
         return self._state_data.get(key, default)
-
 
 class StrategyManager:
     """Manager for multiple strategies"""

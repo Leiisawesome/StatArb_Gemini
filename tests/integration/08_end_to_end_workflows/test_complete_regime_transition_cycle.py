@@ -22,8 +22,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestCompleteRegimeTransitionCycle:
     """Integration tests for complete regime transition cycle"""
 

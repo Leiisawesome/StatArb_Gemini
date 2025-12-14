@@ -18,7 +18,6 @@ from tests.unit.strategies.test_regime_aware_helpers import (
     get_regime_config
 )
 
-
 class TestTrendFollowingRegimeAwareness:
     """Test trend following strategy regime awareness"""
 

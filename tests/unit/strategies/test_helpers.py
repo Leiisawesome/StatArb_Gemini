@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 
-
 def create_enriched_dataframe(
     symbol: str = 'AAPL',
     rows: int = 200,
@@ -142,7 +141,6 @@ def create_enriched_dataframe(
 
     return data
 
-
 def create_enriched_data_dict(
     symbols: List[str] = ['AAPL'],
     rows: int = 200,
@@ -153,7 +151,6 @@ def create_enriched_data_dict(
         symbol: create_enriched_dataframe(symbol=symbol, rows=rows, **kwargs)
         for symbol in symbols
     }
-
 
 def create_mock_strategy_signal(
     symbol: str = 'AAPL',

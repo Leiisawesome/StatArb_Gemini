@@ -18,7 +18,6 @@ import pytest
 from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.config.component_config import RegimeConfig
 
-
 class TestHealthMonitoring:
     """Integration tests for health monitoring"""
 

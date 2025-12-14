@@ -1,7 +1,6 @@
 from core_engine.config import IndicatorConfig
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 
-
 def test_indicator_adapt_to_liquidity_modes():
     engine = EnhancedTechnicalIndicators(IndicatorConfig())
     base_std = engine.config.bb_std

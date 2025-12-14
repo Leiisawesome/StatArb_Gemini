@@ -18,7 +18,6 @@ from core_engine.analytics.attribution_analyzer import (
     AttributionConfig, AttributionMethod, AttributionType, PerformanceComponent
 )
 
-
 class TestAttributionAnalyzer:
     """Comprehensive tests for AttributionAnalyzer - Advanced performance attribution analysis"""
 
@@ -461,7 +460,6 @@ class TestAttributionAnalyzer:
 
         assert result is True
         self.attribution_analyzer.handle_attribution_error.assert_called_once_with('factor_attribution', test_error)
-
 
 if __name__ == '__main__':
     pytest.main([__file__])

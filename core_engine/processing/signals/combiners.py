@@ -23,7 +23,6 @@ from .generator import SignalType, SignalStrength, TradingSignal
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class SignalTypeWrapper(str):
     """
     Wrapper that behaves like a string for storage/serialization while
@@ -61,7 +60,6 @@ class SignalTypeWrapper(str):
     def __reduce__(self):
         return (self.__class__, (self._enum, str(self)))
 
-
 class CombinationMethod(Enum):
     """Signal combination methods"""
     SIMPLE_AVERAGE = "simple_average"
@@ -73,7 +71,6 @@ class CombinationMethod(Enum):
     ENSEMBLE_VOTING = "ensemble_voting"
     DYNAMIC_WEIGHTING = "dynamic_weighting"
 
-
 class EnsembleStrategy(Enum):
     """Ensemble strategies"""
     MAJORITY_VOTE = "majority_vote"
@@ -82,7 +79,6 @@ class EnsembleStrategy(Enum):
     BLENDING = "blending"
     BAGGING = "bagging"
     BOOSTING = "boosting"
-
 
 class SignalWeight(Enum):
     """Signal weighting schemes"""
@@ -93,7 +89,6 @@ class SignalWeight(Enum):
     SHARPE_BASED = "sharpe_based"
     INFORMATION_RATIO = "information_ratio"
     DECAY_WEIGHTED = "decay_weighted"
-
 
 @dataclass
 class CombinationConfig:
@@ -126,7 +121,6 @@ class CombinationConfig:
     correlation_threshold: float = 0.8
     volatility_scaling: bool = True
 
-
 @dataclass
 class SignalCombination:
     """Result of signal combination"""
@@ -158,7 +152,6 @@ class SignalCombination:
     combination_details: Dict[str, Any] = field(default_factory=dict)
     performance_attribution: Dict[str, float] = field(default_factory=dict)
 
-
 @dataclass
 class EnsembleModel:
     """Ensemble model for signal combination"""
@@ -179,7 +172,6 @@ class EnsembleModel:
     # Model parameters
     feature_importance: Dict[str, float] = field(default_factory=dict)
     model_parameters: Dict[str, Any] = field(default_factory=dict)
-
 
 class SignalWeightCalculator:
     """Calculate signal weights using different schemes"""
@@ -328,7 +320,6 @@ class SignalWeightCalculator:
             getattr(s, 'signal_id', f'signal_{i}'): weight / total_weight
             for i, (s, weight) in enumerate(zip(signals, weights))
         }
-
 
 class EnsembleEngine:
     """Machine learning ensemble engine for signal combination"""
@@ -513,7 +504,6 @@ class EnsembleEngine:
         except Exception as e:
             logger.error(f"Error predicting combination for {symbol}: {e}")
             return 0.0, 0.5
-
 
 class SignalCombiner:
     """

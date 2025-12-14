@@ -18,7 +18,6 @@ from tests.unit.strategies.test_helpers import (
     create_mock_strategy_signal
 )
 
-
 class TestVolatilitySignalGeneration:
     """Test volatility-specific signal calculation logic"""
 
@@ -67,7 +66,6 @@ class TestVolatilitySignalGeneration:
 
         assert isinstance(signals, list)
 
-
 class TestVolatilityPositionSizing:
     """Test position sizing logic"""
 
@@ -104,7 +102,6 @@ class TestVolatilityPositionSizing:
 
         assert position_size_low_vol >= position_size_high_vol
         assert position_size_low_vol <= strategy.config.max_position_pct
-
 
 class TestVolatilityEntryExitConditions:
     """Test entry and exit condition logic"""

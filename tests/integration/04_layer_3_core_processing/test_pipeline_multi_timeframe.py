@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestPipelineMultiTimeframe:
     """Integration tests for pipeline multi-timeframe processing"""
 

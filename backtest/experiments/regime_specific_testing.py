@@ -33,7 +33,6 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 
-
 class RegimeSpecificTesting(BaseExperiment):
     """
     Regime-specific testing experiment.
@@ -278,7 +277,6 @@ class RegimeSpecificTesting(BaseExperiment):
         json_path = self.output_dir / f"{experiment_slug}_regime_{timestamp}.json"
         with open(json_path, 'w') as f:
             json.dump(regime_results, f, indent=2, default=str)
-
 
 if __name__ == "__main__":
     # Example usage

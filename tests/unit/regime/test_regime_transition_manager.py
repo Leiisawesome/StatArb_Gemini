@@ -34,7 +34,6 @@ from core_engine.regime.regime_detector import RegimeType
 from core_engine.regime.regime_indicators import RegimeIndicator, IndicatorType
 from core_engine.config.component_config import RegimeConfig
 
-
 class TestTransitionPrediction:
     """Test transition prediction functionality"""
 
@@ -182,7 +181,6 @@ class TestTransitionPrediction:
             assert isinstance(result, TransitionPrediction)
             assert result.current_regime == RegimeType.BULL_MARKET
 
-
 class TestRebalancingManager:
     """Test rebalancing management functionality"""
 
@@ -280,7 +278,6 @@ class TestRebalancingManager:
             assert result['success'] is True
             assert 'cost' in result
 
-
 class TestTransitionMonitor:
     """Test transition monitoring functionality"""
 
@@ -365,7 +362,6 @@ class TestTransitionMonitor:
         assert isinstance(result, TransitionMonitoring)
         assert transition_id not in monitor.active_transitions
         assert len(monitor.monitoring_history) == 1
-
 
 class TestRegimeTransitionManager:
     """Test main regime transition manager integration"""
@@ -562,7 +558,6 @@ class TestRegimeTransitionManager:
         assert result['operational'] is True
         assert result['initialized'] is True
 
-
 class TestTransitionPredictionDataClasses:
     """Test transition prediction data classes"""
 
@@ -614,7 +609,6 @@ class TestTransitionPredictionDataClasses:
         assert monitoring.portfolio_performance == 0.05
         assert monitoring.realized_volatility == 0.2
 
-
 class TestTransitionEnums:
     """Test transition-related enums"""
 
@@ -645,7 +639,6 @@ class TestTransitionEnums:
         assert RebalancingTrigger.STRESS_INDICATOR_ALERT.value == "stress_indicator_alert"
         assert RebalancingTrigger.TIME_BASED.value == "time_based"
         assert RebalancingTrigger.PERFORMANCE_DEVIATION.value == "performance_deviation"
-
 
 class TestErrorHandling:
     """Test error handling and edge cases"""
@@ -696,7 +689,6 @@ class TestErrorHandling:
 
         result = manager.stop()
         assert result is True  # stop() always returns True
-
 
 class TestIntegrationScenarios:
     """Test complex integration scenarios"""

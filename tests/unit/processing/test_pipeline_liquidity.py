@@ -4,7 +4,6 @@ import pandas as pd
 
 from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
 
-
 def test_get_liquidity_at_timestamp_exact_and_nearest():
     orchestrator = ProcessingPipelineOrchestrator()
     symbol = "TSLA"
@@ -26,7 +25,6 @@ def test_get_liquidity_at_timestamp_exact_and_nearest():
 
     nearest = orchestrator.get_liquidity_at_timestamp(symbol, datetime(2024, 1, 2, 9, 31, 30))
     assert nearest['overall_score'] == 55.0
-
 
 def test_merge_liquidity_features_adds_columns():
     orchestrator = ProcessingPipelineOrchestrator()

@@ -22,7 +22,6 @@ from core_engine.utils.exceptions import (
     handle_error, safe_execute
 )
 
-
 class TestExceptions:
     """Test exception hierarchy and utilities"""
 
@@ -152,5 +151,4 @@ class TestExceptions:
 
         result = safe_execute(failing_func)
         assert result is None
-
 

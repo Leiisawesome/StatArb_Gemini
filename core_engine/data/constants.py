@@ -6,8 +6,6 @@ Centralized constants for the data brick to eliminate magic numbers
 and improve code maintainability.
 """
 
-
-
 class DataIntervals:
     """Time intervals for background tasks and polling (in seconds)"""
 
@@ -32,7 +30,6 @@ class DataIntervals:
     WS_CONNECTION_WAIT_SECONDS = 1
     WS_RECONNECT_WAIT_SECONDS = 5
 
-
 class DataRetention:
     """Data retention periods"""
 
@@ -51,13 +48,11 @@ class DataRetention:
     # Real-time data buffer
     REALTIME_BUFFER_SIZE = 1000
 
-
 class CircuitBreaker:
     """Circuit breaker configuration"""
 
     FAILURE_THRESHOLD = 5
     RESET_TIMEOUT_SECONDS = 60
-
 
 class AnomalyDetection:
     """Anomaly detection thresholds"""
@@ -81,7 +76,6 @@ class AnomalyDetection:
 
     # Spread anomaly thresholds
     ABNORMAL_SPREAD_MULTIPLIER = 3.0  # 3x normal spread = anomaly
-
 
 class ValidationThresholds:
     """Data validation thresholds"""
@@ -109,7 +103,6 @@ class ValidationThresholds:
     TIMESTAMP_WEIGHT = 0.15
     CONSISTENCY_WEIGHT = 0.1
 
-
 class MarketDataConfig:
     """Market data configuration"""
 
@@ -131,7 +124,6 @@ class MarketDataConfig:
     HEARTBEAT_TIMEOUT_SECONDS = 60
     HIGH_ERROR_COUNT_THRESHOLD = 10
 
-
 class FeedConfig:
     """Feed management configuration"""
 
@@ -140,7 +132,6 @@ class FeedConfig:
 
     # Top feeds for subscription routing
     MAX_FEEDS_PER_SUBSCRIPTION = 3
-
 
 class AlternativeDataConfig:
     """Alternative data configuration"""

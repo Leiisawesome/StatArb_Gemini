@@ -32,7 +32,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.config.broker_config import load_broker_config
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
-
 def test_position_tracking():
     """Test position retrieval and data validation"""
 
@@ -161,7 +160,6 @@ def test_position_tracking():
         print("\nDisconnecting from broker...")
         adapter.disconnect()
         print("✅ Disconnected")
-
 
 if __name__ == "__main__":
     import datetime

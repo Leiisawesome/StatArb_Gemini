@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import MeanReversionConfig, StrategyType
 
-
 class TestMeanReversionConfig:
     """Test suite for MeanReversionConfig class."""
 

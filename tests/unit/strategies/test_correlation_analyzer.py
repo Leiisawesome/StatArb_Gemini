@@ -22,7 +22,6 @@ from core_engine.trading.strategies.correlation_analyzer import (
     DiversificationReport
 )
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -32,7 +31,6 @@ def correlation_analyzer():
     """Create correlation analyzer instance"""
     mock_strategy_manager = Mock()
     return StrategyCorrelationAnalyzer(mock_strategy_manager)
-
 
 @pytest.fixture
 def sample_strategy_returns():
@@ -62,7 +60,6 @@ def sample_strategy_returns():
         'strategy_4': pd.Series(strategy4_returns, index=dates),
     }
 
-
 @pytest.fixture
 def sample_strategy_metrics():
     """Create sample strategy performance metrics"""
@@ -87,7 +84,6 @@ def sample_strategy_metrics():
         }
     }
 
-
 # =============================================================================
 # TEST CATEGORY 1: INITIALIZATION
 # =============================================================================
@@ -98,7 +94,6 @@ def test_initialization(correlation_analyzer):
     assert correlation_analyzer.strategy_manager is not None
     # Check internal attributes exist
     assert hasattr(correlation_analyzer, 'config')
-
 
 # =============================================================================
 # TEST CATEGORY 2: CORRELATION CALCULATION
@@ -116,7 +111,6 @@ def test_calculate_correlation(correlation_analyzer, sample_strategy_returns):
     assert isinstance(correlation, float)
     assert -1.0 <= correlation <= 1.0
 
-
 @pytest.mark.skip(reason="Method calculate_correlation_matrix() doesn't exist in current implementation. API changed.")
 def test_calculate_correlation_matrix(correlation_analyzer, sample_strategy_returns):
     """Test correlation matrix calculation"""
@@ -127,7 +121,6 @@ def test_calculate_correlation_matrix(correlation_analyzer, sample_strategy_retu
     assert isinstance(matrix, np.ndarray)
     assert matrix.shape == (4, 4)  # 4 strategies
     assert np.allclose(matrix, matrix.T)  # Symmetric
-
 
 @pytest.mark.skip(reason="Method classify_correlation_level() doesn't exist in current implementation. API changed.")
 def test_correlation_level_classification(correlation_analyzer):
@@ -148,7 +141,6 @@ def test_correlation_level_classification(correlation_analyzer):
     level = correlation_analyzer.classify_correlation_level(0.95)
     assert level == CorrelationLevel.EXTREME
 
-
 # =============================================================================
 # TEST CATEGORY 3: STRATEGY RETURNS TRACKING
 # =============================================================================
@@ -161,7 +153,6 @@ def test_update_strategy_returns(correlation_analyzer, sample_strategy_returns):
     assert 'strategy_1' in correlation_analyzer.strategy_returns
     assert 'strategy_2' in correlation_analyzer.strategy_returns
 
-
 def test_add_strategy_return(correlation_analyzer):
     """Test adding single strategy return"""
     dates = pd.date_range('2024-01-01', periods=50, freq='D')
@@ -172,7 +163,6 @@ def test_add_strategy_return(correlation_analyzer):
     assert 'new_strategy' in correlation_analyzer.strategy_returns
     assert len(correlation_analyzer.strategy_returns['new_strategy']) == 50
 
-
 def test_remove_strategy(correlation_analyzer, sample_strategy_returns):
     """Test removing strategy from tracking"""
     correlation_analyzer.update_strategy_returns(sample_strategy_returns)
@@ -181,7 +171,6 @@ def test_remove_strategy(correlation_analyzer, sample_strategy_returns):
     correlation_analyzer.remove_strategy('strategy_1')
 
     assert 'strategy_1' not in correlation_analyzer.strategy_returns
-
 
 # =============================================================================
 # TEST CATEGORY 4: DIVERSIFICATION ANALYSIS
@@ -196,7 +185,6 @@ def test_calculate_diversification_score(correlation_analyzer, sample_strategy_r
     assert isinstance(score, float)
     assert 0.0 <= score <= 100.0
 
-
 @pytest.mark.skip(reason="Method find_high_correlations() doesn't exist in current implementation. API changed.")
 def test_find_high_correlations(correlation_analyzer, sample_strategy_returns):
     """Test finding highly correlated strategy pairs"""
@@ -210,7 +198,6 @@ def test_find_high_correlations(correlation_analyzer, sample_strategy_returns):
         assert isinstance(pair, StrategyPairCorrelation)
         assert pair.correlation >= 0.7
 
-
 def test_generate_diversification_report(correlation_analyzer, sample_strategy_returns):
     """Test generating diversification report"""
     correlation_analyzer.update_strategy_returns(sample_strategy_returns)
@@ -221,7 +208,6 @@ def test_generate_diversification_report(correlation_analyzer, sample_strategy_r
     assert report.diversification_score is not None
     assert report.strategy_count == 4
     assert report.timestamp is not None
-
 
 # =============================================================================
 # TEST CATEGORY 5: REBALANCING RECOMMENDATIONS
@@ -239,7 +225,6 @@ def test_generate_rebalancing_recommendations(correlation_analyzer, sample_strat
     for rec in recommendations:
         assert isinstance(rec, str)
         assert len(rec) > 0
-
 
 @pytest.mark.skip(reason="Method generate_rebalancing_recommendations() doesn't exist in current implementation. API changed.")
 def test_recommendations_for_high_correlation(correlation_analyzer):
@@ -261,7 +246,6 @@ def test_recommendations_for_high_correlation(correlation_analyzer):
     # Should have recommendations for highly correlated pairs
     assert len(recommendations) > 0
 
-
 # =============================================================================
 # TEST CATEGORY 6: ROLLING CORRELATION
 # =============================================================================
@@ -281,7 +265,6 @@ def test_calculate_rolling_correlation(correlation_analyzer, sample_strategy_ret
     assert isinstance(rolling_corr, pd.Series)
     assert len(rolling_corr) > 0
 
-
 @pytest.mark.skip(reason="Method detect_correlation_clusters() doesn't exist in current implementation. API changed.")
 def test_detect_correlation_clustering(correlation_analyzer, sample_strategy_returns):
     """Test correlation clustering detection"""
@@ -294,7 +277,6 @@ def test_detect_correlation_clustering(correlation_analyzer, sample_strategy_ret
     for cluster in clusters:
         assert isinstance(cluster, list)
         assert len(cluster) > 0
-
 
 # =============================================================================
 # TEST CATEGORY 7: EDGE CASES
@@ -314,7 +296,6 @@ def test_correlation_with_insufficient_data(correlation_analyzer):
     # May return NaN or handle gracefully
     assert correlation is not None or np.isnan(correlation)
 
-
 @pytest.mark.skip(reason="Method calculate_correlation() doesn't exist in current implementation. API changed.")
 def test_correlation_with_identical_strategies(correlation_analyzer):
     """Test correlation with identical strategies (should be 1.0)"""
@@ -324,7 +305,6 @@ def test_correlation_with_identical_strategies(correlation_analyzer):
     correlation = correlation_analyzer.calculate_correlation(returns, returns)
 
     assert abs(correlation - 1.0) < 0.001  # Should be very close to 1.0
-
 
 @pytest.mark.skip(reason="Method calculate_correlation() doesn't exist in current implementation. API changed.")
 def test_correlation_with_negatively_correlated_strategies(correlation_analyzer):
@@ -337,7 +317,6 @@ def test_correlation_with_negatively_correlated_strategies(correlation_analyzer)
 
     assert correlation < 0
     assert abs(correlation + 1.0) < 0.1  # Should be close to -1.0
-
 
 # =============================================================================
 # TEST CATEGORY 8: PERFORMANCE METRICS INTEGRATION
@@ -357,7 +336,6 @@ def test_integration_with_strategy_metrics(correlation_analyzer, sample_strategy
     assert report is not None
     assert report.strategy_count > 0
 
-
 # =============================================================================
 # TEST CATEGORY 9: DATA VALIDATION
 # =============================================================================
@@ -370,7 +348,6 @@ def test_validation_of_returns_data(correlation_analyzer):
 
     with pytest.raises((ValueError, IndexError)):
         correlation_analyzer.calculate_correlation(empty_returns, empty_returns)
-
 
 @pytest.mark.skip(reason="Method calculate_correlation() doesn't exist in current implementation. API changed.")
 def test_validation_of_mismatched_lengths(correlation_analyzer):

@@ -8,7 +8,6 @@ without requiring knowledge of configuration files or command-line arguments.
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-
 class InteractiveBacktestCLI:
     """
     Interactive command-line interface with guided setup

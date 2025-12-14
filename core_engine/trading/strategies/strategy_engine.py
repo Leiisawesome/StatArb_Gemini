@@ -49,7 +49,6 @@ except ImportError:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class StrategyState(Enum):
     """Strategy execution states"""
     INACTIVE = "inactive"
@@ -61,10 +60,8 @@ class StrategyState(Enum):
     ERROR = "error"
     WARMING_UP = "warming_up"
 
-
 # StrategyType imported from type_definitions.strategy (canonical source)
 # SignalType imported from type_definitions.strategy (canonical source)
-
 
 class RiskLevel(Enum):
     """Risk levels for strategy execution"""
@@ -72,7 +69,6 @@ class RiskLevel(Enum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
-
 
 @dataclass
 class StrategySignal:
@@ -117,7 +113,6 @@ class StrategySignal:
     execution_price: Optional[float] = None
     execution_quantity: Optional[float] = None
 
-
 @dataclass
 class StrategyPosition:
     """Strategy position tracking"""
@@ -152,7 +147,6 @@ class StrategyPosition:
     # Position metadata
     position_source: str = ""
     additional_data: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class StrategyMetrics:
@@ -194,7 +188,6 @@ class StrategyMetrics:
     error_count: int = 0
     warning_count: int = 0
     last_error_time: Optional[datetime] = None
-
 
 @dataclass
 class StrategyConfig:
@@ -241,7 +234,6 @@ class StrategyConfig:
     max_slippage: float = 0.001  # 0.1% max slippage
     enable_stop_loss: bool = True
     enable_take_profit: bool = True
-
 
 class BaseStrategy(ABC):
     """
@@ -512,7 +504,6 @@ class BaseStrategy(ABC):
     def get_state(self) -> StrategyState:
         """Get strategy state"""
         return self.state
-
 
 class StrategyExecutionEngine(ISystemComponent):
     """

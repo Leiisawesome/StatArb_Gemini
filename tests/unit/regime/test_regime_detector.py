@@ -10,8 +10,6 @@ from datetime import datetime, timedelta
 
 # Import regime component classes
 
-
-
 from core_engine.regime.regime_detector import (
     RegimeType,
     DetectionMethod,
@@ -26,9 +24,6 @@ from core_engine.regime.regime_detector import (
     RegimeDetector
 )
 
-
-
-
 class TestRegimeType:
     """Test RegimeType enum."""
 
@@ -39,7 +34,6 @@ class TestRegimeType:
         assert RegimeType.SIDEWAYS.value == "sideways"
         assert RegimeType.HIGH_VOLATILITY.value == "high_volatility"
         assert RegimeType.LOW_VOLATILITY.value == "low_volatility"
-
 
 class TestDetectionMethod:
     """Test DetectionMethod enum."""
@@ -52,7 +46,6 @@ class TestDetectionMethod:
         assert DetectionMethod.THRESHOLD_BASED.value == "threshold_based"
         assert DetectionMethod.STATISTICAL_TESTS.value == "statistical_tests"
 
-
 class TestConfidenceLevel:
     """Test ConfidenceLevel enum."""
 
@@ -63,7 +56,6 @@ class TestConfidenceLevel:
         assert ConfidenceLevel.MEDIUM.value == 0.75
         assert ConfidenceLevel.HIGH.value == 0.85
         assert ConfidenceLevel.VERY_HIGH.value == 0.95
-
 
 class TestRegimeDetectionConfig:
     """Test RegimeDetectionConfig dataclass."""
@@ -124,7 +116,6 @@ class TestRegimeDetectionConfig:
         assert config.n_clusters == 4
         assert config.random_state == 123
 
-
 class TestRegimeDetection:
     """Test RegimeDetection dataclass."""
 
@@ -169,7 +160,6 @@ class TestRegimeDetection:
         assert detection.features == {"rsi": 65.0, "macd": 0.5}
         assert detection.model_output == {"probabilities": [0.85, 0.10, 0.05]}
 
-
 class TestRegimeTransition:
     """Test RegimeTransition dataclass."""
 
@@ -201,7 +191,6 @@ class TestRegimeTransition:
         assert transition.warning_signals == ["high_volatility", "momentum_shift"]
         assert transition.performance_impact == 0.05
         assert transition.risk_impact == 0.15
-
 
 class TestMarkovSwitchingDetector:
     """Test MarkovSwitchingDetector class."""
@@ -255,7 +244,6 @@ class TestMarkovSwitchingDetector:
         assert regime_detection.regime_type in RegimeType
         assert 0.0 <= regime_detection.confidence <= 1.0
 
-
 class TestGaussianMixtureDetector:
     """Test GaussianMixtureDetector class."""
 
@@ -307,7 +295,6 @@ class TestGaussianMixtureDetector:
         assert regime_detection.regime_type in RegimeType
         assert 0.0 <= regime_detection.confidence <= 1.0
 
-
 class TestVolatilityBasedDetector:
     """Test VolatilityBasedDetector class."""
 
@@ -355,7 +342,6 @@ class TestVolatilityBasedDetector:
         assert regime_detection.regime_type in RegimeType
         assert 0.0 <= regime_detection.confidence <= 1.0
 
-
 class TestThresholdBasedDetector:
     """Test ThresholdBasedDetector class."""
 
@@ -396,7 +382,6 @@ class TestThresholdBasedDetector:
         assert isinstance(regime_detection, RegimeDetection)
         assert regime_detection.regime_type in RegimeType
         assert 0.0 <= regime_detection.confidence <= 1.0
-
 
 class TestRegimeDetector:
     """Test RegimeDetector class."""
@@ -481,5 +466,4 @@ class TestRegimeDetector:
         # Should handle gracefully or return None for insufficient data
         result = detector.detect_current_regime(insufficient_data)
         assert result is None  # Expected for insufficient data
-
 

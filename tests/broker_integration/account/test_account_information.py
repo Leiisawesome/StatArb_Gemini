@@ -34,7 +34,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.config.broker_config import load_broker_config
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
-
 def test_account_information_querying():
     """Test comprehensive account information retrieval and validation"""
 
@@ -177,7 +176,6 @@ def test_account_information_querying():
         print("\nDisconnecting from broker...")
         adapter.disconnect()
         print("✅ Disconnected")
-
 
 if __name__ == "__main__":
     import datetime

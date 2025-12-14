@@ -22,7 +22,6 @@ from unittest.mock import Mock, AsyncMock
 from core_engine.type_definitions.strategy import TradingSignal
 from core_engine.trading.strategies.strategy_engine import StrategyState, SignalType
 
-
 class StrategyTestFixtures:
     """Common fixtures for strategy testing"""
 
@@ -106,7 +105,6 @@ class StrategyTestFixtures:
         })
         return risk_manager
 
-
 @pytest.fixture
 def market_data_uptrend():
     """Fixture for uptrending market data as Dict[str, DataFrame]
@@ -116,7 +114,6 @@ def market_data_uptrend():
     df = StrategyTestFixtures.create_mock_market_data(trend='uptrend')
     symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
     return {symbol: df}
-
 
 @pytest.fixture
 def market_data_downtrend():
@@ -128,7 +125,6 @@ def market_data_downtrend():
     symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
     return {symbol: df}
 
-
 @pytest.fixture
 def market_data_sideways():
     """Fixture for sideways/range-bound market data as Dict[str, DataFrame]
@@ -139,24 +135,20 @@ def market_data_sideways():
     symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else 'AAPL'
     return {symbol: df}
 
-
 @pytest.fixture
 def mock_orchestrator():
     """Fixture for mock orchestrator"""
     return StrategyTestFixtures.create_mock_orchestrator()
-
 
 @pytest.fixture
 def mock_regime_engine():
     """Fixture for mock regime engine"""
     return StrategyTestFixtures.create_mock_regime_engine()
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Fixture for mock risk manager"""
     return StrategyTestFixtures.create_mock_risk_manager()
-
 
 class BaseStrategyTest:
     """Base class for strategy testing"""
@@ -250,7 +242,6 @@ class BaseStrategyTest:
         is_valid = strategy.validate_regime_dependency()
         assert isinstance(is_valid, bool)
 
-
 # Helper functions for test assertions
 def assert_valid_signal(signal: TradingSignal):
     """Assert signal has valid structure and values"""
@@ -259,7 +250,6 @@ def assert_valid_signal(signal: TradingSignal):
     assert signal.signal_type in [SignalType.BUY, SignalType.SELL, SignalType.HOLD]
     assert 0 <= signal.confidence <= 1.0
     assert signal.timestamp is not None
-
 
 def assert_strategy_performance_metrics(metrics: Dict[str, Any]):
     """Assert performance metrics are valid"""

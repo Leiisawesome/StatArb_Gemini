@@ -28,7 +28,6 @@ from core_engine.config.unified_config import (
     config_section
 )
 
-
 class TestDataConfig:
     """Test suite for DataConfig class."""
 
@@ -53,7 +52,6 @@ class TestDataConfig:
         assert config.end_date == "2024-01-31"
         assert config.caching.enable_caching is True  # Default from CachingConfig
         assert config.caching.cache_ttl == 300  # Default from CachingConfig
-
 
 class TestRiskConfig:
     """Test suite for RiskConfig class."""
@@ -81,7 +79,6 @@ class TestRiskConfig:
         assert config.auto_approval_threshold == 0.005
         assert config.elevated_review_threshold == 0.03
 
-
 class TestProcessingConfig:
     """Test suite for ProcessingConfig class."""
 
@@ -102,7 +99,6 @@ class TestProcessingConfig:
         assert config.signal_threshold == 0.8
         assert config.feature_normalization == "standard"
         assert config.enable_cross_sectional is False
-
 
 class TestSystemConfig:
     """Test suite for SystemConfig class."""
@@ -143,7 +139,6 @@ class TestSystemConfig:
         assert config.health_check_interval == 45
         assert config.log_level == "WARNING"
         assert config.max_concurrent_operations == 75
-
 
 class TestUnifiedConfig:
     """Test suite for UnifiedConfig class."""
@@ -292,7 +287,6 @@ class TestUnifiedConfig:
         assert config._convert_value("42") == 42
         assert config._convert_value("3.14") == 3.14
         assert config._convert_value("hello") == "hello"
-
 
 class TestGlobalConfigFunctions:
     """Test suite for global configuration functions."""

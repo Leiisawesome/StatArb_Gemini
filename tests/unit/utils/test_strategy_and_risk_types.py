@@ -17,7 +17,6 @@ from core_engine.type_definitions.risk import (
     RiskLevel, RiskConfig, RiskMetrics, RiskResult, RiskManager
 )
 
-
 class TestStrategy:
     """Test strategy-related types"""
 
@@ -317,7 +316,6 @@ class TestStrategy:
         assert "test_strategy" in metrics
         assert metrics["test_strategy"].total_return == 0.15
 
-
 class TestRisk:
     """Test risk-related types"""
 
@@ -520,5 +518,4 @@ class TestRisk:
 
         assert manager.is_trading_allowed("AAPL") is False
         assert manager.is_trading_allowed("GOOGL") is True  # Default
-
 

@@ -34,7 +34,6 @@ from core_engine.config.broker_config import load_broker_config
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.type_definitions.orders import OrderSide
 
-
 def test_limit_order_lifecycle():
     """Test complete limit order lifecycle: submit -> track -> cancel"""
 
@@ -179,7 +178,6 @@ def test_limit_order_lifecycle():
         print("\nDisconnecting from broker...")
         adapter.disconnect()
         print("✅ Disconnected")
-
 
 if __name__ == "__main__":
     import datetime

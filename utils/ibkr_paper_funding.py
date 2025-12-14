@@ -16,7 +16,6 @@ from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 
 logger = logging.getLogger(__name__)
 
-
 class IBKRPaperTradingFunder:
     """Utility for funding IBKR paper trading accounts"""
 
@@ -137,7 +136,6 @@ class IBKRPaperTradingFunder:
         print("   4. Run this balance check again to verify")
         return False  # Always return false since we can't actually fund
 
-
 def main():
     """Main function for the funding utility"""
     import argparse
@@ -159,7 +157,6 @@ def main():
 
     if args.simulate:
         funder.simulate_funding(args.simulate)
-
 
 if __name__ == "__main__":
     main()

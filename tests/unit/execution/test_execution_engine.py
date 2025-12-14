@@ -30,7 +30,6 @@ from core_engine.trading.execution.execution_engine import (
     ExecutionEngine
 )
 
-
 # ============================================================================
 # 1. ENUM TESTS (4 tests)
 # ============================================================================
@@ -84,7 +83,6 @@ class TestEnums:
         assert ExecutionStatus.ERROR.value == "error"
 
         assert len(ExecutionStatus) == 8
-
 
 # ============================================================================
 # 2. DATACLASS TESTS (5 tests)
@@ -234,7 +232,6 @@ class TestDataClasses:
         assert metrics.completion_rate == 0.95
         assert metrics.avg_slippage == 0.0012
 
-
 # ============================================================================
 # 3. MARKET DATA PROVIDER TESTS (4 tests)
 # ============================================================================
@@ -277,7 +274,6 @@ class TestMarketDataProvider:
         assert 'volume_rate' in profile
         assert 'liquidity_score' in profile
         assert profile['liquidity_score'] == 0.85
-
 
 # ============================================================================
 # 4. VENUE ROUTER TESTS (3 tests)
@@ -331,7 +327,6 @@ class TestVenueRouter:
         assert 'slippage' in quality
         assert 'market_impact' in quality
         assert quality['fill_rate'] == 0.95
-
 
 # ============================================================================
 # 5. SLICING ENGINE TESTS (5 tests)
@@ -481,7 +476,6 @@ class TestSlicingEngine:
         assert min_size <= slice_high_vol <= max_size
         assert min_size <= slice_low_vol <= max_size
 
-
 # ============================================================================
 # 6. RISK MONITOR TESTS (4 tests)
 # ============================================================================
@@ -586,7 +580,6 @@ class TestRiskMonitor:
         # Should fail - 0.5% > 0.2% (0.002) threshold
         assert risk_ok is False
         assert any("slippage" in alert.lower() for alert in alerts)
-
 
 # ============================================================================
 # 7. EXECUTION ENGINE CORE TESTS (5 tests)
@@ -718,7 +711,6 @@ class TestExecutionEngineCore:
         assert result['filled_quantity'] > 0
         assert result['avg_fill_price'] > 0
 
-
 # ============================================================================
 # 8. EXECUTION MANAGEMENT TESTS (4 tests)
 # ============================================================================
@@ -801,7 +793,6 @@ class TestExecutionManagement:
         cancelled = engine.cancel_execution("NONEXISTENT")
 
         assert cancelled is False
-
 
 # ============================================================================
 # 9. METRICS & LIFECYCLE TESTS (3 tests)

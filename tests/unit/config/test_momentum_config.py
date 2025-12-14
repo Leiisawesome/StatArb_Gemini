@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 from core_engine.config.strategies import MomentumConfig, StrategyType
 
-
 class TestMomentumConfig:
     """Test suite for MomentumConfig class."""
 

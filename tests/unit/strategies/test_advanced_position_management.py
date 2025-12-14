@@ -21,7 +21,6 @@ from core_engine.trading.strategies.implementations.momentum.enhanced_momentum i
 from core_engine.trading.strategies.implementations.breakout.enhanced_breakout import EnhancedBreakoutStrategy
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 
-
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -40,7 +39,6 @@ def create_market_data_with_price(symbol: str, price: float, rows: int = 100) ->
         'RSI_14': [50] * rows,
         'ADX_14': [25] * rows
     }, index=dates)
-
 
 # =============================================================================
 # TRAILING STOP LOSS TESTS
@@ -231,7 +229,6 @@ class TestTrailingStopLoss:
         # Should trigger exit
         assert True
 
-
 # =============================================================================
 # DYNAMIC PROFIT TARGET TESTS
 # =============================================================================
@@ -341,7 +338,6 @@ class TestDynamicProfitTargets:
         # Should handle profit target
         assert True
 
-
 # =============================================================================
 # POSITION AGING TESTS
 # =============================================================================
@@ -418,7 +414,6 @@ class TestPositionAging:
 
         # Fresh position should not trigger aging exit
         assert True
-
 
 # =============================================================================
 # ADVANCED EXIT CONDITIONS TESTS
@@ -532,7 +527,6 @@ class TestAdvancedExitConditions:
 
         # Should handle multiple exit conditions
         assert True
-
 
 # =============================================================================
 # CROSS-STRATEGY ADVANCED POSITION MANAGEMENT

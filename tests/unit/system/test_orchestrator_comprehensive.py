@@ -28,7 +28,6 @@ from core_engine.system.orchestrator_components import (
     AuthorityLevel
 )
 
-
 # ========================================
 # FIXTURES
 # ========================================
@@ -43,7 +42,6 @@ def orchestrator_config():
         'component_startup_timeout': 60
     }
 
-
 @pytest_asyncio.fixture
 async def orchestrator(orchestrator_config):
     """Create orchestrator instance"""
@@ -52,7 +50,6 @@ async def orchestrator(orchestrator_config):
     # Cleanup
     if orch.system_status == SystemStatus.OPERATIONAL:
         await orch.stop()
-
 
 @pytest.fixture
 def mock_risk_manager():
@@ -65,7 +62,6 @@ def mock_risk_manager():
     risk_manager.set_controlled_components = Mock()
     return risk_manager
 
-
 @pytest.fixture
 def mock_strategy_manager():
     """Mock Strategy Manager"""
@@ -76,7 +72,6 @@ def mock_strategy_manager():
     strategy.health_check = AsyncMock(return_value={'healthy': True})
     return strategy
 
-
 @pytest.fixture
 def mock_execution_engine():
     """Mock Execution Engine"""
@@ -86,7 +81,6 @@ def mock_execution_engine():
     engine.stop = AsyncMock(return_value=True)
     engine.health_check = AsyncMock(return_value={'healthy': True})
     return engine
-
 
 # ========================================
 # TESTS: LIFECYCLE MANAGEMENT
@@ -116,7 +110,6 @@ class TestOrchestratorLifecycle:
         assert hasattr(orchestrator, 'stop')
         assert hasattr(orchestrator, 'health_check')
         assert hasattr(orchestrator, 'get_status')
-
 
 # ========================================
 # TESTS: COMPONENT REGISTRATION
@@ -186,7 +179,6 @@ class TestComponentRegistration:
         assert len(orchestrator.layer_components[ComponentLayer.EXECUTION]) == 1
         assert gov_id in orchestrator.layer_components[ComponentLayer.GOVERNANCE]
         assert exec_id in orchestrator.layer_components[ComponentLayer.EXECUTION]
-
 
 # ========================================
 # TESTS: AUTHORITY LEVELS
@@ -266,7 +258,6 @@ class TestAuthorityLevels:
         assert "process_data" not in allowed_ops
         assert "execute_trades" not in allowed_ops
 
-
 # ========================================
 # TESTS: HIERARCHICAL INITIALIZATION
 # ========================================
@@ -334,7 +325,6 @@ class TestHierarchicalInitialization:
         assert not success
         assert orchestrator.system_status == SystemStatus.EMERGENCY
 
-
 # ========================================
 # TESTS: CONTROL RELATIONSHIPS
 # ========================================
@@ -376,7 +366,6 @@ class TestControlRelationships:
         # Check risk manager controls trading components
         mock_risk_manager.set_controlled_components.assert_called_once()
 
-
 # ========================================
 # TESTS: HEALTH CHECKS
 # ========================================
@@ -407,7 +396,6 @@ class TestHealthChecks:
         assert 'system_status' in status
         assert 'component_count' in status
 
-
 # ========================================
 # TESTS: EMERGENCY SHUTDOWN
 # ========================================
@@ -432,7 +420,6 @@ class TestEmergencyShutdown:
 
         assert success
 
-
 # ========================================
 # TESTS: SYSTEM METRICS
 # ========================================
@@ -454,7 +441,6 @@ class TestSystemMetrics:
         assert metrics is not None
         assert isinstance(metrics, dict)
 
-
 # ========================================
 # TESTS: CONCURRENT OPERATIONS
 # ========================================
@@ -467,7 +453,6 @@ class TestConcurrentOperations:
         """Test operation semaphore limits concurrency"""
         assert orchestrator.operation_semaphore is not None
         assert orchestrator.operation_semaphore._value == 10  # max_concurrent_operations
-
 
 # ========================================
 # TESTS: AUDIT TRAIL
@@ -485,7 +470,6 @@ class TestAuditTrail:
         """Test authorization audit trail"""
         assert hasattr(orchestrator, '_authorization_audit')
         assert isinstance(orchestrator._authorization_audit, list)
-
 
 # ========================================
 # TESTS: PERFORMANCE
@@ -521,7 +505,6 @@ class TestPerformance:
 
         # Should register 10 components in under 100ms
         assert duration < 0.1
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

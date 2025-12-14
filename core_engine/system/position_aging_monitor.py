@@ -47,7 +47,6 @@ from ..type_definitions.strategy import StrategyType
 
 logger = logging.getLogger(__name__)
 
-
 class PositionAgeCategory(Enum):
     """Position age categories"""
     FRESH = "fresh"           # <50% of limit
@@ -56,7 +55,6 @@ class PositionAgeCategory(Enum):
     EXPIRED = "expired"       # >100% of limit
 
 # StrategyType imported from type_definitions.strategy (canonical source)
-
 
 @dataclass
 class PositionAgeInfo:
@@ -88,7 +86,6 @@ class PositionAgeInfo:
     position_value: float
     unrealized_pnl: float = 0.0
 
-
 @dataclass
 class AgingReport:
     """
@@ -112,7 +109,6 @@ class AgingReport:
     expired_count: int
     positions: List[PositionAgeInfo] = field(default_factory=list)
     actions_taken: List[str] = field(default_factory=list)
-
 
 class PositionAgingMonitor:
     """

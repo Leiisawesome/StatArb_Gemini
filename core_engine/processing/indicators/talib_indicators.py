@@ -45,7 +45,6 @@ except ImportError:
     TALIB_AVAILABLE = False
     logger.info("⚠️ TA-Lib not installed - using fallback implementations")
 
-
 # =============================================================================
 # RSI - Relative Strength Index
 # =============================================================================
@@ -80,7 +79,6 @@ def calculate_rsi(
         return pd.Series(result, index=close.index, name='rsi')
     return result
 
-
 def _rsi_fallback(close: np.ndarray, period: int) -> np.ndarray:
     """Pure Python RSI implementation using Wilder's smoothing"""
     delta = np.diff(close, prepend=close[0])
@@ -111,7 +109,6 @@ def _rsi_fallback(close: np.ndarray, period: int) -> np.ndarray:
     rsi[:period] = np.nan
 
     return rsi
-
 
 # =============================================================================
 # MACD - Moving Average Convergence Divergence
@@ -156,7 +153,6 @@ def calculate_macd(
         )
     return macd, signal, hist
 
-
 def _macd_fallback(
     close: np.ndarray,
     fast_period: int,
@@ -173,7 +169,6 @@ def _macd_fallback(
 
     return macd, signal, histogram
 
-
 def _ema(data: np.ndarray, period: int) -> np.ndarray:
     """Calculate Exponential Moving Average"""
     alpha = 2.0 / (period + 1)
@@ -184,7 +179,6 @@ def _ema(data: np.ndarray, period: int) -> np.ndarray:
         result[i] = alpha * data[i] + (1 - alpha) * result[i-1]
 
     return result
-
 
 # =============================================================================
 # Bollinger Bands
@@ -228,7 +222,6 @@ def calculate_bollinger_bands(
         )
     return upper, middle, lower
 
-
 def _bollinger_fallback(
     close: np.ndarray,
     period: int,
@@ -250,7 +243,6 @@ def _bollinger_fallback(
         lower[i] = mean - std_dev * std
 
     return upper, middle, lower
-
 
 # =============================================================================
 # ATR - Average True Range
@@ -296,7 +288,6 @@ def calculate_atr(
         return pd.Series(result, index=close.index, name='atr')
     return result
 
-
 def _atr_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -324,7 +315,6 @@ def _atr_fallback(
         atr[i] = atr[i-1] * (1 - alpha) + tr[i] * alpha
 
     return atr
-
 
 # =============================================================================
 # ADX - Average Directional Index
@@ -391,7 +381,6 @@ def calculate_adx(
         )
     return adx, plus_di, minus_di
 
-
 def _adx_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -424,7 +413,7 @@ def _adx_fallback(
             minus_dm[i] = down
 
     # Wilder's smoothing
-    alpha = 1.0 / period
+    1.0 / period
 
     # Smooth TR, +DM, -DM
     atr = np.full(n, np.nan)
@@ -469,7 +458,6 @@ def _adx_fallback(
                 adx[i] = (adx[i-1] * (period - 1) + dx[i]) / period
 
     return adx, plus_di, minus_di
-
 
 # =============================================================================
 # Stochastic Oscillator
@@ -523,7 +511,6 @@ def calculate_stochastic(
         )
     return slowk, slowd
 
-
 def _stochastic_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -559,7 +546,6 @@ def _stochastic_fallback(
 
     return slowk, slowd
 
-
 # =============================================================================
 # Simple and Exponential Moving Averages
 # =============================================================================
@@ -584,7 +570,6 @@ def calculate_sma(
         return pd.Series(result, index=data.index, name=f'sma_{period}')
     return result
 
-
 def calculate_ema(
     data: Union[pd.Series, np.ndarray],
     period: int
@@ -601,7 +586,6 @@ def calculate_ema(
     if is_series:
         return pd.Series(result, index=data.index, name=f'ema_{period}')
     return result
-
 
 # =============================================================================
 # Williams %R
@@ -658,7 +642,6 @@ def calculate_williams_r(
         return pd.Series(result, index=close.index, name='williams_r')
     return result
 
-
 # =============================================================================
 # OBV - On Balance Volume
 # =============================================================================
@@ -705,7 +688,6 @@ def calculate_obv(
     if is_series:
         return pd.Series(result, index=close.index, name='obv')
     return result
-
 
 # =============================================================================
 # CCI - Commodity Channel Index
@@ -766,7 +748,6 @@ def calculate_cci(
         return pd.Series(result, index=close.index, name='cci')
     return result
 
-
 # =============================================================================
 # Module-level utility functions
 # =============================================================================
@@ -786,7 +767,6 @@ def get_available_indicators() -> dict:
         'obv': 'On Balance Volume - volume indicator',
         'cci': 'Commodity Channel Index - momentum/mean reversion'
     }
-
 
 def check_talib_status() -> dict:
     """Check TA-Lib installation status and available functions"""

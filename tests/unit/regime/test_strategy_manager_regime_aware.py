@@ -39,7 +39,6 @@ except ImportError:
         regime_confidence: float
         volatility_regime: str
 
-
 class TestStrategyManagerIRegimeAware:
     """Test IRegimeAware interface implementation"""
 
@@ -328,7 +327,6 @@ class TestStrategyManagerIRegimeAware:
 
         print("✅ Adaptation metrics are properly structured")
 
-
 class TestStrategyManagerRegimeIntegration:
     """Test full integration with regime engine"""
 
@@ -385,7 +383,6 @@ class TestStrategyManagerRegimeIntegration:
         assert current.primary_regime == RegimeType.TRENDING_UP
 
         print("✅ Full regime integration works end-to-end")
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

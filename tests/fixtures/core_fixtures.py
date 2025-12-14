@@ -17,7 +17,6 @@ from core_engine.system.hierarchical_orchestrator import HierarchicalSystemOrche
 from core_engine.trading.strategies.manager import StrategyManager
 from core_engine.analytics.metrics_calculator import EnhancedMetricsCalculator
 
-
 # ========================================
 # RISK MANAGER FIXTURES
 # ========================================
@@ -39,7 +38,6 @@ def risk_manager_config() -> Dict[str, Any]:
         'real_time_monitoring': False,  # Disable monitoring in tests
     }
 
-
 @pytest.fixture
 async def risk_manager_fixture(risk_manager_config):
     """Initialized CentralRiskManager fixture"""
@@ -51,7 +49,6 @@ async def risk_manager_fixture(risk_manager_config):
         await manager.stop()
     except:
         pass
-
 
 @pytest.fixture
 def mock_risk_manager():
@@ -79,7 +76,6 @@ def mock_risk_manager():
 
     return mock
 
-
 # ========================================
 # STRATEGY MANAGER FIXTURES
 # ========================================
@@ -100,7 +96,6 @@ def strategy_manager_config() -> Dict[str, Any]:
         'strategy_registry_path': '/tmp/test_strategy_registry.json'
     }
 
-
 @pytest.fixture
 async def strategy_manager_fixture(strategy_manager_config):
     """Initialized StrategyManager fixture"""
@@ -112,7 +107,6 @@ async def strategy_manager_fixture(strategy_manager_config):
         await manager.stop()
     except:
         pass
-
 
 @pytest.fixture
 def mock_strategy_manager():
@@ -134,7 +128,6 @@ def mock_strategy_manager():
 
     return mock
 
-
 # ========================================
 # EXECUTION ENGINE FIXTURES
 # ========================================
@@ -151,7 +144,6 @@ def execution_engine_config() -> Dict[str, Any]:
         'enable_monitoring': False  # Disable in tests
     }
 
-
 @pytest.fixture
 async def execution_engine_fixture(execution_engine_config):
     """Initialized UnifiedExecutionEngine fixture"""
@@ -163,7 +155,6 @@ async def execution_engine_fixture(execution_engine_config):
         await engine.stop()
     except:
         pass
-
 
 @pytest.fixture
 def mock_execution_engine():
@@ -183,7 +174,6 @@ def mock_execution_engine():
 
     return mock
 
-
 # ========================================
 # ORCHESTRATOR FIXTURES
 # ========================================
@@ -198,7 +188,6 @@ def orchestrator_config() -> Dict[str, Any]:
         'component_startup_timeout': 30
     }
 
-
 @pytest.fixture
 async def orchestrator_fixture(orchestrator_config):
     """Initialized HierarchicalSystemOrchestrator fixture"""
@@ -210,7 +199,6 @@ async def orchestrator_fixture(orchestrator_config):
         await orchestrator.shutdown_system()
     except:
         pass
-
 
 @pytest.fixture
 def mock_orchestrator():
@@ -231,7 +219,6 @@ def mock_orchestrator():
 
     return mock
 
-
 # ========================================
 # ANALYTICS FIXTURES
 # ========================================
@@ -247,7 +234,6 @@ def metrics_calculator_config() -> Dict[str, Any]:
         'enable_tail_analysis': True
     }
 
-
 @pytest.fixture
 async def metrics_calculator_fixture(metrics_calculator_config):
     """Initialized EnhancedMetricsCalculator fixture"""
@@ -259,7 +245,6 @@ async def metrics_calculator_fixture(metrics_calculator_config):
         await calculator.stop()
     except:
         pass
-
 
 @pytest.fixture
 def mock_metrics_calculator():
@@ -279,7 +264,6 @@ def mock_metrics_calculator():
     })
 
     return mock
-
 
 # ========================================
 # COMPONENT INTEGRATION FIXTURES
@@ -302,7 +286,6 @@ async def integrated_system_fixture(
         'strategy_manager': strategy_manager_fixture,
         'execution_engine': execution_engine_fixture
     }
-
 
 # ========================================
 # ASYNC HELPERS

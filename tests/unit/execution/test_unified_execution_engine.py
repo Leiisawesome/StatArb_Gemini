@@ -31,7 +31,6 @@ from core_engine.system.unified_execution_engine import (
     ExecutionUrgency
 )
 
-
 @pytest.fixture
 def execution_config():
     """Configuration for execution engine"""
@@ -48,7 +47,6 @@ def execution_config():
         'test_mode': True  # Enable test mode for faster execution
     }
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Mock risk manager for testing"""
@@ -61,7 +59,6 @@ def mock_risk_manager():
     risk_manager.validate_position_change = AsyncMock(return_value=(True, "Valid"))
     return risk_manager
 
-
 @pytest.fixture
 def mock_position_callback():
     """Mock position update callback"""
@@ -71,14 +68,12 @@ def mock_position_callback():
     })
     return callback
 
-
 @pytest.fixture
 def execution_engine(execution_config, mock_risk_manager, mock_position_callback):
     """UnifiedExecutionEngine instance for testing"""
     execution_config['risk_manager_callback'] = mock_risk_manager
     execution_config['position_update_callback'] = mock_position_callback
     return UnifiedExecutionEngine(execution_config)
-
 
 @pytest.fixture
 def sample_authorization():
@@ -97,7 +92,6 @@ def sample_authorization():
         authorized_at=datetime.now()
     )
 
-
 @pytest.fixture
 def sample_execution_request(sample_authorization):
     """Sample execution request"""
@@ -110,7 +104,6 @@ def sample_execution_request(sample_authorization):
         venue_preferences=["NYSE"],
         algorithm_params={}
     )
-
 
 class TestUnifiedExecutionEngineInterface:
     """Test ISystemComponent interface compliance"""
@@ -196,7 +189,6 @@ class TestUnifiedExecutionEngineInterface:
         assert 'total_executions' in status
         assert status['component_type'] == 'UnifiedExecutionEngine'
 
-
 class TestExecutionAuthorization:
     """Test execution authorization and validation"""
 
@@ -213,7 +205,6 @@ class TestExecutionAuthorization:
         """Test authorization with no allowed algorithms"""
         sample_authorization.allowed_algorithms = []
         assert sample_authorization.validate_authorization() is False
-
 
 class TestExecutionValidation:
     """Test execution request validation"""
@@ -257,7 +248,6 @@ class TestExecutionValidation:
         assert is_valid is False
         assert len(errors) > 0
         assert any("algorithm" in error.lower() for error in errors)
-
 
 class TestExecutionExecution:
     """Test trade execution functionality"""
@@ -312,7 +302,6 @@ class TestExecutionExecution:
         assert stored_result is not None
         assert stored_result.request_id == result.request_id
 
-
 class TestPositionTracking:
     """Test position tracking integration"""
 
@@ -348,7 +337,6 @@ class TestPositionTracking:
         # Should still execute successfully
         assert result.status in [ExecutionStatus.FILLED, ExecutionStatus.PARTIALLY_FILLED, ExecutionStatus.REJECTED]
 
-
 class TestExecutionMetrics:
     """Test execution metrics and performance tracking"""
 
@@ -383,7 +371,6 @@ class TestExecutionMetrics:
         assert 'total_cost' in cost_estimate
         assert all(isinstance(v, (int, float)) for v in cost_estimate.values())
 
-
 class TestExecutionCancellation:
     """Test execution cancellation functionality"""
 
@@ -416,7 +403,6 @@ class TestExecutionCancellation:
         else:
             # Cancellation might fail if execution completed too quickly
             assert result.status in [ExecutionStatus.FILLED, ExecutionStatus.PARTIALLY_FILLED]
-
 
 class TestErrorHandling:
     """Test error handling and recovery"""
@@ -469,7 +455,6 @@ class TestErrorHandling:
         if not health['healthy']:
             assert 'error' in health
 
-
 class TestExecutionAlgorithms:
     """Test different execution algorithms"""
 
@@ -519,7 +504,6 @@ class TestExecutionAlgorithms:
         assert isinstance(result, ExecutionResult)
         # Adaptive should select an appropriate algorithm
         assert result.algorithm_used in [ExecutionAlgorithm.MARKET, ExecutionAlgorithm.TWAP, ExecutionAlgorithm.ADAPTIVE]
-
 
 class TestExecutionIntegration:
     """Integration tests for execution engine"""
@@ -604,7 +588,6 @@ class TestExecutionIntegration:
         # Check metrics
         metrics = execution_engine.get_execution_metrics()
         assert metrics['total_executions'] >= 3
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

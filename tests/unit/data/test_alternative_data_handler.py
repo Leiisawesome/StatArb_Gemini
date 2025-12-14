@@ -22,7 +22,6 @@ from core_engine.data.alternative_data_handler import (
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -63,18 +62,15 @@ async def alt_data_handler():
 
     return handler
 
-
 @pytest.fixture
 def sentiment_analyzer():
     """Create sentiment analyzer instance"""
     return SentimentAnalyzer()
 
-
 @pytest.fixture
 def web_scraper():
     """Create web scraper instance"""
     return WebScraper()
-
 
 @pytest.fixture
 def sample_news_text():
@@ -86,7 +82,6 @@ def sample_news_text():
     fundamentals. The company also announced increased dividend payments.
     """
 
-
 @pytest.fixture
 def sample_negative_text():
     """Sample negative news text"""
@@ -96,7 +91,6 @@ def sample_negative_text():
     Concerns about declining market share and fragile business model continue to weigh
     on the stock. Management lowered guidance for the upcoming quarter.
     """
-
 
 @pytest.fixture
 def scraping_target():
@@ -113,7 +107,6 @@ def scraping_target():
         required_fields=['title', 'content'],
         validation_rules={}
     )
-
 
 # =============================================================================
 # CATEGORY 1: ALTERNATIVE DATA HANDLER INITIALIZATION (3 tests)
@@ -150,7 +143,6 @@ class TestAlternativeDataHandlerInitialization:
         assert alt_data_handler._data_by_type is not None
         assert alt_data_handler._subscriptions is not None
         logger.info("✅ Handler storage structures test passed")
-
 
 # =============================================================================
 # CATEGORY 2: SENTIMENT ANALYZER (5 tests)
@@ -212,7 +204,6 @@ class TestSentimentAnalyzer:
         # Should extract relevant financial keywords
         logger.info("✅ Sentiment keyword extraction test passed")
 
-
 # =============================================================================
 # CATEGORY 3: WEB SCRAPER (3 tests)
 # =============================================================================
@@ -251,7 +242,6 @@ class TestWebScraper:
         assert all('content' in item for item in scraped_data)
         assert scraping_target.success_count > 0
         logger.info("✅ Scrape target test passed")
-
 
 # =============================================================================
 # CATEGORY 4: DATA INGESTION (4 tests)
@@ -331,7 +321,6 @@ class TestDataIngestion:
         assert alt_data_handler._processing_stats['total_ingested'] == 3
         assert len(set(data_ids)) == 3  # All unique IDs
         logger.info("✅ Multiple data ingestion test passed")
-
 
 # =============================================================================
 # CATEGORY 5: DATA PROCESSING (4 tests)
@@ -424,7 +413,6 @@ class TestDataProcessing:
         assert impact > 0.5
         logger.info("✅ Impact score calculation test passed")
 
-
 # =============================================================================
 # CATEGORY 6: DATA RETRIEVAL (3 tests)
 # =============================================================================
@@ -503,7 +491,6 @@ class TestDataRetrieval:
         assert stats['processing_errors'] == 5
         logger.info("✅ Get processing stats test passed")
 
-
 # =============================================================================
 # CATEGORY 7: SUBSCRIPTIONS (3 tests)
 # =============================================================================
@@ -571,7 +558,6 @@ class TestSubscriptions:
         assert alt_data_handler._data_callbacks[0] == callback
         logger.info("✅ Add data callback test passed")
 
-
 # =============================================================================
 # CATEGORY 8: DATA SUMMARY (2 tests)
 # =============================================================================
@@ -614,7 +600,6 @@ class TestDataSummary:
         assert 'message' in summary
         assert 'No recent data' in summary['message']
         logger.info("✅ Get data summary (empty) test passed")
-
 
 # =============================================================================
 # CATEGORY 9: SCRAPING TARGET MANAGEMENT (3 tests)
@@ -680,7 +665,6 @@ class TestScrapingTargetManagement:
             assert target.error_count > initial_errors
 
         logger.info("✅ Scraping target error tracking test passed")
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -27,7 +27,6 @@ from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.data.manager import ClickHouseDataManager
 from core_engine.config.component_config import RegimeConfig, DataConfig
 
-
 class TestRegimeFirstInitialization:
     """Integration tests for Regime-First initialization"""
 
@@ -332,7 +331,7 @@ class TestRegimeFirstInitialization:
         )
 
         # Initialize (may fail)
-        result = await orchestrator.initialize_system()
+        await orchestrator.initialize_system()
 
         # System should handle failure (80% success rate allows some failures)
         regime_reg = orchestrator.component_registry[regime_id]

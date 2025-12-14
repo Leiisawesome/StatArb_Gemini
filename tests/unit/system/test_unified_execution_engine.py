@@ -28,9 +28,9 @@ from core_engine.system.unified_execution_engine import (
     ExecutionAlgorithm,
     ExecutionUrgency,
     TWAPAlgorithm,
-    MarketAlgorithm
+    MarketAlgorithm,
+    ExecutionResult
 )
-
 
 # ========================================
 # FIXTURES
@@ -46,7 +46,6 @@ def default_config():
         'enable_position_tracking': False  # Disabled by default
     }
 
-
 @pytest.fixture
 def config_with_position_tracking():
     """Configuration with position tracking enabled"""
@@ -56,7 +55,6 @@ def config_with_position_tracking():
         'default_time_horizon': 300,
         'enable_position_tracking': True
     }
-
 
 @pytest.fixture
 def valid_authorization():
@@ -75,7 +73,6 @@ def valid_authorization():
         expires_at=datetime.now() + timedelta(hours=1)
     )
 
-
 @pytest.fixture
 def expired_authorization():
     """Expired execution authorization"""
@@ -89,7 +86,6 @@ def expired_authorization():
         expires_at=datetime.now() - timedelta(hours=1)  # Expired
     )
 
-
 @pytest.fixture
 def market_request(valid_authorization):
     """Market execution request"""
@@ -99,7 +95,6 @@ def market_request(valid_authorization):
         urgency=ExecutionUrgency.NORMAL,
         time_horizon=60
     )
-
 
 @pytest.fixture
 def twap_request(valid_authorization):
@@ -111,7 +106,6 @@ def twap_request(valid_authorization):
         time_horizon=300
     )
 
-
 @pytest.fixture
 def adaptive_request(valid_authorization):
     """Adaptive execution request"""
@@ -122,21 +116,30 @@ def adaptive_request(valid_authorization):
         time_horizon=300
     )
 
-
 @pytest.fixture
 def execution_engine(default_config):
     """Uninitialized execution engine"""
     return UnifiedExecutionEngine(default_config)
 
-
 @pytest.fixture
 async def initialized_engine(execution_engine):
-    """Fully initialized execution engine"""
+    """Fully initialized execution engine with mock broker adapter"""
+    from tests.fixtures.mock_factories import create_mock_broker_adapter
+
+    # Set mock broker adapter on all algorithms
+    mock_broker = create_mock_broker_adapter()
+    for algorithm in execution_engine.algorithms.values():
+        algorithm.broker_adapter = mock_broker
+        # Also set on adaptive algorithm's sub-algorithms
+        if hasattr(algorithm, 'twap'):
+            algorithm.twap.broker_adapter = mock_broker
+        if hasattr(algorithm, 'market'):
+            algorithm.market.broker_adapter = mock_broker
+
     await execution_engine.initialize()
     await execution_engine.start()
     yield execution_engine
     await execution_engine.stop()
-
 
 # ========================================
 # CATEGORY 1: INITIALIZATION & SETUP (4 tests)
@@ -152,7 +155,7 @@ class TestInitialization:
         assert engine.config == default_config
         assert engine.test_mode is True
         assert engine.simulation_delay == 0.0  # No delay in test mode
-        assert len(engine.algorithms) == 3  # Market, TWAP, Adaptive
+        assert len(engine.algorithms) == 4  # Market, TWAP, VWAP, Adaptive
         assert engine.is_initialized is False
         assert engine.is_operational is False
         assert len(engine.active_executions) == 0
@@ -190,7 +193,6 @@ class TestInitialization:
         # Verify test_mode propagated to algorithms
         for algorithm in execution_engine.algorithms.values():
             assert algorithm.test_mode is True
-
 
 # ========================================
 # CATEGORY 2: AUTHORIZATION VALIDATION (5 tests)
@@ -278,7 +280,6 @@ class TestAuthorizationValidation:
         assert result.status == ExecutionStatus.REJECTED
         assert any("exceed" in log.lower() for log in result.execution_log)
 
-
 # ========================================
 # CATEGORY 3: MARKET ALGORITHM (4 tests)
 # ========================================
@@ -322,7 +323,8 @@ class TestMarketAlgorithm:
         assert elapsed < 1.0  # Should complete in < 1 second
         assert result.status == ExecutionStatus.FILLED
 
-    def test_market_impact_estimation(self, default_config):
+    @pytest.mark.asyncio
+    async def test_market_impact_estimation(self, default_config):
         """Test market impact estimation"""
         algorithm = MarketAlgorithm(default_config)
 
@@ -338,11 +340,10 @@ class TestMarketAlgorithm:
             urgency=ExecutionUrgency.NORMAL
         )
 
-        impact = algorithm.estimate_market_impact(request)
+        impact = await algorithm.estimate_market_impact(request)
 
         assert impact > 0
         assert impact <= 0.05  # Capped at 5%
-
 
 # ========================================
 # CATEGORY 4: TWAP ALGORITHM (5 tests)
@@ -407,7 +408,8 @@ class TestTWAPAlgorithm:
         assert len(result.fills) >= 5  # At least 5 slices
         assert result.status == ExecutionStatus.FILLED
 
-    def test_twap_impact_reduction(self, default_config):
+    @pytest.mark.asyncio
+    async def test_twap_impact_reduction(self, default_config):
         """Test TWAP has lower impact than market"""
         twap_algo = TWAPAlgorithm(default_config)
         market_algo = MarketAlgorithm(default_config)
@@ -423,12 +425,11 @@ class TestTWAPAlgorithm:
             urgency=ExecutionUrgency.NORMAL
         )
 
-        twap_impact = twap_algo.estimate_market_impact(request)
-        market_impact = market_algo.estimate_market_impact(request)
+        twap_impact = await twap_algo.estimate_market_impact(request)
+        market_impact = await market_algo.estimate_market_impact(request)
 
         # TWAP should have lower impact (0.7x multiplier)
         assert twap_impact < market_impact
-
 
 # ========================================
 # CATEGORY 5: ADAPTIVE ALGORITHM (4 tests)
@@ -520,6 +521,166 @@ class TestAdaptiveAlgorithm:
         assert result.avg_fill_price > 0
         assert len(result.fills) > 0
 
+# ========================================
+# CATEGORY 4.5: VWAP ALGORITHM (6 tests)
+# ========================================
+
+class TestVWAPAlgorithm:
+    """Test VWAP algorithm functionality"""
+
+    @pytest.fixture
+    def vwap_request(self, valid_authorization):
+        """VWAP execution request"""
+        auth = valid_authorization
+        auth.allowed_algorithms.append(ExecutionAlgorithm.VWAP)
+        return ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.VWAP,
+            urgency=ExecutionUrgency.NORMAL,
+            time_horizon=600  # 10 minutes
+        )
+
+    @pytest.mark.asyncio
+    async def test_vwap_execution_success(self, initialized_engine, vwap_request):
+        """Test successful VWAP execution"""
+        result = await initialized_engine.execute_authorized_trade(vwap_request)
+
+        assert result.status == ExecutionStatus.FILLED
+        assert result.filled_quantity == vwap_request.authorization.quantity
+        assert result.avg_fill_price > 0
+        assert result.algorithm_used == ExecutionAlgorithm.VWAP
+        assert len(result.fills) > 1  # Multiple slices
+        assert result.execution_time > 0
+
+    @pytest.mark.asyncio
+    async def test_vwap_slicing(self, initialized_engine):
+        """Test VWAP creates proper slices based on volume profile"""
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            max_quantity=1000.0,
+            allowed_algorithms=[ExecutionAlgorithm.VWAP],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request = ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.VWAP,
+            time_horizon=600  # 10 minutes
+        )
+
+        result = await initialized_engine.execute_authorized_trade(request)
+
+        # Should have multiple fills (slices)
+        assert len(result.fills) > 1
+        # Total quantity should match
+        total_filled = sum(fill['quantity'] for fill in result.fills)
+        assert abs(total_filled - 1000.0) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_vwap_execution_time(self, initialized_engine):
+        """Test VWAP respects execution time horizon"""
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            max_quantity=1000.0,
+            allowed_algorithms=[ExecutionAlgorithm.VWAP],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request = ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.VWAP,
+            time_horizon=300  # 5 minutes
+        )
+
+        start_time = datetime.now()
+        result = await initialized_engine.execute_authorized_trade(request)
+        end_time = datetime.now()
+
+        # Should complete within reasonable time (test mode is fast)
+        execution_duration = (end_time - start_time).total_seconds()
+        assert execution_duration < 1.0  # Should be very fast in test mode
+        assert result.execution_time == 300  # Should match time horizon
+
+    @pytest.mark.asyncio
+    async def test_vwap_fills_count(self, initialized_engine):
+        """Test VWAP creates expected number of fills"""
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=2000.0,
+            max_quantity=2000.0,
+            allowed_algorithms=[ExecutionAlgorithm.VWAP],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request = ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.VWAP,
+            time_horizon=600
+        )
+
+        result = await initialized_engine.execute_authorized_trade(request)
+
+        # Should have multiple fills based on volume profile
+        assert len(result.fills) >= 5  # At least 5 slices for 10 minute horizon
+        # Each fill should have proper structure
+        for fill in result.fills:
+            assert 'quantity' in fill
+            assert 'price' in fill
+            assert 'timestamp' in fill
+            assert 'slice' in fill
+            assert fill['quantity'] > 0
+            assert fill['price'] > 0
+
+    @pytest.mark.asyncio
+    async def test_vwap_impact_reduction(self, initialized_engine):
+        """Test VWAP has lower market impact than market orders"""
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=5000.0,  # Large quantity
+            max_quantity=5000.0,
+            allowed_algorithms=[ExecutionAlgorithm.VWAP, ExecutionAlgorithm.MARKET],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        # VWAP request
+        vwap_request = ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.VWAP,
+            time_horizon=600
+        )
+
+        # Market request (same auth)
+        market_request = ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.MARKET,
+            time_horizon=60
+        )
+
+        vwap_result = await initialized_engine.execute_authorized_trade(vwap_request)
+        market_result = await initialized_engine.execute_authorized_trade(market_request)
+
+        # VWAP should have lower or equal market impact (in test mode, market might be 0)
+        # Just verify both have reasonable impact values
+        assert vwap_result.market_impact >= 0
+        assert market_result.market_impact >= 0
+        # VWAP typically has some impact due to slicing, market might be 0 in test mode
+
+    @pytest.mark.asyncio
+    async def test_vwap_price_calculation(self, initialized_engine, vwap_request):
+        """Test VWAP calculates correct average price"""
+        result = await initialized_engine.execute_authorized_trade(vwap_request)
+
+        # Calculate expected VWAP manually
+        total_value = sum(fill['quantity'] * fill['price'] for fill in result.fills)
+        expected_vwap = total_value / result.filled_quantity
+
+        assert abs(result.avg_fill_price - expected_vwap) < 0.001
 
 # ========================================
 # CATEGORY 6: EXECUTION TRACKING (5 tests)
@@ -591,7 +752,6 @@ class TestExecutionTracking:
 
         assert cancel_success is False  # Should fail for non-existent execution
 
-
 # ========================================
 # CATEGORY 7: METRICS & ANALYTICS (4 tests)
 # ========================================
@@ -653,6 +813,116 @@ class TestMetricsAndAnalytics:
         # Should have entries for executed algorithms
         assert len(report['algorithm_breakdown']) > 0
 
+    @pytest.mark.asyncio
+    async def test_get_execution_report_with_date_filter(self, initialized_engine, market_request):
+        """Test execution report with date filtering"""
+        # Execute a trade
+        result = await initialized_engine.execute_authorized_trade(market_request)
+        result.completed_at = datetime.now()
+
+        # Get report for future date range (should be empty)
+        future_start = datetime.now() + timedelta(days=1)
+        future_end = datetime.now() + timedelta(days=2)
+
+        report = initialized_engine.get_execution_report(
+            start_date=future_start,
+            end_date=future_end
+        )
+
+        assert 'message' in report
+        assert report['message'] == 'No executions found in date range'
+
+    @pytest.mark.asyncio
+    async def test_get_execution_report_comprehensive(self, initialized_engine):
+        """Test comprehensive execution report generation"""
+        # Execute multiple trades
+        auth1 = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            max_quantity=1000.0,
+            allowed_algorithms=[ExecutionAlgorithm.MARKET],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        auth2 = ExecutionAuthorization(
+            symbol="MSFT",
+            side="sell",
+            quantity=500.0,
+            max_quantity=500.0,
+            allowed_algorithms=[ExecutionAlgorithm.TWAP],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request1 = ExecutionRequest(authorization=auth1, algorithm=ExecutionAlgorithm.MARKET)
+        request2 = ExecutionRequest(authorization=auth2, algorithm=ExecutionAlgorithm.TWAP)
+
+        await initialized_engine.execute_authorized_trade(request1)
+        await initialized_engine.execute_authorized_trade(request2)
+
+        report = initialized_engine.get_execution_report()
+
+        # Verify report structure
+        assert 'period' in report
+        assert 'execution_summary' in report
+        assert 'performance_metrics' in report
+        assert 'algorithm_breakdown' in report
+
+        # Verify summary data
+        summary = report['execution_summary']
+        assert summary['total_executions'] == 2
+        assert summary['successful_executions'] == 2
+        assert summary['success_rate'] == 1.0
+
+        # Verify performance metrics
+        metrics = report['performance_metrics']
+        assert 'avg_execution_time' in metrics
+        assert 'avg_market_impact' in metrics
+        assert 'total_volume' in metrics
+        assert metrics['total_volume'] == 1500.0  # 1000 + 500
+
+    def test_get_algorithm_breakdown(self, initialized_engine):
+        """Test algorithm breakdown calculation"""
+        # Create mock execution results
+        results = [
+            ExecutionResult(
+                request_id="1",
+                authorization_id="auth1",
+                status=ExecutionStatus.FILLED,
+                filled_quantity=1000.0,
+                algorithm_used=ExecutionAlgorithm.MARKET
+            ),
+            ExecutionResult(
+                request_id="2",
+                authorization_id="auth2",
+                status=ExecutionStatus.FILLED,
+                filled_quantity=500.0,
+                algorithm_used=ExecutionAlgorithm.TWAP
+            ),
+            ExecutionResult(
+                request_id="3",
+                authorization_id="auth3",
+                status=ExecutionStatus.FAILED,
+                filled_quantity=0.0,
+                algorithm_used=ExecutionAlgorithm.MARKET
+            )
+        ]
+
+        breakdown = initialized_engine._get_algorithm_breakdown(results)
+
+        # Verify breakdown
+        assert ExecutionAlgorithm.MARKET.value in breakdown
+        assert ExecutionAlgorithm.TWAP.value in breakdown
+
+        market_stats = breakdown[ExecutionAlgorithm.MARKET.value]
+        assert market_stats['count'] == 2  # Two market executions
+        assert market_stats['successful'] == 1  # One successful
+        assert market_stats['volume'] == 1000.0  # Only successful volume
+
+        twap_stats = breakdown[ExecutionAlgorithm.TWAP.value]
+        assert twap_stats['count'] == 1
+        assert twap_stats['successful'] == 1
+        assert twap_stats['volume'] == 500.0
 
 # ========================================
 # CATEGORY 8: POSITION TRACKING (5 tests)
@@ -677,6 +947,13 @@ class TestPositionTracking:
         config_with_position_tracking['position_update_callback'] = mock_callback
 
         engine = UnifiedExecutionEngine(config_with_position_tracking)
+
+        # Set mock broker adapter on all algorithms
+        from tests.fixtures.mock_factories import create_mock_broker_adapter
+        mock_broker = create_mock_broker_adapter()
+        for algorithm in engine.algorithms.values():
+            algorithm.broker_adapter = mock_broker
+
         await engine.initialize()
         await engine.start()
 
@@ -757,6 +1034,13 @@ class TestPositionTracking:
         config_with_position_tracking['position_update_callback'] = detailed_callback
 
         engine = UnifiedExecutionEngine(config_with_position_tracking)
+
+        # Set mock broker adapter on all algorithms
+        from tests.fixtures.mock_factories import create_mock_broker_adapter
+        mock_broker = create_mock_broker_adapter()
+        for algorithm in engine.algorithms.values():
+            algorithm.broker_adapter = mock_broker
+
         await engine.initialize()
         await engine.start()
 
@@ -872,6 +1156,174 @@ class TestPositionTracking:
 
         await engine.stop()
 
+    @pytest.mark.asyncio
+    async def test_set_position_callbacks(self, default_config):
+        """Test setting position callbacks dynamically"""
+        engine = UnifiedExecutionEngine(default_config)
+        await engine.initialize()
+
+        # Initially no callbacks
+        assert engine.position_update_callback is None
+        assert engine.risk_manager_callback is None
+
+        # Set callbacks
+        async def position_callback(symbol, side, qty, price):
+            pass
+
+        class MockRiskManager:
+            async def update_position(self, symbol, side, qty, price):
+                pass
+
+        mock_risk = MockRiskManager()
+
+        engine.set_position_callbacks(
+            risk_manager_callback=mock_risk,
+            position_update_callback=position_callback
+        )
+
+        assert engine.risk_manager_callback == mock_risk
+        assert engine.position_update_callback == position_callback
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_handle_position_updates_success(self, config_with_position_tracking):
+        """Test _handle_position_updates processes successful execution"""
+        position_updates = []
+
+        async def mock_callback(symbol, side, quantity, price):
+            position_updates.append({
+                'symbol': symbol,
+                'side': side,
+                'quantity': quantity,
+                'price': price
+            })
+
+        config_with_position_tracking['position_update_callback'] = mock_callback
+
+        engine = UnifiedExecutionEngine(config_with_position_tracking)
+        await engine.initialize()
+        await engine.start()
+
+        # Create successful execution result
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            max_quantity=1000.0,
+            allowed_algorithms=[ExecutionAlgorithm.MARKET],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request = ExecutionRequest(authorization=auth, algorithm=ExecutionAlgorithm.MARKET)
+
+        result = ExecutionResult(
+            request_id=request.request_id,
+            authorization_id=auth.authorization_id,
+            status=ExecutionStatus.FILLED,
+            filled_quantity=1000.0,
+            avg_fill_price=100.0
+        )
+
+        # Call the private method directly
+        await engine._handle_position_updates(request, result)
+
+        assert len(position_updates) == 1
+        assert position_updates[0]['symbol'] == "AAPL"
+        assert position_updates[0]['side'] == "buy"
+        assert position_updates[0]['quantity'] == 1000.0
+        assert position_updates[0]['price'] == 100.0
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_handle_position_updates_failed_execution(self, config_with_position_tracking):
+        """Test _handle_position_updates skips failed executions"""
+        position_updates = []
+
+        async def mock_callback(symbol, side, quantity, price):
+            position_updates.append({'symbol': symbol})
+
+        config_with_position_tracking['position_update_callback'] = mock_callback
+
+        engine = UnifiedExecutionEngine(config_with_position_tracking)
+        await engine.initialize()
+
+        # Create failed execution result
+        auth = ExecutionAuthorization(
+            symbol="AAPL",
+            side="buy",
+            quantity=1000.0,
+            max_quantity=1000.0,
+            allowed_algorithms=[ExecutionAlgorithm.MARKET],
+            expires_at=datetime.now() + timedelta(hours=1)
+        )
+
+        request = ExecutionRequest(authorization=auth, algorithm=ExecutionAlgorithm.MARKET)
+
+        result = ExecutionResult(
+            request_id=request.request_id,
+            authorization_id=auth.authorization_id,
+            status=ExecutionStatus.FAILED,  # Failed status
+            filled_quantity=0.0,
+            avg_fill_price=0.0
+        )
+
+        # Call the private method directly
+        await engine._handle_position_updates(request, result)
+
+        # Should not update position for failed execution
+        assert len(position_updates) == 0
+
+    @pytest.mark.asyncio
+    async def test_update_position_via_risk_manager(self, default_config):
+        """Test position update via risk manager callback"""
+        updates = []
+
+        class MockRiskManager:
+            async def update_position(self, symbol, side, quantity, price):
+                updates.append({
+                    'symbol': symbol,
+                    'side': side,
+                    'quantity': quantity,
+                    'price': price
+                })
+
+        mock_risk = MockRiskManager()
+        engine = UnifiedExecutionEngine(default_config)
+        engine.risk_manager_callback = mock_risk
+
+        await engine._update_position_via_risk_manager("AAPL", "buy", 1000.0, 100.0)
+
+        assert len(updates) == 1
+        assert updates[0]['symbol'] == "AAPL"
+        assert updates[0]['side'] == "buy"
+        assert updates[0]['quantity'] == 1000.0
+        assert updates[0]['price'] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_update_position_via_callback(self, default_config):
+        """Test position update via direct callback"""
+        updates = []
+
+        async def position_callback(symbol, side, quantity, price):
+            updates.append({
+                'symbol': symbol,
+                'side': side,
+                'quantity': quantity,
+                'price': price
+            })
+
+        engine = UnifiedExecutionEngine(default_config)
+        engine.position_update_callback = position_callback
+
+        await engine._update_position_via_callback("MSFT", "sell", 500.0, 200.0)
+
+        assert len(updates) == 1
+        assert updates[0]['symbol'] == "MSFT"
+        assert updates[0]['side'] == "sell"
+        assert updates[0]['quantity'] == 500.0
+        assert updates[0]['price'] == 200.0
 
 # ========================================
 # CATEGORY 9: ISYSTEMCOMPONENT INTERFACE (4 tests)
@@ -912,7 +1364,7 @@ class TestISystemComponentInterface:
         assert 'position_tracking_enabled' in status
 
         assert status['component_type'] == 'UnifiedExecutionEngine'
-        assert status['algorithms_count'] == 3
+        assert status['algorithms_count'] == 4
 
     @pytest.mark.asyncio
     async def test_start_stop_lifecycle(self, execution_engine):

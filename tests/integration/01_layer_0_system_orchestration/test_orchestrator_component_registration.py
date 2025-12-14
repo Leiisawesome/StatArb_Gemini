@@ -23,7 +23,6 @@ from core_engine.data.manager import ClickHouseDataManager
 from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.config.component_config import RiskConfig, DataConfig, RegimeConfig
 
-
 # =============================================================================
 # COMPONENT REGISTRATION TESTS
 # =============================================================================

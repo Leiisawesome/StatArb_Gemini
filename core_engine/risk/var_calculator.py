@@ -21,7 +21,6 @@ from core_engine.analytics.core_metrics import calculate_max_drawdown, calculate
 
 logger = logging.getLogger(__name__)
 
-
 class VarMethod(Enum):
     """VaR calculation methods"""
     HISTORICAL = "historical"
@@ -31,7 +30,6 @@ class VarMethod(Enum):
     FILTERED_HISTORICAL = "filtered_historical"
     EVT = "extreme_value_theory"
 
-
 class RiskMeasure(Enum):
     """Risk measure types"""
     VAR = "var"  # Value at Risk
@@ -40,7 +38,6 @@ class RiskMeasure(Enum):
     VOLATILITY = "volatility"
     BETA = "beta"
     TRACKING_ERROR = "tracking_error"
-
 
 @dataclass
 class VarResult:
@@ -52,7 +49,6 @@ class VarResult:
     currency: str = "USD"
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class RiskMetrics:
@@ -70,7 +66,6 @@ class RiskMetrics:
     kurtosis: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
 
-
 @dataclass
 class StressTestScenario:
     """Stress test scenario definition"""
@@ -79,7 +74,6 @@ class StressTestScenario:
     factor_shocks: Dict[str, float]  # factor -> shock percentage
     correlation_changes: Optional[Dict[Tuple[str, str], float]] = None
     volatility_multipliers: Optional[Dict[str, float]] = None
-
 
 class VarCalculator:
     """
@@ -126,7 +120,6 @@ class VarCalculator:
     def default_time_horizon(self) -> int:
         """Alias for time_horizon (backward compatibility)."""
         return self.time_horizon
-
 
     async def calculate_var(
         self,

@@ -39,7 +39,6 @@ from .interfaces import ISystemComponent
 
 logger = logging.getLogger(__name__)
 
-
 class SettlementStatus(Enum):
     """Settlement lifecycle states per Rule 6"""
     PENDING = "pending"           # Trade executed, awaiting settlement
@@ -50,14 +49,12 @@ class SettlementStatus(Enum):
     FAILED = "failed"             # Settlement failed
     CANCELLED = "cancelled"       # Trade cancelled before settlement
 
-
 class SettlementType(Enum):
     """Types of settlement"""
     REGULAR = "regular"           # Standard T+1/T+2
     CASH = "cash"                 # Same day (T+0)
     NEXT_DAY = "next_day"         # T+1
     EXTENDED = "extended"         # T+3 or longer
-
 
 @dataclass
 class SettlementRecord:
@@ -111,7 +108,6 @@ class SettlementRecord:
     # Metadata
     strategy_id: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 class SettlementManager(ISystemComponent):
     """

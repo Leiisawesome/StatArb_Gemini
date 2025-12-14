@@ -22,7 +22,6 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass, field
 
 from .engine import HistoricalDataReplayEngine, ReplayStatus
 from .config import ReplayConfig, ReplaySpeed
@@ -36,14 +35,13 @@ from core_engine.data.feeds.adapters import (
 
 logger = logging.getLogger(__name__)
 
-
 class HistoricalReplayFeedAdapter(DataFeedAdapter):
     """
     Feed adapter for historical data replay
 
     Implements the DataFeedAdapter interface to provide historical data
     streams that simulate real-time market feeds for testing purposes.
-    
+
     Uses centralized ReplayConfig for all configuration settings.
     """
 
@@ -55,7 +53,7 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
     def __init__(self, config: ReplayConfig):
         """
         Initialize the replay feed adapter
-        
+
         Args:
             config: ReplayConfig instance with all replay settings
         """
@@ -64,7 +62,7 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             name=config.adapter_name,
             provider=FeedProvider.SIMULATED
         )
-        
+
         # Initialize base adapter
         super().__init__(base_config)
 
@@ -125,7 +123,7 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
     async def disconnect(self) -> None:
         """
         Disconnect from the replay feed
-        
+
         Stops the replay engine and cleans up resources. Safe to call multiple times.
         """
         try:
@@ -375,7 +373,6 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             })
 
         return health_status
-
 
 # ============================================================================
 # UTILITY FUNCTIONS

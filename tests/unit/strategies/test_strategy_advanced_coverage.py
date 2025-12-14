@@ -31,7 +31,6 @@ from core_engine.trading.strategies.implementations.trend_following.enhanced_tre
 )
 from tests.unit.strategies.test_helpers import create_enriched_data_dict
 
-
 # =============================================================================
 # STATISTICAL ARBITRAGE ADVANCED TESTS
 # =============================================================================
@@ -416,7 +415,6 @@ class TestStatisticalArbitrageAdvanced:
         # Should update tracking
         assert True
 
-
 # =============================================================================
 # BREAKOUT STRATEGY ADVANCED TESTS
 # =============================================================================
@@ -559,7 +557,6 @@ class TestBreakoutAdvanced:
         # Should check exit conditions
         assert True
 
-
 # =============================================================================
 # TREND FOLLOWING ADVANCED TESTS
 # =============================================================================
@@ -633,7 +630,7 @@ class TestTrendFollowingAdvanced:
         # Add volatility column with enough rows for lookback
         # Use low volatility values to ensure it passes the percentile check
         volatility_lookback = getattr(strategy.config, 'volatility_lookback', 20)
-        max_percentile = getattr(strategy.config, 'max_volatility_percentile', 0.8)
+        getattr(strategy.config, 'max_volatility_percentile', 0.8)
 
         # Create volatility series where current is below percentile threshold
         historical_vol = [0.20] * (volatility_lookback - 1)  # Higher historical
@@ -741,7 +738,6 @@ class TestTrendFollowingAdvanced:
         signals = await strategy._generate_symbol_signals('AAPL')
 
         assert isinstance(signals, list)
-
 
 # =============================================================================
 # INTEGRATION TESTS FOR COMPLEX SCENARIOS

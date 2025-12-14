@@ -24,7 +24,6 @@ from core_engine.broker.broker_manager import (
     BrokerConfig
 )
 
-
 class TestBrokerAdapter:
     """Test suite for BrokerAdapter class."""
 
@@ -191,7 +190,6 @@ class TestBrokerAdapter:
 
             assert account == expected_account
             mock_get.assert_called_once()
-
 
 class TestBrokerManager:
     """Test suite for BrokerManager class."""

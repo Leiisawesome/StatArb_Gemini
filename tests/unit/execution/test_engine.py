@@ -35,7 +35,6 @@ from core_engine.type_definitions.orders import (
     Order, OrderType, OrderSide
 )
 
-
 class TestEnums:
     """Test enum definitions"""
 
@@ -63,7 +62,6 @@ class TestEnums:
         # Verify all priorities are unique
         priorities = [p.value for p in ExecutionPriority]
         assert len(priorities) == len(set(priorities))
-
 
 class TestDataClasses:
     """Test dataclass definitions"""
@@ -174,7 +172,6 @@ class TestDataClasses:
         assert config.enable_smart_routing is False
         assert config.commission_rate == 0.002
 
-
 class TestExecutionEngineLifecycle:
     """Test execution engine lifecycle methods"""
 
@@ -248,7 +245,6 @@ class TestExecutionEngineLifecycle:
             assert result is True
             assert engine.is_running is False
 
-
 class TestComponentIntegration:
     """Test component integration methods"""
 
@@ -295,7 +291,6 @@ class TestComponentIntegration:
         engine.subscribe(subscriber2)
 
         assert len(engine.subscribers) == 2
-
 
 class TestOrderExecution:
     """Test order execution methods"""
@@ -435,7 +430,6 @@ class TestOrderExecution:
         assert request1 in result
         assert request2 in result
 
-
 class TestAuthorizationAndRouting:
     """Test authorization validation and broker routing"""
 
@@ -519,7 +513,6 @@ class TestAuthorizationAndRouting:
 
         assert broker == engine.config.default_broker
 
-
 class TestExecutionMethods:
     """Test execution implementation methods"""
 
@@ -592,7 +585,6 @@ class TestExecutionMethods:
         assert report.executed_quantity == 0
         assert report.error_message == "Test error"
         assert report.symbol == "AAPL"
-
 
 class TestStatusAndMonitoring:
     """Test status and monitoring methods"""
@@ -679,7 +671,6 @@ class TestStatusAndMonitoring:
         assert summary['components_linked']['trading_engine'] is True
         assert summary['components_linked']['broker_manager'] is False
 
-
 class TestErrorHandling:
     """Test error handling scenarios"""
 
@@ -716,7 +707,6 @@ class TestErrorHandling:
 
             # Should handle gracefully
             assert result is False
-
 
 class TestIntegration:
     """Test integration scenarios"""
@@ -808,7 +798,6 @@ class TestIntegration:
 
             # Verify subscriber was notified
             mock_subscriber.on_execution_update.assert_called_once()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

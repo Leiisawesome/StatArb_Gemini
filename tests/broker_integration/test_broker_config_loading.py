@@ -16,7 +16,6 @@ sys.path.insert(0, str(project_root))
 
 from core_engine.config.broker_config import load_broker_config
 
-
 def test_config_loading():
     """Test configuration loads correctly from .env file"""
     print("=" * 60)
@@ -110,7 +109,6 @@ def test_config_loading():
         print(f"\n❌ ERROR: {type(e).__name__}")
         print(f"   {str(e)}")
         assert False, f"Configuration loading failed: {str(e)}"
-
 
 if __name__ == "__main__":
     test_config_loading()

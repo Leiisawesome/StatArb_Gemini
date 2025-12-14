@@ -37,7 +37,6 @@ from core_engine.trading.strategies.manager import (
 
 from core_engine.type_definitions.strategy import StrategyType
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
@@ -58,7 +57,6 @@ def basic_config():
         'enable_multi_strategy_coordination': True
     }
 
-
 @pytest.fixture
 def advanced_config(basic_config):
     """Advanced configuration with all features enabled"""
@@ -71,7 +69,6 @@ def advanced_config(basic_config):
         'enable_strategy_attribution': True
     })
     return config
-
 
 @pytest.fixture
 async def strategy_manager(basic_config):
@@ -125,7 +122,6 @@ async def strategy_manager(basic_config):
 
     return manager
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Mock risk manager"""
@@ -133,7 +129,6 @@ def mock_risk_manager():
     mock.authorize_trade = AsyncMock(return_value=True)
     mock.check_risk_limits = AsyncMock(return_value={'approved': True})
     return mock
-
 
 @pytest.fixture
 def mock_data_manager():
@@ -146,7 +141,6 @@ def mock_data_manager():
     mock.get_symbols = AsyncMock(return_value=['AAPL', 'MSFT', 'GOOGL'])
     return mock
 
-
 @pytest.fixture
 def mock_regime_engine():
     """Mock regime engine"""
@@ -157,7 +151,6 @@ def mock_regime_engine():
         'recommended_strategies': ['momentum', 'trend_following']
     })
     return mock
-
 
 @pytest.fixture
 def sample_trading_signal():
@@ -181,7 +174,6 @@ def sample_trading_signal():
         created_at=datetime.now()
     )
 
-
 @pytest.fixture
 def sample_strategy_config():
     """Sample strategy configuration"""
@@ -194,7 +186,6 @@ def sample_strategy_config():
         'lookback_period': 20,
         'threshold': 0.02
     }
-
 
 # =============================================================================
 # TEST CATEGORY 1: INITIALIZATION AND CONFIGURATION
@@ -209,7 +200,6 @@ async def test_basic_initialization(strategy_manager, basic_config):
     assert strategy_manager.is_initialized == False
     assert len(strategy_manager.active_strategies) == 0
     assert len(strategy_manager.subscribers) == 0
-
 
 @pytest.mark.asyncio
 async def test_config_object_creation():
@@ -226,7 +216,6 @@ async def test_config_object_creation():
     assert config.enable_enhanced_strategies == True  # Default
     assert config.enable_multi_strategy_coordination == True  # Default
 
-
 @pytest.mark.asyncio
 async def test_initialization_with_components(strategy_manager, mock_risk_manager,
                                                mock_data_manager, mock_regime_engine):
@@ -238,7 +227,6 @@ async def test_initialization_with_components(strategy_manager, mock_risk_manage
     assert strategy_manager.risk_manager is not None
     assert strategy_manager.data_manager is not None
     assert strategy_manager.regime_engine is not None
-
 
 @pytest.mark.asyncio
 async def test_enhanced_strategy_factory_initialization(strategy_manager):
@@ -252,7 +240,6 @@ async def test_enhanced_strategy_factory_initialization(strategy_manager):
     assert StrategyType.MOMENTUM in available
     assert StrategyType.MEAN_REVERSION in available
 
-
 @pytest.mark.asyncio
 async def test_signal_management_initialization(strategy_manager):
     """Test signal management structures are initialized"""
@@ -260,7 +247,6 @@ async def test_signal_management_initialization(strategy_manager):
     assert isinstance(strategy_manager.signal_history, list)
     assert isinstance(strategy_manager.aggregated_signals, dict)
     assert len(strategy_manager.signal_history) == 0
-
 
 # =============================================================================
 # TEST CATEGORY 2: STRATEGY REGISTRATION AND MANAGEMENT
@@ -282,7 +268,6 @@ async def test_strategy_allocation_creation():
     assert allocation.strategy_type == StrategyType.MOMENTUM
     assert allocation.allocation_pct == 0.25
     assert allocation.active == True
-
 
 @pytest.mark.asyncio
 async def test_add_strategy_to_manager(strategy_manager):
@@ -307,7 +292,6 @@ async def test_add_strategy_to_manager(strategy_manager):
     assert strategy_name in strategy_manager.strategy_allocations
     assert strategy_name in strategy_manager.strategy_performance
 
-
 @pytest.mark.asyncio
 async def test_multiple_strategy_registration(strategy_manager):
     """Test registering multiple strategies"""
@@ -331,7 +315,6 @@ async def test_multiple_strategy_registration(strategy_manager):
     assert "momentum_1" in strategy_manager.strategy_allocations
     assert "mean_rev_1" in strategy_manager.strategy_allocations
 
-
 @pytest.mark.asyncio
 async def test_strategy_factory_availability(strategy_manager):
     """Test strategy factory can check strategy availability"""
@@ -343,7 +326,6 @@ async def test_strategy_factory_availability(strategy_manager):
     # Get all available
     available = strategy_manager.strategy_factory.get_available_strategies()
     assert len(available) >= 5  # Should have multiple strategies
-
 
 # =============================================================================
 # TEST CATEGORY 3: SIGNAL GENERATION AND PROCESSING
@@ -362,7 +344,6 @@ async def test_trading_signal_creation(sample_trading_signal):
     assert signal.confidence == 0.85
     assert signal.quantity == 100
 
-
 @pytest.mark.asyncio
 async def test_signal_storage_in_manager(strategy_manager, sample_trading_signal):
     """Test storing signals in manager"""
@@ -377,7 +358,6 @@ async def test_signal_storage_in_manager(strategy_manager, sample_trading_signal
     # Move to history
     strategy_manager.signal_history.append(signal)
     assert len(strategy_manager.signal_history) == 1
-
 
 @pytest.mark.asyncio
 async def test_multiple_signal_processing(strategy_manager):
@@ -405,7 +385,6 @@ async def test_multiple_signal_processing(strategy_manager):
 
     assert len(strategy_manager.pending_signals) == 5
 
-
 @pytest.mark.asyncio
 async def test_signal_strength_enum():
     """Test SignalStrength enum values"""
@@ -414,7 +393,6 @@ async def test_signal_strength_enum():
     assert SignalStrength.STRONG.value == "strong"
     assert SignalStrength.VERY_STRONG.value == "very_strong"
 
-
 @pytest.mark.asyncio
 async def test_signal_type_enum():
     """Test SignalType enum values"""
@@ -422,7 +400,6 @@ async def test_signal_type_enum():
     assert SignalType.SELL.value == "sell"
     assert SignalType.HOLD.value == "hold"
     assert SignalType.CLOSE.value == "close"
-
 
 # =============================================================================
 # TEST CATEGORY 4: COMPONENT INTEGRATION
@@ -436,7 +413,6 @@ async def test_set_risk_manager(strategy_manager, mock_risk_manager):
     assert strategy_manager.risk_manager is not None
     assert strategy_manager.risk_manager == mock_risk_manager
 
-
 @pytest.mark.asyncio
 async def test_set_data_manager(strategy_manager, mock_data_manager):
     """Test setting data manager component"""
@@ -445,7 +421,6 @@ async def test_set_data_manager(strategy_manager, mock_data_manager):
     assert strategy_manager.data_manager is not None
     assert strategy_manager.data_manager == mock_data_manager
 
-
 @pytest.mark.asyncio
 async def test_set_regime_engine(strategy_manager, mock_regime_engine):
     """Test setting regime engine component"""
@@ -453,7 +428,6 @@ async def test_set_regime_engine(strategy_manager, mock_regime_engine):
 
     assert strategy_manager.regime_engine is not None
     assert strategy_manager.regime_engine == mock_regime_engine
-
 
 @pytest.mark.asyncio
 async def test_all_components_integration(strategy_manager, mock_risk_manager,
@@ -467,7 +441,6 @@ async def test_all_components_integration(strategy_manager, mock_risk_manager,
     assert strategy_manager.risk_manager is not None
     assert strategy_manager.data_manager is not None
     assert strategy_manager.regime_engine is not None
-
 
 # =============================================================================
 # TEST CATEGORY 5: LIFECYCLE MANAGEMENT
@@ -484,14 +457,12 @@ async def test_get_status_before_initialization(strategy_manager):
     assert status['initialized'] == False
     assert status['operational'] == False
 
-
 @pytest.mark.asyncio
 async def test_component_id_assignment(strategy_manager):
     """Test component ID is properly assigned"""
     assert strategy_manager.component_id is not None
     assert isinstance(strategy_manager.component_id, str)
     assert len(strategy_manager.component_id) > 0
-
 
 @pytest.mark.asyncio
 async def test_orchestrator_registration_structure(strategy_manager):
@@ -505,7 +476,6 @@ async def test_orchestrator_registration_structure(strategy_manager):
 
     strategy_manager.orchestrator = mock_orchestrator
     assert strategy_manager.orchestrator is not None
-
 
 # =============================================================================
 # TEST CATEGORY 6: PERFORMANCE TRACKING AND ANALYTICS
@@ -530,7 +500,6 @@ async def test_strategy_performance_initialization(strategy_manager):
     assert perf['total_signals'] == 0
     assert perf['total_return'] == 0.0
 
-
 @pytest.mark.asyncio
 async def test_performance_metric_updates(strategy_manager):
     """Test updating performance metrics"""
@@ -550,7 +519,6 @@ async def test_performance_metric_updates(strategy_manager):
     assert perf['total_signals'] == 1
     assert perf['successful_signals'] == 1
     assert perf['total_return'] == 0.05
-
 
 @pytest.mark.asyncio
 async def test_multiple_strategy_performance_tracking(strategy_manager):
@@ -572,7 +540,6 @@ async def test_multiple_strategy_performance_tracking(strategy_manager):
     assert strategy_manager.strategy_performance['strat2']['total_return'] == 0.04
     assert strategy_manager.strategy_performance['strat3']['total_signals'] == 3
 
-
 @pytest.mark.asyncio
 async def test_get_status_includes_performance_data(strategy_manager):
     """Test get_status includes performance information"""
@@ -587,7 +554,6 @@ async def test_get_status_includes_performance_data(strategy_manager):
     assert status is not None
     # Status should be retrievable even with performance data
 
-
 # =============================================================================
 # TEST CATEGORY 7: MULTI-STRATEGY COORDINATION
 # =============================================================================
@@ -598,13 +564,11 @@ async def test_multi_strategy_coordination_enabled(strategy_manager):
     assert strategy_manager.enable_multi_strategy == True
     assert strategy_manager.config.enable_multi_strategy_coordination == True
 
-
 @pytest.mark.asyncio
 async def test_strategy_registrations_structure(strategy_manager):
     """Test strategy registrations dictionary structure"""
     assert isinstance(strategy_manager.strategy_registrations, dict)
     assert len(strategy_manager.strategy_registrations) == 0
-
 
 @pytest.mark.asyncio
 async def test_signal_aggregator_initialization(strategy_manager):
@@ -619,7 +583,6 @@ async def test_signal_aggregator_initialization(strategy_manager):
 
     assert strategy_manager.signal_aggregator is not None
 
-
 # =============================================================================
 # TEST CATEGORY 8: ERROR HANDLING AND EDGE CASES
 # =============================================================================
@@ -633,7 +596,6 @@ async def test_last_error_tracking(strategy_manager):
     strategy_manager.last_error = "Test error occurred"
     assert strategy_manager.last_error == "Test error occurred"
 
-
 @pytest.mark.asyncio
 async def test_empty_strategy_operations(strategy_manager):
     """Test operations with no strategies registered"""
@@ -643,7 +605,6 @@ async def test_empty_strategy_operations(strategy_manager):
 
     status = strategy_manager.get_status()
     assert status is not None
-
 
 # =============================================================================
 # TEST EXECUTION SUMMARY
@@ -665,7 +626,6 @@ def test_suite_metadata():
     assert metadata['total_tests'] == 30
     assert metadata['test_categories'] == 8
 
-
 # =============================================================================
 # ADDITIONAL TESTS - TARGETING UNCOVERED LINES
 # =============================================================================
@@ -685,7 +645,6 @@ async def test_strategy_factory_create_strategy_success():
     # This tests the factory logic
     assert strategy is not None or strategy is None  # Either outcome is valid
 
-
 @pytest.mark.asyncio
 async def test_strategy_factory_unavailable_strategy():
     """Test factory handles unavailable strategy types"""
@@ -695,7 +654,6 @@ async def test_strategy_factory_unavailable_strategy():
     # Test is_strategy_available
     is_available = EnhancedStrategyFactory.is_strategy_available(StrategyType.MOMENTUM)
     assert isinstance(is_available, bool)
-
 
 @pytest.mark.asyncio
 async def test_subscriber_interface():
@@ -713,7 +671,6 @@ async def test_subscriber_interface():
     subscriber = TestSubscriber()
     assert subscriber is not None
 
-
 @pytest.mark.asyncio
 async def test_subscribe_to_manager(strategy_manager):
     """Test subscribing to strategy manager events"""
@@ -730,7 +687,6 @@ async def test_subscribe_to_manager(strategy_manager):
     assert len(strategy_manager.subscribers) == 1
     assert strategy_manager.subscribers[0] == subscriber
 
-
 @pytest.mark.asyncio
 async def test_market_context_tracking(strategy_manager):
     """Test market context tracking"""
@@ -746,7 +702,6 @@ async def test_market_context_tracking(strategy_manager):
     assert strategy_manager.market_conditions['volatility'] == 'low'
     assert len(strategy_manager.market_conditions) == 3
 
-
 @pytest.mark.asyncio
 async def test_signal_with_metadata(sample_trading_signal):
     """Test signal metadata handling"""
@@ -756,7 +711,6 @@ async def test_signal_with_metadata(sample_trading_signal):
     assert 'additional_data' in signal.metadata
     assert signal.metadata['additional_data']['indicator'] == 'RSI'
 
-
 @pytest.mark.asyncio
 async def test_signal_time_horizon(sample_trading_signal):
     """Test signal time horizon configuration"""
@@ -765,7 +719,6 @@ async def test_signal_time_horizon(sample_trading_signal):
     assert signal.time_horizon is not None
     assert isinstance(signal.time_horizon, timedelta)
     assert signal.time_horizon.days == 5
-
 
 @pytest.mark.asyncio
 async def test_aggregated_signals_dictionary(strategy_manager):
@@ -793,7 +746,6 @@ async def test_aggregated_signals_dictionary(strategy_manager):
     assert "AAPL" in strategy_manager.aggregated_signals
     assert strategy_manager.aggregated_signals["AAPL"].signal_id == "agg_001"
 
-
 @pytest.mark.asyncio
 async def test_strategy_allocation_active_flag():
     """Test strategy allocation active/inactive state"""
@@ -812,7 +764,6 @@ async def test_strategy_allocation_active_flag():
     allocation.active = True
     assert allocation.active == True
 
-
 @pytest.mark.asyncio
 async def test_config_signal_aggregation_method():
     """Test different signal aggregation methods"""
@@ -821,7 +772,6 @@ async def test_config_signal_aggregation_method():
 
     config2 = StrategyManagerConfig(signal_aggregation_method='majority_vote')
     assert config2.signal_aggregation_method == 'majority_vote'
-
 
 @pytest.mark.asyncio
 async def test_config_regime_awareness_toggle():
@@ -832,13 +782,11 @@ async def test_config_regime_awareness_toggle():
     config_disabled = StrategyManagerConfig(enable_regime_awareness=False)
     assert config_disabled.enable_regime_awareness == False
 
-
 @pytest.mark.asyncio
 async def test_config_correlation_filtering():
     """Test correlation filtering configuration"""
     config = StrategyManagerConfig(enable_correlation_filtering=True)
     assert config.enable_correlation_filtering == True
-
 
 @pytest.mark.asyncio
 async def test_strategy_performance_sharpe_ratio():
@@ -857,7 +805,6 @@ async def test_strategy_performance_sharpe_ratio():
 
     assert manager.strategy_performance[strategy_name]['sharpe_ratio'] == 1.5
 
-
 @pytest.mark.asyncio
 async def test_strategy_performance_max_drawdown():
     """Test max drawdown tracking"""
@@ -873,7 +820,6 @@ async def test_strategy_performance_max_drawdown():
 
     assert manager.strategy_performance[strategy_name]['max_drawdown'] == -0.15
 
-
 @pytest.mark.asyncio
 async def test_strategy_performance_last_signal_time():
     """Test last signal time tracking"""
@@ -888,7 +834,6 @@ async def test_strategy_performance_last_signal_time():
     }
 
     assert manager.strategy_performance[strategy_name]['last_signal_time'] == now
-
 
 @pytest.mark.asyncio
 async def test_signal_history_append(strategy_manager):
@@ -918,7 +863,6 @@ async def test_signal_history_append(strategy_manager):
     assert strategy_manager.signal_history[0].signal_id == "hist_0"
     assert strategy_manager.signal_history[2].signal_id == "hist_2"
 
-
 @pytest.mark.asyncio
 async def test_config_max_strategy_allocation_limit():
     """Test max strategy allocation percentage"""
@@ -929,7 +873,6 @@ async def test_config_max_strategy_allocation_limit():
     config2 = StrategyManagerConfig(max_strategy_allocation=0.40)
     assert config2.max_strategy_allocation == 0.40
 
-
 @pytest.mark.asyncio
 async def test_signal_generation_task_attribute(strategy_manager):
     """Test signal generation task tracking"""
@@ -939,7 +882,6 @@ async def test_signal_generation_task_attribute(strategy_manager):
     mock_task = Mock()
     strategy_manager.signal_generation_task = mock_task
     assert strategy_manager.signal_generation_task is not None
-
 
 @pytest.mark.asyncio
 async def test_component_state_management(strategy_manager):

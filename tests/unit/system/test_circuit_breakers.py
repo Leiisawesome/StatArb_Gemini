@@ -19,7 +19,6 @@ from core_engine.system.circuit_breakers import (
     CircuitBreakerType
 )
 
-
 class TestTradingCircuitBreakers:
     """Test suite for TradingCircuitBreakers"""
 
@@ -295,7 +294,6 @@ class TestTradingCircuitBreakers:
         assert len(circuit_breakers.breaker_history) > initial_history_count
         assert circuit_breakers.halts_triggered > 0
 
-
 # Integration Test
 class TestCircuitBreakerIntegration:
     """Integration tests for circuit breakers"""
@@ -393,7 +391,6 @@ class TestCircuitBreakerIntegration:
         # Should halt on FIRST breaker (order rate)
         assert status.can_trade is False
         assert CircuitBreakerType.ORDER_RATE_LIMIT in status.triggered_breakers
-
 
 if __name__ == '__main__':
     # Run tests

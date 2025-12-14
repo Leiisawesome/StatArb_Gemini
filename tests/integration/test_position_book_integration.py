@@ -17,7 +17,6 @@ from core_engine.trading.position_book import (
     PositionBook, Fill
 )
 
-
 class TestPositionBookCRMIntegration:
     """Test integration between PositionBook and CentralRiskManager"""
 
@@ -177,7 +176,6 @@ class TestPositionBookCRMIntegration:
         assert result['new_position'] == 100.0
         assert crm.current_positions.get('AAPL') == 100.0
 
-
 class TestPositionBookAsSSoT:
     """Test that PositionBook is the Single Source of Truth"""
 
@@ -227,7 +225,6 @@ class TestPositionBookAsSSoT:
 
         # Realized P&L from this trade
         assert update.realized_pnl == Decimal('750')  # (115-100) * 50
-
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

@@ -20,7 +20,6 @@ from core_engine.utils.logging import (
     setup_logger
 )
 
-
 class TestLogging:
     """Test logging utilities"""
 
@@ -230,5 +229,4 @@ class TestLogging:
         logger = setup_logger("test", "INFO")
         assert isinstance(logger, logging.Logger)
         assert logger.name == "core_engine.test"
-
 

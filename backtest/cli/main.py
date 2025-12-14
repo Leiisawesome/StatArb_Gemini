@@ -31,7 +31,6 @@ from core_engine.config import BacktestConfig, BacktestMode  # CENTRALIZED CONFI
 from backtest.cli.interactive import InteractiveBacktestCLI
 from backtest.cli.config_builder import ConfigurationBuilder
 
-
 class BacktestCLI:
     """
     Professional command-line interface for institutional backtesting
@@ -515,7 +514,6 @@ Examples:
             print(f"     Max Drawdown: {summary.get('max_drawdown_pct', 0):.2f}%")
             print(f"     Win Rate: {summary.get('win_rate', 0):.2f}%")
 
-
 def main():
     """Main entry point"""
 
@@ -525,7 +523,6 @@ def main():
     # Run async
     exit_code = asyncio.run(cli.run(args))
     sys.exit(exit_code)
-
 
 if __name__ == '__main__':
     main()

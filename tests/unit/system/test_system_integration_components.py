@@ -30,7 +30,6 @@ from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
 from core_engine.processing.signals.generator import EnhancedSignalGenerator
 
-
 class TestSystemIntegrationManagerBasics:
     """Test suite for System Integration Manager basic functionality"""
 
@@ -122,7 +121,6 @@ class TestSystemIntegrationManagerBasics:
         assert 'component_status' in status
         assert 'health_metrics' in status
 
-
 class TestConfigurationTemplates:
     """Test suite for configuration templates"""
 
@@ -155,7 +153,6 @@ class TestConfigurationTemplates:
         assert config.enable_health_monitoring is True
         assert config.health_check_interval == 30
         assert config.performance_report_interval == 300
-
 
 class TestComponentCompatibility:
     """Test suite for component compatibility validation"""
@@ -266,7 +263,6 @@ class TestComponentCompatibility:
                 has_all_methods = all(hasattr(component_class, method) for method in required_methods)
                 assert has_all_methods, f"{component_class.__name__} does not implement required interface methods"
 
-
 class TestSystemPhases:
     """Test suite for system phases and lifecycle"""
 
@@ -324,7 +320,6 @@ class TestSystemPhases:
             assert isinstance(phase.value, str)
             assert len(phase.value) > 0
 
-
 class TestSystemMetrics:
     """Test suite for system metrics and monitoring"""
 
@@ -381,7 +376,6 @@ class TestSystemMetrics:
         }
         health_score = manager._calculate_system_health_score(component_health)
         assert health_score == 1.0
-
 
 class TestEndToEndIntegration:
     """Test suite for end-to-end system integration"""
@@ -453,7 +447,6 @@ class TestEndToEndIntegration:
         assert 'healthy' in health
 
         await manager.stop()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

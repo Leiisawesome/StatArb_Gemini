@@ -25,7 +25,6 @@ import asyncio
 
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
-
 class TestSystemUnderLoad:
     """Integration tests for system under load"""
 

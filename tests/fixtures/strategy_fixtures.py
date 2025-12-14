@@ -22,7 +22,6 @@ from core_engine.trading.strategies.enhanced_pairs_trading import EnhancedPairsT
 from core_engine.trading.strategies.enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
 from core_engine.trading.strategies.enhanced_trend_following import EnhancedTrendFollowingStrategy
 
-
 @pytest.fixture
 def sample_market_data():
     """
@@ -52,7 +51,6 @@ def sample_market_data():
 
     return data
 
-
 @pytest.fixture
 def pairs_trading_strategy():
     """Create a configured EnhancedPairsTradingStrategy instance."""
@@ -69,7 +67,6 @@ def pairs_trading_strategy():
     strategy = EnhancedPairsTradingStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def momentum_strategy():
     """Create a configured EnhancedMomentumStrategy instance."""
@@ -85,7 +82,6 @@ def momentum_strategy():
     strategy = EnhancedMomentumStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def mean_reversion_strategy():
     """Create a configured EnhancedMeanReversionStrategy instance."""
@@ -99,7 +95,6 @@ def mean_reversion_strategy():
 
     strategy = EnhancedMeanReversionStrategy(config)
     return strategy
-
 
 @pytest.fixture
 def trend_following_strategy():
@@ -116,7 +111,6 @@ def trend_following_strategy():
     strategy = EnhancedTrendFollowingStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def breakout_strategy():
     """Create a configured EnhancedBreakoutStrategy instance."""
@@ -131,7 +125,6 @@ def breakout_strategy():
     strategy = EnhancedBreakoutStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def factor_strategy():
     """Create a configured EnhancedFactorStrategy instance."""
@@ -144,7 +137,6 @@ def factor_strategy():
 
     strategy = EnhancedFactorStrategy(config)
     return strategy
-
 
 @pytest.fixture
 def multi_asset_strategy():
@@ -159,7 +151,6 @@ def multi_asset_strategy():
     strategy = EnhancedMultiAssetStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def arbitrage_strategy():
     """Create a configured EnhancedArbitrageStrategy instance."""
@@ -172,7 +163,6 @@ def arbitrage_strategy():
 
     strategy = EnhancedArbitrageStrategy(config)
     return strategy
-
 
 @pytest.fixture
 def statistical_arbitrage_strategy():
@@ -188,7 +178,6 @@ def statistical_arbitrage_strategy():
     strategy = EnhancedStatisticalArbitrageStrategy(config)
     return strategy
 
-
 @pytest.fixture
 def mock_risk_manager():
     """Create a mock risk manager for strategy testing."""
@@ -198,7 +187,6 @@ def mock_risk_manager():
     mock_rm.calculate_position_size = Mock(return_value=0.02)
     mock_rm.get_portfolio_risk = Mock(return_value={'var': 0.02, 'sharpe': 1.5})
     return mock_rm
-
 
 @pytest.fixture
 def mock_execution_engine():
@@ -213,7 +201,6 @@ def mock_execution_engine():
     mock_engine.cancel_order = AsyncMock(return_value=True)
     mock_engine.get_order_status = AsyncMock(return_value='filled')
     return mock_engine
-
 
 @pytest.fixture
 def mock_data_manager():
@@ -236,7 +223,6 @@ def mock_data_manager():
 
     return mock_dm
 
-
 @pytest.fixture
 def strategy_test_config():
     """
@@ -254,7 +240,6 @@ def strategy_test_config():
         'rebalance_frequency': 'daily',
         'enable_risk_management': True,
     }
-
 
 @pytest.fixture
 def multi_asset_market_data():
@@ -277,7 +262,6 @@ def multi_asset_market_data():
         })
 
     return data
-
 
 @pytest.fixture
 def correlated_pair_data():

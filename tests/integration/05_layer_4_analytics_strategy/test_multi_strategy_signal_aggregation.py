@@ -25,7 +25,6 @@ from datetime import datetime
 
 from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
 
-
 class TestMultiStrategySignalAggregation:
     """Integration tests for multi-strategy signal aggregation"""
 

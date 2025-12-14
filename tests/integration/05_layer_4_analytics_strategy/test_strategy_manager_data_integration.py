@@ -20,8 +20,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestStrategyManagerDataIntegration:
     """Integration tests for strategy manager-data integration"""
 

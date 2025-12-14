@@ -10,7 +10,6 @@ from core_engine.utils.dependency_injection import (
     get_container, register_component, resolve_component, reset_container
 )
 
-
 class TestDependencyInjection:
     """Test dependency injection utilities"""
 

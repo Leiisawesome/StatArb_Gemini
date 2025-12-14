@@ -16,7 +16,6 @@ sys.path.insert(0, str(project_root))
 from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
 from core_engine.config.broker_config import load_broker_config
 
-
 def test_ibkr_connection():
     """Test connection to IBKR paper trading account"""
     print("=" * 60)
@@ -120,7 +119,6 @@ def test_ibkr_connection():
     print("   1. Run error handling test: python tests/broker_integration/test_connection_error_handling.py")
     print("   2. Proceed to Day 3: Order submission")
     print("   3. Review account on IBKR Trader Workstation")
-
 
 if __name__ == "__main__":
     success = test_ibkr_connection()

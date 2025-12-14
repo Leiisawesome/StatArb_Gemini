@@ -18,7 +18,6 @@ from tests.unit.strategies.test_regime_aware_helpers import (
     get_regime_config
 )
 
-
 class TestStatisticalArbitrageRegimeAwareness:
     """Test statistical arbitrage strategy regime awareness"""
 
@@ -63,7 +62,6 @@ class TestStatisticalArbitrageRegimeAwareness:
 
         assert adaptation_result['adapted'] is True
         assert adaptation_result['regime'] == 'high_volatility'
-
 
 class TestStatisticalArbitrageHighVolatilityRegime:
     """Test statistical arbitrage in high volatility regime"""

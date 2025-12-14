@@ -17,8 +17,6 @@ Date: November 4, 2025
 
 import pytest
 
-
-
 class TestRegimeStrategyIntegration:
     """Integration tests for regime-strategy cross-layer integration"""
 
@@ -35,7 +33,7 @@ class TestRegimeStrategyIntegration:
         regime_engine = system['regime_engine']
 
         # Get regime context (not async, so no await needed)
-        regime_context = regime_engine.get_current_regime_context() if regime_engine else None
+        regime_engine.get_current_regime_context() if regime_engine else None
 
         # Strategy manager would use regime for selection
         # Verify both components exist
@@ -51,7 +49,7 @@ class TestRegimeStrategyIntegration:
         Expected: Regime context received
         """
         system = strategy_manager_with_regime
-        strategy_manager = system['strategy_manager']
+        system['strategy_manager']
         regime_engine = system['regime_engine']
 
         # Get regime context (not async, so no await needed)

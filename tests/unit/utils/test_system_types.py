@@ -20,7 +20,6 @@ from core_engine.type_definitions.broker import (
     BrokerType, BrokerConfig, PaperBroker
 )
 
-
 class TestRegime:
     """Test regime-related types"""
 
@@ -74,7 +73,6 @@ class TestRegime:
         assert signal.confidence == 0.85
         assert signal.indicators["rsi"] == 65
         assert signal.indicators["trend"] == 0.03
-
 
 class TestData:
     """Test data-related types"""
@@ -151,7 +149,6 @@ class TestData:
         assert data_dict["close"] == 152.0
         assert data_dict["volume"] == 2000000
 
-
 class TestAnalytics:
     """Test analytics-related types"""
 
@@ -205,7 +202,6 @@ class TestAnalytics:
         assert hasattr(metrics, 'volatility')
         assert hasattr(metrics, 'sharpe_ratio')
         assert hasattr(metrics, 'max_drawdown')
-
 
 class TestBroker:
     """Test broker-related types"""

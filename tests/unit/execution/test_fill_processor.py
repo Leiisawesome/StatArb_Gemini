@@ -24,7 +24,6 @@ from core_engine.trading.execution.fill_processor import (
     FillProcessor,
 )
 
-
 # ==================== Fixtures ====================
 
 @pytest.fixture
@@ -43,7 +42,6 @@ def sample_trade_execution():
         fees=2.50,
     )
 
-
 @pytest.fixture
 def sample_position_update():
     """Sample position update"""
@@ -59,36 +57,30 @@ def sample_position_update():
         source_execution_id="EXEC001",
     )
 
-
 @pytest.fixture
 def fill_validator():
     """Fill validator instance"""
     return FillValidator()
-
 
 @pytest.fixture
 def trade_reconciler():
     """Trade reconciler instance"""
     return TradeReconciler()
 
-
 @pytest.fixture
 def position_manager():
     """Position manager instance"""
     return PositionManager()
-
 
 @pytest.fixture
 def trade_reporter():
     """Trade reporter instance"""
     return TradeReporter()
 
-
 @pytest.fixture
 def fill_processor():
     """Fill processor instance"""
     return FillProcessor()
-
 
 # ==================== Test Enums ====================
 
@@ -113,7 +105,6 @@ class TestEnums:
         """Test ReportingFrequency enum values"""
         assert ReportingFrequency.REAL_TIME.value == "real_time"
         assert ReportingFrequency.DAILY.value == "daily"
-
 
 # ==================== Test Data Classes ====================
 
@@ -158,7 +149,6 @@ class TestTradeExecution:
         assert trade.side == "SELL"
         assert trade.quantity == 100.0
 
-
 class TestPositionUpdate:
     """Test PositionUpdate dataclass"""
 
@@ -177,7 +167,6 @@ class TestPositionUpdate:
         assert sample_position_update.realized_pnl == 0.0
         assert sample_position_update.unrealized_pnl_change == 0.0
 
-
 class TestFillEvent:
     """Test FillEvent dataclass"""
 
@@ -192,7 +181,6 @@ class TestFillEvent:
         )
         assert event.order_id == "ORDER001"
         assert event.quantity == 500.0
-
 
 # ==================== Test FillValidator ====================
 
@@ -254,7 +242,6 @@ class TestFillValidator:
         # May fail quantity check depending on rules
         assert isinstance(is_valid, bool)
 
-
 # ==================== Test TradeReconciler ====================
 
 class TestTradeReconciler:
@@ -306,7 +293,6 @@ class TestTradeReconciler:
         assert isinstance(result, ReconciliationStatus)
         # Should detect mismatch - will be BROKEN or MATCHED depending on tolerance
         assert result in [ReconciliationStatus.BROKEN, ReconciliationStatus.MATCHED]
-
 
 # ==================== Test PositionManager ====================
 
@@ -414,7 +400,6 @@ class TestPositionManager:
         assert isinstance(position_data, dict)
         assert position_data['position'] == 100.0
 
-
 # ==================== Test TradeReporter ====================
 
 class TestTradeReporter:
@@ -490,7 +475,6 @@ class TestTradeReporter:
         if len(report) > 0:
             assert all(report['symbol'] == "AAPL")
 
-
 # ==================== Test FillProcessor ====================
 
 class TestFillProcessor:
@@ -559,7 +543,6 @@ class TestFillProcessor:
         result = await fill_processor.process_fill(trade)
         assert isinstance(result, bool)
 
-
 # ==================== Test Error Handling ====================
 
 class TestErrorHandling:
@@ -606,7 +589,6 @@ class TestErrorHandling:
         except (ValueError, KeyError, AttributeError):
             # Expected to handle empty symbol
             pass
-
 
 # ==================== Test Integration ====================
 
@@ -659,7 +641,6 @@ class TestIntegration:
             position_data = position_manager.get_position("DEFAULT", symbol)
             assert position_data is not None
             assert position_data['position'] > 0
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

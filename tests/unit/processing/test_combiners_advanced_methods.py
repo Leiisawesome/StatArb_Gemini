@@ -22,7 +22,6 @@ from core_engine.processing.signals.combiners import (
     CombinationConfig
 )
 
-
 class TestMachineLearningCombination:
     """Test machine learning ensemble combination"""
 
@@ -150,7 +149,6 @@ class TestMachineLearningCombination:
         assert strength == 0.0
         assert confidence == 0.5
 
-
 class TestEnsembleVotingCombination:
     """Test ensemble voting combination"""
 
@@ -226,7 +224,6 @@ class TestEnsembleVotingCombination:
         if result is not None:
             assert hasattr(result, 'combined_strength')
 
-
 class TestDynamicWeightingCombination:
     """Test dynamic weighting combination"""
 
@@ -296,7 +293,6 @@ class TestDynamicWeightingCombination:
 
         if result is not None:
             assert hasattr(result, 'combined_strength')
-
 
 class TestAdaptiveStrategies:
     """Test adaptive combination strategies"""
@@ -411,13 +407,12 @@ class TestAdaptiveStrategies:
 
     def test_reset_adaptation(self, adaptive_combiner):
         """Test resetting adaptation state"""
-        result = adaptive_combiner.reset_adaptation()
+        adaptive_combiner.reset_adaptation()
 
         # Method doesn't return a value (returns None)
         # Just verify it doesn't raise an exception and state is reset
         assert hasattr(adaptive_combiner, 'strategy_weights')
         assert hasattr(adaptive_combiner, 'performance_history')
-
 
 class TestEnsembleModelTraining:
     """Test ensemble model training scenarios"""
@@ -466,7 +461,6 @@ class TestEnsembleModelTraining:
         except AttributeError:
             # If ensemble_engine doesn't have this method, skip
             pass
-
 
 class TestAdvancedCombinationScenarios:
     """Test advanced combination scenarios"""

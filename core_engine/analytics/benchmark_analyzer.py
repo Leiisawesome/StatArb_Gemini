@@ -25,7 +25,6 @@ from .core_metrics import (
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 class BenchmarkType(Enum):
     """Types of benchmarks"""
     MARKET_INDEX = "market_index"
@@ -35,7 +34,6 @@ class BenchmarkType(Enum):
     COMPOSITE = "composite"
     CUSTOM = "custom"
 
-
 class ComparisonMethod(Enum):
     """Comparison methods"""
     ABSOLUTE = "absolute"
@@ -44,14 +42,12 @@ class ComparisonMethod(Enum):
     DRAWDOWN_ADJUSTED = "drawdown_adjusted"
     FACTOR_ADJUSTED = "factor_adjusted"
 
-
 class AttributionMethod(Enum):
     """Attribution analysis methods"""
     REGRESSION_BASED = "regression_based"
     HOLDINGS_BASED = "holdings_based"
     RETURNS_BASED = "returns_based"
     FACTOR_MODEL = "factor_model"
-
 
 @dataclass
 class BenchmarkConfig:
@@ -101,7 +97,6 @@ class BenchmarkConfig:
     enable_tail_analysis: bool = True
     enable_correlation_analysis: bool = True
 
-
 @dataclass
 class BenchmarkData:
     """Benchmark data container"""
@@ -127,7 +122,6 @@ class BenchmarkData:
     # Data quality
     data_quality_score: float = 0.0
     missing_data_pct: float = 0.0
-
 
 @dataclass
 class ComparisonResult:
@@ -174,7 +168,6 @@ class ComparisonResult:
     analysis_period: Tuple[datetime, datetime] = field(default_factory=lambda: (datetime.now(), datetime.now()))
     data_points: int = 0
 
-
 @dataclass
 class FactorAnalysisResult:
     """Factor analysis result"""
@@ -205,7 +198,6 @@ class FactorAnalysisResult:
     # Factor contribution
     factor_contributions: Dict[str, float] = field(default_factory=dict)
     unexplained_return: float = 0.0
-
 
 class BenchmarkDataManager:
     """Manages benchmark data"""
@@ -358,7 +350,6 @@ class BenchmarkDataManager:
 
         return max(quality_score, 0.0)
 
-
 class PerformanceComparator:
     """Compares portfolio performance against benchmarks"""
 
@@ -481,7 +472,6 @@ class PerformanceComparator:
             down_capture = 0.0
 
         return up_capture, down_capture
-
 
 class FactorAnalyzer:
     """Factor-based performance analysis"""
@@ -609,7 +599,6 @@ class FactorAnalyzer:
         except Exception as e:
             logger.warning(f"Error calculating regression statistics: {e}")
 
-
 class RollingAnalyzer:
     """Rolling benchmark analysis"""
 
@@ -671,7 +660,6 @@ class RollingAnalyzer:
             risk_free_rate=self.config.risk_free_rate,
             periods_per_year=252
         )
-
 
 class BenchmarkAnalyzer:
     """

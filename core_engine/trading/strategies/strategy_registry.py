@@ -55,7 +55,6 @@ except ImportError:
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # DEPLOYMENT AND TEMPLATE DATACLASSES
 # =============================================================================
@@ -68,7 +67,6 @@ class DeploymentMode(Enum):
     BACKTESTING = "backtesting"
     RESEARCH = "research"
 
-
 class ResourceType(Enum):
     """Strategy resource types"""
     CPU = "cpu"
@@ -77,7 +75,6 @@ class ResourceType(Enum):
     STORAGE = "storage"
     DATA_FEEDS = "data_feeds"
     COMPUTE = "compute"
-
 
 @dataclass
 class StrategyDependency:
@@ -89,7 +86,6 @@ class StrategyDependency:
     version: Optional[str] = None
     configuration: Dict[str, Any] = field(default_factory=dict)
 
-
 @dataclass
 class StrategyResource:
     """Strategy resource requirements"""
@@ -99,7 +95,6 @@ class StrategyResource:
     unit: str = ""
     priority: int = 1  # 1=low, 5=high
     shared: bool = True
-
 
 @dataclass
 class StrategyDeployment:
@@ -137,7 +132,6 @@ class StrategyDeployment:
     deployed_by: str = ""
     deployment_version: str = "1.0.0"
 
-
 @dataclass
 class StrategyTemplate:
     """Strategy template for easy strategy creation"""
@@ -166,7 +160,6 @@ class StrategyTemplate:
     version: str = "1.0.0"
     tags: List[str] = field(default_factory=list)
 
-
 # =============================================================================
 # REGISTRY ENUMS AND STATUS
 # =============================================================================
@@ -179,7 +172,6 @@ class RegistryStatus(Enum):
     DEVELOPMENT = "development"
     TESTING = "testing"
     PRODUCTION = "production"
-
 
 class StrategyCategory(Enum):
     """Strategy categories"""
@@ -194,14 +186,12 @@ class StrategyCategory(Enum):
     MULTI_FACTOR = "multi_factor"
     CUSTOM = "custom"
 
-
 class StrategyComplexity(Enum):
     """Strategy complexity levels"""
     SIMPLE = "simple"       # Basic strategies with few parameters
     MODERATE = "moderate"   # Standard strategies with moderate complexity
     COMPLEX = "complex"     # Advanced strategies with many components
     EXPERT = "expert"       # Sophisticated strategies requiring deep knowledge
-
 
 @dataclass
 class StrategyMetadata:
@@ -256,7 +246,6 @@ class StrategyMetadata:
     child_strategies: List[str] = field(default_factory=list)
     related_strategies: List[str] = field(default_factory=list)
 
-
 @dataclass
 class RegistryQuery:
     """Query parameters for strategy search"""
@@ -292,7 +281,6 @@ class RegistryQuery:
     sort_order: str = "desc"        # asc, desc
     limit: Optional[int] = None
 
-
 @dataclass
 class RegistryStats:
     """Registry statistics"""
@@ -325,7 +313,6 @@ class RegistryStats:
     validation_pass_rate: float = 0.0
     outdated_strategies: List[str] = field(default_factory=list)
     orphaned_files: List[str] = field(default_factory=list)
-
 
 class StrategyLoader:
     """Load and instantiate strategies"""
@@ -401,7 +388,6 @@ class StrategyLoader:
         except Exception as e:
             logger.error(f"Error creating strategy instance: {e}")
             return None
-
 
 class StrategyDiscovery:
     """Discover strategies in filesystem"""
@@ -585,7 +571,6 @@ class StrategyDiscovery:
             return StrategyCategory.MACHINE_LEARNING
         else:
             return StrategyCategory.CUSTOM
-
 
 class EnhancedStrategyRegistry(ISystemComponent):
     """
@@ -1846,7 +1831,6 @@ class EnhancedStrategyRegistry(ISystemComponent):
 
         except Exception as e:
             logger.error(f"Metric update failed for {metric_name}: {e}")
-
 
 # Maintain backward compatibility
 StrategyRegistry = EnhancedStrategyRegistry

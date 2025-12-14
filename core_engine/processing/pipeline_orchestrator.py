@@ -40,7 +40,6 @@ from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, Signa
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================================
 # PIPELINE CONSTANTS (P2 Fix: Centralized magic numbers)
 # ============================================================================
@@ -70,9 +69,7 @@ class PipelineConstants:
     # IQR multiplier for outlier detection
     OUTLIER_IQR_MULTIPLIER: float = 3.0
 
-
 PIPELINE_CONSTANTS = PipelineConstants()
-
 
 # ============================================================================
 # ENRICHED DATA CONTAINER
@@ -172,7 +169,6 @@ class EnrichedMarketData:
             'enrichment_valid': self.validate_enrichment(),
             'has_liquidity_context': self.liquidity_context is not None
         }
-
 
 # ============================================================================
 # PROCESSING PIPELINE ORCHESTRATOR
@@ -889,6 +885,16 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         start_processing = datetime.now()
 
         try:
+            # Check cache first - if all symbols are cached, skip data loading
+            all_cached = all(self._cache_get(symbol) is not None for symbol in symbols)
+            if all_cached:
+                logger.debug(f"✅ All {len(symbols)} symbols cached, skipping data loading")
+                for symbol in symbols:
+                    cached_data = self._cache_get(symbol)
+                    if cached_data:
+                        enriched_data[symbol] = cached_data
+                return enriched_data
+
             # PHASE 1: Load raw OHLCV data
             logger.info(f"📊 Phase 1: Loading raw OHLCV for {len(symbols)} symbols")
             phase1_start = datetime.now()
@@ -952,7 +958,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
                     # PHASE 0: Process regime FIRST (store bar-by-bar regime sequence as "beacon light")
                     # Regime acts as metadata reference, not as segment boundaries
-                    dominant_regime_analysis = None
                     regime_sequence = []
 
                     if self.regime_engine:
@@ -1957,7 +1962,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 for stage, times in self.processing_times.items()
             }
         }
-
 
 # ============================================================================
 # EXPORTS

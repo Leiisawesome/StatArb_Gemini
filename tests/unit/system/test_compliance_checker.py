@@ -20,7 +20,6 @@ from core_engine.system.compliance_checker import (
     ComplianceViolationType
 )
 
-
 class TestPreTradeComplianceChecker:
     """Test suite for PreTradeComplianceChecker"""
 
@@ -110,7 +109,7 @@ class TestPreTradeComplianceChecker:
         # Set ownership near threshold
         compliance_checker.current_ownership['SMALL_CAP'] = 0.049  # 4.9%
 
-        # Large buy would push over 5%
+        # Large buy would push over 5% but gets rejected for concentration first
         result = await compliance_checker.check_pre_trade_compliance(
             symbol='SMALL_CAP',
             side='buy',
@@ -118,9 +117,10 @@ class TestPreTradeComplianceChecker:
             price=10.0
         )
 
-        # Note: In real implementation with shares outstanding data,
-        # this would be rejected. For now, test setup works.
-        assert result.approved is True or result.requires_manual_review
+        # Gets rejected due to concentration limit exceeding 20%
+        assert result.approved is False
+        assert result.requires_manual_review is False
+        assert 'concentration' in result.rejection_reason.lower()
 
     @pytest.mark.asyncio
     async def test_pattern_day_trading_rejected(self, compliance_checker):
@@ -292,7 +292,6 @@ class TestPreTradeComplianceChecker:
         # Should handle gracefully
         assert isinstance(result, ComplianceResult)
 
-
 # Integration Test
 class TestComplianceIntegration:
     """Integration tests for compliance checker"""
@@ -361,7 +360,6 @@ class TestComplianceIntegration:
         assert stats['checks_performed'] == 4
         assert stats['trades_approved'] == 2
         assert stats['trades_rejected'] == 2
-
 
 if __name__ == '__main__':
     # Run tests

@@ -13,18 +13,16 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-
 class TradingMode(Enum):
     """Trading mode enumeration"""
     PAPER = "paper"
     LIVE = "live"
     SIMULATION = "simulation"
 
-
 class BrokerType(Enum):
     """Supported broker types"""
     INTERACTIVE_BROKERS = "interactive_brokers"
-
+    ALPACA = "alpaca"
 
 @dataclass
 class RiskLimits:
@@ -63,7 +61,6 @@ class RiskLimits:
 
         return True
 
-
 @dataclass
 class InteractiveBrokersConfig:
     """Interactive Brokers configuration"""
@@ -88,6 +85,26 @@ class InteractiveBrokersConfig:
 
         return True
 
+@dataclass
+class AlpacaConfig:
+    """Alpaca configuration"""
+    api_key: str
+    secret_key: str
+    base_url: str
+    data_feed_url: Optional[str] = None
+    paper_trading: bool = True
+
+    def validate(self) -> bool:
+        """Validate Alpaca configuration"""
+        if not self.api_key or not self.secret_key:
+            logger.error("Alpaca API credentials missing!")
+            return False
+
+        if not self.base_url:
+            logger.error("Alpaca base URL missing!")
+            return False
+
+        return True
 
 @dataclass
 class BrokerConfig:
@@ -97,9 +114,10 @@ class BrokerConfig:
 
     # Broker configurations
     interactive_brokers: Optional[InteractiveBrokersConfig] = None
+    alpaca: Optional[AlpacaConfig] = None
 
     # Active broker
-    active_broker: BrokerType = BrokerType.INTERACTIVE_BROKERS
+    active_broker: BrokerType = BrokerType.ALPACA
 
     # Risk limits
     risk_limits: RiskLimits = field(default_factory=RiskLimits)
@@ -133,10 +151,15 @@ class BrokerConfig:
                 return False
             if not self.interactive_brokers.validate():
                 return False
+        elif self.active_broker == BrokerType.ALPACA:
+            if not self.alpaca:
+                logger.error("Alpaca selected but not configured!")
+                return False
+            if not self.alpaca.validate():
+                return False
 
         logger.info("✅ Broker configuration validated successfully")
         return True
-
 
 class BrokerConfigLoader:
     """Load broker configuration from environment variables"""
@@ -184,15 +207,31 @@ class BrokerConfigLoader:
             )
             logger.info("✅ Interactive Brokers configuration loaded")
 
+        # Load Alpaca configuration
+        alpaca_api_key = os.getenv("ALPACA_PAPER_API_KEY") or os.getenv("ALPACA_API_KEY")
+        alpaca_secret_key = os.getenv("ALPACA_PAPER_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY")
+
+        if alpaca_api_key and alpaca_secret_key:
+            config.alpaca = AlpacaConfig(
+                api_key=alpaca_api_key,
+                secret_key=alpaca_secret_key,
+                base_url=os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
+                data_feed_url=os.getenv("ALPACA_DATA_FEED_URL"),
+                paper_trading=os.getenv("ALPACA_PAPER_TRADING", "true").lower() == "true"
+            )
+            logger.info("✅ Alpaca configuration loaded")
+
         # Load active broker (support both old and new variable names)
         active_broker = (
             os.getenv("BROKER_TYPE") or
             os.getenv("ACTIVE_BROKER") or
             os.getenv("PHASE_9_ACTIVE_BROKER") or
-            "interactive_brokers"
+            "alpaca"
         ).lower()
         if active_broker in ["ib", "interactive_brokers"]:
             config.active_broker = BrokerType.INTERACTIVE_BROKERS
+        elif active_broker in ["alpaca"]:
+            config.active_broker = BrokerType.ALPACA
 
         # Load risk limits (support both old and new variable names)
         config.risk_limits = RiskLimits(
@@ -238,6 +277,13 @@ class BrokerConfigLoader:
 # Trading Mode (paper/live) - KEEP ON PAPER FOR PHASE 9!
 PHASE_9_TRADING_MODE=paper
 
+# Alpaca (Paper Trading)
+ALPACA_PAPER_API_KEY=your_alpaca_paper_api_key_here
+ALPACA_PAPER_SECRET_KEY=your_alpaca_paper_secret_key_here
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+ALPACA_DATA_FEED_URL=https://data.alpaca.markets
+ALPACA_PAPER_TRADING=true
+
 # Interactive Brokers (Paper Trading)
 IB_PAPER_HOST=127.0.0.1
 IB_PAPER_PORT=7497
@@ -245,8 +291,8 @@ IB_PAPER_CLIENT_ID=1
 IB_PAPER_ACCOUNT=DU1234567
 IB_PAPER_TRADING=true
 
-# Active Broker (interactive_brokers)
-PHASE_9_ACTIVE_BROKER=interactive_brokers
+# Active Broker (alpaca)
+PHASE_9_ACTIVE_BROKER=alpaca
 
 # Risk Limits (Conservative for Phase 9)
 PHASE_9_MAX_POSITION_SIZE=100
@@ -279,7 +325,6 @@ PHASE_9_LOG_DIRECTORY=logs/phase9
 
         logger.info(f"✅ Sample .env file created at {path}")
 
-
 # Convenience function for quick loading
 def load_broker_config(env_file: Optional[str] = None) -> BrokerConfig:
     """
@@ -301,12 +346,10 @@ def load_broker_config(env_file: Optional[str] = None) -> BrokerConfig:
 
     return config
 
-
 # Backward compatibility aliases
 Phase9Config = BrokerConfig
 Phase9ConfigLoader = BrokerConfigLoader
 load_phase9_config = load_broker_config
-
 
 if __name__ == "__main__":
     # Test configuration loading

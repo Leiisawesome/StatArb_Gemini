@@ -13,7 +13,6 @@ from datetime import datetime
 from core_engine.type_definitions.portfolio import Position
 from core_engine.type_definitions.orders import OrderType, OrderSide
 
-
 class TestTradingManagerEnhanced:
     """Test suite for TradingManagerEnhanced - 0% coverage module"""
 
@@ -380,7 +379,6 @@ class TestTradingManagerEnhanced:
         assert result['data_persisted'] is True
         assert result['backup_created'] is True
 
-
 class TestTradingManagerEnhancedIntegration:
     """Integration tests for TradingManagerEnhanced"""
 
@@ -403,7 +401,6 @@ class TestTradingManagerEnhancedIntegration:
     def test_risk_management_integration(self):
         """Test risk management integration"""
         # This would test risk management across all operations
-
 
 class TestTradingManagerEnhancedPerformance:
     """Performance tests for TradingManagerEnhanced"""

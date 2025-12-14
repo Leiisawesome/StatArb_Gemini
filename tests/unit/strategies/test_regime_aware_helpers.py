@@ -12,7 +12,6 @@ Priority 2: Regime-Aware Testing
 from unittest.mock import Mock
 from typing import Dict, Any
 
-
 def create_mock_regime_engine(
     primary_regime: str = 'normal_volatility',
     volatility_regime: str = 'normal',
@@ -46,7 +45,6 @@ def create_mock_regime_engine(
 
     return regime_engine
 
-
 def create_regime_context_mock(
     primary_regime: str = 'normal_volatility',
     volatility_regime: str = 'normal',
@@ -72,7 +70,6 @@ def create_regime_context_mock(
     regime_context.confidence = confidence
 
     return regime_context
-
 
 # Standard regime configurations for testing
 REGIME_CONFIGS = {
@@ -119,7 +116,6 @@ REGIME_CONFIGS = {
         'confidence': 0.70
     }
 }
-
 
 def get_regime_config(regime_name: str) -> Dict[str, Any]:
     """
