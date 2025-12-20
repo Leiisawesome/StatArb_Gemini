@@ -33,12 +33,17 @@ class SmokeTest(BasePapertestExperiment):
 
             duration = time.perf_counter() - start
             return PapertestResult(
-                experiment_name="smoke_test",
-                experiment_type="papertest_smoke",
+                # Match backtest smoke_test output layout / naming
+                experiment_name="Smoke_Test",
+                experiment_type="smoke_test",
                 run_timestamp=run_ts,
                 duration_seconds=duration,
                 engine_stats=result.engine_stats,
                 replay_stats=result.replay_stats,
+                execution_stats={
+                    "execution_history": result.execution_history,
+                    "account_info": result.account_info,
+                },
                 custom_metrics={"bridge_stats": result.bridge_stats},
                 success=True,
             )
@@ -46,12 +51,16 @@ class SmokeTest(BasePapertestExperiment):
         except Exception as e:
             duration = time.perf_counter() - start
             return PapertestResult(
-                experiment_name="smoke_test",
-                experiment_type="papertest_smoke",
+                experiment_name="Smoke_Test",
+                experiment_type="smoke_test",
                 run_timestamp=run_ts,
                 duration_seconds=duration,
                 success=False,
                 error_message=str(e),
             )
+
+    def print_summary(self, result: PapertestResult) -> None:
+        # Render the same console layout as backtest smoke_test
+        return super().print_summary_backtest_style(result)
 
 

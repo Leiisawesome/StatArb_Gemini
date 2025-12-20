@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 import time as _time
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from pathlib import Path
+import json
 
 from core_engine.data.replay.engine import ReplayStatus
 
@@ -28,6 +30,8 @@ class PapertestRunResult:
     engine_stats: Dict[str, Any]
     replay_stats: Dict[str, Any]
     bridge_stats: Dict[str, Any]
+    execution_history: List[Dict[str, Any]]
+    account_info: Dict[str, Any]
 
 
 class PapertestEngine:
@@ -174,11 +178,227 @@ class PapertestEngine:
             # If state retrieval fails, still proceed with returning stats
             pass
 
+        # Extract execution history for reporting (best-effort; avoids coupling callers to internal classes)
+        execution_history: List[Dict[str, Any]] = []
+        try:
+            exec_engine = (self.wired.components or {}).get("execution_engine")
+            if exec_engine is not None:
+                for res in getattr(exec_engine, "execution_history", []) or []:
+                    fills = getattr(res, "fills", None) or []
+                    if fills:
+                        for f in fills:
+                            ts = f.get("timestamp")
+                            if isinstance(ts, datetime):
+                                ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+                            else:
+                                ts_str = str(ts) if ts is not None else ""
+                                ts_str = ts_str[:19] if ts_str else ""
+                            execution_history.append(
+                                {
+                                    "timestamp": ts_str,
+                                    "symbol": f.get("symbol"),
+                                    "action": f.get("side") or f.get("action"),
+                                    "quantity": f.get("quantity") or f.get("qty") or 0.0,
+                                    "price": f.get("price") or f.get("fill_price") or 0.0,
+                                    "signal_strength": f.get("signal_strength") or f.get("strength") or 0.0,
+                                    "confidence": f.get("confidence") or 0.0,
+                                }
+                            )
+                    else:
+                        ts = getattr(res, "completed_at", None) or getattr(res, "started_at", None)
+                        if isinstance(ts, datetime):
+                            ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            ts_str = str(ts)[:19] if ts is not None else ""
+                        execution_history.append(
+                            {
+                                "timestamp": ts_str,
+                                "symbol": None,
+                                "action": None,
+                                "quantity": float(getattr(res, "filled_quantity", 0.0) or 0.0),
+                                "price": float(getattr(res, "avg_fill_price", 0.0) or 0.0),
+                            }
+                        )
+        except Exception:
+            execution_history = []
+
+        # Extract broker account info for return calculations (best-effort)
+        account_info: Dict[str, Any] = {}
+        try:
+            broker = (self.wired.components or {}).get("paper_broker")
+            if broker is not None and hasattr(broker, "get_account_info"):
+                acct = broker.get_account_info()
+                account_info = {
+                    "cash": float(getattr(acct, "cash", 0.0) or 0.0),
+                    "equity": float(getattr(acct, "equity", 0.0) or 0.0),
+                    "portfolio_value": float(getattr(acct, "portfolio_value", 0.0) or 0.0),
+                }
+        except Exception:
+            account_info = {}
+
+        # Fallback: UnifiedExecutionEngine may not retain fills in execution_history in some modes,
+        # but the EventJournal is the source of truth for fills. If empty, derive trades from the journal.
+        if not execution_history:
+            try:
+                journal_dir = str(((self.config.get("papertest") or {}).get("session") or {}).get("journal_dir", "papertest/results/journals"))
+                session_id = str((self.wired.engine.get_stats() or {}).get("session_id") or "")
+                if session_id:
+                    execution_history = self._extract_execution_history_from_journal(
+                        journal_dir=journal_dir,
+                        session_id=session_id,
+                    )
+            except Exception:
+                pass
+
+        engine_stats = dict(self.wired.engine.get_stats() or {})
+        engine_stats["execution_history"] = execution_history
+
+        # region agent log
+        try:
+            _payload = {
+                "sessionId": "debug-session",
+                "runId": "papertest_smoke_layout",
+                "hypothesisId": "H1",
+                "location": "papertest/engine/papertest_engine.py:run:exec_history",
+                "message": "papertest execution_history extraction result",
+                "data": {
+                    "exec_history_len": len(execution_history),
+                    "has_account_info": bool(account_info),
+                    "journal_dir": str(((self.config.get("papertest") or {}).get("session") or {}).get("journal_dir", "papertest/results/journals")),
+                    "session_id": engine_stats.get("session_id"),
+                },
+                "timestamp": int(__import__("time").time() * 1000),
+            }
+            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
+                _f.write(json.dumps(_payload) + "\n")
+        except Exception:
+            pass
+        # endregion agent log
+
         return PapertestRunResult(
-            engine_stats=self.wired.engine.get_stats(),
+            engine_stats=engine_stats,
             replay_stats=self.wired.replay_adapter.get_replay_statistics(),
             bridge_stats=self._bridge.stats,
+            execution_history=execution_history,
+            account_info=account_info,
         )
+
+    def _extract_execution_history_from_journal(self, journal_dir: str, session_id: str) -> List[Dict[str, Any]]:
+        """
+        Parse EventJournal JSONL and return a backtest-like execution_history list.
+
+        Uses:
+        - FILL events for trades (timestamp, symbol, side, qty, price)
+        - Best-effort "carry-forward" signal_strength from the most recent SIGNAL event for that symbol.
+        """
+        path = Path(journal_dir) / f"{session_id}.jsonl"
+        if not path.exists():
+            # Try gz variant if compression was enabled
+            gz = Path(journal_dir) / f"{session_id}.jsonl.gz"
+            path = gz if gz.exists() else path
+
+        trades: List[Dict[str, Any]] = []
+        last_strength_by_symbol: Dict[str, float] = {}
+
+        # region agent log
+        try:
+            _payload = {
+                "sessionId": "debug-session",
+                "runId": "papertest_smoke_layout",
+                "hypothesisId": "H2",
+                "location": "papertest/engine/papertest_engine.py:_extract_execution_history_from_journal:entry",
+                "message": "journal parsing entry",
+                "data": {"path": str(path), "exists": bool(path.exists()), "session_id": session_id},
+                "timestamp": int(__import__("time").time() * 1000),
+            }
+            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
+                _f.write(json.dumps(_payload) + "\n")
+        except Exception:
+            pass
+        # endregion agent log
+
+        if not path.exists():
+            return trades
+
+        # Use EventJournal reader to support .gz transparently.
+        try:
+            from core_engine.system.event_journal import EventJournal as _EJ
+            events = _EJ.read_journal(str(path))
+        except Exception:
+            # Fallback: line-by-line JSONL
+            events = []
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except Exception:
+                        continue
+
+        for ev in events:
+            try:
+                # EventJournal.read_journal returns JournalEvent objects; normalize to dict.
+                if hasattr(ev, "to_dict"):
+                    evd = ev.to_dict()  # type: ignore[attr-defined]
+                else:
+                    evd = ev if isinstance(ev, dict) else {}
+
+                category = (evd.get("category") or "").upper()
+                symbol = evd.get("symbol")
+                data = evd.get("data") or {}
+
+                if category == "SIGNAL" and evd.get("event_type") == "signal_generated":
+                    if symbol:
+                        try:
+                            last_strength_by_symbol[symbol] = float(data.get("signal_strength") or 0.0)
+                        except Exception:
+                            last_strength_by_symbol[symbol] = 0.0
+                if category == "FILL" and evd.get("event_type") == "fill":
+                    side = data.get("side") or ""
+                    qty = float(data.get("quantity") or 0.0)
+                    px = float(data.get("price") or 0.0)
+                    ft = data.get("fill_timestamp") or evd.get("timestamp") or ""
+                    # Normalize timestamp to "YYYY-mm-dd HH:MM:SS"
+                    ts = str(ft).replace("T", " ")
+                    ts = ts[:19] if ts else "N/A"
+                    trades.append(
+                        {
+                            "timestamp": ts,
+                            "symbol": symbol,
+                            "action": side,
+                            "quantity": qty,
+                            "price": px,
+                            "signal_strength": float(last_strength_by_symbol.get(symbol or "", 0.0)),
+                            "confidence": 0.0,
+                        }
+                    )
+            except Exception:
+                continue
+
+        # region agent log
+        try:
+            _payload = {
+                "sessionId": "debug-session",
+                "runId": "papertest_smoke_layout",
+                "hypothesisId": "H2",
+                "location": "papertest/engine/papertest_engine.py:_extract_execution_history_from_journal:exit",
+                "message": "journal parsing exit",
+                "data": {
+                    "trades_len": len(trades),
+                    "strength_symbols": len(last_strength_by_symbol),
+                    "first_trade": trades[0] if trades else None,
+                },
+                "timestamp": int(__import__("time").time() * 1000),
+            }
+            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
+                _f.write(json.dumps(_payload) + "\n")
+        except Exception:
+            pass
+        # endregion agent log
+
+        return trades
 
     async def _wait_for_replay_completion(self) -> None:
         assert self.wired and self.wired.replay_adapter.replay_engine is not None
