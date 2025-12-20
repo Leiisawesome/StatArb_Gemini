@@ -52,9 +52,12 @@ class PrioritizedEvent:
     """
     Event wrapper for priority queue ordering.
 
-    Ordered by (market_timestamp, sequence_number) for determinism.
+    Ordered by (market_timestamp, priority, sequence_number) for determinism.
+    Priority is used to guarantee causal ordering within the same market timestamp
+    (e.g., process FILLs before BARs so position state is updated before generating new signals).
     """
     market_timestamp: datetime = field(compare=True)
+    priority: int = field(compare=True)
     sequence_number: int = field(compare=True)
     event_type: EventType = field(compare=False)
     symbol: Optional[str] = field(compare=False, default=None)
@@ -138,6 +141,26 @@ class DeterministicEventDispatcher:
             self._sequence_counter += 1
             return self._sequence_counter
 
+    def _event_priority(self, event_type: EventType) -> int:
+        """
+        Priority within the same market_timestamp.
+
+        Lower number means processed earlier.
+        This is critical for deterministic causality: fills should be applied before bar-driven signal generation.
+        """
+        # Most urgent first: fills -> orders -> signals -> bars -> quotes/trades -> rest
+        if event_type == EventType.FILL:
+            return 0
+        if event_type == EventType.ORDER:
+            return 1
+        if event_type == EventType.SIGNAL:
+            return 2
+        if event_type == EventType.BAR:
+            return 3
+        if event_type in (EventType.QUOTE, EventType.TRADE):
+            return 4
+        return 5
+
     def register_handler(self, event_type: EventType, handler: EventHandler) -> None:
         """
         Register a handler for an event type.
@@ -182,9 +205,11 @@ class DeterministicEventDispatcher:
         """
         timestamp = market_timestamp or self._time_source.market_now()
         seq = self._next_sequence()
+        pri = self._event_priority(event_type)
 
         event = PrioritizedEvent(
             market_timestamp=timestamp,
+            priority=pri,
             sequence_number=seq,
             event_type=event_type,
             symbol=symbol,
@@ -276,6 +301,20 @@ class DeterministicEventDispatcher:
             self._events_processed += 1
 
         return event
+
+    def peek_next(self) -> Optional[PrioritizedEvent]:
+        """
+        Peek at the next event without removing it.
+
+        Intended for single-threaded consumer usage (same as process_next()).
+        """
+        with self._queue_lock:
+            # First flush any conflated events
+            if self._quote_buffer or self._trade_buffer:
+                self._flush_conflation_buffers()
+            if not self._queue:
+                return None
+            return self._queue[0]
 
     def process_all(self, max_events: Optional[int] = None) -> int:
         """

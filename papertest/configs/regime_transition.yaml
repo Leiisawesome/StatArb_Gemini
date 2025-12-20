@@ -1,0 +1,14 @@
+papertest:
+  data:
+    symbols: ["SPY", "QQQ"]
+    start_date: "2024-10-30"
+    end_date: "2024-11-01"
+    interval: "5min"
+    replay_speed: "FAST_10X"
+    simulate_market_hours: true
+
+  buffers:
+    size: 600
+    warmup_required: 250
+
+

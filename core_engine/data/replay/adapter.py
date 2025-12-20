@@ -20,8 +20,9 @@ Version: 1.0.0
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+from zoneinfo import ZoneInfo
 
 from .engine import HistoricalDataReplayEngine, ReplayStatus
 from .config import ReplayConfig, ReplaySpeed
@@ -69,6 +70,9 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
         # Store replay configuration
         self.replay_config = config
         self.replay_engine: Optional[HistoricalDataReplayEngine] = None
+        # Optional warmup anchor override (used by papertest debug windows).
+        # If set, get_warmup_data() will return bars strictly before this timestamp.
+        self._warmup_anchor_timestamp: Optional[datetime] = None
 
         # Adapter state
         self._replay_task: Optional[asyncio.Task] = None
@@ -197,6 +201,83 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             self.status = AdapterStatus.ERROR
             logger.error(f"❌ Subscription failed: {e}")
             return False
+
+    async def get_warmup_data(self, symbol: str, bars: int = 200):
+        """
+        Return warmup bars strictly **before** the replay start, to avoid lookahead.
+
+        This exists to satisfy core_engine.paper.PaperTradingEngine.warmup(),
+        enabling streaming components to start with populated buffers.
+        """
+        if not self.replay_engine or not self.replay_engine.data_manager:
+            return None
+
+        try:
+            # Warmup should end strictly before the first bar the consumer will process.
+            # By default we anchor to ReplayConfig.start_time on start_date. Papertest can override
+            # this via set_warmup_anchor_timestamp() when using debug windows (start_at_time).
+            tz = ZoneInfo("America/New_York")
+
+            anchor = self._warmup_anchor_timestamp
+            if anchor is None:
+                # ReplayConfig.start_time is a time object interpreted in America/New_York.
+                # If replay_config.start_time is not available for some reason, fall back to 04:00.
+                st = getattr(self.replay_config, "start_time", None)
+                if st is None:
+                    anchor = datetime.strptime(
+                        f"{self.replay_config.start_date} 04:00:00",
+                        "%Y-%m-%d %H:%M:%S",
+                    ).replace(tzinfo=tz)
+                else:
+                    day = datetime.strptime(self.replay_config.start_date, "%Y-%m-%d").date()
+                    anchor = datetime(day.year, day.month, day.day, st.hour, st.minute, st.second, tzinfo=tz)
+
+            # Ensure tz-aware
+            if getattr(anchor, "tzinfo", None) is None:
+                anchor = anchor.replace(tzinfo=tz)
+
+            warmup_end = anchor - timedelta(seconds=1)
+            warmup_start = (anchor - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+            df = self.replay_engine.data_manager.load_market_data(
+                symbols=[symbol],
+                start_time=warmup_start,
+                end_time=warmup_end,
+                interval=self.replay_config.interval,
+            )
+
+            if df is None or getattr(df, "empty", True):
+                return None
+
+            # Keep only the last N bars (still pre-replay)
+            if bars and bars > 0:
+                df = df.tail(int(bars)).copy()
+
+            # Ensure expected columns exist
+            if "symbol" not in df.columns:
+                df["symbol"] = symbol
+
+            # Deterministic ordering for warmup load
+            if "timestamp" in df.columns:
+                try:
+                    df = df.sort_values("timestamp").reset_index(drop=True)
+                except Exception:
+                    pass
+
+            return df
+        except Exception as e:
+            logger.error(f"❌ get_warmup_data failed for {symbol}: {e}", exc_info=True)
+            return None
+
+    def set_warmup_anchor_timestamp(self, timestamp: Optional[datetime]) -> None:
+        """
+        Override the warmup anchor used by get_warmup_data().
+
+        When set, warmup data will end strictly before this timestamp. This is
+        particularly important when the consumer intentionally skips early replay
+        data (e.g., papertest debug windows), to prevent a large history gap.
+        """
+        self._warmup_anchor_timestamp = timestamp
 
     async def start_replay(self) -> bool:
         """

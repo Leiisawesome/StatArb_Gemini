@@ -41,7 +41,7 @@ from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest,
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
-from .interfaces import ISystemComponent
+from .interfaces import ISystemComponent, RegimeContext
 from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
@@ -1220,8 +1220,12 @@ class CentralRiskManager(ISystemComponent):
             if authorization_level != AuthorizationLevel.REJECTED:
                 # Calculate authorized quantity
                 authorized_qty = self._calculate_authorized_quantity(request, risk_impact, regime_adjustment)
-                authorization.authorized_quantity = authorized_qty
-                authorization.max_quantity = min(request.quantity, authorized_qty * 1.1)  # 10% buffer
+                # Never authorize MORE than was requested (critical for deterministic sizing + governance)
+                if request.quantity and request.quantity > 0:
+                    authorization.authorized_quantity = min(float(request.quantity), float(authorized_qty))
+                else:
+                    authorization.authorized_quantity = float(authorized_qty)
+                authorization.max_quantity = authorization.authorized_quantity
 
                 # Set risk constraints
                 authorization.position_limit = self._get_position_limit(request.symbol)
@@ -1617,8 +1621,12 @@ class CentralRiskManager(ISystemComponent):
                     logger.info(f"🔒 Final position constraint: reducing {authorized_qty:.2f} to {current_position:.2f}")
                     authorized_qty = current_position
 
-            # PRECISION FIX: Round to 2 decimal places to avoid floating point errors
-            authorized_qty = max(0.0, round(authorized_qty, 2))
+            # Precision: keep full float precision for fractional-share parity.
+            # Only snap extremely small residuals to 0 to avoid position “dust”.
+            authorized_qty = float(authorized_qty)
+            if abs(authorized_qty) < 1e-6:
+                authorized_qty = 0.0
+            authorized_qty = max(0.0, authorized_qty)
 
             return authorized_qty
 
@@ -2957,7 +2965,8 @@ class CentralRiskManager(ISystemComponent):
         result['gate_passed'] = 'G0'
 
         # === GATE 1: Session Gate ===
-        gate1_result = self._gate1_session(symbol)
+        # CRITICAL: use the signal timestamp (not wall-clock now) for deterministic session checks
+        gate1_result = self._gate1_session(symbol, signal.get('signal_timestamp'))
         result['gates']['gate1_session'] = gate1_result
 
         if not gate1_result['passed']:
@@ -3005,6 +3014,13 @@ class CentralRiskManager(ISystemComponent):
         result['gate_passed'] = 'G4'
 
         # === GATE 5: P&L-Aware Risk Budget ===
+        # Ensure risk budget has current portfolio value (otherwise per-trade/daily budgets become 0 and always reject).
+        risk_budget = getattr(self, "_risk_budget", None)
+        if risk_budget is not None and hasattr(risk_budget, "update_portfolio_value"):
+            try:
+                risk_budget.update_portfolio_value(float(portfolio_value))
+            except Exception:
+                pass
         stop_price = signal.get('stop_price')
         stop_loss_pct = signal.get('stop_loss_pct', 0.02)
 
@@ -3029,7 +3045,16 @@ class CentralRiskManager(ISystemComponent):
         result['gate_passed'] = 'G5'
 
         # === GATE 6: Final Authorization ===
-        min_order_size = self.config.position_limits.min_order_size if hasattr(self.config, 'position_limits') else 1.0
+        # NOTE: PositionLimits does not define min_order_size in the consolidated config model.
+        # Use a safe fallback to avoid AttributeError during papertest/backtest parity runs.
+        min_order_size = 1.0
+        try:
+            pl = getattr(self.config, "position_limits", None)
+            if pl is not None:
+                # If the config ever defines it in the future, respect it; otherwise default to 1 share.
+                min_order_size = float(getattr(pl, "min_order_size", min_order_size))
+        except Exception:
+            min_order_size = 1.0
 
         if candidate_qty < min_order_size:
             result['rejection_reason'] = f"Quantity {candidate_qty} below minimum {min_order_size}"
@@ -3057,15 +3082,15 @@ class CentralRiskManager(ISystemComponent):
 
         return {'passed': True}
 
-    def _gate1_session(self, symbol: str) -> Dict[str, Any]:
-        """Gate 1: Check session/trading hours."""
+    def _gate1_session(self, symbol: str, timestamp: Optional[datetime] = None) -> Dict[str, Any]:
+        """Gate 1: Check session/trading hours (MUST use signal timestamp for determinism)."""
         session_gate = getattr(self, '_session_gate', None)
 
         if session_gate is None:
             # No session gate configured, allow
             return {'passed': True, 'reason': 'No session gate configured'}
 
-        check_result = session_gate.check(symbol=symbol)
+        check_result = session_gate.check(timestamp=timestamp, symbol=symbol)
 
         if check_result.decision.name == 'ALLOW':
             return {'passed': True, 'session': check_result.current_session.name}
@@ -3143,23 +3168,39 @@ class CentralRiskManager(ISystemComponent):
         portfolio_value: float,
     ) -> Dict[str, Any]:
         """Gate 3: Position-aware validation."""
+
         # Get current position
+        #
+        # IMPORTANT: in this codebase, the SSOT for positions is either:
+        # - PositionBook (when configured via `set_position_book()`), stored as `self._position_book`
+        # - Legacy in-memory map `self.current_positions` updated via `update_position()`
         current_position = 0.0
-        if hasattr(self, 'position_book') and self.position_book:
-            pos = self.position_book.get_position(symbol)
-            if pos:
-                current_position = pos.quantity
+        if getattr(self, "_position_book", None) is not None:
+            try:
+                pos = self._position_book.get_position(symbol)
+                if pos is not None:
+                    current_position = float(getattr(pos, "quantity", 0.0) or 0.0)
+            except Exception:
+                current_position = 0.0
+        else:
+            try:
+                current_position = float(self.current_positions.get(symbol, 0.0) or 0.0)
+            except Exception:
+                current_position = 0.0
 
         # Get pending exposure from OMS
         pending_buy_qty = 0.0
         pending_sell_qty = 0.0
-        if hasattr(self, 'order_management_system') and self.order_management_system:
-            oms = self.order_management_system
-            if hasattr(oms, 'get_pending_exposure'):
+        oms = getattr(self, "_oms", None) or getattr(self, "order_management_system", None)
+        if oms and hasattr(oms, "get_pending_exposure"):
+            try:
                 pending = oms.get_pending_exposure(symbol)
                 if pending:
-                    pending_buy_qty = pending.get('pending_buy_qty', 0.0)
-                    pending_sell_qty = pending.get('pending_sell_qty', 0.0)
+                    pending_buy_qty = float(pending.get("pending_buy_qty", 0.0) or 0.0)
+                    pending_sell_qty = float(pending.get("pending_sell_qty", 0.0) or 0.0)
+            except Exception:
+                pending_buy_qty = 0.0
+                pending_sell_qty = 0.0
 
         pending_qty = pending_buy_qty - pending_sell_qty
 
@@ -3169,7 +3210,22 @@ class CentralRiskManager(ISystemComponent):
         post_trade_value = abs(post_trade_position) * current_price
 
         # Check position limits
-        max_position_pct = self.config.position_limits.max_position_pct if hasattr(self.config, 'position_limits') else 0.05
+        # Resolve max_position_pct from config.
+        # - Backtest config often provides `config.position_limits.max_position_pct`
+        # - Papertest passes a lightweight config with top-level `max_position_pct` / `max_position_size`
+        max_position_pct = 0.05
+        try:
+            pl = getattr(self.config, "position_limits", None)
+            if pl is not None and hasattr(pl, "max_position_pct"):
+                max_position_pct = float(getattr(pl, "max_position_pct", max_position_pct) or max_position_pct)
+            else:
+                # papertest config path
+                if hasattr(self.config, "max_position_pct"):
+                    max_position_pct = float(getattr(self.config, "max_position_pct", max_position_pct) or max_position_pct)
+                elif hasattr(self.config, "max_position_size"):
+                    max_position_pct = float(getattr(self.config, "max_position_size", max_position_pct) or max_position_pct)
+        except Exception:
+            max_position_pct = 0.05
         max_position_value = portfolio_value * max_position_pct
 
         position_pct = post_trade_value / portfolio_value if portfolio_value > 0 else 0

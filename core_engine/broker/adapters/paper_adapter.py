@@ -124,6 +124,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         impact_coefficient: float = 10.0,
         adv_table: Optional[Dict[str, float]] = None,
         spread_table: Optional[Dict[str, float]] = None,
+        seed: Optional[int] = None,
+        use_historical_execution_simulator: bool = False,
+        historical_execution_simulator_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize paper broker.
@@ -153,12 +156,22 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         self._impact_coef = impact_coefficient
         self._adv_table = adv_table or {}
         self._spread_table = spread_table or {}
+        self._seed = seed
+        # Always use an instance RNG for determinism; never use module-level random.
+        self._rng = random.Random(seed) if seed is not None else random.Random()
+
+        # Optional: reuse backtest's deterministic execution cost model for parity
+        self._use_historical_execution_simulator = bool(use_historical_execution_simulator)
+        self._historical_execution_simulator_config = historical_execution_simulator_config or {}
+        self._historical_execution_simulator = None
 
         # State
         self._connected = False
         self._orders: Dict[str, PaperOrder] = {}
         self._positions: Dict[str, PaperPosition] = {}
         self._prices: Dict[str, float] = {}  # Current prices
+        self._latest_market_data: Dict[str, Dict[str, Any]] = {}
+        self._next_order_context: Optional[Dict[str, Any]] = None
 
         # Halted symbols
         self._halted_symbols: set = set()
@@ -169,6 +182,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         # Callbacks
         self._fill_callback: Optional[Callable[[PaperFill], None]] = None
         self._order_callback: Optional[Callable[[PaperOrder], None]] = None
+
+        # Time source (optional; needed for replay-mode monotonic market timestamps)
+        self._time_source: Optional[Any] = None
 
         # Thread safety
         self._lock = threading.Lock()
@@ -205,9 +221,33 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         return {
             'connected': self._connected,
             'latency': (self._latency_min + self._latency_max) / 2,
-            'last_heartbeat': datetime.now(timezone.utc),
+            'last_heartbeat': self._now(),
             'type': 'paper',
         }
+
+    def set_time_source(self, time_source: Any) -> None:
+        """
+        Set a TimeSource (ReplayTimeSource in papertest) so timestamps use market time, not wall time.
+
+        This prevents dispatcher market time from jumping to wall-clock time on fills, which would
+        break replay monotonicity (cannot move market time backwards).
+        """
+        self._time_source = time_source
+
+    def _now(self) -> datetime:
+        """
+        Return a timestamp appropriate for this broker.
+
+        In replay/papertest: prefer market_now() so fill events are ordered with replay bars.
+        Fallback: wall-clock UTC.
+        """
+        try:
+            ts = self._time_source.market_now() if self._time_source is not None else None
+            if ts is not None:
+                return ts
+        except Exception:
+            pass
+        return datetime.now(timezone.utc)
 
     # ==================== Market Data ====================
 
@@ -215,6 +255,36 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         """Set current price for a symbol (called by replay engine)."""
         with self._lock:
             self._prices[symbol] = price
+
+    def set_market_data(self, symbol: str, bar: Dict[str, Any], market_timestamp: Any) -> None:
+        """
+        Store the most recent bar snapshot for execution simulation.
+        This lets paper mode reuse backtest's HistoricalExecutionSimulator with identical OHLCV inputs.
+        """
+        try:
+            self._latest_market_data[symbol] = {
+                "timestamp": market_timestamp,
+                "open": bar.get("open") or bar.get("open_price"),
+                "high": bar.get("high"),
+                "low": bar.get("low"),
+                "close": bar.get("close") or bar.get("close_price"),
+                "volume": bar.get("volume", 0),
+                "volatility": bar.get("volatility", 0.02),
+            }
+        except Exception:
+            # Best-effort; never break trading loop on telemetry
+            pass
+
+    def set_next_order_context(self, context: Dict[str, Any]) -> None:
+        """
+        Set one-shot context for the *next* submitted order.
+        Used by paper execution routing to pass signal-time decision_price so we can
+        match backtest's HistoricalExecutionSimulator semantics.
+        """
+        try:
+            self._next_order_context = dict(context or {})
+        except Exception:
+            self._next_order_context = None
 
     def set_prices(self, prices: Dict[str, float]) -> None:
         """Set multiple prices at once."""
@@ -237,7 +307,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 'bid_size': 100,
                 'ask_size': 100,
                 'last_price': price,
-                'timestamp': datetime.now(timezone.utc),
+                'timestamp': self._now(),
             }
 
     def is_market_open(self) -> bool:
@@ -253,7 +323,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
     def _simulate_latency(self) -> float:
         """Get simulated latency in seconds."""
-        latency_ms = random.uniform(self._latency_min, self._latency_max)
+        latency_ms = self._rng.uniform(self._latency_min, self._latency_max)
         return latency_ms / 1000.0
 
     def _calculate_fill_price(
@@ -277,7 +347,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         impact_bps = math.sqrt(participation) * self._impact_coef
 
         # Random slippage
-        slippage_bps = random.uniform(0, self._slippage_max)
+        slippage_bps = self._rng.uniform(0, self._slippage_max)
 
         # Total cost
         total_bps = half_spread + impact_bps + slippage_bps
@@ -295,6 +365,29 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 fill_price = max(fill_price, limit_price)
 
         return round(fill_price, 4)
+
+    def _get_historical_execution_simulator(self):
+        if self._historical_execution_simulator is not None:
+            return self._historical_execution_simulator
+        try:
+            # Lazy import to avoid hard dependency during normal operation
+            from backtest.engine.historical_execution_simulator import HistoricalExecutionSimulator
+            cfg = {
+                'fill_model': 'realistic',
+                'base_spread_bps': 5.0,
+                'base_slippage_bps': 2.0,
+                'commission_per_share': float(self._commission_per_share),
+                'enable_random_slippage': False,  # deterministic
+                'impact_linear_coeff': 0.1,
+                'impact_sqrt_coeff': 0.5,
+                'disable_rejections': True,
+            }
+            cfg.update(self._historical_execution_simulator_config or {})
+            self._historical_execution_simulator = HistoricalExecutionSimulator(cfg)
+            return self._historical_execution_simulator
+        except Exception:
+            self._historical_execution_simulator = None
+            return None
 
     def _calculate_commission(self, quantity: float) -> float:
         """Calculate commission for a fill."""
@@ -327,7 +420,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 return f"Insufficient position: need {quantity}, have {available}"
 
         # Random rejection (simulate broker issues)
-        if random.random() > self._fill_prob:
+        if self._rng.random() > self._fill_prob:
             return "Order rejected by venue"
 
         return None
@@ -340,7 +433,18 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         with self._lock:
             # Transition to NEW
             order.status = PaperOrderStatus.NEW
-            order.submitted_at = datetime.now(timezone.utc)
+            order.submitted_at = self._now()
+            # Capture a deterministic decision price + bar snapshot at submission time.
+            # This avoids races where the engine updates broker price to bar-close before the async fill runs.
+            try:
+                dp_override = getattr(order, "_decision_price_override", None)
+                if dp_override is not None:
+                    setattr(order, "_paper_decision_price", float(dp_override))
+                else:
+                    setattr(order, "_paper_decision_price", float(self._prices.get(order.symbol, 100.0)))
+                setattr(order, "_paper_market_data", dict(self._latest_market_data.get(order.symbol, {}) or {}))
+            except Exception:
+                pass
 
             if self._order_callback:
                 self._order_callback(order)
@@ -354,17 +458,64 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 return
 
             # Get fill price
-            fill_price = self._calculate_fill_price(
-                order.symbol,
-                order.side,
-                order.quantity,
-                order.order_type,
-                order.limit_price,
-            )
+            fill_price = None
+            if self._use_historical_execution_simulator:
+                sim = self._get_historical_execution_simulator()
+                if sim is not None:
+                    base_price = float(getattr(order, "_paper_decision_price", self._prices.get(order.symbol, 100.0)))
+                    md0 = getattr(order, "_paper_market_data", None) or self._latest_market_data.get(order.symbol, {}) or {}
+                    market_data = {
+                        'timestamp': md0.get('timestamp', self._now()),
+                        'open': md0.get('open', base_price),
+                        'high': md0.get('high', base_price),
+                        'low': md0.get('low', base_price),
+                        # Match backtest: 'close' should be the decision price (bar-open execution)
+                        'close': base_price,
+                        'volume': md0.get('volume', 0),
+                        'volatility': md0.get('volatility', 0.02),
+                    }
+                    # Pull optional context (regime/liquidity) from order context if provided
+                    ctx = getattr(order, "_paper_context", None) if hasattr(order, "_paper_context") else None
+                    regime_ctx = None
+                    liquidity_score = None
+                    try:
+                        if isinstance(ctx, dict):
+                            regime_ctx = ctx.get("regime_context")
+                            liquidity_score = ctx.get("liquidity_score")
+                    except Exception:
+                        regime_ctx = None
+                        liquidity_score = None
+                    res = sim.simulate_fill_with_rejection(
+                        symbol=order.symbol,
+                        side=order.side.value.lower(),
+                        quantity=float(order.remaining_quantity),
+                        decision_price=base_price,
+                        market_data=market_data,
+                        authorization_id=getattr(order, "order_id", ""),
+                        strategy_id="PAPER_SIM",
+                        regime_context=regime_ctx if isinstance(regime_ctx, dict) else None,
+                        liquidity_score=float(liquidity_score) if liquidity_score is not None else None,
+                        max_retries=0,
+                    )
+                    sf = res.get('fill')
+                    if sf is not None:
+                        fill_price = float(getattr(sf, "fill_price", base_price))
+
+            if fill_price is None:
+                fill_price = self._calculate_fill_price(
+                    order.symbol,
+                    order.side,
+                    order.quantity,
+                    order.order_type,
+                    order.limit_price,
+                )
 
             # Determine fill quantity (partial fill simulation)
-            if random.random() < self._partial_prob:
-                fill_qty = random.uniform(0.5, 0.9) * order.remaining_quantity
+            if self._use_historical_execution_simulator:
+                fill_qty = order.remaining_quantity
+                is_partial = False
+            elif self._rng.random() < self._partial_prob:
+                fill_qty = self._rng.uniform(0.5, 0.9) * order.remaining_quantity
                 fill_qty = round(fill_qty)
                 is_partial = True
                 self._stats['partial_fills'] += 1
@@ -383,7 +534,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 quantity=fill_qty,
                 price=fill_price,
                 commission=commission,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=self._now(),
                 is_partial=is_partial,
             )
 
@@ -397,7 +548,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
             if order.remaining_quantity <= 0:
                 order.status = PaperOrderStatus.FILLED
-                order.filled_at = datetime.now(timezone.utc)
+                order.filled_at = self._now()
                 self._stats['orders_filled'] += 1
             else:
                 order.status = PaperOrderStatus.PARTIALLY_FILLED
@@ -505,6 +656,8 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         """Internal order submission."""
         with self._lock:
             order_id = str(uuid.uuid4())
+            ctx = self._next_order_context or {}
+            self._next_order_context = None
 
             paper_order = PaperOrder(
                 order_id=order_id,
@@ -515,6 +668,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 limit_price=limit_price,
                 stop_price=stop_price,
             )
+            # Attach context (best-effort)
+            try:
+                dp = ctx.get("decision_price", None)
+                if dp is not None:
+                    setattr(paper_order, "_decision_price_override", float(dp))
+                setattr(paper_order, "_paper_context", dict(ctx))
+            except Exception:
+                pass
 
             # Check for immediate rejection
             est_price = limit_price or self._prices.get(symbol, 100.0)

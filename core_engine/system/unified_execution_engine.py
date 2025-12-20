@@ -1812,7 +1812,7 @@ class UnifiedExecutionEngine(ISystemComponent):
         auth = request.authorization
         side = auth.side.upper() if hasattr(auth.side, 'upper') else str(auth.side)
 
-        from ..type_definitions.broker_types import OrderSide, OrderType
+        from ..type_definitions.broker_types import OrderSide, OrderType, OrderStatus
 
         order_side = OrderSide.BUY if side in ('BUY', 'buy') else OrderSide.SELL
 
@@ -1827,6 +1827,20 @@ class UnifiedExecutionEngine(ISystemComponent):
 
         # Submit to paper broker
         try:
+            # If supported, pass one-shot context into paper broker (e.g., decision_price for simulator parity)
+            if hasattr(paper_broker, "set_next_order_context"):
+                try:
+                    ctx = {}
+                    if isinstance(getattr(request, "strategy_context", None), dict):
+                        ctx.update(request.strategy_context)
+                    if isinstance(getattr(request, "algorithm_params", None), dict):
+                        ctx.update(request.algorithm_params)
+                    # Normalize common field name
+                    if "decision_price" in ctx:
+                        ctx["decision_price"] = float(ctx["decision_price"])
+                    paper_broker.set_next_order_context(ctx)
+                except Exception:
+                    pass
             if order_type == OrderType.LIMIT and hasattr(auth, 'limit_price'):
                 order = paper_broker.submit_limit_order(
                     symbol=auth.symbol,
@@ -1843,31 +1857,41 @@ class UnifiedExecutionEngine(ISystemComponent):
 
             # Wait for fill (paper broker fills quickly)
             import asyncio
+            # The paper broker returns an Order with `order_id` (not `.id`).
+            order_id = getattr(order, "order_id", None) or getattr(order, "id", None)
+
             for _ in range(50):  # Wait up to 5 seconds
                 await asyncio.sleep(0.1)
-                updated_order = paper_broker.get_order(order.id)
-                if updated_order and updated_order.status in ('filled', 'rejected', 'cancelled'):
-                    break
+                updated_order = paper_broker.get_order(str(order_id))
+                if updated_order:
+                    st = getattr(updated_order, "status", None)
+                    st_val = getattr(st, "value", None) or getattr(st, "name", None) or str(st)
+                    if st in (OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELLED) or str(st_val).lower() in ('filled', 'rejected', 'cancelled'):
+                        break
 
             # Build result
-            if updated_order and updated_order.status == 'filled':
+            st = getattr(updated_order, "status", None) if updated_order else None
+            st_val = getattr(st, "value", None) or getattr(st, "name", None) or str(st)
+            is_filled = bool(updated_order) and (st == OrderStatus.FILLED or str(st_val).lower() == "filled")
+
+            if is_filled:
                 result = ExecutionResult(
                     request_id=request.request_id,
                     authorization_id=auth.authorization_id,
-                    status=ExecutionStatus.COMPLETED,
+                    status=ExecutionStatus.FILLED,
                     algorithm_used=request.algorithm,
                 )
                 result.fill_quantity = updated_order.filled_quantity
-                result.fill_price = updated_order.avg_fill_price
-                result.execution_log.append(f"Paper fill: {updated_order.filled_quantity} @ {updated_order.avg_fill_price}")
+                result.fill_price = float(getattr(updated_order, "average_price", 0.0) or 0.0)
+                result.execution_log.append(f"Paper fill: {updated_order.filled_quantity} @ {result.fill_price}")
             else:
                 result = ExecutionResult(
                     request_id=request.request_id,
                     authorization_id=auth.authorization_id,
-                    status=ExecutionStatus.FAILED,
+                    status=ExecutionStatus.EXECUTING,
                     algorithm_used=request.algorithm,
                 )
-                result.execution_log.append(f"Paper order not filled: {updated_order.status if updated_order else 'unknown'}")
+                result.execution_log.append(f"Paper order not filled yet: {st_val if updated_order else 'unknown'}")
 
             return result
 

@@ -397,6 +397,14 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return None
 
             current_row = data.iloc[idx]
+            current_ts = None
+            try:
+                current_ts = current_row.get("timestamp", None) if hasattr(current_row, "get") else None
+            except Exception:
+                current_ts = None
+
+            # Trace only a tight window to keep log volume low (debug mode)
+            trace = False
 
             # Get core indicator values
             # Calculate zscore using strategy's lookback_period (more accurate than pre-calculated)
@@ -1708,25 +1716,28 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 f"Entry=${entry_price:.2f}, Current=${current_price:.2f}"
             )
 
-            return StrategySignal(
-                symbol=symbol,
-                signal_type=signal_type,
-                confidence=1.0,  # High confidence - stop-loss is mandatory
-                strength=0.0,    # Forced exit, not quality-based
-                timestamp=timestamp,
-                signal_price=current_price,
-                entry_price=entry_price,
-                target_quantity=abs(quantity),  # Exit full position
-                quantity_type="ABSOLUTE",
-                strategy_id=getattr(self, 'strategy_id', 'mean_reversion'),
-                signal_source='PROACTIVE_STOP_LOSS',
-                signal_reason=f"Stop-loss triggered: {pnl_pct:+.2f}% <= {stop_loss_pct}%",
-                additional_data={
-                    'current_price': current_price,
-                    'pnl_pct': pnl_pct,
-                    'stop_loss_threshold': stop_loss_pct
-                }
-            )
+            try:
+                return StrategySignal(
+                    symbol=symbol,
+                    signal_type=signal_type,
+                    confidence=1.0,  # High confidence - stop-loss is mandatory
+                    strength=0.0,    # Forced exit, not quality-based
+                    timestamp=timestamp,
+                    signal_price=current_price,
+                    entry_price=entry_price,
+                    target_quantity=abs(quantity),  # Exit full position
+                    quantity_type="ABSOLUTE",
+                    strategy_id=getattr(self, 'strategy_id', 'mean_reversion'),
+                    signal_source='PROACTIVE_STOP_LOSS',
+                    signal_reason=f"Stop-loss triggered: {pnl_pct:+.2f}% <= {stop_loss_pct}%",
+                    additional_data={
+                        'current_price': current_price,
+                        'pnl_pct': pnl_pct,
+                        'stop_loss_threshold': stop_loss_pct
+                    }
+                )
+            except Exception as e:
+                return None
 
         return None
 

@@ -179,12 +179,13 @@ class EventJournal:
         data: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         event_id: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
     ) -> JournalEvent:
         """Create a journal event."""
         return JournalEvent(
             event_id=event_id or f"{self._session_id}:{self._sequence + 1:08d}",
             sequence=self._next_sequence(),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp or datetime.now(timezone.utc),
             category=category,
             event_type=event_type,
             symbol=symbol,
@@ -377,6 +378,8 @@ class EventJournal:
         quantity: float,
         price: float,
         commission: float = 0.0,
+        side: Optional[str] = None,
+        fill_timestamp: Optional[datetime] = None,
     ) -> None:
         """Log an execution fill."""
         with self._lock:
@@ -390,8 +393,11 @@ class EventJournal:
                     'quantity': quantity,
                     'price': price,
                     'commission': commission,
+                    **({'side': side} if side is not None else {}),
+                    **({'fill_timestamp': fill_timestamp.isoformat() if fill_timestamp else None}),
                 },
                 event_id=fill_id,
+                timestamp=fill_timestamp,
             )
             self._append_event(event)
 

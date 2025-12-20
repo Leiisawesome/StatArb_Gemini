@@ -1,0 +1,85 @@
+papertest:
+  data:
+    symbols: ["TSLA"]
+    start_date: "2024-12-20"
+    end_date: "2024-12-20"
+    interval: "1min"
+    replay_speed: "FAST_50X"
+    simulate_market_hours: true
+
+  buffers:
+    size: 400
+    warmup_required: 200
+
+  strategies:
+    - type: "mean_reversion"
+      name: "MR_Simple"
+      allocation_pct: 1.0
+      parameters:
+        lookback_period: 30
+        scan_all_bars: false
+        scan_interval: 1
+        enable_regime_filter: false
+
+        dislocation_minimum: 2.5
+        dislocation_moderate: 2.5
+        dislocation_strong: 3.0
+
+        exhaustion_score_moderate: 55.0
+        exhaustion_score_strong: 65.0
+
+        rsi_oversold: 35
+        rsi_overbought: 65
+
+        base_position_pct: 0.1
+
+        stop_loss_pct: -2.0
+        take_profit_pct: 10.0
+        min_profit_to_exit: 0.0
+
+        enable_momentum_exit: true
+        momentum_adx_threshold: 20.0
+        momentum_rsi_overbought: 70.0
+        momentum_rsi_oversold: 30.0
+        momentum_volume_ratio: 0.7
+        momentum_extended_zscore: 3.0
+
+        zscore_entry_threshold: 1.5
+        zscore_exit_threshold: 0.5
+
+        enable_eod_liquidation: true
+        eod_close_time: "15:55"
+        enable_entry_cutoff: true
+        entry_cutoff_time: "15:30"
+        min_holding_bars: 5
+
+  risk:
+    allow_shorts: false
+    min_signal_confidence: 0.40
+    max_position_size: 0.40
+    max_position_pct: 0.40
+    max_positions: 5
+    position_concentration_limit: 0.20
+    daily_risk_budget_pct: 0.01
+    per_trade_risk_pct: 0.005
+
+  execution:
+    test_mode: true
+    initial_cash: 100000.0
+    commission_per_share: 0.005
+    min_commission: 1.0
+    latency_ms_min: 0.0
+    latency_ms_max: 0.0
+    fill_probability: 1.0
+    partial_fill_probability: 0.0
+    slippage_bps_max: 2.0
+    impact_coefficient: 10.0
+    seed: 42
+
+  # Comparable scope to backtest: RTH only
+  debug:
+    start_at_time: "09:30"
+    stop_at_time: "16:00"
+    timezone: "America/New_York"
+
+

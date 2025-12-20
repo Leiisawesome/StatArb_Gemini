@@ -92,7 +92,9 @@ class RiskBudgetState:
         self._daily_realized_loss: float = 0.0
 
         # Lock for thread safety
-        self._lock = threading.Lock()
+        # NOTE: This must be re-entrant because some methods call other methods that also acquire the lock.
+        # Using a non-reentrant Lock would deadlock (e.g., check_trade_risk -> get_available_risk -> get_used_risk_budget).
+        self._lock = threading.RLock()
 
         # Stats
         self._stats = {
@@ -258,6 +260,7 @@ class RiskBudgetState:
                 per_share_loss = max(0, effective_stop_price - estimated_fill_price)
 
             max_loss = candidate_quantity * per_share_loss
+
             available = self.get_available_risk()
             per_trade_limit = self.get_per_trade_limit()
 

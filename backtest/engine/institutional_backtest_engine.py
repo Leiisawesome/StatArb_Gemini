@@ -26,6 +26,7 @@ from pathlib import Path
 import logging
 import pandas as pd
 import sys
+import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -3992,10 +3993,10 @@ class InstitutionalBacktestEngine:
                             ) else self.config.initial_capital
                             dollar_amount = target_weight * portfolio_value
                             quantity = dollar_amount / current_price
-                            quantity = max(1, int(quantity))
+                            quantity = max(1.0, float(quantity))
                             logger.debug(f"   💰 Percentage sizing: {target_weight:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
                         elif target_quantity > 0:
-                            quantity = max(1, int(target_quantity))
+                            quantity = max(1.0, float(target_quantity))
                             logger.debug(f"   💰 Absolute sizing: {quantity} shares")
                         else:
                             if self.config.strategies and len(self.config.strategies) > 0:
@@ -4010,7 +4011,7 @@ class InstitutionalBacktestEngine:
                             portfolio_value = self.config.initial_capital
                             dollar_amount = position_size_pct * portfolio_value
                             quantity = dollar_amount / current_price
-                            quantity = max(1, int(quantity))
+                            quantity = max(1.0, float(quantity))
                             logger.debug(f"   💰 Fallback sizing: {position_size_pct:.2%} of ${portfolio_value:,.0f} = {quantity} shares @ ${current_price:.2f}")
                         return quantity
 
@@ -4021,7 +4022,7 @@ class InstitutionalBacktestEngine:
                         if has_short:
                             # First close the short, then open long
                             side = 'buy'
-                            quantity = abs(int(current_position))  # Cover short first
+                            quantity = abs(float(current_position))  # Cover short first
                             logger.debug(f"   🔄 Covering short position: {quantity} shares")
                             # Note: Next iteration should open long
                         elif not has_long:
@@ -4040,7 +4041,7 @@ class InstitutionalBacktestEngine:
                     elif signal_type_lower in ['long_exit', 'close_long']:
                         if has_long:
                             side = 'sell'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📉 Closing LONG: {quantity} shares")
                         else:
                             logger.debug(f"   ⏭️  Skipping LONG_EXIT for {symbol}: no long position to close")
@@ -4053,7 +4054,7 @@ class InstitutionalBacktestEngine:
                         if has_long:
                             # Close the long position first (or instead of shorting)
                             side = 'sell'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📉 Closing LONG (from SHORT_ENTRY signal): {quantity} shares")
                             # Note: If shorts allowed, next iteration could open short
                         elif not has_short:
@@ -4075,7 +4076,7 @@ class InstitutionalBacktestEngine:
                     elif signal_type_lower in ['short_exit', 'close_short']:
                         if has_short:
                             side = 'buy'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📈 Closing SHORT (covering): {quantity} shares")
                         else:
                             logger.debug(f"   ⏭️  Skipping SHORT_EXIT for {symbol}: no short position to cover")
@@ -4088,7 +4089,7 @@ class InstitutionalBacktestEngine:
                         if has_long:
                             # Close long position
                             side = 'sell'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📉 Closing LONG (from legacy SELL): {quantity} shares")
                         elif not has_short:
                             if getattr(self.config, 'allow_shorts', False):
@@ -4107,11 +4108,11 @@ class InstitutionalBacktestEngine:
                     elif signal_type_lower == 'close':
                         if has_long:
                             side = 'sell'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📉 Closing LONG (from CLOSE): {quantity} shares")
                         elif has_short:
                             side = 'buy'
-                            quantity = abs(int(current_position))
+                            quantity = abs(float(current_position))
                             logger.debug(f"   📈 Closing SHORT (from CLOSE): {quantity} shares")
                         else:
                             logger.debug(f"   ⏭️  Skipping CLOSE for {symbol}: no position to close")
@@ -4373,6 +4374,8 @@ class InstitutionalBacktestEngine:
                             regime_dict = regime_context
 
                     # Use simulate_fill_with_rejection for realistic order rejection modeling
+                    if quantity <= 0:
+                        continue
                     execution_result = self.execution_simulator.simulate_fill_with_rejection(
                         symbol=symbol,
                         side=side.lower(),
@@ -4422,6 +4425,8 @@ class InstitutionalBacktestEngine:
                     # Execution successful - extract fill
                     simulated_fill = execution_result['fill']
                     actual_quantity = execution_result['final_quantity']  # May be reduced from retries
+                    if actual_quantity <= 0:
+                        continue
 
                     # Log if quantity was reduced
                     if actual_quantity < quantity:

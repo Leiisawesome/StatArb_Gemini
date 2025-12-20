@@ -1,0 +1,45 @@
+papertest:
+  session:
+    id_prefix: "pt"
+    checkpoint_interval_bars: 1000
+    checkpoint_dir: "papertest/results/checkpoints"
+    journal_dir: "papertest/results/journals"
+
+  data:
+    source: "replay"
+    symbols: ["AAPL"]
+    start_date: "2024-12-20"
+    end_date: "2024-12-20"
+    interval: "1min"
+    replay_speed: "FAST_10X"
+    simulate_market_hours: true
+
+  dispatcher:
+    max_queue_size: 10000
+    bar_queue_size: 1000
+    conflate_quotes: true
+
+  buffers:
+    size: 500
+    warmup_required: 200
+
+  risk:
+    daily_risk_budget_pct: 0.01
+    per_trade_risk_pct: 0.005
+    min_signal_strength: 0.60
+    require_stop: true
+
+  execution:
+    initial_cash: 100000.0
+    commission_per_share: 0.005
+    latency_ms_min: 50.0
+    latency_ms_max: 200.0
+    test_mode: true
+
+  strategies:
+    - name: "momentum_default"
+      type: "momentum"
+      allocation_pct: 0.10
+      active: true
+
+

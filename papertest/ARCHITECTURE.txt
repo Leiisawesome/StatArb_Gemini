@@ -1,0 +1,24 @@
+Papertest Suite (core_engine-wired)
+==================================
+
+Purpose
+-------
+Provide a desk-grade "papertest" suite that validates end-to-end trading
+behavior in an event-driven, streaming mode using historical replay as a
+realtime OHLCV feed surrogate.
+
+Key Principles
+--------------
+- Thin orchestration: reuse core_engine components; avoid re-implementing logic.
+- Deterministic ordering: DeterministicEventDispatcher is the authoritative bus.
+- Bar-policy parity: signals computed at bar close; executed at next bar open.
+- Governance: all trades go through CentralRiskManager (6-gate) in papertest v1.
+
+Primary Flow
+------------
+Replay -> FeedAdapter -> ReplayToDispatcherBridge -> DeterministicEventDispatcher
+-> PaperTradingEngine -> StrategyManager -> CentralRiskManager(6-gate)
+-> StreamingSignalManager -> OMS -> UnifiedExecutionEngine(PAPER) -> PaperBrokerAdapter
+-> Fill callback -> Dispatcher(FILL) -> PaperTradingEngine._process_fill -> Risk position update
+
+

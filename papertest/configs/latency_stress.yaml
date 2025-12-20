@@ -1,0 +1,15 @@
+papertest:
+  data:
+    symbols: ["AAPL", "MSFT", "NVDA"]
+    start_date: "2024-12-20"
+    end_date: "2024-12-20"
+    interval: "1min"
+    replay_speed: "FAST_50X"
+    simulate_market_hours: true
+
+  execution:
+    latency_ms_min: 100.0
+    latency_ms_max: 250.0
+    test_mode: false
+
+

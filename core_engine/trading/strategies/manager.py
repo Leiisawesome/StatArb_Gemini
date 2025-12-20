@@ -937,8 +937,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"❌ Failed to remove strategy {strategy_name}: {e}")
             return False
 
-    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None,
-                             current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[TradingSignal]:
+    async def generate_signals(
+        self,
+        symbols: List[str],
+        market_data: Optional[Dict[str, Any]] = None,
+        current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
+        position_details: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[TradingSignal]:
         """
         Generate trading signals from all active strategies
         ENHANCED: Multi-strategy with regime awareness and position tracking
@@ -963,7 +968,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     # Enhanced strategy signal generation with position awareness
                     strategy_signals = await self._generate_enhanced_strategy_signals(
                         strategy, strategy_name, symbols, regime_info,
-                        market_data, current_positions
+                        market_data, current_positions, position_details
                     )
                     all_signals.extend(strategy_signals)
 
@@ -1596,10 +1601,16 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 'strategy_weights': {'mean_reversion': 0.5, 'momentum': 0.5}
             }
 
-    async def _generate_enhanced_strategy_signals(self, strategy: Any, strategy_name: str,
-                                                symbols: List[str], regime_info: Dict[str, Any],
-                                                market_data: Optional[Dict[str, Any]] = None,
-                                                current_positions: Optional[Dict[str, Dict[str, Any]]] = None) -> List[TradingSignal]:
+    async def _generate_enhanced_strategy_signals(
+        self,
+        strategy: Any,
+        strategy_name: str,
+        symbols: List[str],
+        regime_info: Dict[str, Any],
+        market_data: Optional[Dict[str, Any]] = None,
+        current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
+        position_details: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[TradingSignal]:
         """
         Generate enhanced strategy signals with regime awareness and position tracking
         ENHANCED: Multi-strategy logic from test implementation
@@ -1642,7 +1653,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         market_data_dict = {symbol: market_data for symbol in symbols}
 
                     # Call the enhanced strategy's generate_signals method
-                    raw_signals = await strategy.generate_signals(market_data_dict)
+                    try:
+                        raw_signals = await strategy.generate_signals(market_data_dict, position_details=position_details)
+                    except TypeError:
+                        raw_signals = await strategy.generate_signals(market_data_dict)
                     logger.debug(f"📊 Enhanced strategy {strategy_name} generated {len(raw_signals)} signals")
 
                     # Convert StrategySignal objects to TradingSignal objects
@@ -1676,12 +1690,24 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         # Use preserved timestamp or default to now
                         created_at = signal_timestamp if signal_timestamp else datetime.now()
 
+                        # Robust signal_type handling: StrategySignal may provide an enum (e.g., SignalType.LONG_EXIT)
+                        # or a string (e.g., "long_entry"). Using .lower() blindly drops exit signals.
+                        try:
+                            if isinstance(raw_signal.signal_type, SignalType):
+                                st = raw_signal.signal_type
+                            elif hasattr(raw_signal.signal_type, "value"):
+                                st = SignalType(str(raw_signal.signal_type.value).lower())
+                            else:
+                                st = SignalType(str(raw_signal.signal_type).lower())
+                        except Exception:
+                            st = SignalType.HOLD
+
                         trading_signal = TradingSignal(
                             signal_id=str(uuid.uuid4()),
                             strategy_name=strategy_name,
                             strategy_type=strategy_type,
                             symbol=raw_signal.symbol,
-                            signal_type=SignalType(raw_signal.signal_type.lower()),
+                            signal_type=st,
                             strength=raw_signal.strength,
                             confidence=getattr(raw_signal, 'confidence', 0.5),
                             expected_return=getattr(raw_signal, 'expected_return', 0.0),
@@ -3213,9 +3239,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"Phase 6 aggregation and conversion failed: {e}")
             return []
 
-    async def generate_signals(self, symbols: List[str], market_data: Optional[Dict[str, Any]] = None,
-                             current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
-                             position_details: Optional[Dict[str, Dict[str, Any]]] = None) -> List[EnhancedSignal]:
+    async def generate_signals(
+        self,
+        symbols: List[str],
+        market_data: Optional[Dict[str, Any]] = None,
+        current_positions: Optional[Dict[str, Dict[str, Any]]] = None,
+        position_details: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[EnhancedSignal]:
         """
         Generate signals using multi-strategy coordination
 
@@ -3238,8 +3268,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             self._position_details = position_details or {}
 
             if not self.enable_multi_strategy or not self.signal_aggregator:
-                # Fallback to traditional signal generation
-                return await self._generate_traditional_signals(symbols)
+                # Fallback to traditional signal generation (single-strategy / legacy mode)
+                # IMPORTANT: This must still generate signals when multi-strategy coordinator is disabled.
+                out = await self._generate_traditional_signals(
+                    symbols,
+                    market_data=market_data,
+                    position_details=position_details,
+                )
+                return out
 
             # Get market data (use provided or fetch)
             if market_data is None:
@@ -3258,10 +3294,90 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             logger.error(f"Multi-strategy signal generation failed: {e}")
             return []
 
-    async def _generate_traditional_signals(self, symbols: List[str]) -> List[EnhancedSignal]:
-        """Fallback traditional signal generation"""
-        # Placeholder - would implement traditional signal generation
-        return []
+    async def _generate_traditional_signals(
+        self,
+        symbols: List[str],
+        market_data: Optional[Dict[str, Any]] = None,
+        position_details: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[EnhancedSignal]:
+        """
+        Traditional signal generation (single-strategy / legacy mode).
+
+        Generates signals directly from `active_strategies` without requiring
+        MultiStrategySignalAggregator, which may be disabled in streaming runners.
+        """
+        try:
+            if not self.active_strategies:
+                return []
+
+            # Market data is expected to be Dict[symbol, pd.DataFrame]
+            if market_data is None or not isinstance(market_data, dict):
+                return []
+
+            enriched_dataframes: Dict[str, Any] = {}
+            for sym in symbols:
+                df = market_data.get(sym)
+                if df is not None:
+                    enriched_dataframes[sym] = df
+
+            if not enriched_dataframes:
+                return []
+
+            out: List[EnhancedSignal] = []
+            now = datetime.now()
+
+            for strategy_name, strategy in self.active_strategies.items():
+                allocation = self.strategy_allocations.get(strategy_name)
+                if not allocation or not allocation.active:
+                    continue
+
+                # Strategy implementations accept Dict[symbol, pd.DataFrame]
+                try:
+                    try:
+                        raw_signals = await strategy.generate_signals(
+                            enriched_dataframes,
+                            position_details=position_details,
+                        )
+                    except TypeError:
+                        raw_signals = await strategy.generate_signals(enriched_dataframes)
+                except Exception:
+                    continue
+
+                for rs in raw_signals or []:
+                    try:
+                        st = getattr(rs, "signal_type", SignalType.HOLD)
+                        # Default quantities: support both ABSOLUTE and PERCENTAGE sizing
+                        quantity_type = getattr(rs, "quantity_type", "ABSOLUTE") or "ABSOLUTE"
+                        target_weight = getattr(rs, "target_weight", None)
+                        target_qty = getattr(rs, "target_quantity", None)
+
+                        qty = float(target_qty or 0.0)
+                        out.append(
+                            EnhancedSignal(
+                                signal_id=str(getattr(rs, "signal_id", "") or uuid.uuid4()),
+                                symbol=str(getattr(rs, "symbol", "")),
+                                signal_type=st if isinstance(st, SignalType) else SignalType(str(st).lower()),
+                                confidence=float(getattr(rs, "confidence", 0.5) or 0.5),
+                                strength=float(getattr(rs, "strength", 0.5) or 0.5),
+                                quantity=qty,
+                                timestamp=getattr(rs, "timestamp", now),
+                                strategy_id=str(getattr(rs, "strategy_id", strategy_name) or strategy_name),
+                                strategy_type=str(getattr(allocation.strategy_type, "value", allocation.strategy_type)),
+                                price=getattr(rs, "signal_price", None),
+                                target_weight=float(target_weight) if target_weight is not None else None,
+                                quantity_type=str(quantity_type),
+                                metadata={
+                                    "strategy_name": strategy_name,
+                                    "legacy_mode": True,
+                                },
+                            )
+                        )
+                    except Exception:
+                        continue
+
+            return out
+        except Exception:
+            return []
 
     async def _get_market_data(self, symbols: List[str]):
         """Get market data for signal generation"""
