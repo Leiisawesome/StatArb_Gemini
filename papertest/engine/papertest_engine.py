@@ -253,28 +253,6 @@ class PapertestEngine:
         engine_stats = dict(self.wired.engine.get_stats() or {})
         engine_stats["execution_history"] = execution_history
 
-        # region agent log
-        try:
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H1",
-                "location": "papertest/engine/papertest_engine.py:run:exec_history",
-                "message": "papertest execution_history extraction result",
-                "data": {
-                    "exec_history_len": len(execution_history),
-                    "has_account_info": bool(account_info),
-                    "journal_dir": str(((self.config.get("papertest") or {}).get("session") or {}).get("journal_dir", "papertest/results/journals")),
-                    "session_id": engine_stats.get("session_id"),
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
-
         return PapertestRunResult(
             engine_stats=engine_stats,
             replay_stats=self.wired.replay_adapter.get_replay_statistics(),
@@ -299,23 +277,6 @@ class PapertestEngine:
 
         trades: List[Dict[str, Any]] = []
         last_strength_by_symbol: Dict[str, float] = {}
-
-        # region agent log
-        try:
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H2",
-                "location": "papertest/engine/papertest_engine.py:_extract_execution_history_from_journal:entry",
-                "message": "journal parsing entry",
-                "data": {"path": str(path), "exists": bool(path.exists()), "session_id": session_id},
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
 
         if not path.exists():
             return trades
@@ -376,27 +337,6 @@ class PapertestEngine:
                     )
             except Exception:
                 continue
-
-        # region agent log
-        try:
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H2",
-                "location": "papertest/engine/papertest_engine.py:_extract_execution_history_from_journal:exit",
-                "message": "journal parsing exit",
-                "data": {
-                    "trades_len": len(trades),
-                    "strength_symbols": len(last_strength_by_symbol),
-                    "first_trade": trades[0] if trades else None,
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
 
         return trades
 

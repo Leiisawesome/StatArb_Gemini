@@ -113,30 +113,6 @@ class BasePapertestExperiment(ABC):
 
         This is used by the papertest smoke test for side-by-side parity diffs.
         """
-        # region agent log
-        try:
-            import json as _json
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H2",
-                "location": "papertest/experiments/base_experiment.py:print_summary_backtest_style:entry",
-                "message": "papertest summary rendering entry",
-                "data": {
-                    "experiment_name": result.experiment_name,
-                    "experiment_type": result.experiment_type,
-                    "success": result.success,
-                    "has_engine_execution_history": bool((result.engine_stats or {}).get("execution_history")),
-                    "has_exec_stats_execution_history": bool((result.execution_stats or {}).get("execution_history")),
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(_json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
-
         print("\n" + "=" * 80)
         print(f"📊 EXPERIMENT SUMMARY: {result.experiment_name}")
         print("=" * 80)
@@ -218,32 +194,6 @@ class BasePapertestExperiment(ABC):
             win_rate = (wins / sells * 100.0) if sells else 0.0
         except Exception:
             win_rate = 0.0
-
-        # region agent log
-        try:
-            import json as _json
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H3",
-                "location": "papertest/experiments/base_experiment.py:print_summary_backtest_style:metrics",
-                "message": "papertest computed backtest-style metrics",
-                "data": {
-                    "initial_cash": initial_cash,
-                    "final_equity": final_equity,
-                    "total_return_pct": total_return_pct,
-                    "sharpe_ratio": sharpe_ratio,
-                    "max_drawdown_pct": max_drawdown_pct,
-                    "total_trades": total_trades,
-                    "win_rate": win_rate,
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(_json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
 
         print("Performance Metrics:")
         print(f"  Total Return:    {total_return_pct:>8.2f}%")
@@ -355,23 +305,6 @@ class BasePapertestExperiment(ABC):
         positions: Dict[str, float] = {}
         last_price: Dict[str, float] = {}
         equity_series: list[float] = []
-
-        # region agent log
-        try:
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_smoke_layout",
-                "hypothesisId": "H4",
-                "location": "papertest/experiments/base_experiment.py:_compute_equity_curve_from_journal:entry",
-                "message": "computing equity curve from journal",
-                "data": {"path": str(path), "exists": bool(path.exists()), "initial_cash": cash},
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
 
         if not path.exists():
             return {"sharpe_ratio": 0.0, "max_drawdown_pct": 0.0, "equity_points": 0}
@@ -489,40 +422,6 @@ class BasePapertestExperiment(ABC):
             else:
                 sharpe = raw_sharpe * math.sqrt(252.0 * bars_per_day)
                 sharpe_mode = "annualized"
-
-        # region agent log
-        try:
-            _payload = {
-                "sessionId": "debug-session",
-                "runId": "papertest_sharpe_align",
-                "hypothesisId": "H6",
-                "location": "papertest/experiments/base_experiment.py:_compute_equity_curve_from_journal:exit",
-                "message": "computed equity/sharpe/dd (backtest-aligned, RTH-filtered)",
-                "data": {
-                    "equity_points": len(equity_series),
-                    "bars_seen": bars_seen,
-                    "bars_used": bars_used,
-                    "first_bar_ts": first_bar_ts,
-                    "last_bar_ts": last_bar_ts,
-                    "first_equity": equity_series[0],
-                    "last_equity": equity_series[-1],
-                    "rets_len": len(rets),
-                    "mean_r": mean_r,
-                    "stdev_r": stdev,
-                    "bars_per_day": bars_per_day,
-                    "trading_days": trading_days,
-                    "raw_sharpe": raw_sharpe,
-                    "sharpe_mode": sharpe_mode,
-                    "sharpe": sharpe,
-                    "max_drawdown_pct": max_drawdown_pct,
-                },
-                "timestamp": int(__import__("time").time() * 1000),
-            }
-            with open("/Users/lei/Documents/GitHub/StatArb_Gemini/StatArb_Gemini/.cursor/debug.log", "a") as _f:
-                _f.write(json.dumps(_payload) + "\n")
-        except Exception:
-            pass
-        # endregion agent log
 
         return {"sharpe_ratio": sharpe, "max_drawdown_pct": max_drawdown_pct, "equity_points": len(equity_series)}
 
