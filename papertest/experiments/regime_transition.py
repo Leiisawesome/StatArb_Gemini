@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from papertest.engine.papertest_engine import PapertestEngine
 from papertest.experiments.base_experiment import BasePapertestExperiment, PapertestResult
 
 
@@ -23,9 +22,7 @@ class RegimeTransitionPapertest(BasePapertestExperiment):
         start = time.perf_counter()
         run_ts = datetime.now(timezone.utc)
         try:
-            engine = PapertestEngine(self.config)
-            await engine.initialize()
-            run_result = await engine.run()
+            run_result = await self._run_engine()
 
             duration = time.perf_counter() - start
             stats = run_result.engine_stats or {}

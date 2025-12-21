@@ -306,6 +306,11 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             await self.replay_engine.stop_replay()
             self.status = AdapterStatus.CONNECTED
 
+    def request_stop(self) -> None:
+        """Synchronously request the replay to stop"""
+        if self.replay_engine:
+            self.replay_engine.request_stop()
+
     async def pause_replay(self) -> None:
         """Pause the data replay"""
         if self.replay_engine:

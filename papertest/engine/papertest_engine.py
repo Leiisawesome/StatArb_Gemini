@@ -21,6 +21,7 @@ from core_engine.data.replay.engine import ReplayStatus
 
 from papertest.engine.component_factory import ComponentFactory, WiredPaperSystem
 from papertest.engine.replay_bridge import ReplayToDispatcherBridge
+from papertest.utils.config_loader import parse_debug_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -54,32 +55,10 @@ class PapertestEngine:
         await self.wired.replay_adapter.subscribe(list(data_cfg["symbols"]), ["bar", "quote", "trade"])
 
         # Bridge replay -> dispatcher
-        debug_cfg = (self.config.get("papertest") or {}).get("debug", {}) or {}
-        start_at_timestamp = None
-        start_at_time = debug_cfg.get("start_at_time")
-        stop_after_bars = debug_cfg.get("stop_after_bars")
-        stop_at_timestamp = None
-        stop_at_time = debug_cfg.get("stop_at_time")
-        tz_name = debug_cfg.get("timezone", "America/New_York")
-        if start_at_time:
-            try:
-                hh, mm = [int(x) for x in str(start_at_time).split(":")]
-                start_date = str(self.config["papertest"]["data"]["start_date"])
-                day = datetime.strptime(start_date, "%Y-%m-%d").date()
-                tz = ZoneInfo(tz_name)
-                start_at_timestamp = datetime(day.year, day.month, day.day, hh, mm, tzinfo=tz)
-            except Exception:
-                start_at_timestamp = None
-        if stop_at_time:
-            try:
-                # stop_at_time: "HH:MM" in the configured timezone on the replay start_date
-                hh, mm = [int(x) for x in str(stop_at_time).split(":")]
-                start_date = str(self.config["papertest"]["data"]["start_date"])
-                day = datetime.strptime(start_date, "%Y-%m-%d").date()
-                tz = ZoneInfo(tz_name)
-                stop_at_timestamp = datetime(day.year, day.month, day.day, hh, mm, tzinfo=tz)
-            except Exception:
-                stop_at_timestamp = None
+        debug_ts = parse_debug_timestamps(self.config)
+        start_at_timestamp = debug_ts["start_at_timestamp"]
+        stop_at_timestamp = debug_ts["stop_at_timestamp"]
+        stop_after_bars = debug_ts["stop_after_bars"]
 
         # If we are intentionally skipping early replay data (debug window), we MUST warm up
         # right up to the first processed bar to avoid a large history gap that changes signals.
@@ -92,19 +71,9 @@ class PapertestEngine:
         def _request_stop() -> None:
             """
             Fast-stop for INSTANT replay.
-
-            In ReplaySpeed.INSTANT, the replay loop may not yield to the event loop between
-            timestamps (sync handlers), so scheduling an async stop can be delayed until
-            replay completes. Instead, flip the replay engine's running flag synchronously.
             """
-            try:
-                re = self.wired.replay_adapter.replay_engine
-                if re is None:
-                    return
-                re._running = False  # best-effort fast stop (checked every timestamp)
-                re.status = ReplayStatus.STOPPED
-            except Exception:
-                return
+            if self.wired and self.wired.replay_adapter:
+                self.wired.replay_adapter.request_stop()
 
         self._bridge = ReplayToDispatcherBridge(
             dispatcher=self.wired.dispatcher,

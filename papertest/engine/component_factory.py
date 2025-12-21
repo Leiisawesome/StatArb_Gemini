@@ -153,21 +153,7 @@ class ComponentFactory:
         risk_manager.set_session_gate(session_gate)
         risk_manager.set_risk_budget(risk_budget)
         # Ensure risk manager can account for pending exposure (OMS) in Gate 3
-        if hasattr(risk_manager, "set_order_management_system"):
-            try:
-                risk_manager.set_order_management_system(oms)
-            except Exception:
-                pass
-        elif hasattr(risk_manager, "set_oms"):
-            try:
-                risk_manager.set_oms(oms)
-            except Exception:
-                pass
-        else:
-            try:
-                setattr(risk_manager, "_oms", oms)
-            except Exception:
-                pass
+        risk_manager.set_oms(oms)
 
         execution_engine = UnifiedExecutionEngine({"test_mode": bool(exec_cfg.get("test_mode", True))})
         paper_broker = PaperBrokerAdapter(

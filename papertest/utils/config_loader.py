@@ -9,18 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Optional
-import copy
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yaml
 
-
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    out = copy.deepcopy(base)
-    for k, v in (override or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = copy.deepcopy(v)
-    return out
+from core_engine.utils.config import deep_merge
 
 
 def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -36,7 +29,7 @@ def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dic
         base_cfg = yaml.safe_load(base_path.read_text()) or {}
 
     override_cfg = yaml.safe_load(cfg_path.read_text()) or {}
-    merged = _deep_merge(base_cfg, override_cfg)
+    merged = deep_merge(base_cfg, override_cfg)
     validate_papertest_schema(merged)
     return merged
 
@@ -80,5 +73,42 @@ def validate_papertest_schema(cfg: Dict[str, Any]) -> None:
         for k in ("start_at_time", "stop_at_time"):
             if k in debug and debug[k] is not None and not isinstance(debug[k], (str, int)):
                 raise ValueError(f"papertest.debug.{k} must be a string like 'HH:MM' if provided")
+
+
+def parse_debug_timestamps(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parse start_at_time and stop_at_time from config into datetime objects.
+    """
+    pt = config.get("papertest", {})
+    debug_cfg = pt.get("debug", {}) or {}
+    data_cfg = pt.get("data", {})
+    
+    start_date = str(data_cfg.get("start_date", ""))
+    tz_name = debug_cfg.get("timezone", "America/New_York")
+    
+    results = {
+        "start_at_timestamp": None,
+        "stop_at_timestamp": None,
+        "stop_after_bars": debug_cfg.get("stop_after_bars")
+    }
+    
+    if not start_date:
+        return results
+
+    day = datetime.strptime(start_date, "%Y-%m-%d").date()
+    tz = ZoneInfo(tz_name)
+
+    for key in ("start_at_time", "stop_at_time"):
+        val = debug_cfg.get(key)
+        if val:
+            try:
+                hh, mm = [int(x) for x in str(val).split(":")]
+                results[key.replace("_time", "_timestamp")] = datetime(
+                    day.year, day.month, day.day, hh, mm, tzinfo=tz
+                )
+            except Exception:
+                pass
+                
+    return results
 
 

@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
 
+from core_engine.utils.config import deep_merge
+
 logger = logging.getLogger(__name__)
 
 def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -46,31 +48,10 @@ def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dic
         primary_config = yaml.safe_load(f) or {}
 
     # Merge configs (primary overrides base)
-    config = _deep_merge(config, primary_config)
+    config = deep_merge(config, primary_config)
 
     logger.info(f"Loaded config: {config_path}")
     return config
-
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Deep merge two dictionaries.
-
-    Args:
-        base: Base dictionary
-        override: Override dictionary (takes precedence)
-
-    Returns:
-        Merged dictionary
-    """
-    result = base.copy()
-
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-
-    return result
 
 def save_config(config: Dict[str, Any], output_path: str):
     """

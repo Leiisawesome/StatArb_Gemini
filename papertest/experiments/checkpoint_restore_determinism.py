@@ -28,9 +28,8 @@ class CheckpointRestoreDeterminismPapertest(BasePapertestExperiment):
         start = time.perf_counter()
         run_ts = datetime.now(timezone.utc)
         try:
-            engine = PapertestEngine(self.config)
-            await engine.initialize()
-            run_result = await engine.run()
+            # Use the base helper to run the engine
+            engine, run_result = await self._run_engine()
 
             # Inspect checkpoint dir
             checkpoint_dir = Path(self.config["papertest"]["session"].get("checkpoint_dir", "papertest/results/checkpoints"))

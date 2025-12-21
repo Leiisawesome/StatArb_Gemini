@@ -83,6 +83,15 @@ class BasePapertestExperiment(ABC):
     @abstractmethod
     def get_description(self) -> str: ...
 
+    async def _run_engine(self) -> Any:
+        """
+        Helper to initialize and run the PapertestEngine.
+        """
+        from papertest.engine.papertest_engine import PapertestEngine
+        engine = PapertestEngine(self.config)
+        await engine.initialize()
+        return await engine.run()
+
     def print_summary(self, result: PapertestResult) -> None:
         print("\n" + "=" * 80)
         print(f"📎 PAPERTEST SUMMARY: {result.experiment_name}")

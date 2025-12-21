@@ -239,7 +239,7 @@ class HistoricalDataReplayEngine:
 
     async def stop_replay(self) -> None:
         """Stop the data replay gracefully."""
-        self._running = False
+        self.request_stop()
         self.stats.end_time = datetime.now()
 
         # Cancel replay task if running
@@ -255,6 +255,14 @@ class HistoricalDataReplayEngine:
 
         await self._notify_status_handlers()
         logger.info("🛑 Data replay stopped")
+
+    def request_stop(self) -> None:
+        """
+        Synchronously request the replay loop to stop.
+        Useful for INSTANT replay mode where the event loop may be blocked.
+        """
+        self._running = False
+        logger.debug("Replay stop requested")
 
     async def pause_replay(self) -> None:
         """Pause the data replay."""

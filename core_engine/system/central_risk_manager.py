@@ -500,6 +500,20 @@ class CentralRiskManager(ISystemComponent):
         """Get the PositionBook if set, None otherwise"""
         return self._position_book
 
+    def set_oms(self, oms: Any) -> None:
+        """
+        Set the Order Management System.
+
+        Args:
+            oms: OrderManagementSystem instance
+        """
+        self._oms = oms
+        logger.info("✅ OrderManagementSystem registered with Central Risk Manager")
+
+    def set_order_management_system(self, oms: Any) -> None:
+        """Alias for set_oms"""
+        self.set_oms(oms)
+
     def has_position_book(self) -> bool:
         """Check if PositionBook is configured"""
         return self._position_book is not None
