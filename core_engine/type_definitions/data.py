@@ -4,10 +4,11 @@ Core Engine Data Types
 Lightweight data management for standalone core_engine.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from datetime import datetime, timedelta
+from enum import Enum
 import pandas as pd
 import numpy as np
 import logging
@@ -19,6 +20,36 @@ except ImportError:
     # Fallback for standalone usage
     class DataUnavailableError(Exception):
         """Raised when required data is unavailable"""
+
+class DataSource(Enum):
+    """Market data source types"""
+    EXCHANGE = "exchange"
+    VENDOR = "vendor"
+    BROKER = "broker"
+    INTERNAL = "internal"
+    ALTERNATIVE = "alternative"
+    SYNTHETIC = "synthetic"
+    CLICKHOUSE = "clickhouse"
+
+class DataType(Enum):
+    """Market data types"""
+    QUOTE = "quote"
+    TRADE = "trade"
+    DEPTH = "depth"
+    OHLCV = "ohlcv"
+    STATISTICS = "statistics"
+    NEWS = "news"
+    FUNDAMENTAL = "fundamental"
+    TECHNICAL = "technical"
+
+class DataQuality(Enum):
+    """Data quality levels"""
+    REAL_TIME = "real_time"
+    DELAYED = "delayed"
+    SNAPSHOT = "snapshot"
+    HISTORICAL = "historical"
+    ESTIMATED = "estimated"
+    DERIVED = "derived"
 
 @dataclass
 class DataConfig:
@@ -36,19 +67,37 @@ class DataConfig:
 
 @dataclass
 class MarketData:
-    """Market data container"""
+    """
+    Comprehensive Market Data Container
+    Unified across all core_engine bricks (Rule 3: Unified Data Flow)
+    """
     symbol: str
     timestamp: datetime
     open: float
     high: float
     low: float
     close: float
-    volume: int
+    volume: float
 
-    # Additional fields
+    # Extended OHLCV & Pricing
     adjusted_close: Optional[float] = None
+    vwap: Optional[float] = None
+    transactions: Optional[int] = None
+
+    # Quote Data
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    bid_size: Optional[float] = None
+    ask_size: Optional[float] = None
+
+    # Corporate Actions
     dividend: Optional[float] = None
     split_ratio: Optional[float] = None
+
+    # Metadata
+    source: str = "clickhouse"
+    exchange: Optional[str] = None
+    quality_score: float = 1.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -61,8 +110,16 @@ class MarketData:
             'close': self.close,
             'volume': self.volume,
             'adjusted_close': self.adjusted_close,
+            'vwap': self.vwap,
+            'transactions': self.transactions,
+            'bid': self.bid,
+            'ask': self.ask,
+            'bid_size': self.bid_size,
+            'ask_size': self.ask_size,
             'dividend': self.dividend,
-            'split_ratio': self.split_ratio
+            'split_ratio': self.split_ratio,
+            'source': self.source,
+            'exchange': self.exchange
         }
 
     @classmethod

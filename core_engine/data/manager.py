@@ -102,7 +102,7 @@ except ImportError:
 
 # Import high-quality data components when available
 try:
-    from data.manager import DataManager as CoreDataManager, IDataSubscriber, MarketDataPoint
+    from data.manager import DataManager as CoreDataManager, IDataSubscriber
 except ImportError:
     # Fallback definitions for architectural compliance
     class IDataSubscriber(ABC):
@@ -110,7 +110,6 @@ except ImportError:
         async def on_market_data(self, data: Any) -> None:
             pass
 
-    MarketDataPoint = None
     CoreDataManager = None
 
 logger = logging.getLogger(__name__)
@@ -206,24 +205,6 @@ class ClickHouseDataConfig(DataConfig):
             )
         )
 
-@dataclass
-class EnhancedMarketData(MarketData):
-    """Enhanced market data structure extending core_engine MarketData"""
-    transactions: Optional[int] = None
-    source: str = "clickhouse"
-
-    def to_core_format(self) -> MarketData:
-        """Convert to core_engine MarketData format"""
-        return MarketData(
-            symbol=self.symbol,
-            timestamp=self.timestamp,
-            open=self.open,
-            high=self.high,
-            low=self.low,
-            close=self.close,
-            volume=int(self.volume) if self.volume else 0
-        )
-
 class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     """
     Architecturally Compliant ClickHouse Data Manager
@@ -242,7 +223,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     - Compatible with existing portfolio and risk managers
     """
 
-    def __init__(self, config: Optional[Union[ClickHouseDataConfig, Any, Dict[str, Any]]] = None):
+    def __init__(self, config: Optional[Union[CentralizedDataConfig, Any, Dict[str, Any]]] = None):
         """
         Initialize ClickHouse Data Manager
 
@@ -257,9 +238,6 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         if config is None:
             # Default: Use legacy for backward compatibility
             self.enhanced_config = ClickHouseDataConfig()
-        elif isinstance(config, ClickHouseDataConfig):
-            # Legacy config
-            self.enhanced_config = config
         elif CentralizedDataConfig and isinstance(config, CentralizedDataConfig):
             # New centralized config - convert to legacy for internal use
             logger.info("✅ Using centralized DataConfig (Rule 1, Section 7)")
@@ -274,6 +252,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 enable_caching=config.caching.enable_caching,
                 cache_ttl=config.caching.cache_ttl
             )
+        elif isinstance(config, ClickHouseDataConfig):
+            # Legacy config
+            self.enhanced_config = config
         elif isinstance(config, dict):
             # Dictionary config - convert to legacy
             self.enhanced_config = ClickHouseDataConfig(**config)
@@ -536,7 +517,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         if subscriber in self.subscribers:
             self.subscribers.remove(subscriber)
 
-    async def notify_subscribers(self, data: EnhancedMarketData) -> None:
+    async def notify_subscribers(self, data: MarketData) -> None:
         """Notify all subscribers of new data"""
         for subscriber in self.subscribers:
             try:
@@ -1003,8 +984,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Get the latest row
             latest_row = df.iloc[-1]
 
-            # Create EnhancedMarketData object
-            market_data = EnhancedMarketData(
+            # Create MarketData object
+            market_data = MarketData(
                 symbol=symbol,
                 timestamp=latest_row.name,
                 open=float(latest_row['open']),

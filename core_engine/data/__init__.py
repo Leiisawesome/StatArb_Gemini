@@ -7,11 +7,9 @@ with centralized configuration management (Rule 1, Section 7).
 
 Core Components:
     - ClickHouseDataManager: Primary data access and management
-    - AlternativeDataHandler: Alternative data processing and sentiment analysis
     - LiquidityAssessmentEngine: Liquidity risk assessment
     - DataValidator: Data quality validation and error detection
     - FeedManager: Real-time and historical data feed management
-    - MarketDataHandler: Multi-source market data aggregation
 
 Configuration:
     All configuration centralized in core_engine.config.DataConfig
@@ -36,26 +34,14 @@ from .manager import (
 )
 
 # ============================================================================
-# DATA SOURCES
+# DATA TYPES & ENUMS (RULE 3: UNIFIED DATA FLOW)
 # ============================================================================
 
-from .sources.clickhouse import (
-    DataEngineConfig,  # DEPRECATED - use DataConfig from core_engine.config
-    # Note: Other classes in clickhouse.py have optional imports
-)
-
-from .sources.market_data import (
-    # Enums
+from core_engine.type_definitions.data import (
+    MarketData,
     DataSource,
     DataType,
     DataQuality,
-
-    # Data Structures
-    MarketDataPoint,
-    DataSubscription,
-
-    # Handlers (if exported)
-    # MarketDataHandler,  # May need to be added if class exists
 )
 
 # ============================================================================
@@ -134,30 +120,6 @@ from .validation.validator import (
 )
 
 # ============================================================================
-# ALTERNATIVE DATA
-# ============================================================================
-
-from .alternative_data_handler import (
-    # Enums
-    AlternativeDataType,
-    DataProvider,
-    ProcessingStatus,
-
-    # Data Structures
-    AlternativeDataPoint,
-    AlternativeDataRequest,
-    AlternativeDataResponse,
-    SentimentAnalysis,
-    NewsAnalysis,
-    WebScrapingTarget,
-
-    # Core Components
-    SentimentAnalyzer,
-    WebScraper,
-    AlternativeDataHandler,
-)
-
-# ============================================================================
 # LIQUIDITY ASSESSMENT
 # ============================================================================
 
@@ -175,13 +137,11 @@ __all__ = [
     'ClickHouseDataManager',
     'ClickHouseDataConfig',  # DEPRECATED
 
-    # ===== DATA SOURCES =====
-    'DataEngineConfig',  # DEPRECATED
+    # ===== DATA TYPES & ENUMS =====
+    'MarketData',
     'DataSource',
     'DataType',
     'DataQuality',
-    'MarketDataPoint',
-    'DataSubscription',
 
     # ===== DATA FEEDS =====
     'FeedConfiguration',
@@ -222,25 +182,6 @@ __all__ = [
     # ===== DATA VALIDATION =====
     'ValidationConfiguration',  # DEPRECATED
 
-    # ===== ALTERNATIVE DATA =====
-    # Enums
-    'AlternativeDataType',
-    'DataProvider',
-    'ProcessingStatus',
-
-    # Data Structures
-    'AlternativeDataPoint',
-    'AlternativeDataRequest',
-    'AlternativeDataResponse',
-    'SentimentAnalysis',
-    'NewsAnalysis',
-    'WebScrapingTarget',
-
-    # Core Components
-    'SentimentAnalyzer',
-    'WebScraper',
-    'AlternativeDataHandler',
-
     # ===== LIQUIDITY ASSESSMENT =====
     'LiquidityRegime',
     'LiquidityAssessmentEngine',
@@ -269,7 +210,6 @@ Please migrate to centralized configuration:
 
 DEPRECATED Classes:
     - ClickHouseDataConfig → Use DataConfig from core_engine.config
-    - DataEngineConfig → Use DataConfig from core_engine.config
     - ValidationConfiguration → Use DataValidationConfig from core_engine.config
 
 See: core_engine/config/component_config.py for the new centralized configs.
