@@ -185,7 +185,7 @@ class ClickHouseDataConfig(DataConfig):
             self.start_date = "2024-12-20"
             self.end_date = "2024-12-20"
 
-    def to_centralized_config(self) -> 'CentralizedDataConfig':
+    def to_centralized_config(self) -> Any:
         """Convert to centralized DataConfig format"""
         if CentralizedDataConfig is None or ConnectionConfig is None or CachingConfig is None:
             raise ImportError("Centralized configuration classes not available")
@@ -242,7 +242,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     - Compatible with existing portfolio and risk managers
     """
 
-    def __init__(self, config: Optional[Union[ClickHouseDataConfig, 'CentralizedDataConfig', Dict[str, Any]]] = None):
+    def __init__(self, config: Optional[Union[ClickHouseDataConfig, Any, Dict[str, Any]]] = None):
         """
         Initialize ClickHouse Data Manager
 
