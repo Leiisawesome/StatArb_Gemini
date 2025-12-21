@@ -20,7 +20,7 @@ import cProfile
 import pstats
 import io
 
-from .logging import get_logger, log_performance_metric
+from .structured_logging import get_logger, log_performance_metric
 
 logger = get_logger("performance")
 

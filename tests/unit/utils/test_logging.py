@@ -12,7 +12,7 @@ from unittest.mock import patch
 from core_engine.utils.exceptions import (
     ErrorContext
 )
-from core_engine.utils.logging import (
+from core_engine.utils.structured_logging import (
     StructuredFormatter, ComponentFilter, LevelFilter, LogConfig,
     StructuredLogger, init_logging, get_logger, log_error_with_context,
     log_performance_metric, log_trade_event, log_component_start,
@@ -134,7 +134,7 @@ class TestLogging:
         assert config.enable_syslog is True
         assert config.syslog_address == ("localhost", 514)
 
-    @patch('core_engine.utils.logging.logging')
+    @patch('core_engine.utils.structured_logging.logging')
     def test_structured_logger_initialization(self, mock_logging):
         """Test StructuredLogger initialization"""
         config = LogConfig(level="INFO", console_output=True)
@@ -171,7 +171,7 @@ class TestLogging:
     def test_get_logger(self):
         """Test get_logger function"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         logger = get_logger("test")
@@ -181,7 +181,7 @@ class TestLogging:
     def test_log_error_with_context(self):
         """Test log_error_with_context function"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         context = ErrorContext(component="test", operation="test_op")
@@ -193,7 +193,7 @@ class TestLogging:
     def test_log_performance_metric(self):
         """Test log_performance_metric function"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         # Should not raise (logger not initialized)
@@ -202,7 +202,7 @@ class TestLogging:
     def test_log_trade_event(self):
         """Test log_trade_event function"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         # Should not raise (logger not initialized)
@@ -211,7 +211,7 @@ class TestLogging:
     def test_convenience_logging_functions(self):
         """Test convenience logging functions"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         # These should not raise even without initialized logger
@@ -223,7 +223,7 @@ class TestLogging:
     def test_setup_logger_backward_compatibility(self):
         """Test setup_logger backward compatibility"""
         # Reset global state
-        import core_engine.utils.logging as logging_module
+        import core_engine.utils.structured_logging as logging_module
         logging_module._logger_instance = None
 
         logger = setup_logger("test", "INFO")

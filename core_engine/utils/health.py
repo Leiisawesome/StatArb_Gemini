@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from .logging import get_logger
+from .structured_logging import get_logger
 
 logger = get_logger("health")
 
