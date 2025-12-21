@@ -84,6 +84,26 @@ class InstitutionalBacktestEngine:
         Args:
             config: Complete backtest configuration mapping to all Lego Bricks
         """
+        # Canonicalize backtest outputs under backtest/results/ regardless of CWD.
+        # This prevents duplicated folders like backtest/backtest_results, reports/, etc.
+        from pathlib import Path as _Path
+        from backtest.utils.paths import backtest_results_dir
+
+        if hasattr(config, "output_directory"):
+            od = getattr(config, "output_directory", None)
+            if not od:
+                config.output_directory = str(backtest_results_dir())
+            else:
+                od_path = _Path(str(od))
+                if not od_path.is_absolute():
+                    # Keep everything under the canonical results root.
+                    # If caller provided "reports" or "some_subdir", nest it under backtest/results/.
+                    # If caller provided legacy defaults, collapse them to backtest/results/.
+                    if str(od) in ("backtest_results", "backtest/results"):
+                        config.output_directory = str(backtest_results_dir())
+                    else:
+                        config.output_directory = str(backtest_results_dir() / od_path)
+
         self.config = config
         self.backtest_name = config.backtest_name
         self.backtest_mode = config.backtest_mode
@@ -1122,11 +1142,15 @@ class InstitutionalBacktestEngine:
             # Create strategy manager config
             # For backtesting, we enable multi-strategy coordination and
             # enhanced strategy support
+            from backtest.utils.paths import backtest_results_dir
+
             strategy_config = {
                 'enable_multi_strategy_coordination': True,  # Rule 5
                 'enable_enhanced_strategies': True,
                 'auto_discover_strategies': False,  # Manual registration in backtest
-                'strategy_registry_path': 'strategy_registry.json',  # Registry path for strategy metadata
+                # Canonicalize registry under backtest/results/ regardless of CWD.
+                # Use a directory-like name (registry implementation stores multiple files).
+                'strategy_registry_path': str(backtest_results_dir() / 'strategy_registry'),
                 'max_concurrent_strategies': 10,
                 'signal_aggregation_method': 'weighted_average',
                 'conflict_resolution_method': 'confidence_weighted',
@@ -2035,6 +2059,8 @@ class InstitutionalBacktestEngine:
                 EnhancedAnalyticsManager, AnalyticsConfig, AnalyticsMode
             )
 
+            from backtest.utils.paths import backtest_results_dir, backtest_reports_dir
+
             # Create analytics manager config
             analytics_config = AnalyticsConfig(
                 # Mode
@@ -2047,8 +2073,8 @@ class InstitutionalBacktestEngine:
                 enable_caching=True,
                 cache_ttl_hours=24,
 
-                # Storage
-                output_directory='backtest_results',
+                # Storage (canonicalize under backtest/results/)
+                output_directory=str(backtest_results_dir()),
                 archive_old_results=False,  # Don't archive during backtest
 
                 # Analysis
@@ -2061,6 +2087,10 @@ class InstitutionalBacktestEngine:
                 auto_generate_reports=True,
                 report_frequency='daily'
             )
+
+            # Ensure report artifacts go under backtest/results/reports/ (not ./reports)
+            if getattr(analytics_config, "report_config", None) is not None and hasattr(analytics_config.report_config, "output_directory"):
+                analytics_config.report_config.output_directory = str(backtest_reports_dir())
 
             # Create analytics manager
             self.analytics_manager = EnhancedAnalyticsManager(analytics_config)
@@ -2124,7 +2154,7 @@ class InstitutionalBacktestEngine:
 
         logger.info(f"✅ Performance reporting configured")
         logger.info(f"   Source: EnhancedAnalyticsManager (Rule 9)")
-        logger.info(f"   Output Directory: backtest_results")
+        logger.info(f"   Output Directory: {getattr(self.analytics_manager.config, 'output_directory', 'N/A') if self.analytics_manager else 'N/A'}")
         logger.info(f"   Risk-Free Rate: 4.0%")
         logger.info(f"\n   Capabilities (via EnhancedAnalyticsManager):")
         logger.info(f"   • Performance metrics calculation")
@@ -2734,7 +2764,8 @@ class InstitutionalBacktestEngine:
             # Export if requested
             if export:
                 from pathlib import Path
-                output_dir = Path(self.config.output_directory) if hasattr(self.config, 'output_directory') else Path("backtest_results")
+                from backtest.utils.paths import backtest_results_dir
+                output_dir = Path(self.config.output_directory) if hasattr(self.config, 'output_directory') else backtest_results_dir()
                 output_dir.mkdir(parents=True, exist_ok=True)
 
                 if format.lower() == 'json':

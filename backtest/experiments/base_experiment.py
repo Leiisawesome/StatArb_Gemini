@@ -16,6 +16,8 @@ import json
 import logging
 from pathlib import Path
 
+from backtest.utils.paths import backtest_results_dir
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -76,7 +78,7 @@ class BaseExperiment(ABC):
     - Config-driven execution
     """
 
-    def __init__(self, config: Dict[str, Any], output_dir: str = "backtest/results"):
+    def __init__(self, config: Dict[str, Any], output_dir: Optional[str] = None):
         """
         Initialize experiment.
 
@@ -85,7 +87,9 @@ class BaseExperiment(ABC):
             output_dir: Directory for results output
         """
         self.config = config
-        self.output_dir = Path(output_dir)
+        # Canonicalize output location to a single backtest/results/ directory
+        # regardless of current working directory.
+        self.output_dir = Path(output_dir) if output_dir else backtest_results_dir()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(self.__class__.__name__)
 

@@ -30,6 +30,7 @@ from backtest.engine.institutional_backtest_engine import InstitutionalBacktestE
 from core_engine.config import BacktestConfig, BacktestMode  # CENTRALIZED CONFIG
 from backtest.cli.interactive import InteractiveBacktestCLI
 from backtest.cli.config_builder import ConfigurationBuilder
+from backtest.utils.paths import backtest_results_dir
 
 class BacktestCLI:
     """
@@ -233,7 +234,7 @@ Examples:
                 report = engine.generate_performance_report()
 
                 # Save results
-                output_dir = Path(args.output) if args.output else Path('backtest_results')
+                output_dir = Path(args.output) if args.output else backtest_results_dir()
                 output_dir.mkdir(exist_ok=True, parents=True)
 
                 # Save results JSON
@@ -387,7 +388,7 @@ Examples:
             self._display_results_summary(results)
 
             # Save report
-            output_dir = Path(args.output) if args.output else Path('backtest_results')
+            output_dir = Path(args.output) if args.output else backtest_results_dir()
             output_dir.mkdir(exist_ok=True, parents=True)
 
             report_path = output_dir / "report.html"

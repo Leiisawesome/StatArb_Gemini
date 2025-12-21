@@ -22,6 +22,7 @@ import time
 from backtest.experiments.base_experiment import BaseExperiment, ExperimentResult
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
+from backtest.utils.paths import backtest_results_dir
 
 class SmokeTest(BaseExperiment):
     """
@@ -116,6 +117,8 @@ class SmokeTest(BaseExperiment):
             'max_position_size': self.config.get('max_position_size', 0.10),
             'max_concentration': self.config.get('max_concentration', 0.20),
             'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
+            # Canonicalize all backtest outputs under backtest/results/ regardless of CWD
+            'output_directory': str(backtest_results_dir()),
         }
 
         # Add regime risk multipliers if provided
