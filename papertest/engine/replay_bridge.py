@@ -79,6 +79,15 @@ class ReplayToDispatcherBridge:
         # This keeps reproductions to a few seconds while preserving determinism inside the window.
         if event_type == EventType.BAR and self._start_at_timestamp is not None and ts < self._start_at_timestamp:
             self._skipped_before_start += 1
+            
+            # Enqueue a heartbeat to keep watchdog alive during fast-forward
+            # We use a low-priority SYSTEM event that the engine will ignore but watchdog will see
+            self._dispatcher.enqueue(
+                event_type=EventType.SYSTEM,
+                payload={'type': 'heartbeat', 'reason': 'fast_forward', 'timestamp': ts.isoformat()},
+                market_timestamp=ts,
+                event_id=f"heartbeat-{ts.timestamp()}-{msg.symbol}"
+            )
             return
 
         payload = self._normalize_payload(msg)

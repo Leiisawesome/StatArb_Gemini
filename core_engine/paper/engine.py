@@ -32,6 +32,8 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional
 import threading
 
+from ..system.event_dispatcher import EventType
+
 logger = logging.getLogger(__name__)
 
 class PaperTradingState(Enum):
@@ -70,6 +72,10 @@ class PaperTradingConfig:
     # Execution settings
     initial_cash: float = 100_000.0
     commission_per_share: float = 0.005
+
+    # EOD Liquidation settings
+    enable_eod_liquidation: bool = False
+    eod_close_time: str = "15:55"
 
 class PaperTradingEngine:
     """
@@ -141,6 +147,7 @@ class PaperTradingEngine:
         # Bar-open execution (next_bar_open semantics)
         self._last_bar_open_timestamp: Optional[datetime] = None
         self._pending_open_signals: List[Any] = []
+        self._eod_flags: Dict[str, bool] = {}
         # Execution sequencing (parity shim): backtest does not always have regime context on the first trade.
         self._execution_count: int = 0
 
@@ -403,7 +410,11 @@ class PaperTradingEngine:
 
                         # Update watchdog
                         if self._watchdog:
-                            self._watchdog.on_bar_processed()
+                            # Only count BAR events as bars; others are heartbeats
+                            if event.event_type == EventType.BAR:
+                                self._watchdog.on_bar_processed()
+                            else:
+                                self._watchdog.on_heartbeat()
 
                         # Check for checkpoint
                         if self._state_manager:
@@ -711,6 +722,96 @@ class PaperTradingEngine:
                     event.sequence_number,
                 )
 
+        # 12. Check for EOD liquidation
+        await self._check_eod_liquidation(timestamp, bar)
+
+    async def _check_eod_liquidation(self, timestamp: datetime, bar: Dict[str, Any]) -> int:
+        """
+        Check if we should perform EOD liquidation and close all positions.
+        """
+        if not self.config.enable_eod_liquidation:
+            return 0
+
+        # Parse EOD time
+        try:
+            eod_hour, eod_minute = map(int, self.config.eod_close_time.split(':'))
+        except (ValueError, AttributeError):
+            eod_hour, eod_minute = 15, 55
+
+        # Convert timestamp to comparable format (NY time)
+        import pandas as pd
+        ts = pd.Timestamp(timestamp)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert('America/New_York')
+        else:
+            # Assume UTC if no TZ, but for papertest it's usually NY
+            ts = ts.tz_localize('UTC').tz_convert('America/New_York')
+
+        current_time_mins = ts.hour * 60 + ts.minute
+        eod_time_mins = eod_hour * 60 + eod_minute
+
+        if current_time_mins < eod_time_mins:
+            return 0
+
+        # Only liquidate if we haven't already at this timestamp
+        eod_key = f"eod_liquidated_{ts.date()}"
+        if self._eod_flags.get(eod_key, False):
+            return 0
+
+        # Get current positions from broker
+        if not self._paper_broker:
+            return 0
+
+        # We need to check all positions. 
+        # For parity with backtest, we should close everything.
+        liquidated_count = 0
+        
+        # Get all symbols with positions
+        symbols_to_close = []
+        try:
+            # This is a bit expensive but necessary for EOD
+            # In a real system we'd track this in the position book
+            if self._position_book:
+                symbols_to_close = list(self._position_book.get_all_positions().keys())
+            elif hasattr(self._paper_broker, "get_all_positions"):
+                positions = self._paper_broker.get_all_positions()
+                symbols_to_close = [p.symbol for p in positions if abs(p.quantity) > 0]
+        except Exception as e:
+            logger.error(f"Failed to get positions for EOD liquidation: {e}")
+            return 0
+
+        if not symbols_to_close:
+            return 0
+
+        self._eod_flags[eod_key] = True
+        logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(symbols_to_close)} positions")
+
+        for symbol in symbols_to_close:
+            pos = None
+            if self._position_book:
+                pos = self._position_book.get_position(symbol)
+            elif self._paper_broker:
+                pos = self._paper_broker.get_position(symbol)
+            
+            if pos and abs(pos.quantity) > 0:
+                side = "sell" if pos.quantity > 0 else "buy"
+                
+                # Create a liquidation signal
+                signal = {
+                    'symbol': symbol,
+                    'side': side,
+                    'requested_quantity': abs(pos.quantity),
+                    'type': 'market',
+                    'reason': 'EOD_LIQUIDATION',
+                    'signal_timestamp': timestamp
+                }
+                
+                logger.info(f"   💰 EOD: {side.upper()} {abs(pos.quantity)} {symbol}")
+                await self.submit_signal(signal)
+                liquidated_count += 1
+
+        return liquidated_count
+
     def _normalize_strategy_signal(self, s: Any, market_timestamp: datetime, bar_close_price: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """
         Convert StrategyManager aggregated signal into PaperTradingEngine.submit_signal() dict.
@@ -1010,6 +1111,10 @@ class PaperTradingEngine:
         try:
             if self._risk_manager and symbol:
                 side = fill.get('side', '')
+                # Handle Enum if necessary
+                if hasattr(side, 'value'):
+                    side = str(side.value)
+                
                 qty = float(fill.get('quantity', 0) or 0)
                 px = float(fill.get('price', 0) or 0)
                 ts = fill.get('timestamp')

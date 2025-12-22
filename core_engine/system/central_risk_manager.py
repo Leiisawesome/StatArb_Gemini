@@ -253,7 +253,7 @@ class CentralRiskManager(ISystemComponent):
         self.current_prices: Dict[str, float] = {}  # symbol -> last known price
 
         # Portfolio value and cash (synced from PositionBook when available)
-        initial_capital = config.get('initial_capital', 1000000.0) if isinstance(config, dict) else 1000000.0
+        initial_capital = config.get('initial_capital', 100000.0) if isinstance(config, dict) else 100000.0
         self.portfolio_value: float = initial_capital
         self.available_cash: float = initial_capital  # DEPRECATED: Use position_book.get_cash_balance()
         self.position_history: List[Dict[str, Any]] = []  # DEPRECATED: PositionBook tracks fill history
@@ -3255,7 +3255,10 @@ class CentralRiskManager(ISystemComponent):
         if side == 'sell':
             sellable = current_position + pending_buy_qty
             if quantity > sellable:
+                logger.info(f"❌ Gate 3 Reject: {symbol} quantity {quantity} > sellable {sellable} (pos={current_position}, pending_buy={pending_buy_qty})")
                 max_qty = min(max_qty, max(0, sellable))
+        else:
+            pass
 
         return {
             'passed': max_qty > 0,

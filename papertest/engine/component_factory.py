@@ -75,6 +75,15 @@ class ComponentFactory:
         risk_cfg = pt.get("risk", {})
         exec_cfg = pt.get("execution", {})
 
+        # EOD Liquidation settings (extract from first strategy if available)
+        enable_eod = False
+        eod_time = "15:55"
+        strategies = pt.get("strategies", [])
+        if strategies:
+            params = strategies[0].get("parameters", {})
+            enable_eod = bool(params.get("enable_eod_liquidation", False))
+            eod_time = str(params.get("eod_close_time", "15:55"))
+
         # Session ids
         session_prefix = session_cfg.get("id_prefix", "pt")
         paper_cfg = PaperTradingConfig(
@@ -89,6 +98,8 @@ class ComponentFactory:
             initial_cash=float(exec_cfg.get("initial_cash", 100_000.0)),
             commission_per_share=float(exec_cfg.get("commission_per_share", 0.005)),
             stall_threshold_seconds=float(session_cfg.get("stall_threshold_seconds", 60.0)),
+            enable_eod_liquidation=enable_eod,
+            eod_close_time=eod_time,
         )
 
         engine = PaperTradingEngine(paper_cfg)
@@ -148,6 +159,7 @@ class ComponentFactory:
                 "max_position_pct": float(risk_cfg.get("max_position_pct", 0.05)),
                 "max_positions": int(risk_cfg.get("max_positions", 5)),
                 "position_concentration_limit": float(risk_cfg.get("position_concentration_limit", 0.15)),
+                "initial_capital": float(exec_cfg.get("initial_cash", 100_000.0)),
             }
         )
         risk_manager.set_session_gate(session_gate)

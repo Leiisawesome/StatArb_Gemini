@@ -174,6 +174,20 @@ class PaperTradingWatchdog:
                 self._stats['recoveries'] += 1
                 logger.info("🐕 Watchdog: Activity resumed, alert cleared")
 
+    def on_heartbeat(self) -> None:
+        """
+        Called to indicate activity without incrementing bar count.
+        Resets the stall timer.
+        """
+        with self._lock:
+            self._last_bar_time = monotonic()
+
+            # Reset alert level on activity
+            if self._alert_level != WatchdogAlertLevel.NORMAL:
+                self._alert_level = WatchdogAlertLevel.NORMAL
+                self._stats['recoveries'] += 1
+                logger.info("🐕 Watchdog: Activity resumed (heartbeat), alert cleared")
+
     def update_queue_depth(self, depth: int) -> None:
         """Update current queue depth."""
         with self._lock:
