@@ -456,6 +456,13 @@ class PaperTradingEngine:
         bar = event.payload
         timestamp = event.market_timestamp
 
+        # CRITICAL SAFETY CHECK: Ensure bar data matches the event symbol
+        # This prevents cross-symbol contamination from the data source
+        bar_symbol = bar.get('symbol')
+        if bar_symbol and bar_symbol != symbol:
+            logger.warning(f"⚠️ Data contamination detected: Event symbol {symbol} != Bar symbol {bar_symbol}. Skipping.")
+            return
+
         self._stats['bars_processed'] += 1
 
         # === BarOpenSynthesizer: execute next-bar-open signals once per timestamp ===
@@ -545,6 +552,10 @@ class PaperTradingEngine:
                 # Compute indicators over the full buffer window for strategy compatibility
                 ind_df = self._indicator_adapter.compute_indicators_batch(buffer, last_n=len(buffer))
                 if ind_df is not None and len(ind_df) > 0:
+                    # Ensure the symbol column is present and correct in the enriched DF
+                    if 'symbol' not in ind_df.columns:
+                        ind_df['symbol'] = symbol
+                    
                     enriched_df = ind_df
                     # Extract last-row indicator values for optional feature transform
                     last = ind_df.iloc[-1]
@@ -604,27 +615,39 @@ class PaperTradingEngine:
                         pd_map: Dict[str, Dict[str, Any]] = {}
                         for sym in expected:
                             pos = self._paper_broker.get_position(sym)
+                            
+                            # CRITICAL: Ensure we use the latest price from the broker's price cache
+                            # if the position object's current_price is stale.
+                            curr_price = 0.0
+                            if hasattr(self._paper_broker, "_prices"):
+                                curr_price = self._paper_broker._prices.get(sym, 0.0)
+                            
                             if pos is None:
                                 pd_map[sym] = {
                                     "quantity": 0.0,
                                     "entry_price": 0.0,
-                                    "current_price": 0.0,
+                                    "current_price": curr_price,
                                     "unrealized_pnl": 0.0,
                                     "pnl_pct": 0.0,
                                     "is_profitable": False,
                                 }
                             else:
                                 unreal = float(getattr(pos, "unrealized_pl", 0.0) or 0.0)
+                                # Use the more reliable price source
+                                p_price = float(getattr(pos, "current_price", 0.0) or 0.0)
+                                final_price = p_price if p_price > 0 else curr_price
+                                
                                 pd_map[sym] = {
                                     "quantity": float(getattr(pos, "quantity", 0.0) or 0.0),
                                     "entry_price": float(getattr(pos, "avg_entry_price", 0.0) or 0.0),
-                                    "current_price": float(getattr(pos, "current_price", 0.0) or 0.0),
+                                    "current_price": final_price,
                                     "unrealized_pnl": unreal,
                                     "pnl_pct": float(getattr(pos, "unrealized_plpc", 0.0) or 0.0),
                                     "is_profitable": unreal > 0.0,
                                 }
                         position_details = pd_map
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"Failed to build position details: {e}")
                         position_details = None
                 try:
                     signals = await self._strategy_manager.generate_signals(
@@ -642,10 +665,22 @@ class PaperTradingEngine:
                     )
 
                 # Convert and submit signals through risk manager
-                close_price = bar.get('close') or bar.get('close_price')
-                close_price_f = float(close_price) if close_price is not None else None
                 for s in signals or []:
-                    signal_dict = self._normalize_strategy_signal(s, market_timestamp=timestamp, bar_close_price=close_price_f)
+                    # FIX: Use the correct price for the signal's symbol from the batch data
+                    # This prevents cross-symbol price contamination where TSLA gets NVDA's price
+                    sig_symbol = getattr(s, "symbol", None)
+                    sig_price = None
+                    if sig_symbol and sig_symbol in self._bar_batch_market_data:
+                        sig_df = self._bar_batch_market_data[sig_symbol]
+                        if not sig_df.empty:
+                            sig_price = float(sig_df.iloc[-1]['close'])
+                    
+                    # Fallback to current bar price if symbol not in batch (shouldn't happen)
+                    if sig_price is None:
+                        close_price = bar.get('close') or bar.get('close_price')
+                        sig_price = float(close_price) if close_price is not None else None
+                        
+                    signal_dict = self._normalize_strategy_signal(s, market_timestamp=timestamp, bar_close_price=sig_price)
                     if signal_dict:
                         await self.submit_signal(signal_dict)
 

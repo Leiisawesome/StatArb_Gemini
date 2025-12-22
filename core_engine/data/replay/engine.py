@@ -551,8 +551,13 @@ class HistoricalDataReplayEngine:
 
         async with self._buffer_lock:
             for symbol, data in self._data_buffer.items():
-                # Filter data for this timestamp
-                timestamp_data = data[data['timestamp'] == timestamp]
+                # Filter data for this timestamp AND this symbol
+                # The buffer might contain multiple symbols if the data manager returned a broad set
+                timestamp_data = data[
+                    (data['timestamp'] == timestamp) & 
+                    (data['symbol'] == symbol)
+                ]
+                
                 if not timestamp_data.empty:
                     # Convert to FeedMessage format
                     for _, row in timestamp_data.iterrows():
