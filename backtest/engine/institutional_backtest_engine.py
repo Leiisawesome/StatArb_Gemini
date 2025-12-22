@@ -2808,7 +2808,7 @@ class InstitutionalBacktestEngine:
                 return None
 
             # Get basic performance data
-            total_trades = len(self.execution_history)
+            total_executions = len(self.execution_history)
             total_bars = len(self.historical_data) if self.historical_data is not None else 0
 
             # Get initial and final capital
@@ -2901,7 +2901,8 @@ class InstitutionalBacktestEngine:
             summary = {
                 "backtest_name": self.backtest_name,
                 "total_bars_processed": total_bars,
-                "total_trades": total_trades,
+                "total_trades": closed_trades,
+                "total_executions": total_executions,
                 "initial_capital": initial_capital,
                 "final_capital": final_capital,
                 "total_return": total_return,
@@ -3168,7 +3169,7 @@ class InstitutionalBacktestEngine:
 
                 try:
                     # Process current bar
-                    bar_result = await self._process_single_bar(bar, timestamp, idx)
+                    bar_result = await self._process_single_bar(bar, timestamp, idx, pre_calc_index)
 
                     bars_processed += 1
                     pre_calc_index += 1  # Increment pre-calc index for next bar
@@ -3379,13 +3380,17 @@ class InstitutionalBacktestEngine:
             }
 
             # Update position via CentralRiskManager (Rule 4)
-            await self.risk_manager.update_position(
+            position_update = await self.risk_manager.update_position(
                 symbol=symbol,
                 side=side,
                 quantity=qty,
                 price=close_price,
                 timestamp=timestamp
             )
+
+            # Update execution with actual P&L from risk manager
+            if position_update:
+                execution['realized_pnl'] = position_update.get('realized_pnl', 0.0)
 
             self.execution_history.append(execution)
             liquidated += 1
@@ -3416,7 +3421,8 @@ class InstitutionalBacktestEngine:
     async def _process_single_bar(self,
                                   bar: pd.Series,
                                   timestamp: datetime,
-                                  bar_index: int) -> Dict[str, Any]:
+                                  bar_index: int,
+                                  pre_calc_index: int = 0) -> Dict[str, Any]:
         """
         Process a single bar of market data through the complete pipeline
 
@@ -3434,6 +3440,7 @@ class InstitutionalBacktestEngine:
             bar: Market data for current bar
             timestamp: Timestamp of current bar
             bar_index: Index of current bar
+            pre_calc_index: Index in pre-calculated features (excludes warmup)
 
         Returns:
             Dict with bar processing results
