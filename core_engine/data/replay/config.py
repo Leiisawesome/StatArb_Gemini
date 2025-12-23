@@ -24,6 +24,7 @@ class ReplaySpeed(Enum):
     FAST_10X = 10.0
     FAST_50X = 50.0
     FAST_100X = 100.0
+    FAST_1000X = 1000.0
     INSTANT = float('inf')  # Replay all data instantly
 
 @dataclass

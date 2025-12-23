@@ -133,6 +133,7 @@ class HistoricalDataReplayEngine:
         # Timing control - use actual data timestamps
         self._previous_data_timestamp: Optional[datetime] = None
         self._speed_multiplier = config.speed.value
+        self._accumulated_delay = 0.0
         self._pause_start_time: Optional[datetime] = None
         self._total_pause_duration: float = 0.0
 
@@ -671,11 +672,16 @@ class HistoricalDataReplayEngine:
         # Apply speed multiplier
         delay_seconds = time_gap_seconds / self._speed_multiplier
 
-        # Cap minimum delay to prevent overwhelming the system
-        # Cap maximum delay to prevent extremely long waits
-        delay_seconds = max(0.001, min(delay_seconds, 60.0))
+        # Accumulate small delays to avoid overhead of many tiny sleeps
+        self._accumulated_delay += delay_seconds
 
-        await asyncio.sleep(delay_seconds)
+        # Only sleep if we've accumulated enough delay (e.g., 10ms)
+        # or if the delay is large (e.g., > 100ms)
+        if self._accumulated_delay >= 0.01:
+            # Cap maximum delay to prevent extremely long waits
+            sleep_time = min(self._accumulated_delay, 60.0)
+            await asyncio.sleep(sleep_time)
+            self._accumulated_delay = 0.0
 
     def _update_elapsed_time(self) -> None:
         """Update elapsed real time in statistics."""

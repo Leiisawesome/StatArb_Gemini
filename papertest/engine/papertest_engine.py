@@ -246,6 +246,7 @@ class PapertestEngine:
 
         trades: List[Dict[str, Any]] = []
         last_strength_by_symbol: Dict[str, float] = {}
+        last_confidence_by_symbol: Dict[str, float] = {}
 
         if not path.exists():
             return trades
@@ -283,8 +284,10 @@ class PapertestEngine:
                     if symbol:
                         try:
                             last_strength_by_symbol[symbol] = float(data.get("signal_strength") or 0.0)
+                            last_confidence_by_symbol[symbol] = float(data.get("confidence") or 0.0)
                         except Exception:
                             last_strength_by_symbol[symbol] = 0.0
+                            last_confidence_by_symbol[symbol] = 0.0
                 if category == "FILL" and evd.get("event_type") == "fill":
                     side = data.get("side") or ""
                     qty = float(data.get("quantity") or 0.0)
@@ -301,7 +304,7 @@ class PapertestEngine:
                             "quantity": qty,
                             "price": px,
                             "signal_strength": float(last_strength_by_symbol.get(symbol or "", 0.0)),
-                            "confidence": 0.0,
+                            "confidence": float(last_confidence_by_symbol.get(symbol or "", 0.0)),
                         }
                     )
             except Exception:

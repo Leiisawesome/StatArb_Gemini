@@ -930,6 +930,7 @@ class PaperTradingEngine:
                 return None
 
             strength = float(getattr(s, "strength", 0.5) or 0.5)
+            confidence = float(getattr(s, "confidence", 0.0) or 0.0)
             strategy_id = getattr(s, "strategy_id", "strategy")
             arrival_price = float(bar_close_price or 0.0)
             if arrival_price <= 0:
@@ -946,6 +947,7 @@ class PaperTradingEngine:
                 "side": side,
                 "requested_quantity": qty,
                 "signal_strength": strength,
+                "confidence": confidence,
                 "strategy_id": strategy_id,
                 "signal_timestamp": market_timestamp,
                 "arrival_price": arrival_price,
