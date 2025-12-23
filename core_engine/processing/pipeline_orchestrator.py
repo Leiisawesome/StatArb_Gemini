@@ -69,6 +69,9 @@ class PipelineConstants:
     # IQR multiplier for outlier detection
     OUTLIER_IQR_MULTIPLIER: float = 3.0
 
+    # Warmup bars for indicators (P0 Fix: Lookback window)
+    WARMUP_BARS: int = 200
+
 PIPELINE_CONSTANTS = PipelineConstants()
 
 # ============================================================================
@@ -1591,10 +1594,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             'confidence': 'liquidity_confidence',
             'liquidity_regime': 'liquidity_regime',
             'liquidity_risk_score': 'liquidity_risk_score',
-            'slippage_risk': 'liquidity_slippage_risk',
-            'bid_ask_spread_bps': 'liquidity_bid_ask_spread_bps',
+            'slippage_estimate_bps': 'liquidity_slippage_risk',
+            'spread_proxy_bps': 'liquidity_bid_ask_spread_bps',
             'effective_spread_bps': 'liquidity_effective_spread_bps',
-            'market_depth': 'liquidity_market_depth',
+            'kyle_lambda': 'liquidity_market_depth',
             'volume_ratio': 'liquidity_volume_ratio'
         }
 
@@ -1810,19 +1813,23 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         logger.debug(f"   🔄 Processing {segment_count} regime segments for {symbol}")
 
         for segment_idx, (start_idx, end_idx, regime_info) in enumerate(regime_segments):
-            # Extract segment data
-            segment_data = symbol_data.iloc[start_idx:end_idx].copy()
+            # Extract segment data with warmup window for indicators (P0 Fix: Lookback window)
+            # This ensures indicators like SMA_200 are populated even for short segments
+            warmup_bars = PIPELINE_CONSTANTS.WARMUP_BARS
+            actual_start_idx = max(0, start_idx - warmup_bars)
+            segment_data_with_warmup = symbol_data.iloc[actual_start_idx:end_idx].copy()
 
-            if segment_data.empty:
+            if segment_data_with_warmup.empty:
                 continue
 
             # Get regime analysis for this segment
             regime_analysis = None
             if regime_info and 'regime_analysis' in regime_info:
                 regime_analysis = regime_info['regime_analysis']
-            elif self.regime_engine and segment_data is not None and not segment_data.empty:
-                # Fallback: Get regime from first bar of segment
-                first_timestamp = segment_data.iloc[0]['timestamp']
+            elif self.regime_engine and segment_data_with_warmup is not None and not segment_data_with_warmup.empty:
+                # Fallback: Get regime from first bar of segment (not warmup)
+                # We use the original start_idx to get the correct regime for the segment
+                first_timestamp = symbol_data.iloc[start_idx]['timestamp']
                 if isinstance(first_timestamp, pd.Timestamp):
                     first_timestamp = first_timestamp.to_pydatetime()
                 regime_analysis = self.regime_engine.get_regime_at_timestamp(
@@ -1831,8 +1838,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 )
 
             liquidity_context = None
-            if not segment_data.empty:
-                seg_timestamp = segment_data.iloc[0]['timestamp']
+            if not segment_data_with_warmup.empty:
+                # Use original start_idx for liquidity context
+                seg_timestamp = symbol_data.iloc[start_idx]['timestamp']
                 if isinstance(seg_timestamp, pd.Timestamp):
                     seg_timestamp = seg_timestamp.to_pydatetime()
                 liquidity_context = self.get_liquidity_at_timestamp(symbol, seg_timestamp)
@@ -1842,7 +1850,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 regime_name = regime_analysis.primary_regime.value if hasattr(regime_analysis.primary_regime, 'value') else str(regime_analysis.primary_regime)
                 logger.debug(
                     f"   📊 Segment {segment_idx + 1}/{segment_count} ({start_idx}-{end_idx}): "
-                    f"Regime={regime_name}, Bars={len(segment_data)}"
+                    f"Regime={regime_name}, Bars={len(segment_data_with_warmup)} (incl. {start_idx - actual_start_idx} warmup)"
                 )
 
                 # Adapt indicator engine config
@@ -1860,12 +1868,20 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     self.feature_engineer.adapt_to_liquidity(liquidity_context)
 
             # Process segment through pipeline
-            # PHASE 2: Calculate indicators for this segment
-            segment_indicators = await self._calculate_indicators(segment_data)
-            all_indicators.append(segment_indicators)
+            # PHASE 2: Calculate indicators for this segment (using warmup data)
+            segment_indicators_full = await self._calculate_indicators(segment_data_with_warmup)
+            
+            # PHASE 3: Engineer features for this segment (using full indicators)
+            segment_features_full = await self._engineer_features(segment_indicators_full)
 
-            # PHASE 3: Engineer features for this segment
-            segment_features = await self._engineer_features(segment_indicators)
+            # Trim back to original segment range (remove warmup bars)
+            # We use the original start_idx relative to actual_start_idx
+            trim_idx = start_idx - actual_start_idx
+            
+            segment_indicators = segment_indicators_full.iloc[trim_idx:].copy()
+            segment_features = segment_features_full.iloc[trim_idx:].copy()
+            
+            all_indicators.append(segment_indicators)
             all_features.append(segment_features)
 
         # Combine segments
