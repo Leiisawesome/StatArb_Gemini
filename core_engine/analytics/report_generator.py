@@ -17,6 +17,9 @@ import base64
 import io
 import warnings
 
+# Setup logger
+logger = logging.getLogger(__name__)
+
 # Import plotting libraries with fallbacks
 try:
     import matplotlib.pyplot as plt

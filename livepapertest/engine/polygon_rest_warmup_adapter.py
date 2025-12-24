@@ -60,14 +60,14 @@ class PolygonRestWarmupAdapter:
 
         PaperTradingEngine calls this method if present.
         """
-        if self._svc is None:
-            await self.initialize()
-        assert self._svc is not None
-
         sym = (symbol or "").upper()
         bars = int(bars)
         if bars <= 0:
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+        if self._svc is None:
+            await self.initialize()
+        assert self._svc is not None
 
         end = datetime.now(timezone.utc)
         est_days = ceil(bars / max(1, self.config.rth_minutes_per_day)) + self.config.extra_days_padding
