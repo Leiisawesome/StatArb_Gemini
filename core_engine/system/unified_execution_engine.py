@@ -404,6 +404,8 @@ class MarketAlgorithm(IExecutionAlgorithm):
         self.config = config
         self.test_mode = False
         self.impact_model = MarketImpactModel()
+        # Optional live broker hook (injected by UnifiedExecutionEngine.set_live_broker)
+        self.live_broker = None
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute market order"""
@@ -417,11 +419,88 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 algorithm_used=request.algorithm
             )
 
+            quantity = request.authorization.quantity
+
+            # LIVE BROKER PATH (production-ready live paper)
+            # If a live broker is injected, submit the order and poll for fill.
+            if (not self.test_mode) and self.live_broker is not None and hasattr(self.live_broker, "submit_market_order"):
+                from core_engine.type_definitions.broker_types import OrderSide, OrderStatus
+
+                symbol = request.authorization.symbol
+                side_raw = request.authorization.side
+                side_str = side_raw.value if hasattr(side_raw, "value") else str(side_raw)
+                side_str = side_str.lower()
+                order_side = OrderSide.BUY if side_str in ("buy", "long") else OrderSide.SELL
+
+                timeout_s = float(self.config.get("ibkr_fill_timeout_seconds", 30.0))
+                poll_s = float(self.config.get("ibkr_poll_interval_seconds", 0.25))
+
+                # Submit in a worker thread (IBKRAdapter is blocking/threaded)
+                order = await asyncio.to_thread(self.live_broker.submit_market_order, symbol, quantity, order_side)
+                order_id = getattr(order, "order_id", None) or getattr(order, "id", None)
+                if not order_id:
+                    raise ConfigurationRequiredError("Live broker did not return order_id")
+
+                # Poll for completion
+                import time as _time
+                t0 = _time.time()
+                last = None
+                while _time.time() - t0 < timeout_s:
+                    last = await asyncio.to_thread(self.live_broker.get_order, str(order_id))
+                    if last is None:
+                        await asyncio.sleep(poll_s)
+                        continue
+                    st = getattr(last, "status", None)
+                    if st in (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED):
+                        break
+                    await asyncio.sleep(poll_s)
+
+                if last is None:
+                    result.status = ExecutionStatus.FAILED
+                    result.execution_log.append(f"Live order {order_id} not found")
+                    return result
+
+                st = getattr(last, "status", None)
+                st_val = getattr(st, "value", None) or getattr(st, "name", None) or str(st)
+                if st != OrderStatus.FILLED and str(st_val).lower() != "filled":
+                    result.status = ExecutionStatus.FAILED
+                    result.execution_log.append(f"Live order {order_id} not filled: {st_val}")
+                    return result
+
+                fill_px = float(getattr(last, "average_price", 0.0) or 0.0)
+                if fill_px <= 0:
+                    # Best-effort fallback: use last known market data if present
+                    try:
+                        if request.strategy_context and "decision_price" in request.strategy_context:
+                            fill_px = float(request.strategy_context["decision_price"])
+                    except Exception:
+                        fill_px = 0.0
+
+                result.filled_quantity = float(getattr(last, "filled_quantity", quantity) or quantity)
+                result.avg_fill_price = fill_px
+                # Backwards-compat fields expected by PaperTradingEngine
+                result.fill_quantity = result.filled_quantity
+                result.fill_price = result.avg_fill_price
+                result.status = ExecutionStatus.FILLED
+                result.completed_at = datetime.now()
+                result.execution_time = (result.completed_at - result.started_at).total_seconds()
+                result.execution_log.append(f"Live fill: order_id={order_id} {result.filled_quantity} @ {result.avg_fill_price}")
+
+                if not hasattr(result, "fills") or result.fills is None:
+                    result.fills = []
+                result.fills.append({
+                    "timestamp": result.completed_at,
+                    "quantity": result.filled_quantity,
+                    "price": result.avg_fill_price,
+                    "venue": "IBKR_PAPER",
+                    "order_id": str(order_id),
+                })
+                return result
+
+            # SIMULATION PATH (existing behavior)
             # Simulate immediate execution
             if not self.test_mode:
                 await asyncio.sleep(0.05)  # 50ms latency
-
-            quantity = request.authorization.quantity
 
             # Get fill price - use test mode price if available, otherwise use market data manager
             if self.test_mode:
@@ -532,6 +611,13 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 logger.info(f"Market execution PARTIALLY FILLED: {filled_quantity:.2f}/{quantity:.2f} @ {fill_price:.4f} (test_mode={self.test_mode})")
             else:
                 logger.info(f"Market execution completed: {quantity:.2f} @ {fill_price:.4f} (test_mode={self.test_mode})")
+
+            # Backwards-compat fields expected by PaperTradingEngine
+            try:
+                result.fill_quantity = float(result.filled_quantity)
+                result.fill_price = float(result.avg_fill_price)
+            except Exception:
+                pass
             return result
 
         except Exception as e:
@@ -1746,6 +1832,13 @@ class UnifiedExecutionEngine(ISystemComponent):
             live_broker: Live broker adapter (IBKR, etc.)
         """
         self._live_broker = live_broker
+        # Propagate to algorithms that can use it (MARKET in particular).
+        try:
+            for algo in getattr(self, "algorithms", {}).values():
+                if hasattr(algo, "live_broker"):
+                    setattr(algo, "live_broker", live_broker)
+        except Exception:
+            pass
         logger.info("✅ Live broker set for execution routing")
 
     def set_execution_mode(self, mode: str) -> None:

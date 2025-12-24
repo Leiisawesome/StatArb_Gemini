@@ -225,6 +225,8 @@ audit_trail.jsonl
 # Generated run artifacts (keep source configs/code, ignore outputs)
 papertest/results/
 papertest/**/results/
+livepapertest/results/
+livepapertest/**/results/
 backtest/results/*.json
 backtest/results/*.jsonl
 validation_benchmarks.json
