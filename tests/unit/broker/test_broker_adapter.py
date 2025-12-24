@@ -80,6 +80,7 @@ class TestBrokerAdapterBasic:
         self.mock_position = StandardPosition(
             symbol='AAPL',
             quantity=100.0,
+            side='long',
             avg_cost=150.0,
             market_value=15000.0,
             unrealized_pnl=0.0,
@@ -188,6 +189,7 @@ class TestBrokerAdapterBasic:
         position = StandardPosition(
             symbol='AAPL',
             quantity=100.0,
+            side='long',
             avg_cost=150.0,
             market_value=15000.0,
             unrealized_pnl=0.0,
@@ -198,6 +200,7 @@ class TestBrokerAdapterBasic:
 
         assert position.symbol == 'AAPL'
         assert position.quantity == 100.0
+        assert position.side == 'long'
         assert position.avg_cost == 150.0
         assert position.market_value == 15000.0
         assert position.unrealized_pnl == 0.0
@@ -209,6 +212,7 @@ class TestBrokerAdapterBasic:
         position = StandardPosition(
             symbol='AAPL',
             quantity=100.0,
+            side='long',
             avg_cost=150.0,
             market_value=15000.0,
             unrealized_pnl=0.0,

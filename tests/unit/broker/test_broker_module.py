@@ -155,6 +155,7 @@ class TestBrokerAdapter:
             StandardPosition(
                 symbol="AAPL",
                 quantity=100,
+                side="long",
                 avg_cost=150.0,
                 market_value=15500.0,
                 unrealized_pnl=500.0,

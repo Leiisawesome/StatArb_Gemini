@@ -295,7 +295,7 @@ class TestPapertestEngine:
 
         mock_wired = Mock()
         mock_replay_engine = Mock()
-        mock_replay_engine.status = "COMPLETED"
+        mock_replay_engine.status = ReplayStatus.COMPLETED
         mock_wired.replay_adapter = Mock()
         mock_wired.replay_adapter.replay_engine = mock_replay_engine
         mock_wired.engine = Mock()

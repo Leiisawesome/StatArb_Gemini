@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from core_engine.data.manager import (
-    ClickHouseDataManager, ClickHouseDataConfig, EnhancedMarketData
+    ClickHouseDataManager, ClickHouseDataConfig, MarketData as EnhancedMarketData
 )
 from core_engine.exceptions import ClickHouseConnectionError, DataUnavailableError
 

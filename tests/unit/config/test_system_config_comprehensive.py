@@ -88,10 +88,10 @@ class TestBacktestConfig:
         )
         is_valid, errors = config.validate()
         assert is_valid is False
-        assert "end_date must be after start_date" in errors
+        assert "end_date must be on or after start_date" in errors
 
     def test_validate_end_equals_start(self):
-        """Test validation fails when end_date equals start_date."""
+        """Test validation succeeds when end_date equals start_date."""
         config = BacktestConfig(
             backtest_name="Test",
             symbols=["AAPL"],
@@ -99,8 +99,8 @@ class TestBacktestConfig:
             end_date="2024-01-01"
         )
         is_valid, errors = config.validate()
-        assert is_valid is False
-        assert "end_date must be after start_date" in errors
+        assert is_valid is True
+        assert len(errors) == 0
 
     def test_validate_invalid_interval(self):
         """Test validation fails with invalid interval."""

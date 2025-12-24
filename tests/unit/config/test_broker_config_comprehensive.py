@@ -176,12 +176,13 @@ PHASE_9_ACTIVE_BROKER=interactive_brokers
         # Simulation mode should default to PAPER
         assert config.trading_mode == TradingMode.PAPER
 
+    @patch('core_engine.config.broker_config.load_dotenv')
     @patch.dict(os.environ, {
         'IB_HOST': '127.0.0.1',  # Legacy var without PAPER prefix
         'IB_PORT': '7497',
         'IB_PAPER_CLIENT_ID': '1'
-    }, clear=False)
-    def test_load_from_env_legacy_ib_vars(self):
+    }, clear=True)
+    def test_load_from_env_legacy_ib_vars(self, mock_load_dotenv):
         """Test loading IB config from legacy env vars."""
         config = BrokerConfigLoader.load_from_env()
         assert config.interactive_brokers is not None

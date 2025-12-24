@@ -14,6 +14,7 @@ from core_engine.paper.engine import (
     PaperTradingConfig,
     PaperTradingState,
 )
+from core_engine.system.event_dispatcher import EventType
 
 class TestPaperTradingState:
     """Test PaperTradingState enum."""
@@ -613,30 +614,31 @@ class TestPaperTradingEngine:
         engine._state = PaperTradingState.RUNNING
 
         # Mock dispatcher to return an event, then None
-        mock_dispatcher = AsyncMock()
+        mock_dispatcher = MagicMock()
         mock_event = MagicMock()
-        mock_event.event_type.name = 'BAR'
+        mock_event.event_type = EventType.BAR
         mock_event.symbol = 'AAPL'
         mock_event.payload = {'close': 100.0}
         mock_dispatcher.process_next = Mock(side_effect=[mock_event] + [None] * 10)  # Return event once, then None
         engine.setup_dispatcher(mock_dispatcher)
 
         # Mock watchdog
-        mock_watchdog = AsyncMock()
+        mock_watchdog = MagicMock()
         mock_watchdog_task = MagicMock()
         mock_watchdog.start_async_monitor = Mock(return_value=mock_watchdog_task)  # Sync method returning task
         mock_watchdog.on_bar_processed = Mock()  # Sync method
+        mock_watchdog.on_heartbeat = Mock()  # Sync method
         engine.setup_watchdog(mock_watchdog)
 
         # Mock state manager
-        mock_state_manager = AsyncMock()
+        mock_state_manager = MagicMock()
         mock_state_manager.increment_bars = Mock(return_value=False)  # Sync method - No checkpoint
         mock_state_manager.set_replay_position = Mock()  # Sync method
         mock_state_manager.update_event_tracking = Mock()  # Sync method
         engine.setup_state_manager(mock_state_manager)
 
         # Mock buffer manager for bar processing
-        mock_buffer_manager = AsyncMock()
+        mock_buffer_manager = MagicMock()
         mock_buffer_manager.is_warmed_up = Mock(return_value=True)  # Sync method
         mock_buffer_manager.get_latest_bar = Mock(return_value={'close': 100.0})  # Sync method
         mock_buffer_manager.update = Mock()  # Sync method
@@ -644,32 +646,34 @@ class TestPaperTradingEngine:
         engine.setup_buffer_manager(mock_buffer_manager)
 
         # Mock regime engine
-        mock_regime_engine = AsyncMock()
+        mock_regime_engine = MagicMock()
         mock_regime_engine.process_bar = Mock(return_value=True)  # Sync method
         mock_regime_engine.evaluate_regime_causal = Mock()  # Sync method
         mock_regime_engine.enable_causal_only_mode = Mock()  # Sync method
         engine.setup_regime_engine(mock_regime_engine)
 
         # Mock signal manager
-        mock_signal_manager = AsyncMock()
+        mock_signal_manager = MagicMock()
         mock_signal_manager.process_bar = Mock(return_value=[])  # Sync method
         mock_signal_manager.on_computation_complete = Mock()  # Sync method
         mock_signal_manager.on_bar_close = Mock()  # Sync method
+        mock_signal_manager.on_bar_open = Mock(return_value=[])  # Sync method
         engine.setup_signal_manager(mock_signal_manager)
 
         # Mock risk manager
-        mock_risk_manager = AsyncMock()
+        mock_risk_manager = MagicMock()
         mock_risk_manager.update_market_data = Mock()  # Sync method
         engine.setup_risk_manager(mock_risk_manager)
 
         # Mock event journal
-        mock_event_journal = AsyncMock()
+        mock_event_journal = MagicMock()
         mock_event_journal.log_bar = Mock()  # Sync method
         engine.setup_event_journal(mock_event_journal)
 
         # Mock paper broker
-        mock_paper_broker = AsyncMock()
+        mock_paper_broker = MagicMock()
         mock_paper_broker.set_price = Mock()  # Sync method
+        mock_paper_broker.set_market_data = Mock()  # Sync method
         engine.setup_paper_broker(mock_paper_broker)
 
         # Run for a short time, then stop
@@ -689,38 +693,41 @@ class TestPaperTradingEngine:
     async def test_process_bar_event(self, engine):
         """Test processing a bar event."""
         # Mock components needed for bar processing
-        mock_buffer_manager = AsyncMock()
+        mock_buffer_manager = MagicMock()
         mock_buffer_manager.get_buffer = Mock(return_value={'close': 100.0})  # Sync method
         mock_buffer_manager.update = Mock()  # Sync method
         mock_buffer_manager.is_warmed_up = Mock(return_value=True)  # Sync method
         engine.setup_buffer_manager(mock_buffer_manager)
 
-        mock_regime_engine = AsyncMock()
+        mock_regime_engine = MagicMock()
         mock_regime_engine.evaluate_regime_causal = Mock()  # Sync method
         mock_regime_engine.enable_causal_only_mode = Mock()  # Sync method
         engine.setup_regime_engine(mock_regime_engine)
 
-        mock_signal_manager = AsyncMock()
+        mock_signal_manager = MagicMock()
         mock_signal_manager.on_computation_complete = Mock()  # Sync method
         mock_signal_manager.on_bar_close = Mock()  # Sync method
+        mock_signal_manager.on_bar_open = Mock(return_value=[])  # Sync method
         engine.setup_signal_manager(mock_signal_manager)
 
-        mock_paper_broker = AsyncMock()
+        mock_paper_broker = MagicMock()
         mock_paper_broker.set_price = Mock()  # Sync method
+        mock_paper_broker.set_market_data = Mock()  # Sync method
         engine.setup_paper_broker(mock_paper_broker)
 
-        mock_state_manager = AsyncMock()
+        mock_state_manager = MagicMock()
         mock_state_manager.set_replay_position = Mock()  # Sync method
         mock_state_manager.update_event_tracking = Mock()  # Sync method
         engine.setup_state_manager(mock_state_manager)
 
         # Create a mock bar event
         mock_event = MagicMock()
-        mock_event.event_type.name = 'BAR'
+        mock_event.event_type = EventType.BAR
         mock_event.symbol = 'AAPL'
         mock_event.payload = {'close': 100.0, 'volume': 1000}
         mock_event.event_id = 'bar-123'
         mock_event.sequence_number = 1
+        mock_event.market_timestamp = pd.Timestamp('2024-01-01 09:30:00')
 
         await engine._process_bar(mock_event)
 
@@ -735,13 +742,13 @@ class TestPaperTradingEngine:
     async def test_process_fill_event(self, engine):
         """Test processing a fill event."""
         # Mock components needed for fill processing
-        mock_event_journal = AsyncMock()
+        mock_event_journal = MagicMock()
         mock_event_journal.log_fill = Mock()  # Sync method
         engine.setup_event_journal(mock_event_journal)
 
         # Create a mock fill event
         mock_event = MagicMock()
-        mock_event.event_type.name = 'FILL'
+        mock_event.event_type = EventType.FILL
         mock_event.symbol = 'AAPL'
         mock_event.payload = {
             'order_id': 'order-123',
@@ -749,7 +756,9 @@ class TestPaperTradingEngine:
             'symbol': 'AAPL',
             'quantity': 100,
             'price': 100.0,
-            'commission': 1.0
+            'commission': 1.0,
+            'side': 'buy',
+            'timestamp': pd.Timestamp('2024-01-01 09:30:00')
         }
         mock_event.event_id = 'fill-123'
         mock_event.sequence_number = 1
@@ -762,57 +771,62 @@ class TestPaperTradingEngine:
             fill_id='fill-123',
             quantity=100,
             price=100.0,
-            commission=1.0
+            commission=1.0,
+            side='buy',
+            fill_timestamp=pd.Timestamp('2024-01-01 09:30:00')
         )
 
     @pytest.mark.asyncio
     async def test_process_event_with_idempotency(self, engine):
         """Test event processing with idempotency checking."""
         # Mock idempotency tracker
-        mock_idempotency_tracker = AsyncMock()
+        mock_idempotency_tracker = MagicMock()
         mock_idempotency_tracker.check_and_mark = Mock(return_value=False)  # Not duplicate
         engine.setup_idempotency_tracker(mock_idempotency_tracker)
 
         # Create a mock event
         mock_event = MagicMock()
-        mock_event.event_type.name = 'BAR'
+        mock_event.event_type = EventType.BAR
         mock_event.event_id = 'event-123'
         mock_event.symbol = 'AAPL'
         mock_event.payload = {'close': 100.0}
+        mock_event.market_timestamp = pd.Timestamp('2024-01-01 09:30:00')
 
         # Mock bar processing components
-        mock_buffer_manager = AsyncMock()
+        mock_buffer_manager = MagicMock()
         mock_buffer_manager.is_warmed_up = Mock(return_value=True)  # Sync
         mock_buffer_manager.get_latest_bar = Mock(return_value={'close': 100.0})  # Sync
         mock_buffer_manager.update = Mock()  # Sync
         mock_buffer_manager.get_buffer = Mock(return_value={'close': 100.0})  # Sync
         engine.setup_buffer_manager(mock_buffer_manager)
 
-        mock_regime_engine = AsyncMock()
+        mock_regime_engine = MagicMock()
         mock_regime_engine.process_bar = Mock(return_value=True)  # Sync
         mock_regime_engine.evaluate_regime_causal = Mock()  # Sync
         mock_regime_engine.enable_causal_only_mode = Mock()  # Sync
         engine.setup_regime_engine(mock_regime_engine)
 
-        mock_signal_manager = AsyncMock()
+        mock_signal_manager = MagicMock()
         mock_signal_manager.process_bar = Mock(return_value=[])  # Sync
         mock_signal_manager.on_computation_complete = Mock()  # Sync
         mock_signal_manager.on_bar_close = Mock()  # Sync
+        mock_signal_manager.on_bar_open = Mock(return_value=[])  # Sync
         engine.setup_signal_manager(mock_signal_manager)
 
-        mock_risk_manager = AsyncMock()
+        mock_risk_manager = MagicMock()
         mock_risk_manager.update_market_data = Mock()  # Sync
         engine.setup_risk_manager(mock_risk_manager)
 
-        mock_event_journal = AsyncMock()
+        mock_event_journal = MagicMock()
         mock_event_journal.log_bar = Mock()  # Sync
         engine.setup_event_journal(mock_event_journal)
 
-        mock_paper_broker = AsyncMock()
+        mock_paper_broker = MagicMock()
         mock_paper_broker.set_price = Mock()  # Sync
+        mock_paper_broker.set_market_data = Mock()  # Sync
         engine.setup_paper_broker(mock_paper_broker)
 
-        mock_state_manager = AsyncMock()
+        mock_state_manager = MagicMock()
         mock_state_manager.set_replay_position = Mock()  # Sync
         mock_state_manager.update_event_tracking = Mock()  # Sync
         engine.setup_state_manager(mock_state_manager)
@@ -825,13 +839,13 @@ class TestPaperTradingEngine:
     async def test_process_event_duplicate_skipped(self, engine):
         """Test that duplicate events are skipped."""
         # Mock idempotency tracker
-        mock_idempotency_tracker = AsyncMock()
+        mock_idempotency_tracker = MagicMock()
         mock_idempotency_tracker.check_and_mark = Mock(return_value=True)  # Duplicate
         engine.setup_idempotency_tracker(mock_idempotency_tracker)
 
         # Create a mock event
         mock_event = MagicMock()
-        mock_event.event_type.name = 'BAR'
+        mock_event.event_type = EventType.BAR
         mock_event.event_id = 'event-123'
 
         initial_state = engine._state

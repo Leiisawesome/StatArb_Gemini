@@ -361,9 +361,10 @@ class TestExecutionMetrics:
         assert 'failed_executions' in updated_metrics
         assert 'avg_execution_time' in updated_metrics
 
-    def test_execution_cost_estimation(self, execution_engine, sample_execution_request):
+    @pytest.mark.asyncio
+    async def test_execution_cost_estimation(self, execution_engine, sample_execution_request):
         """Test execution cost estimation"""
-        cost_estimate = execution_engine.estimate_execution_cost(sample_execution_request)
+        cost_estimate = await execution_engine.estimate_execution_cost(sample_execution_request)
 
         assert isinstance(cost_estimate, dict)
         assert 'market_impact' in cost_estimate

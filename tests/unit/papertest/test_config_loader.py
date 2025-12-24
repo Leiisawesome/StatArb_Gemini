@@ -8,7 +8,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from papertest.utils.config_loader import load_config, validate_papertest_schema, _deep_merge
+from papertest.utils.config_loader import load_config, validate_papertest_schema, deep_merge as _deep_merge
 
 
 class TestDeepMerge:

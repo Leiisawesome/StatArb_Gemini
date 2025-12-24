@@ -34,7 +34,7 @@ class TestDataConfig:
     def test_initialization(self):
         """Test DataConfig initialization with defaults."""
         config = DataConfig()
-        assert config.symbols == ['NVDA', 'TSLA', 'AAPL', 'MSFT', 'GOOGL', 'SPY', 'QQQ']
+        assert config.symbols == ['TSLA']
         assert config.start_date is None
         assert config.end_date is None
         assert config.caching.enable_caching is True

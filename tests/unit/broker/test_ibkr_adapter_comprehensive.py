@@ -475,7 +475,7 @@ class TestIBKRAdapterDataRetrieval:
     def test_get_account_info(self, connected_adapter):
         """Test account information retrieval"""
         # Setup mock account data
-        connected_adapter.wrapper.account_values = {
+        account_data = {
             'TotalCashValue': {'value': '95000.00', 'currency': 'USD'},
             'BuyingPower': {'value': '190000.00', 'currency': 'USD'},
             'NetLiquidation': {'value': '100000.00', 'currency': 'USD'},
@@ -483,7 +483,12 @@ class TestIBKRAdapterDataRetrieval:
             'AccountCode': {'account': 'TEST123'}
         }
 
-        account_info = connected_adapter.get_account_info()
+        def mock_req_account_updates(subscribe, account_id):
+            connected_adapter.wrapper.account_values = account_data
+
+        with patch.object(connected_adapter.client, 'reqAccountUpdates', side_effect=mock_req_account_updates), \
+             patch('time.sleep'):
+            account_info = connected_adapter.get_account_info()
 
         assert account_info.cash == 95000.00
         assert account_info.buying_power == 190000.00
