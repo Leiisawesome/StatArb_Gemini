@@ -29,7 +29,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum, auto
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import threading
 
 from ..system.event_dispatcher import EventType
@@ -46,7 +46,8 @@ class _SignalNormalizer:
         market_timestamp: datetime, 
         bar_close_price: Optional[float],
         broker: Any,
-        risk_manager: Any
+        risk_manager: Any,
+        default_stop_loss_pct: float = 0.02
     ) -> Optional[Dict[str, Any]]:
         try:
             symbol = getattr(signal, "symbol", None)
@@ -84,7 +85,7 @@ class _SignalNormalizer:
                 "signal_timestamp": market_timestamp,
                 "arrival_price": arrival_price,
                 # Risk 6-gate requires stop info; if none known, allow risk manager / signal manager defaults
-                "stop_loss_pct": 0.02,
+                "stop_loss_pct": float(getattr(signal, "stop_loss_pct", 0.0) or default_stop_loss_pct),
             }
         except Exception:
             return None
@@ -600,35 +601,10 @@ class PaperTradingEngine:
         except Exception as e:
             logger.error(f"Event processing error: {e}", exc_info=True)
 
-    async def _process_bar(self, event: Any) -> None:
-        """Process a bar event."""
-        symbol = event.symbol
-        bar = event.payload
-        timestamp = event.market_timestamp
-
-        # CRITICAL SAFETY CHECK: Ensure bar data matches the event symbol
-        # This prevents cross-symbol contamination from the data source
-        bar_symbol = bar.get('symbol')
-        if bar_symbol and bar_symbol != symbol:
-            logger.warning(f"⚠️ Data contamination detected: Event symbol {symbol} != Bar symbol {bar_symbol}. Skipping.")
-            return
-
-        self._stats['bars_processed'] += 1
-
-        # === BarOpenSynthesizer: execute next-bar-open signals once per timestamp ===
-        # Bars arrive at bar-close timestamps; we treat the first bar at a new timestamp as "bar open"
-        # for the purposes of executing signals queued from the previous bar close.
-        if self._signal_manager and (self._last_bar_open_timestamp is None or timestamp != self._last_bar_open_timestamp):
-            self._pending_open_signals = list(self._signal_manager.on_bar_open())
-            self._last_bar_open_timestamp = timestamp
-
-        # 1. Validate bar
-        if self._data_validator:
-            result = self._data_validator.validate_bar_dict(symbol, bar)
-            if not result.is_valid:
-                logger.warning(f"Invalid bar for {symbol}: {result.issues}")
-                return
-
+    async def _update_market_data_and_execute_open(self, symbol: str, bar: Dict[str, Any], timestamp: datetime) -> None:
+        """
+        Update broker prices and execute pending bar-open signals.
+        """
         # Ensure broker has up-to-date price BEFORE any executions at this bar's open
         if self._paper_broker:
             open_price = bar.get('open') or bar.get('open_price')
@@ -646,7 +622,6 @@ class PaperTradingEngine:
             await self._execute_pending_signals_for_symbol(symbol=symbol, bar=bar, market_timestamp=timestamp)
 
         # After bar-open execution, process any queued fills up through this bar timestamp.
-        # This updates risk manager position state before we generate any new signals on this bar close.
         if self._dispatcher and hasattr(self._dispatcher, "peek_next"):
             drained = 0
             while True:
@@ -675,23 +650,11 @@ class PaperTradingEngine:
                 await self._process_fill(fev)
                 drained += 1
 
-        # 2. Update buffer
-        if self._buffer_manager:
-            self._buffer_manager.update(symbol, bar)
-
-            # Check warmup
-            if not self._buffer_manager.is_warmed_up(symbol):
-                return
-
-        # 3. Log bar
-        if self._event_journal:
-            self._event_journal.log_bar(symbol, bar, event.event_id)
-
-        # 4. Signal bar close to signal manager
-        if self._signal_manager:
-            self._signal_manager.on_bar_close(timestamp)
-
-        # 5-6. Compute enriched DataFrame for strategy layer
+    def _compute_analytics(self, symbol: str, timestamp: datetime) -> Tuple[Optional[Any], Dict[str, float], Dict[str, float]]:
+        """
+        Compute indicators, features, and evaluate regime.
+        Returns (enriched_df, last_row_indicators, last_row_features)
+        """
         enriched_df = None
         last_row_indicators: Dict[str, float] = {}
         last_row_features: Dict[str, float] = {}
@@ -725,130 +688,182 @@ class PaperTradingEngine:
                 # Scalers not loaded (allowed)
                 last_row_features = {}
 
-        # 7. Log derived state
+        # Log derived state
         if self._event_journal and (last_row_indicators or last_row_features):
             self._event_journal.log_features(symbol, {**last_row_indicators, **last_row_features}, timestamp)
 
-        # 8. Evaluate regime
+        # Evaluate regime
         if self._regime_engine and self._buffer_manager:
+            # Note: buffer might be fetched again here, but it's a cheap reference in memory
             buffer = self._buffer_manager.get_buffer(symbol)
             if buffer is not None:
                 self._regime_engine.evaluate_regime_causal(buffer, symbol)
+                
+        return enriched_df, last_row_indicators, last_row_features
 
-        # 9. StrategyManager signal generation (multi-symbol timestamp barrier)
-        if self._strategy_manager and enriched_df is not None:
-            # Track bars for current timestamp batch
-            if self._bar_batch_timestamp is None or timestamp != self._bar_batch_timestamp:
-                self._bar_batch_timestamp = timestamp
-                self._bar_batch_symbols = set()
-                self._bar_batch_market_data = {}
+    async def _generate_strategy_signals(self, symbol: str, bar: Dict[str, Any], timestamp: datetime, enriched_df: Any, last_row_features: Dict[str, float]) -> None:
+        """
+        Coordinate with StrategyManager to generate signals.
+        """
+        if not self._strategy_manager or enriched_df is None:
+            return
 
-            # Attach features (last-row only) as columns so strategies can read them if needed
-            if last_row_features:
-                for k, v in last_row_features.items():
-                    if k not in enriched_df.columns:
-                        enriched_df[k] = None
-                    try:
-                        enriched_df.at[enriched_df.index[-1], k] = float(v)
-                    except Exception:
-                        pass
+        # Track bars for current timestamp batch
+        if self._bar_batch_timestamp is None or timestamp != self._bar_batch_timestamp:
+            self._bar_batch_timestamp = timestamp
+            self._bar_batch_symbols = set()
+            self._bar_batch_market_data = {}
 
-            self._bar_batch_symbols.add(symbol)
-            self._bar_batch_market_data[symbol] = enriched_df
-
-            expected = set(self._expected_symbols) if self._expected_symbols else set(self._bar_batch_market_data.keys())
-            if expected and expected.issubset(self._bar_batch_symbols):
-                # Call StrategyManager once per timestamp with full universe snapshot
-                position_details: Optional[Dict[str, Dict[str, Any]]] = None
-                if self._paper_broker:
-                    try:
-                        pd_map: Dict[str, Dict[str, Any]] = {}
-                        for sym in expected:
-                            pos = self._paper_broker.get_position(sym)
-                            
-                            # CRITICAL: Ensure we use the latest price from the broker's price cache
-                            # if the position object's current_price is stale.
-                            curr_price = 0.0
-                            if hasattr(self._paper_broker, "_prices"):
-                                curr_price = self._paper_broker._prices.get(sym, 0.0)
-                            
-                            if pos is None:
-                                pd_map[sym] = {
-                                    "quantity": 0.0,
-                                    "entry_price": 0.0,
-                                    "current_price": curr_price,
-                                    "unrealized_pnl": 0.0,
-                                    "pnl_pct": 0.0,
-                                    "is_profitable": False,
-                                }
-                            else:
-                                unreal = float(getattr(pos, "unrealized_pl", 0.0) or 0.0)
-                                # Use the more reliable price source
-                                p_price = float(getattr(pos, "current_price", 0.0) or 0.0)
-                                final_price = p_price if p_price > 0 else curr_price
-                                
-                                pd_map[sym] = {
-                                    "quantity": float(getattr(pos, "quantity", 0.0) or 0.0),
-                                    "entry_price": float(getattr(pos, "avg_entry_price", 0.0) or 0.0),
-                                    "current_price": final_price,
-                                    "unrealized_pnl": unreal,
-                                    "pnl_pct": float(getattr(pos, "unrealized_plpc", 0.0) or 0.0),
-                                    "is_profitable": unreal > 0.0,
-                                }
-                        position_details = pd_map
-                    except Exception as e:
-                        logger.error(f"Failed to build position details: {e}")
-                        position_details = None
+        # Attach features (last-row only) as columns so strategies can read them if needed
+        if last_row_features:
+            for k, v in last_row_features.items():
+                if k not in enriched_df.columns:
+                    enriched_df[k] = None
                 try:
-                    signals = await self._strategy_manager.generate_signals(
-                        symbols=list(expected),
-                        market_data=dict(self._bar_batch_market_data),
-                        current_positions=None,
-                        position_details=position_details,
-                    )
-                except TypeError:
-                    # Backwards compat: some versions omit position_details
-                    signals = await self._strategy_manager.generate_signals(
-                        symbols=list(expected),
-                        market_data=dict(self._bar_batch_market_data),
-                        current_positions=None,
-                    )
+                    enriched_df.at[enriched_df.index[-1], k] = float(v)
+                except Exception:
+                    pass
 
-                # Convert and submit signals through risk manager
-                for s in signals or []:
-                    # FIX: Use the correct price for the signal's symbol from the batch data
-                    # This prevents cross-symbol price contamination where TSLA gets NVDA's price
-                    sig_symbol = getattr(s, "symbol", None)
-                    sig_price = None
-                    if sig_symbol and sig_symbol in self._bar_batch_market_data:
-                        sig_df = self._bar_batch_market_data[sig_symbol]
-                        if not sig_df.empty:
-                            sig_price = float(sig_df.iloc[-1]['close'])
-                    
-                    # Fallback to current bar price if symbol not in batch (shouldn't happen)
-                    if sig_price is None:
-                        close_price = bar.get('close') or bar.get('close_price')
-                        sig_price = float(close_price) if close_price is not None else None
+        self._bar_batch_symbols.add(symbol)
+        self._bar_batch_market_data[symbol] = enriched_df
+
+        expected = set(self._expected_symbols) if self._expected_symbols else set(self._bar_batch_market_data.keys())
+        if expected and expected.issubset(self._bar_batch_symbols):
+            # Call StrategyManager once per timestamp with full universe snapshot
+            position_details: Optional[Dict[str, Dict[str, Any]]] = None
+            if self._paper_broker:
+                try:
+                    pd_map: Dict[str, Dict[str, Any]] = {}
+                    for sym in expected:
+                        pos = self._paper_broker.get_position(sym)
                         
-                    signal_dict = self._normalize_strategy_signal(s, market_timestamp=timestamp, bar_close_price=sig_price)
-                    if signal_dict:
-                        await self.submit_signal(signal_dict)
+                        # CRITICAL: Ensure we use the latest price from the broker's price cache
+                        curr_price = 0.0
+                        if hasattr(self._paper_broker, "_prices"):
+                            curr_price = self._paper_broker._prices.get(sym, 0.0)
+                        
+                        if pos is None:
+                            pd_map[sym] = {
+                                "quantity": 0.0,
+                                "entry_price": 0.0,
+                                "current_price": curr_price,
+                                "unrealized_pnl": 0.0,
+                                "pnl_pct": 0.0,
+                                "is_profitable": False,
+                            }
+                        else:
+                            unreal = float(getattr(pos, "unrealized_pl", 0.0) or 0.0)
+                            p_price = float(getattr(pos, "current_price", 0.0) or 0.0)
+                            final_price = p_price if p_price > 0 else curr_price
+                            
+                            pd_map[sym] = {
+                                "quantity": float(getattr(pos, "quantity", 0.0) or 0.0),
+                                "entry_price": float(getattr(pos, "avg_entry_price", 0.0) or 0.0),
+                                "current_price": final_price,
+                                "unrealized_pnl": unreal,
+                                "pnl_pct": float(getattr(pos, "unrealized_plpc", 0.0) or 0.0),
+                                "is_profitable": unreal > 0.0,
+                            }
+                    position_details = pd_map
+                except Exception as e:
+                    logger.error(f"Failed to build position details: {e}")
+                    position_details = None
+            try:
+                signals = await self._strategy_manager.generate_signals(
+                    symbols=list(expected),
+                    market_data=dict(self._bar_batch_market_data),
+                    current_positions=None,
+                    position_details=position_details,
+                )
+            except TypeError:
+                # Backwards compat
+                signals = await self._strategy_manager.generate_signals(
+                    symbols=list(expected),
+                    market_data=dict(self._bar_batch_market_data),
+                    current_positions=None,
+                )
 
-                # Reset batch so we don't run twice for same timestamp
-                self._bar_batch_symbols = set()
-                self._bar_batch_market_data = {}
+            # Convert and submit signals through risk manager
+            for s in signals or []:
+                sig_symbol = getattr(s, "symbol", None)
+                sig_price = None
+                if sig_symbol and sig_symbol in self._bar_batch_market_data:
+                    sig_df = self._bar_batch_market_data[sig_symbol]
+                    if not sig_df.empty:
+                        sig_price = float(sig_df.iloc[-1]['close'])
+                
+                if sig_price is None:
+                    close_price = bar.get('close') or bar.get('close_price')
+                    sig_price = float(close_price) if close_price is not None else None
+                    
+                signal_dict = self._normalize_strategy_signal(s, market_timestamp=timestamp, bar_close_price=sig_price)
+                if signal_dict:
+                    await self.submit_signal(signal_dict)
 
-        # Mark computation complete for BarPolicy state machine
+            # Reset batch
+            self._bar_batch_symbols = set()
+            self._bar_batch_market_data = {}
+
+    async def _process_bar(self, event: Any) -> None:
+        """Process a bar event."""
+        symbol = event.symbol
+        bar = event.payload
+        timestamp = event.market_timestamp
+
+        # CRITICAL SAFETY CHECK
+        bar_symbol = bar.get('symbol')
+        if bar_symbol and bar_symbol != symbol:
+            logger.warning(f"⚠️ Data contamination detected: Event symbol {symbol} != Bar symbol {bar_symbol}. Skipping.")
+            return
+
+        self._stats['bars_processed'] += 1
+
+        # === BarOpenSynthesizer ===
+        if self._signal_manager and (self._last_bar_open_timestamp is None or timestamp != self._last_bar_open_timestamp):
+            self._pending_open_signals = list(self._signal_manager.on_bar_open())
+            self._last_bar_open_timestamp = timestamp
+
+        # 1. Validate bar
+        if self._data_validator:
+            result = self._data_validator.validate_bar_dict(symbol, bar)
+            if not result.is_valid:
+                logger.warning(f"Invalid bar for {symbol}: {result.issues}")
+                return
+
+        # 2. Update market data and execute open signals
+        await self._update_market_data_and_execute_open(symbol, bar, timestamp)
+
+        # 3. Update buffer
+        if self._buffer_manager:
+            self._buffer_manager.update(symbol, bar)
+            if not self._buffer_manager.is_warmed_up(symbol):
+                return
+
+        # 4. Log bar
+        if self._event_journal:
+            self._event_journal.log_bar(symbol, bar, event.event_id)
+
+        # 5. Signal bar close
+        if self._signal_manager:
+            self._signal_manager.on_bar_close(timestamp)
+
+        # 6. Compute analytics (Indicators, Features, Regime)
+        enriched_df, _, last_row_features = self._compute_analytics(symbol, timestamp)
+
+        # 7. Generate Strategy Signals
+        await self._generate_strategy_signals(symbol, bar, timestamp, enriched_df, last_row_features)
+
+        # 8. Mark computation complete
         if self._signal_manager:
             self._signal_manager.on_computation_complete()
 
-        # 10. Update paper broker price
+        # 9. Update paper broker price (Close)
         if self._paper_broker:
             close_price = bar.get('close') or bar.get('close_price')
             if close_price:
                 self._paper_broker.set_price(symbol, float(close_price))
 
-        # 11. Update state manager
+        # 10. Update state manager
         if self._state_manager:
             self._state_manager.set_replay_position(
                 symbol=symbol,
@@ -861,7 +876,7 @@ class PaperTradingEngine:
                     event.sequence_number,
                 )
 
-        # 12. Check for EOD liquidation
+        # 11. Check for EOD liquidation
         await self._check_eod_liquidation(timestamp, bar)
 
     async def _check_eod_liquidation(self, timestamp: datetime, bar: Dict[str, Any]) -> int:
@@ -961,7 +976,8 @@ class PaperTradingEngine:
             market_timestamp=market_timestamp,
             bar_close_price=bar_close_price,
             broker=self._paper_broker,
-            risk_manager=self._risk_manager
+            risk_manager=self._risk_manager,
+            default_stop_loss_pct=0.02
         )
 
     def _get_regime_context(self) -> Optional[Dict[str, Any]]:
