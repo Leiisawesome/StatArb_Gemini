@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
+from core_engine.data.replay.engine import ReplayStatus
 from papertest.engine.papertest_engine import PapertestEngine, PapertestRunResult
 
 

@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import Mock, MagicMock
 
-from core_engine.data.feeds.adapters import FeedMessage
+from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
 from core_engine.system.event_dispatcher import EventType
 
 from papertest.engine.replay_bridge import ReplayToDispatcherBridge, BridgeStats
@@ -121,6 +121,7 @@ class TestReplayToDispatcherBridge:
     def test_normalize_payload(self):
         """Test payload normalization"""
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -152,6 +153,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -184,6 +186,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="quote",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -209,6 +212,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="trade",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -233,6 +237,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="unknown",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -257,6 +262,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -284,6 +290,7 @@ class TestReplayToDispatcherBridge:
 
         # Message before start time
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -292,8 +299,11 @@ class TestReplayToDispatcherBridge:
 
         bridge.on_feed_message(msg)
 
-        # Should not enqueue
-        dispatcher.enqueue.assert_not_called()
+        # Should enqueue a heartbeat, but not the bar
+        dispatcher.enqueue.assert_called_once()
+        call_args = dispatcher.enqueue.call_args
+        assert call_args[1]["event_type"] == EventType.SYSTEM
+        assert call_args[1]["payload"]["type"] == "heartbeat"
         assert bridge._skipped_before_start == 1
 
     def test_on_feed_message_process_at_start(self):
@@ -310,6 +320,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=start_ts,
@@ -338,6 +349,7 @@ class TestReplayToDispatcherBridge:
         )
 
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -377,6 +389,7 @@ class TestReplayToDispatcherBridge:
 
         # Bar before stop time
         msg1 = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
@@ -389,6 +402,7 @@ class TestReplayToDispatcherBridge:
 
         # Bar at stop time
         msg2 = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=stop_ts,
@@ -412,6 +426,7 @@ class TestReplayToDispatcherBridge:
 
         # Message with naive timestamp
         msg = FeedMessage(
+            provider=FeedProvider.POLYGON,
             message_type="bar",
             symbol="AAPL",
             timestamp=datetime(2024, 1, 1, 9, 30),  # No timezone

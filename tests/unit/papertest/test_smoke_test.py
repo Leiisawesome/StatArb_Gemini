@@ -19,7 +19,7 @@ class TestSmokeTest:
         description = experiment.get_description()
         assert description == "Smoke test: single symbol streaming replay + basic pipeline wiring"
 
-    @patch('papertest.experiments.smoke_test.PapertestEngine')
+    @patch('papertest.engine.papertest_engine.PapertestEngine')
     @patch('papertest.experiments.smoke_test.time.perf_counter')
     @patch('papertest.experiments.smoke_test.datetime')
     async def test_run_success(self, mock_datetime, mock_perf_counter, mock_engine_class):
@@ -66,7 +66,7 @@ class TestSmokeTest:
         }
         assert result.custom_metrics == {"bridge_stats": {"bars_enqueued": 100}}
 
-    @patch('papertest.experiments.smoke_test.PapertestEngine')
+    @patch('papertest.engine.papertest_engine.PapertestEngine')
     @patch('papertest.experiments.smoke_test.time.perf_counter')
     @patch('papertest.experiments.smoke_test.datetime')
     async def test_run_initialization_failure(self, mock_datetime, mock_perf_counter, mock_engine_class):
@@ -92,7 +92,7 @@ class TestSmokeTest:
         # Engine run should not be called
         mock_engine.run.assert_not_called()
 
-    @patch('papertest.experiments.smoke_test.PapertestEngine')
+    @patch('papertest.engine.papertest_engine.PapertestEngine')
     @patch('papertest.experiments.smoke_test.time.perf_counter')
     @patch('papertest.experiments.smoke_test.datetime')
     async def test_run_execution_failure(self, mock_datetime, mock_perf_counter, mock_engine_class):
