@@ -36,6 +36,145 @@ from ..system.event_dispatcher import EventType
 
 logger = logging.getLogger(__name__)
 
+class _SignalNormalizer:
+    """
+    Internal helper to normalize strategy signals into execution signals.
+    """
+    @staticmethod
+    def normalize(
+        signal: Any, 
+        market_timestamp: datetime, 
+        bar_close_price: Optional[float],
+        broker: Any,
+        risk_manager: Any
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            symbol = getattr(signal, "symbol", None)
+            if not symbol:
+                return None
+
+            signal_type = getattr(signal, "signal_type", None)
+            st_val = str(getattr(signal_type, "value", signal_type))
+            st_val = (st_val or "").lower()
+
+            # Explicit mapping for canonical signal types
+            side = _SignalNormalizer._resolve_side(st_val)
+            if not side:
+                return None
+
+            # StrategySignal uses target_quantity/target_weight, not `quantity`.
+            qty = _SignalNormalizer._resolve_quantity(signal, st_val, bar_close_price, broker, risk_manager)
+            
+            if qty <= 0:
+                return None
+
+            strength = float(getattr(signal, "strength", 0.5) or 0.5)
+            confidence = float(getattr(signal, "confidence", 0.0) or 0.0)
+            strategy_id = getattr(signal, "strategy_id", "strategy")
+            
+            arrival_price = _SignalNormalizer._resolve_price(signal, bar_close_price, broker)
+
+            return {
+                "symbol": symbol,
+                "side": side,
+                "requested_quantity": qty,
+                "signal_strength": strength,
+                "confidence": confidence,
+                "strategy_id": strategy_id,
+                "signal_timestamp": market_timestamp,
+                "arrival_price": arrival_price,
+                # Risk 6-gate requires stop info; if none known, allow risk manager / signal manager defaults
+                "stop_loss_pct": 0.02,
+            }
+        except Exception:
+            return None
+
+    @staticmethod
+    def _resolve_side(st_val: str) -> Optional[str]:
+        if "long_entry" in st_val or "increase_long" in st_val:
+            return "buy"
+        elif "long_exit" in st_val or "reduce_long" in st_val:
+            return "sell"
+        elif "short_entry" in st_val or "increase_short" in st_val:
+            return "sell"
+        elif "short_exit" in st_val or "reduce_short" in st_val:
+            return "buy"
+        elif st_val == "buy":
+            return "buy"
+        elif st_val == "sell":
+            return "sell"
+        return None
+
+    @staticmethod
+    def _resolve_price(signal: Any, bar_close_price: Optional[float], broker: Any) -> float:
+        arrival_price = float(bar_close_price or 0.0)
+        if arrival_price <= 0:
+            arrival_price = float(getattr(signal, "price", 0.0) or 0.0)
+        if arrival_price <= 0 and broker:
+            q = broker.get_latest_quote(getattr(signal, "symbol", ""))
+            if q:
+                arrival_price = float(q.get("last_price", 0.0) or 0.0)
+        if arrival_price <= 0:
+            arrival_price = 100.0
+        return arrival_price
+
+    @staticmethod
+    def _resolve_quantity(signal: Any, st_val: str, bar_close_price: Optional[float], broker: Any, risk_manager: Any) -> float:
+        qty = 0.0
+        qt = str(getattr(signal, "quantity_type", "") or "").upper()
+        symbol = getattr(signal, "symbol", "")
+        
+        if qt == "ABSOLUTE":
+            qty = float(getattr(signal, "target_quantity", 0.0) or 0.0)
+            if qty <= 0:
+                qty = float(getattr(signal, "quantity", 0.0) or 0.0)
+        elif qt == "PERCENTAGE":
+            tw = getattr(signal, "target_weight", None)
+            if tw is not None and broker:
+                try:
+                    target_weight = float(tw or 0.0)
+                    acct = broker.get_account_info()
+                    portfolio_value = float(getattr(acct, "portfolio_value", 0.0) or 0.0)
+                    
+                    # Backtest parity: sizing uses CentralRiskManager.portfolio_value
+                    try:
+                        if risk_manager is not None and hasattr(risk_manager, "portfolio_value"):
+                            rm_pv = float(getattr(risk_manager, "portfolio_value", 0.0) or 0.0)
+                            if rm_pv > 0:
+                                portfolio_value = rm_pv
+                    except Exception:
+                        pass
+                        
+                    px = _SignalNormalizer._resolve_price(signal, bar_close_price, broker)
+                    
+                    if target_weight > 0 and portfolio_value > 0 and px > 0:
+                        qty = float((target_weight * portfolio_value) / px)
+                except Exception:
+                    qty = 0.0
+
+        # Exit sizing parity
+        try:
+            pos = 0.0
+            if risk_manager:
+                pos = float(getattr(risk_manager, "current_positions", {}).get(symbol, 0.0) or 0.0)
+
+            if ("long_exit" in st_val or "reduce_long" in st_val) and pos > 0:
+                qty = abs(pos)
+            elif ("short_exit" in st_val or "reduce_short" in st_val) and pos < 0:
+                qty = abs(pos)
+            elif "short_entry" in st_val and pos > 0:
+                qty = abs(pos)
+            elif "long_entry" in st_val and pos < 0:
+                qty = abs(pos)
+            elif st_val == "sell" and pos > 0:
+                qty = abs(pos)
+            elif st_val == "buy" and pos < 0:
+                qty = abs(pos)
+        except Exception:
+            pass
+            
+        return qty
+
 class PaperTradingState(Enum):
     """State of the paper trading engine."""
     INITIALIZING = auto()
@@ -815,147 +954,71 @@ class PaperTradingEngine:
     def _normalize_strategy_signal(self, s: Any, market_timestamp: datetime, bar_close_price: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """
         Convert StrategyManager aggregated signal into PaperTradingEngine.submit_signal() dict.
+        Delegates to _SignalNormalizer.
         """
-        try:
-            symbol = getattr(s, "symbol", None)
-            if not symbol:
-                return None
+        return _SignalNormalizer.normalize(
+            signal=s,
+            market_timestamp=market_timestamp,
+            bar_close_price=bar_close_price,
+            broker=self._paper_broker,
+            risk_manager=self._risk_manager
+        )
 
-            signal_type = getattr(s, "signal_type", None)
-            st_val = str(getattr(signal_type, "value", signal_type))
-            st_val = (st_val or "").lower()
-
-            # Explicit mapping for canonical signal types
-            if "long_entry" in st_val or "increase_long" in st_val:
-                side = "buy"
-            elif "long_exit" in st_val or "reduce_long" in st_val:
-                side = "sell"
-            elif "short_entry" in st_val or "increase_short" in st_val:
-                side = "sell"
-            elif "short_exit" in st_val or "reduce_short" in st_val:
-                side = "buy"
-            elif st_val == "buy":
-                # Legacy BUY semantics: open long if flat, otherwise close short
-                side = "buy"
-            elif st_val == "sell":
-                # Legacy SELL semantics: close long if long, otherwise open short (if shorts supported)
-                side = "sell"
-            else:
-                return None  # HOLD/unknown
-
-            # StrategySignal uses target_quantity/target_weight, not `quantity`.
-            # For parity with backtest, keep quantities as floats (no int rounding) so fractional shares are allowed.
-            qty = 0.0
-            qt = str(getattr(s, "quantity_type", "") or "").upper()
-            if qt == "ABSOLUTE":
-                # StrategyManager's TradingSignal uses `quantity` for ABSOLUTE sizing.
-                # Some signal sources (e.g., LONG_EXIT from proactive stop-loss) won't populate `target_quantity`.
-                qty = float(getattr(s, "target_quantity", 0.0) or 0.0)
-                if qty <= 0:
-                    qty = float(getattr(s, "quantity", 0.0) or 0.0)
-            elif qt == "PERCENTAGE":
-                tw = getattr(s, "target_weight", None)
-                if tw is not None and self._paper_broker:
-                    try:
-                        target_weight = float(tw or 0.0)
-                        acct = self._paper_broker.get_account_info()
-                        portfolio_value = float(getattr(acct, "portfolio_value", 0.0) or 0.0)
-                        cash = float(getattr(acct, "cash", 0.0) or 0.0)
-                        pv_source = "broker_account_info"
-                        # Backtest parity: sizing uses CentralRiskManager.portfolio_value (which is updated by RiskManager cash model).
-                        # This removes tiny qty drift by using the same PV source as backtest.
-                        try:
-                            if self._risk_manager is not None and hasattr(self._risk_manager, "portfolio_value"):
-                                rm_pv = float(getattr(self._risk_manager, "portfolio_value", 0.0) or 0.0)
-                                if rm_pv > 0:
-                                    portfolio_value = rm_pv
-                                    pv_source = "risk_manager.portfolio_value"
-                        except Exception:
-                            pass
-                        # Use last known price (arrival_price computed below) but fall back to broker quote if needed
-                        px = float(bar_close_price or 0.0)
-                        if px <= 0:
-                            px = float(getattr(s, "signal_price", 0.0) or 0.0)
-                        if px <= 0:
-                            px = float(getattr(s, "price", 0.0) or 0.0)
-                        if px <= 0 and hasattr(self._paper_broker, "get_latest_quote"):
-                            q = self._paper_broker.get_latest_quote(symbol)
-                            if q:
-                                px = float(q.get("last_price", 0.0) or 0.0)
-                        if px <= 0:
-                            px = 100.0
-                        # Backtest parity: use CentralRiskManager.portfolio_value for sizing (cash model),
-                        # not broker-marked portfolio value. This yields exact qty parity.
-                        if target_weight > 0 and portfolio_value > 0 and px > 0:
-                            qty = float((target_weight * portfolio_value) / px)
-                    except Exception:
-                        qty = 0.0
-
-            # Exit sizing parity:
-            # - LONG_EXIT/SHORT_EXIT close the whole position
-            # - Legacy SELL closes long if currently long; legacy BUY closes short if currently short
-            try:
-                if self._risk_manager:
-                    pos = float(getattr(self._risk_manager, "current_positions", {}).get(symbol, 0.0) or 0.0)
-
-                if ("long_exit" in st_val or "reduce_long" in st_val) and self._risk_manager:
-                    pos = float(getattr(self._risk_manager, "current_positions", {}).get(symbol, 0.0) or 0.0)
-                    if pos > 0:
-                        qty = abs(pos)
-                elif ("short_exit" in st_val or "reduce_short" in st_val) and self._risk_manager:
-                    pos = float(getattr(self._risk_manager, "current_positions", {}).get(symbol, 0.0) or 0.0)
-                    if pos < 0:
-                        qty = abs(pos)
-                elif "short_entry" in st_val and self._risk_manager:
-                    # Backtest semantics: SHORT_ENTRY while long == close long (shorts disabled by default).
-                    # This prevents leaving a residual “stub” position.
-                    if pos > 0:
-                        qty = abs(pos)
-                elif "long_entry" in st_val and self._risk_manager:
-                    # Symmetric: LONG_ENTRY while short == cover short (if any).
-                    if pos < 0:
-                        qty = abs(pos)
-                elif st_val == "sell" and self._risk_manager:
-                    # If we're long, legacy SELL means close the long
-                    if pos > 0:
-                        qty = abs(pos)
-                elif st_val == "buy" and self._risk_manager:
-                    # If we're short, legacy BUY means cover the short
-                    if pos < 0:
-                        qty = abs(pos)
-            except Exception:
-                pass
-
-            if qty <= 0:
-                return None
-
-            strength = float(getattr(s, "strength", 0.5) or 0.5)
-            confidence = float(getattr(s, "confidence", 0.0) or 0.0)
-            strategy_id = getattr(s, "strategy_id", "strategy")
-            arrival_price = float(bar_close_price or 0.0)
-            if arrival_price <= 0:
-                arrival_price = float(getattr(s, "price", 0.0) or 0.0)
-            if arrival_price <= 0 and self._paper_broker:
-                q = self._paper_broker.get_latest_quote(symbol)
-                if q:
-                    arrival_price = float(q.get("last_price", 0.0) or 0.0)
-            if arrival_price <= 0:
-                arrival_price = 100.0
-
-            return {
-                "symbol": symbol,
-                "side": side,
-                "requested_quantity": qty,
-                "signal_strength": strength,
-                "confidence": confidence,
-                "strategy_id": strategy_id,
-                "signal_timestamp": market_timestamp,
-                "arrival_price": arrival_price,
-                # Risk 6-gate requires stop info; if none known, allow risk manager / signal manager defaults
-                "stop_loss_pct": 0.02,
-            }
-        except Exception:
+    def _get_regime_context(self) -> Optional[Dict[str, Any]]:
+        """
+        Safely retrieve current regime context from regime engine.
+        """
+        if not self._regime_engine:
             return None
+
+        try:
+            # Prefer standard interface (Rule 2)
+            if hasattr(self._regime_engine, "get_current_regime_context"):
+                rc = self._regime_engine.get_current_regime_context()
+                if isinstance(rc, dict):
+                    return rc
+                elif hasattr(rc, "__dict__"):
+                    return dict(rc.__dict__)
+            
+            # Fallback for legacy/alternative implementations
+            if hasattr(self._regime_engine, "current_regime"):
+                cr = getattr(self._regime_engine, "current_regime", None)
+                if isinstance(cr, dict):
+                    return cr
+                elif hasattr(cr, "__dict__"):
+                    return dict(cr.__dict__)
+        except Exception as e:
+            logger.warning(f"Failed to retrieve regime context: {e}")
+            
+        return None
+
+    def _create_execution_authorization(self, sig: Any) -> Any:
+        """Create ExecutionAuthorization from signal."""
+        from core_engine.system.unified_execution_engine import ExecutionAuthorization, ExecutionAlgorithm
+        
+        auth_id = None
+        if hasattr(sig, "metadata") and isinstance(sig.metadata, dict):
+            auth_id = sig.metadata.get("authorization_id")
+            
+        return ExecutionAuthorization(
+            authorization_id=str(auth_id or f"auth:{getattr(sig, 'signal_id', '')}"),
+            symbol=sig.symbol,
+            side=sig.side,
+            quantity=float(sig.requested_quantity),
+            max_quantity=float(sig.requested_quantity),
+            strategy_id=getattr(sig, "strategy_id", ""),
+            allowed_algorithms=[ExecutionAlgorithm.MARKET],
+        )
+
+    def _create_execution_request(self, auth: Any, decision_price: Optional[float], regime_ctx: Optional[Dict]) -> Any:
+        """Create ExecutionRequest from authorization."""
+        from core_engine.system.unified_execution_engine import ExecutionRequest, ExecutionAlgorithm
+        
+        return ExecutionRequest(
+            authorization=auth,
+            algorithm=ExecutionAlgorithm.MARKET,
+            strategy_context={"decision_price": decision_price, "regime_context": regime_ctx},
+        )
 
     async def _execute_pending_signals_for_symbol(self, symbol: str, bar: Dict[str, Any], market_timestamp: datetime) -> None:
         """
@@ -983,20 +1046,7 @@ class PaperTradingEngine:
         for sig in to_exec:
             try:
                 # Construct authorization for execution engine
-                from core_engine.system.unified_execution_engine import ExecutionAuthorization, ExecutionRequest, ExecutionAlgorithm
-
-                auth_id = None
-                if hasattr(sig, "metadata") and isinstance(sig.metadata, dict):
-                    auth_id = sig.metadata.get("authorization_id")
-                auth = ExecutionAuthorization(
-                    authorization_id=str(auth_id or f"auth:{getattr(sig, 'signal_id', '')}"),
-                    symbol=sig.symbol,
-                    side=sig.side,
-                    quantity=float(sig.requested_quantity),
-                    max_quantity=float(sig.requested_quantity),
-                    strategy_id=getattr(sig, "strategy_id", ""),
-                    allowed_algorithms=[ExecutionAlgorithm.MARKET],
-                )
+                auth = self._create_execution_authorization(sig)
 
                 # OMS tracking
                 oms_order = await self._oms.create_order(
@@ -1035,28 +1085,12 @@ class PaperTradingEngine:
                 # so we intentionally skip regime context for the first executed order to match that behavior.
                 regime_ctx = None
                 skip_regime_for_first_exec = bool(self._execution_count == 0)
-                try:
-                    if (not skip_regime_for_first_exec) and self._regime_engine is not None:
-                        if hasattr(self._regime_engine, "get_current_regime_context"):
-                            rc = self._regime_engine.get_current_regime_context()
-                            if isinstance(rc, dict):
-                                regime_ctx = rc
-                            elif hasattr(rc, "__dict__"):
-                                regime_ctx = dict(rc.__dict__)
-                        elif hasattr(self._regime_engine, "current_regime"):
-                            cr = getattr(self._regime_engine, "current_regime", None)
-                            if isinstance(cr, dict):
-                                regime_ctx = cr
-                            elif hasattr(cr, "__dict__"):
-                                regime_ctx = dict(cr.__dict__)
-                except Exception:
-                    regime_ctx = None
+                
+                if (not skip_regime_for_first_exec):
+                    regime_ctx = self._get_regime_context()
 
-                req = ExecutionRequest(
-                    authorization=auth,
-                    algorithm=ExecutionAlgorithm.MARKET,
-                    strategy_context={"decision_price": decision_price, "regime_context": regime_ctx},
-                )
+                req = self._create_execution_request(auth, decision_price, regime_ctx)
+                
                 result = await self._execution_engine.execute_with_mode_routing(req)
                 self._execution_count += 1
 
