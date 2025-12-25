@@ -21,6 +21,7 @@ from papertest.experiments.regime_transition import RegimeTransitionPapertest
 from papertest.experiments.latency_stress import LatencyStressPapertest
 from papertest.experiments.execution_quality import ExecutionQualityPapertest
 from papertest.experiments.checkpoint_restore_determinism import CheckpointRestoreDeterminismPapertest
+from papertest.experiments.symbol_picker_test import SymbolPickerTestExperiment
 from papertest.utils.config_loader import load_config
 
 logging.basicConfig(
@@ -59,6 +60,11 @@ EXPERIMENTS = {
         "class": CheckpointRestoreDeterminismPapertest,
         "default_config": "papertest/configs/smoke_test.yaml",
         "description": "Checkpoint/restore determinism checks",
+    },
+    "symbol_picker_test": {
+        "class": SymbolPickerTestExperiment,
+        "default_config": "papertest/configs/smoke_test.yaml",
+        "description": "Integration test: Run Picker -> Artifact -> Papertest Sim",
     },
 }
 

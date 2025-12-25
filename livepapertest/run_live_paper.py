@@ -18,11 +18,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import json
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from dotenv import load_dotenv
 
 from core_engine.paper.engine import PaperTradingEngine, PaperTradingConfig
 from core_engine.system.time_source import TimeSourceFactory
@@ -152,6 +154,27 @@ async def main_async(args: argparse.Namespace) -> None:
 
     # Basic logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    # Load universe from artifact if provided
+    if args.universe_file:
+        logger.info(f"Loading universe from {args.universe_file}")
+        try:
+            with open(args.universe_file, 'r') as f:
+                artifact = json.load(f)
+                # Schema: { "symbols": { "SYM": {...} }, "regime": ... }
+                if "symbols" in artifact and isinstance(artifact["symbols"], dict):
+                    loaded_symbols = list(artifact["symbols"].keys())
+                    # Override config symbols
+                    cfg["polygon"]["symbols"] = loaded_symbols
+                    logger.info(f"Overridden symbols from artifact: {len(loaded_symbols)} found")
+                    
+                    if "regime" in artifact:
+                        logger.info(f"Artifact Regime: {artifact['regime']}")
+                else:
+                    logger.warning("Artifact missing 'symbols' dictionary, using config default.")
+        except Exception as e:
+            logger.error(f"Failed to load universe file: {e}")
+            raise
 
     symbols = [str(s).upper() for s in cfg["polygon"]["symbols"]]
     if not symbols:
@@ -409,12 +432,14 @@ async def main_async(args: argparse.Namespace) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run live paper trading (Polygon delayed -> IBKR paper).")
     p.add_argument("--config", type=str, default=_default_config_path(), help="Path to YAML config")
+    p.add_argument("--universe-file", type=str, help="Path to universe JSON artifact from symbolpicker")
     p.add_argument("--enable-orders", action="store_true", help="Second key: allow real order submission")
     p.add_argument("--dry-run", action="store_true", help="Force no-order mode (signals/risk still run)")
     return p
 
 
 def main() -> None:
+    load_dotenv()
     args = build_arg_parser().parse_args()
     asyncio.run(main_async(args))
 

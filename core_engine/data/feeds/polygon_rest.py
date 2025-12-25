@@ -60,17 +60,17 @@ class PolygonRestConfig:
     # Base URL
     base_url: str = "https://api.polygon.io"
 
-    # Rate limiting (Stock Starter: 5 calls/minute)
-    rate_limit_calls: int = 5
-    rate_limit_period: float = 60.0  # seconds
+    # Rate limiting (Unlimited plan adjusted)
+    rate_limit_calls: int = 500
+    rate_limit_period: float = 1.0  # seconds
 
     # Request settings
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 60.0
     max_retries: int = 3
     retry_delay_seconds: float = 1.0
 
     # Data settings
-    default_limit: int = 5000  # Max results per request
+    default_limit: int = 50000  # Max results per request
 
     def __post_init__(self):
         if not self.api_key:
@@ -221,12 +221,15 @@ class PolygonRestService:
             params = {}
         params['apiKey'] = self.config.api_key
 
+        self.logger.debug(f"Requesting URL: {url} with params: { {k:v for k,v in params.items() if k != 'apiKey'} }")
+
         for attempt in range(self.config.max_retries):
             try:
                 async with self._session.get(url, params=params) as resp:
                     data = await resp.json()
 
                     if resp.status == 200:
+                        self.logger.debug(f"Request successful. Status: {data.get('status')}, Results count: {len(data.get('results', []))}")
                         return data
                     elif resp.status == 429:  # Rate limited
                         wait = float(resp.headers.get('Retry-After', 60))
@@ -260,7 +263,7 @@ class PolygonRestService:
         url = f"{self.config.base_url}/v2/aggs/ticker/{symbol.upper()}/prev"
         data = await self._request(url)
 
-        if data.get('status') == 'OK' and data.get('results'):
+        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
             r = data['results'][0]
             return AggregateBar(
                 symbol=symbol.upper(),
@@ -274,6 +277,43 @@ class PolygonRestService:
                 num_trades=r.get('n'),
             )
         return None
+
+    async def get_grouped_daily_bars(self, date: datetime) -> pd.DataFrame:
+        """
+        Get grouped daily bars for the entire market for a specific date.
+
+        Args:
+            date: Date to fetch data for
+
+        Returns:
+            DataFrame with symbol as index and OHLCV data columns
+        """
+        date_str = date.strftime('%Y-%m-%d')
+        url = f"{self.config.base_url}/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
+
+        data = await self._request(url)
+
+        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
+            bars = []
+            symbols = []
+            for r in data['results']:
+                symbols.append(r['T'])
+                bars.append({
+                    'open': r['o'],
+                    'high': r['h'],
+                    'low': r['l'],
+                    'close': r['c'],
+                    'volume': r['v'],
+                    'vwap': r.get('vw'),
+                    'num_trades': r.get('n'),
+                    'timestamp': datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc)
+                })
+
+            df = pd.DataFrame(bars, index=symbols)
+            df.index.name = 'symbol'
+            return df
+        
+        return pd.DataFrame()
 
     async def get_bars(
         self,
@@ -333,7 +373,7 @@ class PolygonRestService:
 
         data = await self._request(url, params)
 
-        if data.get('status') == 'OK' and data.get('results'):
+        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
             bars = []
             timestamps = []
             for r in data['results']:
@@ -362,7 +402,7 @@ class PolygonRestService:
         days: int = 1,
     ) -> Dict[str, pd.DataFrame]:
         """
-        Get bars for multiple symbols.
+        Get bars for multiple symbols concurrently.
 
         Args:
             symbols: List of stock symbols
@@ -373,16 +413,23 @@ class PolygonRestService:
             Dict mapping symbol to DataFrame
         """
         results = {}
-
-        for symbol in symbols:
-            try:
-                df = await self.get_bars(symbol, timeframe=timeframe, days=days)
-                results[symbol.upper()] = df
-                self.logger.debug(f"Got {len(df)} bars for {symbol}")
-            except Exception as e:
-                self.logger.error(f"Failed to get bars for {symbol}: {e}")
-                results[symbol.upper()] = pd.DataFrame()
-
+        
+        # Batch requests to control concurrency if needed, though rate limiter handles pacing
+        batch_size = 50
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            tasks = [self.get_bars(symbol, timeframe=timeframe, days=days) for symbol in batch]
+            
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for symbol, result in zip(batch, batch_results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"Failed to get bars for {symbol}: {result}")
+                    results[symbol.upper()] = pd.DataFrame()
+                else:
+                    results[symbol.upper()] = result
+                    self.logger.debug(f"Got {len(result)} bars for {symbol}")
+        
         return results
 
     async def get_daily_bars(

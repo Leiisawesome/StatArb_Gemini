@@ -1,0 +1,35 @@
+# Symbol Picker Configuration
+
+# Coarse Filter (Daily Data)
+filters:
+  min_price: 10.0           # Minimum price in USD (strict for top 20)
+  min_adv_30d: 20000000     # Minimum 30-day Average Dollar Volume (strict for top 20)
+  max_gap_percent: 0.15     # Exclude if recent overnight gap > 15% (instability proxy)
+  exclude_tickers:          # Explicit blacklist
+    - "UVXY"
+    - "SQQQ"
+    - "TQQQ"
+
+# Deep Dive (Intraday Minute Data)
+features:
+  lookback_days: 5          # Number of days of minute bars to fetch
+  min_intraday_vol: 0.005   # Minimum volatility (0.5%) to be worth trading
+  max_spread_bps: 20        # Max estimated spread in basis points
+
+# Ranking (Selection)
+selection:
+  target_count: 20          # Target universe size
+  hysteresis:
+    keep_rank_threshold: 25 # Keep existing if rank <= 25
+    enter_rank_threshold: 15 # Enter only if rank <= 15
+  
+  weights:
+    liquidity: 0.4          # Weight for Dollar Volume
+    stability: 0.3          # Weight for Inverse Volatility
+    efficiency: 0.3         # Weight for tight spreads / low gaps
+
+# Output
+output:
+  directory: "symbolpicks"
+  filename_format: "universe_{date}_{regime}.json"
+
