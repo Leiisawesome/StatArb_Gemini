@@ -1,5 +1,10 @@
 # Symbol Picker Configuration
 
+# Data Range
+data:
+  start_date: "2024-12-20"
+  end_date: "2024-12-20"
+
 # Coarse Filter (Daily Data)
 filters:
   min_price: 10.0           # Minimum price in USD (strict for top 20)

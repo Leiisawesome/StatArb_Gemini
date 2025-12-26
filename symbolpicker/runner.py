@@ -130,10 +130,30 @@ class SymbolPickerRunner:
             exporter = ArtifactExporter(self.config)
             file_path = exporter.export(final_universe, regime_data, date)
             
-            print(f"\nSUCCESS: Universe generated at {file_path}")
-            print(f"Regime: {regime_data.get('label')}")
-            print(f"Count: {len(final_universe)}")
-            print("Top 5:", ", ".join(list(final_universe.keys())[:5]))
+            print("\n" + "="*50)
+            print(f"🚀 SYMBOL PICKER SUCCESS | {date.strftime('%Y-%m-%d')}")
+            print("="*50)
+            print(f"📁 Artifact: {file_path}")
+            print(f"📊 Regime:   {regime_data.get('label', 'UNKNOWN').upper()}")
+            print(f"🔢 Count:    {len(final_universe)} symbols")
+            print(f"🔝 Top 5:    {', '.join(list(final_universe.keys())[:5])}")
+            print("="*50)
+            
+            # Print full ranked table
+            print(f"{'Rank':<5} | {'Symbol':<8} | {'Score':<8} | {'Dollar Vol (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
+            print("-" * 75)
+            
+            # Sort by rank just in case
+            sorted_universe = sorted(final_universe.items(), key=lambda x: x[1]['rank'])
+            
+            for sym, data in sorted_universe:
+                metrics = data['metrics']
+                dvol_m = metrics['dollar_vol'] / 1_000_000
+                vol_pct = metrics['realized_vol'] * 100
+                spread = metrics['avg_spread_bps']
+                print(f"{data['rank']:<5} | {sym:<8} | {data['score']:<8.4f} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
+            
+            print("="*75 + "\n")
             
             return file_path
             
@@ -147,15 +167,29 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Quant Symbol Picker")
     parser.add_argument("--date", type=str, help="YYYY-MM-DD (default: yesterday)")
     parser.add_argument("--config", type=str, default="symbolpicker/config.yaml", help="Path to config")
+    parser.add_argument("--log-format", type=str, choices=["structured", "human"], default="human", help="Log format")
     
     args = parser.parse_args()
     
-    init_logging(LogConfig(level="INFO"))
+    init_logging(LogConfig(level="INFO", format=args.log_format))
     
-    target_date = None
+    runner = SymbolPickerRunner(args.config)
+    
     if args.date:
         target_date = datetime.strptime(args.date, '%Y-%m-%d')
+        asyncio.run(runner.run(target_date))
+    elif 'data' in runner.config and 'start_date' in runner.config['data'] and 'end_date' in runner.config['data']:
+        start_date = datetime.strptime(runner.config['data']['start_date'], '%Y-%m-%d')
+        end_date = datetime.strptime(runner.config['data']['end_date'], '%Y-%m-%d')
         
-    runner = SymbolPickerRunner(args.config)
-    asyncio.run(runner.run(target_date))
+        current_date = start_date
+        while current_date <= end_date:
+            # Skip weekends (Saturday=5, Sunday=6)
+            if current_date.weekday() < 5:
+                asyncio.run(runner.run(current_date))
+            current_date += timedelta(days=1)
+    else:
+        # Default to yesterday
+        target_date = datetime.now() - timedelta(days=1)
+        asyncio.run(runner.run(target_date))
 

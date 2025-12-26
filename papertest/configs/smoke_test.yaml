@@ -1,6 +1,6 @@
 papertest:
   data:
-    symbols: ["TSLA","NVDA","GOOGL"]
+    symbols: ["TSLA","NVDA","PLTR"]
     start_date: "2024-12-20"
     end_date: "2024-12-20"
     interval: "1min"

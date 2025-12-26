@@ -9,7 +9,7 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["TSLA","NVDA","GOOGL"]  # Single-symbol for momentum/mean reversion
+symbols: ["TSLA","NVDA","PLTR","APO"]  # Single-symbol for momentum/mean reversion
 interval: "1min"
 start_date: "2024-12-20"  # Valid data date
 end_date: "2024-12-20"    # Same day (1 day test)
