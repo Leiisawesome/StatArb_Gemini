@@ -25,9 +25,47 @@ features:
 selection:
   target_count: 20          # Target universe size
   hysteresis:
-    keep_rank_threshold: 25 # Keep existing if rank <= 25
-    enter_rank_threshold: 15 # Enter only if rank <= 15
+    keep_rank_threshold: 100 # Keep existing if rank <= 100
+    enter_rank_threshold: 80 # Enter only if rank <= 80
   
+  # Bucketing Thresholds (Market Cap in billions USD)
+  cap_thresholds:
+    small_max: 2.0
+    mid_max: 10.0
+    # large is > mid_max
+
+  # Regime-Adaptive Policies
+  regime_policies:
+    # Strong uptrend, calm conditions
+    bull_low_volatility:
+      weights: { liquidity: 0.3, stability: 0.2, momentum: 0.5 }
+      buckets: { etf: 4, large: 8, mid: 5, small: 3 }
+      sector_cap: 5
+    
+    # Strong uptrend, volatile conditions
+    bull_high_volatility:
+      weights: { liquidity: 0.4, stability: 0.3, momentum: 0.3 }
+      buckets: { etf: 6, large: 8, mid: 4, small: 2 }
+      sector_cap: 4
+
+    # Downtrend, panic conditions
+    bear_high_volatility:
+      weights: { liquidity: 0.5, stability: 0.4, momentum: 0.1 }
+      buckets: { etf: 10, large: 10, mid: 0, small: 0 } # Flight to liquidity
+      sector_cap: 3
+
+    # Sideways consolidation
+    range_bound:
+      weights: { liquidity: 0.3, stability: 0.5, momentum: 0.2 }
+      buckets: { etf: 5, large: 5, mid: 5, small: 5 }
+      sector_cap: 4
+
+    # Default for unknown or unlisted regimes
+    default:
+      weights: { liquidity: 0.4, stability: 0.3, efficiency: 0.3 }
+      buckets: { etf: 5, large: 5, mid: 5, small: 5 }
+      sector_cap: 4
+
   weights:
     liquidity: 0.4          # Weight for Dollar Volume
     stability: 0.3          # Weight for Inverse Volatility

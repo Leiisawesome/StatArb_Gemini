@@ -21,102 +21,92 @@ class SymbolPickerTestExperiment(BasePapertestExperiment):
     async def run(self) -> PapertestResult:
         start_time = datetime.now()
         
-        # 1. Run Symbol Picker
-        logger.info("Step 1: Running Symbol Picker...")
-        # Use default config path
-        picker = SymbolPickerRunner("symbolpicker/config.yaml")
+        # Determine simulation window
+        eval_cfg = self.config.get('evaluation', {})
+        rolling_days = eval_cfg.get('rolling_days', 1)
+        end_date_str = eval_cfg.get('end_date')
         
-        try:
-            # Run picker to generate artifact
-            artifact_path = await picker.run()
-        except Exception as e:
-            logger.error(f"Symbol Picker execution failed: {e}", exc_info=True)
-            return PapertestResult(
-                experiment_name="Symbol Picker Test",
-                experiment_type="integration",
-                run_timestamp=start_time,
-                duration_seconds=(datetime.now() - start_time).total_seconds(),
-                success=False,
-                error_message=f"Symbol Picker execution failed: {str(e)}"
-            )
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        else:
+            end_date = datetime.now() - timedelta(days=1)
+            while end_date.weekday() >= 5:
+                end_date -= timedelta(days=1)
+
+        dates = []
+        curr = end_date
+        while len(dates) < rolling_days:
+            if curr.weekday() < 5:
+                dates.append(curr)
+            curr -= timedelta(days=1)
+        dates.reverse() # Chronological order
+
+        logger.info(f"Starting rolling evaluation for {len(dates)} days...")
         
-        if not artifact_path or not os.path.exists(artifact_path):
-            return PapertestResult(
-                experiment_name="Symbol Picker Test",
-                experiment_type="integration",
-                run_timestamp=start_time,
-                duration_seconds=(datetime.now() - start_time).total_seconds(),
-                success=False,
-                error_message="Symbol Picker failed to generate artifact"
-            )
+        results = []
+        all_symbols_picked = []
+        
+        for sim_date in dates:
+            logger.info(f"--- Evaluating {sim_date.strftime('%Y-%m-%d')} ---")
             
-        logger.info(f"Step 2: Loaded Universe from {artifact_path}")
-        
-        # 2. Configure Papertest with Picked Symbols
-        try:
+            # 1. Run Symbol Picker for this date
+            picker = SymbolPickerRunner("symbolpicker/config.yaml")
+            try:
+                artifact_path = await picker.run(sim_date)
+            except Exception as e:
+                logger.error(f"Picker failed for {sim_date}: {e}")
+                continue
+
+            if not artifact_path or not os.path.exists(artifact_path):
+                logger.error(f"Artifact not found for {sim_date}")
+                continue
+                
             with open(artifact_path, 'r') as f:
                 artifact = json.load(f)
-                
-            symbols = list(artifact.get('symbols', {}).keys())
-            logger.info(f"Picked {len(symbols)} symbols: {symbols}")
             
-            if not symbols:
-                 return PapertestResult(
-                    experiment_name="Symbol Picker Test",
-                    experiment_type="integration",
-                    run_timestamp=start_time,
-                    duration_seconds=(datetime.now() - start_time).total_seconds(),
-                    success=False,
-                    error_message="Symbol Picker generated empty universe"
-                )
+            symbols = list(artifact.get('symbols', {}).keys())
+            trade_date_str = artifact.get('trade_date')
+            all_symbols_picked.extend(symbols)
+            
+            if not symbols or not trade_date_str:
+                logger.warning(f"No symbols or trade_date for {sim_date}")
+                continue
 
-            # Inject symbols into config
-            # Handle config structure (nested vs flat)
-            if 'papertest' in self.config:
-                if 'polygon' in self.config['papertest']:
-                    self.config['papertest']['polygon']['symbols'] = symbols
-                else:
-                    logger.warning("Config 'papertest' missing 'polygon' section, trying to inject anyway")
-                    self.config['papertest']['polygon'] = {'symbols': symbols}
-            elif 'polygon' in self.config:
-                 self.config['polygon']['symbols'] = symbols
-            else:
-                 logger.warning("Config structure unknown (no 'papertest' or 'polygon' keys), assuming flat structure")
-                 self.config['polygon'] = {'symbols': symbols}
-                 
-        except Exception as e:
-            return PapertestResult(
-                experiment_name="Symbol Picker Test",
-                experiment_type="integration",
-                run_timestamp=start_time,
-                duration_seconds=(datetime.now() - start_time).total_seconds(),
-                success=False,
-                error_message=f"Failed to configure from artifact: {str(e)}"
-            )
+            # 2. Run Papertest for the TRADE DATE
+            trade_date = datetime.strptime(trade_date_str, '%Y-%m-%d')
+            
+            # Update config for this day
+            day_config = self.config.copy()
+            if 'papertest' not in day_config: day_config['papertest'] = {}
+            if 'polygon' not in day_config['papertest']: day_config['papertest']['polygon'] = {}
+            
+            day_config['papertest']['polygon']['symbols'] = symbols
+            # Assuming papertest engine handles start/end dates
+            day_config['papertest']['session'] = day_config['papertest'].get('session', {})
+            day_config['papertest']['session']['start_date'] = trade_date_str
+            day_config['papertest']['session']['end_date'] = trade_date_str
+            
+            from papertest.engine.papertest_engine import PapertestEngine
+            engine = PapertestEngine(day_config)
+            await engine.initialize()
+            day_stats = await engine.run()
+            results.append(day_stats)
 
-        # 3. Run Engine
-        logger.info("Step 3: Running Papertest Engine...")
-        try:
-            stats = await self._run_engine()
-            success = True
-            err = None
-        except Exception as e:
-            logger.error(f"Engine failed: {e}", exc_info=True)
-            success = False
-            err = str(e)
-            stats = {}
-
+        # 3. Aggregate Results
+        total_pnl = sum(r.get('total_pnl', 0.0) for r in results) if results else 0.0
+        success = len(results) == len(dates)
+        
         return PapertestResult(
-            experiment_name="Symbol Picker Test",
-            experiment_type="integration",
+            experiment_name="Symbol Picker Rolling Test",
+            experiment_type="rolling_integration",
             run_timestamp=start_time,
             duration_seconds=(datetime.now() - start_time).total_seconds(),
-            engine_stats=stats,
             success=success,
-            error_message=err,
+            total_pnl=total_pnl,
             custom_metrics={
-                "universe_count": len(symbols),
-                "regime_label": artifact.get('regime', {}).get('label', 'N/A')
+                "days_evaluated": len(results),
+                "total_symbols_picked": len(set(all_symbols_picked)),
+                "avg_symbols_per_day": len(all_symbols_picked) / len(results) if results else 0
             }
         )
 

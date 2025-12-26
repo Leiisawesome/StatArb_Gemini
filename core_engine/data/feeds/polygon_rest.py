@@ -235,14 +235,19 @@ class PolygonRestService:
                         wait = float(resp.headers.get('Retry-After', 60))
                         self.logger.warning(f"Rate limited, waiting {wait}s")
                         await asyncio.sleep(wait)
+                    elif resp.status == 404:
+                        self.logger.info(f"Ticker not found (404): {url}")
+                        return data
                     else:
-                        self.logger.error(f"API error {resp.status}: {data}")
+                        self.logger.error(f"API error {resp.status} for {url}: {data}")
                         return data
 
             except Exception as e:
-                self.logger.error(f"Request failed (attempt {attempt+1}): {e}")
                 if attempt < self.config.max_retries - 1:
+                    self.logger.warning(f"Request failed (attempt {attempt+1}), retrying in {self.config.retry_delay_seconds}s: {e}")
                     await asyncio.sleep(self.config.retry_delay_seconds)
+                else:
+                    self.logger.error(f"Request failed (final attempt {attempt+1}): {e}")
 
         return {'status': 'ERROR', 'message': 'Max retries exceeded'}
 
@@ -399,6 +404,8 @@ class PolygonRestService:
         self,
         symbols: List[str],
         timeframe: str = '1min',
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
         days: int = 1,
     ) -> Dict[str, pd.DataFrame]:
         """
@@ -407,28 +414,24 @@ class PolygonRestService:
         Args:
             symbols: List of stock symbols
             timeframe: Bar timeframe
-            days: Days of history
+            start: Start datetime
+            end: End datetime
+            days: Days of history (if start/end not provided)
 
         Returns:
             Dict mapping symbol to DataFrame
         """
-        results = {}
+        tasks = [self.get_bars(symbol, timeframe=timeframe, start=start, end=end, days=days) for symbol in symbols]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Batch requests to control concurrency if needed, though rate limiter handles pacing
-        batch_size = 50
-        for i in range(0, len(symbols), batch_size):
-            batch = symbols[i:i + batch_size]
-            tasks = [self.get_bars(symbol, timeframe=timeframe, days=days) for symbol in batch]
-            
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for symbol, result in zip(batch, batch_results):
-                if isinstance(result, Exception):
-                    self.logger.error(f"Failed to get bars for {symbol}: {result}")
-                    results[symbol.upper()] = pd.DataFrame()
-                else:
-                    results[symbol.upper()] = result
-                    self.logger.debug(f"Got {len(result)} bars for {symbol}")
+        results = {}
+        for symbol, result in zip(symbols, batch_results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Failed to get bars for {symbol}: {result}")
+                results[symbol.upper()] = pd.DataFrame()
+            else:
+                results[symbol.upper()] = result
+                self.logger.debug(f"Got {len(result)} bars for {symbol}")
         
         return results
 
@@ -454,14 +457,66 @@ class PolygonRestService:
 
         Note: Real-time prices require Stock Developer+ plan.
         """
+        tasks = [self.get_previous_day(symbol) for symbol in symbols]
+        bars = await asyncio.gather(*tasks, return_exceptions=True)
+        
         prices = {}
-
-        for symbol in symbols:
-            bar = await self.get_previous_day(symbol)
-            if bar:
+        for symbol, bar in zip(symbols, bars):
+            if isinstance(bar, AggregateBar):
                 prices[symbol.upper()] = bar.close
+            elif isinstance(bar, Exception):
+                self.logger.error(f"Failed to get latest price for {symbol}: {bar}")
 
         return prices
+
+    async def get_ticker_details(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get ticker details (Market Cap, Sector, Industry, etc.).
+        
+        Args:
+            symbol: Stock symbol
+            
+        Returns:
+            Dict containing ticker metadata
+        """
+        url = f"{self.config.base_url}/v3/reference/tickers/{symbol.upper()}"
+        data = await self._request(url)
+        
+        if data.get('status') == 'OK' and data.get('results'):
+            return data['results']
+        
+        return {}
+
+    async def get_ticker_details_multi(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Get ticker details for multiple symbols concurrently.
+        """
+        tasks = [self.get_ticker_details(symbol) for symbol in symbols]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        results = {}
+        for symbol, result in zip(symbols, batch_results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Failed to get ticker details for {symbol}: {result}")
+                results[symbol.upper()] = {}
+            else:
+                results[symbol.upper()] = result
+        
+        return results
+
+    async def get_upcoming_earnings(self, symbols: List[str], days: int = 7) -> Dict[str, str]:
+        """
+        Get upcoming earnings dates for symbols.
+        Note: This uses the /vX/reference/financials or similar if available,
+        but for simplicity we'll implement a mock/stub if direct endpoint isn't clear
+        for the current subscription. Polygon's 'events' API is often V3 reference.
+        """
+        # Placeholder implementation - Polygon's V3 Events API
+        # GET /v3/reference/events?ticker={ticker}&event_type=earnings
+        # This is a bit complex for bulk. Let's provide the method anyway.
+        earnings_dates = {}
+        # ... (implementation logic if needed) ...
+        return earnings_dates
 
     def get_ohlcv_for_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
         """

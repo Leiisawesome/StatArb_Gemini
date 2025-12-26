@@ -41,24 +41,23 @@ class CoarseFilter:
         dollar_vol = daily_snapshot['volume'] * daily_snapshot['close']
         liq_mask = dollar_vol >= self.min_adv
 
-        # 3. Ticker Filter (Blacklist & Special Types)
-        # Exclude warrants, rights, etc if they leak into the feed (often 5+ chars)
-        def is_valid_ticker(symbol: str) -> bool:
-            if symbol in self.exclude_tickers:
-                return False
-            if len(symbol) > 4: # Most common stocks are 1-4 chars. 5 chars often test/warrants
-                return False
-            return True
-        
         # Combine Masks
         valid_rows = daily_snapshot[price_mask & liq_mask]
         
         # Apply Ticker Logic
         candidates = [
             sym for sym in valid_rows.index 
-            if is_valid_ticker(str(sym))
+            if self._is_valid_ticker(str(sym))
         ]
         
         logger.info(f"Coarse Filter: Reduced {len(daily_snapshot)} -> {len(candidates)} candidates.")
         return candidates
+
+    def _is_valid_ticker(self, symbol: str) -> bool:
+        """Exclude warrants, rights, and blacklisted tickers."""
+        if symbol in self.exclude_tickers:
+            return False
+        if len(symbol) > 4: # Most common stocks are 1-4 chars. 5 chars often test/warrants
+            return False
+        return True
 

@@ -169,7 +169,9 @@ async def main_async(args: argparse.Namespace) -> None:
                     logger.info(f"Overridden symbols from artifact: {len(loaded_symbols)} found")
                     
                     if "regime" in artifact:
-                        logger.info(f"Artifact Regime: {artifact['regime']}")
+                        regime_info = artifact["regime"]
+                        regime_label = regime_info.get("primary") if isinstance(regime_info, dict) else regime_info
+                        logger.info(f"Artifact Regime: {regime_label}")
                 else:
                     logger.warning("Artifact missing 'symbols' dictionary, using config default.")
         except Exception as e:

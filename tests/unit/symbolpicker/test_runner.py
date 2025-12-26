@@ -43,10 +43,15 @@ async def test_runner_run(
         'close': [150.0, 300.0],
         'volume': [100000, 50000]
     }, index=['AAPL', 'MSFT']))
+    mock_polygon.get_ticker_details_multi = AsyncMock(return_value={
+        'AAPL': {'market_cap': 2e12, 'sic_description': 'Tech', 'type': 'CS'},
+        'MSFT': {'market_cap': 2e12, 'sic_description': 'Tech', 'type': 'CS'}
+    })
     mock_polygon.get_bars_multi = AsyncMock(return_value={
         'AAPL': pd.DataFrame({'close': [150, 151], 'high': [151, 152], 'low': [149, 150], 'volume': [100, 100]}),
         'MSFT': pd.DataFrame({'close': [300, 301], 'high': [301, 302], 'low': [299, 300], 'volume': [50, 50]})
     })
+    mock_polygon.get_bars = AsyncMock(return_value=pd.DataFrame())
     mock_polygon.close = AsyncMock()
     mock_create_polygon.return_value = mock_polygon
     
@@ -54,16 +59,29 @@ async def test_runner_run(
     mock_filter.filter_universe.return_value = ['AAPL', 'MSFT']
     
     mock_engine = mock_engine_cls.return_value
-    mock_engine.compute_features.return_value = pd.DataFrame(index=['AAPL', 'MSFT'])
+    mock_engine.compute_features.return_value = pd.DataFrame({
+        'realized_vol': [0.2, 0.1],
+        'avg_spread_bps': [10, 5]
+    }, index=['AAPL', 'MSFT'])
     
     mock_ranker = mock_ranker_cls.return_value
-    mock_ranker.select_universe.return_value = {
-        'AAPL': {'rank': 1, 'score': 0.9, 'metrics': {'dollar_vol': 1000000, 'realized_vol': 0.2, 'avg_spread_bps': 10}},
-        'MSFT': {'rank': 2, 'score': 0.8, 'metrics': {'dollar_vol': 500000, 'realized_vol': 0.1, 'avg_spread_bps': 5}}
-    }
+    mock_ranker.cap_thresholds = {'small_max': 2.0, 'mid_max': 10.0}
+    
+    def side_effect(df, previous_universe=None, regime_label="UNKNOWN"):
+        df['score'] = [0.9, 0.8]
+        df['rank'] = [1, 2]
+        df['bucket'] = ['large', 'large']
+        return {
+            'symbols': {
+                'AAPL': {'rank': 1, 'score': 0.9, 'bucket': 'large', 'sector': 'Tech', 'metrics': {'dollar_vol': 1000000, 'realized_vol': 0.2, 'avg_spread_bps': 10}},
+                'MSFT': {'rank': 2, 'score': 0.8, 'bucket': 'large', 'sector': 'Tech', 'metrics': {'dollar_vol': 500000, 'realized_vol': 0.1, 'avg_spread_bps': 5}}
+            },
+            'diagnostics': {'churn': 0.0}
+        }
+    mock_ranker.select_universe.side_effect = side_effect
     
     mock_adapter = mock_adapter_cls.return_value
-    mock_adapter.generate_regime_label = AsyncMock(return_value={'label': 'BULL'})
+    mock_adapter.generate_regime_label = AsyncMock(return_value={'primary': 'BULL'})
     
     mock_exporter = mock_exporter_cls.return_value
     mock_exporter.export.return_value = "test_path.json"
