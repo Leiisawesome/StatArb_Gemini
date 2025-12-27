@@ -11,6 +11,7 @@ import sys
 import json
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np
 from typing import Optional, Set
 from dotenv import load_dotenv
 
@@ -93,6 +94,9 @@ class SymbolPickerRunner:
                     mid_small_tier = remaining.index.tolist()
                 
                 candidates = top_tier + mid_small_tier
+            
+            # Ensure candidates are unique and exist in daily_market
+            candidates = [c for c in list(dict.fromkeys(candidates)) if c in daily_market.index]
                 
             logger.info(f"Proceeding to Phase 2 with {len(candidates)} candidates.")
 
@@ -129,17 +133,26 @@ class SymbolPickerRunner:
             # Merge daily stats (dollar vol) and metadata into features_df for ranking
             daily_subset = daily_market.loc[features_df.index]
             features_df['dollar_vol'] = daily_subset['close'] * daily_subset['volume']
+            features_df['close'] = daily_subset['close']
             
             # Enrich with metadata (Vectorized)
             metadata_df = pd.DataFrame.from_dict(metadata_map, orient='index')
             if not metadata_df.empty:
-                # Ensure columns exist
-                for col in ['market_cap', 'sic_description', 'type']:
+                # Ensure required columns exist and rename them
+                cols_to_keep = {
+                    'market_cap': 'market_cap',
+                    'sic_description': 'sector',
+                    'type': 'ticker_type'
+                }
+                
+                # Add missing columns as NaN
+                for col in cols_to_keep.keys():
                     if col not in metadata_df.columns:
                         metadata_df[col] = np.nan
                 
-                features_df = features_df.join(metadata_df[['market_cap', 'sic_description', 'type']], how='left')
-                features_df.rename(columns={'sic_description': 'sector', 'type': 'ticker_type'}, inplace=True)
+                # Select and rename
+                metadata_subset = metadata_df[list(cols_to_keep.keys())].rename(columns=cols_to_keep)
+                features_df = features_df.join(metadata_subset, how='left')
             else:
                 features_df['market_cap'] = 0
                 features_df['sector'] = 'UNKNOWN'
@@ -222,6 +235,19 @@ class SymbolPickerRunner:
                 spread = metrics['avg_spread_bps']
                 print(f"{data['rank']:<5} | {sym:<8} | {data['score']:<8.4f} | {data['bucket']:<8} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
             
+            # 3rd List: Low Price Opportunities ($2-$20)
+            print("\n" + "-"*15 + " LIST 3: LOW PRICE OPPORTUNITIES ($2-$20) " + "-"*15)
+            print(f"{'Rank':<5} | {'Symbol':<8} | {'Price':<8} | {'Score':<8} | {'Dollar Vol (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
+            print("-" * 95)
+            low_price_df = features_df[(features_df['close'] >= 2) & (features_df['close'] <= 20)]
+            low_price_top = low_price_df.sort_values('score', ascending=False).head(20)
+            
+            for i, (sym, row) in enumerate(low_price_top.iterrows(), 1):
+                dvol_m = row['dollar_vol'] / 1_000_000
+                vol_pct = row['realized_vol'] * 100
+                spread = row['avg_spread_bps']
+                print(f"{i:<5} | {sym:<8} | {row['close']:<8.2f} | {row['score']:<8.4f} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
+
             print("="*75 + "\n")
             
             return file_path
