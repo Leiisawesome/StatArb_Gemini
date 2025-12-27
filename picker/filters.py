@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 from typing import List, Dict, Any
 
-logger = logging.getLogger("core_engine.symbolpicker.filters")
+logger = logging.getLogger("core_engine.picker.filters")
 
 class CoarseFilter:
     def __init__(self, config: Dict[str, Any]):

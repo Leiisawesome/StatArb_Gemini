@@ -6,7 +6,7 @@ import numpy as np
 import logging
 from typing import Dict, Any
 
-logger = logging.getLogger("core_engine.symbolpicker.features")
+logger = logging.getLogger("core_engine.picker.features")
 
 class IntradayFeatureEngine:
     def __init__(self, config: Dict[str, Any]):
@@ -80,4 +80,50 @@ class IntradayFeatureEngine:
             return pd.DataFrame()
             
         return pd.DataFrame(features).set_index('symbol')
+
+    def compute_micro_stability(self, second_data: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, float]]:
+        """
+        Compute micro-stability metrics from 1-second bars.
+        
+        Metrics:
+        - jitter: Std dev of 1s log returns (annualized)
+        - voids: Percentage of seconds with zero volume
+        - micro_score: Combined stability score (0-1, higher is better)
+        """
+        results = {}
+        
+        for symbol, df in second_data.items():
+            if df.empty or len(df) < 10:
+                results[symbol] = {'jitter': 9.99, 'voids': 1.0, 'micro_score': 0.0}
+                continue
+                
+            try:
+                close = df['close'].values
+                volume = df['volume'].values
+                
+                # 1. Jitter (1s volatility)
+                log_ret = np.log(close[1:] / close[:-1])
+                # Annualize: 252 days * 6.5 hours * 3600 seconds
+                jitter = np.std(log_ret) * np.sqrt(252 * 6.5 * 3600)
+                
+                # 2. Liquidity Voids (Zero volume bars)
+                voids = np.mean(volume == 0)
+                
+                # 3. Micro Score
+                # Penalize high jitter and high voids
+                # Thresholds: jitter > 0.5 (50%) is high for 1s, voids > 0.2 is high
+                jitter_penalty = np.clip(jitter / 0.5, 0, 1)
+                void_penalty = np.clip(voids / 0.2, 0, 1)
+                micro_score = 1.0 - (0.7 * jitter_penalty + 0.3 * void_penalty)
+                
+                results[symbol] = {
+                    'jitter': float(jitter),
+                    'voids': float(voids),
+                    'micro_score': float(np.clip(micro_score, 0, 1))
+                }
+            except Exception as e:
+                logger.warning(f"Error computing micro-stability for {symbol}: {e}")
+                results[symbol] = {'jitter': 9.99, 'voids': 1.0, 'micro_score': 0.0}
+                
+        return results
 

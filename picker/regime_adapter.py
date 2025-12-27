@@ -11,7 +11,7 @@ from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.type_definitions.regime import MarketRegime
 from core_engine.data.feeds.polygon_rest import PolygonRestService
 
-logger = logging.getLogger("core_engine.symbolpicker.regime_adapter")
+logger = logging.getLogger("core_engine.picker.regime_adapter")
 
 class RegimeAdapter:
     """

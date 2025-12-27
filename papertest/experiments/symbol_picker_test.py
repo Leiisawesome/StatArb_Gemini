@@ -10,7 +10,7 @@ import os
 from typing import Any, Dict, Optional
 
 from papertest.experiments.base_experiment import BasePapertestExperiment, PapertestResult
-from symbolpicker.runner import SymbolPickerRunner
+from picker.runner import SymbolPickerRunner
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class SymbolPickerTestExperiment(BasePapertestExperiment):
             logger.info(f"--- Evaluating {sim_date.strftime('%Y-%m-%d')} ---")
             
             # 1. Run Symbol Picker for this date
-            picker = SymbolPickerRunner("symbolpicker/config.yaml")
+            picker = SymbolPickerRunner("picker/config.yaml")
             try:
                 artifact_path = await picker.run(sim_date)
             except Exception as e:

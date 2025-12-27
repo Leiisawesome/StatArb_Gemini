@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from symbolpicker.ranker import Ranker
+from picker.ranker import Ranker
 
 @pytest.fixture
 def sample_config():

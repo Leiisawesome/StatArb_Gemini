@@ -3,7 +3,7 @@ import os
 import json
 import shutil
 from datetime import datetime
-from symbolpicker.exporter import ArtifactExporter
+from picker.exporter import ArtifactExporter
 
 @pytest.fixture
 def sample_config(tmp_path):

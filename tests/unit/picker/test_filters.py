@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from symbolpicker.filters import CoarseFilter
+from picker.filters import CoarseFilter
 
 @pytest.fixture
 def sample_config():

@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from symbolpicker.features import IntradayFeatureEngine
+from picker.features import IntradayFeatureEngine
 
 @pytest.fixture
 def sample_config():

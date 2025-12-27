@@ -8,7 +8,7 @@ import hashlib
 from datetime import datetime
 from typing import Dict, Any
 
-logger = logging.getLogger("core_engine.symbolpicker.exporter")
+logger = logging.getLogger("core_engine.picker.exporter")
 
 class ArtifactExporter:
     def __init__(self, config: Dict[str, Any]):

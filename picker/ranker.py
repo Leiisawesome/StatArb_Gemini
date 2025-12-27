@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Set
 from sklearn.cluster import KMeans
 
-logger = logging.getLogger("core_engine.symbolpicker.ranker")
+logger = logging.getLogger("core_engine.picker.ranker")
 
 class Ranker:
     def __init__(self, config: Dict[str, Any]):
@@ -21,7 +21,8 @@ class Ranker:
     def select_universe(self, 
                        candidates_df: pd.DataFrame, 
                        previous_universe: Set[str] = None,
-                       regime_label: str = "UNKNOWN") -> Dict[str, Any]:
+                       regime_label: str = "UNKNOWN",
+                       correlation_matrix: pd.DataFrame = None) -> Dict[str, Any]:
         """
         Rank candidates and select the final universe using regime-adaptive bucket policies.
         
@@ -30,6 +31,7 @@ class Ranker:
                           'liquidity_stability', 'market_cap', 'ticker_type', 'sector']
             previous_universe: Set of symbols that were in the universe yesterday.
             regime_label: The canonical MarketRegime label.
+            correlation_matrix: Optional pre-computed correlation matrix for candidates.
             
         Returns:
             Dict containing 'symbols' (dict sym->data) and 'diagnostics'
@@ -44,6 +46,8 @@ class Ranker:
         weights = policy.get('weights', self.weights)
         buckets = policy.get('buckets', { 'etf': 5, 'large': 5, 'mid': 5, 'small': 5 })
         sector_cap = policy.get('sector_cap', 4)
+        corr_threshold = policy.get('correlation_threshold', 0.7)
+        corr_penalty = policy.get('correlation_penalty', 0.2)
         
         logger.info(f"Applying selection policy for regime: {regime_label}")
         
@@ -77,16 +81,36 @@ class Ranker:
         candidates_df['rank'] = candidates_df['score'].rank(ascending=False)
         candidates_df.sort_values('rank', inplace=True)
         
-        # 6. Selection with Constraints
+        # 6. Selection with Constraints & Correlation Penalty
         selected = []
         bucket_counts = { 'etf': 0, 'large': 0, 'mid': 0, 'small': 0 }
         sector_counts = {}
         
+        def get_corr_penalty(symbol, current_selected):
+            if correlation_matrix is None or not current_selected:
+                return 0
+            if symbol not in correlation_matrix.index:
+                return 0
+            
+            # Check max correlation with any selected symbol
+            corrs = correlation_matrix.loc[symbol, current_selected]
+            if corrs.max() > corr_threshold:
+                return corr_penalty
+            return 0
+
         # Pass 1: Hysteresis
         for symbol, row in candidates_df.iterrows():
             if symbol in previous_universe and row['rank'] <= self.hysteresis['keep_rank_threshold']:
                 bucket = row['bucket']
                 sector = row['sector']
+                
+                # Apply correlation penalty to rank check if needed
+                penalty = get_corr_penalty(symbol, selected)
+                if penalty > 0:
+                    # If highly correlated, we might still keep it if it's very high rank
+                    if row['rank'] > self.hysteresis['keep_rank_threshold'] / 2:
+                        continue
+
                 if bucket_counts[bucket] < buckets.get(bucket, 5) and sector_counts.get(sector, 0) < sector_cap:
                     selected.append(symbol)
                     bucket_counts[bucket] += 1
@@ -97,7 +121,13 @@ class Ranker:
             if symbol in selected: continue
             if len(selected) >= self.target_count: break
             if row['rank'] > self.hysteresis['enter_rank_threshold']: continue
+            
             bucket, sector = row['bucket'], row['sector']
+            
+            # Correlation Check
+            if get_corr_penalty(symbol, selected) > 0:
+                continue
+
             if bucket_counts[bucket] < buckets.get(bucket, 5) and sector_counts.get(sector, 0) < sector_cap:
                 selected.append(symbol)
                 bucket_counts[bucket] += 1

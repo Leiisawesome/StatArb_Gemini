@@ -226,6 +226,15 @@ class PolygonRestService:
         for attempt in range(self.config.max_retries):
             try:
                 async with self._session.get(url, params=params) as resp:
+                    # Handle non-JSON responses for 404/403
+                    if resp.status == 404:
+                        self.logger.debug(f"Resource not found (404): {url}")
+                        return {"status": "NOT_FOUND", "results": []}
+                    
+                    if resp.status == 403:
+                        self.logger.debug(f"Not authorized (403): {url}")
+                        return {"status": "NOT_AUTHORIZED", "results": []}
+
                     data = await resp.json()
 
                     if resp.status == 200:
@@ -235,9 +244,6 @@ class PolygonRestService:
                         wait = float(resp.headers.get('Retry-After', 60))
                         self.logger.warning(f"Rate limited, waiting {wait}s")
                         await asyncio.sleep(wait)
-                    elif resp.status == 404:
-                        self.logger.info(f"Ticker not found (404): {url}")
-                        return data
                     else:
                         self.logger.error(f"API error {resp.status} for {url}: {data}")
                         return data
@@ -363,9 +369,13 @@ class PolygonRestService:
         elif start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)
 
-        # Format dates
-        start_str = start.strftime('%Y-%m-%d')
-        end_str = end.strftime('%Y-%m-%d')
+        # Format dates (Support millisecond timestamps for high-res data)
+        if timeframe in ['1s', '1sec']:
+            start_str = str(int(start.timestamp() * 1000))
+            end_str = str(int(end.timestamp() * 1000))
+        else:
+            start_str = start.strftime('%Y-%m-%d')
+            end_str = end.strftime('%Y-%m-%d')
 
         # Build URL
         url = f"{self.config.base_url}/v2/aggs/ticker/{symbol.upper()}/range/{multiplier}/{multiplier_type}/{start_str}/{end_str}"
@@ -504,19 +514,96 @@ class PolygonRestService:
         
         return results
 
+    async def get_adv_multi(self, symbols: List[str], days: int = 30, end_date: Optional[datetime] = None) -> Dict[str, float]:
+        """
+        Calculate Average Daily Volume (ADV) for multiple symbols.
+        """
+        tasks = [self.get_bars(symbol, timeframe='1day', days=days, end=end_date) for symbol in symbols]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        adv_map = {}
+        for symbol, df in zip(symbols, batch_results):
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                # ADV = Mean of (Close * Volume)
+                adv_map[symbol.upper()] = (df['close'] * df['volume']).mean()
+            else:
+                adv_map[symbol.upper()] = 0.0
+        return adv_map
+
     async def get_upcoming_earnings(self, symbols: List[str], days: int = 7) -> Dict[str, str]:
         """
-        Get upcoming earnings dates for symbols.
-        Note: This uses the /vX/reference/financials or similar if available,
-        but for simplicity we'll implement a mock/stub if direct endpoint isn't clear
-        for the current subscription. Polygon's 'events' API is often V3 reference.
+        Get upcoming earnings dates for symbols using Polygon V3 Events API.
         """
-        # Placeholder implementation - Polygon's V3 Events API
-        # GET /v3/reference/events?ticker={ticker}&event_type=earnings
-        # This is a bit complex for bulk. Let's provide the method anyway.
-        earnings_dates = {}
-        # ... (implementation logic if needed) ...
-        return earnings_dates
+        # Note: Bulk events API is limited. We'll fetch per symbol for the final selection.
+        # For a real production system, we'd use a dedicated provider or bulk file.
+        earnings_map = {}
+        
+        async def fetch_earnings(symbol):
+            # Try vX or v3. If 404/403, return None.
+            url = f"{self.config.base_url}/vX/reference/events?ticker={symbol.upper()}&event_type=earnings"
+            try:
+                data = await self._request(url)
+                if data.get('status') == 'OK' and data.get('results'):
+                    events = data['results']
+                    return symbol, events[0].get('date')
+            except:
+                pass
+            return symbol, None
+
+        tasks = [fetch_earnings(s) for s in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for res in results:
+            if isinstance(res, tuple) and res[1]:
+                earnings_map[res[0]] = res[1]
+        
+        return earnings_map
+
+    async def get_last_quote_multi(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        """
+        Get latest NBBO quotes for symbols.
+        """
+        async def fetch_quote(symbol):
+            url = f"{self.config.base_url}/v3/quotes/{symbol.upper()}?limit=1"
+            try:
+                data = await self._request(url)
+                if data.get('status') == 'OK' and data.get('results'):
+                    q = data['results'][0]
+                    return symbol, {
+                        'bid': q.get('bid_price', 0),
+                        'ask': q.get('ask_price', 0),
+                        'bid_size': q.get('bid_size', 0),
+                        'ask_size': q.get('ask_size', 0)
+                    }
+            except:
+                pass
+            return symbol, {}
+
+        tasks = [fetch_quote(s) for s in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        quote_map = {}
+        for res in results:
+            if isinstance(res, tuple) and res[1]:
+                quote_map[res[0]] = res[1]
+        return quote_map
+
+    async def get_borrow_info_multi(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Mock service for borrow costs/availability.
+        In production, this would call an IBKR or similar API.
+        """
+        # Mock: ETFs and Mega Caps are always Easy to Borrow (ETB)
+        # Small caps might be Hard to Borrow (HTB)
+        borrow_map = {}
+        for s in symbols:
+            # Placeholder logic
+            borrow_map[s] = {
+                'status': 'ETB', 
+                'fee_pct': 0.25, # 25bps annual
+                'available': 1000000
+            }
+        return borrow_map
 
     def get_ohlcv_for_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
         """

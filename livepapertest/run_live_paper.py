@@ -434,7 +434,7 @@ async def main_async(args: argparse.Namespace) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run live paper trading (Polygon delayed -> IBKR paper).")
     p.add_argument("--config", type=str, default=_default_config_path(), help="Path to YAML config")
-    p.add_argument("--universe-file", type=str, help="Path to universe JSON artifact from symbolpicker")
+    p.add_argument("--universe-file", type=str, help="Path to universe JSON artifact from picker")
     p.add_argument("--enable-orders", action="store_true", help="Second key: allow real order submission")
     p.add_argument("--dry-run", action="store_true", help="Force no-order mode (signals/risk still run)")
     return p

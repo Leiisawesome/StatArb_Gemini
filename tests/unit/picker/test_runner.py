@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 import pandas as pd
-from symbolpicker.runner import SymbolPickerRunner
+from picker.runner import SymbolPickerRunner
 
 @pytest.fixture
 def mock_config():
@@ -18,12 +18,12 @@ def mock_config():
     }
 
 @pytest.mark.asyncio
-@patch('symbolpicker.runner.create_polygon_rest_service')
-@patch('symbolpicker.runner.CoarseFilter')
-@patch('symbolpicker.runner.IntradayFeatureEngine')
-@patch('symbolpicker.runner.Ranker')
-@patch('symbolpicker.runner.RegimeAdapter')
-@patch('symbolpicker.runner.ArtifactExporter')
+@patch('picker.runner.create_polygon_rest_service')
+@patch('picker.runner.CoarseFilter')
+@patch('picker.runner.IntradayFeatureEngine')
+@patch('picker.runner.Ranker')
+@patch('picker.runner.RegimeAdapter')
+@patch('picker.runner.ArtifactExporter')
 async def test_runner_run(
     mock_exporter_cls,
     mock_adapter_cls,
@@ -52,6 +52,10 @@ async def test_runner_run(
         'MSFT': pd.DataFrame({'close': [300, 301], 'high': [301, 302], 'low': [299, 300], 'volume': [50, 50]})
     })
     mock_polygon.get_bars = AsyncMock(return_value=pd.DataFrame())
+    mock_polygon.get_adv_multi = AsyncMock(return_value={'AAPL': 1000000.0, 'MSFT': 500000.0})
+    mock_polygon.get_upcoming_earnings = AsyncMock(return_value={})
+    mock_polygon.get_last_quote_multi = AsyncMock(return_value={})
+    mock_polygon.get_borrow_info_multi = AsyncMock(return_value={})
     mock_polygon.close = AsyncMock()
     mock_create_polygon.return_value = mock_polygon
     
@@ -67,7 +71,7 @@ async def test_runner_run(
     mock_ranker = mock_ranker_cls.return_value
     mock_ranker.cap_thresholds = {'small_max': 2.0, 'mid_max': 10.0}
     
-    def side_effect(df, previous_universe=None, regime_label="UNKNOWN"):
+    def side_effect(df, previous_universe=None, regime_label="UNKNOWN", correlation_matrix=None):
         df['score'] = [0.9, 0.8]
         df['rank'] = [1, 2]
         df['bucket'] = ['large', 'large']

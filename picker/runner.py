@@ -19,17 +19,17 @@ from dotenv import load_dotenv
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core_engine.data.feeds.polygon_rest import create_polygon_rest_service
-from symbolpicker.filters import CoarseFilter
-from symbolpicker.features import IntradayFeatureEngine
-from symbolpicker.ranker import Ranker
-from symbolpicker.regime_adapter import RegimeAdapter
-from symbolpicker.exporter import ArtifactExporter
+from picker.filters import CoarseFilter
+from picker.features import IntradayFeatureEngine
+from picker.ranker import Ranker
+from picker.regime_adapter import RegimeAdapter
+from picker.exporter import ArtifactExporter
 from core_engine.utils.structured_logging import init_logging, LogConfig
 
-logger = logging.getLogger("core_engine.symbolpicker.runner")
+logger = logging.getLogger("core_engine.picker.runner")
 
 class SymbolPickerRunner:
-    def __init__(self, config_path: str = "symbolpicker/config.yaml"):
+    def __init__(self, config_path: str = "picker/config.yaml"):
         self.config = self._load_config(config_path)
         
     def _load_config(self, path: str):
@@ -130,9 +130,24 @@ class SymbolPickerRunner:
             features_df = feature_engine.compute_features(minute_data)
             logger.info(f"Computed features for {len(features_df)} symbols.")
             
-            # Merge daily stats (dollar vol) and metadata into features_df for ranking
+            # 3.5 Correlation Matrix (Vectorized)
+            logger.info("Phase 2.5: Computing Correlation Matrix...")
+            returns_map = {}
+            for sym, df in minute_data.items():
+                if not df.empty and len(df) > 10:
+                    returns_map[sym] = df['close'].pct_change().fillna(0)
+            
+            returns_df = pd.DataFrame(returns_map)
+            correlation_matrix = returns_df.corr()
+            
+            # 3.6 Rolling 30d ADV (Institutional Liquidity Filter)
+            logger.info("Phase 2.6: Fetching 30d ADV...")
+            adv_map = await polygon.get_adv_multi(candidates, days=30, end_date=date)
+            
+            # Merge daily stats (dollar vol), ADV, and metadata into features_df for ranking
             daily_subset = daily_market.loc[features_df.index]
             features_df['dollar_vol'] = daily_subset['close'] * daily_subset['volume']
+            features_df['adv_30d'] = pd.Series(adv_map)
             features_df['close'] = daily_subset['close']
             
             # Enrich with metadata (Vectorized)
@@ -185,13 +200,86 @@ class SymbolPickerRunner:
             # Load previous universe for hysteresis
             previous_universe = self._load_previous_universe() 
             
-            selection_result = ranker.select_universe(features_df, previous_universe, regime_label=regime_label)
+            selection_result = ranker.select_universe(
+                features_df, 
+                previous_universe, 
+                regime_label=regime_label,
+                correlation_matrix=correlation_matrix
+            )
             final_universe = selection_result['symbols']
             diagnostics = selection_result['diagnostics']
             
-            logger.info(f"Selected {len(final_universe)} symbols. Churn: {diagnostics.get('churn', 0):.2%}")
+            # 5.5 Post-Selection Filters (Earnings, NBBO, Borrow)
+            logger.info("Phase 4.5: Post-Selection Risk Checks...")
+            selected_symbols = list(final_universe.keys())
             
-            # 6. Export
+            # Fetch Risk Data
+            earnings_task = polygon.get_upcoming_earnings(selected_symbols)
+            nbbo_task = polygon.get_last_quote_multi(selected_symbols)
+            borrow_task = polygon.get_borrow_info_multi(selected_symbols)
+            
+            earnings_map, nbbo_map, borrow_map = await asyncio.gather(earnings_task, nbbo_task, borrow_task)
+            
+            # Filter out earnings (within next 2 days)
+            filtered_universe = {}
+            earnings_count = 0
+            for sym, data in final_universe.items():
+                earnings_date = earnings_map.get(sym)
+                if earnings_date:
+                    try:
+                        e_dt = datetime.strptime(earnings_date, '%Y-%m-%d')
+                        if (e_dt - trade_date).days <= 2:
+                            logger.warning(f"Excluding {sym} due to upcoming earnings on {earnings_date}")
+                            earnings_count += 1
+                            continue
+                    except: pass
+                
+                # Enrich with NBBO and Borrow info
+                quote = nbbo_map.get(sym, {})
+                if quote.get('bid') and quote.get('ask'):
+                    actual_spread_bps = (quote['ask'] - quote['bid']) / ((quote['ask'] + quote['bid']) / 2) * 10000
+                    data['metrics']['nbbo_spread_bps'] = actual_spread_bps
+                else:
+                    data['metrics']['nbbo_spread_bps'] = data['metrics']['avg_spread_bps']
+                
+                data['risk'] = {
+                    'earnings_date': earnings_date,
+                    'borrow': borrow_map.get(sym, {'status': 'UNKNOWN'})
+                }
+                filtered_universe[sym] = data
+            
+            # 6. Micro-Stability Check (Phase 4.7)
+            # Use 1-second bars for the final selection to detect jitter/voids
+            logger.info("Phase 4.7: Micro-Stability Validation (1s Data)...")
+            final_candidates = list(filtered_universe.keys())[:20] # Top 20
+            
+            # Fetch last 10 minutes of 1s data
+            # Note: We use the 'date' (as-of) and look at the end of that day
+            # For a real live system, this would be 'now'
+            end_time = date.replace(hour=16, minute=0, second=0, microsecond=0)
+            start_time = end_time - timedelta(minutes=10)
+            
+            second_data = await polygon.get_bars_multi(
+                final_candidates, 
+                timeframe='1s', 
+                start=start_time, 
+                end=end_time
+            )
+            
+            feature_engine = IntradayFeatureEngine(self.config)
+            micro_metrics = feature_engine.compute_micro_stability(second_data)
+            
+            # Enrich universe with micro-stability
+            for sym in final_candidates:
+                if sym in micro_metrics:
+                    filtered_universe[sym]['micro_stability'] = micro_metrics[sym]
+                    if micro_metrics[sym]['micro_score'] < self.config['selection'].get('min_micro_score', 0.3):
+                        logger.warning(f"Low micro-stability for {sym}: score={micro_metrics[sym]['micro_score']:.2f}")
+
+            final_universe = filtered_universe
+            logger.info(f"Selected {len(final_universe)} symbols. Churn: {diagnostics.get('churn', 0):.2%}. Earnings Exclusions: {earnings_count}")
+            
+            # 7. Export (Phase 5)
             logger.info("Phase 5: Exporting Artifact...")
             exporter = ArtifactExporter(self.config)
             file_path = exporter.export(final_universe, regime_data, date, trade_date=trade_date, diagnostics=diagnostics)
@@ -208,45 +296,44 @@ class SymbolPickerRunner:
             
             # 1st List: Analysis Period (Top 20 Candidates by Raw Score)
             print("\n" + "-"*15 + " LIST 1: ANALYSIS PERIOD (Top 20 by Score) " + "-"*15)
-            print(f"{'Rank':<5} | {'Symbol':<8} | {'Score':<8} | {'Bucket':<8} | {'Dollar Vol (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
-            print("-" * 90)
-            # We need to use the scores from the ranker's internal state or re-calculate
-            # Actually, ranker.select_universe returns the final selection. 
-            # Let's get the full ranked list from the ranker if possible, or just use features_df
-            # features_df now has 'score', 'rank', 'bucket' after ranker.select_universe is called 
-            # because ranker modifies the dataframe in place (or we can make it do so).
+            print(f"{'Rank':<5} | {'Symbol':<8} | {'Score':<8} | {'Bucket':<8} | {'ADV 30d (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
+            print("-" * 95)
             
             top_candidates = features_df.sort_values('score', ascending=False).head(20)
             for sym, row in top_candidates.iterrows():
-                dvol_m = row['dollar_vol'] / 1_000_000
+                adv_m = row['adv_30d'] / 1_000_000
                 vol_pct = row['realized_vol'] * 100
                 spread = row['avg_spread_bps']
-                print(f"{int(row['rank']):<5} | {sym:<8} | {row['score']:<8.4f} | {row['bucket']:<8} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
+                print(f"{int(row['rank']):<5} | {sym:<8} | {row['score']:<8.4f} | {row['bucket']:<8} | {adv_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
 
-            # 2nd List: Next Trading Day (Final Selection with Hysteresis & Constraints)
+            # 2nd List: Next Trading Day (Final Selection with Risk Checks)
             print("\n" + "-"*15 + " LIST 2: NEXT TRADING DAY (Final Selection) " + "-"*15)
-            print(f"{'Rank':<5} | {'Symbol':<8} | {'Score':<8} | {'Bucket':<8} | {'Dollar Vol (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
-            print("-" * 90)
+            print(f"{'Rank':<5} | {'Symbol':<8} | {'Score':<8} | {'Borrow':<8} | {'ADV 30d (M)':<15} | {'NBBO (bps)':<10} | {'Micro-Stab':<10} | {'Earnings':<10}")
+            print("-" * 115)
             sorted_universe = sorted(final_universe.items(), key=lambda x: x[1]['rank'])
             for sym, data in sorted_universe:
                 metrics = data['metrics']
-                dvol_m = metrics['dollar_vol'] / 1_000_000
-                vol_pct = metrics['realized_vol'] * 100
-                spread = metrics['avg_spread_bps']
-                print(f"{data['rank']:<5} | {sym:<8} | {data['score']:<8.4f} | {data['bucket']:<8} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
+                risk = data.get('risk', {})
+                micro = data.get('micro_stability', {}).get('micro_score', 1.0)
+                adv_m = metrics.get('adv_30d', metrics.get('dollar_vol', 0)) / 1_000_000
+                nbbo = metrics.get('nbbo_spread_bps', 0)
+                borrow = risk.get('borrow', {}).get('status', 'ETB')
+                earnings = risk.get('earnings_date', 'None')
+                earnings_str = str(earnings) if earnings else "None"
+                print(f"{data['rank']:<5} | {sym:<8} | {data['score']:<8.4f} | {borrow:<8} | {adv_m:<15.2f} | {nbbo:<10.2f} | {micro:<10.2f} | {earnings_str:<10}")
             
             # 3rd List: Low Price Opportunities ($2-$20)
             print("\n" + "-"*15 + " LIST 3: LOW PRICE OPPORTUNITIES ($2-$20) " + "-"*15)
-            print(f"{'Rank':<5} | {'Symbol':<8} | {'Price':<8} | {'Score':<8} | {'Dollar Vol (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
-            print("-" * 95)
+            print(f"{'Rank':<5} | {'Symbol':<8} | {'Price':<8} | {'Score':<8} | {'ADV 30d (M)':<15} | {'Vol (%)':<8} | {'Spread (bps)':<12}")
+            print("-" * 100)
             low_price_df = features_df[(features_df['close'] >= 2) & (features_df['close'] <= 20)]
             low_price_top = low_price_df.sort_values('score', ascending=False).head(20)
             
             for i, (sym, row) in enumerate(low_price_top.iterrows(), 1):
-                dvol_m = row['dollar_vol'] / 1_000_000
+                adv_m = row['adv_30d'] / 1_000_000
                 vol_pct = row['realized_vol'] * 100
                 spread = row['avg_spread_bps']
-                print(f"{i:<5} | {sym:<8} | {row['close']:<8.2f} | {row['score']:<8.4f} | {dvol_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
+                print(f"{i:<5} | {sym:<8} | {row['close']:<8.2f} | {row['score']:<8.4f} | {adv_m:<15.2f} | {vol_pct:<8.2f} | {spread:<12.2f}")
 
             print("="*75 + "\n")
             
@@ -288,7 +375,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Run Quant Symbol Picker")
     parser.add_argument("--date", type=str, help="YYYY-MM-DD (default: yesterday)")
-    parser.add_argument("--config", type=str, default="symbolpicker/config.yaml", help="Path to config")
+    parser.add_argument("--config", type=str, default="picker/config.yaml", help="Path to config")
     parser.add_argument("--log-format", type=str, choices=["structured", "human"], default="human", help="Log format")
     
     args = parser.parse_args()

@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 from datetime import datetime
 import pandas as pd
-from symbolpicker.regime_adapter import RegimeAdapter
+from picker.regime_adapter import RegimeAdapter
 
 @pytest.fixture
 def sample_config():
