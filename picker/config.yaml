@@ -57,7 +57,7 @@ selection:
 
     # Sideways consolidation
     range_bound:
-      weights: { liquidity: 0.3, stability: 0.5, momentum: 0.2 }
+      weights: { liquidity: 0.2, stability: 0.3, efficiency: 0.2, mean_reversion: 0.3 }
       buckets: { etf: 5, large: 5, mid: 5, small: 5 }
       sector_cap: 4
       correlation_threshold: 0.7
@@ -65,7 +65,7 @@ selection:
 
     # Choppy / Mean Reverting
     choppy:
-      weights: { liquidity: 0.3, stability: 0.4, efficiency: 0.3 }
+      weights: { liquidity: 0.2, stability: 0.2, efficiency: 0.2, mean_reversion: 0.4 }
       buckets: { etf: 6, large: 6, mid: 4, small: 4 }
       sector_cap: 3
       correlation_threshold: 0.65

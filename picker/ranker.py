@@ -61,13 +61,19 @@ class Ranker:
         if momentum_series is None:
             momentum_series = pd.Series(0, index=candidates_df.index)
         norm_mom = self._normalize(momentum_series)
+
+        mr_series = candidates_df.get('mean_reversion')
+        if mr_series is None:
+            mr_series = pd.Series(0, index=candidates_df.index)
+        norm_mr = self._normalize(mr_series)
                       
         # 3. Composite Score
         candidates_df['score'] = (
             weights.get('liquidity', 0.4) * norm_liq +
             weights.get('stability', 0.3) * norm_stab +
             weights.get('efficiency', 0.3) * norm_eff +
-            weights.get('momentum', 0.0) * norm_mom
+            weights.get('momentum', 0.0) * norm_mom +
+            weights.get('mean_reversion', 0.0) * norm_mr
         )
         
         # 4. Assign Buckets (Vectorized)

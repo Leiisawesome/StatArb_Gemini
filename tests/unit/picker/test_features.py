@@ -57,6 +57,29 @@ def test_compute_features(sample_config, sample_minute_data):
     # SYM2 spread: (200.1-199.9)/200 = 0.001 = 10 bps
     assert features_df.loc['SYM1', 'avg_spread_bps'] == pytest.approx(200.0, rel=1e-3)
     assert features_df.loc['SYM2', 'avg_spread_bps'] == pytest.approx(10.0, rel=1e-3)
+    
+    # Check mean_reversion feature
+    assert 'mean_reversion' in features_df.columns
+    # SYM1 has price crosses, SYM2 is flat
+    assert features_df.loc['SYM1', 'mean_reversion'] >= 0
+
+def test_compute_micro_stability(sample_config):
+    engine = IntradayFeatureEngine(sample_config)
+    
+    # Create 10 seconds of data
+    times = pd.date_range("2023-01-01 09:30", periods=10, freq="s")
+    df = pd.DataFrame({
+        'timestamp': times,
+        'close': [100.0, 100.1, 100.0, 99.9, 100.0, 100.1, 100.0, 99.9, 100.0, 100.1],
+        'volume': [100, 100, 0, 100, 100, 0, 100, 100, 0, 100] # 3 voids
+    })
+    
+    score_dict = engine.compute_micro_stability({'SYM1': df})
+    assert 'SYM1' in score_dict
+    score = score_dict['SYM1']['micro_score']
+    assert 0 <= score <= 1
+    # With 3 voids out of 10, and some jitter, score should be less than 1
+    assert score < 1.0
 
 def test_compute_features_empty(sample_config):
     engine = IntradayFeatureEngine(sample_config)

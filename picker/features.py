@@ -54,7 +54,14 @@ class IntradayFeatureEngine:
                 # 5. Gap Risk (Max absolute 1min log return)
                 max_jump = np.max(np.abs(log_ret))
                 
-                # 6. Skewness (Asymmetry of returns)
+                # 6. Mean Reversion Score (Oscillation around mean)
+                # Count how many times price crosses its 20-period moving average
+                # Normalized by length of data
+                ma = pd.Series(close).rolling(window=20).mean().values
+                crosses = np.diff(np.sign(close[20:] - ma[20:]) != 0).sum()
+                mr_score = crosses / len(close) if len(close) > 0 else 0
+                
+                # 7. Skewness (Asymmetry of returns)
                 if len(log_ret) > 2:
                     diff = log_ret - np.mean(log_ret)
                     std = np.std(log_ret)
@@ -68,6 +75,7 @@ class IntradayFeatureEngine:
                     'avg_spread_bps': avg_spread_bps,
                     'liquidity_stability': vol_cv,
                     'momentum': total_ret,
+                    'mean_reversion': mr_score,
                     'gap_risk': max_jump,
                     'skewness': skew,
                     'count': len(df)

@@ -28,11 +28,30 @@ def sample_candidates():
         'realized_vol': [0.2, 0.1, 0.3, 0.4],
         'avg_spread_bps': [10, 5, 20, 30],
         'liquidity_stability': [1.0, 0.5, 2.0, 3.0],
+        'mean_reversion': [0.1, 0.8, 0.2, 0.4],
         'market_cap': [100e9, 50e9, 1e9, 0.5e9],
         'ticker_type': ['CS', 'CS', 'CS', 'CS'],
         'sector': ['Tech', 'Tech', 'Finance', 'Finance']
     }
     return pd.DataFrame(data).set_index('symbol')
+
+def test_ranker_regime_weights(sample_config, sample_candidates):
+    # Add regime weights to config
+    sample_config['selection']['regime_weights'] = {
+        'choppy': {
+            'mean_reversion': 0.8,
+            'liquidity': 0.1,
+            'stability': 0.1
+        }
+    }
+    ranker = Ranker(sample_config)
+    
+    # B has highest mean_reversion (0.8)
+    result = ranker.select_universe(sample_candidates, regime_label='choppy')
+    universe = result['symbols']
+    
+    assert 'B' in universe
+    assert universe['B']['rank'] == 1
 
 def test_ranker_basic(sample_config, sample_candidates):
     ranker = Ranker(sample_config)
