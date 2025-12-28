@@ -74,7 +74,7 @@ class SymbolPickerRunner:
         with open(path, 'r') as f:
             return yaml.safe_load(f)
 
-    async def run(self, date: datetime = None) -> Optional[str]:
+    async def run(self, date: datetime = None) -> dict:
         """
         Run the symbol picking pipeline.
         
@@ -387,7 +387,13 @@ class SymbolPickerRunner:
 
             print("="*75 + "\n")
             
-            return file_path
+            return {
+                'universe': final_universe,
+                'regime': regime_data,
+                'correlation_matrix': correlation_matrix,
+                'diagnostics': diagnostics,
+                'artifact_path': file_path
+            }
             
         finally:
             await polygon.close()
