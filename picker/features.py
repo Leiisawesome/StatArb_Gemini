@@ -36,10 +36,21 @@ class IntradayFeatureEngine:
                 low = df['low'].values
                 volume = df['volume'].values
                 
-                # 1. Realized Volatility (Log returns std dev annualized)
-                # minute vol -> annualized (assuming 252 days * 390 minutes)
+                # 1. Realized Volatility (Sub-sampled to reduce microstructure noise)
+                # Use 5-minute sub-sampling: reduces autocorrelation and bid-ask bounce
+                # 78 five-minute bars per trading day (390 mins / 5)
+                subsample_interval = 5
+                if len(close) >= subsample_interval * 2:
+                    close_5m = close[::subsample_interval]
+                    log_ret_5m = np.log(close_5m[1:] / close_5m[:-1])
+                    realized_vol = np.std(log_ret_5m) * np.sqrt(252 * 78)
+                else:
+                    # Fallback for very short data
+                    log_ret = np.log(close[1:] / close[:-1])
+                    realized_vol = np.std(log_ret) * np.sqrt(252 * 390)
+                
+                # Keep raw 1-min returns for other metrics
                 log_ret = np.log(close[1:] / close[:-1])
-                realized_vol = np.std(log_ret) * np.sqrt(252 * 390)
                 
                 # 2. Spread Proxy (High - Low) / Close (in bps)
                 avg_spread_bps = np.mean((high - low) / close) * 10000
@@ -54,12 +65,12 @@ class IntradayFeatureEngine:
                 # 5. Gap Risk (Max absolute 1min log return)
                 max_jump = np.max(np.abs(log_ret))
                 
-                # 6. Mean Reversion Score (Oscillation around mean)
-                # Count how many times price crosses its 20-period moving average
-                # Normalized by length of data
-                ma = pd.Series(close).rolling(window=20).mean().values
-                crosses = np.diff(np.sign(close[20:] - ma[20:]) != 0).sum()
-                mr_score = crosses / len(close) if len(close) > 0 else 0
+                # 6. Mean Reversion Score (Hurst Exponent-based)
+                # H < 0.5 = mean-reverting, H = 0.5 = random walk, H > 0.5 = trending
+                # Convert to a score where higher = more mean-reverting
+                hurst = self._compute_hurst_exponent(close)
+                # Transform: H=0 → score=1.0, H=0.5 → score=0.5, H=1 → score=0.0
+                mr_score = max(0, 1.0 - hurst) if hurst is not None else 0.5
                 
                 # 7. Skewness (Asymmetry of returns)
                 if len(log_ret) > 2:
@@ -134,4 +145,85 @@ class IntradayFeatureEngine:
                 results[symbol] = {'jitter': 9.99, 'voids': 1.0, 'micro_score': 0.0}
                 
         return results
+
+    def _compute_hurst_exponent(self, prices: np.ndarray, max_lag: int = 100) -> float:
+        """
+        Compute Hurst exponent using the rescaled range (R/S) method.
+        
+        H < 0.5: Mean-reverting (anti-persistent)
+        H = 0.5: Random walk (Brownian motion)
+        H > 0.5: Trending (persistent)
+        
+        Args:
+            prices: Array of price values
+            max_lag: Maximum lag for R/S calculation
+            
+        Returns:
+            Hurst exponent (0 to 1), or None if calculation fails
+        """
+        if len(prices) < 20:
+            return None
+            
+        try:
+            # Use log prices for stationarity
+            log_prices = np.log(prices)
+            
+            # Calculate lags (powers of 2 for efficiency)
+            lags = []
+            lag = 4
+            while lag < min(len(log_prices) // 2, max_lag):
+                lags.append(lag)
+                lag *= 2
+            
+            if len(lags) < 3:
+                return None
+                
+            rs_values = []
+            
+            for lag in lags:
+                # Split into non-overlapping segments
+                n_segments = len(log_prices) // lag
+                if n_segments < 1:
+                    continue
+                    
+                rs_list = []
+                for i in range(n_segments):
+                    segment = log_prices[i * lag:(i + 1) * lag]
+                    
+                    # Calculate returns within segment
+                    returns = np.diff(segment)
+                    if len(returns) == 0:
+                        continue
+                        
+                    # Mean-adjusted cumulative sum
+                    mean_ret = np.mean(returns)
+                    cumsum = np.cumsum(returns - mean_ret)
+                    
+                    # Range
+                    R = np.max(cumsum) - np.min(cumsum)
+                    
+                    # Standard deviation
+                    S = np.std(returns, ddof=1)
+                    
+                    if S > 0:
+                        rs_list.append(R / S)
+                
+                if rs_list:
+                    rs_values.append((lag, np.mean(rs_list)))
+            
+            if len(rs_values) < 3:
+                return None
+                
+            # Linear regression of log(R/S) vs log(lag)
+            log_lags = np.log([x[0] for x in rs_values])
+            log_rs = np.log([x[1] for x in rs_values])
+            
+            # Hurst exponent is the slope
+            slope, _ = np.polyfit(log_lags, log_rs, 1)
+            
+            # Clip to valid range
+            return float(np.clip(slope, 0, 1))
+            
+        except Exception:
+            return None
 

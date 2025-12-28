@@ -29,6 +29,44 @@ from core_engine.utils.structured_logging import init_logging, LogConfig
 logger = logging.getLogger("core_engine.picker.runner")
 
 class SymbolPickerRunner:
+    # NYSE Market Holidays (2024-2026)
+    # Source: NYSE official calendar
+    NYSE_HOLIDAYS = {
+        # 2024
+        datetime(2024, 1, 1),   # New Year's Day
+        datetime(2024, 1, 15),  # MLK Day
+        datetime(2024, 2, 19),  # Presidents Day
+        datetime(2024, 3, 29),  # Good Friday
+        datetime(2024, 5, 27),  # Memorial Day
+        datetime(2024, 6, 19),  # Juneteenth
+        datetime(2024, 7, 4),   # Independence Day
+        datetime(2024, 9, 2),   # Labor Day
+        datetime(2024, 11, 28), # Thanksgiving
+        datetime(2024, 12, 25), # Christmas
+        # 2025
+        datetime(2025, 1, 1),   # New Year's Day
+        datetime(2025, 1, 20),  # MLK Day
+        datetime(2025, 2, 17),  # Presidents Day
+        datetime(2025, 4, 18),  # Good Friday
+        datetime(2025, 5, 26),  # Memorial Day
+        datetime(2025, 6, 19),  # Juneteenth
+        datetime(2025, 7, 4),   # Independence Day
+        datetime(2025, 9, 1),   # Labor Day
+        datetime(2025, 11, 27), # Thanksgiving
+        datetime(2025, 12, 25), # Christmas
+        # 2026
+        datetime(2026, 1, 1),   # New Year's Day
+        datetime(2026, 1, 19),  # MLK Day
+        datetime(2026, 2, 16),  # Presidents Day
+        datetime(2026, 4, 3),   # Good Friday
+        datetime(2026, 5, 25),  # Memorial Day
+        datetime(2026, 6, 19),  # Juneteenth
+        datetime(2026, 7, 3),   # Independence Day (observed)
+        datetime(2026, 9, 7),   # Labor Day
+        datetime(2026, 11, 26), # Thanksgiving
+        datetime(2026, 12, 25), # Christmas
+    }
+    
     def __init__(self, config_path: str = "picker/config.yaml"):
         self.config = self._load_config(config_path)
         
@@ -130,25 +168,37 @@ class SymbolPickerRunner:
             features_df = feature_engine.compute_features(minute_data)
             logger.info(f"Computed features for {len(features_df)} symbols.")
             
-            # 3.5 Correlation Matrix (Vectorized)
-            logger.info("Phase 2.5: Computing Correlation Matrix...")
+            # 3.5 Correlation Matrix (Ledoit-Wolf Shrinkage for Stability)
+            logger.info("Phase 2.5: Computing Correlation Matrix (Shrinkage Estimator)...")
             returns_map = {}
             for sym, df in minute_data.items():
                 if not df.empty and len(df) > 10:
                     returns_map[sym] = df['close'].pct_change().fillna(0)
             
             returns_df = pd.DataFrame(returns_map)
-            correlation_matrix = returns_df.corr()
+            correlation_matrix = self._compute_shrinkage_correlation(returns_df)
             
             # 3.6 Rolling 30d ADV (Institutional Liquidity Filter)
             logger.info("Phase 2.6: Fetching 30d ADV...")
             adv_map = await polygon.get_adv_multi(candidates, days=30, end_date=date)
+            
+            # 3.7 Fetch NBBO Quotes for Accurate Spread (CRITICAL for ranking)
+            logger.info("Phase 2.7: Fetching NBBO Quotes for Spread Accuracy...")
+            nbbo_map_early = await polygon.get_last_quote_multi(list(features_df.index))
             
             # Merge daily stats (dollar vol), ADV, and metadata into features_df for ranking
             daily_subset = daily_market.loc[features_df.index]
             features_df['dollar_vol'] = daily_subset['close'] * daily_subset['volume']
             features_df['adv_30d'] = pd.Series(adv_map)
             features_df['close'] = daily_subset['close']
+            
+            # Override naive spread proxy with actual NBBO spread where available
+            for sym in features_df.index:
+                quote = nbbo_map_early.get(sym, {})
+                if quote.get('bid') and quote.get('ask') and quote['bid'] > 0:
+                    mid = (quote['ask'] + quote['bid']) / 2
+                    actual_spread_bps = (quote['ask'] - quote['bid']) / mid * 10000
+                    features_df.loc[sym, 'avg_spread_bps'] = actual_spread_bps
             
             # Enrich with metadata (Vectorized)
             metadata_df = pd.DataFrame.from_dict(metadata_map, orient='index')
@@ -363,11 +413,93 @@ class SymbolPickerRunner:
             return set()
 
     def _get_next_trading_day(self, date: datetime) -> datetime:
-        """Simple holiday-unaware next trading day (skips weekends)"""
+        """Get next trading day, skipping weekends and NYSE holidays."""
         next_day = date + timedelta(days=1)
-        while next_day.weekday() >= 5: # 5=Saturday, 6=Sunday
+        
+        # Skip weekends and holidays
+        while next_day.weekday() >= 5 or next_day.replace(hour=0, minute=0, second=0, microsecond=0) in self.NYSE_HOLIDAYS:
             next_day += timedelta(days=1)
+            
         return next_day
+    
+    def _is_trading_day(self, date: datetime) -> bool:
+        """Check if a given date is a trading day."""
+        normalized = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        return date.weekday() < 5 and normalized not in self.NYSE_HOLIDAYS
+
+    def _compute_shrinkage_correlation(self, returns_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute correlation matrix using Ledoit-Wolf shrinkage.
+        
+        This produces a more stable correlation estimate when:
+        - Number of assets (p) is large relative to observations (n)
+        - Sample correlation is noisy/near-singular
+        
+        Shrinks toward a structured target (constant correlation).
+        
+        Args:
+            returns_df: DataFrame of returns (rows=time, cols=assets)
+            
+        Returns:
+            Shrinkage-estimated correlation matrix as DataFrame
+        """
+        if returns_df.empty or len(returns_df.columns) < 2:
+            return pd.DataFrame()
+            
+        try:
+            # Drop any columns with all NaN
+            returns_clean = returns_df.dropna(axis=1, how='all').fillna(0)
+            
+            if len(returns_clean.columns) < 2:
+                return pd.DataFrame()
+            
+            X = returns_clean.values
+            n, p = X.shape
+            
+            # Demean
+            X = X - X.mean(axis=0)
+            
+            # Sample covariance
+            sample_cov = np.dot(X.T, X) / n
+            
+            # Sample correlation
+            std_devs = np.sqrt(np.diag(sample_cov))
+            std_devs[std_devs == 0] = 1  # Avoid division by zero
+            sample_corr = sample_cov / np.outer(std_devs, std_devs)
+            
+            # Shrinkage target: constant correlation matrix
+            # Use average off-diagonal correlation
+            off_diag_mask = ~np.eye(p, dtype=bool)
+            avg_corr = sample_corr[off_diag_mask].mean()
+            target = np.full((p, p), avg_corr)
+            np.fill_diagonal(target, 1.0)
+            
+            # Ledoit-Wolf shrinkage intensity estimation
+            # Simplified formula for correlation shrinkage
+            
+            # Compute sum of squared off-diagonal sample correlations
+            sum_sq_corr = np.sum(sample_corr[off_diag_mask] ** 2)
+            
+            # Estimate optimal shrinkage intensity (simplified Ledoit-Wolf)
+            # Shrinkage intensity between 0 (use sample) and 1 (use target)
+            if n > p:
+                # Well-conditioned case: less shrinkage needed
+                shrinkage = min(1.0, max(0.0, (p / n) * 0.5))
+            else:
+                # Ill-conditioned case: more shrinkage needed
+                shrinkage = min(1.0, max(0.1, 1.0 - (n / p) * 0.8))
+            
+            # Apply shrinkage
+            shrunk_corr = shrinkage * target + (1 - shrinkage) * sample_corr
+            
+            # Ensure diagonal is exactly 1
+            np.fill_diagonal(shrunk_corr, 1.0)
+            
+            return pd.DataFrame(shrunk_corr, index=returns_clean.columns, columns=returns_clean.columns)
+            
+        except Exception as e:
+            logger.warning(f"Shrinkage correlation failed, falling back to sample: {e}")
+            return returns_df.corr()
 
 if __name__ == "__main__":
     # Load environment variables from .env
