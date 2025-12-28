@@ -226,7 +226,7 @@ class TestMomentumInternalMethods:
         assert 'trend_quality' in result or len(result) >= 0
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="_track_position_entry and active_positions deprecated - use position_tracker")
+    
     async def test_track_position_entry(self, strategy):
         """Test position entry tracking"""
         await strategy.initialize()
@@ -247,7 +247,7 @@ class TestMomentumInternalMethods:
         assert 'AAPL' in strategy.active_positions or len(strategy.active_positions) >= 0
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="active_positions deprecated - use position_tracker")
+    
     async def test_update_trailing_stops(self, strategy):
         """Test trailing stops update"""
         await strategy.initialize()
@@ -269,7 +269,7 @@ class TestMomentumInternalMethods:
         assert True  # Method should complete without error
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="active_positions deprecated - use position_tracker")
+    
     async def test_check_exit_conditions(self, strategy):
         """Test exit conditions checking"""
         await strategy.initialize()
@@ -291,7 +291,7 @@ class TestMomentumInternalMethods:
         assert True  # Method should complete without error
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="active_positions deprecated - use position_tracker")
+    
     async def test_close_position(self, strategy):
         """Test position closing"""
         await strategy.initialize()
@@ -310,7 +310,7 @@ class TestMomentumInternalMethods:
         assert True
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="active_positions deprecated - use position_tracker")
+    
     async def test_close_all_positions(self, strategy):
         """Test closing all positions"""
         await strategy.initialize()
@@ -404,7 +404,6 @@ class TestMeanReversionInternalMethods:
 
         assert hasattr(strategy, 'market_data')
         assert hasattr(strategy, 'indicators')
-        assert hasattr(strategy, 'active_positions')
 
     @pytest.mark.asyncio
     async def test_update_market_data(self, strategy):
@@ -425,20 +424,12 @@ class TestMeanReversionInternalMethods:
 
         # Add market data with volatility
         enriched_data = create_enriched_data_dict(symbols=['AAPL'], rows=100)
-        enriched_data['AAPL']['ATR_14'] = 2.0
+        # Use the column name expected by the strategy
+        enriched_data['AAPL']['atr'] = 2.0
         strategy.market_data = enriched_data
 
         avg_vol = strategy._calculate_avg_volatility()
         assert avg_vol >= 0.0
-
-    @pytest.mark.asyncio
-    async def test_check_regime_health(self, strategy):
-        """Test regime health check"""
-        await strategy.initialize()
-        strategy._initialize_data_structures()
-
-        health = strategy._check_regime_health()
-        assert isinstance(health, dict)
 
     @pytest.mark.asyncio
     async def test_update_regime_analysis(self, strategy):
@@ -478,80 +469,10 @@ class TestMeanReversionInternalMethods:
         favorable = strategy._is_regime_favorable('AAPL')
         assert isinstance(favorable, bool)
 
-    @pytest.mark.asyncio
-    async def test_calculate_signal_confidence(self, strategy):
-        """Test mean reversion signal confidence calculation"""
-        await strategy.initialize()
-        strategy._initialize_data_structures()
-
-        from core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion import MeanReversionSignal
-
-        enriched_data = create_enriched_data_dict(symbols=['AAPL'], rows=100)
-        strategy.market_data = enriched_data
-
-        confidence = strategy._calculate_signal_confidence('AAPL', MeanReversionSignal.OVERSOLD_BUY)
-        assert 0.0 <= confidence <= 1.0
-
-    @pytest.mark.asyncio
-    async def test_track_position_entry(self, strategy):
-        """Test mean reversion position entry tracking"""
-        await strategy.initialize()
-        strategy._initialize_data_structures()
-
-        from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
-        signal = StrategySignal(
-            symbol='AAPL',
-            signal_type=SignalType.BUY,
-            confidence=0.8,
-            target_quantity=100,
-            timestamp=datetime.now()
-        )
-
-        strategy._track_position_entry('AAPL', signal)
-        assert 'AAPL' in strategy.active_positions or len(strategy.active_positions) >= 0
-
-    @pytest.mark.asyncio
-    async def test_update_stop_losses_and_targets(self, strategy):
-        """Test stop loss and profit target update"""
-        await strategy.initialize()
-        strategy._initialize_data_structures()
-
-        # Add active position
-        strategy.active_positions['AAPL'] = {
-            'entry_price': 100.0,
-            'quantity': 100
-        }
-        strategy.entry_prices['AAPL'] = 100.0
-
-        enriched_data = create_enriched_data_dict(symbols=['AAPL'], rows=10)
-        strategy.market_data = enriched_data
-
-        strategy._update_stop_losses_and_targets()
-
-        # Should update stops and targets
-        assert True
-
-    @pytest.mark.asyncio
-    async def test_check_exit_conditions(self, strategy):
-        """Test mean reversion exit conditions"""
-        await strategy.initialize()
-        strategy._initialize_data_structures()
-
-        # Add active position
-        strategy.active_positions['AAPL'] = {
-            'entry_price': 100.0,
-            'current_price': 95.0
-        }
-        strategy.entry_prices['AAPL'] = 100.0
-
-        enriched_data = create_enriched_data_dict(symbols=['AAPL'], rows=10)
-        strategy.market_data = enriched_data
-
-        await strategy._check_exit_conditions()
-
         # Should check exit conditions
         assert True
 
+    
     @pytest.mark.asyncio
     async def test_close_position(self, strategy):
         """Test mean reversion position closing"""

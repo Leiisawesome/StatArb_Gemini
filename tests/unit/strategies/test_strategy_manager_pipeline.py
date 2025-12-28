@@ -69,27 +69,26 @@ class TestPhase3PipelineIntegration:
             })
             raw_data.set_index('timestamp', inplace=True)
 
-            # Create indicators DataFrame
-            indicators = pd.DataFrame({
-                'SMA_10': raw_data['close'].rolling(10).mean(),
-                'SMA_20': raw_data['close'].rolling(20).mean(),
-                'RSI_14': np.random.uniform(30, 70, 100),
-                'ADX_14': np.random.uniform(10, 40, 100),
-                'MACD': np.random.uniform(-2, 2, 100),
-                'ATR_14': np.random.uniform(1, 3, 100),
-                'volume_ratio': np.random.uniform(0.5, 2.0, 100)
-            }, index=raw_data.index)
+            # Create indicators DataFrame (OHLCV + indicators)
+            indicators = raw_data.copy()
+            indicators['SMA_10'] = raw_data['close'].rolling(10).mean()
+            indicators['SMA_20'] = raw_data['close'].rolling(20).mean()
+            indicators['RSI_14'] = np.random.uniform(30, 70, 100)
+            indicators['ADX_14'] = np.random.uniform(10, 40, 100)
+            indicators['MACD'] = np.random.uniform(-2, 2, 100)
+            indicators['ATR_14'] = np.random.uniform(1, 3, 100)
+            indicators['volume_ratio'] = np.random.uniform(0.5, 2.0, 100)
 
-            # Create features DataFrame
-            features = pd.DataFrame({
-                'returns_1': raw_data['close'].pct_change(),
-                'momentum_score': np.random.uniform(-1, 1, 100),
-                'trend_strength': np.random.uniform(0, 1, 100),
-                'volatility_ratio': np.random.uniform(0.5, 2.0, 100)
-            }, index=raw_data.index)
+            # Create features DataFrame (OHLCV + indicators + features)
+            features = indicators.copy()
+            features['returns_1'] = raw_data['close'].pct_change()
+            features['momentum_score'] = np.random.uniform(-1, 1, 100)
+            features['trend_strength'] = np.random.uniform(0, 1, 100)
+            features['volatility_ratio'] = np.random.uniform(0.5, 2.0, 100)
 
-            # Create signals DataFrame (empty for now)
-            signals = pd.DataFrame(index=raw_data.index)
+            # Create signals DataFrame (OHLCV + indicators + features + signals)
+            signals = features.copy()
+            signals['preliminary_signal'] = 0
 
             return EnrichedMarketData(
                 symbol=symbol,
@@ -249,17 +248,17 @@ class TestSignalGenerationWithPipeline(TestPhase3PipelineIntegration):
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Integration test needs mock updates for generate_signals_with_pipeline flow")
     async def test_all_strategies_receive_same_enriched_data(self, pipeline_config, mock_enriched_data):
         """Test that all strategies receive the same enriched data"""
         manager = StrategyManager(pipeline_config)
         manager.is_initialized = True
 
         # Register multiple mock strategies
-        mock_strategy1 = AsyncMock()
+        from core_engine.trading.strategies.base_strategy_enhanced import EnhancedBaseStrategy
+        mock_strategy1 = AsyncMock(spec=EnhancedBaseStrategy)
         mock_strategy1.generate_signals = AsyncMock(return_value=[])
 
-        mock_strategy2 = AsyncMock()
+        mock_strategy2 = AsyncMock(spec=EnhancedBaseStrategy)
         mock_strategy2.generate_signals = AsyncMock(return_value=[])
 
         manager.active_strategies = {
@@ -329,7 +328,6 @@ class TestEnrichedDataValidation(TestPhase3PipelineIntegration):
     """Test that enriched data is properly validated"""
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Mock fixture needs update - signals DataFrame should include indicators")
     async def test_enriched_data_contains_indicators(self, mock_enriched_data):
         """Test that enriched data contains required indicators"""
         data = mock_enriched_data('AAPL')
@@ -341,7 +339,6 @@ class TestEnrichedDataValidation(TestPhase3PipelineIntegration):
             assert indicator in enriched_df.columns, f"Missing indicator: {indicator}"
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Mock fixture needs update - signals DataFrame should include features")
     async def test_enriched_data_contains_features(self, mock_enriched_data):
         """Test that enriched data contains engineered features"""
         data = mock_enriched_data('AAPL')
@@ -353,17 +350,13 @@ class TestEnrichedDataValidation(TestPhase3PipelineIntegration):
             assert feature in enriched_df.columns, f"Missing feature: {feature}"
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="validate_enrichment signature changed - returns bool not dict")
     async def test_enriched_data_validation(self, mock_enriched_data):
         """Test EnrichedMarketData validation method"""
         data = mock_enriched_data('AAPL')
 
         validation = data.validate_enrichment()
 
-        assert validation['has_raw_data'] is True
-        assert validation['has_indicators'] is True
-        assert validation['has_features'] is True
-        assert validation['raw_columns_present'] is True
+        assert validation is True
 
 class TestBackwardCompatibility(TestPhase3PipelineIntegration):
     """Test backward compatibility with legacy methods"""
@@ -445,17 +438,17 @@ class TestErrorHandling(TestPhase3PipelineIntegration):
         assert signals == []
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Integration test needs mock updates for strategy execution flow")
     async def test_strategy_exception_doesnt_stop_other_strategies(self, pipeline_config, mock_enriched_data):
         """Test that exception in one strategy doesn't stop others"""
         manager = StrategyManager(pipeline_config)
         manager.is_initialized = True
 
         # Create two strategies: one fails, one succeeds
-        failing_strategy = AsyncMock()
+        from core_engine.trading.strategies.base_strategy_enhanced import EnhancedBaseStrategy
+        failing_strategy = AsyncMock(spec=EnhancedBaseStrategy)
         failing_strategy.generate_signals = AsyncMock(side_effect=Exception("Strategy failed"))
 
-        working_strategy = AsyncMock()
+        working_strategy = AsyncMock(spec=EnhancedBaseStrategy)
         working_strategy.generate_signals = AsyncMock(return_value=[])
 
         manager.active_strategies = {
@@ -496,7 +489,6 @@ class TestSignalMetadata(TestPhase3PipelineIntegration):
     """Test that signals have correct metadata"""
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Module core_engine.type_definitions.signal not found - import path changed")
     async def test_signals_marked_as_pipeline_processed(self, pipeline_config, mock_enriched_data):
         """Test that signals are marked as pipeline-processed"""
         manager = StrategyManager(pipeline_config)
@@ -504,12 +496,12 @@ class TestSignalMetadata(TestPhase3PipelineIntegration):
 
         # Create mock strategy that returns a signal
         from core_engine.trading.strategies.base_strategy_enhanced import EnhancedBaseStrategy
-        from core_engine.type_definitions.signal import StrategySignal
-        from core_engine.trading.strategies.manager import SignalStrength
+        from core_engine.trading.strategies.strategy_engine import StrategySignal
+        from core_engine.type_definitions.strategy import SignalStrength, SignalType
 
         mock_signal = StrategySignal(
             symbol='AAPL',
-            signal_type='BUY',
+            signal_type=SignalType.BUY,
             strength=SignalStrength.STRONG,
             confidence=0.8,
             timestamp=datetime.now()

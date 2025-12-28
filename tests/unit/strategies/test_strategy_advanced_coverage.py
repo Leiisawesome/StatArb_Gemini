@@ -443,7 +443,7 @@ class TestBreakoutAdvanced:
         current_price = recent_high * 1.02  # Above resistance
         df.loc[df.index[-1], 'close'] = current_price
         df.loc[df.index[-1], 'high'] = current_price
-        df.loc[df.index[-1], 'volume'] = df['volume'].mean() * 2.0  # High volume
+        df.loc[df.index[-1], 'volume'] = int(df['volume'].mean() * 2.0)  # High volume
 
         strategy.market_data = enriched_data
 
@@ -466,7 +466,7 @@ class TestBreakoutAdvanced:
         current_price = recent_low * 0.98  # Below support
         df.loc[df.index[-1], 'close'] = current_price
         df.loc[df.index[-1], 'low'] = current_price
-        df.loc[df.index[-1], 'volume'] = df['volume'].mean() * 2.0  # High volume
+        df.loc[df.index[-1], 'volume'] = int(df['volume'].mean() * 2.0)  # High volume
 
         strategy.market_data = enriched_data
 
@@ -501,7 +501,7 @@ class TestBreakoutAdvanced:
         recent_high = df['high'].tail(20).max()
         current_price = recent_high * 1.02  # Above resistance
         df.loc[df.index[-1], 'close'] = current_price
-        df.loc[df.index[-1], 'volume'] = df['volume'].mean() * 0.5  # Low volume
+        df.loc[df.index[-1], 'volume'] = int(df['volume'].mean() * 0.5)  # Low volume
 
         strategy.market_data = enriched_data
 

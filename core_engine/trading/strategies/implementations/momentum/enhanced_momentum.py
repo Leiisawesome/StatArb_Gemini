@@ -1205,9 +1205,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 trend_strength_series = pd.Series([0.0] * len(data), index=data.index)
 
             # Forward fill NaN values with last valid value (for indicators that need lookback)
-            adx_series = adx_series.fillna(method='ffill').fillna(25.0)  # Default ADX if all NaN
-            volume_ratio_series = volume_ratio_series.fillna(method='ffill').fillna(1.0)  # Default 1.0 if all NaN
-            trend_strength_series = trend_strength_series.fillna(method='ffill').fillna(0.0)  # Default 0.0 if all NaN
+            adx_series = adx_series.ffill().fillna(25.0)  # Default ADX if all NaN
+            volume_ratio_series = volume_ratio_series.ffill().fillna(1.0)  # Default 1.0 if all NaN
+            trend_strength_series = trend_strength_series.ffill().fillna(0.0)  # Default 0.0 if all NaN
 
             self.indicators[symbol] = {
                 'adx': adx_series,
@@ -1403,6 +1403,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         """Close all active positions"""
         logger.info(f"🔄 Closing {len(self.position_tracker)} active positions")
         self.position_tracker.clear()  # Phase 2.5: Unified tracking
+        
+        # Legacy shim support
+        if hasattr(self, 'active_positions'):
+            self.active_positions.clear()
+        if hasattr(self, 'entry_prices'):
+            self.entry_prices.clear()
 
     def _save_performance_data(self) -> None:
         """Save performance data"""

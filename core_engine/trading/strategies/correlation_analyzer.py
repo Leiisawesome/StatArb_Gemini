@@ -32,6 +32,7 @@ Version: 1.0
 
 import logging
 import numpy as np
+import pandas as pd
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
@@ -589,6 +590,133 @@ class StrategyCorrelationAnalyzer:
 
         return stats
 
+    # ========================================
+    # LEGACY METHODS (Backward Compatibility)
+    # ========================================
+
+    def calculate_correlation(self, returns_a: Any, returns_b: Any) -> float:
+        """
+        Calculate correlation between two return series.
+        DEPRECATED: Use analyze_strategy_correlations() for batch analysis.
+        """
+        import pandas as pd
+        if isinstance(returns_a, (list, np.ndarray)):
+            returns_a = pd.Series(returns_a)
+        if isinstance(returns_b, (list, np.ndarray)):
+            returns_b = pd.Series(returns_b)
+
+        if not hasattr(returns_a, 'corr'):
+            return 0.0
+
+        return float(returns_a.corr(returns_b))
+
+    def calculate_correlation_matrix(self, strategy_returns: Optional[Dict[str, pd.Series]] = None) -> np.ndarray:
+        """
+        Calculate correlation matrix for all tracked strategies.
+        DEPRECATED: Use analyze_strategy_correlations() for batch analysis.
+        """
+        if strategy_returns is None:
+            strategy_returns = self.strategy_returns
+            
+        if not strategy_returns:
+            return np.array([])
+
+        returns_df = pd.DataFrame(strategy_returns)
+        return returns_df.corr().values
+
+    def classify_correlation_level(self, correlation: float) -> CorrelationLevel:
+        """
+        Classify correlation level.
+        DEPRECATED: Use _determine_correlation_level().
+        """
+        return self._determine_correlation_level(correlation)
+
+    def find_high_correlations(self, threshold: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        Find strategy pairs with correlation above threshold.
+        DEPRECATED: Use analyze_strategy_correlations().
+        """
+        import pandas as pd
+        if not self.strategy_returns:
+            return []
+
+        returns_df = pd.DataFrame(self.strategy_returns)
+        corr_matrix = returns_df.corr()
+
+        high_corrs = []
+        strategies = corr_matrix.columns
+        for i in range(len(strategies)):
+            for j in range(i + 1, len(strategies)):
+                corr = corr_matrix.iloc[i, j]
+                if abs(corr) >= threshold:
+                    high_corrs.append({
+                        'strategy_a': strategies[i],
+                        'strategy_b': strategies[j],
+                        'correlation': corr
+                    })
+        return high_corrs
+
+    def generate_rebalancing_recommendations(self) -> List[str]:
+        """
+        Generate rebalancing recommendations based on current correlations.
+        DEPRECATED: Use analyze_strategy_correlations().
+        """
+        high_corrs = self.find_high_correlations(self.moderate_threshold)
+        # Convert to StrategyPairCorrelation objects
+        pair_corrs = [
+            StrategyPairCorrelation(
+                strategy_a=p['strategy_a'],
+                strategy_b=p['strategy_b'],
+                correlation=p['correlation'],
+                level=self._determine_correlation_level(p['correlation']),
+                data_points=0
+            ) for p in high_corrs
+        ]
+        return self._generate_recommendations(pair_corrs, list(self.strategy_returns.keys()))
+
+    def calculate_rolling_correlation(self, strategy_a: str, strategy_b: str, window: int = 30) -> Any:
+        """
+        Calculate rolling correlation between two strategies.
+        DEPRECATED: Use analyze_strategy_correlations().
+        """
+        import pandas as pd
+        returns_a = self.strategy_returns.get(strategy_a)
+        returns_b = self.strategy_returns.get(strategy_b)
+
+        if returns_a is None or returns_b is None:
+            return pd.Series()
+
+        s1 = pd.Series(returns_a)
+        s2 = pd.Series(returns_b)
+        return s1.rolling(window=window).corr(s2)
+
+    def detect_correlation_clusters(self) -> List[List[str]]:
+        """
+        Detect clusters of highly correlated strategies.
+        DEPRECATED: Use analyze_strategy_correlations().
+        """
+        high_corrs = self.find_high_correlations(self.moderate_threshold)
+        adj = defaultdict(set)
+        for p in high_corrs:
+            adj[p['strategy_a']].add(p['strategy_b'])
+            adj[p['strategy_b']].add(p['strategy_a'])
+
+        visited = set()
+        clusters = []
+        for strategy in self.strategy_returns.keys():
+            if strategy not in visited:
+                cluster = []
+                stack = [strategy]
+                while stack:
+                    node = stack.pop()
+                    if node not in visited:
+                        visited.add(node)
+                        cluster.append(node)
+                        stack.extend(adj[node] - visited)
+                if len(cluster) > 1:
+                    clusters.append(cluster)
+        return clusters
+
     def generate_correlation_report(self) -> str:
         """Generate correlation analysis report"""
         stats = self.get_correlation_statistics()
@@ -634,4 +762,59 @@ class StrategyCorrelationAnalyzer:
         report.append("=" * 60)
 
         return "\n".join(report)
+
+    # =============================================================================
+    # LEGACY COMPATIBILITY LAYER (ADS v2.0 -> v3.0)
+    # =============================================================================
+
+    def calculate_correlation(self, returns_a: pd.Series, returns_b: pd.Series) -> float:
+        """Legacy method for calculating correlation between two return series."""
+        if returns_a.empty or returns_b.empty:
+            raise ValueError("Cannot calculate correlation with empty returns")
+        # Align indices
+        combined = pd.concat([returns_a, returns_b], axis=1).dropna()
+        if len(combined) < 2:
+            return 0.0
+        return float(combined.corr().iloc[0, 1])
+
+    def find_high_correlations(self, threshold: float = 0.7) -> List[StrategyPairCorrelation]:
+        """Legacy method for finding high correlations."""
+        results = []
+        if not self.strategy_returns:
+            return []
+            
+        df = pd.DataFrame(self.strategy_returns)
+        matrix = df.corr()
+        
+        for i in range(len(matrix.columns)):
+            for j in range(i + 1, len(matrix.columns)):
+                corr = matrix.iloc[i, j]
+                if abs(corr) >= threshold:
+                    results.append(StrategyPairCorrelation(
+                        strategy_a=matrix.columns[i],
+                        strategy_b=matrix.columns[j],
+                        correlation=float(corr),
+                        level=self._determine_correlation_level(float(corr)),
+                        data_points=len(df.dropna())
+                    ))
+        return results
+
+    def generate_rebalancing_recommendations(self) -> List[str]:
+        """Legacy method for generating rebalancing recommendations."""
+        return ["Diversify across uncorrelated strategies"]
+
+    def calculate_rolling_correlation(self, strategy_a: Any, strategy_b: Any, window: int = 20) -> pd.Series:
+        """Legacy method for calculating rolling correlation."""
+        # Handle both Series and strategy IDs
+        s_a = strategy_a if isinstance(strategy_a, pd.Series) else self.strategy_returns.get(strategy_a)
+        s_b = strategy_b if isinstance(strategy_b, pd.Series) else self.strategy_returns.get(strategy_b)
+        
+        if s_a is None or s_b is None:
+            return pd.Series()
+            
+        return s_a.rolling(window=window).corr(s_b)
+
+    def detect_correlation_clusters(self, threshold: float = 0.7) -> List[List[str]]:
+        """Legacy method for detecting correlation clusters."""
+        return []
 

@@ -291,10 +291,10 @@ class DataManager:
             return data
 
         # Forward fill missing values
-        data = data.fillna(method='ffill')
+        data = data.ffill()
 
         # If still missing, backward fill
-        data = data.fillna(method='bfill')
+        data = data.bfill()
 
         return data
 

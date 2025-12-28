@@ -66,8 +66,17 @@ class TestMeanReversionSignalGeneration:
         await strategy.initialize()
         await strategy.start()
 
-        # Setup existing position
-        strategy.active_positions = {'AAPL': Mock(quantity=100.0)}
+        # Setup existing position via position_details
+        position_details = {
+            'AAPL': {
+                'quantity': 100.0,
+                'entry_price': 100.0,
+                'current_price': 105.0,
+                'unrealized_pnl': 500.0,
+                'pnl_pct': 0.05,
+                'is_profitable': True
+            }
+        }
 
         enriched_data = create_enriched_data_dict(symbols=['AAPL'], rows=200)
 
@@ -85,7 +94,7 @@ class TestMeanReversionSignalGeneration:
         df = df.ffill().bfill().fillna(0)
         enriched_data['AAPL'] = df
 
-        signals = await strategy.generate_signals(enriched_data)
+        signals = await strategy.generate_signals(enriched_data, position_details=position_details)
 
         assert isinstance(signals, list)
 
