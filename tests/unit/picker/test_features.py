@@ -13,25 +13,25 @@ def sample_config():
 
 @pytest.fixture
 def sample_minute_data():
-    # Create 10 minutes of data for two symbols
-    times = pd.date_range("2023-01-01 09:30", periods=10, freq="min")
+    # Create 20 minutes of data for two symbols to ensure sub-sampling works
+    times = pd.date_range("2023-01-01 09:30", periods=20, freq="min")
     
     df1 = pd.DataFrame({
         'timestamp': times,
-        'open': [100.0] * 10,
-        'high': [101.0] * 10,
-        'low': [99.0] * 10,
-        'close': [100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0],
-        'volume': [1000] * 10
+        'open': [100.0] * 20,
+        'high': [101.0] * 20,
+        'low': [99.0] * 20,
+        'close': [100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0] * 2,
+        'volume': [1000] * 20
     })
     
     df2 = pd.DataFrame({
         'timestamp': times,
-        'open': [200.0] * 10,
-        'high': [200.1] * 10,
-        'low': [199.9] * 10,
-        'close': [200.0] * 10,
-        'volume': [500] * 10
+        'open': [200.0] * 20,
+        'high': [200.1] * 20,
+        'low': [199.9] * 20,
+        'close': [200.0] * 20,
+        'volume': [500] * 20
     })
     
     return {

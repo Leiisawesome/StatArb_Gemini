@@ -93,7 +93,7 @@ async def test_runner_run(
     # Run
     result = await runner.run(datetime(2023, 1, 1))
     
-    assert result == "test_path.json"
+    assert result['artifact_path'] == "test_path.json"
     mock_filter.filter_universe.assert_called_once()
     mock_engine.compute_features.assert_called_once()
     mock_ranker.select_universe.assert_called_once()
