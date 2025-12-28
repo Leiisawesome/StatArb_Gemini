@@ -292,11 +292,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # Store position details for price-aware decisions
         self._position_details = position_details or {}
 
-        # Track call count for debugging
-        if not hasattr(self, '_signal_call_count'):
-            self._signal_call_count = 0
-        self._signal_call_count += 1
-
         try:
             self._validate_enriched_data(enriched_data)
             self._update_market_data(enriched_data)
@@ -307,11 +302,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             for symbol in self.config.symbols:
                 data_len = len(self.market_data.get(symbol, []))
                 lookback = self.config.lookback_period
-
-                # Debug: Log first 10 calls to understand the flow
-                if self._signal_call_count <= 10:
-                    logger.info(f"[{symbol}] Call #{self._signal_call_count}: data_len={data_len}, "
-                               f"lookback={lookback}, will_generate={data_len > lookback}")
 
                 if symbol in self.market_data and data_len > lookback:
                     symbol_signals = await self._generate_symbol_signals(symbol)
@@ -492,15 +482,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             sms_score = sms.compute(regime_label)
             sms_threshold = self.ads_config.get('sms_threshold', 0.5)
 
-            # DEBUG: Log SMS evaluation
-            if not hasattr(self, '_eval_log_count'):
-                self._eval_log_count = 0
-            if self._eval_log_count < 20:
-                self._eval_log_count += 1
-                logger.info(f"[{symbol}] ADS SMS #{self._eval_log_count}: zscore={zscore:.3f}, "
-                           f"SMS={sms_score:.3f} (E={exhaustion:.3f}, P_rev={reversal_prob:.3f}, "
-                           f"VC={vol_compression:.3f}), threshold={sms_threshold}")
-
             # Check SMS threshold
             if sms_score < sms_threshold:
                 return None  # Signal not mature enough
@@ -545,12 +526,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 erar_gamma = self.ads_config.get('erar_gamma', 0.5)
 
                 if not erar.should_trade(gamma=erar_gamma):
-                    if self._eval_log_count <= 30:
-                        logger.debug(f"[{symbol}] ERAR gate blocked: ERAR={erar_score:.3f} < gamma={erar_gamma}")
                     return None  # Doesn't meet risk-adjusted return threshold
-
-                if self._eval_log_count <= 20:
-                    logger.info(f"[{symbol}] ERAR passed: {erar_score:.3f} >= {erar_gamma}")
 
             # ========================================
             # LEGACY: Calculate exhaustion score for confidence
@@ -590,6 +566,17 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 (signal_type == SignalType.LONG_ENTRY and hasattr(self, '_position_details') and
                  self._position_details.get(symbol, {}).get('quantity', 0) < 0)  # Will close short
             )
+
+            # ========================================
+            # CARRIED-OVER POSITION RULES (NEW)
+            # ========================================
+            # Rule: Liquidation of the carried-over position has to be profitable.
+            if is_exit_signal and hasattr(self, '_position_details'):
+                pos_info = self._position_details.get(symbol, {})
+                if pos_info.get('is_carried_over', False):
+                    pnl_pct = pos_info.get('pnl_pct', 0.0)
+                    if pnl_pct <= 0:
+                        return None
 
             if is_exit_signal and getattr(self.config, 'enable_momentum_exit', True):
                 # Get momentum indicators (using DRY helpers)
@@ -635,15 +622,18 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     momentum_exhausted = True
                     exit_reason = f"volume_fading (ratio {exit_volume_ratio:.2f} < {vol_ratio_threshold})"
 
-                # Momentum still strong - HOLD for extended move
+                # NEW: Exit on buying climax (blow-off top)
                 else:
-                    hold_reason = f"momentum_strong (ADX={exit_adx:.1f}, RSI={exit_rsi:.1f}, vol_ratio={exit_volume_ratio:.2f})"
+                    is_climax, climax_reason = self._is_volume_climax(data, idx, is_oversold=False)
+                    if is_climax:
+                        momentum_exhausted = True
+                        exit_reason = climax_reason
+                    else:
+                        # Momentum still strong - HOLD for extended move
+                        hold_reason = f"momentum_strong (ADX={exit_adx:.1f}, RSI={exit_rsi:.1f}, vol_ratio={exit_volume_ratio:.2f})"
 
                 # Log the decision
-                if momentum_exhausted:
-                    logger.debug(f"[{symbol}] MOMENTUM EXIT ALLOWED: {exit_reason}")
-                else:
-                    logger.debug(f"[{symbol}] MOMENTUM HOLD: {hold_reason}")
+                if not momentum_exhausted:
                     return None  # Don't exit yet, momentum still strong
 
             # ========================================
@@ -696,19 +686,17 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     entry_reason = f"weak_trend (ADX {entry_adx:.1f} < {adx_threshold})"
 
                 # For BUY entries: High volume = selling climax (capitulation), OK to enter
-                elif entry_volume_ratio > 1.5:  # Volume spike = potential capitulation/reversal
-                    momentum_reversing = True
-                    entry_reason = f"volume_spike (ratio {entry_volume_ratio:.2f} > 1.5) - potential capitulation"
-
-                # Strong downward momentum - WAIT for exhaustion
                 else:
-                    hold_entry_reason = f"momentum_strong (ADX={entry_adx:.1f}, RSI={entry_rsi:.1f}, vol_ratio={entry_volume_ratio:.2f})"
+                    is_climax, climax_reason = self._is_volume_climax(data, idx, is_oversold=True)
+                    if is_climax:
+                        momentum_reversing = True
+                        entry_reason = climax_reason
+                    else:
+                        # Strong downward momentum - WAIT for exhaustion
+                        hold_entry_reason = f"momentum_strong (ADX={entry_adx:.1f}, RSI={entry_rsi:.1f}, vol_ratio={entry_volume_ratio:.2f})"
 
                 # Log the decision
-                if momentum_reversing:
-                    logger.debug(f"[{symbol}] MOMENTUM ENTRY ALLOWED: {entry_reason}")
-                else:
-                    logger.debug(f"[{symbol}] MOMENTUM ENTRY WAIT: {hold_entry_reason}")
+                if not momentum_reversing:
                     return None  # Don't enter yet, downward momentum still strong
 
             # ========================================
@@ -733,34 +721,23 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     take_profit_pct = getattr(self.config, 'take_profit_pct', 10.0)  # +10% default
                     min_profit_to_exit = getattr(self.config, 'min_profit_to_exit', -2.0)  # Allow -2% loss max
 
-                    # Log position context
-                    logger.debug(f"[{symbol}] Price-aware: entry=${entry_price_pos:.2f}, current=${current_price:.2f}, "
-                                f"pnl={pnl_pct:+.2f}%, stop={stop_loss_pct}%")
-
                     # RULE 1: Take profit if exceeds threshold (always exit)
                     if pnl_pct >= take_profit_pct:
-                        logger.info(f"[{symbol}] ✅ TAKE PROFIT: pnl={pnl_pct:+.2f}% >= {take_profit_pct}%")
                         # Boost confidence for profitable exits
                         confidence = min(confidence * 1.2, 1.0)
 
                     # RULE 2: Stop loss if exceeds threshold (always exit)
                     elif pnl_pct <= stop_loss_pct:
-                        logger.info(f"[{symbol}] ⚠️ STOP LOSS: pnl={pnl_pct:+.2f}% <= {stop_loss_pct}%")
-                        # Still exit but log it
+                        pass # Still exit
 
                     # RULE 3: Don't sell at significant loss just because z-score says overbought
                     elif pnl_pct < min_profit_to_exit:
-                        logger.info(f"[{symbol}] ❌ SKIPPING SELL: pnl={pnl_pct:+.2f}% < {min_profit_to_exit}%, "
-                                   f"waiting for better price (entry=${entry_price_pos:.2f})")
                         return None  # Skip this sell signal
 
                     # RULE 4: Small loss or breakeven - allow exit if z-score strong enough
                     else:
                         # Allow exit if z-score is very strong (>2.5) even at small loss
-                        if zscore > self.config.dislocation_strong:
-                            logger.info(f"[{symbol}] ✅ STRONG Z-SCORE EXIT: z={zscore:.2f} > {self.config.dislocation_strong}")
-                        else:
-                            logger.info(f"[{symbol}] ⚠️ MARGINAL EXIT: pnl={pnl_pct:+.2f}%, z={zscore:.2f}")
+                        pass
 
             # Confidence threshold check
             if confidence <= 0.6:
@@ -1180,6 +1157,41 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         if volume_ma > 0:
             return volume / volume_ma
         return default
+
+    def _is_volume_climax(self, data: pd.DataFrame, idx: int, is_oversold: bool) -> Tuple[bool, str]:
+        """
+        Detect volume climax (capitulation/exhaustion).
+
+        A volume climax is a massive spike in volume accompanied by a large price move,
+        often signaling the end of a trend (capitulation).
+
+        Args:
+            data: Market data
+            idx: Current index
+            is_oversold: True if looking for selling climax (BUY entry), False for buying climax (SELL entry)
+
+        Returns:
+            Tuple of (is_climax, reason)
+        """
+        volume_ratio = self._get_volume_ratio(data, idx)
+        climax_threshold = getattr(self.config, 'volume_climax_threshold', 2.5)
+        price_threshold = getattr(self.config, 'volume_climax_price_threshold', 0.5)
+
+        if volume_ratio >= climax_threshold:
+            # Check if price action confirms climax (large candle or gap)
+            current_close = data['close'].iloc[idx]
+            prev_close = data['close'].iloc[idx-1] if idx > 0 else current_close
+            price_change_pct = abs(current_close / prev_close - 1.0) * 100
+
+            # For selling climax (BUY entry), price should be dropping sharply
+            # For buying climax (SELL entry), price should be rising sharply
+            price_direction_ok = (is_oversold and current_close < prev_close) or (not is_oversold and current_close > prev_close)
+
+            if price_direction_ok and price_change_pct >= price_threshold: # Significant move on 1m bar
+                climax_type = "selling_climax" if is_oversold else "buying_climax"
+                return True, f"{climax_type} (ratio {volume_ratio:.2f} >= {climax_threshold}, move {price_change_pct:.2f}% >= {price_threshold}%)"
+
+        return False, ""
 
     def _get_macd_histogram(self, data: pd.DataFrame, idx: int, default: float = 0.0) -> float:
         """
@@ -1682,6 +1694,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # Get position details
         entry_price = pos_info.get('entry_price', 0)
         quantity = pos_info.get('quantity', 0)
+        is_carried_over = pos_info.get('is_carried_over', False)
 
         if entry_price <= 0:
             return None
@@ -1701,6 +1714,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
 
         # Get stop-loss threshold from config
         stop_loss_pct = getattr(self.config, 'stop_loss_pct', -2.0)
+
+        # Rule: stop-loss (2%) does not apply carried-over position
+        if is_carried_over:
+            return None
 
         # Check if stop-loss triggered
         if pnl_pct <= stop_loss_pct:

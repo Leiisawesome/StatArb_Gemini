@@ -26,7 +26,6 @@ from pathlib import Path
 import logging
 import pandas as pd
 import sys
-import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -3353,7 +3352,6 @@ class InstitutionalBacktestEngine:
                     pnl_pct = (entry_price - close_price) / entry_price * 100
             
             if pnl_pct <= 0:
-                logger.info(f"   ⏩ EOD: CARRY OVER {symbol} (P&L={pnl_pct:+.2f}%, not profitable)")
                 continue
 
             # Create a liquidation sell order
@@ -3576,6 +3574,18 @@ class InstitutionalBacktestEngine:
                             for sym, qty in current_positions.items():
                                 if abs(qty) > 0.001:  # Has position
                                     entry_price = self.pnl_tracker.position_cost_basis.get(sym, 0.0)
+                                    entry_time = getattr(self.pnl_tracker, 'position_entry_time', {}).get(sym)
+                                    
+                                    # Determine if position is carried over from a previous day
+                                    is_carried_over = False
+                                    if entry_time:
+                                        # Handle timezone awareness for comparison
+                                        entry_date = entry_time.date() if hasattr(entry_time, 'date') else None
+                                        current_date = bar_timestamp.date() if hasattr(bar_timestamp, 'date') else None
+                                        
+                                        if entry_date and current_date and entry_date < current_date:
+                                            is_carried_over = True
+
                                     # Use current bar's close price, not stale cached price
                                     if not features_historical.empty and 'close' in features_historical.columns:
                                         current_price_sym = features_historical['close'].iloc[-1]
@@ -3586,10 +3596,12 @@ class InstitutionalBacktestEngine:
                                     position_details[sym] = {
                                         'quantity': qty,
                                         'entry_price': entry_price,
+                                        'entry_time': entry_time,
                                         'current_price': current_price_sym,
                                         'unrealized_pnl': unrealized_pnl,
                                         'pnl_pct': pnl_pct,
-                                        'is_profitable': pnl_pct > 0  # Fix: use pnl_pct, not unrealized_pnl
+                                        'is_profitable': pnl_pct > 0,
+                                        'is_carried_over': is_carried_over
                                     }
 
                         # ✅ FIX: For strategies, provide ENRICHED data (not raw OHLCV!)

@@ -107,6 +107,7 @@ class RealTimePnLTracker:
         self.position_pnl: Dict[str, float] = {}  # symbol → P&L
         self.strategy_pnl: Dict[str, float] = {}  # strategy_id → P&L
         self.position_cost_basis: Dict[str, float] = {}  # symbol → avg cost
+        self.position_entry_time: Dict[str, datetime] = {}  # symbol → first entry time
         self.position_strategy_map: Dict[str, str] = {}  # symbol → strategy_id
 
         # History
@@ -243,6 +244,14 @@ class RealTimePnLTracker:
         # Update intraday high
         self._update_intraday_high(timestamp)
 
+        # Cleanup if position is fully closed
+        current_position = self.risk_manager.current_positions.get(symbol, 0.0)
+        if abs(current_position) < 0.001:
+            if symbol in self.position_cost_basis:
+                del self.position_cost_basis[symbol]
+            if symbol in self.position_entry_time:
+                del self.position_entry_time[symbol]
+
         self.logger.info(
             f"💰 Position closed: {symbol} | "
             f"Qty: {quantity:.2f} @ ${exit_price:.2f} | "
@@ -284,9 +293,14 @@ class RealTimePnLTracker:
             total_cost = (current_cost * prior_position) + (entry_price * quantity)
             new_position = prior_position + quantity
             self.position_cost_basis[symbol] = total_cost / new_position if abs(new_position) > 0.001 else entry_price
+            
+            # Keep original entry time for carried-over logic
+            if symbol not in self.position_entry_time:
+                self.position_entry_time[symbol] = timestamp
         else:
             # NEW position (prior was 0 or no prior cost basis) - use entry price directly
             self.position_cost_basis[symbol] = entry_price
+            self.position_entry_time[symbol] = timestamp
 
         # Map position to strategy
         if strategy_id:

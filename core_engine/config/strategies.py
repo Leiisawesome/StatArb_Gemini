@@ -379,6 +379,13 @@ class MeanReversionConfig(BaseStrategyConfig):
     momentum_extended_zscore: float = 3.0
     """Extended z-score threshold. Always exit if |z| > this regardless of momentum. Default: 3.0"""
 
+    # Volume climax detection (NEW)
+    volume_climax_threshold: float = 2.5
+    """Volume ratio threshold for climax detection. Default: 2.5"""
+
+    volume_climax_price_threshold: float = 0.5
+    """Price change % threshold for climax detection. Default: 0.5%"""
+
     # Momentum-aware entry parameters (NEW)
     enable_momentum_entry: bool = True
     """Enable momentum-aware entry logic. Prevents buying into falling knives. Default: True"""

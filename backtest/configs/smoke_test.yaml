@@ -9,9 +9,9 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["TSLA"]  # Single-symbol for momentum/mean reversion
+symbols: ["GOOGL"]  # Single-symbol for momentum/mean reversion
 interval: "1min"
-start_date: "2024-12-02"  # Valid data date
+start_date: "2024-12-01"  # Valid data date
 end_date: "2024-12-20"    # Same day (1 day test)
 
 # Small capital for quick test
@@ -96,7 +96,8 @@ strategies:
       momentum_rsi_oversold: 30.0       # RSI < 30 = momentum exhausted, OK to exit
       momentum_volume_ratio: 0.7        # Volume < 70% avg = fading, OK to exit
       momentum_extended_zscore: 3.0     # Always exit if |z| > 3.0
-      
+      volume_climax_threshold: 1.8      # Volume > 1.8x avg = climax, OK to enter/exit
+
       # Legacy (kept for reference but NOT used by exhaustion system)
       zscore_entry_threshold: 1.5       # IGNORED - use dislocation_minimum instead
       zscore_exit_threshold: 0.5
