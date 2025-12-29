@@ -480,14 +480,21 @@ class CentralRiskManager(ISystemComponent):
 
                 if update.position is not None:
                     new_qty = float(update.position.quantity)
-                    self.current_positions[symbol] = new_qty
-                    logger.debug(f"📘 current_positions[{symbol}] = {new_qty:.4f}")
-                    if update.position.quantity != 0 and update.fill.price > 0:
-                        self.current_prices[symbol] = float(update.fill.price)
+                    if new_qty != 0.0:
+                        self.current_positions[symbol] = new_qty
+                        logger.debug(f"📘 current_positions[{symbol}] = {new_qty:.4f}")
+                        if update.fill.price > 0:
+                            self.current_prices[symbol] = float(update.fill.price)
+                    else:
+                        # Position fully closed - remove from dict
+                        if symbol in self.current_positions:
+                            del self.current_positions[symbol]
+                            logger.debug(f"📘 current_positions[{symbol}] removed (position closed)")
                 else:
-                    # Position closed - set to zero
-                    self.current_positions[symbol] = 0.0
-                    logger.debug(f"📘 current_positions[{symbol}] = 0.0 (position closed)")
+                    # Position closed - remove from dict
+                    if symbol in self.current_positions:
+                        del self.current_positions[symbol]
+                        logger.debug(f"📘 current_positions[{symbol}] removed (position closed)")
             except Exception as e:
                 logger.warning(f"Error in position update handler: {e}", exc_info=True)
 
@@ -1957,8 +1964,14 @@ class CentralRiskManager(ISystemComponent):
                     'error': f'Invalid side: {side}'
                 }
 
-            # Update position
-            self.current_positions[symbol] = new_position
+            # Update position - remove from dict if closed
+            if new_position != 0.0:
+                self.current_positions[symbol] = new_position
+            else:
+                # Position fully closed - remove from dict
+                if symbol in self.current_positions:
+                    del self.current_positions[symbol]
+                    logger.debug(f"📘 current_positions[{symbol}] removed (position closed)")
 
             # ✅ FIX: Store current price for portfolio valuation
             if price > 0:

@@ -3098,13 +3098,15 @@ class InstitutionalBacktestEngine:
             # Record initial position state
             if self.risk_manager:
                 # Use CentralRiskManager for position state (Rule 4)
+                # P&L values come from pnl_tracker (if available)
+                pnl_source = getattr(self, 'pnl_tracker', None) or self.risk_manager
                 initial_snapshot = {
                     'timestamp': self.historical_data.index[0] if not self.historical_data.empty else datetime.now(),
                     'equity': self.risk_manager.portfolio_value if hasattr(self.risk_manager, 'portfolio_value') else self.config.initial_capital,
                     'cash': self.risk_manager.available_cash,
-                    'total_pnl': getattr(self.risk_manager, 'total_pnl', 0.0),
-                    'realized_pnl': getattr(self.risk_manager, 'realized_pnl', 0.0),
-                    'unrealized_pnl': getattr(self.risk_manager, 'unrealized_pnl', 0.0),
+                    'total_pnl': getattr(pnl_source, 'total_pnl', 0.0),
+                    'realized_pnl': getattr(pnl_source, 'realized_pnl', 0.0),
+                    'unrealized_pnl': getattr(pnl_source, 'unrealized_pnl', 0.0),
                     'position_count': len(self.risk_manager.current_positions),
                     'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
                     'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
@@ -3900,13 +3902,15 @@ class InstitutionalBacktestEngine:
             # Record position history after execution
             if self.risk_manager:
                 # Use CentralRiskManager for position state (Rule 4)
+                # P&L values come from pnl_tracker (if available)
+                pnl_source = getattr(self, 'pnl_tracker', None) or self.risk_manager
                 position_snapshot = {
                     'timestamp': timestamp,
                     'equity': self.risk_manager.portfolio_value if hasattr(self.risk_manager, 'portfolio_value') else self.config.initial_capital,
                     'cash': self.risk_manager.available_cash,
-                    'total_pnl': getattr(self.risk_manager, 'total_pnl', 0.0),
-                    'realized_pnl': getattr(self.risk_manager, 'realized_pnl', 0.0),
-                    'unrealized_pnl': getattr(self.risk_manager, 'unrealized_pnl', 0.0),
+                    'total_pnl': getattr(pnl_source, 'total_pnl', 0.0),
+                    'realized_pnl': getattr(pnl_source, 'realized_pnl', 0.0),
+                    'unrealized_pnl': getattr(pnl_source, 'unrealized_pnl', 0.0),
                     'position_count': len(self.risk_manager.current_positions),
                     'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
                     'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
