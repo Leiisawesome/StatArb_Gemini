@@ -252,6 +252,7 @@ Thumbs.dbtests/strategy_assessment/results/
 
 # Backtest results (generated output)
 backtest/results/
+utils/plots/
 
 # Obsolete tests (kept for reference, not run)
 tests/_obsolete/
