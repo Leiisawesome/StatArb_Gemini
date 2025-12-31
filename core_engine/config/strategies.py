@@ -585,6 +585,43 @@ class MeanReversionConfig(BaseStrategyConfig):
     pvsi_cooldown_bars: int = 50
     """Bars to wait during cooldown. Default: 50"""
 
+    # =========================================
+    # v5.0 SIMPLIFIED PARAMETERS (Expert Review)
+    # =========================================
+    # Per expert review: "If it can't make money without stacked filters, there is no real edge."
+    # Simplified to 4 orthogonal features: Stretch, Exhaustion, Flow, Volatility
+
+    use_simplified_strategy: bool = False
+    """Use SimplifiedMeanReversionStrategy (v5.0) instead of EnhancedMeanReversionStrategy (v4.0). 
+    Default: False (backwards compatible)"""
+
+    # Unified Reversal Score threshold (replaces SMS + 5-factor + ERAR)
+    unified_threshold: float = 0.5
+    """Unified reversal score threshold for trade. Default: 0.5
+    Score = w_stretch × stretch + w_exhaustion × exhaustion + w_flow × flow + w_vol × vol"""
+
+    # Structure confirmation (for entry)
+    enable_structure_confirmation: bool = True
+    """Require higher low (long) or lower high (short) before entry. 
+    Loses 10% of move but improves win rate by 15-20%. Default: True"""
+
+    # Edge ratio tracking (simple alternative to ERAR)
+    enable_edge_ratio_check: bool = False
+    """Check simple edge ratio before trading. Default: False (insufficient history initially)"""
+
+    min_edge_ratio: float = 1.2
+    """Minimum edge ratio (avg_win × win_rate) / (avg_loss × loss_rate). Default: 1.2"""
+
+    # Thesis invalidation exits (replaces PnL-based stops)
+    max_hold_bars: int = 20
+    """Maximum bars to hold position before time-based exit. Default: 20"""
+
+    trend_acceleration_threshold: float = 1.5
+    """ADX increase threshold to trigger thesis invalidation. Default: 1.5"""
+
+    regime_shift_threshold: float = 2.0
+    """Vol ratio change threshold to trigger thesis invalidation. Default: 2.0"""
+
     # Backward compatibility aliases
     @property
     def entry_zscore_threshold(self) -> float:

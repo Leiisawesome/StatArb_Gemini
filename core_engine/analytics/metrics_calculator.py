@@ -1549,10 +1549,8 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
             return rolling_metrics
 
         except Exception as e:
-            # Use print instead of logger since logger might not be available
-            print(f"Error calculating rolling metrics for {window}: {e}")
+            logger.warning(f"Error calculating rolling metrics for {window}: {e}")
             return {}
-            logger.info("Metrics cache cleared")
 
     def get_calculator_statistics(self) -> Dict[str, Any]:
         """Get calculator statistics"""

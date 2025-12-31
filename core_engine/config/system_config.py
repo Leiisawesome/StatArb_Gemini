@@ -99,6 +99,10 @@ class BacktestConfig:
     max_daily_var: float = 0.05
     max_drawdown: float = 0.20
     min_signal_confidence: float = 0.6
+    
+    # Strategy manager settings
+    min_confidence_threshold: float = 0.6
+    """Minimum confidence threshold for signals in strategy aggregator. Default: 0.6 (60%). For v5.0 simplified strategies, use 0.5."""
 
     # Risk authorization thresholds (for CentralRiskManager)
     auto_approval_threshold: float = 0.08

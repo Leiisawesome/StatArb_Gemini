@@ -1297,22 +1297,12 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
                 f"{signals_filtered_count} scores above threshold, {signals_created_count} signals created"
             )
         elif len(df) > 0:
-            # DEBUG: Check if combined_score indices match df indices
-            score_indices_match = combined_score.index.equals(df.index)
+            # Log warning if no signals created
             self.logger.warning(
                 f"No signals created from {len(df)} rows. "
                 f"Combined score range: [{combined_score.min():.4f}, {combined_score.max():.4f}], "
-                f"Threshold: {self.config.signal_threshold}, "
-                f"Index alignment: {score_indices_match}, "
-                f"Combined score shape: {combined_score.shape}, DF shape: {df.shape}"
+                f"Threshold: {self.config.signal_threshold}"
             )
-            # DEBUG: Show sample indices if mismatch
-            if not score_indices_match:
-                self.logger.warning(
-                    f"Index mismatch detected! "
-                    f"DF index[:5]: {list(df.index[:5])}, "
-                    f"Combined score index[:5]: {list(combined_score.index[:5])}"
-                )
 
         return signals
 

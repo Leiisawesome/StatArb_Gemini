@@ -442,62 +442,30 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if not pd.api.types.is_numeric_dtype(data[col]):
                     raise TypeError(f"{symbol}.{col} must be numeric, got {data[col].dtype}")
 
-        # DEBUG Phase 4C: Log entry point
-        logger.info(f"🔍 Phase 4C: generate_signals() called with {len(enriched_data)} symbols")
-        for symbol, df in enriched_data.items():
-            logger.info(f"   {symbol}: {len(df)} bars")
-
         try:
             # PHASE 4: Validate enriched data (Rule 3)
             self._validate_enriched_data(enriched_data)
 
-            # DEBUG Phase 4C: Check if regime columns are in enriched data
-            for symbol, df in enriched_data.items():
-                has_primary = 'primary_regime' in df.columns
-                has_volatility = 'volatility_regime' in df.columns
-                logger.info(f"🔍 Phase 4C: {symbol} enriched data has regime columns: primary={has_primary}, volatility={has_volatility}")
-                if has_primary and len(df) > 0:
-                    regime_distribution = df['primary_regime'].value_counts().to_dict()
-                    logger.info(f"   Regime distribution in data: {regime_distribution}")
-
             # Update market data with enriched data
             self._update_market_data(enriched_data)
-
-            logger.debug(f"🔍 DEBUG: After update, market_data keys: {list(self.market_data.keys())}")
-            for symbol, df in self.market_data.items():
-                logger.debug(f"   {symbol}: {len(df)} rows")
 
             # Update momentum analysis (using pre-calculated indicators)
             self._update_momentum_analysis()
 
-            logger.info(f"🔍 DEBUG: Processing symbols: {self.config.symbols}")
-
             # Generate signals for each symbol
             for symbol in self.config.symbols:
-                data_length = len(self.market_data.get(symbol, []))
-                logger.info(f"🔍 Evaluating {symbol}: data length = {data_length}, required > {self.config.long_period}")
                 if symbol in self.market_data and len(self.market_data[symbol]) > self.config.long_period:
-                    logger.info(f"✅ {symbol} has enough data, generating signals...")
                     symbol_signals = await self._generate_symbol_signals(symbol)
-                    logger.info(f"   {symbol} generated {len(symbol_signals)} signals")
                     signals.extend(symbol_signals)
-                    logger.info(f"   Total signals now: {len(signals)}")
-                else:
-                    logger.info(f"⏭️  {symbol} skipped (insufficient data: {data_length} <= {self.config.long_period})")
 
             # Update performance metrics
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
 
-            # Enhanced logging
+            # Summary logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
-            logger.debug(f"About to log summary - signals list has {len(signals)} items")
-            logger.info(f"📊 Momentum Strategy Summary (Rule 3 Phase 4 - Enriched Data):")
-            logger.info(f"   Symbols checked: {len(symbols_checked)} {symbols_checked}")
-            logger.info(f"   Signals generated: {len(signals)}")
-            logger.info(f"   Generation time: {generation_time:.3f}s")
+            logger.info(f"📊 Momentum Strategy: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s")
 
-            logger.debug(f"🔍 DEBUG: generate_signals returning {len(signals)} signals")
             return signals
 
         except Exception as e:
@@ -1374,11 +1342,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         for symbol, data in market_data.items():
             if symbol in self.config.symbols:
-                # FIXED: MED #10 - Create defensive copy to prevent mutations
-                # TODO: Profile and optimize if memory becomes an issue
+                # Create defensive copy to prevent mutations
                 self.market_data[symbol] = data.copy()
-                # 🔍 DEBUG: Log data update
-                logger.debug(f"🔍 Updated market_data[{symbol}]: {len(data)} bars, columns: {list(data.columns[:5])}")
 
     def _initialize_data_structures(self) -> None:
         """Initialize strategy data structures"""
@@ -1587,16 +1552,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         Returns:
             Dict with 'long_threshold' and 'short_threshold' (absolute values)
         """
-
-        # DEBUG Phase 4C: Log current_bar regime columns
-        logger.info(f"🔍 Phase 4C: current_bar columns: {list(current_bar.index)}")
-        logger.info(f"   primary_regime in current_bar: {'primary_regime' in current_bar.index}")
-        logger.info(f"   volatility_regime in current_bar: {'volatility_regime' in current_bar.index}")
-        if 'primary_regime' in current_bar.index:
-            logger.info(f"   current_bar['primary_regime'] = {current_bar.get('primary_regime', 'N/A')}")
-        if 'volatility_regime' in current_bar.index:
-            logger.info(f"   current_bar['volatility_regime'] = {current_bar.get('volatility_regime', 'N/A')}")
-
         # Get regime from bar data (populated by regime engine)
         primary_regime = current_bar.get('primary_regime', 'normal_volatility')
         volatility_regime = current_bar.get('volatility_regime', 'normal_volatility')
@@ -1721,28 +1676,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             logger.exception(f"❌ [{symbol}] Unexpected error getting composite signals")
             raise  # Don't mask unexpected errors
 
-        logger.debug(f"🔍 [{symbol}] Step 2: Checking if regime columns exist...")
-        # DEBUG Phase 4C: Check if regime columns exist
-        'primary_regime' in current_bar.index if hasattr(current_bar, 'index') else 'primary_regime' in current_bar
-        'volatility_regime' in current_bar.index if hasattr(current_bar, 'index') else 'volatility_regime' in current_bar
-        # SIMPLIFIED LOGGING (original line 1540 was causing silent exceptions)
-        logger.debug(f"🔍 {symbol} composite check: composite_z={composite_z}, composite_pct={composite_pct}")
-
-        # 🔍 Check 1: Is composite_z valid?
+        # Check 1: Is composite_z valid?
         if composite_z is None or pd.isna(composite_z):
-            logger.debug(f"❌ [{symbol}] EARLY RETURN: composite_z not available (composite_z={composite_z})")
             return False, None
-        else:
-            logger.debug(f"✅ [{symbol}] composite_z is valid: {composite_z:.4f}")
 
-        # 🔍 Check 2: Is composite_pct valid? (FIXED: HIGH #1 - was disabled, now enforced)
+        # Check 2: Is composite_pct valid?
         if composite_pct is None or pd.isna(composite_pct):
-            logger.debug(f"❌ [{symbol}] EARLY RETURN: composite_pct not available (composite_pct={composite_pct})")
             return False, None
 
         # Normalize composite_pct scale (handle both 0-1 and 0-100 ranges)
         if composite_pct <= 1.0:
-            logger.debug(f"🔧 [{symbol}] Normalizing composite_pct from {composite_pct} to {composite_pct * 100}%")
             composite_pct = composite_pct * 100.0
 
         # CRITICAL FIX #1 & #3: Lowered thresholds for earlier entry (1.0 instead of 1.75)
@@ -1751,9 +1694,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         BASE_PCT_THRESHOLD = 70.0  # Was 92.0 (too high, enters at top of move)
 
         # Phase 4B: Get regime-adjusted thresholds (Type 2 Explicit Regime Awareness)
-        logger.debug(f"🔍 [{symbol}] About to get regime-adjusted thresholds...")
         thresholds = self._get_regime_adjusted_thresholds(current_bar)
-        logger.debug(f"🔍 [{symbol}] Got thresholds: {thresholds}")
 
         # Apply regime adjustments to NEW lower base thresholds
         regime_multiplier = thresholds.get('regime_multiplier', 1.0)

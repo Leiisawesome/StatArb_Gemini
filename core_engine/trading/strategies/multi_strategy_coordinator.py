@@ -151,6 +151,7 @@ class MultiStrategySignalAggregator(ISystemComponent):
         self.enable_dynamic_weighting = self.config.get('enable_dynamic_weighting', False)  # Disabled by default for stability
 
         self.logger.info(f"🎯 MultiStrategySignalAggregator initialized: {self.component_id}")
+        self.logger.info(f"   min_confidence_threshold={self.min_confidence_threshold}")
 
     async def initialize(self) -> bool:
         """Initialize signal aggregator"""
@@ -350,13 +351,22 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     else:
                         raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
 
+                    self.logger.info(f"🔍 Strategy {strategy_id} returned {len(raw_signals) if raw_signals else 0} raw signals")
+                    
                     # Convert to enhanced signals
                     enhanced_signals = []
                     for signal in raw_signals:
                         enhanced_signal = self._convert_to_enhanced_signal(signal, strategy_id, registration)
-                        if enhanced_signal and enhanced_signal.confidence >= self.min_confidence_threshold:
-                            enhanced_signals.append(enhanced_signal)
+                        if enhanced_signal:
+                            self.logger.debug(f"🔍 Converted signal: confidence={enhanced_signal.confidence:.3f}, threshold={self.min_confidence_threshold}")
+                            if enhanced_signal.confidence >= self.min_confidence_threshold:
+                                enhanced_signals.append(enhanced_signal)
+                            else:
+                                self.logger.debug(f"🔍 Signal filtered: {enhanced_signal.confidence:.3f} < {self.min_confidence_threshold}")
+                        else:
+                            self.logger.warning(f"🔍 Signal conversion returned None for signal: {signal}")
 
+                    self.logger.info(f"🔍 After filtering: {len(enhanced_signals)} signals passed threshold {self.min_confidence_threshold}")
                     strategy_signals[strategy_id] = enhanced_signals
 
                     # Update performance tracking
@@ -371,16 +381,20 @@ class MultiStrategySignalAggregator(ISystemComponent):
     async def aggregate_strategy_signals(self, strategy_signals: Dict[str, List[EnhancedSignal]]) -> List[EnhancedSignal]:
         """Aggregate signals from multiple strategies with conflict resolution"""
         try:
+            # Count total input signals
+            total_input = sum(len(sigs) for sigs in strategy_signals.values())
+            self.logger.debug(f"🔍 aggregate_strategy_signals: {total_input} total signals from {list(strategy_signals.keys())}")
+            
             # Step 1: Collect all signals with weights
             weighted_signals = []
             for strategy_id, signals in strategy_signals.items():
                 if strategy_id not in self.strategy_weights:
+                    self.logger.warning(f"⚠️ Strategy {strategy_id} not in strategy_weights! Available: {list(self.strategy_weights.keys())}")
                     continue
+                
+                self.logger.debug(f"🔍 Processing {len(signals)} signals from {strategy_id}")
 
                 strategy_weight = self.strategy_weights[strategy_id]
-
-                # DEBUG: Log strategy weight
-                self.logger.debug(f"📊 Strategy {strategy_id}: weight={strategy_weight}, signals={len(signals)}")
 
                 # Apply dynamic weighting if enabled
                 if self.enable_dynamic_weighting:
@@ -397,15 +411,22 @@ class MultiStrategySignalAggregator(ISystemComponent):
                         weighted_signal.confidence *= strategy_weight
                     weighted_signals.append(weighted_signal)
 
+            self.logger.debug(f"🔍 Step 1 complete: {len(weighted_signals)} weighted signals")
+            
             # Step 2: Group signals by symbol
             signals_by_symbol = defaultdict(list)
             for signal in weighted_signals:
                 signals_by_symbol[signal.symbol].append(signal)
 
+            self.logger.debug(f"🔍 Step 2 complete: {len(signals_by_symbol)} symbols with signals")
+            for sym, sigs in signals_by_symbol.items():
+                self.logger.debug(f"🔍   {sym}: {len(sigs)} signals")
+
             # Step 3: Resolve conflicts and aggregate
             aggregated_signals = []
             for symbol, symbol_signals in signals_by_symbol.items():
                 resolved_signal = await self._resolve_signal_conflicts(symbol_signals)
+                self.logger.debug(f"🔍 Step 3 for {symbol}: {len(symbol_signals)} signals -> resolved={resolved_signal is not None}")
                 if resolved_signal:
                     aggregated_signals.append(resolved_signal)
 
@@ -626,9 +647,19 @@ class SignalConflictResolver(ISystemComponent):
             return signals[0]
 
         try:
-            # Separate by signal type
-            buy_signals = [s for s in signals if s.signal_type == SignalType.BUY]
-            sell_signals = [s for s in signals if s.signal_type == SignalType.SELL]
+            # Separate by signal intent using unified terminology:
+            # - "buy_signals": Open LONG (bullish) or Cover SHORT
+            # - "sell_signals": Open SHORT (bearish) or Close LONG
+            buy_signals = [s for s in signals if s.signal_type in (
+                SignalType.BUY, SignalType.LONG_ENTRY,           # Open long
+                SignalType.SHORT_EXIT, SignalType.COVER,         # Cover short (also bullish)
+                SignalType.CLOSE_SHORT
+            )]
+            sell_signals = [s for s in signals if s.signal_type in (
+                SignalType.SELL, SignalType.SHORT_ENTRY,         # Open short
+                SignalType.SHORT,                                 # Alias for SHORT_ENTRY
+                SignalType.LONG_EXIT, SignalType.CLOSE_LONG      # Close long (also bearish)
+            )]
             hold_signals = [s for s in signals if s.signal_type == SignalType.HOLD]
 
             # Record conflict

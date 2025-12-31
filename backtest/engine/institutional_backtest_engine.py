@@ -1154,7 +1154,9 @@ class InstitutionalBacktestEngine:
                 'signal_aggregation_method': 'weighted_average',
                 'conflict_resolution_method': 'confidence_weighted',
                 'enable_regime_awareness': True,  # Rule 2 (Regime-First)
-                'enable_strategy_attribution': True  # Performance tracking
+                'enable_strategy_attribution': True,  # Performance tracking
+                # v5.0: Allow min_confidence_threshold from backtest config (default 0.6)
+                'min_confidence_threshold': getattr(self.config, 'min_confidence_threshold', 0.6)
             }
 
             # Convert backtest DataConfig to centralized DataConfig format
@@ -4011,7 +4013,10 @@ class InstitutionalBacktestEngine:
                 exit_signals = ['sell', 'long_exit', 'short_exit', 'close', 'close_long', 'close_short']
                 actionable_signals = entry_signals + exit_signals
 
-                if signal_type_lower in actionable_signals and confidence >= 0.6:
+                # Use config's min_confidence_threshold (default 0.6 for backward compatibility)
+                min_confidence = getattr(self.config, 'min_confidence_threshold', 0.6)
+                
+                if signal_type_lower in actionable_signals and confidence >= min_confidence:
 
                     # Get current position
                     current_position = 0.0

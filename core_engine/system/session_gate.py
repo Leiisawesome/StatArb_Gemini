@@ -219,9 +219,6 @@ class TradingSessionGate:
             # Check for holiday
             tz_obj = ZoneInfo(self._timezone)
             local_dt = timestamp.astimezone(tz_obj)
-            
-            # DEBUG LOGGING
-            logger.info(f"🔍 SessionGate check: ts={timestamp}, local={local_dt}, tz={self._timezone}")
 
             if local_dt.date() in self._holidays:
                 self._stats['holiday_rejects'] += 1

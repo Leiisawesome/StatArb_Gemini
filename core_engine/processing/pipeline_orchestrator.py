@@ -1641,13 +1641,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             - volatility_regime: str (e.g., 'high_volatility', 'normal_volatility', 'low_volatility')
             - regime_confidence: float (0-1, confidence in regime detection)
         """
-        # DEBUG Phase 4C: Log regime sequence info
-        logger.debug(f"Phase 4C: _add_regime_columns called for {symbol}")
-        logger.debug(f"   Regime sequence length: {len(regime_sequence) if regime_sequence else 0}")
-        if regime_sequence:
-            logger.debug(f"   First regime: {regime_sequence[0] if regime_sequence else 'N/A'}")
-            logger.debug(f"   Last regime: {regime_sequence[-1] if regime_sequence else 'N/A'}")
-
         if signals_df.empty or not regime_sequence:
             # Add default columns if no regime data
             logger.warning(f"⚠️  {symbol}: Empty signals_df or regime_sequence - using defaults")
@@ -1660,12 +1653,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         try:
             # Convert regime sequence to DataFrame
             regime_df = pd.DataFrame(regime_sequence)
-
-            # DEBUG Phase 4C: Log regime_df columns
-            logger.debug(f"Phase 4C: Regime DataFrame columns: {list(regime_df.columns)}")
-            logger.debug(f"   Regime DataFrame shape: {regime_df.shape}")
-            if len(regime_df) > 0:
-                logger.debug(f"   Sample regime entry: {regime_df.iloc[0].to_dict()}")
 
             if 'timestamp' not in regime_df.columns:
                 logger.warning(f"⚠️  {symbol}: No timestamp in regime sequence, cannot add regime columns")
@@ -1719,12 +1706,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 on='timestamp',
                 direction='backward'  # Use most recent regime for each bar
             )
-
-            # DEBUG Phase 4C: Log merge results
-            logger.info(f"🔍 Phase 4C: After merge, merged_df columns: {list(merged_df.columns)}")
-            if 'primary_regime' in merged_df.columns:
-                regime_dist = merged_df['primary_regime'].value_counts().to_dict()
-                logger.info(f"   Primary regime distribution AFTER merge: {regime_dist}")
 
             # Fill any remaining NaNs with defaults
             if 'primary_regime' not in merged_df.columns:

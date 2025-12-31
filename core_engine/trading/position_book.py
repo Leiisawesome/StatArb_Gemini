@@ -508,11 +508,27 @@ class PositionBook(IPositionBook):
             return pos.quantity if pos else Decimal('0')
 
     def get_portfolio_value(self) -> Decimal:
-        """Total portfolio value = cash + sum(position market values)"""
+        """
+        Total portfolio value = cash + long_positions - short_positions
+        
+        CRITICAL: Short positions are LIABILITIES (owed shares), so their
+        market value must be SUBTRACTED from portfolio value, not added.
+        
+        Example:
+        - $100K cash, short 100 TSLA @ $400
+        - Cash becomes $140K (received $40K from short sale)
+        - Short liability = $40K (owe 100 shares @ $400)
+        - Portfolio value = $140K - $40K = $100K (correct!)
+        """
         with self._lock:
-            positions_value = sum(
-                p.market_value for p in self._positions.values()
-            )
+            positions_value = Decimal('0')
+            for p in self._positions.values():
+                if p.is_long:
+                    # Long positions are assets - ADD to portfolio value
+                    positions_value += p.market_value
+                elif p.is_short:
+                    # Short positions are liabilities - SUBTRACT from portfolio value
+                    positions_value -= p.market_value
             return self._cash_balance + positions_value
 
     def get_net_exposure(self, symbol: Optional[str] = None) -> Decimal:
@@ -569,7 +585,14 @@ class PositionBook(IPositionBook):
                 k: copy.deepcopy(v) for k, v in self._positions.items()
             }
 
-            positions_value = sum(p.market_value for p in positions_copy.values())
+            # CRITICAL: Short positions are liabilities - subtract from portfolio
+            positions_value = Decimal('0')
+            for p in positions_copy.values():
+                if p.is_long:
+                    positions_value += p.market_value
+                elif p.is_short:
+                    positions_value -= p.market_value
+            
             unrealized_pnl = sum(p.unrealized_pnl for p in positions_copy.values())
 
             long_count = sum(1 for p in positions_copy.values() if p.is_long)

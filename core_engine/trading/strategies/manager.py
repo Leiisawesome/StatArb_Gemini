@@ -45,6 +45,7 @@ from ...exceptions import ConfigurationRequiredError
 from .implementations import (
     EnhancedMomentumStrategy, MomentumConfig,
     EnhancedMeanReversionStrategy, MeanReversionConfig,
+    SimplifiedMeanReversionStrategy,  # v5.0 simplified
     EnhancedStatisticalArbitrageStrategy,
     EnhancedFactorStrategy, FactorConfig,
     EnhancedMultiAssetStrategy, MultiAssetConfig,
@@ -186,7 +187,19 @@ class EnhancedStrategyFactory:
     def create_strategy(cls, strategy_type: StrategyType, config: Dict[str, Any]) -> Optional[EnhancedBaseStrategy]:
         """Create enhanced strategy instance"""
         try:
-            strategy_class = cls.STRATEGY_CLASSES.get(strategy_type)
+            # Check for v5.0 simplified strategy flag
+            use_simplified = config.get('use_simplified_strategy', False)
+            parameters = config.get('parameters', {})
+            if not use_simplified and isinstance(parameters, dict):
+                use_simplified = parameters.get('use_simplified_strategy', False)
+            
+            # Select strategy class based on type and simplified flag
+            if strategy_type == StrategyType.MEAN_REVERSION and use_simplified:
+                strategy_class = SimplifiedMeanReversionStrategy
+                logger.info(f"📊 Using SimplifiedMeanReversionStrategy v5.0 (expert-reviewed)")
+            else:
+                strategy_class = cls.STRATEGY_CLASSES.get(strategy_type)
+            
             if not strategy_class:
                 logger.error(f"No enhanced strategy class found for type: {strategy_type}")
                 raise ConfigurationRequiredError(f"Unknown strategy type: {strategy_type}")

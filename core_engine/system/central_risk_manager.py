@@ -479,10 +479,17 @@ class CentralRiskManager(ISystemComponent):
                 self.available_cash = float(position_book.get_cash_balance())
 
                 if update.position is not None:
-                    new_qty = float(update.position.quantity)
-                    if new_qty != 0.0:
+                    # CRITICAL FIX: PositionBook stores quantity as POSITIVE with separate side
+                    # CentralRiskManager uses SIGNED quantities (negative for shorts)
+                    raw_qty = float(update.position.quantity)
+                    if raw_qty != 0.0:
+                        # Apply sign based on position side
+                        if update.position.is_short:
+                            new_qty = -raw_qty  # Short positions have negative quantity
+                        else:
+                            new_qty = raw_qty   # Long positions have positive quantity
                         self.current_positions[symbol] = new_qty
-                        logger.debug(f"📘 current_positions[{symbol}] = {new_qty:.4f}")
+                        logger.debug(f"📘 current_positions[{symbol}] = {new_qty:.4f} (side={update.position.side})")
                         if update.fill.price > 0:
                             self.current_prices[symbol] = float(update.fill.price)
                     else:
@@ -1585,9 +1592,6 @@ class CentralRiskManager(ISystemComponent):
                 # ALWAYS use internal position tracking for SELL orders (most authoritative source)
                 # request.current_position may be stale or default to 0.0
                 current_position = self.current_positions.get(request.symbol, 0.0)
-
-                # DEBUG: Log the position check
-                logger.debug(f"🔍 SELL check: self.current_positions.get('{request.symbol}')={current_position}")
 
                 if current_position <= 0 and not getattr(self.config, 'allow_shorts', False):
                     # No position to sell and short selling not allowed

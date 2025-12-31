@@ -895,25 +895,6 @@ class LiveDataSignalGenerationTest:
                 enriched_data = enriched_data_dict['TSLA']
                 full_dataframe = enriched_data.signals  # Fully enriched DataFrame with all bars
 
-                # DEBUG Phase 4C: Verify regime diversity in full_dataframe
-                logger.info("\n" + "=" * 80)
-                logger.info("🔍 Phase 4C DIAGNOSTIC: Regime Data in Full DataFrame")
-                logger.info("=" * 80)
-                logger.info(f"   📊 Total bars available: {len(full_dataframe)}")
-                if 'primary_regime' in full_dataframe.columns:
-                    regime_dist = full_dataframe['primary_regime'].value_counts().to_dict()
-                    logger.info(f"   ✅ primary_regime column exists")
-                    logger.info(f"   📊 Regime distribution in FULL dataframe: {regime_dist}")
-                else:
-                    logger.warning(f"   ❌ primary_regime column MISSING from full_dataframe")
-                if 'volatility_regime' in full_dataframe.columns:
-                    vol_regime_dist = full_dataframe['volatility_regime'].value_counts().to_dict()
-                    logger.info(f"   ✅ volatility_regime column exists")
-                    logger.info(f"   📊 Volatility regime distribution: {vol_regime_dist}")
-                else:
-                    logger.warning(f"   ❌ volatility_regime column MISSING from full_dataframe")
-                logger.info("=" * 80)
-
                 # Initialize trading components for simulation
                 from core_engine.system.central_risk_manager import (
                     CentralRiskManager, TradingDecisionRequest, TradingDecisionType, AuthorizationLevel

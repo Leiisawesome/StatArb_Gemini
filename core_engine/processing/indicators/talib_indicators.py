@@ -17,10 +17,7 @@ Usage:
     )
 
     # Check if TA-Lib is available
-    if TALIB_AVAILABLE:
-        print("Using optimized TA-Lib")
-    else:
-        print("Using fallback implementations")
+    # TALIB_AVAILABLE will be True if optimized, False if using fallback
 
     # Functions work the same regardless
     rsi = calculate_rsi(close_prices, period=14)
