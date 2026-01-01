@@ -53,12 +53,16 @@ from core_engine.alpha import (
     ERAR,
     Cooldown,
     PendingSignalQueue,
+    PendingSignalContext,
     compute_exhaustion,
     compute_reversal_probability,
     compute_vol_compression,
     estimate_expected_pnl,
     estimate_cvar_95,
 )
+
+# ADS v3.1: continuous regime vector adapter and tau(R) thresholding
+from core_engine.alpha.ads_regime_vector import ADSRegimeVector, compute_sms_tau
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +144,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         self.pending_signals = PendingSignalQueue(
             max_pending=getattr(config, 'sms_max_pending', 50)
         )
+
+        # ADS v3.1: per-symbol regime vector memory for velocity (best-effort)
+        self._ads_regime_prev: Dict[str, ADSRegimeVector] = {}
 
         # §8: Cooldown (PVSI) tracker
         self.cooldown = Cooldown(
@@ -337,6 +344,11 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 scan_interval = max(1, self.config.scan_interval)
 
                 for idx in range(start_idx, data_length, scan_interval):
+                    # ADS v3.1: attempt to emit any matured pending signals first
+                    matured = self._try_emit_matured_pending(symbol, data, idx)
+                    if matured is not None:
+                        signals.append(matured)
+
                     signal = self._evaluate_signal_conditions(symbol, data, idx)
                     if signal:
                         signals.append(signal)
@@ -345,6 +357,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 return signals
 
             # Live mode: evaluate current bar only
+            matured = self._try_emit_matured_pending(symbol, data, -1)
+            if matured is not None:
+                signals.append(matured)
+
             signal = self._evaluate_signal_conditions(symbol, data, -1)
             if signal:
                 signals.append(signal)
@@ -432,6 +448,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             volume_ratio = self._get_volume_ratio(data, idx)
             macd_hist = self._get_macd_histogram(data, idx)
             macd_hist_prev = self._get_macd_histogram(data, idx - 1)
+            bb_missing = 'bb_position' not in data.columns
             bb_position = self._get_indicator_value(data, 'bb_position', idx, default=0.5)
 
             # Calculate volatility compression
@@ -463,9 +480,20 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # Order flow imbalance shift (use volume ratio as proxy)
             ofi_shift = (volume_ratio - 1.0) * -0.5 if is_oversold else (volume_ratio - 1.0) * 0.5
             ofi_shift = np.clip(ofi_shift, -1.0, 1.0)
+            ofi_proxy_used = True  # current strategy uses volume_ratio proxy
 
             # Get current regime
             regime_label = self._get_regime_label(symbol)
+
+            # ADS v3.1: compute tau(R) from continuous regime vector (best-effort)
+            ads_r, ads_diag = self._get_ads_regime_vector(symbol)
+            tau_0 = getattr(self.config, 'tau_0', 0.50)
+            sms_threshold_dyn = compute_sms_tau(
+                ads_r,
+                tau_0=tau_0,
+                ofi_proxy_used=ofi_proxy_used,
+                bb_missing=bb_missing,
+            )
 
             # Create multiplicative SMS
             sms = SignalMaturityScore(
@@ -480,11 +508,66 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
 
             # Compute SMS score
             sms_score = sms.compute(regime_label)
+            # Legacy fixed threshold retained for backward-compat; v3.1 uses tau(R)
             sms_threshold = self.ads_config.get('sms_threshold', 0.5)
 
-            # Check SMS threshold
+            # Determine signal type (explicit semantics)
+            if is_oversold:
+                signal_type = SignalType.LONG_ENTRY
+            elif is_overbought:
+                signal_type = SignalType.SHORT_ENTRY
+            else:
+                return None
+
+            # Position context to distinguish entries vs exits (do not delay exits)
+            qty = 0.0
+            try:
+                qty = float(getattr(self, '_position_details', {}).get(symbol, {}).get('quantity', 0.0))
+            except Exception:
+                qty = 0.0
+
+            is_entry_long = (signal_type == SignalType.LONG_ENTRY and qty == 0)
+            # For now, only queue BUY/long entries; do not delay exits or short logic
+
+            # ADS v3.1 §1: pending/stale maturation
+            if is_entry_long and sms_score < sms_threshold_dyn:
+                # Add to pending queue instead of discarding
+                try:
+                    entry_price = float(data['close'].iloc[idx]) if 'close' in data.columns else 0.0
+                except Exception:
+                    entry_price = 0.0
+
+                # Store conservative ERAR placeholder; recompute on maturity
+                erar_stub = ERAR(tail_lambda=self.ads_config.get('erar_gamma', 0.5))
+
+                ctx = PendingSignalContext(
+                    symbol=symbol,
+                    side='BUY',
+                    sms=sms,
+                    erar=erar_stub,
+                    raw_signal_strength=float(abs(zscore)),
+                    timestamp=datetime.now(),
+                    entry_price=entry_price,
+                    metadata={
+                        'ads_regime_vector': {
+                            'volatility': ads_r.volatility,
+                            'trend': ads_r.trend,
+                            'liquidity': ads_r.liquidity,
+                            'microstructure': ads_r.microstructure,
+                            'confidence': ads_r.confidence,
+                        },
+                        'ads_fallbacks_used': ads_diag.get('used', []),
+                        'ads_tau': sms_threshold_dyn,
+                        'ofi_source': 'proxy_volume_ratio',
+                        'bb_missing': bb_missing,
+                    }
+                )
+                self.pending_signals.add(ctx)
+                return None
+
+            # For non-entry signals (or if entry is already mature), keep legacy fixed threshold check
             if sms_score < sms_threshold:
-                return None  # Signal not mature enough
+                return None
 
             # ========================================
             # ADS v3.0 §3: ERAR GATE (Risk-Adjusted Return)
@@ -546,13 +629,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             else:
                 signal_reason = 'ads_sms_marginal'
 
-            # Determine signal type (using explicit semantics per Rule 2)
-            if is_oversold:
-                signal_type = SignalType.LONG_ENTRY  # Price low → go long
-            elif is_overbought:
-                signal_type = SignalType.SHORT_ENTRY  # Price high → go short (or close long)
-            else:
-                return None
+            # signal_type already determined above
 
             # ========================================
             # MOMENTUM-AWARE EXIT LOGIC (NEW)
@@ -721,8 +798,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     take_profit_pct = getattr(self.config, 'take_profit_pct', 10.0)  # +10% default
                     min_profit_to_exit = getattr(self.config, 'min_profit_to_exit', -2.0)  # Allow -2% loss max
 
-                    # RULE 1: Take profit if exceeds threshold (always exit)
-                    if pnl_pct >= take_profit_pct:
+                    # RULE 1 (LEGACY): Take profit if exceeds threshold (always exit)
+                    # ADS v3.1 prefers multi-exit in RiskManager; keep behind feature flag.
+                    if getattr(self.config, 'enable_fixed_take_profit', False) and pnl_pct >= take_profit_pct:
                         # Boost confidence for profitable exits
                         confidence = min(confidence * 1.2, 1.0)
 
@@ -766,7 +844,22 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 'exhaustion_score': score,
                 'score_breakdown': score_breakdown,
                 'entry_price': entry_price,
-                'bar_index': idx
+                'bar_index': idx,
+                'ads_tau': sms_threshold_dyn,
+                'ads_regime_vector': {
+                    'volatility': ads_r.volatility,
+                    'trend': ads_r.trend,
+                    'liquidity': ads_r.liquidity,
+                    'microstructure': ads_r.microstructure,
+                    'confidence': ads_r.confidence,
+                    'd_volatility': ads_r.d_volatility,
+                    'd_trend': ads_r.d_trend,
+                    'd_liquidity': ads_r.d_liquidity,
+                    'd_microstructure': ads_r.d_microstructure,
+                },
+                'ads_fallbacks_used': ads_diag.get('used', []),
+                'ofi_source': 'proxy_volume_ratio',
+                'bb_missing': bb_missing,
             }
 
             # Add available indicators to additional_data
@@ -790,6 +883,171 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         except Exception as e:
             logger.error(f"[{symbol}] Error evaluating bar at index {idx}: {e}")
             return None
+
+    # ========================================
+    # ADS v3.1: PENDING SIGNAL MATURATION
+    # ========================================
+
+    def _get_ads_regime_vector(self, symbol: str) -> Tuple[ADSRegimeVector, Dict[str, Any]]:
+        """
+        Best-effort adapter to ADS continuous regime vector.
+        This uses system RegimeContext if available; otherwise falls back to conservative defaults.
+        """
+        regime_context = None
+        try:
+            regime_context = self.get_current_regime_context()
+        except Exception:
+            regime_context = None
+
+        prev = self._ads_regime_prev.get(symbol)
+        r, diag = ADSRegimeVector.from_regime_context(regime_context, prev=prev)
+        self._ads_regime_prev[symbol] = r
+        return r, diag
+
+    def _try_emit_matured_pending(self, symbol: str, data: pd.DataFrame, idx: int) -> Optional[StrategySignal]:
+        """
+        Attempt to mature and emit a pending BUY signal for this symbol.
+        Returns a StrategySignal if matured, else None.
+        """
+        ctx = self.pending_signals.get(symbol, 'BUY')
+        if ctx is None:
+            return None
+
+        # Normalize index
+        if idx < 0:
+            idx = len(data) + idx
+        if idx < 0 or idx >= len(data):
+            return None
+
+        # Refresh SMS components using current bar (so SMS can increase, not only decay)
+        zscore = self._calculate_strategy_zscore(data, idx)
+        if abs(zscore) < self.config.dislocation_minimum:
+            # If no longer dislocated, drop pending (thesis invalidated)
+            self.pending_signals.remove(symbol, 'BUY')
+            return None
+
+        is_oversold = zscore < 0
+        rsi = self._get_rsi(data, idx)
+        volume_ratio = self._get_volume_ratio(data, idx)
+        macd_hist = self._get_macd_histogram(data, idx)
+        macd_hist_prev = self._get_macd_histogram(data, idx - 1)
+        bb_missing = 'bb_position' not in data.columns
+        bb_position = self._get_indicator_value(data, 'bb_position', idx, default=0.5)
+
+        exhaustion = compute_exhaustion(
+            zscore=zscore,
+            rsi=rsi,
+            volume_ratio=volume_ratio,
+            macd_histogram=macd_hist,
+            macd_histogram_prev=macd_hist_prev,
+            is_oversold=is_oversold
+        )
+        reversal_prob = compute_reversal_probability(
+            zscore=zscore,
+            rsi=rsi,
+            bb_position=bb_position,
+            is_oversold=is_oversold
+        )
+
+        # Update VC
+        if 'close' in data.columns and idx >= 20:
+            prices = data['close'].iloc[max(0, idx-20):idx+1]
+            short_vol = prices.tail(5).pct_change().std() if len(prices) >= 5 else 0.02
+            long_vol = prices.pct_change().std() if len(prices) >= 10 else 0.02
+            vol_compression = compute_vol_compression(short_vol, long_vol)
+        else:
+            vol_compression = 1.0
+
+        ofi_shift = (volume_ratio - 1.0) * -0.5
+        ofi_shift = float(np.clip(ofi_shift, -1.0, 1.0))
+
+        ctx.sms.exhaustion = exhaustion
+        ctx.sms.reversal_prob = reversal_prob
+        ctx.sms.ofi_shift = ofi_shift
+        ctx.sms.vol_compression = vol_compression
+
+        # Tick pending bars + stale kill
+        ctx.increment_pending()
+        if ctx.sms.is_stale():
+            self.pending_signals.remove(symbol, 'BUY')
+            return None
+
+        # Compute tau(R)
+        ads_r, ads_diag = self._get_ads_regime_vector(symbol)
+        tau_0 = getattr(self.config, 'tau_0', 0.50)
+        tau = compute_sms_tau(ads_r, tau_0=tau_0, ofi_proxy_used=True, bb_missing=bb_missing)
+
+        # Maturity check
+        regime_label = self._get_regime_label(symbol)
+        if ctx.sms.compute(regime_label) < tau:
+            return None
+
+        # Recompute ERAR at maturity time (conservative + current vol)
+        try:
+            atr = self._get_atr(data, idx)
+            price = float(data['close'].iloc[idx]) if 'close' in data.columns else 0.0
+            half_life = self._calculate_half_life(data['close'].iloc[max(0, idx-50):idx+1]) if 'close' in data.columns else 10.0
+            expected_pnl = estimate_expected_pnl(
+                zscore=zscore,
+                atr=atr,
+                price=price if price > 0 else 100.0,
+                half_life=half_life if half_life != float('inf') else 20.0,
+                holding_bars=10
+            )
+            volatility = atr / price if price > 0 else 0.02
+            cvar_95 = estimate_cvar_95(volatility=volatility, holding_days=0.5)
+            erar = ERAR(
+                expected_pnl=expected_pnl,
+                cvar_95=cvar_95,
+                skewness=0.0,
+                spread_bps=getattr(self.config, 'spread_bps', 2.0),
+                participation=0.01,
+                volatility=volatility,
+                adverse_prob=0.1,
+                kyle_lambda=0.0001,
+                holding_days=0.5,
+                alt_return_bps=0.5,
+                tail_lambda=self.ads_config.get('erar_gamma', 0.5)
+            )
+            if self.ads_config.get('enable_ads_gates', True):
+                if not erar.should_trade(gamma=self.ads_config.get('erar_gamma', 0.5)):
+                    # Keep pending but do not emit this bar
+                    return None
+        except Exception:
+            # If ERAR cannot be computed, fail safe: do not emit
+            return None
+
+        # Emit matured LONG_ENTRY signal
+        confidence = max(0.55, min(0.95, 0.50 + ctx.sms.compute(regime_label) * 0.45))
+        additional_data = {
+            'signal_reason': 'ads_sms_matured_pending',
+            'zscore': zscore,
+            'ads_tau': tau,
+            'ads_regime_vector': {
+                'volatility': ads_r.volatility,
+                'trend': ads_r.trend,
+                'liquidity': ads_r.liquidity,
+                'microstructure': ads_r.microstructure,
+                'confidence': ads_r.confidence,
+            },
+            'ads_fallbacks_used': ads_diag.get('used', []),
+            'pending_bars': ctx.sms.pending_bars,
+            'ofi_source': 'proxy_volume_ratio',
+            'bb_missing': bb_missing,
+        }
+
+        timestamp = data.iloc[idx].get('timestamp', datetime.now()) if isinstance(data.iloc[idx], pd.Series) else datetime.now()
+        return StrategySignal(
+            strategy_id=self.strategy_id,
+            symbol=symbol,
+            signal_type=SignalType.LONG_ENTRY,
+            strength=min(float(ctx.raw_signal_strength) / 3.0, 1.0),
+            confidence=confidence,
+            target_weight=self.config.base_position_pct,
+            quantity_type="PERCENTAGE",
+            timestamp=timestamp,
+            additional_data=additional_data
+        )
 
     # ========================================
     # EXHAUSTION SCORING SYSTEM

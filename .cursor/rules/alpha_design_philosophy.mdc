@@ -1,17 +1,30 @@
-# Rule 8: Alpha Design Specification (ADS v3.0)
+---
+description: trading strategy alpha
+alwaysApply: false
+---
+## Alpha Design Specification (ADS) v3.1
 
-**Version:** 3.0  
-**Date:** December 3, 2025  
+**Version:** 3.1  
+**Date:** December 31, 2025  
 **Status:** ACTIVE
 
----
+### Purpose
+ADS defines **non-negotiable constraints** for alpha modules to prevent common failure modes (fading trends, underpricing tail risk, ignoring costs, over-sizing, and not adapting to regime/drift).
 
-## Overview
+### Changelog (v3.1 vs v3.0)
+- **Engineering-complete contracts**: each section now includes **Data Contract**, **Estimator**, **Fallback**, and **Calibration** guidance so implementations don’t silently drift into “whatever data was available”.
+- **Resolved internal ambiguity**: clarified scope of “no linear signal combinations” and reconciled continuous regimes with regime-dependent parameter tables.
+- **Phased compliance tiers**: explicit **ADS-Core** vs **ADS-Full** to balance effectiveness vs engineering effort.
 
-Non-negotiable constraints for all alpha modules. Each rule is expressed as:
-- **Principle** → Intent
-- **Specification** → Math and constraints
-- **Implementation** → Enforcement code
+### Compliance tiers (effort vs effectiveness)
+- **ADS-Core (ship-first, high ROI)**: §1 (SMS + pending/stale), §3 (ERAR gate), §8 (PVSI cooldown), §9 (multi-exit core: vol stop + time + liquidity), §6 (basic trend avoidance proxy).
+- **ADS-Full (institutional, data-heavy)**: ADS-Core + §2 (full regime vector + confidence/velocity), §4 (multi-asset SRI), §5 (σ_eff with implied/forecast vol + corr penalty), §7 (fractional Kelly w/ uncertainty + DD + liquidity), §10 (drift/edge decay).
+- **ADS-Research (optional)**: alternative estimators (HMM, EVT-CVaR, options microstructure) behind feature flags with monitoring.
+
+### Scope clarifications (to avoid contradictions)
+- **Linear combinations**: prohibited for **entry alpha scoring** (stretch/exhaustion/flow/vol etc.). Linear weighted **risk indices / gates** (e.g., SRI, ERAR components) are allowed.
+- **Continuous regimes**: strategies must consume a continuous regime vector \(\mathbf{R}\). Discrete labels (e.g., “high_vol”) are allowed **only** as deterministic functions of \(\mathbf{R}\) for parameter selection, not as the sole regime representation.
+- **Missing data**: every gate must define an explicit fallback (“degrade safely” vs “block trading”) and must record which fallback was used.
 
 ---
 
@@ -694,10 +707,95 @@ class MetaLearning:
 
 ---
 
+## Appendix A — Engineering Contracts (v3.1)
+
+This appendix is **normative** for implementations. If you cannot meet an input requirement, you must follow the fallback and log it.
+
+### A.0 Global contracts (all sections)
+- **Timebase**: every computation must declare its bar frequency (e.g., 1m/5m/1h/1d) and use consistent windows in *bars*, not “days”.
+- **Minimum history**: if insufficient history, either (a) **block trading** or (b) **use conservative defaults**; the choice must be explicitly documented per section.
+- **Feature provenance**: each scalar must be tagged with source (L1/L2/bars/external) and staleness.
+- **Normalization**: any quantity claimed to be in \([0,1]\) must specify its mapping and clipping.
+
+### A.1 §1 SMS — estimators, fallbacks, calibration
+- **Data contract**
+  - Required: price series for z-score; RSI (or momentum proxy); volume; short/long vol estimate; pending bar counter \(t\).
+  - Optional (better): true OFI from L1/L2; microstructure toxicity score.
+- **Estimators**
+  - **Z-score** (default robust): \(z_t = (p_t - \text{median}(p_{t-w:t})) / (1.4826\,\text{MAD}(p_{t-w:t}) + \epsilon)\).
+  - **\(P_{rev}\)**: logistic of orthogonal inputs (z, RSI, BB position) combined via **geometric mean** (multiplicative combining).
+  - **\(E\in[0,1]\)**: normalize explicitly, e.g. \(E = \text{clip}(\sigma(|z| - z_0)\cdot P_{rev}, 0, 1)\) where \(\sigma\) is logistic and \(z_0\) is regime-adjusted “meaningful stretch”.
+  - **\(\Delta OFI \in [-1,1]\)**:
+    - Preferred: standardized OFI change vs recent baseline, clipped to \([-1,1]\).
+    - Proxy fallback: signed volume imbalance over last \(k\) bars, normalized and clipped.
+  - **VC**: \(\sigma_{short}/\sigma_{long}\) computed on returns with EWMA or rolling std, then clipped to \([0.5,2.0]\).
+  - **\(\tau(\mathbf{R})\)**: deterministic function of \(\mathbf{R}\) and Conf; recommended:
+    \[
+    \tau = \text{clip}(\tau_0 + 0.15R_{vol} + 0.10(1-R_{liq}) + 0.10(1-Conf),\, 0.35,\, 0.80)
+    \]
+- **Fallbacks**
+  - If OFI missing: use proxy and increase \(\tau\) by +0.05.
+  - If BB not available: drop BB from \(P_{rev}\) but increase \(\tau\) by +0.05.
+- **Calibration**
+  - Choose \(\tau_0\) by targeting a stable “setup rate” per symbol/regime (not a fixed trade rate) and verifying forward PnL conditional on SMS deciles.
+
+### A.2 §2 Regime Vector — estimators, fallbacks, calibration
+- **Data contract**
+  - Required: realized vol, trend metric, liquidity proxy, microstructure proxy, and a probability vector \(\mathbf{p}\) (or an explicit heuristic confidence model).
+- **Estimators (reference)**
+  - \(R_{vol}\): percentile rank of realized vol vs trailing baseline; map to \([0,1]\).
+  - \(R_{trend}\): signed trend strength in \([-1,1]\) from slope-of-log-price / ATR, clipped.
+  - \(R_{liq}\): \([0,1]\) from spread, depth, ADV, and participation; higher is better liquidity.
+  - \(R_{micro}\): \([0,1]\) from spread/impact/toxicity; higher is healthier microstructure.
+  - Velocities \(dR/dt\): first differences of **smoothed** \(R\) (e.g., EWMA) to avoid noise-triggering.
+  - \(Conf = 1 - H(\mathbf{p})\): if \(\mathbf{p}\) unavailable, use confidence = 0.5 and treat as “low confidence” for gating.
+- **Fallback**
+  - If any component missing: set \(Conf\) low and force conservative thresholds (increase \(\tau\), increase \(\gamma\), reduce RF).
+
+### A.3 §3 ERAR — estimators, fallbacks, calibration
+- **Expected PnL**: must be either (a) model-based (half-life / reversion-to-mean) or (b) empirical conditional on similar setups; must be shrinkage-stabilized.
+- **CVaR95**: empirical preferred (bootstrapped ES); normal approximation allowed only as fallback and must be flagged.
+- **Costs**: at minimum include spread + slippage; opportunity cost must reference an explicit alt benchmark (cash/benchmark/other strategy).
+- **Calibration**: set \(\gamma\) by requiring positive realized net edge after costs within each regime bucket derived from \(\mathbf{R}\).
+
+### A.4 §4 SRI — availability tiers (so data does not block shipping)
+- **Tier 1 (Full)**: equity + options + credit + cross-asset.
+- **Tier 2 (Partial)**: equity + cross-asset only; renormalize weights over available components.
+- **Tier 3 (Minimal)**: correlation spike + vol profile shift only; threshold increased (harder to trigger).
+- **Rule**: do not “fake” missing components with zeros without recording coverage; require minimum coverage (e.g., \(\ge 50\%\)) for SRI gating.
+
+### A.5 §5 Stops — forward-looking volatility without requiring a full IV surface
+- **\(\sigma_{eff}\)**: \(\max(\sigma_{realized}, \sigma_{forecast})\) where \(\sigma_{forecast}\) is implied vol if available else a volatility forecast (EWMA/GARCH).
+- **\(\Delta\rho\)**: change in correlation to a declared hedge basket (e.g., sector ETF / market index) comparing short vs long windows.
+- **Fallback**: if no implied/forecast vol, block trading in high \(R_{vol}\) regimes or widen stops conservatively.
+
+### A.6 §6 Trend avoidance (TPI) — estimator guardrails
+- **Hurst**: must declare estimator and minimum sample size; if sample too small, fall back to autocorr + slope proxy and reduce confidence.
+- **Breadth**: must declare universe; if unavailable, use sector/market ETF breadth proxy or set breadth confidence to 0.5 and tighten thresholds.
+
+### A.7 §7 Sizing — make “win_prob”/“uncertainty” implementable
+- **win_prob / win_loss_ratio**: must be produced by an explicit estimator (e.g., Bayesian shrinkage on historical conditioned trades).
+- **Uncertainty**: must be computed from posterior std or bootstrap; if uncertainty is unknown, apply a strong penalty (cap size).
+- **Drawdown state**: defined on portfolio equity curve with explicit lookback and peak-trough definition.
+
+### A.8 §8 Cooldown — define the series
+- **pnl_history**: must be consistent (per-closed-trade risk-normalized PnL, not mixed with mark-to-market).
+- **regime mismatch**: fraction of recent trades whose realized regime compatibility check failed (as defined by §2).
+
+### A.9 §9 Multi-exit — “thesis” and alt-opportunity must be concrete
+- **thesis**: must be a serializable object with explicit invalidation rules (e.g., spread widening, regime flip, signal decay).
+- **alt_erar**: if unavailable, omit opportunity exit rather than inventing a value.
+
+### A.10 §10 Meta-learning — don’t overfit noise
+- **PHT input \(x_i\)**: risk-normalized trade outcome (e.g., PnL / ex-ante risk) to avoid volatility regime confusing drift detection.
+- **Minimum sample**: drift/edge-decay gates only activate after a minimum trade count (e.g., 50) and must be regime-stratified where possible.
+
+---
+
 ## Prohibited
 
-- Linear signal combinations
-- Categorical-only regimes
+- Linear signal combinations **for entry alpha scoring** (risk indices / gates may be linear if declared)
+- Categorical-only regimes (labels allowed only as deterministic functions of continuous \(\mathbf{R}\), never as the sole regime representation)
 - Variance-only risk metrics (must include CVaR)
 - Equity-only shift detection
 - Backward-looking stops only
@@ -707,6 +805,6 @@ class MetaLearning:
 
 ---
 
-**Last Updated:** December 3, 2025  
-**Status:** ACTIVE (v3.0)  
+**Last Updated:** December 31, 2025  
+**Status:** ACTIVE (v3.1)  
 **Related:** Rule 2, Rule 4, Rule 6, Rule 7

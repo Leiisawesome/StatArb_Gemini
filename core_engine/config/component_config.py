@@ -205,6 +205,90 @@ class RiskConfig:
     max_total_risk: float = 0.20
     """Maximum total risk exposure. Default: 20%"""
 
+    # =========================================================================
+    # ADS v3.1 / Institutional Risk Extensions
+    # =========================================================================
+    # These are additive fields to support ADS v3.1 Core + requested upgrades.
+
+    # --- Cooldown (PVSI) ---
+    enable_ads_cooldown: bool = True
+    """Enable ADS PVSI cooldown gating. Default: True"""
+
+    ads_cooldown_mode: str = "block_entries"
+    """Cooldown behavior: 'block_entries' or 'scale_entries'. Default: block_entries"""
+
+    pvsi_threshold: float = 2.0
+    """PVSI trigger threshold. Default: 2.0"""
+
+    pvsi_baseline_window: int = 100
+    """PVSI baseline window length (trades). Default: 100"""
+
+    pvsi_recent_window: int = 20
+    """PVSI recent window length (trades). Default: 20"""
+
+    # --- Multi-exit core ---
+    enable_ads_multi_exit: bool = True
+    """Enable ADS multi-exit monitoring (vol/time/liquidity). Default: True"""
+
+    max_holding_minutes: float = 24 * 60  # 1 day
+    """Time stop in minutes for ADS multi-exit core. Default: 1 day"""
+
+    # --- Forward-looking volatility stops (EWMA) ---
+    enable_forward_vol_stops: bool = True
+    """Enable σ_eff forward-looking volatility stops (EWMA fallback). Default: True"""
+
+    vol_realized_window: int = 20
+    """Realized volatility window (returns). Default: 20"""
+
+    vol_ewma_lambda: float = 0.94
+    """EWMA lambda for volatility forecast. Default: 0.94"""
+
+    corr_benchmark_symbol: str = "SPY"
+    """Benchmark symbol for correlation change Δρ. Default: SPY"""
+
+    corr_short_window: int = 20
+    """Short window for correlation estimate. Default: 20"""
+
+    corr_long_window: int = 60
+    """Long window for correlation estimate. Default: 60"""
+
+    stop_k: float = 2.0
+    """Vol stop multiplier k. Default: 2.0"""
+
+    stop_kappa: float = 0.5
+    """Correlation penalty κ. Default: 0.5"""
+
+    stop_overnight_mult: float = 1.5
+    """Overnight stop widening multiplier. Default: 1.5"""
+
+    # --- Fractional Kelly sizing ---
+    enable_fractional_kelly_sizing: bool = True
+    """Enable fractional Kelly sizing scaling for entries. Default: True"""
+
+    kelly_frac: float = 0.33
+    """Fractional Kelly multiplier. Default: 0.33"""
+
+    kelly_min: float = 0.02
+    """Minimum Kelly fraction. Default: 0.02"""
+
+    kelly_max: float = 0.20
+    """Maximum Kelly fraction. Default: 0.20"""
+
+    kelly_prior_a: float = 5.0
+    """Beta prior a for win probability. Default: 5.0"""
+
+    kelly_prior_b: float = 5.0
+    """Beta prior b for win probability. Default: 5.0"""
+
+    kelly_min_trades: int = 30
+    """Minimum trades before trusting Kelly estimates. Default: 30"""
+
+    kelly_uncertainty_floor: float = 0.3
+    """Lower bound for uncertainty adjustment. Default: 0.3"""
+
+    kelly_dd_gamma: float = 2.0
+    """Drawdown penalty gamma. Default: 2.0"""
+
     # Backward compatibility properties
     @property
     def max_position_size(self) -> float:

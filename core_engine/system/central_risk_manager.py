@@ -33,6 +33,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
+from collections import deque, defaultdict
+
+import numpy as np
 
 from core_engine.exceptions import ConfigurationRequiredError
 
@@ -46,6 +49,15 @@ from .circuit_breakers import CircuitBreakerLevel
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
 from ..config.component_config import RiskConfig
+
+# ADS v3.1 / Institutional extensions
+from core_engine.alpha.ads_components import Cooldown
+from core_engine.risk.volatility_forecast import sigma_eff, correlation_change, stop_distance_pct, VolStopParams
+from core_engine.risk.multi_exit_engine import decide_exit
+from core_engine.risk.position_sizing.kelly_sizer import (
+    KellyParams,
+    compute_fractional_kelly_fraction_of_capital,
+)
 
 # PHASE 2 (PositionBook Integration): Type hints only to avoid circular import
 # Actual import is deferred to runtime in set_position_book() and update_position()
@@ -252,11 +264,35 @@ class CentralRiskManager(ISystemComponent):
         # Market prices for portfolio valuation (still needed for MTM)
         self.current_prices: Dict[str, float] = {}  # symbol -> last known price
 
+        # --------------------------------------------------------------------
+        # ADS v3.1 / Institutional: lightweight state for monitoring + sizing
+        # --------------------------------------------------------------------
+        # Rolling price history for EWMA vol + correlation change (best-effort)
+        self._price_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+
+        # Closed-trade outcome history for Kelly + PVSI cooldown (per strategy_id)
+        # Stored as risk-normalized return proxy (pnl_pct/100 by default)
+        self._strategy_trade_outcomes: Dict[str, List[float]] = defaultdict(list)
+
+        # ADS PVSI cooldown trackers (per strategy_id)
+        self._strategy_cooldowns: Dict[str, Cooldown] = {}
+
+        # Prevent repeated exit firing while an exit is already in-flight
+        self._exit_in_flight: set[str] = set()
+
+        # High-water mark tracking for drawdown factor (Kelly)
+        self._portfolio_hwm: float = 0.0
+
+        # Optional: liquidity engine (if injected by orchestrator)
+        self.liquidity_engine: Optional[Any] = None
+
         # Portfolio value and cash (synced from PositionBook when available)
         initial_capital = config.get('initial_capital', 100000.0) if isinstance(config, dict) else 100000.0
         self.portfolio_value: float = initial_capital
         self.available_cash: float = initial_capital  # DEPRECATED: Use position_book.get_cash_balance()
         self.position_history: List[Dict[str, Any]] = []  # DEPRECATED: PositionBook tracks fill history
+
+        self._portfolio_hwm = float(initial_capital)
 
         # Risk limits and audit trails (FIXED: Missing initialization)
         self.risk_limits: Dict[str, float] = {
@@ -502,6 +538,12 @@ class CentralRiskManager(ISystemComponent):
                     if symbol in self.current_positions:
                         del self.current_positions[symbol]
                         logger.debug(f"📘 current_positions[{symbol}] removed (position closed)")
+
+                # ADS v3.1: update cooldown + trade outcome stats on fills/closes
+                try:
+                    self._handle_position_update_ads(update)
+                except Exception as e:
+                    logger.debug(f"ADS position update handler failed: {e}")
             except Exception as e:
                 logger.warning(f"Error in position update handler: {e}", exc_info=True)
 
@@ -513,6 +555,15 @@ class CentralRiskManager(ISystemComponent):
     def position_book(self) -> Optional["IPositionBook"]:
         """Get the PositionBook if set, None otherwise"""
         return self._position_book
+
+    def set_liquidity_engine(self, liquidity_engine: Any) -> None:
+        """
+        Inject LiquidityAssessmentEngine (optional).
+
+        Used for ADS v3.1 multi-exit liquidity stop and sizing liquidity factor.
+        """
+        self.liquidity_engine = liquidity_engine
+        logger.info("✅ LiquidityAssessmentEngine injected into CentralRiskManager")
 
     def set_oms(self, oms: Any) -> None:
         """
@@ -1222,6 +1273,79 @@ class CentralRiskManager(ISystemComponent):
                 logger.warning(f"Request rejected due to invalid input: {validation_error}")
                 return authorization
 
+            # ADS v3.1 §8: PVSI cooldown gate (entry-only)
+            if (
+                self.config.enable_ads_cooldown
+                and request.decision_type == TradingDecisionType.POSITION_ENTRY
+                and request.side
+                and request.side.lower() == "buy"
+                and request.strategy_id
+            ):
+                cd = self._strategy_cooldowns.get(request.strategy_id)
+                if cd is not None and cd.needs_cooldown():
+                    pvsi = 0.0
+                    try:
+                        pvsi = float(cd.compute())
+                    except Exception:
+                        pvsi = 0.0
+
+                    mode = str(getattr(self.config, "ads_cooldown_mode", "block_entries")).lower()
+                    if mode == "scale_entries":
+                        # Apply scaling later in sizing/quantity calc
+                        request.metadata["ads_cooldown_scale"] = 0.5
+                        request.metadata["ads_pvsi"] = pvsi
+                        request.metadata["ads_cooldown_active"] = True
+                        logger.warning(f"⚠️ PVSI cooldown active for {request.strategy_id}: PVSI={pvsi:.2f} (scaling entries)")
+                    else:
+                        authorization.authorization_level = AuthorizationLevel.REJECTED
+                        authorization.rejection_reason = f"PVSI_COOLDOWN: PVSI={pvsi:.2f} >= {self.config.pvsi_threshold}"
+                        logger.warning(f"🚫 Entry blocked by PVSI cooldown for {request.strategy_id}: PVSI={pvsi:.2f}")
+                        return authorization
+
+            # ----------------------------------------------------------------
+            # CRITICAL: Quantity unit normalization (PERCENTAGE -> shares)
+            # StrategyManager may pass quantity as a *weight* (e.g., 0.10 = 10%),
+            # which must be converted to shares before any min(request.quantity, ...)
+            # enforcement or cash checks.
+            # ----------------------------------------------------------------
+            try:
+                if request.decision_type == TradingDecisionType.POSITION_ENTRY and request.side.lower() == "buy":
+                    meta = request.metadata or {}
+                    orig = meta.get("original_signal_metadata", {}) or {}
+                    quantity_type = str(meta.get("quantity_type", orig.get("quantity_type", "")) or "").upper()
+
+                    # Prefer explicit target_weight; fall back to strategy target_weight if present
+                    target_weight = meta.get("target_weight", orig.get("target_weight", None))
+                    if target_weight is None:
+                        # Some signals store percentage under position_size
+                        target_weight = orig.get("position_size", None)
+
+                    price = float(request.current_price or meta.get("price", 0.0) or self.current_prices.get(request.symbol, 0.0) or 0.0)
+
+                    if quantity_type == "PERCENTAGE" and target_weight is not None and price > 0:
+                        tw = float(target_weight)
+                        # Guard against percent-as-100 (e.g., 10 instead of 0.10)
+                        if tw > 1.0:
+                            tw = tw / 100.0
+
+                        tw = max(0.0, min(1.0, tw))
+                        computed_qty = (float(self.portfolio_value) * tw) / price
+
+                        # Mutate request.quantity into shares (authoritative)
+                        request.quantity = float(computed_qty)
+
+                        # Provide cash/price hints for later checks
+                        if "price" not in meta:
+                            meta["price"] = price
+                        if "available_cash" not in meta:
+                            meta["available_cash"] = float(self.available_cash)
+                        meta["computed_from_target_weight"] = True
+                        meta["target_weight"] = tw
+                        meta["quantity_type"] = "ABSOLUTE"
+                        request.metadata = meta
+            except Exception as e:
+                logger.debug(f"Quantity normalization failed (continuing with raw quantity): {e}")
+
             # Risk impact assessment
             risk_impact = self._calculate_risk_impact(request)
 
@@ -1570,7 +1694,7 @@ class CentralRiskManager(ISystemComponent):
             if request.side.lower() == 'buy':
                 # Get available cash from request metadata or use conservative default
                 available_cash = request.metadata.get('available_cash', self.portfolio_value * 0.95)
-                price = request.metadata.get('price', 100.0)  # Get price from metadata
+                price = request.metadata.get('price', request.current_price or 100.0)  # Prefer request.current_price
                 required_cash = authorized_qty * price
 
                 logger.info(f"💰 Cash check: Need ${required_cash:,.2f}, Available ${available_cash:,.2f}")
@@ -1629,10 +1753,92 @@ class CentralRiskManager(ISystemComponent):
             elif regime_adjustment < 0.8:  # Low risk regime
                 authorized_qty *= 1.1  # Increase by 10%
 
+            # ADS v3.1: apply cooldown scaling if requested by assessment
+            cooldown_scale = float(request.metadata.get("ads_cooldown_scale", 1.0))
+            if cooldown_scale < 1.0:
+                authorized_qty *= max(0.0, cooldown_scale)
+
+            # ADS v3.1 §7: fractional Kelly sizing (entry scaling; RiskManager enforces caps)
+            if (
+                getattr(self.config, "enable_fractional_kelly_sizing", False)
+                and request.decision_type == TradingDecisionType.POSITION_ENTRY
+                and request.side.lower() == "buy"
+                and request.strategy_id
+            ):
+                try:
+                    price = float(request.metadata.get("price", request.current_price or 100.0))
+                    if price > 0:
+                        # Extract signal strength in [0,1] from original signal metadata when available
+                        sig_meta = request.metadata.get("original_signal_metadata", {}) or {}
+                        signal_strength = sig_meta.get("signal_strength", None)
+                        if signal_strength is None:
+                            signal_strength = sig_meta.get("strength", None)
+                        if signal_strength is None:
+                            # Sometimes strategies express size as weight; treat as strength proxy
+                            signal_strength = sig_meta.get("target_weight", sig_meta.get("position_size", request.confidence))
+                        signal_strength = float(signal_strength) if signal_strength is not None else float(request.confidence)
+                        signal_strength = max(0.0, min(1.0, signal_strength))
+
+                        # Liquidity factor best-effort: if strategy provided one, use it; else default 1.0
+                        liquidity_factor = float(sig_meta.get("liquidity_factor", 1.0))
+                        liquidity_factor = max(0.0, min(1.0, liquidity_factor))
+
+                        # Drawdown state from risk manager portfolio value tracking
+                        current_dd = 0.0
+                        if self._portfolio_hwm > 0:
+                            current_dd = max(0.0, (float(self._portfolio_hwm) - float(self.portfolio_value)) / float(self._portfolio_hwm))
+                        max_dd = float(getattr(self.config.risk_limits, "max_drawdown", 0.10))
+
+                        # Regime factor: use risk multiplier already applied by on_regime_change
+                        regime_factor = float(getattr(self, "risk_multiplier", 1.0))
+
+                        # Per-strategy trade outcomes (risk-normalized return proxy)
+                        pnls = self._strategy_trade_outcomes.get(request.strategy_id, [])
+
+                        # IMPORTANT: Do not apply Kelly sizing until sufficient sample size exists.
+                        # Before min_trades, keep the strategy's requested sizing (target_weight / base sizing)
+                        # to avoid collapsing to tiny positions from priors.
+                        min_trades = int(getattr(self.config, "kelly_min_trades", 30))
+                        if len(pnls) < min_trades:
+                            pnls = []  # explicit: skip Kelly cap entirely
+
+                        kp = KellyParams(
+                            kelly_frac=float(getattr(self.config, "kelly_frac", 0.33)),
+                            kelly_min=float(getattr(self.config, "kelly_min", 0.02)),
+                            kelly_max=float(getattr(self.config, "kelly_max", 0.20)),
+                            prior_a=float(getattr(self.config, "kelly_prior_a", 5.0)),
+                            prior_b=float(getattr(self.config, "kelly_prior_b", 5.0)),
+                            min_trades=min_trades,
+                            uncertainty_floor=float(getattr(self.config, "kelly_uncertainty_floor", 0.3)),
+                            dd_gamma=float(getattr(self.config, "kelly_dd_gamma", 2.0)),
+                        )
+
+                        if not pnls:
+                            # Skip Kelly (insufficient sample)
+                            raise RuntimeError("kelly_insufficient_trades")
+
+                        res = compute_fractional_kelly_fraction_of_capital(
+                            signal_strength=signal_strength,
+                            pnls=pnls,
+                            liquidity_factor=liquidity_factor,
+                            current_dd=current_dd,
+                            max_dd=max_dd,
+                            regime_factor=regime_factor,
+                            params=kp,
+                        )
+
+                        desired_qty = (float(self.portfolio_value) * float(res.target_fraction_of_capital)) / price
+                        if desired_qty >= 0:
+                            authorized_qty = min(float(authorized_qty), float(desired_qty))
+                            request.metadata["ads_kelly"] = res.diagnostics
+                            request.metadata["ads_kelly_target_fraction"] = float(res.target_fraction_of_capital)
+                except Exception as e:
+                    logger.debug(f"Kelly sizing failed (fallback to requested quantity): {e}")
+
             # FINAL CASH CONSTRAINT: Ensure BUY orders don't exceed available cash
             if request.side.lower() == 'buy':
                 available_cash = request.metadata.get('available_cash', self.portfolio_value * 0.95)
-                price = request.metadata.get('price', 100.0)
+                price = request.metadata.get('price', request.current_price or 100.0)
                 final_required_cash = authorized_qty * price
                 if final_required_cash > available_cash:
                     final_max_qty = available_cash / price
@@ -2151,6 +2357,15 @@ class CentralRiskManager(ISystemComponent):
         # ✅ FIX: Store prices for portfolio value calculation
         self.current_prices.update(prices)
 
+        # ADS v3.1: maintain lightweight price history for σ_eff and Δρ
+        for symbol, price in prices.items():
+            try:
+                p = float(price)
+                if p > 0 and np.isfinite(p):  # type: ignore[name-defined]
+                    self._price_history[symbol].append(p)
+            except Exception:
+                continue
+
         if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
             try:
                 if timestamp is None:
@@ -2166,6 +2381,81 @@ class CentralRiskManager(ISystemComponent):
 
         # ✅ FIX: Update portfolio metrics after price update
         self._update_portfolio_metrics()
+
+        # Update drawdown high-water mark (best-effort)
+        try:
+            self._portfolio_hwm = max(float(self._portfolio_hwm), float(self.portfolio_value))
+        except Exception:
+            pass
+
+    # ========================================================================
+    # ADS v3.1: COOLDOWN + TRADE OUTCOME TRACKING (from PositionBook events)
+    # ========================================================================
+
+    def _handle_position_update_ads(self, update: Any) -> None:
+        """
+        Consume PositionBook updates to maintain:
+        - Per-strategy trade outcome history (for Kelly sizing)
+        - Per-strategy PVSI cooldown state (ADS §8)
+        - Exit-in-flight cleanup
+        """
+        try:
+            symbol = getattr(update, "symbol", None)
+            event_type = getattr(update, "event_type", None)
+            event_name = getattr(event_type, "value", str(event_type)).lower() if event_type is not None else "unknown"
+
+            # Cleanup exit-in-flight if position is closed
+            if symbol and event_name == "closed":
+                if symbol in self._exit_in_flight:
+                    self._exit_in_flight.discard(symbol)
+
+            # Track realized PnL on close for sizing/cooldown
+            if event_name != "closed":
+                return
+
+            fill = getattr(update, "fill", None)
+            strategy_id = getattr(fill, "strategy_id", "") if fill is not None else ""
+            if not strategy_id:
+                # If strategy_id missing, do not contaminate per-strategy stats
+                return
+
+            realized_pnl = getattr(update, "realized_pnl", None)
+            prev_qty = getattr(update, "previous_quantity", None)
+            prev_avg = getattr(update, "previous_avg_price", None)
+
+            # Risk-normalized return proxy: realized_pnl / notional
+            pnl_ret = 0.0
+            try:
+                notional = abs(float(prev_qty) * float(prev_avg)) if prev_qty is not None and prev_avg is not None else 0.0
+                pnl = float(realized_pnl) if realized_pnl is not None else 0.0
+                pnl_ret = (pnl / notional) if notional > 0 else 0.0
+            except Exception:
+                pnl_ret = 0.0
+
+            # Store trade outcomes (cap size for memory)
+            hist = self._strategy_trade_outcomes[strategy_id]
+            hist.append(float(pnl_ret))
+            if len(hist) > 2000:
+                del hist[: len(hist) - 2000]
+
+            # Update PVSI cooldown
+            if self.config.enable_ads_cooldown:
+                cd = self._strategy_cooldowns.get(strategy_id)
+                if cd is None:
+                    cd = Cooldown(
+                        pnl_history=[],
+                        regime_history=[],
+                        threshold=float(self.config.pvsi_threshold),
+                        baseline_window=int(self.config.pvsi_baseline_window),
+                        recent_window=int(self.config.pvsi_recent_window),
+                    )
+                    self._strategy_cooldowns[strategy_id] = cd
+
+                regime = getattr(getattr(self, "current_regime_context", None), "primary_regime", "unknown")
+                cd.update(pnl=pnl_ret, regime=str(regime))
+
+        except Exception as e:
+            logger.debug(f"_handle_position_update_ads error: {e}")
 
     @property
     def authorization_audit_trail(self) -> List[Dict[str, Any]]:
@@ -2202,6 +2492,118 @@ class CentralRiskManager(ISystemComponent):
     async def _monitor_positions(self):
         """Monitor current positions for risk"""
         try:
+            # ADS v3.1: multi-exit core monitoring (PositionBook preferred)
+            if getattr(self.config, "enable_ads_multi_exit", False) and self.position_book is not None:
+                now = datetime.now()
+                positions = self.position_book.get_all_positions()
+
+                benchmark = str(getattr(self.config, "corr_benchmark_symbol", "SPY"))
+                bench_prices = list(self._price_history.get(benchmark, []))
+                bench_returns: List[float] = []
+                if len(bench_prices) >= 3:
+                    bp = np.asarray(bench_prices, dtype=float)
+                    bench_returns = list(np.diff(bp) / bp[:-1])
+
+                for symbol, pos in positions.items():
+                    try:
+                        if symbol in self._exit_in_flight:
+                            continue
+
+                        pnl_pct = float(getattr(pos, "pnl_percent", 0.0))
+                        opened_at = getattr(pos, "opened_at", now)
+
+                        # Forward-looking volatility stop (% distance)
+                        stop_loss_pct_val: Optional[float] = None
+                        if getattr(self.config, "enable_forward_vol_stops", False):
+                            sym_prices = list(self._price_history.get(symbol, []))
+                            if len(sym_prices) >= 3:
+                                sp = np.asarray(sym_prices, dtype=float)
+                                sym_returns = list(np.diff(sp) / sp[:-1])
+
+                                s_eff, s_real, s_fcst = sigma_eff(
+                                    sym_returns,
+                                    realized_window=int(getattr(self.config, "vol_realized_window", 20)),
+                                    lambda_=float(getattr(self.config, "vol_ewma_lambda", 0.94)),
+                                )
+                                d_rho = correlation_change(
+                                    sym_returns,
+                                    bench_returns,
+                                    short_window=int(getattr(self.config, "corr_short_window", 20)),
+                                    long_window=int(getattr(self.config, "corr_long_window", 60)),
+                                )
+                                params = VolStopParams(
+                                    k=float(getattr(self.config, "stop_k", 2.0)),
+                                    kappa=float(getattr(self.config, "stop_kappa", 0.5)),
+                                    overnight_mult=float(getattr(self.config, "stop_overnight_mult", 1.5)),
+                                )
+                                sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
+                                stop_loss_pct_val = float(sl_frac) * 100.0
+                                # Attach for diagnostics (optional)
+                                _ = (s_real, s_fcst)
+
+                        # Liquidity stop (best-effort; only if liquidity engine is injected)
+                        liquidity_bad = False
+                        liquidity_details: Optional[Dict[str, Any]] = None
+                        if self.liquidity_engine is not None:
+                            # Without OHLCV, liquidity engine will degrade to limited assessment
+                            md = {"close": float(getattr(pos, "current_price", 0.0))}
+                            try:
+                                liq = self.liquidity_engine.assess_liquidity_score(symbol, md)
+                                eff_spread = float(liq.get("effective_spread_bps", 0.0))
+                                liq_reg = str(liq.get("liquidity_regime", "normal_liquidity"))
+                                # Conservative trigger: very wide effective spread or crisis/illiquid regime
+                                if eff_spread > 80.0 or ("crisis" in liq_reg) or ("illiquid" in liq_reg):
+                                    liquidity_bad = True
+                                    liquidity_details = {"effective_spread_bps": eff_spread, "liquidity_regime": liq_reg}
+                            except Exception:
+                                pass
+
+                        decision = decide_exit(
+                            now=now,
+                            opened_at=opened_at,
+                            pnl_pct=pnl_pct,
+                            stop_loss_pct=stop_loss_pct_val,
+                            max_holding_minutes=float(getattr(self.config, "max_holding_minutes", 24 * 60)),
+                            liquidity_bad=liquidity_bad,
+                            liquidity_details=liquidity_details,
+                        )
+
+                        if decision.should_exit:
+                            # Trigger governed exit via authorization + execution
+                            side = "sell" if getattr(pos, "is_long", True) else "buy"
+                            qty = float(getattr(pos, "quantity", 0.0))
+                            qty = abs(qty)
+                            px = float(getattr(pos, "current_price", 0.0)) if getattr(pos, "current_price", 0.0) else float(self.current_prices.get(symbol, 100.0))
+                            strategy_id = str(getattr(pos, "strategy_id", "")) or "unknown"
+
+                            self._exit_in_flight.add(symbol)
+
+                            req = TradingDecisionRequest(
+                                decision_type=TradingDecisionType.POSITION_EXIT,
+                                strategy_id=strategy_id,
+                                symbol=symbol,
+                                side=side,
+                                quantity=qty,
+                                confidence=1.0,
+                                current_price=px,
+                                urgency=ExecutionUrgency.URGENT,
+                                requesting_component="RiskMonitor",
+                                justification=f"ADS_MULTI_EXIT:{decision.reason}",
+                                metadata={"ads_exit": decision.reason, "ads_exit_details": decision.details},
+                            )
+
+                            auth = await self.authorize_trading_decision(req)
+                            if auth.authorization_level != AuthorizationLevel.REJECTED and auth.authorized_quantity > 0:
+                                await self.execute_authorized_trade(
+                                    auth,
+                                    execution_params={"urgency": ExecutionUrgency.URGENT},
+                                )
+                            else:
+                                # If rejected, clear exit-in-flight so it can be retried next cycle
+                                self._exit_in_flight.discard(symbol)
+                    except Exception as e:
+                        logger.debug(f"ADS multi-exit monitoring error for {symbol}: {e}")
+
             for symbol, position in self.current_positions.items():
                 if position != 0:
                     # ✅ FIX: Create proper TradingDecisionRequest for position limit check

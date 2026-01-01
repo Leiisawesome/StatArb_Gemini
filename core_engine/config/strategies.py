@@ -357,6 +357,9 @@ class MeanReversionConfig(BaseStrategyConfig):
     take_profit_pct: float = 10.0
     """Take profit percentage. Exit if unrealized P&L exceeds this. Default: +10%"""
 
+    enable_fixed_take_profit: bool = False
+    """Enable fixed take-profit exits (legacy). Default: False (ADS v3.1 prefers dynamic/multi-exit)."""
+
     min_profit_to_exit: float = -2.0
     """Minimum P&L % to allow z-score based exit. Prevents selling at big loss. Default: -2%"""
 
@@ -566,6 +569,11 @@ class MeanReversionConfig(BaseStrategyConfig):
     sms_threshold: float = 0.5
     """Minimum SMS score to consider signal mature. Default: 0.5
     SMS uses multiplicative formula: E^α × P_rev^β × (1+ΔOFI)^γ × VC^(-δ) × e^(-λt)"""
+
+    # ADS v3.1: dynamic SMS threshold base (tau(R))
+    tau_0: float = 0.50
+    """Base SMS threshold for ADS v3.1 tau(R) computation. Default: 0.50
+    tau = clip(tau0 + 0.15*R_vol + 0.10*(1-R_liq) + 0.10*(1-Conf), 0.35, 0.80)"""
 
     sms_max_pending: int = 50
     """Maximum bars a signal can be pending before considered stale. Default: 50"""
