@@ -17,7 +17,7 @@ Date: December 3, 2025
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, ClassVar
 from datetime import datetime
 import logging
 
@@ -64,12 +64,12 @@ class SignalMaturityScore:
     max_pending: int = 50            # Maximum bars before signal is stale
 
     # Regime-adaptive exponents
-    EXPONENTS: Dict[str, Tuple[float, float, float, float]] = field(default_factory=lambda: {
+    EXPONENTS: ClassVar[Dict[str, Tuple[float, float, float, float]]] = {
         'low_vol': (0.30, 0.40, 0.20, 0.10),
         'normal': (0.35, 0.35, 0.20, 0.10),
         'high_vol': (0.40, 0.25, 0.25, 0.10),
         'crisis': (0.50, 0.20, 0.20, 0.10)
-    })
+    }
 
     def compute(self, regime: str = 'normal') -> float:
         """
