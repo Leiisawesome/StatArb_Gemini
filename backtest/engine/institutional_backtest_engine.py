@@ -26,6 +26,7 @@ from pathlib import Path
 import logging
 import pandas as pd
 import sys
+import asyncio
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -533,6 +534,11 @@ class InstitutionalBacktestEngine:
 
                 # Manually initialize each component
                 for component_name, component in self.components.items():
+                    # Skip if already initialized
+                    if hasattr(component, 'is_initialized') and component.is_initialized:
+                        logger.info(f"   {component_name} already initialized, skipping...")
+                        continue
+
                     logger.info(f"   Initializing {component_name}...")
                     try:
                         if hasattr(component, 'initialize'):
@@ -838,45 +844,45 @@ class InstitutionalBacktestEngine:
 
             logger.info(f"   Data range: {start_dt} to {end_dt}")
 
-            # Load data for all symbols
+            # Load data for all symbols in parallel
             self.market_data = {}
-
-            for symbol in self.config.symbols:
+            
+            async def load_symbol_data(symbol):
                 logger.info(f"   Loading {symbol}...")
-
-                # Load market data using data manager (not async)
-                data = self.data_manager.load_market_data(
-                    symbols=[symbol],  # Pass as list
-                    start_time=start_dt,
-                    end_time=end_dt,
-                    interval=self.config.interval
-                )
-
-                if data is not None and not data.empty:
-                    self.market_data[symbol] = data
-                    logger.info(f"   ✅ {symbol}: {len(data)} bars loaded")
-                else:
-                    logger.warning(f"   ⚠️  {symbol}: No data available")
-
-            # Load benchmark data for correlation-change Δρ (used by ADS vol stops),
-            # without adding it to the strategy symbol universe.
-            try:
-                benchmark_symbol = str(self._get_strategy_param("corr_benchmark_symbol", "SPY"))
-                if benchmark_symbol and benchmark_symbol not in self.market_data:
-                    logger.info(f"   Loading benchmark {benchmark_symbol} (for Δρ)...")
-                    bench = self.data_manager.load_market_data(
-                        symbols=[benchmark_symbol],
+                try:
+                    data = await self.data_manager.load_market_data(
+                        symbols=[symbol],
                         start_time=start_dt,
                         end_time=end_dt,
-                        interval=self.config.interval,
+                        interval=self.config.interval
                     )
-                    if bench is not None and not bench.empty:
-                        self.market_data[benchmark_symbol] = bench
-                        logger.info(f"   ✅ {benchmark_symbol}: {len(bench)} bars loaded (benchmark)")
+                    if data is not None and not data.empty:
+                        logger.info(f"   ✅ {symbol}: {len(data)} bars loaded")
+                        return symbol, data
                     else:
-                        logger.warning(f"   ⚠️  {benchmark_symbol}: No benchmark data available")
-            except Exception:
-                pass
+                        logger.warning(f"   ⚠️  {symbol}: No data available")
+                        return symbol, None
+                except Exception as e:
+                    logger.error(f"   ❌ Error loading {symbol}: {e}")
+                    return symbol, None
+
+            # Create tasks for all symbols
+            tasks = [load_symbol_data(s) for s in self.config.symbols]
+            
+            # Add benchmark task if needed
+            benchmark_symbol = str(self._get_strategy_param("corr_benchmark_symbol", "SPY"))
+            if benchmark_symbol and benchmark_symbol not in self.config.symbols:
+                tasks.append(load_symbol_data(benchmark_symbol))
+
+            # Run all tasks in parallel
+            results = await asyncio.gather(*tasks)
+            
+            # Process results
+            for symbol, data in results:
+                if data is not None:
+                    self.market_data[symbol] = data
+
+            logger.info(f"📊 Data loading complete: {len(self.market_data)} symbols loaded")
 
             if not self.market_data:
                 raise ValueError("No market data loaded - cannot run backtest")
@@ -1052,7 +1058,8 @@ class InstitutionalBacktestEngine:
                 data_config=data_config,
                 indicator_config=indicator_config,
                 feature_config=feature_config,
-                signal_config=signal_config
+                signal_config=signal_config,
+                data_manager=self.data_manager
             )
 
             # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
@@ -1199,6 +1206,11 @@ class InstitutionalBacktestEngine:
 
             # Create strategy manager instance
             self.strategy_manager = StrategyManager(strategy_config, data_config=centralized_data_config)
+
+            # Inject data manager
+            if hasattr(self.strategy_manager, 'set_data_manager'):
+                self.strategy_manager.set_data_manager(self.data_manager)
+                logger.info("✅ Data manager injected into StrategyManager")
 
             # CRITICAL: Inject regime engine (Rule 2 - Regime-First)
             if hasattr(self.strategy_manager, 'set_regime_engine'):

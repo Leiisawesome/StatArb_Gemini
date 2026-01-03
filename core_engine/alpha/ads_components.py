@@ -81,23 +81,46 @@ class SignalMaturityScore:
         Returns:
             SMS score [0, 1]
         """
+        return self.compute_vectorized(
+            self.exhaustion,
+            self.reversal_prob,
+            self.ofi_shift,
+            self.vol_compression,
+            self.pending_bars,
+            regime
+        )
+
+    @classmethod
+    def compute_vectorized(
+        cls,
+        exhaustion: Any,
+        reversal_prob: Any,
+        ofi_shift: Any,
+        vol_compression: Any,
+        pending_bars: Any,
+        regime: str = 'normal'
+    ) -> Any:
+        """
+        Vectorized computation of SMS score.
+        Supports both scalar and NumPy array inputs.
+        """
         # Get regime-specific exponents
-        α, β, γ, δ = self.EXPONENTS.get(regime, self.EXPONENTS['normal'])
+        α, β, γ, δ = cls.EXPONENTS.get(regime, cls.EXPONENTS['normal'])
 
         # Clamp inputs to valid ranges
-        E = np.clip(self.exhaustion, 0.001, 1.0)  # Avoid 0^α issues
-        P_rev = np.clip(self.reversal_prob, 0.001, 1.0)
-        ofi = np.clip(self.ofi_shift, -1.0, 1.0)
-        VC = np.clip(self.vol_compression, 0.5, 2.0)
-        t = max(0, self.pending_bars)
+        E = np.clip(exhaustion, 0.001, 1.0)
+        P_rev = np.clip(reversal_prob, 0.001, 1.0)
+        ofi = np.clip(ofi_shift, -1.0, 1.0)
+        VC = np.clip(vol_compression, 0.5, 2.0)
+        t = np.maximum(0, pending_bars)
 
         # Multiplicative SMS formula
         sms = (
             (E ** α) *
             (P_rev ** β) *
-            ((1 + max(0, ofi)) ** γ) *  # Only positive OFI shift helps
-            ((1 / VC) ** δ) *           # Lower VC = higher score (compression good)
-            np.exp(-self.decay_rate * t)  # Time decay
+            ((1 + np.maximum(0, ofi)) ** γ) *
+            ((1 / VC) ** δ) *
+            np.exp(-0.05 * t)  # Using default decay_rate 0.05
         )
 
         return np.clip(sms, 0.0, 1.0)
@@ -180,27 +203,40 @@ class ERAR:
         Returns:
             Total cost in bps
         """
-        # Spread cost
-        c_spread = self.spread_bps
+        return self.cost_vectorized(
+            self.spread_bps,
+            self.participation,
+            self.volatility,
+            self.adverse_prob,
+            self.kyle_lambda,
+            self.holding_days,
+            self.alt_return_bps
+        )
 
-        # Slippage cost (market impact)
-        c_slip = self.volatility * np.sqrt(max(self.participation, 0.001)) * 10000
+    @classmethod
+    def cost_vectorized(
+        cls,
+        spread_bps: Any,
+        participation: Any,
+        volatility: Any,
+        adverse_prob: Any,
+        kyle_lambda: Any,
+        holding_days: Any,
+        alt_return_bps: Any
+    ) -> Any:
+        """Vectorized cost calculation"""
+        c_spread = spread_bps
+        c_slip = volatility * np.sqrt(np.maximum(participation, 0.001)) * 10000
+        c_adverse = adverse_prob * kyle_lambda * 10000
+        c_opp = alt_return_bps * holding_days
 
-        # Adverse selection cost
-        c_adverse = self.adverse_prob * self.kyle_lambda * 10000
-
-        # Opportunity cost
-        c_opp = self.alt_return_bps * self.holding_days
-
-        # Total cost with participation scaling
         total = (
             c_spread +
-            c_slip * (self.participation ** 0.6) +
+            c_slip * (np.maximum(participation, 0.0) ** 0.6) +
             c_adverse +
             c_opp
         )
-
-        return max(total, 0.1)  # Minimum 0.1 bps
+        return np.maximum(total, 0.1)
 
     def omega_adj(self) -> float:
         """
@@ -212,7 +248,12 @@ class ERAR:
         Returns:
             Adjustment factor [0.5, 1.5]
         """
-        return np.clip(1 + 0.1 * self.skewness, 0.5, 1.5)
+        return self.omega_adj_vectorized(self.skewness)
+
+    @staticmethod
+    def omega_adj_vectorized(skewness: Any) -> Any:
+        """Vectorized omega adjustment"""
+        return np.clip(1 + 0.1 * skewness, 0.5, 1.5)
 
     def compute(self) -> float:
         """
@@ -221,17 +262,50 @@ class ERAR:
         Returns:
             ERAR value (higher = better risk-adjusted opportunity)
         """
-        cost = self.cost()
+        return self.compute_vectorized(
+            self.expected_pnl,
+            self.cvar_95,
+            self.skewness,
+            self.spread_bps,
+            self.participation,
+            self.volatility,
+            self.adverse_prob,
+            self.kyle_lambda,
+            self.holding_days,
+            self.alt_return_bps,
+            self.tail_lambda
+        )
 
-        if cost <= 0:
+    @classmethod
+    def compute_vectorized(
+        cls,
+        expected_pnl: Any,
+        cvar_95: Any,
+        skewness: Any,
+        spread_bps: Any,
+        participation: Any,
+        volatility: Any,
+        adverse_prob: Any,
+        kyle_lambda: Any,
+        holding_days: Any,
+        alt_return_bps: Any,
+        tail_lambda: float = 1.0
+    ) -> Any:
+        """Vectorized ERAR computation"""
+        cost = cls.cost_vectorized(
+            spread_bps, participation, volatility, adverse_prob,
+            kyle_lambda, holding_days, alt_return_bps
+        )
+        
+        risk_adj_return = expected_pnl - tail_lambda * np.abs(cvar_95)
+        erar = (risk_adj_return / cost) * cls.omega_adj_vectorized(skewness)
+        
+        # Handle zero cost case
+        if isinstance(erar, np.ndarray):
+            erar[cost <= 0] = 0.0
+        elif cost <= 0:
             return 0.0
-
-        # Risk-adjusted expected return
-        risk_adj_return = self.expected_pnl - self.tail_lambda * abs(self.cvar_95)
-
-        # Normalize by cost and apply omega adjustment
-        erar = (risk_adj_return / cost) * self.omega_adj()
-
+            
         return erar
 
     def should_trade(self, gamma: float = 0.5) -> bool:

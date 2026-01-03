@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass
 import asyncio
+import aiohttp
 import time
 from abc import ABC, abstractmethod
 
@@ -284,8 +285,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         self.clickhouse_url = f"http://{self.enhanced_config.clickhouse_host}:{self.enhanced_config.clickhouse_port}"
 
         # HTTP session for connection reuse (performance optimization)
-        import requests
-        self._http_session = requests.Session()
+        # Initialized in initialize() for async compatibility
+        self._http_session: Optional[aiohttp.ClientSession] = None
 
         # Data cache for performance
         self._cache: Dict[str, Any] = {}
@@ -304,21 +305,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Regime-aware integration (Rule 2 (Regime-First Principle))
         self.regime_engine: Optional[Any] = None  # EnhancedRegimeEngine reference
 
-        # Test ClickHouse connection - FAIL FAST if unavailable
+        # Connection state
         self._connection_available = False
-        try:
-            connection_result = self._test_connection()
-            self._connection_available = self._coerce_bool(connection_result, default=False)
-            if not self._connection_available:
-                raise ClickHouseConnectionError(
-                    "ClickHouse database unavailable. Cannot proceed without real market data."
-                )
-        except Exception as e:
-            if isinstance(e, ClickHouseConnectionError):
-                raise
-            raise ClickHouseConnectionError(
-                f"ClickHouse connection test failed: {e}. Cannot proceed without real market data."
-            ) from e
 
         self.logger.info(
             f"ClickHouseDataManager initialized for {len(self.enhanced_config.symbols)} symbols"
@@ -400,11 +388,18 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
     async def initialize(self) -> bool:
         """Initialize the data manager component"""
+        if self.is_initialized:
+            return True
+
         try:
             self.logger.info("Initializing ClickHouseDataManager...")
 
+            # Initialize HTTP session if not already done
+            if self._http_session is None:
+                self._http_session = aiohttp.ClientSession()
+
             # Test connection - FAIL FAST if unavailable
-            connection_result = self._test_connection()
+            connection_result = await self._test_connection()
             self._connection_available = self._coerce_bool(connection_result, default=False)
             if not self._connection_available:
                 raise ClickHouseConnectionError(
@@ -418,7 +413,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Pre-warm cache with available symbols if connection is available
             if self._connection_available:
                 try:
-                    available_symbols = self.get_available_symbols()
+                    available_symbols = await self.get_available_symbols()
                     self.logger.info(f"Found {len(available_symbols)} available symbols")
                 except Exception as e:
                     self.logger.warning(f"Could not pre-load available symbols: {e}")
@@ -433,11 +428,18 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
     async def start(self) -> bool:
         """Start the data manager operations"""
+        if self.is_operational:
+            return True
+
         if not self.is_initialized:
             self.logger.error("Cannot start ClickHouseDataManager - not initialized")
             return False
 
         try:
+            # Ensure session is active
+            if self._http_session is None:
+                self._http_session = aiohttp.ClientSession()
+
             self.is_operational = True
             self.logger.info("✅ ClickHouseDataManager started and operational")
             return True
@@ -449,6 +451,11 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         """Stop the data manager operations"""
         try:
             self.is_operational = False
+
+            # Close HTTP session
+            if self._http_session:
+                await self._http_session.close()
+                self._http_session = None
 
             # Clear cache on shutdown
             self.clear_cache()
@@ -479,7 +486,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Test connection if operational - FAIL FAST if unavailable
         if self.is_operational:
             try:
-                connection_test = self._coerce_bool(self._test_connection(), default=False)
+                connection_test = self._coerce_bool(await self._test_connection(), default=False)
                 health_status['connection_test_result'] = connection_test
                 if not connection_test:
                     health_status['healthy'] = False
@@ -525,18 +532,23 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             except Exception as e:
                 self.logger.warning(f"Subscriber notification failed: {e}")
 
-    def _test_connection(self) -> bool:
+    async def _test_connection(self) -> bool:
         """Test ClickHouse connection using reusable HTTP session"""
+        if self._http_session is None:
+            self._http_session = aiohttp.ClientSession()
+
         try:
-            response = self._http_session.post(
+            async with self._http_session.post(
                 self.clickhouse_url,
                 data="SELECT 1",
                 timeout=CONNECTION_TEST_TIMEOUT_SECONDS
-            )
-            if response.status_code == 200 and response.text.strip() == "1":
-                self.logger.info("✅ ClickHouse connection successful")
-                return True
-            raise Exception(f"Unexpected response: {response.text}")
+            ) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    if text.strip() == "1":
+                        self.logger.info("✅ ClickHouse connection successful")
+                        return True
+                raise Exception(f"Unexpected response: {await response.text()}")
         except Exception as e:
             self.logger.warning(
                 "❌ ClickHouse connection failed: %s. Falling back to synthetic data when required.",
@@ -554,7 +566,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         escaped = [self._escape_sql_string(s) for s in symbols]
         return "', '".join(escaped)
 
-    def _execute_query(self, query: str) -> pd.DataFrame:
+    async def _execute_query(self, query: str) -> pd.DataFrame:
         """
         Execute ClickHouse query and return DataFrame with proper timezone handling
 
@@ -562,21 +574,25 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         ClickHouse toTimeZone() converts timestamp values to NY time but returns timezone-naive datetimes.
         This method ensures all timestamps are properly localized to America/New_York timezone.
         """
+        if self._http_session is None:
+            self._http_session = aiohttp.ClientSession()
+
         try:
             # Add TSVWithNames format to get proper column names
             formatted_query = f"{query} FORMAT TSVWithNames"
 
-            response = self._http_session.post(
+            async with self._http_session.post(
                 self.clickhouse_url,
                 data=formatted_query,
                 headers={'Content-Type': 'text/plain'},
                 timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
+                text = await response.text()
 
             # Parse response as TSV with headers
             from io import StringIO
-            df = pd.read_csv(StringIO(response.text), sep='\t')
+            df = pd.read_csv(StringIO(text), sep='\t')
 
             # FIX TIMEZONE AT SOURCE: Handle timestamp timezone conversion immediately after query
             # This ensures ALL data returned from ClickHouse has correct timezone, regardless of caller
@@ -603,7 +619,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.error(f"Query: {query}")
             raise
 
-    def get_available_symbols(self) -> List[str]:
+    async def get_available_symbols(self) -> List[str]:
         """Get list of available symbols for target date"""
         query = f"""
         SELECT ticker, COUNT(*) as records
@@ -615,7 +631,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         """
 
         try:
-            result = self._execute_query(query)
+            result = await self._execute_query(query)
             symbols = result['ticker'].tolist()
             self.logger.info(f"Found {len(symbols)} symbols with data for period {self.enhanced_config.start_date} to {self.enhanced_config.end_date}")
             return symbols
@@ -623,7 +639,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.error(f"Failed to get available symbols: {e}")
             return []
 
-    def load_market_data(
+    async def load_market_data(
         self,
         symbols: Optional[List[str]] = None,
         start_time: Optional[datetime] = None,
@@ -672,7 +688,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
         try:
             start_query_time = time.time()
-            df = self._execute_query(query)
+            df = await self._execute_query(query)
             query_time = time.time() - start_query_time
 
             if df.empty:
@@ -859,7 +875,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         age = (datetime.now() - cache_time).total_seconds()
         return age < self.enhanced_config.cache_ttl
 
-    def get_latest_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, float]:
+    async def get_latest_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, float]:
         """Get latest prices for symbols"""
         symbols = symbols or self.enhanced_config.symbols
         # Escape symbols to prevent SQL injection
@@ -876,7 +892,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         """
 
         try:
-            df = self._execute_query(query)
+            df = await self._execute_query(query)
             return dict(zip(df['symbol'], df['latest_price']))
         except Exception as e:
             self.logger.error(f"Failed to get latest prices: {e}")
@@ -900,7 +916,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     # CORE ENGINE INTERFACE COMPLIANCE METHODS
     # ========================================================================================
 
-    def get_market_data(self, symbol: str, start_time: Optional[str] = None,
+    async def get_market_data(self, symbol: str, start_time: Optional[str] = None,
                        end_time: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
         Core Engine compatible market data interface
@@ -937,7 +953,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     end_dt = datetime.strptime(f"{self.enhanced_config.end_date} {end_time}:59", "%Y-%m-%d %H:%M:%S")
 
             # Use existing load_market_data method
-            df = self.load_market_data(
+            df = await self.load_market_data(
                 symbols=[symbol],
                 start_time=start_dt,
                 end_time=end_dt,
@@ -1002,7 +1018,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         except Exception as e:
             self.logger.warning(f"Failed to notify subscribers: {e}")
 
-    def get_historical_data(self, symbol: str, start_date: datetime,
+    async def get_historical_data(self, symbol: str, start_date: datetime,
                           end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
         """
         Core Engine compatible historical data interface
@@ -1025,7 +1041,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             end_date_obj = end_date.date() if hasattr(end_date, 'date') else end_date
 
             if start_date_obj <= config_end and end_date_obj >= config_start:
-                df = self.get_market_data(symbol)
+                df = await self.get_market_data(symbol)
                 if df is not None and not df.empty:
                     return df
 
@@ -1036,10 +1052,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.error(f"Error in get_historical_data for {symbol}: {e}")
             return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
 
-    def get_current_price(self, symbol: str) -> Optional[float]:
+    async def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price (latest close price from our data)"""
         try:
-            df = self.get_market_data(symbol)
+            df = await self.get_market_data(symbol)
             if df is not None and not df.empty:
                 return float(df['close'].iloc[-1])
             return None
@@ -1047,16 +1063,16 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self.logger.error(f"Error getting current price for {symbol}: {e}")
             return None
 
-    def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
+    async def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
         """Get current prices for multiple symbols"""
         prices = {}
         for symbol in symbols:
-            price = self.get_current_price(symbol)
+            price = await self.get_current_price(symbol)
             if price is not None:
                 prices[symbol] = price
         return prices
 
-    def load_data(self, symbols: Optional[List[str]] = None,
+    async def load_data(self, symbols: Optional[List[str]] = None,
                   start_time: Optional[datetime] = None,
                   end_time: Optional[datetime] = None,
                   interval: Optional[str] = None) -> pd.DataFrame:
@@ -1075,7 +1091,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         Returns:
             DataFrame with loaded market data
         """
-        return self.load_market_data(symbols, start_time, end_time, interval)
+        return await self.load_market_data(symbols, start_time, end_time, interval)
 
     def validate_data(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -1176,17 +1192,17 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
     # STANDARDIZED DATA FLOW METHODS
     # ========================================
 
-    def process_market_data(self, symbol: str, **kwargs) -> pd.DataFrame:
+    async def process_market_data(self, symbol: str, **kwargs) -> pd.DataFrame:
         """Standardized method for processing market data (alias for get_market_data)"""
-        return self.get_market_data(symbol, **kwargs)
+        return await self.get_market_data(symbol, **kwargs)
 
-    def fetch_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
+    async def fetch_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
         """Standardized method for fetching data (alias for load_data)"""
-        return self.load_data(symbols, **kwargs)
+        return await self.load_data(symbols, **kwargs)
 
-    def process_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
+    async def process_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
         """Standardized method for data processing (alias for load_market_data)"""
-        return self.load_market_data(symbols, **kwargs)
+        return await self.load_market_data(symbols, **kwargs)
 
     # ========================================
     # ANALYTICS INTEGRATION METHODS

@@ -212,7 +212,8 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         indicator_config: Optional[Any] = None,
         feature_config: Optional[Any] = None,
         signal_config: Optional[Any] = None,
-        liquidity_config: Optional[Any] = None
+        liquidity_config: Optional[Any] = None,
+        data_manager: Optional[Any] = None
     ):
         """
         Initialize pipeline orchestrator
@@ -222,6 +223,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             indicator_config: Configuration for TechnicalIndicators
             feature_config: Configuration for FeatureEngineer
             signal_config: Configuration for SignalGenerator
+            data_manager: Optional existing DataManager instance to share
         """
         # Component state (ISystemComponent)
         self.component_name = "ProcessingPipelineOrchestrator"
@@ -238,7 +240,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.liquidity_config = liquidity_config or {}
 
         # Pipeline components (initialized in initialize())
-        self.data_manager: Optional[Any] = None
+        self.data_manager = data_manager
         self.indicators_engine: Optional[Any] = None
         self.feature_engineer: Optional[Any] = None
         self.signal_generator: Optional[Any] = None
@@ -285,7 +287,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
             # Initialize DataManager (Phase 1)
             logger.debug("Phase 1: Initializing DataManager...")
-            self.data_manager = ClickHouseDataManager(self.data_config)
+            if self.data_manager is None:
+                self.data_manager = ClickHouseDataManager(self.data_config)
+            
             if hasattr(self.data_manager, 'initialize'):
                 await self.data_manager.initialize()
             logger.debug("✅ DataManager initialized")
@@ -354,6 +358,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         """
         if self.liquidity_engine and hasattr(self.liquidity_engine, 'stop'):
             await self.liquidity_engine.stop()
+
+        # Close DataManager if it exists
+        if self.data_manager and hasattr(self.data_manager, 'stop'):
+            await self.data_manager.stop()
 
         self.is_operational = False
 

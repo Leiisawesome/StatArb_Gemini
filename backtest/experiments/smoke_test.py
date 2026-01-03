@@ -82,6 +82,9 @@ class SmokeTest(BaseExperiment):
                 success=True
             )
 
+            # Shutdown engine to release resources (Rule 1 compliance)
+            await engine.shutdown()
+
             self.logger.info(f"✅ Smoke test completed in {duration:.2f}s")
             return result
 

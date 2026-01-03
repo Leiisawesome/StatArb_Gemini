@@ -98,6 +98,9 @@ class BaselineBacktest(BaseExperiment):
                 success=True
             )
 
+            # Shutdown engine to release resources (Rule 1 compliance)
+            await engine.shutdown()
+
             self.logger.info(f"✅ Baseline backtest completed in {duration:.2f}s")
             return result
 

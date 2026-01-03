@@ -498,7 +498,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     self.pipeline_orchestrator = ProcessingPipelineOrchestrator(
                         data_config=self.data_config if self.data_config else (
                             self.config.pipeline_config if self.config.pipeline_config else None
-                        )
+                        ),
+                        data_manager=self.data_manager
                     )
                     await self.pipeline_orchestrator.initialize()
                     await self.pipeline_orchestrator.start()

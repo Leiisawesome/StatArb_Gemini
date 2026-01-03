@@ -175,39 +175,42 @@ class EnhancedRiskManager:
                 'market_data': market_data or {}
             }
 
-            # Calculate exposures
-            logger.debug("Calculating exposures...")
-            exposures = await self.exposure_calculator.calculate_exposures(
-                positions, portfolio_value
-            )
-
-            # Calculate VaR and risk metrics
-            risk_metrics = None
+            # Define tasks for parallel execution
+            tasks = []
+            
+            # 1. Exposure calculation
+            tasks.append(self.exposure_calculator.calculate_exposures(positions, portfolio_value))
+            
+            # 2. VaR and risk metrics (if returns data available)
             if returns_data is not None and len(returns_data) > 0:
-                logger.debug("Calculating risk metrics...")
-                risk_metrics = await self.var_calculator.calculate_comprehensive_risk_metrics(
-                    returns_data
-                )
-
-            # Calculate correlation matrix
-            correlation_matrix = None
+                tasks.append(self.var_calculator.calculate_comprehensive_risk_metrics(returns_data))
+            else:
+                tasks.append(asyncio.sleep(0, result=None))
+                
+            # 3. Correlation matrix (if returns data available)
             if returns_data is not None and len(returns_data.columns) > 1:
-                logger.debug("Calculating correlation matrix...")
-                correlation_matrix = await self.correlation_analyzer.calculate_correlation_matrix(
-                    returns_data
-                )
+                tasks.append(self.correlation_analyzer.calculate_correlation_matrix(returns_data))
+            else:
+                tasks.append(asyncio.sleep(0, result=None))
+                
+            # 4. Stress tests
+            tasks.append(self._run_key_stress_tests(positions, portfolio_value))
+            
+            # 5. Risk limits
+            tasks.append(self.limit_monitor.check_limits(portfolio_data, positions, market_data))
 
-            # Run stress tests
-            logger.debug("Running stress tests...")
-            stress_results = await self._run_key_stress_tests(positions, portfolio_value)
+            # Execute all tasks in parallel
+            logger.debug(f"Executing {len(tasks)} risk analysis tasks in parallel...")
+            results = await asyncio.gather(*tasks)
+            
+            # Unpack results
+            exposures = results[0]
+            risk_metrics = results[1]
+            correlation_matrix = results[2]
+            stress_results = results[3]
+            limit_breaches = results[4]
 
-            # Check risk limits
-            logger.debug("Checking risk limits...")
-            limit_breaches = await self.limit_monitor.check_limits(
-                portfolio_data, positions, market_data
-            )
-
-            # Detect correlation regime
+            # Detect correlation regime (depends on correlation_matrix)
             regime_status = "NORMAL"
             if correlation_matrix is not None:
                 regime_result = await self.correlation_analyzer.detect_correlation_regime(
@@ -257,9 +260,7 @@ class EnhancedRiskManager:
         positions: Dict[str, Any],
         portfolio_value: float
     ) -> Dict[str, PortfolioStressResult]:
-        """Run key stress test scenarios"""
-
-        stress_results = {}
+        """Run key stress test scenarios in parallel"""
 
         # Key scenarios to run
         key_scenarios = [
@@ -269,16 +270,21 @@ class EnhancedRiskManager:
             'geopolitical_crisis'
         ]
 
-        for scenario_name in key_scenarios:
+        async def run_single_test(scenario_name):
             try:
                 result = await self.stress_tester.run_stress_test(
                     scenario_name, positions, portfolio_value
                 )
-                stress_results[scenario_name] = result
+                return scenario_name, result
             except Exception as e:
                 logger.warning(f"Failed to run stress test {scenario_name}: {e}")
+                return scenario_name, None
 
-        return stress_results
+        # Run all stress tests in parallel
+        results = await asyncio.gather(*[run_single_test(s) for s in key_scenarios])
+        
+        # Filter out failed tests and return dict
+        return {name: res for name, res in results if res is not None}
 
     def _calculate_risk_score(
         self,
