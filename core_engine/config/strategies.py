@@ -95,6 +95,22 @@ class MomentumConfig(BaseStrategyConfig):
     """
     strategy_type: StrategyType = StrategyType.MOMENTUM
 
+    # State Machine (Professional re-architecture)
+    enable_state_machine: bool = False
+    """Enable stage-based state machine for entries/exits. Default: False"""
+
+    orb_minutes: int = 15
+    """Opening Range Breakout filter (ignore first N bars). Default: 15"""
+
+    tightness_threshold: float = 0.75
+    """Volatility tightness threshold (VCP). Default: 0.75"""
+
+    max_extension_atr: float = 1.5
+    """Maximum extension from anchor (in ATRs) to avoid chasing. Default: 1.5"""
+
+    setup_expiry_bars: int = 10
+    """Maximum bars a setup remains valid. Default: 10"""
+
     # Core momentum parameters
     lookback_period: int = 60
     """Momentum lookback period. Default: 60 bars"""
@@ -251,6 +267,30 @@ class MomentumConfig(BaseStrategyConfig):
     """Entry percentile threshold for composite momentum signal. Default: 70.0 (top 30% momentum required for entry).
     Format: 0-100 percentage scale (70.0 = 70th percentile)."""
 
+    # =====================================================================
+    # ADS v3.1 (Core): SMS pending/stale + tau(R) + ERAR gate (strategy-side)
+    # =====================================================================
+    enable_ads_gates: bool = True
+    """Enable ADS gates (SMS + ERAR) for momentum. Default: True"""
+
+    sms_max_pending: int = 50
+    """Maximum bars to keep a pending signal before stale-kill. Default: 50"""
+
+    tau_0: float = 0.50
+    """Base SMS threshold used in tau(R) calculation. Default: 0.50"""
+
+    erar_gamma: float = 0.5
+    """Minimum ERAR threshold for trade. Default: 0.5"""
+
+    spread_bps: float = 2.0
+    """Assumed half-spread cost in basis points. Default: 2.0"""
+
+    alt_return_bps: float = 0.5
+    """Opportunity cost proxy in bps/day. Default: 0.5"""
+
+    erar_tail_lambda: float = 1.0
+    """Tail-risk penalty multiplier for ERAR CVaR term. Default: 1.0"""
+
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -289,6 +329,17 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"composite_z_entry must be non-negative, got {self.composite_z_entry}")
         if not 0 <= self.composite_pct_entry <= 100:
             raise ValueError(f"composite_pct_entry must be [0, 100], got {self.composite_pct_entry}")
+
+        if self.sms_max_pending <= 0:
+            raise ValueError(f"sms_max_pending must be positive, got {self.sms_max_pending}")
+        if not 0.0 < self.tau_0 <= 1.0:
+            raise ValueError(f"tau_0 must be (0, 1.0], got {self.tau_0}")
+        if self.spread_bps < 0:
+            raise ValueError(f"spread_bps must be >= 0, got {self.spread_bps}")
+        if self.erar_gamma < 0:
+            raise ValueError(f"erar_gamma must be >= 0, got {self.erar_gamma}")
+        if self.erar_tail_lambda < 0:
+            raise ValueError(f"erar_tail_lambda must be >= 0, got {self.erar_tail_lambda}")
 
 @dataclass
 class MeanReversionConfig(BaseStrategyConfig):

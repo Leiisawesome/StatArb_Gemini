@@ -529,7 +529,6 @@ class InstitutionalBacktestEngine:
             # (which requires CentralRiskManager). Instead, we manually initialize
             # the components we need for historical simulation.
             if len(self.components) > 0:
-                logger.info("\n🎯 Initializing registered components...")
                 logger.info(f"   Components registered: {len(self.components)}")
 
                 # Manually initialize each component
@@ -858,6 +857,26 @@ class InstitutionalBacktestEngine:
                     logger.info(f"   ✅ {symbol}: {len(data)} bars loaded")
                 else:
                     logger.warning(f"   ⚠️  {symbol}: No data available")
+
+            # Load benchmark data for correlation-change Δρ (used by ADS vol stops),
+            # without adding it to the strategy symbol universe.
+            try:
+                benchmark_symbol = str(self._get_strategy_param("corr_benchmark_symbol", "SPY"))
+                if benchmark_symbol and benchmark_symbol not in self.market_data:
+                    logger.info(f"   Loading benchmark {benchmark_symbol} (for Δρ)...")
+                    bench = self.data_manager.load_market_data(
+                        symbols=[benchmark_symbol],
+                        start_time=start_dt,
+                        end_time=end_dt,
+                        interval=self.config.interval,
+                    )
+                    if bench is not None and not bench.empty:
+                        self.market_data[benchmark_symbol] = bench
+                        logger.info(f"   ✅ {benchmark_symbol}: {len(bench)} bars loaded (benchmark)")
+                    else:
+                        logger.warning(f"   ⚠️  {benchmark_symbol}: No benchmark data available")
+            except Exception:
+                pass
 
             if not self.market_data:
                 raise ValueError("No market data loaded - cannot run backtest")
@@ -1312,6 +1331,20 @@ class InstitutionalBacktestEngine:
 
             logger.info(f"\n✅ Strategy registration complete: {registered_count} strategies registered")
 
+            # ✅ SSOT FIX: Inject PositionBook into each active enhanced strategy
+            # Without this, EnhancedBaseStrategy._has_position() falls back to deprecated internal tracking,
+            # causing repeated LONG_ENTRY emissions while already long.
+            if self.strategy_manager and hasattr(self.strategy_manager, "active_strategies"):
+                try:
+                    injected = 0
+                    for _name, _strategy in getattr(self.strategy_manager, "active_strategies", {}).items():
+                        if hasattr(_strategy, "set_position_book"):
+                            _strategy.set_position_book(self.position_book)
+                            injected += 1
+                    logger.info(f"📚 PositionBook injected into {injected} strategy instance(s) (SSOT)")
+                except Exception as e:
+                    logger.warning(f"⚠️  Could not inject PositionBook into strategies: {e}")
+
         except Exception as e:
             logger.error(f"❌ Strategy registration failed: {e}", exc_info=True)
             raise RuntimeError(f"Strategy registration failed: {e}")
@@ -1391,7 +1424,12 @@ class InstitutionalBacktestEngine:
                 'real_time_monitoring': False,  # Disabled for backtesting
 
                 # Short selling configuration - from flattened config
-                'allow_shorts': self.config.allow_shorts
+                'allow_shorts': self.config.allow_shorts,
+
+                # ADS v3.1: include institutional exit controls for backtest (dict-config path now preserves them)
+                'enable_ads_multi_exit': self._get_strategy_param('enable_ads_multi_exit', True),
+                'max_holding_minutes': self._get_strategy_param('max_holding_minutes', 24 * 60),
+                'enable_forward_vol_stops': self._get_strategy_param('enable_forward_vol_stops', True),
             }
 
             # Create risk manager instance (it will create RiskManagerConfig internally)
@@ -3354,7 +3392,6 @@ class InstitutionalBacktestEngine:
                     pnl_pct = (close_price - entry_price) / entry_price * 100
                 else: # Short
                     pnl_pct = (entry_price - close_price) / entry_price * 100
-            
             if pnl_pct <= 0:
                 continue
 
@@ -3445,25 +3482,6 @@ class InstitutionalBacktestEngine:
                                   pre_calc_index: int = 0) -> Dict[str, Any]:
         """
         Process a single bar of market data through the complete pipeline
-
-        COMPLIANCE FIX: Uses ProcessingPipelineOrchestrator (Rule 3) for unified data processing.
-
-        This method executes one iteration of the backtest loop:
-        1. Update regime engine with market data (Rule 2 - Regime-First)
-        2. ProcessingPipelineOrchestrator: Raw OHLCV → Indicators → Features → Signals (Rule 3)
-        3. Strategy signal generation using enriched data (Phase 5)
-        4. Risk authorization via CentralRiskManager (Rule 4, Phase 7)
-        5. Trade execution simulation
-        6. Position updates via CentralRiskManager (Rule 4, Phase 10)
-
-        Args:
-            bar: Market data for current bar
-            timestamp: Timestamp of current bar
-            bar_index: Index of current bar
-            pre_calc_index: Index in pre-calculated features (excludes warmup)
-
-        Returns:
-            Dict with bar processing results
         """
         bar_results = {
             'timestamp': timestamp,
@@ -3542,7 +3560,10 @@ class InstitutionalBacktestEngine:
                             current_bar_iloc = np.argmax(current_bar_mask.values)  # Get iloc position
                             # Pass data up to and including current bar (for historical context)
                             features_historical = self.pre_calculated_features.iloc[:current_bar_iloc + 1].copy()
-
+                            
+                            # Ensure features_historical has timestamp index for strategy consistency
+                            if 'timestamp' in features_historical.columns:
+                                features_historical = features_historical.set_index('timestamp')
                         else:
                             features_historical = pd.DataFrame()
                     elif hasattr(self.pre_calculated_features.index, 'equals'):
@@ -3560,8 +3581,10 @@ class InstitutionalBacktestEngine:
                         # ✅ CRITICAL FIX: Convert pre-calculated features to expected format
                         # Ensure features_historical is a DataFrame with correct columns
                         if 'timestamp' in features_historical.columns:
-                            # Rename timestamp column to avoid conflicts
-                            features_historical = features_historical.rename(columns={'timestamp': 'regime_timestamp'})
+                            # Keep `timestamp` for strategies (required for correct bar timestamp propagation).
+                            # If downstream logic wants a regime-specific alias, add it as a copy.
+                            if 'regime_timestamp' not in features_historical.columns:
+                                features_historical['regime_timestamp'] = features_historical['timestamp']
 
                         # Call strategy's generate_signals with Dict[symbol, enriched DataFrame with indicators]
                         # Strategy receives pre-calculated indicators with FULL HISTORICAL CONTEXT
@@ -3889,17 +3912,161 @@ class InstitutionalBacktestEngine:
             if self.risk_manager and self.risk_manager.current_positions:
                 current_prices = {}
                 for symbol in self.risk_manager.current_positions.keys():
-                    if symbol in self.market_data and timestamp in self.market_data[symbol].index:
-                        current_prices[symbol] = self.market_data[symbol].loc[timestamp, 'close']
-                    elif symbol in self.market_data:
-                        # Fallback: use the most recent available price
+                    if symbol in self.market_data:
+                        # Robust price lookup (tz-safe): use most recent close <= timestamp
                         symbol_data = self.market_data[symbol]
-                        if not symbol_data.empty:
-                            current_prices[symbol] = symbol_data['close'].iloc[-1]
+                        try:
+                            sym_df = symbol_data
+                            if 'timestamp' in sym_df.columns and not isinstance(sym_df.index, pd.DatetimeIndex):
+                                sym_df = sym_df.set_index('timestamp')
 
-                # Update via CentralRiskManager (single source of truth)
-                if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
-                    self.risk_manager.update_market_prices(current_prices)
+                            ts_compare = pd.Timestamp(timestamp)
+                            index_tz = getattr(sym_df.index, 'tz', None)
+                            ts_tz = ts_compare.tz
+                            if index_tz is not None and ts_tz is None:
+                                ts_compare = ts_compare.tz_localize(index_tz)
+                            elif index_tz is None and ts_tz is not None:
+                                ts_compare = ts_compare.tz_localize(None)
+
+                            filtered = sym_df[sym_df.index <= ts_compare]
+                            if len(filtered) > 0:
+                                close_col = 'close' if 'close' in filtered.columns else 'Close'
+                                if close_col in filtered.columns:
+                                    current_prices[symbol] = float(filtered[close_col].iloc[-1])
+                                    continue
+                        except Exception:
+                            pass
+
+                        # Fallback: use last available close in the dataframe
+                        if not symbol_data.empty:
+                            try:
+                                close_col = 'close' if 'close' in symbol_data.columns else 'Close'
+                                if close_col in symbol_data.columns:
+                                    current_prices[symbol] = float(symbol_data[close_col].iloc[-1])
+                            except Exception:
+                                pass
+
+                    # Update via CentralRiskManager (single source of truth)
+                    if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
+                        # CRITICAL: update_market_prices is async; must await so MTM + price history are actually updated.
+                        await self.risk_manager.update_market_prices(current_prices, timestamp=timestamp)
+
+            # ADS v3.1 exits in backtest: synthesize LONG_EXIT signals when multi-exit rules trigger.
+            # Rationale: exits are centralized (risk-side), but backtest execution/reporting expects signals.
+            try:
+                if self.risk_manager and self.risk_manager.current_positions:
+                    enable_ads_multi_exit = bool(self._get_strategy_param("enable_ads_multi_exit", False))
+                    max_holding_minutes = float(self._get_strategy_param("max_holding_minutes", 0.0) or 0.0)
+                    if enable_ads_multi_exit and max_holding_minutes > 0 and self.position_book is not None:
+                        from core_engine.risk.multi_exit_engine import decide_exit
+                        from core_engine.risk.volatility_forecast import (
+                            VolStopParams,
+                            correlation_change,
+                            sigma_eff,
+                            stop_distance_pct,
+                        )
+
+                        enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False))
+                        exit_rows = []
+                        positions = self.position_book.get_all_positions()
+                        for sym, pos in positions.items():
+                            try:
+                                if not getattr(pos, "is_long", True):
+                                    continue
+                                qty = float(getattr(pos, "quantity", 0.0))
+                                if qty <= 0:
+                                    continue
+                                opened_at = getattr(pos, "opened_at", None)
+                                if opened_at is None:
+                                    continue
+                                # Avoid repeatedly queuing exit while one is already pending for this symbol.
+                                if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == "sell") for t in (self.pending_signals or [])):
+                                    continue
+
+                                held_mins = (timestamp - opened_at).total_seconds() / 60.0
+
+                                # Compute pnl_pct using SSOT entry price + current mark from RiskManager (not PositionBook MTM).
+                                avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
+                                px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
+                                pnl_pct = ((px - avg_entry) / avg_entry) * 100.0 if avg_entry > 0 else 0.0
+
+                                # Optional forward-looking vol stop (% distance)
+                                stop_loss_pct_val = None
+                                if enable_forward_vol_stops:
+                                    try:
+                                        sym_prices = list(getattr(self.risk_manager, "_price_history", {}).get(sym, []))
+                                        if len(sym_prices) >= 3:
+                                            sp = np.asarray(sym_prices, dtype=float)
+                                            sym_returns = list(np.diff(sp) / sp[:-1])
+
+                                            benchmark = str(getattr(self.risk_manager.config, "corr_benchmark_symbol", "SPY"))
+                                            bench_prices = list(getattr(self.risk_manager, "_price_history", {}).get(benchmark, []))
+                                            bench_returns = []
+                                            if len(bench_prices) >= 3:
+                                                bp = np.asarray(bench_prices, dtype=float)
+                                                bench_returns = list(np.diff(bp) / bp[:-1])
+
+                                            s_eff, _, _ = sigma_eff(
+                                                sym_returns,
+                                                realized_window=int(getattr(self.risk_manager.config, "vol_realized_window", 20)),
+                                                lambda_=float(getattr(self.risk_manager.config, "vol_ewma_lambda", 0.94)),
+                                            )
+                                            d_rho = correlation_change(
+                                                sym_returns,
+                                                bench_returns,
+                                                short_window=int(getattr(self.risk_manager.config, "corr_short_window", 20)),
+                                                long_window=int(getattr(self.risk_manager.config, "corr_long_window", 60)),
+                                            )
+                                            params = VolStopParams(
+                                                k=float(getattr(self.risk_manager.config, "stop_k", 2.0)),
+                                                kappa=float(getattr(self.risk_manager.config, "stop_kappa", 0.5)),
+                                                overnight_mult=float(getattr(self.risk_manager.config, "stop_overnight_mult", 1.5)),
+                                            )
+                                            sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
+                                            stop_loss_pct_val = float(sl_frac) * 100.0
+                                    except Exception:
+                                        stop_loss_pct_val = None
+
+                                decision = decide_exit(
+                                    now=timestamp,
+                                    opened_at=opened_at,
+                                    pnl_pct=float(pnl_pct),
+                                    stop_loss_pct=stop_loss_pct_val,
+                                    max_holding_minutes=float(max_holding_minutes),
+                                    liquidity_bad=False,
+                                    liquidity_details=None,
+                                )
+
+                                if decision.should_exit:
+                                    exit_rows.append({
+                                        "symbol": sym,
+                                        "signal_type": "long_exit",
+                                        "confidence": 1.0,
+                                        "strength": 1.0,
+                                        "timestamp": timestamp,
+                                        "additional_data": {
+                                            "ads_exit": decision.reason,
+                                            "ads_exit_details": decision.details,
+                                            "held_minutes": held_mins,
+                                            "pnl_pct": float(pnl_pct),
+                                            "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
+                                        },
+                                    })
+                            except Exception:
+                                continue
+
+                        if exit_rows:
+                            exit_df = pd.DataFrame(exit_rows)
+                            bar_df_local = pd.DataFrame([bar.to_dict()])
+                            authorized_exits = await self._get_authorized_trades_for_bar(bar_df_local, exit_df, timestamp)
+                            if authorized_exits:
+                                for trade in authorized_exits:
+                                    trade["signal_bar_close"] = bar.get("close", 0)
+                                    trade["signal_bar_index"] = bar_index
+                                    trade["signal_timestamp"] = timestamp
+                                self.pending_signals.extend(authorized_exits)
+            except Exception:
+                pass
 
             # Record position history after execution
             if self.risk_manager:
@@ -3956,7 +4123,6 @@ class InstitutionalBacktestEngine:
         authorized_trades = []
 
         try:
-
             # Check if risk manager is available and initialized
             if self.risk_manager is None:
                 logger.warning("⚠️  No risk manager available - signals cannot be authorized")
@@ -4218,7 +4384,8 @@ class InstitutionalBacktestEngine:
                             metadata={
                                 'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
                                 'signal_type': signal_type,
-                                'bar_index': self.current_bar_index
+                                'bar_index': self.current_bar_index,
+                                'debug_run': 'momentum_smoke'
                             }
                         )
 
@@ -4239,6 +4406,8 @@ class InstitutionalBacktestEngine:
                                 'timestamp': timestamp,
                                 'current_price': current_price  # ✅ Store symbol-specific price
                             })
+                else:
+                    continue
 
         except Exception as e:
             logger.error(f"❌ Error getting authorized trades: {e}")

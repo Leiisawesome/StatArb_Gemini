@@ -1,0 +1,49 @@
+# Smoke Test Configuration for Momentum State Machine
+# Symbol: TSLA
+# Goal: Verify "Breakout Acceleration" logic avoids extension traps.
+
+experiment_name: "Smoke_Test_State_Machine"
+experiment_type: "smoke_test"
+
+# Market Data (Top-level for SmokeTest experiment)
+symbols: ["TSLA"]
+interval: "1min"
+start_date: "2024-12-20"
+end_date: "2024-12-20"
+
+# Portfolio Settings
+initial_capital: 100000
+allow_shorts: false
+
+# Strategy Selection (Top-level for SmokeTest experiment)
+strategies:
+  - type: "momentum"
+    name: "MOM_State_Machine"
+    allocation_pct: 1.0
+    parameters:
+      # State Machine Settings (Professional Re-architecture)
+      enable_state_machine: true
+      enable_eod_liquidation: true
+      eod_close_time: "15:55"
+      orb_minutes: 15
+      tightness_threshold: 0.9
+      max_extension_atr: 1.5
+      setup_expiry_bars: 15
+      anchor_ma: "sma_20"
+      
+      # Core momentum parameters
+      short_period: 10
+      medium_period: 20
+      long_period: 50
+      lookback_period: 60
+      momentum_threshold: 0.02
+      adx_threshold: 25.0
+      volume_threshold: 1.2
+      
+      # Position sizing
+      base_position_pct: 0.05
+      max_position_pct: 0.10
+
+# Risk Management
+min_signal_confidence: 0.40
+max_position_size: 0.40

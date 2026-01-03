@@ -9,7 +9,7 @@ experiment_type: "smoke_test"
 # Symbols - adjust based on strategy type:
 # - Single-symbol: ["TSLA"]
 # - Pairs trading: ["AAPL", "MSFT", "GOOGL", "AMZN"]  # Need 2+ symbols
-symbols: ["TSLA","NVDA"]  # Single-symbol for momentum/mean reversion
+symbols: ["TSLA"]  # Single-symbol for momentum/mean reversion
 interval: "1min"
 start_date: "2024-12-20"  # Valid data date
 end_date: "2024-12-20"    # Same day (1 day test)
@@ -23,37 +23,7 @@ allow_shorts: false  # Disable for mean reversion (enable for pairs trading)
 # Uncomment ONE strategy block to test
 # ========================================
 
-# OPTION 1: Momentum Strategy (commented out)
-# strategies:
-#   - type: "momentum"
-#     name: "MOM_Simple"
-#     allocation_pct: 1.0
-#     parameters:
-#       # Core momentum periods
-#       short_period: 10
-#       medium_period: 20
-#       long_period: 50
-#       lookback_period: 60
-#       
-#       # Entry thresholds (RELAXED for testing)
-#       momentum_threshold: 0.01             # RELAXED from 0.02 to 0.01
-#       adx_threshold: 15.0                  # RELAXED from 25.0 to 15.0
-#       volume_threshold: 1.0                # RELAXED from 1.2 to 1.0
-#       
-#       # RSI settings
-#       rsi_period: 14
-#       rsi_overbought: 75.0                 # RELAXED from 70 to 75
-#       rsi_oversold: 25.0                   # RELAXED from 30 to 25
-#       
-#       # Position sizing
-#       base_position_pct: 0.05
-#       max_position_pct: 0.10
-#       
-#       # Scanning mode
-#       scan_all_bars: false                 # Disabled - engine calls per-bar
-#       scan_interval: 1
-
-# OPTION 2: Mean Reversion Strategy (ACTIVE)
+# Mean Reversion Strategy (ACTIVE)
 # NOTE: Strategy uses EXHAUSTION SCORING system (v3.0)
 # Key thresholds are dislocation_*, NOT zscore_entry_threshold!
 strategies:
@@ -92,12 +62,12 @@ strategies:
       # MOMENTUM-AWARE EXIT LOGIC (NEW)
       enable_momentum_exit: true
       momentum_adx_threshold: 20.0      # ADX < 20 = weak trend, OK to exit
-      momentum_rsi_overbought: 70.0     # RSI > 70 = momentum exhausted, OK to exit  
+      momentum_rsi_overbought: 70.0     # RSI > 70 = momentum exhausted, OK to exit
       momentum_rsi_oversold: 30.0       # RSI < 30 = momentum exhausted, OK to exit
       momentum_volume_ratio: 0.7        # Volume < 70% avg = fading, OK to exit
       momentum_extended_zscore: 3.0     # Always exit if |z| > 3.0
       volume_climax_threshold: 1.8      # Volume > 1.8x avg = climax, OK to enter/exit
-
+#
       # Legacy (kept for reference but NOT used by exhaustion system)
       zscore_entry_threshold: 1.5       # IGNORED - use dislocation_minimum instead
       zscore_exit_threshold: 0.5

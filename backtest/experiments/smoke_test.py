@@ -18,6 +18,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any
 import time
+import os
 
 from backtest.experiments.base_experiment import BaseExperiment, ExperimentResult
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
@@ -168,10 +169,16 @@ async def run_smoke_test(config: Dict[str, Any] = None):
         from pathlib import Path
 
         try:
-            # Get path to smoke_test.yaml
-            config_path = Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'
+            # Allow override without changing defaults:
+            # SMOKE_TEST_CONFIG=/abs/path/to/config.yaml python backtest/experiments/smoke_test.py
+            override = os.environ.get("SMOKE_TEST_CONFIG")
+            if override:
+                config_path = Path(override)
+            else:
+                # Get path to smoke_test.yaml
+                config_path = Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'
             config = load_config(str(config_path))
-            print(f"✅ Loaded configuration from smoke_test.yaml")
+            print(f"✅ Loaded configuration from {config_path.name}")
             print(f"   Symbols: {config.get('symbols', [])}")
             print(f"   Period: {config.get('start_date')} → {config.get('end_date')}")
         except Exception as e:

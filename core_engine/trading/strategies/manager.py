@@ -971,7 +971,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             regime_info = await self._get_current_regime_info()
 
             # Generate signals from each active strategy with enhanced logic
-            logger.info(f"🎯 LOOP DEBUG: active_strategies = {list(self.active_strategies.keys())}")
             for strategy_name, strategy in self.active_strategies.items():
                 allocation = self.strategy_allocations.get(strategy_name)
                 if not allocation or not allocation.active:
@@ -1645,10 +1644,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 return signals
 
             # For enhanced strategy instances, use their generate_signals method
-            logger.info(f"🎯 DEBUG: Checking strategy type for {strategy_name}: {type(strategy).__name__}")
             if isinstance(strategy, EnhancedBaseStrategy):
                 try:
-                    logger.info(f"🎯 DEBUG: Calling enhanced strategy.generate_signals for {strategy_name}")
                     # Convert market_data to Dict[str, pd.DataFrame] format expected by enhanced strategies
                     if isinstance(market_data, dict):
                         market_data_dict = market_data
@@ -3013,8 +3010,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     async def _initialize_multi_strategy_coordination(self) -> None:
         """Initialize multi-strategy coordination components"""
         try:
-            logger.info("🎯 Initializing multi-strategy coordination...")
-
             # Initialize signal aggregator
             if self.config.enable_signal_aggregation:
                 aggregator_config = {
@@ -3261,20 +3256,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     ) -> List[EnhancedSignal]:
         """
         Generate signals using multi-strategy coordination
-
-        Args:
-            symbols: List of symbols to generate signals for
-            market_data: Dict mapping symbol to enriched DataFrame
-            current_positions: Dict mapping symbol to quantity (legacy)
-            position_details: Dict mapping symbol to rich position info:
-                {
-                    'quantity': float,
-                    'entry_price': float,
-                    'current_price': float,
-                    'unrealized_pnl': float,
-                    'pnl_pct': float,
-                    'is_profitable': bool
-                }
         """
         try:
             # Store position details for strategies to access

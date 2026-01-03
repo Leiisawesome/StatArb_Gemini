@@ -728,7 +728,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         """
         if self._position_book:
             pos = self._position_book.get_position(symbol)
-            return pos is not None and pos.net_quantity != 0
+            return pos is not None and pos.quantity != 0
         # Fallback to deprecated internal tracking
         if symbol in self._positions:
             return self._positions[symbol].quantity != 0
