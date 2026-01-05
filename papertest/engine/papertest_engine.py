@@ -75,6 +75,10 @@ class PapertestEngine:
             if self.wired and self.wired.replay_adapter:
                 self.wired.replay_adapter.request_stop()
 
+        # Extract session gate for bridge filtering (consistency with backtest)
+        session_gate = (self.wired.components or {}).get("session_gate")
+        filter_market_hours = bool(data_cfg.get("simulate_market_hours", True))
+
         self._bridge = ReplayToDispatcherBridge(
             dispatcher=self.wired.dispatcher,
             id_generator=self.wired.id_generator,
@@ -82,6 +86,8 @@ class PapertestEngine:
             stop_after_bars=stop_after_bars,
             stop_at_timestamp=stop_at_timestamp,
             stop_callback=_request_stop,
+            session_gate=session_gate,
+            filter_market_hours=filter_market_hours,
         )
         self.wired.replay_adapter.add_message_handler(self._bridge.on_feed_message)
 

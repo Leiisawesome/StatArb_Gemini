@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import threading
 
 from ..system.event_dispatcher import EventType
+from ..system.session_gate import GateDecision
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,7 @@ class PaperTradingConfig:
     # EOD Liquidation settings
     enable_eod_liquidation: bool = False
     eod_close_time: str = "15:55"
+    eod_profit_only: bool = True
 
 class PaperTradingEngine:
     """
@@ -728,6 +730,20 @@ class PaperTradingEngine:
         self._bar_batch_market_data[symbol] = enriched_df
 
         expected = set(self._expected_symbols) if self._expected_symbols else set(self._bar_batch_market_data.keys())
+        
+        # SESSION GATE CHECK (Rule 4.1: Only trade during market hours)
+        if self._session_gate:
+            # Check if we are in market hours for the first symbol in the batch
+            # (Assuming all symbols share the same market hours for simplicity in this engine)
+            gate_res = self._session_gate.check(timestamp, list(expected)[0] if expected else symbol)
+            if gate_res.decision == GateDecision.REJECT:
+                # Still update broker price for mark-to-market, but skip signal generation
+                if self._paper_broker:
+                    close_price = bar.get('close') or bar.get('close_price')
+                    if close_price:
+                        self._paper_broker.set_price(symbol, float(close_price))
+                return
+
         if expected and expected.issubset(self._bar_batch_symbols):
             # Call StrategyManager once per timestamp with full universe snapshot
             position_details: Optional[Dict[str, Dict[str, Any]]] = None
@@ -947,14 +963,30 @@ class PaperTradingEngine:
             elif self._paper_broker:
                 pos = self._paper_broker.get_position(symbol)
             
-            if pos and abs(pos.quantity) > 0:
-                side = "sell" if pos.quantity > 0 else "buy"
+            if pos and abs(float(pos.quantity)) > 0:
+                # PROFIT-ONLY LIQUIDATION (Parity with backtest)
+                if self.config.eod_profit_only:
+                    current_price = float(bar.get('close') or bar.get('last_price') or 0.0)
+                    avg_price = float(getattr(pos, 'avg_entry_price', getattr(pos, 'average_price', 0.0)))
+                    
+                    if current_price > 0 and avg_price > 0:
+                        pnl_pct = 0.0
+                        qty = float(pos.quantity)
+                        if qty > 0: # Long
+                            pnl_pct = (current_price - avg_price) / avg_price
+                        else: # Short
+                            pnl_pct = (avg_price - current_price) / avg_price
+                        
+                        if pnl_pct <= 0:
+                            continue
+
+                side = "sell" if float(pos.quantity) > 0 else "buy"
                 
                 # Create a liquidation signal
                 signal = {
                     'symbol': symbol,
                     'side': side,
-                    'requested_quantity': abs(pos.quantity),
+                    'requested_quantity': abs(float(pos.quantity)),
                     'type': 'market',
                     'reason': 'EOD_LIQUIDATION',
                     'signal_timestamp': timestamp

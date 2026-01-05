@@ -30,6 +30,21 @@ from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 
+# Import JIT utilities
+try:
+    from ..utils.jit_utils import (
+        jit_calculate_spread_proxy,
+        jit_calculate_spread_history,
+        jit_calculate_overall_score,
+        jit_calculate_percentile
+    )
+except ImportError:
+    # Fallback to pure Python if JIT utils not available
+    jit_calculate_spread_proxy = None
+    jit_calculate_spread_history = None
+    jit_calculate_overall_score = None
+    jit_calculate_percentile = None
+
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
     from ..system.interfaces import ISystemComponent
@@ -472,6 +487,9 @@ class LiquidityAssessmentEngine(ISystemComponent):
         This tends to overestimate actual bid-ask spread but provides
         a reasonable proxy for illiquidity cost.
         """
+        if jit_calculate_spread_proxy:
+            return jit_calculate_spread_proxy(high, low, close)
+
         if close <= 0:
             return 10.0  # Default 10 bps
 
@@ -483,20 +501,27 @@ class LiquidityAssessmentEngine(ISystemComponent):
 
     def _calculate_spread_history(self, window: pd.DataFrame) -> np.ndarray:
         """Calculate spread proxy for historical window."""
-        spreads = []
-
         high_col = 'high' if 'high' in window.columns else 'High'
         low_col = 'low' if 'low' in window.columns else 'Low'
         close_col = 'close' if 'close' in window.columns else 'Close'
 
         if high_col in window.columns and low_col in window.columns and close_col in window.columns:
+            if jit_calculate_spread_history:
+                return jit_calculate_spread_history(
+                    window[high_col].values,
+                    window[low_col].values,
+                    window[close_col].values
+                )
+
+            spreads = []
             for _, row in window.iterrows():
                 spread = self._calculate_spread_proxy(
                     row[high_col], row[low_col], row[close_col]
                 )
                 spreads.append(spread)
+            return np.array(spreads) if spreads else np.array([10.0])
 
-        return np.array(spreads) if spreads else np.array([10.0])
+        return np.array([10.0])
 
     def _calculate_kyle_lambda(
         self,
@@ -564,6 +589,9 @@ class LiquidityAssessmentEngine(ISystemComponent):
         - Spread score (40%): Based on spread proxy
         - Volatility score (20%): Based on volatility
         """
+        if jit_calculate_overall_score:
+            return jit_calculate_overall_score(volume_ratio, spread_bps, volatility)
+
         # Volume score (0-100)
         if volume_ratio >= 2.0:
             volume_score = 100.0
@@ -617,6 +645,9 @@ class LiquidityAssessmentEngine(ISystemComponent):
         """Calculate percentile of value within history."""
         if len(history) == 0:
             return 50.0
+
+        if jit_calculate_percentile:
+            return jit_calculate_percentile(value, history)
 
         return float(np.sum(history <= value) / len(history) * 100.0)
 

@@ -18,6 +18,7 @@ from scipy import stats
 from core_engine.exceptions import ConfigurationRequiredError
 # Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
 from core_engine.analytics.core_metrics import calculate_max_drawdown, calculate_beta
+from core_engine.utils.jit_utils import jit_calculate_ewma_weights, jit_calculate_cvar
 
 logger = logging.getLogger(__name__)
 
@@ -375,14 +376,12 @@ class VarCalculator:
         else:
             portfolio_returns = returns
 
-        # Calculate exponentially weighted volatility
+        # Calculate exponentially weighted volatility using JIT
         lambda_factor = 0.94  # Decay factor
-        weights = np.array([(lambda_factor ** i) for i in range(len(portfolio_returns))])
-        weights = weights[::-1]  # Reverse to give more weight to recent obs
-        weights = weights / weights.sum()
+        weights = jit_calculate_ewma_weights(len(portfolio_returns), lambda_factor)
 
         # Weight the returns
-        weighted_returns = portfolio_returns * np.sqrt(weights[-len(portfolio_returns):])
+        weighted_returns = portfolio_returns * np.sqrt(weights)
 
         # Scale for time horizon
         scaled_returns = weighted_returns * np.sqrt(time_horizon)
@@ -431,9 +430,8 @@ class VarCalculator:
                 var_value = -np.percentile(portfolio_returns, quantile * 100)
                 var_1d[confidence_level] = var_value
 
-                # Conditional VaR (Expected Shortfall)
-                tail_returns = portfolio_returns[portfolio_returns <= -var_value]
-                cvar_value = -tail_returns.mean() if len(tail_returns) > 0 else var_value
+                # Conditional VaR (Expected Shortfall) using JIT
+                cvar_value = jit_calculate_cvar(portfolio_returns.values, var_value)
                 cvar_1d[confidence_level] = cvar_value
 
             # Volatility calculations

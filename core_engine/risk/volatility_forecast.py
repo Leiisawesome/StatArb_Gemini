@@ -13,6 +13,8 @@ from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 
+from core_engine.utils.jit_utils import jit_ewma_volatility, jit_correlation
+
 
 def _to_np(x: Iterable[float]) -> np.ndarray:
     arr = np.asarray(list(x), dtype=float)
@@ -36,6 +38,9 @@ def ewma_volatility(returns: Sequence[float], lambda_: float = 0.94) -> float:
     r = _to_np(returns)
     if r.size < 2:
         return 0.0
+
+    if jit_ewma_volatility:
+        return float(jit_ewma_volatility(r, float(lambda_)))
 
     lam = float(lambda_)
     lam = max(0.0, min(0.9999, lam))
@@ -84,7 +89,11 @@ def correlation_change(
     b = b[-n:]
 
     def corr(x: np.ndarray, y: np.ndarray) -> float:
-        if x.size < 5 or np.std(x) == 0 or np.std(y) == 0:
+        if x.size < 5:
+            return 0.0
+        if jit_correlation:
+            return float(jit_correlation(x, y))
+        if np.std(x) == 0 or np.std(y) == 0:
             return 0.0
         return float(np.corrcoef(x, y)[0, 1])
 

@@ -17,6 +17,7 @@ from scipy import stats
 from scipy.stats import kendalltau, spearmanr
 
 from core_engine.exceptions import ConfigurationRequiredError
+from core_engine.utils.jit_utils import jit_calculate_correlation_spike
 
 logger = logging.getLogger(__name__)
 
@@ -515,19 +516,9 @@ class CorrelationAnalyzer:
                 elif scenario_name == "correlation_spike":
                     # Scenario where all correlations increase
                     original_values = correlation_matrix.values
-                    n = len(original_values)
-
-                    # Increase off-diagonal elements
-                    stressed_values = original_values.copy()
-                    for i in range(n):
-                        for j in range(n):
-                            if i != j:
-                                current_corr = original_values[i, j]
-                                # Move correlation towards 1 or -1 based on sign
-                                if current_corr >= 0:
-                                    stressed_values[i, j] = current_corr + (1 - current_corr) * stress_factor
-                                else:
-                                    stressed_values[i, j] = current_corr + (-1 - current_corr) * stress_factor
+                    
+                    # Use JIT-optimized correlation spike calculation
+                    stressed_values = jit_calculate_correlation_spike(original_values, stress_factor)
 
                     stressed_matrix = pd.DataFrame(
                         stressed_values,

@@ -399,6 +399,16 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             if idx < 0:
                 idx = len(data) + idx
 
+            # Get timestamp safely
+            if isinstance(data.index, pd.DatetimeIndex):
+                timestamp = data.index[idx]
+            elif 'timestamp' in data.columns:
+                timestamp = data['timestamp'].iloc[idx]
+            elif 'datetime' in data.columns:
+                timestamp = data['datetime'].iloc[idx]
+            else:
+                timestamp = None
+
             if idx < self.config.lookback_period or idx >= len(data):
                 return None
 

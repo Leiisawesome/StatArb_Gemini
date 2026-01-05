@@ -15,6 +15,18 @@ import time
 from collections import defaultdict, deque
 import warnings
 
+# Import JIT utilities
+try:
+    from ...utils.jit_utils import (
+        jit_detect_price_spike,
+        jit_detect_volume_spike,
+        jit_detect_outlier
+    )
+except ImportError:
+    jit_detect_price_spike = None
+    jit_detect_volume_spike = None
+    jit_detect_outlier = None
+
 # Import constants
 from ..constants import (
     AnomalyDetection,
@@ -319,6 +331,15 @@ class AnomalyDetector:
         if len(recent_prices) < 3:
             return anomalies
 
+        # Use JIT if available
+        if jit_detect_price_spike:
+            if jit_detect_price_spike(current_price, np.array(recent_prices), self.price_spike_threshold):
+                anomalies.append(AnomalyType.PRICE_SPIKE)
+            
+            # Update moving average for status reporting
+            self._moving_averages[symbol]['price'] = np.mean(recent_prices)
+            return anomalies
+
         # Calculate average recent price
         avg_price = np.mean(recent_prices)
 
@@ -352,6 +373,15 @@ class AnomalyDetector:
                          if dp.get('volume') is not None and dp.get('volume') > 0]
 
         if len(recent_volumes) < 5:
+            return anomalies
+
+        # Use JIT if available
+        if jit_detect_volume_spike:
+            if jit_detect_volume_spike(current_volume, np.array(recent_volumes), self.volume_spike_threshold):
+                anomalies.append(AnomalyType.VOLUME_SPIKE)
+            
+            # Update moving average
+            self._moving_volumes[symbol]['volume'] = np.mean(recent_volumes)
             return anomalies
 
         # Calculate average volume
@@ -466,14 +496,18 @@ class AnomalyDetector:
                            if dp.get('price') is not None]
 
             if len(recent_prices) >= 10:
-                mean_price = np.mean(recent_prices)
-                std_price = np.std(recent_prices)
-
-                if std_price > 0:
-                    z_score = abs(data_point['price'] - mean_price) / std_price
-
-                    if z_score > self.outlier_std_threshold:
+                if jit_detect_outlier:
+                    if jit_detect_outlier(data_point['price'], np.array(recent_prices), self.outlier_std_threshold):
                         anomalies.append(AnomalyType.OUTLIER)
+                else:
+                    mean_price = np.mean(recent_prices)
+                    std_price = np.std(recent_prices)
+
+                    if std_price > 0:
+                        z_score = abs(data_point['price'] - mean_price) / std_price
+
+                        if z_score > self.outlier_std_threshold:
+                            anomalies.append(AnomalyType.OUTLIER)
 
         return anomalies
 

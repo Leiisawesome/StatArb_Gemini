@@ -695,9 +695,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Measures how consistently price moves in one direction
         if len(df) >= 20:
             # Calculate trend strength as the ratio of cumulative return to cumulative absolute return
-            returns_20 = df['close'].pct_change(fill_method=None).rolling(20)
-            cumulative_return = returns_20.sum()
-            cumulative_abs_return = returns_20.apply(lambda x: x.abs().sum())
+            returns_raw = df['close'].pct_change(fill_method=None)
+            cumulative_return = returns_raw.rolling(20).sum()
+            cumulative_abs_return = returns_raw.abs().rolling(20).sum()
 
             # Avoid division by zero
             df['trend_strength'] = 0.0
@@ -872,34 +872,13 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             df['composite_z'] = composite_z_values
 
             # Step 4: Calculate composite percentile (0-100 scale)
-            # P0 PERF FIX: Use vectorized scipy.stats.rankdata instead of slow rolling apply
-            # This is 50-100x faster than Python function calls per window
+            # P0 PERF FIX: Use JIT-optimized rolling rank instead of slow Python loop with rankdata
             window = min(252, len(df))  # Up to 1 year of data
 
-            # Vectorized rolling percentile using expanding rank
-            composite_z_series = df['composite_z']
-            n = len(composite_z_series)
-
-            if n >= 50:
-                # Use vectorized approach: for each point, calculate its rank in the preceding window
-                # scipy.stats.rankdata is highly optimized in C
-                composite_pct = np.full(n, 50.0)  # Default neutral percentile
-
-                # For efficiency, calculate ranks in chunks
-                # Each value's percentile = its rank in window / window_size * 100
-                z_values = composite_z_series.values
-
-                for i in range(50, n):
-                    start_idx = max(0, i - window + 1)
-                    window_data = z_values[start_idx:i + 1]
-                    # rankdata returns 1-based ranks, normalize to 0-100
-                    ranks = stats.rankdata(window_data, method='average')
-                    # Last element's rank as percentile
-                    composite_pct[i] = (ranks[-1] - 1) / (len(ranks) - 1) * 100 if len(ranks) > 1 else 50.0
-
-                df['composite_pct'] = composite_pct
-            else:
-                df['composite_pct'] = 50.0  # Not enough data
+            # Vectorized rolling percentile using JIT kernel
+            # jit_rolling_rank returns 0-1, so multiply by 100
+            df['composite_pct'] = jit_rolling_rank(df['composite_z'].values, window) * 100.0
+            df['composite_pct'] = df['composite_pct'].fillna(50.0)
 
             # Verify composite_pct range is correct
             pct_min, pct_max = df['composite_pct'].min(), df['composite_pct'].max()
@@ -940,28 +919,38 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         try:
             # Use rolling window for adaptive calculation
             window = min(252, len(series))  # Up to 1 year
+            
+            # Import JIT utilities
+            from core_engine.utils.jit_utils import is_numba_available, jit_rolling_mad_zscore
 
-            def mad_zscore_window(x):
-                """Calculate MAD Z-score for a window"""
-                if len(x) < 20:
-                    return np.nan
+            if is_numba_available():
+                z_scores = pd.Series(
+                    jit_rolling_mad_zscore(series.values, window, min_periods=20),
+                    index=series.index
+                )
+            else:
+                def mad_zscore_window(x):
+                    """Calculate MAD Z-score for a window"""
+                    if len(x) < 20:
+                        return np.nan
 
-                median = np.median(x)
-                mad = np.median(np.abs(x - median))
+                    median = np.median(x)
+                    mad = np.median(np.abs(x - median))
 
-                # Avoid division by zero
-                if mad < 1e-8:
-                    # Use standard deviation fallback
-                    std = np.std(x)
-                    if std < 1e-8:
-                        return 0.0
-                    return (x.iloc[-1] - np.mean(x)) / std
+                    # Avoid division by zero
+                    if mad < 1e-8:
+                        # Use standard deviation fallback
+                        std = np.std(x)
+                        if std < 1e-8:
+                            return 0.0
+                        return (x.iloc[-1] - np.mean(x)) / std
 
-                # MAD-based Z-score (1.4826 is scaling factor for normal distribution)
-                z_score = (x.iloc[-1] - median) / (1.4826 * mad)
-                return z_score
+                    # MAD-based Z-score (1.4826 is scaling factor for normal distribution)
+                    z_score = (x.iloc[-1] - median) / (1.4826 * mad)
+                    return z_score
 
-            z_scores = series.rolling(window, min_periods=20).apply(mad_zscore_window, raw=False)
+                z_scores = series.rolling(window, min_periods=20).apply(mad_zscore_window, raw=False)
+            
             return z_scores.fillna(0.0)
 
         except Exception as e:
@@ -1005,13 +994,13 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             try:
                 # Clean the ATR column before rolling operations
                 clean_atr = pd.to_numeric(df['atr'], errors='coerce').fillna(0)
-                df['atr_percentile'] = clean_atr.rolling(50).rank(pct=True)
+                # P0 PERF FIX: Use JIT-optimized rolling rank
+                df['atr_percentile'] = jit_rolling_rank(clean_atr.values, 50)
                 df['atr_percentile'] = df['atr_percentile'].fillna(0.5)
             except Exception as e:
                 # If any error occurs, set atr_percentile to 0.5
                 self.logger.warning(f"Error calculating ATR percentile: {e}")
                 df['atr_percentile'] = 0.5
-
         # Historical volatility features
         vol_cols = [col for col in df.columns if col.startswith('volatility_')]
         for col in vol_cols:
@@ -1143,6 +1132,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Collect all new columns to avoid fragmentation
         new_columns = {}
 
+        # Import JIT utilities
+        from core_engine.utils.jit_utils import is_numba_available, jit_rolling_rank
+
         for feature in key_features:
             if feature in df.columns:
                 for period in self.config.lookback_periods:
@@ -1150,7 +1142,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                         new_columns[f'{feature}_mean_{period}'] = df[feature].rolling(window=period).mean()
                         new_columns[f'{feature}_std_{period}'] = df[feature].rolling(window=period).std()
                         new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(window=period).skew()
-                        new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(window=period).apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+                        
+                        # Optimization: Use JIT for rolling rank if available
+                        if is_numba_available():
+                            new_columns[f'{feature}_rank_{period}'] = jit_rolling_rank(df[feature].values, period)
+                        else:
+                            new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(window=period).apply(
+                                lambda x: pd.Series(x).rank(pct=True).iloc[-1]
+                            )
                     except Exception as e:
                         self.logger.warning(f"Error creating rolling feature {feature} for period {period}: {e}")
 

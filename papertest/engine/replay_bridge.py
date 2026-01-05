@@ -12,13 +12,18 @@ for ordering, conflation, and backpressure.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Callable
+from zoneinfo import ZoneInfo
 
 from core_engine.data.feeds.adapters import FeedMessage
 from core_engine.system.event_dispatcher import DeterministicEventDispatcher, EventType
 from core_engine.system.idempotency import IdGenerator
+from core_engine.system.session_gate import TradingSessionGate, GateDecision
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +32,7 @@ class BridgeStats:
     quotes_enqueued: int = 0
     trades_enqueued: int = 0
     dropped: int = 0
+    skipped_market_hours: int = 0
 
 
 class ReplayToDispatcherBridge:
@@ -39,6 +45,8 @@ class ReplayToDispatcherBridge:
         stop_after_bars: Optional[int] = None,
         stop_at_timestamp: Optional[datetime] = None,
         stop_callback: Optional[Callable[[], None]] = None,
+        session_gate: Optional[TradingSessionGate] = None,
+        filter_market_hours: bool = True,
     ):
         self._dispatcher = dispatcher
         self._ids = id_generator
@@ -50,6 +58,8 @@ class ReplayToDispatcherBridge:
         self._stop_at_timestamp = stop_at_timestamp
         self._stop_callback = stop_callback
         self._stop_requested = False
+        self._session_gate = session_gate
+        self._filter_market_hours = filter_market_hours
 
     @property
     def stats(self) -> Dict[str, int]:
@@ -59,6 +69,7 @@ class ReplayToDispatcherBridge:
             "trades_enqueued": self._stats.trades_enqueued,
             "dropped": self._stats.dropped,
             "skipped_before_start": self._skipped_before_start,
+            "skipped_market_hours": self._stats.skipped_market_hours,
         }
 
     def on_feed_message(self, msg: FeedMessage) -> None:
@@ -69,11 +80,24 @@ class ReplayToDispatcherBridge:
         """
         ts = msg.timestamp
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            # CRITICAL: US Equity data is typically stored in Eastern Time.
+            # If naive, treat as America/New_York to ensure session gate parity with backtest.
+            try:
+                ts = ts.replace(tzinfo=ZoneInfo("America/New_York"))
+            except Exception:
+                ts = ts.replace(tzinfo=timezone.utc)
 
         event_type = self._map_type(msg.message_type)
         if event_type is None:
             return
+
+        # Market Hours Filtering (Consistency with Backtest)
+        # If session_gate is provided and filter_market_hours is True, we only allow RTH data.
+        if self._filter_market_hours and self._session_gate:
+            res = self._session_gate.check(ts, msg.symbol)
+            if res.decision == GateDecision.REJECT:
+                self._stats.skipped_market_hours += 1
+                return
 
         # Optional debug fast-forward: ignore bars until a configured start timestamp.
         # This keeps reproductions to a few seconds while preserving determinism inside the window.

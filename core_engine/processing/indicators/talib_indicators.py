@@ -31,6 +31,15 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, Union
 
+# JIT Optimization (Rule: Performance First)
+try:
+    from core_engine.utils.jit_utils import njit_conditional
+except ImportError:
+    # Fallback if utils not in path
+    def njit_conditional(func=None, **kwargs):
+        if func is None: return lambda f: f
+        return func
+
 logger = logging.getLogger(__name__)
 
 # Try to import TA-Lib
@@ -76,9 +85,12 @@ def calculate_rsi(
         return pd.Series(result, index=close.index, name='rsi')
     return result
 
+@njit_conditional
 def _rsi_fallback(close: np.ndarray, period: int) -> np.ndarray:
     """Pure Python RSI implementation using Wilder's smoothing"""
-    delta = np.diff(close, prepend=close[0])
+    delta = np.diff(close)
+    # Prepend 0 to match length of close
+    delta = np.concatenate((np.array([0.0]), delta))
 
     gains = np.where(delta > 0, delta, 0.0)
     losses = np.where(delta < 0, -delta, 0.0)
@@ -166,6 +178,7 @@ def _macd_fallback(
 
     return macd, signal, histogram
 
+@njit_conditional
 def _ema(data: np.ndarray, period: int) -> np.ndarray:
     """Calculate Exponential Moving Average"""
     alpha = 2.0 / (period + 1)
@@ -219,6 +232,7 @@ def calculate_bollinger_bands(
         )
     return upper, middle, lower
 
+@njit_conditional
 def _bollinger_fallback(
     close: np.ndarray,
     period: int,
@@ -285,6 +299,7 @@ def calculate_atr(
         return pd.Series(result, index=close.index, name='atr')
     return result
 
+@njit_conditional
 def _atr_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -378,6 +393,7 @@ def calculate_adx(
         )
     return adx, plus_di, minus_di
 
+@njit_conditional
 def _adx_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -508,6 +524,7 @@ def calculate_stochastic(
         )
     return slowk, slowd
 
+@njit_conditional
 def _stochastic_fallback(
     high: np.ndarray,
     low: np.ndarray,
@@ -558,13 +575,19 @@ def calculate_sma(
     if TALIB_AVAILABLE:
         result = talib.SMA(data_arr.astype(np.float64), timeperiod=period)
     else:
-        n = len(data_arr)
-        result = np.full(n, np.nan)
-        for i in range(period - 1, n):
-            result[i] = np.mean(data_arr[i - period + 1:i + 1])
+        result = _sma_fallback(data_arr, period)
 
     if is_series:
         return pd.Series(result, index=data.index, name=f'sma_{period}')
+    return result
+
+@njit_conditional
+def _sma_fallback(data: np.ndarray, period: int) -> np.ndarray:
+    """Pure Python SMA implementation"""
+    n = len(data)
+    result = np.full(n, np.nan)
+    for i in range(period - 1, n):
+        result[i] = np.mean(data[i - period + 1:i + 1])
     return result
 
 def calculate_ema(
@@ -623,20 +646,26 @@ def calculate_williams_r(
             timeperiod=period
         )
     else:
-        n = len(close_arr)
-        result = np.full(n, np.nan)
-
-        for i in range(period - 1, n):
-            highest = np.max(high_arr[i - period + 1:i + 1])
-            lowest = np.min(low_arr[i - period + 1:i + 1])
-
-            if highest != lowest:
-                result[i] = -100.0 * (highest - close_arr[i]) / (highest - lowest)
-            else:
-                result[i] = -50.0
+        result = _williams_r_fallback(high_arr, low_arr, close_arr, period)
 
     if is_series:
         return pd.Series(result, index=close.index, name='williams_r')
+    return result
+
+@njit_conditional
+def _williams_r_fallback(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
+    """Pure Python Williams %R implementation"""
+    n = len(close)
+    result = np.full(n, np.nan)
+
+    for i in range(period - 1, n):
+        highest = np.max(high[i - period + 1:i + 1])
+        lowest = np.min(low[i - period + 1:i + 1])
+
+        if highest != lowest:
+            result[i] = -100.0 * (highest - close[i]) / (highest - lowest)
+        else:
+            result[i] = -50.0
     return result
 
 # =============================================================================
@@ -670,20 +699,26 @@ def calculate_obv(
             volume_arr.astype(np.float64)
         )
     else:
-        n = len(close_arr)
-        result = np.zeros(n)
-        result[0] = volume_arr[0]
-
-        for i in range(1, n):
-            if close_arr[i] > close_arr[i-1]:
-                result[i] = result[i-1] + volume_arr[i]
-            elif close_arr[i] < close_arr[i-1]:
-                result[i] = result[i-1] - volume_arr[i]
-            else:
-                result[i] = result[i-1]
+        result = _obv_fallback(close_arr, volume_arr)
 
     if is_series:
         return pd.Series(result, index=close.index, name='obv')
+    return result
+
+@njit_conditional
+def _obv_fallback(close: np.ndarray, volume: np.ndarray) -> np.ndarray:
+    """Pure Python OBV implementation"""
+    n = len(close)
+    result = np.zeros(n)
+    result[0] = volume[0]
+
+    for i in range(1, n):
+        if close[i] > close[i-1]:
+            result[i] = result[i-1] + volume[i]
+        elif close[i] < close[i-1]:
+            result[i] = result[i-1] - volume[i]
+        else:
+            result[i] = result[i-1]
     return result
 
 # =============================================================================
@@ -725,24 +760,30 @@ def calculate_cci(
             timeperiod=period
         )
     else:
-        # Typical price
-        tp = (high_arr + low_arr + close_arr) / 3.0
-
-        n = len(close_arr)
-        result = np.full(n, np.nan)
-
-        for i in range(period - 1, n):
-            window = tp[i - period + 1:i + 1]
-            sma = np.mean(window)
-            mad = np.mean(np.abs(window - sma))
-
-            if mad > 0:
-                result[i] = (tp[i] - sma) / (0.015 * mad)
-            else:
-                result[i] = 0.0
+        result = _cci_fallback(high_arr, low_arr, close_arr, period)
 
     if is_series:
         return pd.Series(result, index=close.index, name='cci')
+    return result
+
+@njit_conditional
+def _cci_fallback(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
+    """Pure Python CCI implementation"""
+    # Typical price
+    tp = (high + low + close) / 3.0
+
+    n = len(close)
+    result = np.full(n, np.nan)
+
+    for i in range(period - 1, n):
+        window = tp[i - period + 1:i + 1]
+        sma = np.mean(window)
+        mad = np.mean(np.abs(window - sma))
+
+        if mad > 0:
+            result[i] = (tp[i] - sma) / (0.015 * mad)
+        else:
+            result[i] = 0.0
     return result
 
 # =============================================================================

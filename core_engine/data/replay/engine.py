@@ -27,10 +27,12 @@ from datetime import datetime, time
 from typing import Dict, List, Optional, Callable, Any, Set
 from enum import Enum
 import pandas as pd
+import numpy as np
 
 from core_engine.data.manager import ClickHouseDataManager, ClickHouseDataConfig
 from core_engine.data.feeds.adapters import FeedMessage, FeedProvider
 from .config import ReplayConfig, ReplaySpeed
+from core_engine.utils.jit_utils import njit_conditional, jit_find_timestamp_indices
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,17 @@ class HistoricalDataReplayEngine:
         self._data_buffer: Dict[str, pd.DataFrame] = {}
         self._buffer_lock = asyncio.Lock()
 
+        # JIT-optimized unified buffer
+        self._unified_timestamps: Optional[np.ndarray] = None
+        self._unified_symbols: Optional[np.ndarray] = None
+        self._unified_opens: Optional[np.ndarray] = None
+        self._unified_highs: Optional[np.ndarray] = None
+        self._unified_lows: Optional[np.ndarray] = None
+        self._unified_closes: Optional[np.ndarray] = None
+        self._unified_volumes: Optional[np.ndarray] = None
+        self._unified_vwaps: Optional[np.ndarray] = None
+        self._unified_transactions: Optional[np.ndarray] = None
+
         # Timing control - use actual data timestamps
         self._previous_data_timestamp: Optional[datetime] = None
         self._speed_multiplier = config.speed.value
@@ -175,6 +188,9 @@ class HistoricalDataReplayEngine:
 
             # Pre-load initial data buffer
             await self._preload_data_buffer()
+
+            # Unify and sort for JIT optimization
+            await self._unify_and_sort_buffer()
 
             # Validate data was loaded
             if self.stats.total_records == 0:
@@ -395,7 +411,7 @@ class HistoricalDataReplayEngine:
         for symbol in self.config.symbols:
             try:
                 # Load initial batch of data
-                data = self.data_manager.load_market_data(
+                data = await self.data_manager.load_market_data(
                     symbols=[symbol],
                     interval=self.config.interval
                 )
@@ -416,6 +432,55 @@ class HistoricalDataReplayEngine:
         logger.info(f"✅ Pre-loaded {self.stats.total_records} total records")
         if self.stats.first_data_timestamp and self.stats.last_data_timestamp:
             logger.info(f"   Data range: {self.stats.first_data_timestamp} to {self.stats.last_data_timestamp}")
+
+    async def _unify_and_sort_buffer(self) -> None:
+        """
+        Unify all symbol DataFrames into a single sorted NumPy-based buffer 
+        for JIT-optimized lookup.
+        """
+        if not self._data_buffer:
+            return
+
+        try:
+            logger.info("Unifying and sorting data buffer for JIT optimization...")
+            
+            # Combine all DataFrames
+            async with self._buffer_lock:
+                all_data = pd.concat(self._data_buffer.values(), ignore_index=True)
+            
+            if all_data.empty:
+                return
+
+            # Sort by timestamp
+            all_data = all_data.sort_values('timestamp')
+            
+            # Store as NumPy arrays for fast JIT access
+            # Convert timestamps to int64 (nanoseconds since epoch) for JIT compatibility
+            self._unified_timestamps = all_data['timestamp'].values.astype('int64')
+            self._unified_symbols = all_data['symbol'].values.astype('U') # Unicode string array
+            self._unified_opens = all_data['open'].values.astype('float64')
+            self._unified_highs = all_data['high'].values.astype('float64')
+            self._unified_lows = all_data['low'].values.astype('float64')
+            self._unified_closes = all_data['close'].values.astype('float64')
+            self._unified_volumes = all_data['volume'].values.astype('float64')
+            
+            # VWAP might be missing in some data sources
+            if 'vwap' in all_data.columns:
+                self._unified_vwaps = all_data['vwap'].values.astype('float64')
+            else:
+                self._unified_vwaps = self._unified_closes.copy()
+            
+            # Transactions might be missing
+            if 'transactions' in all_data.columns:
+                self._unified_transactions = all_data['transactions'].values.astype('float64')
+            else:
+                self._unified_transactions = np.zeros(len(all_data))
+                
+            logger.info(f"✅ Unified JIT buffer created with {len(all_data)} records")
+            
+        except Exception as e:
+            logger.error(f"Failed to unify buffer: {e}", exc_info=True)
+            # Fallback will happen automatically if _unified_timestamps is None
 
     async def _calculate_timestamp_bounds(self) -> None:
         """Calculate first and last timestamps in the data."""
@@ -532,6 +597,12 @@ class HistoricalDataReplayEngine:
 
     async def _get_all_timestamps(self) -> List[datetime]:
         """Get all unique timestamps across all symbols, sorted."""
+        # Use JIT-optimized unified buffer if available
+        if self._unified_timestamps is not None:
+            unique_ts = np.unique(self._unified_timestamps)
+            return [pd.Timestamp(ts).to_pydatetime() for ts in unique_ts]
+
+        # Fallback to original implementation
         all_timestamps: Set[datetime] = set()
 
         async with self._buffer_lock:
@@ -548,6 +619,12 @@ class HistoricalDataReplayEngine:
 
     async def _process_timestamp(self, timestamp: datetime) -> None:
         """Process all data for a given timestamp."""
+        # Use JIT-optimized lookup if unified buffer is available
+        if self._unified_timestamps is not None:
+            await self._process_timestamp_jit(timestamp)
+            return
+
+        # Fallback to original implementation
         messages: List[FeedMessage] = []
 
         async with self._buffer_lock:
@@ -564,6 +641,49 @@ class HistoricalDataReplayEngine:
                     for _, row in timestamp_data.iterrows():
                         message = self._convert_to_feed_message(symbol, row, timestamp)
                         messages.append(message)
+
+        # Send messages to handlers
+        for message in messages:
+            await self._send_message(message)
+
+        self.stats.records_processed += len(messages)
+        self.stats.current_timestamp = timestamp
+
+    async def _process_timestamp_jit(self, timestamp: datetime) -> None:
+        """Process all data for a given timestamp using JIT-optimized lookup."""
+        messages: List[FeedMessage] = []
+        
+        # Convert datetime to int64 for JIT comparison
+        ts_int = int(pd.Timestamp(timestamp).value)
+        
+        # Use JIT to find indices in O(log N)
+        start_idx, end_idx = jit_find_timestamp_indices(self._unified_timestamps, ts_int)
+        
+        if start_idx != -1:
+            for i in range(start_idx, end_idx):
+                symbol = self._unified_symbols[i]
+                
+                # Create market data dict from NumPy arrays
+                data = {
+                    'symbol': symbol,
+                    'timestamp': timestamp,
+                    'open': self._unified_opens[i],
+                    'high': self._unified_highs[i],
+                    'low': self._unified_lows[i],
+                    'close': self._unified_closes[i],
+                    'volume': self._unified_volumes[i],
+                    'vwap': self._unified_vwaps[i],
+                    'transactions': self._unified_transactions[i]
+                }
+                
+                message = FeedMessage(
+                    provider=FeedProvider.SIMULATED,
+                    symbol=symbol,
+                    message_type='bar',
+                    timestamp=timestamp,
+                    data=data
+                )
+                messages.append(message)
 
         # Send messages to handlers
         for message in messages:

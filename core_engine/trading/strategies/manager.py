@@ -1570,17 +1570,33 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """Get comprehensive current regime information"""
         try:
             if self.regime_engine:
-                regime_analysis = await self.regime_engine.get_current_regime_info()
+                # Use canonical get_current_regime() method (Rule 2)
+                # Note: This is typically sync in the core engine implementation
+                regime_analysis = self.regime_engine.get_current_regime()
+                
                 if regime_analysis:
-                    return {
-                        'regime': regime_analysis.get('regime', 'neutral'),
-                        'confidence': regime_analysis.get('confidence', 0.5),
-                        'volatility': regime_analysis.get('volatility', 0.02),
-                        'trend_strength': regime_analysis.get('trend_strength', 0.0),
-                        'risk_multiplier': regime_analysis.get('risk_multiplier', 1.0),
-                        'recommended_strategies': regime_analysis.get('recommended_strategies', ['mean_reversion', 'momentum']),
-                        'strategy_weights': regime_analysis.get('strategy_weights', {'mean_reversion': 0.5, 'momentum': 0.5})
-                    }
+                    # Handle both dict and object-based RegimeAnalysis
+                    if isinstance(regime_analysis, dict):
+                        return {
+                            'regime': regime_analysis.get('regime', 'neutral'),
+                            'confidence': regime_analysis.get('confidence', 0.5),
+                            'volatility': regime_analysis.get('volatility', 0.02),
+                            'trend_strength': regime_analysis.get('trend_strength', 0.0),
+                            'risk_multiplier': regime_analysis.get('risk_multiplier', 1.0),
+                            'recommended_strategies': regime_analysis.get('recommended_strategies', ['mean_reversion', 'momentum']),
+                            'strategy_weights': regime_analysis.get('strategy_weights', {'mean_reversion': 0.5, 'momentum': 0.5})
+                        }
+                    else:
+                        # Object-based (RegimeAnalysis dataclass)
+                        return {
+                            'regime': getattr(regime_analysis, 'regime', 'neutral'),
+                            'confidence': getattr(regime_analysis, 'confidence', 0.5),
+                            'volatility': getattr(regime_analysis, 'volatility', 0.02),
+                            'trend_strength': getattr(regime_analysis, 'trend_strength', 0.0),
+                            'risk_multiplier': getattr(regime_analysis, 'risk_multiplier', 1.0),
+                            'recommended_strategies': getattr(regime_analysis, 'recommended_strategies', ['mean_reversion', 'momentum']),
+                            'strategy_weights': getattr(regime_analysis, 'strategy_weights', {'mean_reversion': 0.5, 'momentum': 0.5})
+                        }
                 else:
                     # Fallback if regime_analysis is None
                     return {
@@ -1639,10 +1655,18 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             strategy_type = allocation.strategy_type
 
             # Check if strategy is appropriate for current regime
-            regime_support = self._is_strategy_regime_supported(strategy_type, regime_info)
-            if not regime_support:
-                logger.debug(f"Strategy {strategy_name} not supported in regime {regime_info.get('regime')}")
-                return signals
+            # CRITICAL: Respect strategy's own enable_regime_filter setting if available
+            enable_regime_filter = True
+            if hasattr(strategy, 'config') and hasattr(strategy.config, 'enable_regime_filter'):
+                enable_regime_filter = strategy.config.enable_regime_filter
+            
+            if enable_regime_filter:
+                regime_support = self._is_strategy_regime_supported(strategy_type, regime_info)
+                if not regime_support:
+                    logger.debug(f"Strategy {strategy_name} not supported in regime {regime_info.get('regime')}")
+                    return signals
+            else:
+                logger.debug(f"Strategy {strategy_name} regime filtering disabled by config")
 
             # For enhanced strategy instances, use their generate_signals method
             if isinstance(strategy, EnhancedBaseStrategy):
@@ -1990,10 +2014,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
 
         if strategy_type == StrategyType.MEAN_REVERSION:
             # Mean reversion works well in ranging/volatile markets
-            return regime in ['ranging', 'volatile', 'calm_ranging', 'volatile_ranging', 'neutral']
+            # ENHANCED: Include canonical high volatility regimes (Rule 2)
+            supported_regimes = [
+                'ranging', 'volatile', 'calm_ranging', 'volatile_ranging', 'neutral',
+                'range_bound', 'choppy', 'high_volatility', 'extreme_volatility',
+                'bull_high_volatility', 'bear_high_volatility'
+            ]
+            return regime in supported_regimes
         elif strategy_type == StrategyType.MOMENTUM:
             # Momentum works well in trending markets
-            return regime in ['trending', 'trending_up', 'trending_down', 'calm_trending', 'volatile_trending', 'neutral']
+            # ENHANCED: Include canonical trending regimes (Rule 2)
+            supported_regimes = [
+                'trending', 'trending_up', 'trending_down', 'calm_trending', 'volatile_trending', 'neutral',
+                'strong_trending', 'weak_trending', 'bull_low_volatility', 'bear_low_volatility'
+            ]
+            return regime in supported_regimes
         else:
             # Other strategies - allow by default
             return True

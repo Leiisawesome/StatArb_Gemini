@@ -21,11 +21,51 @@ from typing import Dict, List, Optional, Tuple, Any, ClassVar
 from datetime import datetime
 import logging
 
+# JIT Optimization (Rule: Performance First)
+try:
+    from core_engine.utils.jit_utils import njit_conditional
+except ImportError:
+    def njit_conditional(func=None, **kwargs):
+        if func is None: return lambda f: f
+        return func
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # §1. SIGNAL MATURITY SCORE (SMS) - Multiplicative Formula
 # =============================================================================
+
+@njit_conditional
+def _compute_sms_core(
+    exhaustion: Any,
+    reversal_prob: Any,
+    ofi_shift: Any,
+    vol_compression: Any,
+    pending_bars: Any,
+    α: float,
+    β: float,
+    γ: float,
+    δ: float
+) -> Any:
+    """Core SMS calculation logic (JIT optimized)"""
+    # Clamp inputs to valid ranges
+    # Using np.minimum/maximum instead of np.clip to handle scalars in Numba
+    E = np.minimum(np.maximum(exhaustion, 0.001), 1.0)
+    P_rev = np.minimum(np.maximum(reversal_prob, 0.001), 1.0)
+    ofi = np.minimum(np.maximum(ofi_shift, -1.0), 1.0)
+    VC = np.minimum(np.maximum(vol_compression, 0.5), 2.0)
+    t = np.maximum(0, pending_bars)
+
+    # Multiplicative SMS formula
+    sms = (
+        (E ** α) *
+        (P_rev ** β) *
+        ((1 + np.maximum(0, ofi)) ** γ) *
+        ((1 / VC) ** δ) *
+        np.exp(-0.05 * t)
+    )
+
+    return np.minimum(np.maximum(sms, 0.0), 1.0)
 
 @dataclass
 class SignalMaturityScore:
@@ -107,23 +147,14 @@ class SignalMaturityScore:
         # Get regime-specific exponents
         α, β, γ, δ = cls.EXPONENTS.get(regime, cls.EXPONENTS['normal'])
 
-        # Clamp inputs to valid ranges
-        E = np.clip(exhaustion, 0.001, 1.0)
-        P_rev = np.clip(reversal_prob, 0.001, 1.0)
-        ofi = np.clip(ofi_shift, -1.0, 1.0)
-        VC = np.clip(vol_compression, 0.5, 2.0)
-        t = np.maximum(0, pending_bars)
-
-        # Multiplicative SMS formula
-        sms = (
-            (E ** α) *
-            (P_rev ** β) *
-            ((1 + np.maximum(0, ofi)) ** γ) *
-            ((1 / VC) ** δ) *
-            np.exp(-0.05 * t)  # Using default decay_rate 0.05
+        return _compute_sms_core(
+            exhaustion,
+            reversal_prob,
+            ofi_shift,
+            vol_compression,
+            pending_bars,
+            α, β, γ, δ
         )
-
-        return np.clip(sms, 0.0, 1.0)
 
     def is_mature(self, threshold: float, regime: str = 'normal') -> bool:
         """
@@ -156,6 +187,52 @@ class SignalMaturityScore:
 # =============================================================================
 # §3. EXPECTED RISK-ADJUSTED RETURN (ERAR)
 # =============================================================================
+
+@njit_conditional
+def _compute_erar_cost_core(
+    spread_bps: Any,
+    participation: Any,
+    volatility: Any,
+    adverse_prob: Any,
+    kyle_lambda: Any,
+    holding_days: Any,
+    alt_return_bps: Any
+) -> Any:
+    """Core ERAR cost calculation logic (JIT optimized)"""
+    c_spread = spread_bps
+    c_slip = volatility * np.sqrt(np.maximum(participation, 0.001)) * 10000
+    c_adverse = adverse_prob * kyle_lambda * 10000
+    c_opp = alt_return_bps * holding_days
+
+    total = (
+        c_spread +
+        c_slip * (np.maximum(participation, 0.0) ** 0.6) +
+        c_adverse +
+        c_opp
+    )
+    return np.maximum(total, 0.1)
+
+@njit_conditional
+def _compute_erar_core(
+    expected_pnl: Any,
+    cvar_95: Any,
+    skewness: Any,
+    cost: Any,
+    tail_lambda: float = 1.0
+) -> Any:
+    """Core ERAR calculation logic (JIT optimized)"""
+    # Using np.minimum/maximum instead of np.clip to handle scalars in Numba
+    omega_adj = np.minimum(np.maximum(1 + 0.1 * skewness, 0.5), 1.5)
+    risk_adj_return = expected_pnl - tail_lambda * np.abs(cvar_95)
+    
+    # Handle zero cost case safely in JIT
+    # We use a small epsilon to avoid division by zero if cost is 0
+    safe_cost = np.maximum(cost, 0.0001)
+    erar = (risk_adj_return / safe_cost) * omega_adj
+    
+    # If cost was actually <= 0, return 0
+    # Using np.where to handle both scalars and arrays in JIT
+    return np.where(cost <= 0, 0.0, erar)
 
 @dataclass
 class ERAR:
@@ -225,18 +302,10 @@ class ERAR:
         alt_return_bps: Any
     ) -> Any:
         """Vectorized cost calculation"""
-        c_spread = spread_bps
-        c_slip = volatility * np.sqrt(np.maximum(participation, 0.001)) * 10000
-        c_adverse = adverse_prob * kyle_lambda * 10000
-        c_opp = alt_return_bps * holding_days
-
-        total = (
-            c_spread +
-            c_slip * (np.maximum(participation, 0.0) ** 0.6) +
-            c_adverse +
-            c_opp
+        return _compute_erar_cost_core(
+            spread_bps, participation, volatility, adverse_prob,
+            kyle_lambda, holding_days, alt_return_bps
         )
-        return np.maximum(total, 0.1)
 
     def omega_adj(self) -> float:
         """
@@ -297,16 +366,9 @@ class ERAR:
             kyle_lambda, holding_days, alt_return_bps
         )
         
-        risk_adj_return = expected_pnl - tail_lambda * np.abs(cvar_95)
-        erar = (risk_adj_return / cost) * cls.omega_adj_vectorized(skewness)
-        
-        # Handle zero cost case
-        if isinstance(erar, np.ndarray):
-            erar[cost <= 0] = 0.0
-        elif cost <= 0:
-            return 0.0
-            
-        return erar
+        return _compute_erar_core(
+            expected_pnl, cvar_95, skewness, cost, tail_lambda
+        )
 
     def should_trade(self, gamma: float = 0.5) -> bool:
         """

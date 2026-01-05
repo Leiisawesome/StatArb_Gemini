@@ -1,15 +1,15 @@
 papertest:
   data:
-    symbols: ["TSLA","NVDA","PLTR"]
+    symbols: ["TSLA"]
     start_date: "2024-12-20"
     end_date: "2024-12-20"
     interval: "1min"
     replay_speed: "FAST_1000X"
-    simulate_market_hours: true
+    simulate_market_hours: false
 
   buffers:
     size: 400
-    warmup_required: 200
+    warmup_required: 30
 
   strategies:
     - type: "mean_reversion"
@@ -82,7 +82,7 @@ papertest:
     use_historical_execution_simulator: true
 
   debug:
-    start_at_time: "09:30"
+    # start_at_time: "09:30"
     stop_at_time: "16:00"
     timezone: "America/New_York"
 
