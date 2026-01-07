@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Set
 import logging
 import threading
 import pandas as pd
+import numpy as np
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +42,8 @@ class StreamingBufferManager:
             # compute indicators on buffer
     """
 
-    # Standard OHLCV columns
-    OHLCV_COLUMNS = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    # Standard OHLCV columns (+ symbol). Indicator engine expects `symbol` for groupby paths.
+    OHLCV_COLUMNS = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
 
     def __init__(
         self,
@@ -62,7 +64,14 @@ class StreamingBufferManager:
         self._column_mapping = column_mapping or {}
 
         # Per-symbol buffers: symbol -> DataFrame
+        # Stored as fixed-size ring buffers to avoid per-bar pd.concat allocations.
+        # Each symbol has:
+        # - DataFrame of length buffer_size (preallocated)
+        # - write index (next insertion point)
+        # - count (number of valid rows, <= buffer_size)
         self._buffers: Dict[str, pd.DataFrame] = {}
+        self._write_idx: Dict[str, int] = {}
+        self._count: Dict[str, int] = {}
 
         # Track warmup status to avoid repeated checks
         self._warmed_up: Set[str] = set()
@@ -116,8 +125,148 @@ class StreamingBufferManager:
         return normalized
 
     def _create_empty_buffer(self) -> pd.DataFrame:
-        """Create an empty buffer DataFrame with standard columns."""
-        return pd.DataFrame(columns=self.OHLCV_COLUMNS)
+        """Create a fixed-size ring buffer DataFrame with standard columns."""
+        n = int(self._buffer_size)
+        # Timestamp can be tz-aware; keep as object to avoid dtype churn.
+        # IMPORTANT: Use np.full(..., None) instead of np.empty(...) to avoid uninitialized garbage
+        # (which can include ints) leading to sort/type errors downstream.
+        return pd.DataFrame(
+            {
+                "timestamp": np.full(n, None, dtype=object),
+                "symbol": np.full(n, None, dtype=object),
+                "open": np.full(n, np.nan, dtype="float64"),
+                "high": np.full(n, np.nan, dtype="float64"),
+                "low": np.full(n, np.nan, dtype="float64"),
+                "close": np.full(n, np.nan, dtype="float64"),
+                "volume": np.full(n, np.nan, dtype="float64"),
+            }
+        )
+
+    @staticmethod
+    def _coerce_timestamp(value: Any) -> Any:
+        """
+        Coerce incoming timestamps to a consistent datetime-like object.
+
+        We prefer pandas.Timestamp (tz-aware if input has tz) to avoid mixed-type
+        comparisons inside indicator engines (e.g. DataFrame.sort_values on timestamp).
+        """
+        tz_name = "America/New_York"
+        if value is None:
+            return pd.NaT
+        if isinstance(value, pd.Timestamp):
+            ts = value
+            if ts.tz is None:
+                try:
+                    ts = ts.tz_localize(tz_name, ambiguous="infer", nonexistent="shift_forward")
+                except Exception:
+                    ts = ts.tz_localize(tz_name)
+            else:
+                try:
+                    ts = ts.tz_convert(tz_name)
+                except Exception:
+                    pass
+            return ts
+        if isinstance(value, datetime):
+            ts = pd.Timestamp(value)
+            if ts.tz is None:
+                try:
+                    ts = ts.tz_localize(tz_name, ambiguous="infer", nonexistent="shift_forward")
+                except Exception:
+                    ts = ts.tz_localize(tz_name)
+            else:
+                ts = ts.tz_convert(tz_name)
+            return ts
+        if isinstance(value, np.datetime64):
+            # Treat naive np.datetime64 as UTC and convert to NY (common from .values on tz-aware series).
+            try:
+                ts = pd.Timestamp(value, tz="UTC").tz_convert(tz_name)
+            except Exception:
+                ts = pd.Timestamp(value)
+                if ts.tz is None:
+                    ts = ts.tz_localize(tz_name)
+            return ts
+        if isinstance(value, (int, np.integer)):
+            # Treat integer timestamps as nanoseconds since epoch UTC (ClickHouse window_start style).
+            try:
+                return pd.to_datetime(int(value), unit="ns", utc=True).tz_convert(tz_name)
+            except Exception:
+                return pd.NaT
+        if isinstance(value, str):
+            ts = pd.to_datetime(value, errors="coerce")
+            if isinstance(ts, pd.Timestamp):
+                if ts.tz is None:
+                    try:
+                        ts = ts.tz_localize(tz_name, ambiguous="infer", nonexistent="shift_forward")
+                    except Exception:
+                        ts = ts.tz_localize(tz_name)
+                else:
+                    try:
+                        ts = ts.tz_convert(tz_name)
+                    except Exception:
+                        pass
+            return ts
+        # Best-effort fallback
+        try:
+            ts = pd.Timestamp(value)
+            if ts.tz is None:
+                ts = ts.tz_localize(tz_name)
+            else:
+                ts = ts.tz_convert(tz_name)
+            return ts
+        except Exception:
+            return pd.NaT
+
+    def _ensure_symbol(self, symbol: str) -> None:
+        """Initialize ring buffer state for a symbol if missing."""
+        if symbol in self._buffers:
+            return
+        self._buffers[symbol] = self._create_empty_buffer()
+        self._write_idx[symbol] = 0
+        self._count[symbol] = 0
+        self._stats["symbols_tracked"] += 1
+
+    def _append_row(self, symbol: str, row: Dict[str, Any]) -> None:
+        """Append a normalized row into the symbol ring buffer (O(1))."""
+        buf = self._buffers[symbol]
+        i = self._write_idx[symbol]
+
+        # Write into preallocated columns (fast, avoids concat/alloc).
+        # Missing fields become NaN/None.
+        buf.at[i, "timestamp"] = self._coerce_timestamp(row.get("timestamp"))
+        buf.at[i, "symbol"] = row.get("symbol", symbol)
+        buf.at[i, "open"] = row.get("open", np.nan)
+        buf.at[i, "high"] = row.get("high", np.nan)
+        buf.at[i, "low"] = row.get("low", np.nan)
+        buf.at[i, "close"] = row.get("close", np.nan)
+        buf.at[i, "volume"] = row.get("volume", np.nan)
+
+        self._write_idx[symbol] = (i + 1) % self._buffer_size
+        self._count[symbol] = min(self._count[symbol] + 1, self._buffer_size)
+
+    def _ordered_view(self, symbol: str) -> pd.DataFrame:
+        """
+        Return an ordered (oldest->newest) view DataFrame of valid rows for a symbol.
+
+        Note: This may allocate when the ring has wrapped (count==buffer_size).
+        That allocation replaces the per-bar pd.concat overhead we removed in update().
+        """
+        buf = self._buffers[symbol]
+        n = self._count.get(symbol, 0)
+        if n <= 0:
+            return pd.DataFrame(columns=self.OHLCV_COLUMNS)
+
+        if n < self._buffer_size:
+            # Not wrapped yet: valid rows are [0:n)
+            return buf.iloc[:n].reset_index(drop=True)
+
+        # Wrapped: oldest is at write_idx (next write location).
+        w = self._write_idx.get(symbol, 0)
+        if w == 0:
+            return buf.reset_index(drop=True)
+
+        a = buf.iloc[w:]
+        b = buf.iloc[:w]
+        return pd.concat([a, b], ignore_index=True)
 
     def update(self, symbol: str, bar: Dict[str, Any]) -> None:
         """
@@ -130,31 +279,15 @@ class StreamingBufferManager:
         normalized = self._normalize_bar(bar)
 
         with self._lock:
-            if symbol not in self._buffers:
-                self._buffers[symbol] = self._create_empty_buffer()
-                self._stats['symbols_tracked'] += 1
-
-            buffer = self._buffers[symbol]
-
-            # Create new row
-            new_row = pd.DataFrame([normalized])
-
-            # Append and trim to buffer size
-            # Handle empty buffer case to avoid FutureWarning
-            if buffer.empty:
-                self._buffers[symbol] = new_row
-            else:
-                self._buffers[symbol] = pd.concat(
-                    [buffer, new_row],
-                    ignore_index=True
-                ).tail(self._buffer_size)
+            self._ensure_symbol(symbol)
+            self._append_row(symbol, normalized)
 
             # Check warmup status
             if symbol not in self._warmed_up:
-                if len(self._buffers[symbol]) >= self._warmup_required:
+                if self._count.get(symbol, 0) >= self._warmup_required:
                     self._warmed_up.add(symbol)
                     self._stats['symbols_warmed_up'] += 1
-                    logger.info(f"Buffer warmed up for {symbol} ({len(self._buffers[symbol])} bars)")
+                    logger.info(f"Buffer warmed up for {symbol} ({self._count.get(symbol, 0)} bars)")
 
             self._stats['total_updates'] += 1
 
@@ -173,7 +306,7 @@ class StreamingBufferManager:
         with self._lock:
             if symbol not in self._buffers:
                 return None
-            return self._buffers[symbol].copy()
+            return self._ordered_view(symbol).copy()
 
     def get_buffer_view(self, symbol: str) -> Optional[pd.DataFrame]:
         """
@@ -189,7 +322,9 @@ class StreamingBufferManager:
             DataFrame view or None if symbol not tracked
         """
         with self._lock:
-            return self._buffers.get(symbol)
+            if symbol not in self._buffers:
+                return None
+            return self._ordered_view(symbol)
 
     def is_warmed_up(self, symbol: str) -> bool:
         """
@@ -207,9 +342,7 @@ class StreamingBufferManager:
     def get_buffer_length(self, symbol: str) -> int:
         """Get current buffer length for a symbol."""
         with self._lock:
-            if symbol not in self._buffers:
-                return 0
-            return len(self._buffers[symbol])
+            return int(self._count.get(symbol, 0))
 
     def load_warmup_data(
         self,
@@ -242,11 +375,41 @@ class StreamingBufferManager:
 
             # Keep only buffer_size most recent bars
             df = df.tail(self._buffer_size).reset_index(drop=True)
+            self._ensure_symbol(symbol)
 
-            self._buffers[symbol] = df
+            # Fill ring buffer sequentially (not wrapped)
+            buf = self._buffers[symbol]
+            # Reset columns without polluting object columns with float NaNs.
+            buf["timestamp"] = np.full(self._buffer_size, None, dtype=object)
+            buf["symbol"] = np.full(self._buffer_size, None, dtype=object)
+            for col in ("open", "high", "low", "close", "volume"):
+                buf[col] = np.nan
 
-            if symbol not in self._warmed_up:
-                self._stats['symbols_tracked'] += 1
+            n = len(df)
+            if n > 0:
+                # Copy columns that exist
+                for col in self.OHLCV_COLUMNS:
+                    if col in df.columns:
+                        if col == "timestamp":
+                            s = pd.to_datetime(df[col], errors="coerce")
+                            # Preserve tz-awareness; .values can drop tz and create naive np.datetime64.
+                            # Store as object Timestamps in America/New_York.
+                            try:
+                                if getattr(s.dtype, "tz", None) is None:
+                                    s = s.dt.tz_localize("America/New_York", ambiguous="infer", nonexistent="shift_forward")
+                                else:
+                                    s = s.dt.tz_convert("America/New_York")
+                            except Exception:
+                                pass
+                            buf.loc[: n - 1, col] = s.astype(object).values
+                        else:
+                            buf.loc[: n - 1, col] = df[col].values
+                if "symbol" not in df.columns:
+                    buf.loc[: n - 1, "symbol"] = symbol
+
+            self._count[symbol] = n
+            # Next write is 0 if full, else n
+            self._write_idx[symbol] = 0 if n >= self._buffer_size else n
 
             # Check warmup status
             if len(df) >= self._warmup_required:

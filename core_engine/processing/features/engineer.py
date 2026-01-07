@@ -920,36 +920,15 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # Use rolling window for adaptive calculation
             window = min(252, len(series))  # Up to 1 year
             
-            # Import JIT utilities
-            from core_engine.utils.jit_utils import is_numba_available, jit_rolling_mad_zscore
+            # PERF: Avoid pandas rolling.apply (very slow). Use jit_utils implementation.
+            # If Numba is not installed, njit_conditional returns the pure-Python function,
+            # which is still typically faster than pandas apply for large windows.
+            from core_engine.utils.jit_utils import jit_rolling_mad_zscore
 
-            if is_numba_available():
-                z_scores = pd.Series(
-                    jit_rolling_mad_zscore(series.values, window, min_periods=20),
-                    index=series.index
-                )
-            else:
-                def mad_zscore_window(x):
-                    """Calculate MAD Z-score for a window"""
-                    if len(x) < 20:
-                        return np.nan
-
-                    median = np.median(x)
-                    mad = np.median(np.abs(x - median))
-
-                    # Avoid division by zero
-                    if mad < 1e-8:
-                        # Use standard deviation fallback
-                        std = np.std(x)
-                        if std < 1e-8:
-                            return 0.0
-                        return (x.iloc[-1] - np.mean(x)) / std
-
-                    # MAD-based Z-score (1.4826 is scaling factor for normal distribution)
-                    z_score = (x.iloc[-1] - median) / (1.4826 * mad)
-                    return z_score
-
-                z_scores = series.rolling(window, min_periods=20).apply(mad_zscore_window, raw=False)
+            z_scores = pd.Series(
+                jit_rolling_mad_zscore(series.values, window, min_periods=20),
+                index=series.index
+            )
             
             return z_scores.fillna(0.0)
 
@@ -1143,13 +1122,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                         new_columns[f'{feature}_std_{period}'] = df[feature].rolling(window=period).std()
                         new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(window=period).skew()
                         
-                        # Optimization: Use JIT for rolling rank if available
-                        if is_numba_available():
-                            new_columns[f'{feature}_rank_{period}'] = jit_rolling_rank(df[feature].values, period)
-                        else:
-                            new_columns[f'{feature}_rank_{period}'] = df[feature].rolling(window=period).apply(
-                                lambda x: pd.Series(x).rank(pct=True).iloc[-1]
-                            )
+                        # PERF: avoid pandas rolling.apply (very slow). Use jit_utils implementation.
+                        # If Numba is not installed, njit_conditional returns a pure-Python loop.
+                        new_columns[f'{feature}_rank_{period}'] = jit_rolling_rank(df[feature].values, period)
                     except Exception as e:
                         self.logger.warning(f"Error creating rolling feature {feature} for period {period}: {e}")
 
