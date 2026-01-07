@@ -14,6 +14,9 @@ interval: "1min"
 start_date: "2024-12-20"  # Valid data date
 end_date: "2024-12-20"    # Same day (1 day test)
 
+# Warmup parity with Papertest (RTH bars). If omitted, Backtest infers a default.
+warmup_bars: 200
+
 # Small capital for quick test
 initial_capital: 100000
 allow_shorts: false  # Disable for mean reversion (enable for pairs trading)
@@ -80,7 +83,7 @@ strategies:
       min_holding_bars: 5               # Minimum bars to hold (avoid churn)
 
 # Minimal risk management
-min_signal_confidence: 0.40  # RELAXED for momentum (uses composite signals)
-max_position_size: 0.40      # Higher for testing
+min_signal_confidence: 0.40  # Parity with papertest
+max_position_size: 0.10      # Parity with papertest (cap exposure to ~10%)
 
 

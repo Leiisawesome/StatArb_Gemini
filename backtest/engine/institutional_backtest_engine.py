@@ -158,6 +158,10 @@ class InstitutionalBacktestEngine:
         self.current_bar_index = 0
         self.historical_data: Optional[pd.DataFrame] = None
 
+        # Parity default: disable simulated order rejections/retries unless explicitly enabled.
+        # Papertest smoke tests run with deterministic fills (fill_probability=1.0, no partials).
+        self.disable_rejections: bool = bool(getattr(config, "disable_rejections", True))
+
         # Results tracking
         self.backtest_results: Dict[str, Any] = {}
         self.execution_history: List[Dict[str, Any]] = []
@@ -794,6 +798,7 @@ class InstitutionalBacktestEngine:
         """
         try:
             from datetime import datetime, timedelta
+            from math import ceil
 
             logger.info("   Fetching data from ClickHouse...")
 
@@ -801,24 +806,85 @@ class InstitutionalBacktestEngine:
             start_dt = datetime.strptime(self.config.start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(self.config.end_date, "%Y-%m-%d")
 
-            # Add warmup period to ensure sufficient data for indicators
-            # Default: 5 days for intraday, 60 days for daily
-            warmup_days = 5 if self.config.interval in ['1min', '5min', '15min', '1h'] else 60
+            # Add warmup period to ensure sufficient data for indicators/features.
+            # Prefer bars-based warmup (RTH bars) when configured/inferred.
+            warmup_days = None
             original_start_dt = start_dt
             self.simulation_start_dt = original_start_dt  # Store for run_backtest loop filtering
-            start_dt = start_dt - timedelta(days=warmup_days)
-            logger.info(f"   Added warmup period: {warmup_days} days ({original_start_dt.date()} -> {start_dt.date()})")
 
             # ENHANCEMENT: Dynamic Market Hours (Asset-Class Aware)
             # Use MarketCalendar to determine correct session times
             from core_engine.data.market_calendar import MarketCalendar
+            from core_engine.data.rth_filter import filter_bars_to_rth
+            from core_engine.system.session_gate import TradingSessionGate, GateDecision
             calendar = MarketCalendar()
+            session_gate = TradingSessionGate()
 
             # Determine asset class (assume homogeneous for now or take first)
             first_symbol = self.config.symbols[0] if self.config.symbols else "SPY"
             asset_class = calendar.get_asset_class(first_symbol)
 
             logger.info(f"   Asset Class Detected: {asset_class.name} (from {first_symbol})")
+
+            def _infer_warmup_bars() -> int:
+                """
+                Infer a strategy-appropriate warmup in RTH bars.
+                Conservative defaults: enough to stabilize typical rolling indicators and
+                stateful gates (e.g., MR baselines).
+                """
+                # Base default per interval (intraday focuses on bar-count, not days).
+                base = 200 if self.config.interval in ['1min', '5min', '15min', '1h'] else 60
+                req = base
+                try:
+                    for s in (self.config.strategies or []):
+                        st = str((s or {}).get("type") or "").lower()
+                        params = (s or {}).get("parameters") or {}
+                        lb = int(params.get("lookback_period", 0) or 0)
+                        if st == "mean_reversion":
+                            # MR uses lookback_period plus larger stateful baselines (cooldown baseline ~100).
+                            req = max(req, 120, lb, 100)
+                        elif st == "momentum":
+                            req = max(req, 120, lb, base)
+                        else:
+                            req = max(req, lb, base)
+                except Exception:
+                    req = base
+                return int(req)
+
+            # Compute warmup_days from warmup_bars for intraday intervals (RTH only).
+            warmup_bars = getattr(self.config, "warmup_bars", None)
+            if warmup_bars is None:
+                warmup_bars = _infer_warmup_bars()
+            try:
+                warmup_bars = int(warmup_bars)
+            except Exception:
+                warmup_bars = _infer_warmup_bars()
+
+            if self.config.interval in ['1min', '5min', '15min', '1h']:
+                # Estimate bars per RTH session using MarketCalendar session minutes.
+                session_open, session_close = calendar.get_session_times(original_start_dt, asset_class)
+                session_minutes = max(1, int((session_close - session_open).total_seconds() // 60))
+                interval_min = 1
+                if self.config.interval.endswith("min"):
+                    try:
+                        interval_min = int(self.config.interval.replace("min", ""))
+                    except Exception:
+                        interval_min = 1
+                elif self.config.interval == "1h":
+                    interval_min = 60
+                bars_per_day = max(1, session_minutes // interval_min)
+                # Add +1 day safety to cover weekends/holidays without falling back to huge day windows.
+                warmup_days = max(1, int(ceil(max(0, warmup_bars) / bars_per_day)) + 1)
+                start_dt = start_dt - timedelta(days=warmup_days)
+                logger.info(
+                    f"   Added warmup (bars-based): {warmup_bars} RTH bars (~{warmup_days} days) "
+                    f"({original_start_dt.date()} -> {start_dt.date()})"
+                )
+            else:
+                # Daily: keep existing conservative behavior.
+                warmup_days = 60
+                start_dt = start_dt - timedelta(days=warmup_days)
+                logger.info(f"   Added warmup period: {warmup_days} days ({original_start_dt.date()} -> {start_dt.date()})")
 
             if self.config.interval in ['1min', '5min', '15min', '1h']:
                 # Get session times for this asset class
@@ -857,7 +923,45 @@ class InstitutionalBacktestEngine:
                         interval=self.config.interval
                     )
                     if data is not None and not data.empty:
-                        logger.info(f"   ✅ {symbol}: {len(data)} bars loaded")
+                        raw_count = len(data)
+                        # Filter to RTH per-day to avoid indicator contamination from pre/post bars
+                        # that may exist inside the multi-day [start_dt, end_dt] query range.
+                        if self.config.interval in ['1min', '5min', '15min', '1h']:
+                            try:
+                                data = filter_bars_to_rth(data, symbol=symbol, calendar=calendar, timestamp_col="timestamp")
+                            except Exception:
+                                logger.debug("RTH filter failed (ignored)", exc_info=True)
+                            # Match papertest ingestion: apply TradingSessionGate which also enforces
+                            # opening/closing no-trade windows. This prevents 09:30 bar contamination
+                            # (papertest rejects 09:30:00-09:30:30 by default).
+                            try:
+                                if data is not None and not data.empty:
+                                    ts = pd.to_datetime(data["timestamp"], errors="coerce")
+                                    mask = []
+                                    for t in ts:
+                                        try:
+                                            res = session_gate.check(t.to_pydatetime() if hasattr(t, "to_pydatetime") else t, symbol)
+                                            mask.append(res.decision != GateDecision.REJECT)
+                                        except Exception:
+                                            mask.append(True)
+                                    data = data.loc[pd.Series(mask, index=data.index)].copy()
+                            except Exception:
+                                logger.debug("SessionGate filter failed (ignored)", exc_info=True)
+                        # Trim to minimal required history: keep warmup_bars + in-period bars
+                        try:
+                            if data is not None and not data.empty and warmup_bars is not None and warmup_bars >= 0:
+                                ts = pd.to_datetime(data["timestamp"]) if "timestamp" in data.columns else pd.to_datetime(data.index)
+                                start_d = datetime.strptime(self.config.start_date, "%Y-%m-%d").date()
+                                end_d = datetime.strptime(self.config.end_date, "%Y-%m-%d").date()
+                                in_period = (ts.dt.date >= start_d) & (ts.dt.date <= end_d)
+                                sim_cnt = int(in_period.sum())
+                                keep_n = sim_cnt + int(warmup_bars)
+                                if keep_n > 0 and len(data) > keep_n:
+                                    data = data.tail(keep_n).copy()
+                        except Exception:
+                            logger.debug("Warmup trim failed (ignored)", exc_info=True)
+                        kept_count = len(data) if data is not None else 0
+                        logger.info(f"   ✅ {symbol}: {kept_count} bars loaded (raw={raw_count}, rth_kept={kept_count})")
                         return symbol, data
                     else:
                         logger.warning(f"   ⚠️  {symbol}: No data available")
@@ -3098,20 +3202,10 @@ class InstitutionalBacktestEngine:
                     if self.feature_engineer and self.pre_calculated_indicators is not None:
                         self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
 
-                    # Now filter to trading hours only (after warmup)
-                    if hasattr(self, 'simulation_start_dt') and self.pre_calculated_features is not None:
-                        if isinstance(self.pre_calculated_features, pd.DataFrame):
-                            if 'timestamp' in self.pre_calculated_features.columns:
-                                timestamp_col = pd.to_datetime(self.pre_calculated_features['timestamp'])
-                                start_dt = pd.Timestamp(self.simulation_start_dt).tz_localize(timestamp_col.dt.tz) if timestamp_col.dt.tz and not pd.Timestamp(self.simulation_start_dt).tz else pd.Timestamp(self.simulation_start_dt)
-                                mask = timestamp_col >= start_dt
-                            else:
-                                index_tz = self.pre_calculated_features.index.tz if hasattr(self.pre_calculated_features.index, 'tz') else None
-                                start_dt = pd.Timestamp(self.simulation_start_dt).tz_localize(index_tz) if index_tz and not pd.Timestamp(self.simulation_start_dt).tz else pd.Timestamp(self.simulation_start_dt)
-                                mask = pd.to_datetime(self.pre_calculated_features.index) >= start_dt
-                            warmup_count = len(self.pre_calculated_features) - mask.sum()
-                            self.pre_calculated_features = self.pre_calculated_features[mask].copy()
-                            logger.info(f"   📊 Filtered to trading hours: {len(self.pre_calculated_features)} bars (excluded {warmup_count} warmup bars)")
+                    # IMPORTANT: do NOT drop warmup history from pre_calculated_features.
+                    # Strategies (and parity with papertest) require warmup bars as historical context
+                    # for rolling indicators/feature-dependent logic. Trading is gated later in the
+                    # bar loop via simulation_start_dt date filtering.
 
                     logger.info(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
 
@@ -3194,23 +3288,23 @@ class InstitutionalBacktestEngine:
                     if ts_compare_normalized.date() < sim_start_compare_normalized.date():
                         continue  # Skip warmup bars
 
-                # Filter to regular trading hours only (9:30 AM - 4:00 PM ET)
-                # This ensures we only process regular market hours, not pre-market or after-hours
-                ts_time = pd.Timestamp(timestamp)
-                if hasattr(ts_time, 'hour'):
-                    # Convert to ET timezone if needed
-                    if ts_time.tzinfo is not None:
-                        ts_et = ts_time.tz_convert('America/New_York')
+                # Defensive RTH gate (should be no-op if data was filtered to RTH at load time).
+                # Use MarketCalendar (asset-class aware) instead of hardcoding 09:30–16:00.
+                try:
+                    from core_engine.data.market_calendar import MarketCalendar
+                    cal = MarketCalendar()
+                    asset_class = cal.get_asset_class(self.config.symbols[0] if self.config.symbols else "SPY")
+                    ts_time = pd.Timestamp(timestamp)
+                    tz_name = cal.sessions.get(asset_class).timezone if cal.sessions.get(asset_class) else "America/New_York"
+                    if ts_time.tzinfo is None:
+                        ts_local = ts_time.tz_localize(tz_name)
                     else:
-                        ts_et = ts_time
-
-                    # Skip pre-market (before 9:30 AM) and after-hours (after 4:00 PM)
-                    hour_minute = ts_et.hour * 60 + ts_et.minute
-                    market_open = 9 * 60 + 30  # 9:30 AM = 570 minutes
-                    market_close = 16 * 60  # 4:00 PM = 960 minutes
-
-                    if hour_minute < market_open or hour_minute >= market_close:
-                        continue  # Skip pre-market and after-hours
+                        ts_local = ts_time.tz_convert(tz_name)
+                    session_open, session_close = cal.get_session_times(ts_local.to_pydatetime(), asset_class)
+                    if not (session_open.time() <= ts_local.time() < session_close.time()):
+                        continue
+                except Exception:
+                    pass
 
                 self.current_bar_index = idx
 
@@ -3521,27 +3615,34 @@ class InstitutionalBacktestEngine:
                         logger.warning(f"⚠️ Regime engine processing failed: {e}")
                     regime_result = None
 
-            # Step 2: 🚀 OPTION B: Use pre-calculated indicators/features/signals
-            # Much faster than rolling window, enables momentum strategies
+            # ================================================================
+            # PT-style sequencing: execute prior-bar pending signals at THIS bar open
+            # ================================================================
+            # This mirrors the live bar lifecycle:
+            # - decide on bar N close
+            # - execute at bar N+1 open
+            if self.pending_signals:
+                try:
+                    open_price = bar.get('open', bar.get('close', 0))
+                    executed_trades = await self._execute_pending_signals(
+                        self.pending_signals,
+                        bar,
+                        timestamp,
+                        execution_price=open_price,
+                    )
+                    bar_results['trades_executed'] = len(executed_trades)
+                except Exception as e:
+                    logger.warning("Pending-signal execution failed", exc_info=True)
+                finally:
+                    self.pending_signals = []
 
-            # Check if we have pre-calculated data
+            # Step 2: Use pre-calculated data for StrategyManager inputs (PT-style = indicators)
+            # Check if we have pre-calculated indicators/features available
             use_pre_calculated = False
-            if hasattr(self, 'pre_calculated_features') and self.pre_calculated_features is not None:
-                if isinstance(self.pre_calculated_features, list):
-                    # Handle list case (unexpected but possible during debugging)
-                    if len(self.pre_calculated_features) > 0:
-                        # Try to convert to DataFrame if it's a list of dicts or objects
-                        try:
-                            if hasattr(self.pre_calculated_features[0], '__dict__'):
-                                self.pre_calculated_features = pd.DataFrame([x.__dict__ for x in self.pre_calculated_features])
-                            elif isinstance(self.pre_calculated_features[0], dict):
-                                self.pre_calculated_features = pd.DataFrame(self.pre_calculated_features)
-                            else:
-                                logger.error(f"❌ pre_calculated_features is a list of {type(self.pre_calculated_features[0])}, cannot convert to DataFrame")
-                        except Exception as e:
-                            logger.error(f"❌ Failed to convert pre_calculated_features list to DataFrame: {e}")
-
-                # Check if it's a DataFrame and not empty
+            if hasattr(self, 'pre_calculated_indicators') and self.pre_calculated_indicators is not None:
+                if isinstance(self.pre_calculated_indicators, pd.DataFrame) and not self.pre_calculated_indicators.empty:
+                    use_pre_calculated = True
+            if not use_pre_calculated and hasattr(self, 'pre_calculated_features') and self.pre_calculated_features is not None:
                 if isinstance(self.pre_calculated_features, pd.DataFrame) and not self.pre_calculated_features.empty:
                     use_pre_calculated = True
 
@@ -3643,29 +3744,53 @@ class InstitutionalBacktestEngine:
                                         'is_carried_over': is_carried_over
                                     }
 
-                        # ✅ FIX: For strategies, provide ENRICHED data (not raw OHLCV!)
-                        # Use pre-calculated features per symbol (Rule 3 compliant)
+                        # ✅ Canonical (PT-style): For strategies, provide OHLCV + INDICATORS dataframe
+                        # (computed causally from the rolling bar history). Avoid feeding feature-engineered
+                        # batch tables here, as PT does not run full create_features() per bar.
                         enriched_data_per_symbol = {}
                         is_multi_symbol = len(self.config.symbols) > 1
 
                         for sym in self.config.symbols:
-                            # 🔧 MULTI-SYMBOL: Check for per-symbol pre-calculated features first
-                            if hasattr(self, 'pre_calculated_features_per_symbol') and sym in self.pre_calculated_features_per_symbol:
-                                sym_features = self.pre_calculated_features_per_symbol[sym]
-                                if sym_features is not None and len(sym_features) > 0:
-                                    # Filter to current bar timestamp
+                            # Prefer per-symbol pre-calculated INDICATORS (closer to PT semantics).
+                            if hasattr(self, 'pre_calculated_indicators_per_symbol') and sym in getattr(self, 'pre_calculated_indicators_per_symbol', {}):
+                                sym_ind = self.pre_calculated_indicators_per_symbol[sym]
+                                if sym_ind is not None and len(sym_ind) > 0:
                                     ts_compare = pd.Timestamp(bar_timestamp)
-                                    if 'timestamp' in sym_features.columns:
-                                        sym_features_ts = pd.to_datetime(sym_features['timestamp'])
-                                        if sym_features_ts.dt.tz is not None and ts_compare.tz is None:
-                                            ts_compare = ts_compare.tz_localize(sym_features_ts.dt.tz)
-                                        mask = sym_features_ts <= ts_compare
-                                        enriched_data_per_symbol[sym] = sym_features[mask].copy()
-                                    else:
-                                        enriched_data_per_symbol[sym] = sym_features.copy()
-                                    continue
+                                    if 'timestamp' in sym_ind.columns:
+                                        sym_ts = pd.to_datetime(sym_ind['timestamp'])
+                                        if getattr(sym_ts.dt, "tz", None) is not None and ts_compare.tz is None:
+                                            ts_compare = ts_compare.tz_localize(sym_ts.dt.tz)
+                                        mask = sym_ts <= ts_compare
+                                        df_enriched = sym_ind[mask].copy()
+                                        # Ensure datetime index for strategy zscore/window logic
+                                        try:
+                                            if 'timestamp' in df_enriched.columns:
+                                                df_enriched = df_enriched.set_index('timestamp')
+                                        except Exception:
+                                            pass
+                                        enriched_data_per_symbol[sym] = df_enriched
+                                        continue
 
-                            # Single-symbol backward compatibility: use features_historical
+                            # Single-symbol fallback: use the pre-calculated indicators slice (not features)
+                            if not is_multi_symbol and getattr(self, 'pre_calculated_indicators', None) is not None:
+                                try:
+                                    ind_df = self.pre_calculated_indicators
+                                    if isinstance(ind_df, pd.DataFrame) and not ind_df.empty:
+                                        ts_compare = pd.Timestamp(bar_timestamp)
+                                        if 'timestamp' in ind_df.columns:
+                                            ind_ts = pd.to_datetime(ind_df['timestamp'])
+                                            if getattr(ind_ts.dt, "tz", None) is not None and ts_compare.tz is None:
+                                                ts_compare = ts_compare.tz_localize(ind_ts.dt.tz)
+                                            m = ind_ts <= ts_compare
+                                            df_enriched = ind_df[m].copy()
+                                            if 'timestamp' in df_enriched.columns:
+                                                df_enriched = df_enriched.set_index('timestamp')
+                                            enriched_data_per_symbol[sym] = df_enriched
+                                            continue
+                                except Exception:
+                                    pass
+
+                            # Last resort: use features_historical (kept for backward compatibility)
                             if not is_multi_symbol and not features_historical.empty:
                                 enriched_data_per_symbol[sym] = features_historical
                                 continue
@@ -3718,6 +3843,8 @@ class InstitutionalBacktestEngine:
                                 'additional_data': getattr(s, 'additional_data', {})
                             } for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
+                            # Debug trace (parity): record signals with bar timestamps.
+                            # (Parity debug traces removed) 
                     else:
                         # No matching timestamp found in pre_calculated_features
                         # Fall back to on-the-fly calculation
@@ -3877,29 +4004,7 @@ class InstitutionalBacktestEngine:
                 if signals_df is not None and not signals_df.empty:
                     bar_results['signals_generated'] = len(signals_df)
 
-            # ================================================================
-            # CRITICAL FIX: NEXT-BAR EXECUTION (Eliminates Look-Ahead Bias)
-            # ================================================================
-            # Step 3a: FIRST execute any pending signals from PREVIOUS bar
-            # These signals were generated at bar N-1 and execute at bar N open
-            executed_trades = []
-            if self.pending_signals:
-                # Get current bar's OPEN price for execution (not close!)
-                open_price = bar.get('open', bar.get('close', 0))
-
-                # Execute pending signals at current bar's OPEN price
-                executed_trades = await self._execute_pending_signals(
-                    self.pending_signals,
-                    bar,
-                    timestamp,
-                    execution_price=open_price  # Use OPEN price, not close
-                )
-                bar_results['trades_executed'] = len(executed_trades)
-
-                # Clear pending signals after execution
-                self.pending_signals = []
-
-            # Step 3b: Generate NEW signals and QUEUE them for next bar
+            # Step 3: Generate NEW signals and QUEUE them for next bar
             # Signals generated at bar N will execute at bar N+1 open
             if signals_df is not None and not signals_df.empty:
                 # Get authorized trades (validation happens now, execution happens next bar)
@@ -4263,7 +4368,11 @@ class InstitutionalBacktestEngine:
                                     position_size_pct = self.config.strategies[0].get('max_position_size', self.config.max_position_size)
                             else:
                                 position_size_pct = self.config.max_position_size
-                            portfolio_value = self.config.initial_capital
+                            # Parity with papertest: size off live portfolio value (cash + positions),
+                            # not the static initial_capital.
+                            portfolio_value = self.risk_manager.portfolio_value if (
+                                self.risk_manager and hasattr(self.risk_manager, 'portfolio_value')
+                            ) else self.config.initial_capital
                             dollar_amount = position_size_pct * portfolio_value
                             quantity = dollar_amount / current_price
                             quantity = max(1.0, float(quantity))
@@ -4407,6 +4516,7 @@ class InstitutionalBacktestEngine:
                         # Check if authorized
                         from core_engine.system.central_risk_manager import AuthorizationLevel
                         if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                            # Authorized: add to list for next-bar execution
                             authorized_trades.append({
                                 'symbol': symbol,
                                 'side': side,
@@ -4418,6 +4528,8 @@ class InstitutionalBacktestEngine:
                                 'timestamp': timestamp,
                                 'current_price': current_price  # ✅ Store symbol-specific price
                             })
+                        else:
+                            pass
                 else:
                     continue
 

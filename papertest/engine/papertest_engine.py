@@ -77,7 +77,10 @@ class PapertestEngine:
 
         # Extract session gate for bridge filtering (consistency with backtest)
         session_gate = (self.wired.components or {}).get("session_gate")
-        filter_market_hours = bool(data_cfg.get("simulate_market_hours", True))
+        # RTH-only indicators/features: always filter BAR ingestion to RTH unless explicitly disabled.
+        # This is intentionally independent from `simulate_market_hours`, which may be used for other
+        # replay semantics.
+        filter_market_hours = bool(data_cfg.get("rth_only_indicators", True))
 
         self._bridge = ReplayToDispatcherBridge(
             dispatcher=self.wired.dispatcher,
@@ -105,44 +108,52 @@ class PapertestEngine:
     async def run(self) -> PapertestRunResult:
         if not self.wired or not self._bridge:
             raise RuntimeError("Call initialize() first")
+        try:
+            # Start replay
+            ok = await self.wired.replay_adapter.start_replay()
+            if not ok:
+                raise RuntimeError("Replay start failed")
 
-        # Start replay
-        ok = await self.wired.replay_adapter.start_replay()
-        if not ok:
-            raise RuntimeError("Replay start failed")
+            # Run paper engine loop in background
+            self._run_task = asyncio.create_task(self.wired.engine.run())
 
-        # Run paper engine loop in background
-        self._run_task = asyncio.create_task(self.wired.engine.run())
+            # Wait until replay completes (or paper loop errors)
+            await self._wait_for_replay_completion()
 
-        # Wait until replay completes (or paper loop errors)
-        await self._wait_for_replay_completion()
-
-        # Give the paper engine a brief chance to drain queued events / finish in-flight risk work
-        # (critical for deterministic signal↔risk parity in short debug windows)
-        deadline = _time.time() + 2.0
-        while _time.time() < deadline:
-            try:
-                bars_enq = getattr(self._bridge.stats, "bars_enqueued", None)
-                bars_proc = (self.wired.engine.get_stats() or {}).get("bars_processed")
-                if bars_enq is not None and bars_proc is not None and bars_proc >= bars_enq:
-                    break
-            except Exception:
-                pass
-            await asyncio.sleep(0.05)
-
-        # Stop engine (request graceful shutdown)
-        self.wired.engine.stop()
-
-        # Prefer graceful completion; only cancel as last resort
-        if self._run_task and not self._run_task.done():
-            try:
-                await asyncio.wait_for(self._run_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                self._run_task.cancel()
+            # Give the paper engine a brief chance to drain queued events / finish in-flight risk work
+            # (critical for deterministic signal↔risk parity in short debug windows)
+            deadline = _time.time() + 2.0
+            while _time.time() < deadline:
                 try:
-                    await self._run_task
-                except asyncio.CancelledError:
+                    bars_enq = getattr(self._bridge.stats, "bars_enqueued", None)
+                    bars_proc = (self.wired.engine.get_stats() or {}).get("bars_processed")
+                    if bars_enq is not None and bars_proc is not None and bars_proc >= bars_enq:
+                        break
+                except Exception:
                     pass
+                await asyncio.sleep(0.05)
+
+            # Stop engine (request graceful shutdown)
+            self.wired.engine.stop()
+
+            # Prefer graceful completion; only cancel as last resort
+            if self._run_task and not self._run_task.done():
+                try:
+                    await asyncio.wait_for(self._run_task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    self._run_task.cancel()
+                    try:
+                        await self._run_task
+                    except asyncio.CancelledError:
+                        pass
+        finally:
+            # Always disconnect replay adapter so the underlying replay engine (and its ClickHouse
+            # aiohttp session) is properly closed, even on early errors/cancellation.
+            try:
+                if self.wired and self.wired.replay_adapter:
+                    await self.wired.replay_adapter.disconnect()
+            except Exception:
+                logger.debug("Replay adapter disconnect failed (ignored)", exc_info=True)
 
         # Treat engine ERROR as a failed run
         try:

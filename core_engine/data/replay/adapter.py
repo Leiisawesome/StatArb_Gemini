@@ -213,6 +213,11 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             return None
 
         try:
+            # RTH-only warmup: filter to Regular Trading Hours before taking the last N bars.
+            # This ensures `bars` refers to RTH bars (not extended-hours bars).
+            from core_engine.data.market_calendar import MarketCalendar
+            from core_engine.data.rth_filter import filter_bars_to_rth
+
             # Warmup should end strictly before the first bar the consumer will process.
             # By default we anchor to ReplayConfig.start_time on start_date. Papertest can override
             # this via set_warmup_anchor_timestamp() when using debug windows (start_at_time).
@@ -239,7 +244,7 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
             warmup_end = anchor - timedelta(seconds=1)
             warmup_start = (anchor - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
 
-            df = self.replay_engine.data_manager.load_market_data(
+            df = await self.replay_engine.data_manager.load_market_data(
                 symbols=[symbol],
                 start_time=warmup_start,
                 end_time=warmup_end,
@@ -248,6 +253,11 @@ class HistoricalReplayFeedAdapter(DataFeedAdapter):
 
             if df is None or getattr(df, "empty", True):
                 return None
+
+            try:
+                df = filter_bars_to_rth(df, symbol=symbol, calendar=MarketCalendar(), timestamp_col="timestamp")
+            except Exception:
+                logger.debug("RTH warmup filter failed (ignored)", exc_info=True)
 
             # Keep only the last N bars (still pre-replay)
             if bars and bars > 0:

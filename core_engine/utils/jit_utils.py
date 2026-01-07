@@ -27,10 +27,12 @@ try:
     import numba  # type: ignore
     from numba import njit, prange  # type: ignore
     NUMBA_AVAILABLE = True
-    logger.info("✅ Numba available - JIT optimization enabled")
+    # Import-time log is intentionally debug-only to avoid noisy runs.
+    logger.debug("Numba available - JIT optimization enabled")
 except ImportError:
     NUMBA_AVAILABLE = False
-    logger.info("⚠️ Numba not installed - JIT optimization disabled (falling back to pure Python)")
+    # Import-time log is intentionally debug-only to avoid noisy runs.
+    logger.debug("Numba not installed - JIT optimization disabled (falling back to pure Python)")
 
 def njit_conditional(func=None, **kwargs):
     """

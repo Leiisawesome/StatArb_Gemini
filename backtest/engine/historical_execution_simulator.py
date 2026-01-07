@@ -144,6 +144,8 @@ class HistoricalExecutionSimulator:
         self.base_spread_bps = self.config.get('base_spread_bps', 5.0)      # 5 bps base spread
         self.base_slippage_bps = self.config.get('base_slippage_bps', 2.0)  # 2 bps base slippage
         self.commission_per_share = self.config.get('commission_per_share', 0.005)  # $0.005/share
+        # Optional minimum commission per order (paper-broker parity). Default off for legacy behavior.
+        self.min_commission = float(self.config.get('min_commission', 0.0))
 
         # Market impact parameters (Almgren-Chriss)
         self.impact_linear_coeff = self.config.get('impact_linear_coeff', 0.1)
@@ -324,6 +326,8 @@ class HistoricalExecutionSimulator:
             else:
                 # Equity commission: per-share based (e.g., $0.005/share)
                 commission_dollars = quantity * self.commission_per_share
+                if self.min_commission > 0:
+                    commission_dollars = max(self.min_commission, commission_dollars)
                 if market_price > 0:
                     commission_bps = (commission_dollars / (quantity * market_price)) * 10000
                 else:

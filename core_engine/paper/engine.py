@@ -138,12 +138,15 @@ class _SignalNormalizer:
                     acct = broker.get_account_info()
                     portfolio_value = float(getattr(acct, "portfolio_value", 0.0) or 0.0)
                     
-                    # Backtest parity: sizing uses CentralRiskManager.portfolio_value
+                    # Parity + correctness: prefer broker account portfolio_value (cash+positions as-of now).
+                    # Only trust CentralRiskManager.portfolio_value when it agrees (risk PV can lag fills).
                     try:
                         if risk_manager is not None and hasattr(risk_manager, "portfolio_value"):
                             rm_pv = float(getattr(risk_manager, "portfolio_value", 0.0) or 0.0)
-                            if rm_pv > 0:
-                                portfolio_value = rm_pv
+                            if rm_pv > 0 and portfolio_value > 0:
+                                rel_err = abs(rm_pv - portfolio_value) / max(portfolio_value, 1e-9)
+                                if rel_err <= 1e-9:
+                                    portfolio_value = rm_pv
                     except Exception:
                         pass
                         

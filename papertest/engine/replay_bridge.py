@@ -115,6 +115,10 @@ class ReplayToDispatcherBridge:
             return
 
         payload = self._normalize_payload(msg)
+        # Ensure payload timestamp is timezone-consistent with the market timestamp we enqueue.
+        # Without this, warmup bars (tz-aware) + replay bars (tz-naive) can mix in buffers and
+        # break indicator sorting/comparisons.
+        payload["timestamp"] = ts
         market_ts_ns = int(ts.timestamp() * 1_000_000_000)
         event_id = self._ids.generate_event_id(event_type.name, market_ts_ns, msg.symbol)
 

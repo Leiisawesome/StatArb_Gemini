@@ -9,7 +9,8 @@ papertest:
 
   buffers:
     size: 400
-    warmup_required: 30
+    # Warmup parity with Backtest: use the same RTH bar count for indicator/feature readiness.
+    warmup_required: 200
 
   strategies:
     - type: "mean_reversion"

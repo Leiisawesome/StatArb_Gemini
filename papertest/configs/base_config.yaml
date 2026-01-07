@@ -13,6 +13,8 @@ papertest:
     interval: "1min"
     replay_speed: "FAST_10X"
     simulate_market_hours: true
+    # If true, BAR ingestion + warmup seeding are filtered to RTH (pre/post bars excluded)
+    rth_only_indicators: true
 
   dispatcher:
     max_queue_size: 10000

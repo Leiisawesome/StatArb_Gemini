@@ -267,6 +267,14 @@ class HistoricalDataReplayEngine:
             except asyncio.CancelledError:
                 pass
 
+        # Ensure underlying ClickHouseDataManager is stopped so its aiohttp session is closed.
+        # Without this, asyncio will report "Unclosed client session" at process exit.
+        try:
+            if self.data_manager is not None:
+                await self.data_manager.stop()
+        except Exception:
+            logger.debug("Replay data_manager.stop() failed (ignored)", exc_info=True)
+
         self.status = ReplayStatus.STOPPED
         self._update_elapsed_time()
 
@@ -600,7 +608,12 @@ class HistoricalDataReplayEngine:
         # Use JIT-optimized unified buffer if available
         if self._unified_timestamps is not None:
             unique_ts = np.unique(self._unified_timestamps)
-            return [pd.Timestamp(ts).to_pydatetime() for ts in unique_ts]
+            # IMPORTANT: `unique_ts` are int64 nanoseconds since epoch (UTC).
+            # We must preserve timezone when converting back to datetimes; otherwise
+            # downstream session gating will misinterpret premarket bars as RTH bars.
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+            return [pd.Timestamp(int(ts), tz="UTC").tz_convert(tz).to_pydatetime() for ts in unique_ts]
 
         # Fallback to original implementation
         all_timestamps: Set[datetime] = set()

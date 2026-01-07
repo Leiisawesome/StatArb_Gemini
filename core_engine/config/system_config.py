@@ -2,7 +2,7 @@
 System-wide configuration for core_engine
 """
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from datetime import datetime
 
@@ -65,6 +65,11 @@ class BacktestConfig:
     start_date: str = ""  # YYYY-MM-DD
     end_date: str = ""    # YYYY-MM-DD
     interval: str = "1min"
+    # Warmup settings
+    # If set, backtest will fetch and retain approximately this many *RTH bars* before the first
+    # simulated bar for indicator/feature warmup (bars-based warmup).
+    # If None, engine will infer a strategy-appropriate default.
+    warmup_bars: Optional[int] = None
 
     # ClickHouse database settings (for backtesting data source)
     clickhouse_host: str = "localhost"
@@ -176,6 +181,10 @@ class BacktestConfig:
         # Validate interval
         if self.interval not in ["1min", "5min", "15min", "30min", "1H", "1D"]:
             errors.append(f"Invalid interval: {self.interval}")
+
+        # Validate warmup bars
+        if self.warmup_bars is not None and int(self.warmup_bars) < 0:
+            errors.append("warmup_bars must be >= 0")
 
         # Validate risk parameters
         if self.initial_capital <= 0:
