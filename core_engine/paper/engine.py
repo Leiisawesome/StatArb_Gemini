@@ -27,10 +27,11 @@ Version: 1.0.0 (Paper Trading Evolution - Phase 6)
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as _date
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Tuple
 import threading
+from pathlib import Path
 
 from ..system.event_dispatcher import EventType
 from ..system.session_gate import GateDecision
@@ -222,6 +223,10 @@ class PaperTradingConfig:
     eod_close_time: str = "15:55"
     eod_profit_only: bool = True
 
+    # EOD analytics settings
+    # Run a full PerformanceAnalyzer report once per trading day at session end.
+    enable_eod_performance_report: bool = True
+
 class PaperTradingEngine:
     """
     Main paper trading engine.
@@ -303,6 +308,10 @@ class PaperTradingEngine:
             'orders_submitted': 0,
             'fills_received': 0,
         }
+
+        # EOD performance report inputs (recorded during run; computed once per trading day)
+        self._pv_by_date: Dict[_date, List[Tuple[datetime, float]]] = {}
+        self._eod_perf_done: set[_date] = set()
 
         # Thread safety
         self._lock = threading.Lock()
@@ -580,6 +589,11 @@ class PaperTradingEngine:
             self._running = False
             if watchdog_task:
                 watchdog_task.cancel()
+            # End-of-day analytics (runs at session end, not per-bar)
+            try:
+                await self._run_eod_performance_reports()
+            except Exception:
+                logger.debug("EOD performance reporting failed (ignored)", exc_info=True)
 
     async def _process_event(self, event: Any) -> None:
         """Process a single event."""
@@ -882,6 +896,16 @@ class PaperTradingEngine:
             if close_price:
                 self._paper_broker.set_price(symbol, float(close_price))
 
+        # 9b. Record portfolio value series for EOD PerformanceAnalyzer report (close snapshot).
+        # This is intentionally lightweight; report generation happens once at session end.
+        try:
+            if self.config.enable_eod_performance_report and self._paper_broker is not None:
+                acct = self._paper_broker.get_account_info()
+                pv = float(getattr(acct, "portfolio_value", 0.0) or 0.0)
+                self._pv_by_date.setdefault(timestamp.date(), []).append((timestamp, pv))
+        except Exception:
+            pass
+
         # 10. Update state manager
         if self._state_manager:
             self._state_manager.set_replay_position(
@@ -1000,6 +1024,74 @@ class PaperTradingEngine:
                 liquidated_count += 1
 
         return liquidated_count
+
+    async def _run_eod_performance_reports(self) -> None:
+        """
+        Run a PerformanceAnalyzer report once per trading day using recorded portfolio value series.
+
+        Designed for live-style trading efficiency: we only compute the full report at session end.
+        """
+        if not self.config.enable_eod_performance_report:
+            return
+        if not self._pv_by_date:
+            return
+
+        try:
+            import pandas as pd
+            from core_engine.analytics.performance_analyzer import PerformanceAnalyzer, PerformanceConfig
+        except Exception:
+            return
+
+        analyzer = PerformanceAnalyzer(PerformanceConfig())
+
+        out_dir = Path(self.config.journal_dir).parent / "analytics"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for d, points in list(self._pv_by_date.items()):
+            if d in self._eod_perf_done:
+                continue
+            if not points or len(points) < 2:
+                self._eod_perf_done.add(d)
+                continue
+
+            points_sorted = sorted(points, key=lambda x: x[0])
+            ts_idx = [p[0] for p in points_sorted]
+            pv_vals = [float(p[1]) for p in points_sorted]
+            pv = pd.Series(pv_vals, index=pd.to_datetime(ts_idx))
+            rets = pv.pct_change().fillna(0.0)
+
+            report = await analyzer.generate_performance_report(
+                portfolio_returns=rets,
+                portfolio_name=f"paper:{self._session_id}:{d.isoformat()}",
+            )
+
+            m = report.portfolio_metrics
+            payload = {
+                "session_id": self._session_id,
+                "date": d.isoformat(),
+                "portfolio_name": report.portfolio_name,
+                "start": str(report.start_date),
+                "end": str(report.end_date),
+                "total_return": float(getattr(m, "total_return", 0.0) or 0.0),
+                "annualized_return": float(getattr(m, "annualized_return", 0.0) or 0.0),
+                "volatility": float(getattr(m, "volatility", 0.0) or 0.0),
+                "sharpe_ratio": float(getattr(m, "sharpe_ratio", 0.0) or 0.0),
+                "maximum_drawdown": float(getattr(m, "maximum_drawdown", 0.0) or 0.0),
+                "var_95": float(getattr(m, "var_95", 0.0) or 0.0),
+                "cvar_95": float(getattr(m, "cvar_95", 0.0) or 0.0),
+                "win_rate": float(getattr(m, "win_rate", 0.0) or 0.0),
+                "profit_factor": float(getattr(m, "profit_factor", 0.0) or 0.0),
+                "total_trades": int(getattr(m, "total_trades", 0) or 0),
+            }
+
+            import json
+            p = out_dir / f"performance_{d.isoformat()}_{self._session_id}.json"
+            p.write_text(json.dumps(payload, indent=2, default=str))
+            logger.info(
+                f"📊 EOD PerformanceReport saved: {p} "
+                f"(return={payload['total_return']:.2%}, sharpe={payload['sharpe_ratio']:.2f})"
+            )
+            self._eod_perf_done.add(d)
 
     def _normalize_strategy_signal(self, s: Any, market_timestamp: datetime, bar_close_price: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """

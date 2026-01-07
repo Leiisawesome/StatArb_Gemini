@@ -27,7 +27,7 @@ except ImportError:
 
 # Import ISystemComponent and IRegimeAware for orchestrator integration
 from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
-from ..exceptions import PerformanceDataUnavailableError
+from ..exceptions import PerformanceDataUnavailableError, ConfigurationRequiredError
 
 # Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
 from .core_metrics import (
@@ -996,7 +996,9 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         """Calculate metrics for a specific period"""
         try:
             # Resample returns to the specified period
-            period_returns = returns.resample(period).apply(lambda x: (1 + x).prod() - 1)
+            # PERF: avoid resample(...).apply(lambda ...) which is slow in pandas.
+            # Equivalent to compounded period return.
+            period_returns = (1.0 + returns).resample(period).prod() - 1.0
 
             if period_returns.empty:
                 return {}
@@ -1165,13 +1167,13 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         if period == PerformancePeriod.DAILY:
             return returns
         elif period == PerformancePeriod.WEEKLY:
-            return returns.resample('W').apply(lambda x: (1 + x).prod() - 1)
+            return (1.0 + returns).resample('W').prod() - 1.0
         elif period == PerformancePeriod.MONTHLY:
-            return returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
+            return (1.0 + returns).resample('M').prod() - 1.0
         elif period == PerformancePeriod.QUARTERLY:
-            return returns.resample('Q').apply(lambda x: (1 + x).prod() - 1)
+            return (1.0 + returns).resample('Q').prod() - 1.0
         elif period == PerformancePeriod.YEARLY:
-            return returns.resample('Y').apply(lambda x: (1 + x).prod() - 1)
+            return (1.0 + returns).resample('Y').prod() - 1.0
         else:
             return returns
 
@@ -1214,7 +1216,8 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         """Create monthly returns table"""
 
         try:
-            monthly_returns = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
+            # PERF: vectorized compounding per month
+            monthly_returns = (1.0 + returns).resample('M').prod() - 1.0
 
             # Create year-month matrix
             monthly_table = monthly_returns.to_frame('Returns')
@@ -1235,7 +1238,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             pivot_table.columns = [month_names[i-1] for i in pivot_table.columns]
 
             # Add annual totals
-            annual_returns = returns.resample('Y').apply(lambda x: (1 + x).prod() - 1)
+            annual_returns = (1.0 + returns).resample('Y').prod() - 1.0
             pivot_table['Annual'] = annual_returns.groupby(annual_returns.index.year).first()
 
             return pivot_table
@@ -2470,9 +2473,11 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 'compliance_status': 'error'
             }
 
-    async def generate_institutional_report(
+    async def generate_institutional_report_from_data(
         self,
-        report_params: Dict[str, Any]
+        report_params: Dict[str, Any],
+        portfolio_returns: pd.Series,
+        benchmark_returns: Optional[pd.Series] = None,
     ) -> Dict[str, Any]:
         """
         Generate comprehensive institutional performance report
@@ -2503,8 +2508,12 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     "No performance data available. Cannot generate institutional report without real performance data."
                 )
 
-            # Get actual performance metrics
-            performance_metrics = await self.calculate_performance_metrics(portfolio_returns, benchmark_returns)
+            # Get actual performance metrics (best-effort)
+            performance_metrics = await self.analyze_performance(
+                portfolio_returns,
+                symbol=str(report_params.get("portfolio_name", "portfolio")),
+                benchmark_returns=benchmark_returns,
+            )
             institutional_report['performance_summary'] = {
                 'total_return': performance_metrics.total_return,
                 'annualized_return': performance_metrics.annualized_return,
@@ -2782,10 +2791,14 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     def _calculate_consistency_score(self, returns: pd.Series) -> float:
         """Calculate consistency score (0-100)"""
         try:
-            # Calculate rolling Sharpe ratios
-            rolling_sharpe = returns.rolling(window=30).apply(
-                lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else 0
-            ).dropna()
+            # PERF: avoid rolling(...).apply(lambda ...) which is slow.
+            w = 30
+            m = returns.rolling(window=w).mean()
+            s = returns.rolling(window=w).std()
+            rolling_sharpe = (m / s) * np.sqrt(252)
+            # Replace inf/nan from zero std with 0, then drop missing rows.
+            rolling_sharpe = rolling_sharpe.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+            rolling_sharpe = rolling_sharpe.iloc[w - 1 :]
 
             if len(rolling_sharpe) == 0:
                 return 50.0  # Neutral score

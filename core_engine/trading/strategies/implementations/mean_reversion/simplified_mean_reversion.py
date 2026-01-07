@@ -287,10 +287,6 @@ class SimplifiedMeanReversionStrategy(EnhancedBaseStrategy):
 
             current_row = data.iloc[idx]
 
-            # DEBUG: Log for TSLA at 09:34
-            if symbol == "TSLA" and current_row['timestamp'].hour == 9 and current_row['timestamp'].minute == 34:
-                logger.info(f"DEBUG: TSLA bar at 09:34 reached _evaluate_signal_conditions. Regime favorable: {self._is_regime_favorable(symbol)}")
-
             # ========================================
             # STEP 1: REGIME FILTER (fast rejection)
             # ========================================
@@ -376,7 +372,6 @@ class SimplifiedMeanReversionStrategy(EnhancedBaseStrategy):
                     highs = data['high'].iloc[max(0, idx - 6):idx + 1].values
                     lows = data['low'].iloc[max(0, idx - 6):idx + 1].values
                     closes = data['close'].iloc[max(0, idx - 6):idx + 1].values
-                    
                     confirmed, confirm_reason = check_structure_confirmation(
                         highs, lows, closes, direction
                     )
