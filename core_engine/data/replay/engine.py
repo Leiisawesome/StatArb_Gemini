@@ -131,6 +131,8 @@ class HistoricalDataReplayEngine:
         # Data buffer
         self._data_buffer: Dict[str, pd.DataFrame] = {}
         self._buffer_lock = asyncio.Lock()
+        # Optional cached combined DataFrame (used to avoid per-symbol queries + concat/sort in bulk replay).
+        self._all_data_df: Optional[pd.DataFrame] = None
 
         # JIT-optimized unified buffer
         self._unified_timestamps: Optional[np.ndarray] = None
@@ -415,24 +417,38 @@ class HistoricalDataReplayEngine:
     async def _preload_data_buffer(self) -> None:
         """Pre-load initial data into buffer."""
         logger.info("Pre-loading data buffer...")
+        try:
+            # Bulk load once for all symbols to avoid N ClickHouse queries (major speedup for replay/backtest).
+            data = await self.data_manager.load_market_data(
+                symbols=list(self.config.symbols),
+                interval=self.config.interval
+            )
 
-        for symbol in self.config.symbols:
-            try:
-                # Load initial batch of data
-                data = await self.data_manager.load_market_data(
-                    symbols=[symbol],
-                    interval=self.config.interval
-                )
+            if not data.empty:
+                # Cache combined DF for unified buffer creation (avoids pd.concat over per-symbol DFs).
+                self._all_data_df = data
 
-                if not data.empty:
-                    async with self._buffer_lock:
-                        self._data_buffer[symbol] = data
-                        self.stats.total_records += len(data)
+                # Build per-symbol buffers for downstream code that expects them.
+                async with self._buffer_lock:
+                    self._data_buffer.clear()
+                    self.stats.total_records = 0
+                    if 'symbol' in data.columns:
+                        for sym, df_sym in data.groupby('symbol', sort=False):
+                            self._data_buffer[str(sym)] = df_sym.reset_index(drop=True)
+                            self.stats.total_records += len(df_sym)
+                    else:
+                        # Fallback: if data is missing symbol column, store under a generic key
+                        self._data_buffer["__ALL__"] = data.reset_index(drop=True)
+                        self.stats.total_records = len(data)
 
-                    logger.debug(f"Loaded {len(data)} records for {symbol}")
+                logger.info(f"✅ Bulk-loaded {self.stats.total_records} records for {len(self._data_buffer)} symbols")
+            else:
+                self._all_data_df = None
+                logger.warning("No data loaded in bulk preload - check symbols and date range")
 
-            except Exception as e:
-                logger.warning(f"Failed to load data for {symbol}: {e}")
+        except Exception as e:
+            self._all_data_df = None
+            logger.warning(f"Failed to bulk load data: {e}")
 
         # Calculate first and last data timestamps
         await self._calculate_timestamp_bounds()
@@ -451,39 +467,48 @@ class HistoricalDataReplayEngine:
 
         try:
             logger.info("Unifying and sorting data buffer for JIT optimization...")
-            
-            # Combine all DataFrames
+            # Prefer the combined DF from bulk preload (avoids pd.concat).
             async with self._buffer_lock:
-                all_data = pd.concat(self._data_buffer.values(), ignore_index=True)
-            
-            if all_data.empty:
+                all_data = self._all_data_df if self._all_data_df is not None else pd.concat(self._data_buffer.values(), ignore_index=True)
+
+            if all_data is None or all_data.empty:
                 return
 
-            # Sort by timestamp
-            all_data = all_data.sort_values('timestamp')
-            
-            # Store as NumPy arrays for fast JIT access
-            # Convert timestamps to int64 (nanoseconds since epoch) for JIT compatibility
-            self._unified_timestamps = all_data['timestamp'].values.astype('int64')
-            self._unified_symbols = all_data['symbol'].values.astype('U') # Unicode string array
-            self._unified_opens = all_data['open'].values.astype('float64')
-            self._unified_highs = all_data['high'].values.astype('float64')
-            self._unified_lows = all_data['low'].values.astype('float64')
-            self._unified_closes = all_data['close'].values.astype('float64')
-            self._unified_volumes = all_data['volume'].values.astype('float64')
-            
-            # VWAP might be missing in some data sources
-            if 'vwap' in all_data.columns:
-                self._unified_vwaps = all_data['vwap'].values.astype('float64')
+            # Build unified arrays without pandas sort when possible.
+            ts_ns = all_data['timestamp'].values.astype('int64')
+            # Check if already non-decreasing; if not, argsort once (stable to preserve intra-ts ordering).
+            if ts_ns.size >= 2 and not np.all(ts_ns[1:] >= ts_ns[:-1]):
+                order = np.argsort(ts_ns, kind="mergesort")
+                ts_ns = ts_ns[order]
             else:
-                self._unified_vwaps = self._unified_closes.copy()
-            
-            # Transactions might be missing
-            if 'transactions' in all_data.columns:
-                self._unified_transactions = all_data['transactions'].values.astype('float64')
-            else:
-                self._unified_transactions = np.zeros(len(all_data))
-                
+                order = None
+
+            def _col_as_float(name: str, default: float = 0.0) -> np.ndarray:
+                if name not in all_data.columns:
+                    return np.full(len(all_data), default, dtype='float64')
+                arr = all_data[name].values.astype('float64', copy=False)
+                return arr[order] if order is not None else arr
+
+            def _col_as_str(name: str) -> np.ndarray:
+                if name not in all_data.columns:
+                    return np.full(len(all_data), "", dtype='U')
+                arr = all_data[name].values.astype('U', copy=False)
+                return arr[order] if order is not None else arr
+
+            self._unified_timestamps = ts_ns
+            self._unified_symbols = _col_as_str('symbol')
+            self._unified_opens = _col_as_float('open')
+            self._unified_highs = _col_as_float('high')
+            self._unified_lows = _col_as_float('low')
+            self._unified_closes = _col_as_float('close')
+            self._unified_volumes = _col_as_float('volume')
+            self._unified_vwaps = _col_as_float('vwap', default=0.0)
+            if self._unified_vwaps is not None and self._unified_vwaps.size == self._unified_closes.size:
+                # If vwap missing and defaulted to 0s, use closes.
+                if np.all(self._unified_vwaps == 0.0):
+                    self._unified_vwaps = self._unified_closes.copy()
+            self._unified_transactions = _col_as_float('transactions', default=0.0)
+
             logger.info(f"✅ Unified JIT buffer created with {len(all_data)} records")
             
         except Exception as e:

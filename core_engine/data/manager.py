@@ -26,6 +26,8 @@ import asyncio
 import aiohttp
 import time
 from abc import ABC, abstractmethod
+from io import BytesIO
+from pandas.api.types import is_datetime64_any_dtype
 
 # Timezone handling
 try:
@@ -578,29 +580,57 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             self._http_session = aiohttp.ClientSession()
 
         try:
-            # Add TSVWithNames format to get proper column names
-            formatted_query = f"{query} FORMAT TSVWithNames"
+            # Fast path (bulk replay/backtest): ArrowStream via pyarrow (binary, much faster than TSV text parsing).
+            # Falls back to TSVWithNames if pyarrow isn't available or parsing fails.
+            df: pd.DataFrame
+            try:
+                import pyarrow as pa  # type: ignore
+                import pyarrow.ipc as ipc  # type: ignore
 
-            async with self._http_session.post(
-                self.clickhouse_url,
-                data=formatted_query,
-                headers={'Content-Type': 'text/plain'},
-                timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
-            ) as response:
-                response.raise_for_status()
-                text = await response.text()
+                formatted_query = f"{query} FORMAT ArrowStream"
+                async with self._http_session.post(
+                    self.clickhouse_url,
+                    data=formatted_query,
+                    headers={'Content-Type': 'text/plain'},
+                    timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
+                ) as response:
+                    response.raise_for_status()
+                    raw = await response.read()
 
-            # Parse response as TSV with headers
-            from io import StringIO
-            df = pd.read_csv(StringIO(text), sep='\t')
+                reader = ipc.open_stream(BytesIO(raw))
+                table = reader.read_all()
+                df = table.to_pandas(self_destruct=True)
+            except Exception:
+                # Fallback: TSVWithNames format (always supported)
+                formatted_query = f"{query} FORMAT TSVWithNames"
+                async with self._http_session.post(
+                    self.clickhouse_url,
+                    data=formatted_query,
+                    headers={'Content-Type': 'text/plain'},
+                    timeout=DEFAULT_QUERY_TIMEOUT_SECONDS
+                ) as response:
+                    response.raise_for_status()
+                    text = await response.text()
+
+                from io import StringIO
+                df = pd.read_csv(StringIO(text), sep='\t')
 
             # FIX TIMEZONE AT SOURCE: Handle timestamp timezone conversion immediately after query
             # This ensures ALL data returned from ClickHouse has correct timezone, regardless of caller
+            if 'timestamp_ns' in df.columns and not df.empty:
+                # Fast path: ClickHouse returns nanoseconds since epoch (UTC).
+                # Convert to tz-aware NY timestamps efficiently (no string parsing).
+                df['timestamp'] = pd.to_datetime(df['timestamp_ns'], unit='ns', utc=True).dt.tz_convert('America/New_York')
+                # Keep timestamp_ns for debugging/traceability, but downstream should use `timestamp`.
+
             if 'timestamp' in df.columns and not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                # ClickHouse toTimeZone() converts values to NY time but returns timezone-naive
-                # Localize directly to America/New_York (NOT UTC!) to avoid 5-hour offset
-                if df['timestamp'].dt.tz is None:
+                # If timestamp was already created from timestamp_ns above, skip.
+                if not is_datetime64_any_dtype(df['timestamp']):
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+                # ClickHouse toTimeZone() converts values to NY time but returns timezone-naive.
+                # Localize directly to America/New_York (NOT UTC!) to avoid 5-hour offset.
+                if getattr(df['timestamp'].dtype, "tz", None) is None:
                     df['timestamp'] = df['timestamp'].dt.tz_localize(
                         'America/New_York',
                         ambiguous='infer',
@@ -751,10 +781,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         end_ns = int(end_ts * 1e9)
 
         if interval == "1min":
-            # Use raw 1-minute data with timezone conversion
+            # Use raw 1-minute data with nanosecond timestamps (UTC) for fast Python-side conversion.
             query = f"""
             SELECT
-                toTimeZone(toDateTime(window_start / 1000000000), 'America/New_York') as timestamp,
+                window_start as timestamp_ns,
                 ticker as symbol,
                 open,
                 high,
@@ -764,15 +794,15 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 transactions
             FROM {self.enhanced_config.clickhouse_database}.ticks
             WHERE ticker IN ('{symbols_str}')
-            AND toDateTime(window_start / 1000000000, 'America/New_York') >= '{start_str}'
-            AND toDateTime(window_start / 1000000000, 'America/New_York') <= '{end_str}'
+            AND window_start >= {start_ns}
+            AND window_start <= {end_ns}
             ORDER BY ticker, window_start
             """
         elif interval == "5min":
             # Aggregate to 5-minute bars
             query = f"""
             SELECT
-                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute), 'America/New_York') as timestamp,
+                toUnixTimestamp64Nano(toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 5 minute)) as timestamp_ns,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,
@@ -784,14 +814,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             WHERE ticker IN ('{symbols_str}')
             AND window_start >= {start_ns}
             AND window_start <= {end_ns}
-            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 5 minute)
-            ORDER BY ticker, timestamp
+            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 5 minute)
+            ORDER BY ticker, timestamp_ns
             """
         elif interval == "15min":
             # Aggregate to 15-minute bars
             query = f"""
             SELECT
-                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute), 'America/New_York') as timestamp,
+                toUnixTimestamp64Nano(toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 15 minute)) as timestamp_ns,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,
@@ -803,14 +833,14 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             WHERE ticker IN ('{symbols_str}')
             AND window_start >= {start_ns}
             AND window_start <= {end_ns}
-            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 15 minute)
-            ORDER BY ticker, timestamp
+            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 15 minute)
+            ORDER BY ticker, timestamp_ns
             """
         elif interval == "1h":
             # Aggregate to 1-hour bars
             query = f"""
             SELECT
-                toTimeZone(toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour), 'America/New_York') as timestamp,
+                toUnixTimestamp64Nano(toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 1 hour)) as timestamp_ns,
                 ticker as symbol,
                 argMin(open, window_start) as open,
                 max(high) as high,
@@ -822,8 +852,8 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             WHERE ticker IN ('{symbols_str}')
             AND window_start >= {start_ns}
             AND window_start <= {end_ns}
-            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000), INTERVAL 1 hour)
-            ORDER BY ticker, timestamp
+            GROUP BY ticker, toStartOfInterval(toDateTime(window_start / 1000000000, 'UTC'), INTERVAL 1 hour)
+            ORDER BY ticker, timestamp_ns
             """
         else:
             raise ValueError(f"Unsupported interval: {interval}")
@@ -839,9 +869,12 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Note: Timezone conversion is now done in _execute_query() to fix it at the data source
         # This ensures all ClickHouse queries return properly timezone-aware timestamps
         if 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            # Avoid re-parsing timestamps when already datetime64[ns, tz]
+            if not is_datetime64_any_dtype(df['timestamp']):
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+
             # If somehow timezone was lost (shouldn't happen if _execute_query was used), fix it
-            if df['timestamp'].dt.tz is None:
+            if getattr(df['timestamp'].dtype, "tz", None) is None:
                 self.logger.warning("Timestamp timezone missing - applying fix (should be handled in _execute_query)")
                 df['timestamp'] = df['timestamp'].dt.tz_localize(
                     'America/New_York',
@@ -856,7 +889,22 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # Sort by symbol and timestamp
-        df = df.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+        # In bulk replay/backtest, ClickHouse already returns ORDER BY ticker, window_start/timestamp_ns,
+        # so we can skip sorting unless data is out-of-order.
+        try:
+            needs_sort = True
+            if 'symbol' in df.columns and 'timestamp' in df.columns:
+                sym = df['symbol']
+                ts = df['timestamp']
+                # Quick monotonicity check: if symbols are grouped and timestamps non-decreasing within groups, skip sort.
+                # (Cheap heuristic: global sort order matches if both columns are non-decreasing lexicographically.)
+                needs_sort = not (sym.is_monotonic_non_decreasing and ts.is_monotonic_increasing)
+            if needs_sort:
+                df = df.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
+            else:
+                df = df.reset_index(drop=True)
+        except Exception:
+            df = df.sort_values(['symbol', 'timestamp']).reset_index(drop=True)
 
         return df
 
