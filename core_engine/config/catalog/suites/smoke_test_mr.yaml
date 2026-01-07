@@ -1,7 +1,7 @@
-# Canonical Parity Suite: TSLA 2024-12-20 (Smoke Test)
-# ====================================================
-# Canonical suite inputs for BT/PT parity iteration.
-# This file intentionally uses the papertest schema as the single source of truth.
+# Canonical Smoke Test Suite: Mean Reversion (MR)
+# ===============================================
+# Canonical suite inputs for BT/PT parity iteration (MR strategy).
+# Uses papertest schema as the single source of truth.
 
 papertest:
   data:

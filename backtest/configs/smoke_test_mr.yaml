@@ -1,2 +1,2 @@
 includes:
-  - ../../core_engine/config/catalog/suites/smoke_test_tsla_2024_12_20.yaml
+  - ../../core_engine/config/catalog/suites/smoke_test_mr.yaml
