@@ -861,7 +861,8 @@ class EnhancedRegimeEngine(ISystemComponent):
                             regime_changed = True
                         elif new_regime.primary_regime != self.current_regime.primary_regime:
                             regime_changed = True
-                            self.logger.info(
+                            # This can fire frequently in intraday mode; keep at DEBUG to avoid log spam.
+                            self.logger.debug(
                                 f"Regime change detected for {symbol} at {timestamp}: "
                                 f"{self.current_regime.primary_regime.value} -> {new_regime.primary_regime.value}"
                             )
