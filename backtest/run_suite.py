@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 EXPERIMENTS = {
     'smoke_test': {
         'class': SmokeTest,
-        'default_config': 'backtest/configs/smoke_test.yaml',
+        'default_config': 'core_engine/config/catalog/suites/smoke_test_tsla_2024_12_20.yaml',
         'description': 'Quick sanity check (1 symbol, 1 day)'
     },
     'baseline': {

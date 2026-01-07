@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 EXPERIMENTS = {
     "smoke_test": {
         "class": SmokeTest,
-        "default_config": "papertest/configs/smoke_test.yaml",
+        "default_config": "core_engine/config/catalog/suites/smoke_test_tsla_2024_12_20.yaml",
         "description": "Quick sanity check (1 symbol, 1 day)",
     },
     "baseline": {
@@ -83,7 +83,7 @@ def list_experiments() -> None:
 async def run_experiment(
     experiment_name: str,
     config_path: Optional[str] = None,
-    base_config_path: str = "papertest/configs/base_config.yaml",
+    base_config_path: str = "core_engine/config/catalog/papertest/base_config.yaml",
 ) -> bool:
     if experiment_name not in EXPERIMENTS:
         logger.error(f"Unknown experiment: {experiment_name}")
@@ -121,7 +121,7 @@ def main() -> int:
     parser.add_argument(
         "--base-config",
         type=str,
-        default="papertest/configs/base_config.yaml",
+        default="core_engine/config/catalog/papertest/base_config.yaml",
         help="Path to base config file",
     )
     parser.add_argument("--list", action="store_true", help="List available experiments")

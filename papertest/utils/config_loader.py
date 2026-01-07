@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import yaml
 
 from core_engine.utils.config import deep_merge
+from core_engine.config.yaml_loader import load_with_includes
 
 
 def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -26,9 +26,9 @@ def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dic
         base_path = Path(base_config_path)
         if not base_path.exists():
             raise FileNotFoundError(f"Base config file not found: {base_config_path}")
-        base_cfg = yaml.safe_load(base_path.read_text()) or {}
+        base_cfg = load_with_includes(base_path)
 
-    override_cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    override_cfg = load_with_includes(cfg_path)
     merged = deep_merge(base_cfg, override_cfg)
     validate_papertest_schema(merged)
     return merged
