@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import threading
 import uuid
 import asyncio
+import math
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
 from ..system.interfaces import ISystemComponent
@@ -232,7 +233,145 @@ class EnhancedRegimeEngine(ISystemComponent):
         # Threading
         self._lock = threading.Lock()
 
+        # ------------------------------------------------------------------
+        # Per-bar fast regime state (single-symbol incremental evaluator)
+        # ------------------------------------------------------------------
+        self._fast_state: Dict[str, Dict[str, Any]] = {}
+
         self.logger.info(f"🚀 Enhanced Regime Engine initialized with component ID: {self.component_id}")
+
+    def _fast_regime_enabled(self) -> bool:
+        return bool(getattr(self.config, "enable_per_bar_fast", False))
+
+    def _evaluate_fast_single_symbol(self, market_data: pd.DataFrame, symbol: str) -> RegimeAnalysis:
+        """
+        O(1) per-bar single-symbol regime evaluator.
+
+        - Maintains per-symbol EWMA volatility (fast/slow) and EWMA trend.
+        - Classifies directional + volatility regime and emits a RegimeAnalysis.
+        - Designed for intraday per-bar updates without expensive pandas rolling ops.
+        """
+        sym = (symbol or "").upper() or "UNKNOWN"
+        if market_data is None or len(market_data) == 0:
+            ts = datetime.now()
+            return RegimeAnalysis(primary_regime=MarketRegime.UNKNOWN, confidence=0.0, regime_duration=0, timestamp=ts)
+
+        # Use last bar only
+        last = market_data.iloc[-1]
+        ts_val = last.get("timestamp") if isinstance(last, dict) else last["timestamp"] if "timestamp" in market_data.columns else None
+        ts = pd.to_datetime(ts_val, errors="coerce")
+        if isinstance(ts, pd.Timestamp):
+            ts = ts.to_pydatetime()
+        if not isinstance(ts, datetime):
+            ts = datetime.now()
+
+        close_val = None
+        try:
+            close_val = float(last.get("close")) if isinstance(last, dict) else float(last["close"])
+        except Exception:
+            close_val = float(market_data["close"].iloc[-1]) if "close" in market_data.columns else None
+        if close_val is None or not np.isfinite(close_val) or close_val <= 0:
+            return RegimeAnalysis(primary_regime=MarketRegime.UNKNOWN, confidence=0.0, regime_duration=0, timestamp=ts)
+
+        st = self._fast_state.get(sym)
+        if st is None:
+            st = {
+                "last_close": close_val,
+                "bars": 1,
+                "ewma_var_fast": 0.0,
+                "ewma_var_slow": 0.0,
+                "ewma_trend": 0.0,
+                "regime_duration": 0,
+                "last_primary": MarketRegime.UNKNOWN,
+            }
+            self._fast_state[sym] = st
+            return RegimeAnalysis(primary_regime=MarketRegime.UNKNOWN, confidence=0.0, regime_duration=0, timestamp=ts)
+
+        last_close = float(st.get("last_close") or close_val)
+        st["last_close"] = close_val
+        st["bars"] = int(st.get("bars", 0) or 0) + 1
+
+        # Log return
+        r = 0.0
+        if last_close > 0:
+            r = math.log(close_val / last_close) if close_val > 0 else 0.0
+
+        lam_f = float(getattr(self.config, "per_bar_fast_lambda_fast", 0.97))
+        lam_s = float(getattr(self.config, "per_bar_fast_lambda_slow", 0.995))
+        lam_t = float(getattr(self.config, "per_bar_fast_lambda_trend", 0.95))
+
+        # EWMA variance update
+        vf = float(st.get("ewma_var_fast", 0.0) or 0.0)
+        vs = float(st.get("ewma_var_slow", 0.0) or 0.0)
+        vf = lam_f * vf + (1.0 - lam_f) * (r * r)
+        vs = lam_s * vs + (1.0 - lam_s) * (r * r)
+        st["ewma_var_fast"] = vf
+        st["ewma_var_slow"] = vs
+
+        # EWMA trend update
+        tr = float(st.get("ewma_trend", 0.0) or 0.0)
+        tr = lam_t * tr + (1.0 - lam_t) * r
+        st["ewma_trend"] = tr
+
+        # Require minimum bars
+        min_bars = int(getattr(self.config, "per_bar_min_bars", 30))
+        if int(st["bars"]) < min_bars:
+            return RegimeAnalysis(primary_regime=MarketRegime.UNKNOWN, confidence=0.0, regime_duration=0, timestamp=ts)
+
+        vol_fast = math.sqrt(max(vf, 0.0))
+        vol_slow = math.sqrt(max(vs, 0.0))
+        vol_ratio = vol_fast / (vol_slow + 1e-12)
+
+        # Direction
+        trend_th = float(getattr(self.config, "per_bar_trend_threshold", 2e-4))
+        if tr > trend_th:
+            direction = "bull"
+        elif tr < -trend_th:
+            direction = "bear"
+        else:
+            direction = "sideways"
+
+        # Vol regime
+        vr_high = float(getattr(self.config, "per_bar_vol_ratio_high", 1.5))
+        vr_low = float(getattr(self.config, "per_bar_vol_ratio_low", 0.7))
+        if vol_ratio >= vr_high:
+            vol_reg = "high"
+        elif vol_ratio <= vr_low:
+            vol_reg = "low"
+        else:
+            vol_reg = "normal"
+
+        primary = MarketRegime.from_direction_and_vol(direction if direction in ("bull", "bear") else "neutral", vol_reg)
+        # Map "neutral" direction to range-like regimes
+        if direction == "sideways":
+            primary = MarketRegime.RANGE_BOUND if vol_reg != "high" else MarketRegime.CHOPPY
+
+        # Trend strength: normalize by volatility (proxy)
+        trend_strength = float(min(1.0, abs(tr) / (vol_fast + 1e-12) / 5.0))  # heuristic scaling
+
+        # Confidence: higher when vol signals are stable and trend strength is clear
+        conf = float(min(1.0, 0.5 + 0.5 * max(trend_strength, min(1.0, abs(vol_ratio - 1.0)))))
+
+        # Duration tracking
+        last_primary = st.get("last_primary", MarketRegime.UNKNOWN)
+        if primary == last_primary:
+            st["regime_duration"] = int(st.get("regime_duration", 0) or 0) + 1
+        else:
+            st["regime_duration"] = 1
+            st["last_primary"] = primary
+
+        ra = RegimeAnalysis(
+            primary_regime=primary,
+            confidence=conf,
+            regime_duration=int(st["regime_duration"]),
+            timestamp=ts,
+            directional_regime=direction if direction != "sideways" else "neutral",
+            volatility_regime={"low": "low_volatility", "normal": "normal_volatility", "high": "high_volatility"}.get(vol_reg, "normal_volatility"),
+            trend_strength=trend_strength,
+            volatility=float(vol_fast),
+            transition_probability=float(min(1.0, abs(vol_ratio - 1.0))),
+        )
+        return ra
 
     @property
     def regime_history(self) -> List[RegimeAnalysis]:
@@ -1201,8 +1340,12 @@ class EnhancedRegimeEngine(ISystemComponent):
         Returns:
             Confirmed regime (may be lagged during confirmation)
         """
-        # Get raw regime detection (using only current data, no smoothing)
-        raw_regime = self.process_market_data(market_data)
+        # Get raw regime detection (using only current data, no look-ahead).
+        # Optional fast per-bar mode (single-symbol incremental) is config-gated and disabled by default.
+        if symbol and self._fast_regime_enabled():
+            raw_regime = self._evaluate_fast_single_symbol(market_data, symbol)
+        else:
+            raw_regime = self.process_market_data(market_data)
 
         if not self.is_causal_only_mode():
             # Not in causal mode, return raw regime

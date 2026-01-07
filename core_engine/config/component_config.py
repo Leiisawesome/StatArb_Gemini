@@ -952,6 +952,42 @@ class RegimeConfig:
     """
 
     # ========================================================================
+    # INTRADAY PER-BAR FAST MODE (Single-Symbol) - Bulk/Streaming Optimization
+    # ========================================================================
+
+    enable_per_bar_fast: bool = False
+    """
+    If True, the regime engine will use a lightweight incremental per-bar regime evaluator
+    (O(1) state updates) instead of heavier batch-style computations.
+
+    Default: False (disabled to preserve historical behavior unless explicitly enabled).
+    """
+
+    per_bar_fast_lambda_fast: float = 0.97
+    """EWMA lambda for fast volatility estimator (1-min bars). Default: 0.97"""
+
+    per_bar_fast_lambda_slow: float = 0.995
+    """EWMA lambda for slow volatility baseline (1-min bars). Default: 0.995"""
+
+    per_bar_fast_lambda_trend: float = 0.95
+    """EWMA lambda for trend estimator (returns). Default: 0.95"""
+
+    per_bar_trend_threshold: float = 2e-4
+    """
+    Trend threshold on EWMA return (per-bar). Default: 0.0002 (~2 bps per bar).
+    Used to classify bull/bear vs sideways.
+    """
+
+    per_bar_vol_ratio_high: float = 1.5
+    """Volatility ratio (fast/slow) threshold for high volatility. Default: 1.5"""
+
+    per_bar_vol_ratio_low: float = 0.7
+    """Volatility ratio (fast/slow) threshold for low volatility. Default: 0.7"""
+
+    per_bar_min_bars: int = 30
+    """Minimum bars before fast mode emits non-UNKNOWN regimes. Default: 30"""
+
+    # ========================================================================
     # PERSISTENCE & STABILITY PARAMETERS
     # ========================================================================
 

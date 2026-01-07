@@ -17,6 +17,11 @@ papertest:
     # Warmup parity with Backtest: use the same RTH bar count for indicator/feature readiness.
     warmup_required: 200
 
+  # Regime engine (single-symbol, per-bar): enable fast incremental evaluator.
+  # Safe: both BT and PT consume this canonical suite config.
+  regime:
+    enable_per_bar_fast: true
+
   strategies:
     - type: "mean_reversion"
       name: "MR_Simple"
