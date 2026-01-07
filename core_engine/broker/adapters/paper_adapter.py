@@ -187,7 +187,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         self._time_source: Optional[Any] = None
 
         # Thread safety
-        self._lock = threading.Lock()
+        # NOTE: Some methods call other lock-taking methods (e.g. get_orders -> get_open_orders).
+        # Use an RLock to avoid deadlocks while keeping thread safety.
+        self._lock = threading.RLock()
+
+        # Cached portfolio value components (O(1) get_account_info()).
+        # Maintain incremental position market values so we don't sum positions per bar.
+        self._position_market_value: Dict[str, float] = {}
+        self._total_position_value: float = 0.0
 
         # Stats
         self._stats = {
@@ -254,7 +261,32 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     def set_price(self, symbol: str, price: float) -> None:
         """Set current price for a symbol (called by replay engine)."""
         with self._lock:
+            if not symbol:
+                return
+
+            old_price = self._prices.get(symbol)
             self._prices[symbol] = price
+
+            # Incrementally update cached market value if we hold this symbol.
+            pos = self._positions.get(symbol)
+            if pos is None or float(getattr(pos, "quantity", 0.0) or 0.0) <= 0.0:
+                if symbol in self._position_market_value:
+                    old_mv = self._position_market_value.pop(symbol)
+                    self._total_position_value -= old_mv
+                return
+
+            qty = float(pos.quantity or 0.0)
+            if qty <= 0.0:
+                return
+
+            old_mv = self._position_market_value.get(symbol)
+            if old_mv is None:
+                base_px = old_price if old_price is not None else float(pos.avg_entry_price or 0.0)
+                old_mv = qty * base_px
+
+            new_mv = qty * float(price)
+            self._position_market_value[symbol] = new_mv
+            self._total_position_value += (new_mv - old_mv)
 
     def set_market_data(self, symbol: str, bar: Dict[str, Any], market_timestamp: Any) -> None:
         """
@@ -430,6 +462,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         # Simulate latency
         await asyncio.sleep(self._simulate_latency())
 
+        order_cb: Optional[Callable[[PaperOrder], None]] = None
         with self._lock:
             # Transition to NEW
             order.status = PaperOrderStatus.NEW
@@ -446,12 +479,21 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             except Exception:
                 pass
 
-            if self._order_callback:
-                self._order_callback(order)
+            order_cb = self._order_callback
+
+        # Callback outside lock to reduce contention
+        if order_cb:
+            try:
+                order_cb(order)
+            except Exception:
+                logger.debug("Order callback failed (ignored)", exc_info=True)
 
         # Another latency for fill
         await asyncio.sleep(self._simulate_latency())
 
+        fill_cb: Optional[Callable[[PaperFill], None]] = None
+        order_cb2: Optional[Callable[[PaperOrder], None]] = None
+        fill_obj: Optional[PaperFill] = None
         with self._lock:
             # Check if cancelled
             if order.status == PaperOrderStatus.CANCELLED:
@@ -526,7 +568,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             # Create fill
             commission = self._calculate_commission(fill_qty)
 
-            fill = PaperFill(
+            fill_obj = PaperFill(
                 fill_id=self._next_fill_id(order.order_id),
                 order_id=order.order_id,
                 symbol=order.symbol,
@@ -539,7 +581,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             )
 
             # Update order
-            order.fills.append(fill)
+            order.fills.append(fill_obj)
             order.filled_quantity += fill_qty
 
             # Update average fill price
@@ -564,11 +606,20 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
             self._stats['total_commission'] += commission
 
-            # Callbacks
-            if self._fill_callback:
-                self._fill_callback(fill)
-            if self._order_callback:
-                self._order_callback(order)
+            # Callbacks (outside lock)
+            fill_cb = self._fill_callback
+            order_cb2 = self._order_callback
+
+        if fill_cb and fill_obj is not None:
+            try:
+                fill_cb(fill_obj)
+            except Exception:
+                logger.debug("Fill callback failed (ignored)", exc_info=True)
+        if order_cb2:
+            try:
+                order_cb2(order)
+            except Exception:
+                logger.debug("Order callback failed (ignored)", exc_info=True)
 
     def _update_position(
         self,
@@ -578,6 +629,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         price: float,
     ) -> None:
         """Update position from fill."""
+        if not symbol:
+            return
+
         if symbol not in self._positions:
             self._positions[symbol] = PaperPosition(
                 symbol=symbol,
@@ -600,6 +654,24 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 pos.realized_pnl += pos.unrealized_pnl
                 pos.quantity = 0
                 pos.avg_entry_price = 0
+
+        # Update cached market value incrementally (best effort).
+        current_px = float(self._prices.get(symbol, price) or 0.0)
+        old_mv = float(self._position_market_value.get(symbol, 0.0) or 0.0)
+        if float(pos.quantity or 0.0) > 0.0 and current_px > 0.0:
+            new_mv = float(pos.quantity) * current_px
+            self._position_market_value[symbol] = new_mv
+            self._total_position_value += (new_mv - old_mv)
+            # Keep position telemetry in sync (optional)
+            pos.market_value = new_mv
+            pos.unrealized_pnl = (current_px - float(pos.avg_entry_price or 0.0)) * float(pos.quantity or 0.0)
+        else:
+            # Closed position => remove cached MV
+            if symbol in self._position_market_value:
+                self._position_market_value.pop(symbol, None)
+            self._total_position_value -= old_mv
+            pos.market_value = 0.0
+            pos.unrealized_pnl = 0.0
 
     def submit_market_order(
         self,
@@ -866,12 +938,8 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     def get_account_info(self) -> AccountInfo:
         """Get account information."""
         with self._lock:
-            # Calculate total equity
-            position_value = sum(
-                pos.quantity * self._prices.get(pos.symbol, pos.avg_entry_price)
-                for pos in self._positions.values()
-            )
-            total_equity = self._cash + position_value
+            # O(1): total position value maintained incrementally on set_price() and fills.
+            total_equity = float(self._cash) + float(self._total_position_value)
 
             return AccountInfo(
                 account_id="paper-account",
@@ -914,6 +982,8 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             self._prices.clear()
             self._halted_symbols.clear()
             self._fill_seq = 0
+            self._position_market_value.clear()
+            self._total_position_value = 0.0
             for key in self._stats:
                 self._stats[key] = 0
             logger.info("📝 Paper broker reset")
@@ -921,11 +991,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     def get_stats(self) -> Dict[str, Any]:
         """Get paper broker statistics."""
         with self._lock:
+            open_statuses = {PaperOrderStatus.PENDING_NEW, PaperOrderStatus.NEW, PaperOrderStatus.PARTIALLY_FILLED}
+            open_orders_count = sum(1 for o in self._orders.values() if o.status in open_statuses)
+            position_count = sum(1 for p in self._positions.values() if float(getattr(p, "quantity", 0.0) or 0.0) > 0.0)
             return {
                 **self._stats,
                 'cash': self._cash,
-                'position_count': len([p for p in self._positions.values() if p.quantity > 0]),
-                'open_orders': len(self.get_open_orders()),
+                'position_count': position_count,
+                'open_orders': open_orders_count,
             }
 
     # ==================== Abstract Method Implementations ====================
