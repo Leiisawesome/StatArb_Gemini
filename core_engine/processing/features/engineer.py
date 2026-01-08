@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 from core_engine.config import FeatureConfig
 
+# Import JIT utilities for performance optimization
+from core_engine.utils.jit_utils import jit_rolling_rank, jit_rolling_mad_zscore
+
 class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     """
     Enhanced Feature Engineering with ISystemComponent & IRegimeAware Integration
@@ -923,7 +926,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # PERF: Avoid pandas rolling.apply (very slow). Use jit_utils implementation.
             # If Numba is not installed, njit_conditional returns the pure-Python function,
             # which is still typically faster than pandas apply for large windows.
-            from core_engine.utils.jit_utils import jit_rolling_mad_zscore
 
             z_scores = pd.Series(
                 jit_rolling_mad_zscore(series.values, window, min_periods=20),
@@ -1110,9 +1112,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
 
         # Collect all new columns to avoid fragmentation
         new_columns = {}
-
-        # Import JIT utilities
-        from core_engine.utils.jit_utils import is_numba_available, jit_rolling_rank
 
         for feature in key_features:
             if feature in df.columns:
