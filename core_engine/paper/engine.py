@@ -139,15 +139,13 @@ class _SignalNormalizer:
                     acct = broker.get_account_info()
                     portfolio_value = float(getattr(acct, "portfolio_value", 0.0) or 0.0)
                     
-                    # Parity + correctness: prefer broker account portfolio_value (cash+positions as-of now).
-                    # Only trust CentralRiskManager.portfolio_value when it agrees (risk PV can lag fills).
+                    # BT↔PT parity: use CentralRiskManager.portfolio_value when available
+                    # (Backtest sizing uses this source of truth).
                     try:
                         if risk_manager is not None and hasattr(risk_manager, "portfolio_value"):
                             rm_pv = float(getattr(risk_manager, "portfolio_value", 0.0) or 0.0)
-                            if rm_pv > 0 and portfolio_value > 0:
-                                rel_err = abs(rm_pv - portfolio_value) / max(portfolio_value, 1e-9)
-                                if rel_err <= 1e-9:
-                                    portfolio_value = rm_pv
+                            if rm_pv > 0:
+                                portfolio_value = rm_pv
                     except Exception:
                         pass
                         
@@ -217,6 +215,12 @@ class PaperTradingConfig:
     # Execution settings
     initial_cash: float = 100_000.0
     commission_per_share: float = 0.005
+
+    # Regime evaluation semantics
+    # Default True for live-style streaming behavior (no look-ahead, confirm regime changes).
+    # For deterministic BT↔PT parity (where BT already runs causally without confirmation lag),
+    # experiments can disable this to align regime context timing.
+    enable_causal_only_regime: bool = True
 
     # EOD Liquidation settings
     enable_eod_liquidation: bool = False
@@ -358,9 +362,20 @@ class PaperTradingEngine:
     def setup_regime_engine(self, engine: Any) -> None:
         """Set the regime engine."""
         self._regime_engine = engine
-        # Enable causal-only mode
-        if hasattr(engine, 'enable_causal_only_mode'):
-            engine.enable_causal_only_mode()
+        # Enable/disable causal-only mode based on config.
+        # - True: streaming-safe, confirmation state machine (default for paper/live-style).
+        # - False: align timing with backtest parity expectations.
+        try:
+            enable_causal = bool(getattr(self.config, "enable_causal_only_regime", True))
+        except Exception:
+            enable_causal = True
+
+        if enable_causal:
+            if hasattr(engine, 'enable_causal_only_mode'):
+                engine.enable_causal_only_mode()
+        else:
+            if hasattr(engine, 'disable_causal_only_mode'):
+                engine.disable_causal_only_mode()
 
     def setup_session_gate(self, gate: Any) -> None:
         """Set the trading session gate."""
@@ -638,6 +653,39 @@ class PaperTradingEngine:
 
         # Execute any pending bar-open signals for this symbol when its open is available
         if self._pending_open_signals and self._execution_engine and self._oms and self._paper_broker:
+            # Ensure regime context is aligned to THIS symbol before bar-open execution.
+            # We execute bar-open orders *before* updating buffers/analytics for the current bar,
+            # so `current_regime` can otherwise reflect a different symbol's last evaluation at the
+            # prior timestamp (multi-symbol replay ordering). This makes execution-cost inputs
+            # deterministic and symbol-consistent for BT↔PT parity.
+            try:
+                if self._regime_engine and self._buffer_manager:
+                    # Use a deterministic "anchor" symbol (typically the first in the replay universe)
+                    # to produce a single global regime context, matching the backtest engine's
+                    # single-regime execution-cost behavior in parity mode.
+                    anchor = None
+                    try:
+                        if self._expected_symbols:
+                            anchor = str(self._expected_symbols[0])
+                    except Exception:
+                        anchor = None
+                    anchor = anchor or symbol
+
+                    pre_bar_buf = self._buffer_manager.get_buffer(anchor)
+                    if pre_bar_buf is not None and len(pre_bar_buf) > 0:
+                        # Ensure we do NOT include the current bar for the anchor symbol if it has already
+                        # been appended earlier in this timestamp cycle (multi-symbol ordering).
+                        # Bar-open execution at time T should use regime as-of <= T (typically T-1 close).
+                        try:
+                            if "timestamp" in getattr(pre_bar_buf, "columns", []):
+                                pre_bar_buf = pre_bar_buf[pre_bar_buf["timestamp"] < timestamp]
+                        except Exception:
+                            pass
+                        if pre_bar_buf is not None and len(pre_bar_buf) > 0:
+                            self._regime_engine.evaluate_regime_causal(pre_bar_buf, anchor)
+            except Exception:
+                logger.debug("Pre-open regime refresh failed (ignored)", exc_info=True)
+
             await self._execute_pending_signals_for_symbol(symbol=symbol, bar=bar, market_timestamp=timestamp)
 
         # After bar-open execution, process any queued fills up through this bar timestamp.
@@ -980,6 +1028,34 @@ class PaperTradingEngine:
         if not symbols_to_close:
             return 0
 
+        # Ensure we have this timestamp's bar snapshot for ALL symbols we intend to liquidate.
+        # In multi-symbol replay, _check_eod_liquidation() is called once per symbol bar, so we may
+        # reach the EOD time while some symbols' 15:55 bar hasn't been processed yet. If we liquidate
+        # too early, we can use a stale close for those symbols.
+        try:
+            if self._paper_broker:
+                md_all = getattr(self._paper_broker, "_latest_market_data", {}) or {}
+                not_ready = []
+                for sym in symbols_to_close:
+                    md_sym = md_all.get(sym) or {}
+                    md_ts = md_sym.get("timestamp")
+                    if md_ts is None:
+                        not_ready.append(sym)
+                        continue
+                    try:
+                        import pandas as pd
+                        if pd.Timestamp(md_ts) != pd.Timestamp(timestamp):
+                            not_ready.append(sym)
+                    except Exception:
+                        # Best-effort: fall back to strict equality if types are comparable
+                        if md_ts != timestamp:
+                            not_ready.append(sym)
+                if not_ready:
+                    return 0
+        except Exception:
+            # If readiness check fails, proceed (best-effort)
+            pass
+
         self._eod_flags[eod_key] = True
         logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(symbols_to_close)} positions")
 
@@ -1009,17 +1085,103 @@ class PaperTradingEngine:
 
                 side = "sell" if float(pos.quantity) > 0 else "buy"
                 
-                # Create a liquidation signal
+                qty_to_close = abs(float(pos.quantity))
+                logger.info(f"   💰 EOD: {side.upper()} {qty_to_close} {symbol}")
+
+                # Parity with backtest: execute liquidation immediately at the EOD close timestamp,
+                # not next-bar open (avoids a +1 minute drift in fills).
+                if self._execution_engine and hasattr(self._execution_engine, "execute_with_mode_routing"):
+                    try:
+                        # Ensure broker is marked at the EOD close price for this symbol
+                        if self._paper_broker:
+                            close_px = None
+                            try:
+                                md = getattr(self._paper_broker, "_latest_market_data", {}) or {}
+                                md_sym = md.get(symbol) or {}
+                                close_px = md_sym.get("close") or md_sym.get("close_price")
+                            except Exception:
+                                close_px = None
+                            if close_px is None:
+                                close_px = bar.get("close") or bar.get("close_price") or bar.get("last_price")
+                            if close_px:
+                                self._paper_broker.set_price(symbol, float(close_px))
+
+                        from core_engine.system.unified_execution_engine import ExecutionAuthorization, ExecutionRequest, ExecutionAlgorithm
+                        auth = ExecutionAuthorization(
+                            authorization_id=f"eod:{self._session_id}:{symbol}:{ts.isoformat()}",
+                            symbol=symbol,
+                            side=side,
+                            quantity=float(qty_to_close),
+                            max_quantity=float(qty_to_close),
+                            strategy_id="EOD_LIQUIDATION",
+                            allowed_algorithms=[ExecutionAlgorithm.MARKET],
+                        )
+
+                        # Use bar close as decision price for deterministic execution costs at EOD.
+                        decision_px = None
+                        try:
+                            if close_px is not None:
+                                decision_px = float(close_px)
+                            else:
+                                decision_px = float(bar.get("close") or bar.get("close_price") or 0.0) or None
+                        except Exception:
+                            decision_px = None
+                        regime_ctx = self._get_regime_context() if hasattr(self, "_get_regime_context") else None
+
+                        req = ExecutionRequest(
+                            authorization=auth,
+                            algorithm=ExecutionAlgorithm.MARKET,
+                            strategy_context={
+                                "decision_price": decision_px,
+                                "regime_context": regime_ctx,
+                                # Parity with backtest: EOD liquidation is treated as a deterministic close-out
+                                # at the bar close (no extra transaction-cost model noise).
+                                "eod_liquidation": True,
+                            },
+                        )
+                        await self._execution_engine.execute_with_mode_routing(req)
+                        self._execution_count += 1
+
+                        # Drain any fills created by the broker up through this timestamp.
+                        if self._dispatcher and hasattr(self._dispatcher, "peek_next"):
+                            while True:
+                                nxt = None
+                                try:
+                                    nxt = self._dispatcher.peek_next()
+                                except Exception:
+                                    nxt = None
+                                if nxt is None:
+                                    break
+                                try:
+                                    nxt_type = nxt.event_type.name if hasattr(nxt.event_type, "name") else str(nxt.event_type)
+                                except Exception:
+                                    nxt_type = str(getattr(nxt, "event_type", ""))
+                                if nxt_type != "FILL":
+                                    break
+                                try:
+                                    if getattr(nxt, "market_timestamp", None) is not None and nxt.market_timestamp > timestamp:
+                                        break
+                                except Exception:
+                                    pass
+                                fev = self._dispatcher.process_next()
+                                if fev is None:
+                                    break
+                                await self._process_fill(fev)
+
+                        liquidated_count += 1
+                        continue
+                    except Exception:
+                        logger.debug("Immediate EOD liquidation execution failed; falling back to signal path", exc_info=True)
+
+                # Fallback: enqueue as a signal (executes next-bar open)
                 signal = {
                     'symbol': symbol,
                     'side': side,
-                    'requested_quantity': abs(float(pos.quantity)),
+                    'requested_quantity': qty_to_close,
                     'type': 'market',
                     'reason': 'EOD_LIQUIDATION',
                     'signal_timestamp': timestamp
                 }
-                
-                logger.info(f"   💰 EOD: {side.upper()} {abs(pos.quantity)} {symbol}")
                 await self.submit_signal(signal)
                 liquidated_count += 1
 
@@ -1270,6 +1432,11 @@ class PaperTradingEngine:
 
         # Log fill
         if self._event_journal:
+            extra = None
+            try:
+                extra = {k: v for k, v in (fill or {}).items() if isinstance(k, str) and k.startswith("_debug_")}
+            except Exception:
+                extra = None
             self._event_journal.log_fill(
                 symbol=symbol,
                 order_id=fill.get('order_id', ''),
@@ -1279,6 +1446,7 @@ class PaperTradingEngine:
                 commission=fill.get('commission', 0),
                 side=fill.get('side'),
                 fill_timestamp=fill.get('timestamp'),
+                extra=extra,
             )
 
         # Update risk budget

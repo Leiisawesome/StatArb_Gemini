@@ -74,6 +74,7 @@ class ComponentFactory:
         dispatcher_cfg = pt.get("dispatcher", {})
         risk_cfg = pt.get("risk", {})
         exec_cfg = pt.get("execution", {})
+        regime_cfg = pt.get("regime", {}) or {}
 
         # EOD Liquidation settings (extract from first strategy if available)
         enable_eod = False
@@ -100,6 +101,13 @@ class ComponentFactory:
             stall_threshold_seconds=float(session_cfg.get("stall_threshold_seconds", 60.0)),
             enable_eod_liquidation=enable_eod,
             eod_close_time=eod_time,
+            # Default: causal-only streaming regime.
+            # Parity mode (HistoricalExecutionSimulator): disable confirmation lag to match BT semantics.
+            enable_causal_only_regime=(
+                bool(regime_cfg.get("enable_causal_only_mode", True))
+                if not bool(exec_cfg.get("use_historical_execution_simulator", False))
+                else bool(regime_cfg.get("enable_causal_only_mode_for_parity", False))
+            ),
         )
 
         engine = PaperTradingEngine(paper_cfg)
@@ -138,7 +146,19 @@ class ComponentFactory:
         signal_manager = StreamingSignalManager(bar_policy=bar_policy, session_id=engine._session_id)
 
         # Regime + strategy
-        regime_engine = EnhancedRegimeEngine({})
+        # Regime config: in parity mode, use backtest-aligned defaults unless overridden.
+        regime_cfg_effective = dict(regime_cfg or {})
+        if bool(exec_cfg.get("use_historical_execution_simulator", False)):
+            regime_cfg_effective.setdefault("lookback_window", 60)
+            regime_cfg_effective.setdefault("volatility_window", 20)
+            regime_cfg_effective.setdefault("trend_threshold", 0.02)
+            regime_cfg_effective.setdefault("regime_change_threshold", 0.7)
+            regime_cfg_effective.setdefault("update_frequency", 60)
+            regime_cfg_effective.setdefault("enable_enhanced_detection", True)
+            # Important: parity should not depend on the fast incremental evaluator unless BT also uses it.
+            regime_cfg_effective["enable_per_bar_fast"] = False
+
+        regime_engine = EnhancedRegimeEngine(regime_cfg_effective)
         strategy_manager = StrategyManager(config={}, data_config=None)
 
         # Risk governance
@@ -203,6 +223,20 @@ class ComponentFactory:
                     "commission": getattr(fill, "commission", 0),
                     "timestamp": getattr(fill, "timestamp", None),
                 }
+                # Optional debug fields (only present when using HistoricalExecutionSimulator)
+                for k in (
+                    "_debug_regime_volatility_regime",
+                    "_debug_regime_primary_regime",
+                    "_debug_total_cost_bps",
+                    "_debug_spread_cost_bps",
+                    "_debug_market_impact_bps",
+                    "_debug_slippage_bps",
+                    "_debug_commission_bps",
+                    "_debug_market_volume",
+                    "_debug_market_volatility",
+                ):
+                    if hasattr(fill, k):
+                        payload[k] = getattr(fill, k)
                 dispatcher.enqueue(
                     event_type=EventType.FILL,
                     payload=payload,

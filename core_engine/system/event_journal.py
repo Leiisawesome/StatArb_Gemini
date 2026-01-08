@@ -380,6 +380,7 @@ class EventJournal:
         commission: float = 0.0,
         side: Optional[str] = None,
         fill_timestamp: Optional[datetime] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log an execution fill."""
         with self._lock:
@@ -395,6 +396,7 @@ class EventJournal:
                     'commission': commission,
                     **({'side': side} if side is not None else {}),
                     **({'fill_timestamp': fill_timestamp.isoformat() if fill_timestamp else None}),
+                    **(extra or {}),
                 },
                 event_id=fill_id,
                 timestamp=fill_timestamp,

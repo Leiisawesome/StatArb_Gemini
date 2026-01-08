@@ -19,6 +19,7 @@ Version: 1.0.0 (Paper Trading Evolution - Phase 4)
 """
 
 import asyncio
+import contextvars
 import logging
 import random
 import math
@@ -171,7 +172,15 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         self._positions: Dict[str, PaperPosition] = {}
         self._prices: Dict[str, float] = {}  # Current prices
         self._latest_market_data: Dict[str, Dict[str, Any]] = {}
-        self._next_order_context: Optional[Dict[str, Any]] = None
+        # NOTE: Order context is "one-shot" and must be safe under concurrent async execution.
+        # Using a plain instance attribute is race-prone: two coroutines can interleave
+        # set_next_order_context() and submit_*_order(), causing context to be stolen.
+        # Use a task-local ContextVar so each coroutine reliably applies its own context.
+        self._next_order_context: Optional[Dict[str, Any]] = None  # legacy fallback
+        self._next_order_context_var: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+            f"paper_next_order_context_{id(self)}",
+            default=None,
+        )
 
         # Halted symbols
         self._halted_symbols: set = set()
@@ -314,8 +323,15 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         match backtest's HistoricalExecutionSimulator semantics.
         """
         try:
-            self._next_order_context = dict(context or {})
+            ctx = dict(context or {})
+            # Store task-local (preferred) + legacy fallback for any non-async callers.
+            self._next_order_context_var.set(ctx)
+            self._next_order_context = ctx
         except Exception:
+            try:
+                self._next_order_context_var.set(None)
+            except Exception:
+                pass
             self._next_order_context = None
 
     def set_prices(self, prices: Dict[str, float]) -> None:
@@ -501,6 +517,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
             # Get fill price
             fill_price = None
+            debug_costs = None
+            debug_regime_ctx = None
+            debug_market_data = None
             if self._use_historical_execution_simulator:
                 sim = self._get_historical_execution_simulator()
                 if sim is not None:
@@ -516,32 +535,45 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                         'volume': md0.get('volume', 0),
                         'volatility': md0.get('volatility', 0.02),
                     }
+                    debug_market_data = dict(market_data)
                     # Pull optional context (regime/liquidity) from order context if provided
                     ctx = getattr(order, "_paper_context", None) if hasattr(order, "_paper_context") else None
                     regime_ctx = None
                     liquidity_score = None
+                    eod_liquidation = False
                     try:
                         if isinstance(ctx, dict):
                             regime_ctx = ctx.get("regime_context")
                             liquidity_score = ctx.get("liquidity_score")
+                            eod_liquidation = bool(ctx.get("eod_liquidation", False))
                     except Exception:
                         regime_ctx = None
                         liquidity_score = None
-                    res = sim.simulate_fill_with_rejection(
-                        symbol=order.symbol,
-                        side=order.side.value.lower(),
-                        quantity=float(order.remaining_quantity),
-                        decision_price=base_price,
-                        market_data=market_data,
-                        authorization_id=getattr(order, "order_id", ""),
-                        strategy_id="PAPER_SIM",
-                        regime_context=regime_ctx if isinstance(regime_ctx, dict) else None,
-                        liquidity_score=float(liquidity_score) if liquidity_score is not None else None,
-                        max_retries=0,
-                    )
-                    sf = res.get('fill')
-                    if sf is not None:
-                        fill_price = float(getattr(sf, "fill_price", base_price))
+                        eod_liquidation = False
+                    debug_regime_ctx = regime_ctx if isinstance(regime_ctx, dict) else None
+                    if eod_liquidation:
+                        # Deterministic EOD close-out at decision price (backtest parity).
+                        fill_price = base_price
+                    else:
+                        res = sim.simulate_fill_with_rejection(
+                            symbol=order.symbol,
+                            side=order.side.value.lower(),
+                            quantity=float(order.remaining_quantity),
+                            decision_price=base_price,
+                            market_data=market_data,
+                            authorization_id=getattr(order, "order_id", ""),
+                            strategy_id="PAPER_SIM",
+                            regime_context=regime_ctx if isinstance(regime_ctx, dict) else None,
+                            liquidity_score=float(liquidity_score) if liquidity_score is not None else None,
+                            max_retries=0,
+                        )
+                        sf = res.get('fill')
+                        if sf is not None:
+                            fill_price = float(getattr(sf, "fill_price", base_price))
+                            try:
+                                debug_costs = getattr(sf, "costs", None)
+                            except Exception:
+                                debug_costs = None
 
             if fill_price is None:
                 fill_price = self._calculate_fill_price(
@@ -579,6 +611,23 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                 timestamp=self._now(),
                 is_partial=is_partial,
             )
+            # Attach debug-only metadata for parity diagnostics (journal may persist these keys).
+            # Safe: ignored by trading logic.
+            try:
+                if debug_regime_ctx is not None:
+                    setattr(fill_obj, "_debug_regime_volatility_regime", debug_regime_ctx.get("volatility_regime"))
+                    setattr(fill_obj, "_debug_regime_primary_regime", debug_regime_ctx.get("primary_regime"))
+                if debug_costs is not None:
+                    setattr(fill_obj, "_debug_total_cost_bps", getattr(debug_costs, "total_cost_bps", None))
+                    setattr(fill_obj, "_debug_spread_cost_bps", getattr(debug_costs, "spread_cost_bps", None))
+                    setattr(fill_obj, "_debug_market_impact_bps", getattr(debug_costs, "market_impact_bps", None))
+                    setattr(fill_obj, "_debug_slippage_bps", getattr(debug_costs, "slippage_bps", None))
+                    setattr(fill_obj, "_debug_commission_bps", getattr(debug_costs, "commission_bps", None))
+                if debug_market_data is not None:
+                    setattr(fill_obj, "_debug_market_volume", debug_market_data.get("volume"))
+                    setattr(fill_obj, "_debug_market_volatility", debug_market_data.get("volatility"))
+            except Exception:
+                pass
 
             # Update order
             order.fills.append(fill_obj)
@@ -728,7 +777,20 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         """Internal order submission."""
         with self._lock:
             order_id = str(uuid.uuid4())
-            ctx = self._next_order_context or {}
+            # Prefer task-local one-shot context (prevents cross-task context stealing).
+            ctx = {}
+            try:
+                ctx0 = self._next_order_context_var.get()
+                if isinstance(ctx0, dict):
+                    ctx = ctx0
+            except Exception:
+                ctx = {}
+            # Clear context after consumption (one-shot semantics)
+            try:
+                self._next_order_context_var.set(None)
+            except Exception:
+                pass
+            # Legacy fallback: clear instance attribute too
             self._next_order_context = None
 
             paper_order = PaperOrder(

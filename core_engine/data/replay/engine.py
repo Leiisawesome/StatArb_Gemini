@@ -145,6 +145,11 @@ class HistoricalDataReplayEngine:
         self._unified_vwaps: Optional[np.ndarray] = None
         self._unified_transactions: Optional[np.ndarray] = None
 
+        # Deterministic per-timestamp ordering: emit bars in the configured symbol order.
+        # This matters for parity because some downstream components (e.g., regime/risk state)
+        # can be sensitive to cross-symbol processing order when timestamps tie.
+        self._symbol_priority: Dict[str, int] = {str(s): i for i, s in enumerate(list(config.symbols or []))}
+
         # Timing control - use actual data timestamps
         self._previous_data_timestamp: Optional[datetime] = None
         self._speed_multiplier = config.speed.value
@@ -666,7 +671,15 @@ class HistoricalDataReplayEngine:
         messages: List[FeedMessage] = []
 
         async with self._buffer_lock:
-            for symbol, data in self._data_buffer.items():
+            # Emit in configured symbol order (fallback), then any remaining symbols.
+            ordered_symbols = list(self.config.symbols or [])
+            seen = set(ordered_symbols)
+            ordered_symbols.extend([s for s in self._data_buffer.keys() if s not in seen])
+
+            for symbol in ordered_symbols:
+                data = self._data_buffer.get(symbol)
+                if data is None:
+                    continue
                 # Filter data for this timestamp AND this symbol
                 # The buffer might contain multiple symbols if the data manager returned a broad set
                 timestamp_data = data[
@@ -698,7 +711,13 @@ class HistoricalDataReplayEngine:
         start_idx, end_idx = jit_find_timestamp_indices(self._unified_timestamps, ts_int)
         
         if start_idx != -1:
-            for i in range(start_idx, end_idx):
+            # Emit bars in deterministic configured symbol order for this timestamp slice.
+            idxs = list(range(start_idx, end_idx))
+            if len(idxs) > 1 and self._unified_symbols is not None:
+                pri = self._symbol_priority
+                idxs.sort(key=lambda j: pri.get(str(self._unified_symbols[j]), 10**9))
+
+            for i in idxs:
                 symbol = self._unified_symbols[i]
                 
                 # Create market data dict from NumPy arrays

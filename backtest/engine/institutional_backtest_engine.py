@@ -4660,20 +4660,21 @@ class InstitutionalBacktestEngine:
                     if self.risk_manager:
                         current_position = self.risk_manager.current_positions.get(symbol, 0.0)
                         allow_shorts = getattr(self.config, 'allow_shorts', False)
+                        eps_pos = 1e-9
 
-                        if side.lower() == 'buy' and current_position > 0:
+                        if side.lower() == 'buy' and current_position > eps_pos:
                             # Already LONG - skip duplicate BUY
                             logger.info(f"⚠️  Skipping BUY {symbol}: already LONG ({current_position:.2f} shares)")
                             continue
 
                         elif side.lower() == 'sell':
-                            if current_position <= 0 and not allow_shorts:
+                            if current_position <= eps_pos and not allow_shorts:
                                 # No position to sell and shorts not allowed
                                 logger.info(f"⚠️  Skipping SELL {symbol}: no position to close (shorts not allowed)")
                                 continue
-                            elif current_position > 0:
+                            elif current_position > eps_pos:
                                 # Cap sell quantity to actual position
-                                if quantity > current_position:
+                                if quantity > (current_position + eps_pos):
                                     logger.info(f"🔒 Adjusting SELL qty for {symbol}: {quantity} → {current_position:.2f}")
                                     quantity = current_position
                                     auth_trade['quantity'] = quantity
@@ -4724,14 +4725,73 @@ class InstitutionalBacktestEngine:
                             pass
 
                     # Prepare market data for simulator
+                    # CRITICAL FIX (multi-symbol parity):
+                    # `current_bar` is the bar currently being iterated in the main loop and may belong to a
+                    # different symbol when we are executing pending signals for multiple symbols at the same
+                    # timestamp. For transaction cost modeling (impact), we MUST use the executed symbol's
+                    # own bar volume/high/low for this timestamp.
+                    sym_bar = current_bar
+                    try:
+                        cur_sym = None
+                        try:
+                            cur_sym = current_bar.get('symbol', None)
+                        except Exception:
+                            cur_sym = None
+
+                        if cur_sym is None or str(cur_sym) != str(symbol):
+                            # Prefer the loaded per-symbol OHLCV from self.market_data (authoritative).
+                            try:
+                                md = getattr(self, "market_data", None)
+                                sym_df = md.get(symbol) if isinstance(md, dict) else None
+                                if sym_df is not None and hasattr(sym_df, "empty") and not sym_df.empty:
+                                    # Index lookup if timestamp is the index; else use column filter
+                                    if getattr(sym_df.index, "dtype", None) is not None:
+                                        try:
+                                            ts_idx = pd.Timestamp(bar_timestamp)
+                                            if ts_idx in sym_df.index:
+                                                sym_bar = sym_df.loc[ts_idx]
+                                                if hasattr(sym_bar, "iloc"):
+                                                    sym_bar = sym_bar.iloc[-1] if len(sym_bar) > 0 else sym_bar
+                                        except Exception:
+                                            pass
+                                    if (sym_bar is current_bar) and ('timestamp' in getattr(sym_df, "columns", [])):
+                                        ts_ser = pd.to_datetime(sym_df['timestamp'])
+                                        m = ts_ser == pd.Timestamp(bar_timestamp)
+                                        if m.any():
+                                            sym_bar = sym_df.loc[m].iloc[-1]
+                            except Exception:
+                                pass
+
+                            # Fallback: pre_calculated_features if available (may contain per-symbol bars).
+                            dfp = getattr(self, "pre_calculated_features", None)
+                            if dfp is not None and hasattr(dfp, "empty") and not dfp.empty:
+                                df1 = dfp
+                                # Normalize timestamp access
+                                if 'timestamp' in df1.columns:
+                                    ts_ser = pd.to_datetime(df1['timestamp'])
+                                    m = (df1.get('symbol') == symbol) & (ts_ser == pd.Timestamp(bar_timestamp))
+                                    if m.any():
+                                        sym_bar = df1.loc[m].iloc[-1]
+                                else:
+                                    # timestamp index path
+                                    try:
+                                        df_sym = df1[df1.get('symbol') == symbol]
+                                        df_sym = df_sym.loc[:pd.Timestamp(bar_timestamp)]
+                                        if len(df_sym) > 0:
+                                            sym_bar = df_sym.iloc[-1]
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        sym_bar = current_bar
+
                     market_data = {
                         'timestamp': bar_timestamp,
-                        'open': current_bar.get('open', current_price),
-                        'high': current_bar.get('high', current_price),
-                        'low': current_bar.get('low', current_price),
+                        'open': sym_bar.get('open', current_price),
+                        'high': sym_bar.get('high', current_price),
+                        'low': sym_bar.get('low', current_price),
                         'close': current_price,  # Use current_price instead of potentially modified bar data
-                        'volume': current_bar.get('volume', 0),
-                        'volatility': current_bar.get('volatility', 0.02)  # 2% default
+                        'volume': sym_bar.get('volume', 0),
+                        'volatility': sym_bar.get('volatility', 0.02)  # 2% default
                     }
 
                     # SPRINT 0.3: Simulate fill with rejection handling (GAP 4-3)

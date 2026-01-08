@@ -322,6 +322,13 @@ class EnhancedRegimeEngine(ISystemComponent):
         vol_slow = math.sqrt(max(vs, 0.0))
         vol_ratio = vol_fast / (vol_slow + 1e-12)
 
+        # Absolute volatility (annualized) is needed for realistic "extreme_volatility" detection.
+        # Using only vol_ratio fails when both fast/slow vols rise together (ratio ~ 1),
+        # which is common in true high-volatility regimes.
+        # Assumption: intraday minute bars (~390 bars/day, ~252 trading days/year).
+        ann_factor = math.sqrt(390.0 * 252.0)
+        ann_vol = float(vol_fast * ann_factor)
+
         # Direction
         trend_th = float(getattr(self.config, "per_bar_trend_threshold", 2e-4))
         if tr > trend_th:
@@ -331,12 +338,38 @@ class EnhancedRegimeEngine(ISystemComponent):
         else:
             direction = "sideways"
 
-        # Vol regime
+        # Vol regime (two signals):
+        # - **Absolute vol** (primary) → maps to execution cost multipliers.
+        # - **Fast/slow ratio** (secondary) → captures sudden vol regime changes.
+        ann_low = float(getattr(self.config, "per_bar_vol_annual_low", 0.20))
+        ann_high = float(getattr(self.config, "per_bar_vol_annual_high", 0.40))
+        ann_extreme = float(getattr(self.config, "per_bar_vol_annual_extreme", 0.60))
+        ann_crisis = float(getattr(self.config, "per_bar_vol_annual_crisis", 0.90))
+
+        if ann_vol >= ann_crisis:
+            vol_reg_label = "crisis"
+        elif ann_vol >= ann_extreme:
+            vol_reg_label = "extreme_volatility"
+        elif ann_vol >= ann_high:
+            vol_reg_label = "high_volatility"
+        elif ann_vol <= ann_low:
+            vol_reg_label = "low_volatility"
+        else:
+            vol_reg_label = "normal_volatility"
+
+        # Secondary: detect sudden vol *changes* using ratio thresholds.
         vr_high = float(getattr(self.config, "per_bar_vol_ratio_high", 1.5))
         vr_low = float(getattr(self.config, "per_bar_vol_ratio_low", 0.7))
-        if vol_ratio >= vr_high:
+        if vol_ratio >= vr_high and vol_reg_label in ("low_volatility", "normal_volatility"):
+            vol_reg_label = "high_volatility"
+        elif vol_ratio <= vr_low and vol_reg_label in ("high_volatility", "extreme_volatility", "crisis"):
+            vol_reg_label = "normal_volatility"
+
+        # For primary regime classification helper, collapse into {low, normal, high}.
+        # (We keep the richer label in RegimeAnalysis.volatility_regime for execution costs.)
+        if vol_reg_label in ("crisis", "extreme_volatility", "high_volatility"):
             vol_reg = "high"
-        elif vol_ratio <= vr_low:
+        elif vol_reg_label == "low_volatility":
             vol_reg = "low"
         else:
             vol_reg = "normal"
@@ -366,9 +399,8 @@ class EnhancedRegimeEngine(ISystemComponent):
             regime_duration=int(st["regime_duration"]),
             timestamp=ts,
             directional_regime=direction if direction != "sideways" else "neutral",
-            volatility_regime={"low": "low_volatility", "normal": "normal_volatility", "high": "high_volatility"}.get(vol_reg, "normal_volatility"),
+            volatility_regime=vol_reg_label,
             trend_strength=trend_strength,
-            volatility=float(vol_fast),
             transition_probability=float(min(1.0, abs(vol_ratio - 1.0))),
         )
         return ra
