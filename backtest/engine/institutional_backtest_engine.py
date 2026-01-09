@@ -2907,7 +2907,8 @@ class InstitutionalBacktestEngine:
                     symbol = trade.get('symbol', 'N/A')
                     side = trade.get('side', 'N/A')
                     quantity = trade.get('quantity', 0)
-                    price = trade.get('price', 0)
+                    # Check for 'fill_price' (standard) or 'price' (legacy)
+                    price = trade.get('fill_price', trade.get('price', 0))
                     value = quantity * price
                     report_lines.append(f"| {timestamp} | {symbol} | {side} | {quantity} | ${price:.2f} | ${value:.2f} |")
 

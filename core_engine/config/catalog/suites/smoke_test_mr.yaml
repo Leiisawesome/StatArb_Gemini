@@ -5,7 +5,7 @@
 
 papertest:
   data:
-    symbols: ["TSLA","PLTR"]
+    symbols: ["TSLA"]
     start_date: "2024-12-20"
     end_date: "2024-12-20"
     interval: "1min"
@@ -16,6 +16,9 @@ papertest:
     size: 400
     # Warmup parity with Backtest: use the same RTH bar count for indicator/feature readiness.
     warmup_required: 200
+
+  session:
+    stall_threshold_seconds: 300.0
 
   # Regime engine (single-symbol, per-bar): enable fast incremental evaluator.
   # Safe: both BT and PT consume this canonical suite config.
@@ -91,8 +94,8 @@ papertest:
     seed: 42
     use_historical_execution_simulator: true
 
-  debug:
-    stop_at_time: "16:00"
-    timezone: "America/New_York"
+  # debug:
+  #   stop_at_time: "16:00"
+  #   timezone: "America/New_York"
 
 

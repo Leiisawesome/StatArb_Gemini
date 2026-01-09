@@ -1524,11 +1524,8 @@ class CentralRiskManager(ISystemComponent):
             # Adjust for volatility
             volatility_adjustment = max(1.0, request.volatility_estimate)
 
-            # Regime adjustment
-            regime_multiplier = self.regime_risk_multipliers.get(request.market_regime, 1.0)
-
-            # Total risk impact
-            total_impact = position_impact * volatility_adjustment * regime_multiplier
+            # Total risk impact (without regime adjustment, added later in authorization)
+            total_impact = position_impact * volatility_adjustment
 
             return total_impact
 
@@ -1555,7 +1552,10 @@ class CentralRiskManager(ISystemComponent):
             position_value = abs(new_position * price)
             position_pct = position_value / self.portfolio_value
 
-            passed = position_pct <= self.max_position_size
+            # Use small tolerance for floating point comparisons (Rule 3)
+            # This prevents rejections due to tiny precision errors (e.g. 10.000000000000001% > 10.0%)
+            tolerance = 1e-5
+            passed = position_pct <= (self.max_position_size + tolerance)
 
             # 🔍 DIAGNOSTIC LOGGING
             if not passed:
@@ -1595,7 +1595,9 @@ class CentralRiskManager(ISystemComponent):
             position_value = abs(new_position * price)
             concentration = position_value / self.portfolio_value
 
-            passed = concentration <= self.position_concentration_limit
+            # Use small tolerance for floating point comparisons (Rule 3)
+            tolerance = 1e-6
+            passed = concentration <= (self.position_concentration_limit + tolerance)
 
             # 🔍 DIAGNOSTIC LOGGING
             if not passed:

@@ -494,6 +494,9 @@ class MeanReversionConfig(BaseStrategyConfig):
     regime_adjustment_factor: float = 0.85
     """Multiplier for thresholds in unfavorable regimes (0.85 = 15% reduction). Default: 0.85"""
 
+    min_signal_confidence: float = 0.85
+    """Minimum signal confidence threshold for strategy-level filtering. Default: 0.85"""
+
     # =========================================
     # EXHAUSTION-BASED SCORING SYSTEM (v3.0)
     # =========================================

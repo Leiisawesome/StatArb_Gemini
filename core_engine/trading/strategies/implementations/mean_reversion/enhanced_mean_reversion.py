@@ -828,7 +828,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         pass
 
             # Confidence threshold check
-            if confidence <= 0.6:
+            min_conf = getattr(self.config, 'min_signal_confidence', 0.85)
+            if confidence <= min_conf:
                 return None
 
             # Calculate composite signal strength (0-1 scale)
