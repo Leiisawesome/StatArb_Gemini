@@ -60,11 +60,20 @@ def _run_suite(args: List[str]) -> subprocess.CompletedProcess[str]:
     # Keep runs deterministic and avoid noisy logs in CI/local.
     env = dict(os.environ)
     env.setdefault("PYTHONHASHSEED", "0")
+    # Force UTF-8 for Windows emoji support in log output
+    env["PYTHONUTF8"] = "1"
+    
+    # Ensure REPO_ROOT is in PYTHONPATH for submodule discovery
+    ppath = env.get("PYTHONPATH", "")
+    if str(REPO_ROOT) not in ppath:
+        env["PYTHONPATH"] = f"{REPO_ROOT};{ppath}" if ppath else str(REPO_ROOT)
+
     return subprocess.run(
         [sys.executable, *args],
         cwd=str(REPO_ROOT),
         env=env,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=True,
     )
