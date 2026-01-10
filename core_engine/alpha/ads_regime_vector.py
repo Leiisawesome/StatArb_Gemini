@@ -166,6 +166,7 @@ def compute_sms_tau(
     tau_0: float = 0.50,
     ofi_proxy_used: bool = False,
     bb_missing: bool = False,
+    direction: Optional[str] = None,
 ) -> float:
     """
     ADS v3.1 Appendix A.1 recommended SMS threshold:
@@ -182,6 +183,29 @@ def compute_sms_tau(
         + 0.10 * (1.0 - r.confidence)
     )
 
+    # High-vol hardening:
+    # Mean reversion fails most often in "high vol + trending + accelerating" tapes.
+    # Increase tau in those regimes so signals must bake longer / require stronger confirmation.
+    #
+    # direction:
+    # - 'long': penalize downtrend strength/acceleration
+    # - 'short': penalize uptrend strength/acceleration
+    # - None: penalize absolute trend (conservative default)
+    dir_norm = (direction or "").lower()
+    if dir_norm == "long":
+        trend_headwind = max(0.0, -r.trend)      # downtrend headwind for long entries
+        dtrend_headwind = max(0.0, -r.d_trend)
+    elif dir_norm == "short":
+        trend_headwind = max(0.0, r.trend)       # uptrend headwind for short entries
+        dtrend_headwind = max(0.0, r.d_trend)
+    else:
+        trend_headwind = abs(r.trend)
+        dtrend_headwind = abs(r.d_trend)
+
+    base += 0.12 * trend_headwind
+    base += 0.10 * max(0.0, r.d_volatility)      # volatility accelerating -> stricter maturity
+    base += 0.06 * dtrend_headwind               # trend accelerating -> stricter maturity
+
     if ofi_proxy_used:
         base += 0.05
     if bb_missing:
@@ -189,4 +213,33 @@ def compute_sms_tau(
 
     return max(0.35, min(0.80, base))
 
+
+def compute_erar_gamma(
+    r: ADSRegimeVector,
+    *,
+    gamma_0: float = 0.50,
+    direction: Optional[str] = None,
+) -> float:
+    """
+    Regime-conditioned ERAR threshold (gamma).
+
+    In high volatility / crisis-like regimes, require higher ERAR to trade.
+    This reduces knife-catching and trading into liquidation cascades.
+    """
+    base = float(gamma_0)
+
+    dir_norm = (direction or "").lower()
+    if dir_norm == "long":
+        trend_headwind = max(0.0, -r.trend)
+    elif dir_norm == "short":
+        trend_headwind = max(0.0, r.trend)
+    else:
+        trend_headwind = abs(r.trend)
+
+    base += 0.35 * r.volatility
+    base += 0.20 * trend_headwind
+    base += 0.20 * max(0.0, r.d_volatility)
+    base += 0.10 * (1.0 - r.confidence)
+
+    return max(0.30, min(1.20, base))
 

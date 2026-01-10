@@ -57,10 +57,16 @@ def _compute_sms_core(
     t = np.maximum(0, pending_bars)
 
     # Multiplicative SMS formula
+    #
+    # High-vol hardening:
+    # - Penalize adverse flow symmetrically (not just reward favorable flow).
+    #   Prior logic used max(0, ofi) which ignored negative flow (dangerous in selloffs).
+    # - Use an exponential flow factor for smooth, symmetric scaling:
+    #       flow_factor = exp(γ * ofi)  where ofi in [-1, 1]
     sms = (
         (E ** α) *
         (P_rev ** β) *
-        ((1 + np.maximum(0, ofi)) ** γ) *
+        (np.exp(γ * ofi)) *
         ((1 / VC) ** δ) *
         np.exp(-0.05 * t)
     )
@@ -73,7 +79,7 @@ class SignalMaturityScore:
     ADS §1: Signal Maturity Score with Multiplicative Formula
 
     Formula:
-        SMS = E^α × P_rev^β × (1+ΔOFI)^γ × VC^(-δ) × e^(-λt)
+        SMS = E^α × P_rev^β × exp(γ × ΔOFI) × VC^(-δ) × e^(-λt)
 
     Where:
         E = Exhaustion score (Z-score × P(reversal)) [0, 1]
@@ -571,11 +577,25 @@ def compute_exhaustion(
         if rsi > 80:
             score += 0.10  # Extreme overbought
 
-    # Volume exhaustion (low volume at extremes = noise, will revert)
-    if volume_ratio < 0.8 and abs(zscore) > 1.5:
-        score += 0.10  # Low volume exhaustion
-    elif volume_ratio > 2.0 and abs(zscore) > 2.0:
-        score -= 0.15  # High volume = conviction, don't fade
+    # Volume exhaustion / conviction (high-vol hardening)
+    #
+    # Prior logic used hard thresholds (e.g., volume_ratio > 2.0) which creates
+    # brittle boundary failures (e.g., 1.97 treated as "not conviction").
+    # Replace with smooth penalties/bonuses.
+    def _sigmoid(x: float) -> float:
+        return 1.0 / (1.0 + np.exp(-x))
+
+    abs_z = abs(zscore)
+
+    # Low volume at extremes = likely noise (favorable for mean reversion)
+    low_vol_gate = _sigmoid((0.90 - volume_ratio) / 0.10)     # ~1 when vol_ratio << 0.9
+    disloc_gate1 = _sigmoid((abs_z - 1.5) / 0.3)              # ~1 when abs_z >> 1.5
+    score += 0.10 * low_vol_gate * disloc_gate1
+
+    # High volume continuation risk = conviction (unfavorable for mean reversion)
+    high_vol_gate = _sigmoid((volume_ratio - 1.50) / 0.20)    # ramps around ~1.5x
+    disloc_gate2 = _sigmoid((abs_z - 2.0) / 0.25)             # ramps around abs_z≈2
+    score -= 0.25 * high_vol_gate * disloc_gate2
 
     # MACD histogram turning (momentum shift)
     if is_oversold and macd_histogram > macd_histogram_prev:

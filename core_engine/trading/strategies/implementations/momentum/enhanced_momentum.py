@@ -287,7 +287,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Compute tau(R)
             ads_r, ads_diag = self._get_ads_regime_vector(symbol)
             tau_0 = float(getattr(self.config, "tau_0", 0.50))
-            tau = compute_sms_tau(ads_r, tau_0=tau_0, ofi_proxy_used=True, bb_missing=True)
+            tau = compute_sms_tau(
+                ads_r,
+                tau_0=tau_0,
+                ofi_proxy_used=True,
+                bb_missing=True,
+                direction="long" if side == "BUY" else "short",
+            )
 
             regime_label = self._sms_regime_label(ads_r)
             sms_score = float(ctx.sms.compute(regime_label))
@@ -1118,7 +1124,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     bb_missing = False
                 except Exception:
                     bb_missing = False
-                tau = compute_sms_tau(ads_r, tau_0=tau_0, ofi_proxy_used=ofi_proxy_used, bb_missing=bb_missing)
+                tau = compute_sms_tau(
+                    ads_r,
+                    tau_0=tau_0,
+                    ofi_proxy_used=ofi_proxy_used,
+                    bb_missing=bb_missing,
+                    direction="long" if side == "BUY" else "short",
+                )
                 regime_label = self._sms_regime_label(ads_r)
 
                 # Build SMS components (momentum-adapted, multiplicative)

@@ -62,7 +62,7 @@ from core_engine.alpha import (
 )
 
 # ADS v3.1: continuous regime vector adapter and tau(R) thresholding
-from core_engine.alpha.ads_regime_vector import ADSRegimeVector, compute_sms_tau
+from core_engine.alpha.ads_regime_vector import ADSRegimeVector, compute_sms_tau, compute_erar_gamma
 
 logger = logging.getLogger(__name__)
 
@@ -503,6 +503,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 tau_0=tau_0,
                 ofi_proxy_used=ofi_proxy_used,
                 bb_missing=bb_missing,
+                direction="long" if is_oversold else "short",
             )
 
             # Create multiplicative SMS
@@ -537,6 +538,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 qty = 0.0
 
             is_entry_long = (signal_type == SignalType.LONG_ENTRY and qty == 0)
+            # Treat reversal-direction signals as exits when a position exists.
+            # For MR in this suite (allow_shorts=false), SHORT_ENTRY is effectively a CLOSE_LONG.
+            is_exit_signal = (
+                (qty > 0 and signal_type == SignalType.SHORT_ENTRY)
+                or (qty < 0 and signal_type == SignalType.LONG_ENTRY)
+                or (signal_type == SignalType.LONG_EXIT)
+            )
             # For now, only queue BUY/long entries; do not delay exits or short logic
 
             # ADS v3.1 §1: pending/stale maturation
@@ -548,7 +556,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     entry_price = 0.0
 
                 # Store conservative ERAR placeholder; recompute on maturity
-                erar_stub = ERAR(tail_lambda=self.ads_config.get('erar_gamma', 0.5))
+                # NOTE: tail_lambda (risk aversion) is NOT erar_gamma (threshold).
+                erar_stub = ERAR(tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)))
 
                 ctx = PendingSignalContext(
                     symbol=symbol,
@@ -582,7 +591,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             # ADS v3.0 §3: ERAR GATE (Risk-Adjusted Return)
             # ========================================
-            if self.ads_config.get('enable_ads_gates', True):
+            # Professional-grade rule: NEVER block risk-reducing exits using ERAR.
+            # ERAR is an entry quality gate; exits are risk management.
+            if (not is_exit_signal) and self.ads_config.get('enable_ads_gates', True):
                 # Estimate expected PnL (using DRY helpers)
                 atr = self._get_atr(data, idx)
                 price = data['close'].iloc[idx] if 'close' in data.columns else 100.0
@@ -601,6 +612,15 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 cvar_95 = estimate_cvar_95(volatility=volatility, holding_days=0.5)
 
                 # Create ERAR
+                # Regime-conditioned ERAR hardening (high-vol / trending tapes)
+                base_gamma = float(self.ads_config.get('erar_gamma', 0.5))
+                gamma_dyn = float(compute_erar_gamma(ads_r, gamma_0=base_gamma, direction="long" if is_oversold else "short"))
+
+                base_tail_lambda = float(getattr(self.config, "erar_tail_lambda", 1.0))
+                vol_excess = max(0.0, float(ads_r.volatility) - 0.50)
+                # Mild tail-risk tightening in elevated volatility; avoid choking all trades.
+                tail_lambda_dyn = float(min(2.0, base_tail_lambda * (1.0 + 0.50 * vol_excess)))
+
                 erar = ERAR(
                     expected_pnl=expected_pnl,
                     cvar_95=cvar_95,
@@ -612,11 +632,11 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     kyle_lambda=0.0001,
                     holding_days=0.5,
                     alt_return_bps=0.5,
-                    tail_lambda=self.ads_config.get('erar_gamma', 0.5)
+                    tail_lambda=tail_lambda_dyn,
                 )
 
                 erar_score = erar.compute()
-                erar_gamma = self.ads_config.get('erar_gamma', 0.5)
+                erar_gamma = gamma_dyn
 
                 if not erar.should_trade(gamma=erar_gamma):
                     return None  # Doesn't meet risk-adjusted return threshold
@@ -626,10 +646,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             score, score_breakdown = self._calculate_exhaustion_score(data, idx, zscore)
 
-            # Set confidence based on SMS score (continuous mapping)
-            # Map SMS (0.0-1.0) to confidence (0.50-0.95) with floor at min threshold
-            self.ads_config.get('sms_threshold', 0.5)
-            confidence = max(0.50, min(0.95, 0.50 + sms_score * 0.45))
+            # Confidence mapping:
+            # - Entries: SMS-driven (strategy-level confidence gate still applies)
+            # - Exits: force high confidence so we don't drop exits in downstream filters
+            if is_exit_signal:
+                confidence = 1.0
+            else:
+                confidence = float(np.clip(0.60 + float(sms_score) * 0.45, 0.55, 0.95))
 
             # Determine signal reason for logging
             if sms_score >= 0.7:
@@ -828,8 +851,9 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         pass
 
             # Confidence threshold check
+            # Professional-grade rule: do not block exits with confidence gating.
             min_conf = getattr(self.config, 'min_signal_confidence', 0.85)
-            if confidence <= min_conf:
+            if (not is_exit_signal) and confidence <= min_conf:
                 return None
 
             # Calculate composite signal strength (0-1 scale)
@@ -982,7 +1006,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # Compute tau(R)
         ads_r, ads_diag = self._get_ads_regime_vector(symbol)
         tau_0 = getattr(self.config, 'tau_0', 0.50)
-        tau = compute_sms_tau(ads_r, tau_0=tau_0, ofi_proxy_used=True, bb_missing=bb_missing)
+        tau = compute_sms_tau(
+            ads_r,
+            tau_0=tau_0,
+            ofi_proxy_used=True,
+            bb_missing=bb_missing,
+            direction="long",
+        )
 
         # Maturity check
         regime_label = self._get_regime_label(symbol)
@@ -1003,6 +1033,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             )
             volatility = atr / price if price > 0 else 0.02
             cvar_95 = estimate_cvar_95(volatility=volatility, holding_days=0.5)
+            base_gamma = float(self.ads_config.get("erar_gamma", 0.5))
+            gamma_dyn = float(compute_erar_gamma(ads_r, gamma_0=base_gamma, direction="long"))
+
+            base_tail_lambda = float(getattr(self.config, "erar_tail_lambda", 1.0))
+            vol_excess = max(0.0, float(ads_r.volatility) - 0.50)
+            tail_lambda_dyn = float(min(2.0, base_tail_lambda * (1.0 + 0.50 * vol_excess)))
+
             erar = ERAR(
                 expected_pnl=expected_pnl,
                 cvar_95=cvar_95,
@@ -1014,10 +1051,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 kyle_lambda=0.0001,
                 holding_days=0.5,
                 alt_return_bps=0.5,
-                tail_lambda=self.ads_config.get('erar_gamma', 0.5)
+                tail_lambda=tail_lambda_dyn,
             )
             if self.ads_config.get('enable_ads_gates', True):
-                if not erar.should_trade(gamma=self.ads_config.get('erar_gamma', 0.5)):
+                if not erar.should_trade(gamma=gamma_dyn):
                     # Keep pending but do not emit this bar
                     return None
         except Exception:
@@ -1025,7 +1062,11 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             return None
 
         # Emit matured LONG_ENTRY signal
-        confidence = max(0.55, min(0.95, 0.50 + ctx.sms.compute(regime_label) * 0.45))
+        try:
+            sms_now = float(ctx.sms.compute(regime_label))
+            confidence = float(np.clip(0.60 + sms_now * 0.45, 0.55, 0.95))
+        except Exception:
+            confidence = max(0.55, min(0.95, 0.60 + ctx.sms.compute(regime_label) * 0.45))
         additional_data = {
             'signal_reason': 'ads_sms_matured_pending',
             'zscore': zscore,
