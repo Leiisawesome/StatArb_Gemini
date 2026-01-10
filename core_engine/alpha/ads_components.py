@@ -756,7 +756,6 @@ class PendingSignalQueue:
         """Add or update pending signal."""
         key = f"{ctx.symbol}_{ctx.side}"
         self.pending[key] = ctx
-        logger.debug(f"📝 Pending signal added: {key}")
 
     def remove(self, symbol: str, side: str):
         """Remove pending signal."""
@@ -786,7 +785,6 @@ class PendingSignalQueue:
             if ctx.sms.is_stale():
                 removed.append(key)
                 del self.pending[key]
-                logger.debug(f"🗑️ Stale signal removed: {key} (>{self.max_pending} bars)")
         return removed
 
     def get_mature_signals(self, threshold: float, regime: str) -> List[PendingSignalContext]:
@@ -805,7 +803,6 @@ class PendingSignalQueue:
             if ctx.sms.is_mature(threshold, regime):
                 mature.append(ctx)
                 del self.pending[key]
-                logger.info(f"✅ Signal matured: {key} SMS={ctx.sms.compute(regime):.3f}")
         return mature
 
     def __len__(self):

@@ -840,10 +840,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
 
             strength = min(exhaustion_component + sms_component + zscore_component, 1.0)
 
-            # Log signal creation details
-            logger.debug(f"[{symbol}] Signal: {signal_type.value.upper()} zscore={zscore:.3f}, score={score:.1f}, "
-                        f"strength={strength:.2f} (exh={exhaustion_component:.2f}+sms={sms_component:.2f}+z={zscore_component:.2f}), confidence={confidence:.2f}")
-
             # Get timestamp and price
             timestamp = current_row.get('timestamp', datetime.now()) if isinstance(current_row, pd.Series) else datetime.now()
             entry_price = current_row['close'] if isinstance(current_row, pd.Series) else current_row.get('close', 0)
