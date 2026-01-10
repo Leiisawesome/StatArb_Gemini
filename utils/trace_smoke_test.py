@@ -160,6 +160,17 @@ async def traced_generate_signals(self, enriched_data, position_details=None):
 # Hook into PendingSignalQueue.add
 original_queue_add = PendingSignalQueue.add
 def traced_queue_add(self, ctx: PendingSignalContext):
+    # Prefer the strategy-provided tau and reason if present
+    tau = None
+    tau_reason = None
+    try:
+        if hasattr(ctx, 'metadata') and isinstance(ctx.metadata, dict):
+            tau = ctx.metadata.get('ads_tau')
+            tau_reason = ctx.metadata.get('ads_tau_reason')
+    except Exception:
+        tau = None
+        tau_reason = None
+
     collector.add(
         'ADS_QUEUE',
         ctx.symbol,
@@ -167,7 +178,11 @@ def traced_queue_add(self, ctx: PendingSignalContext):
         'QUEUED',
         'Initial conditions met, awaiting maturation',
         price=ctx.entry_price,
-        details={'initial_sms': f"{ctx.sms.compute('normal'):.3f}"}
+        details={
+            'initial_sms': f"{ctx.sms.compute('normal'):.3f}",
+            **({'tau': f"{tau:.3f}"} if isinstance(tau, (int, float)) else {}),
+            **({'tau_reason': str(tau_reason)} if tau_reason is not None else {}),
+        }
     )
     return original_queue_add(self, ctx)
 

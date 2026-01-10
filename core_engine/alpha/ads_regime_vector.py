@@ -176,12 +176,13 @@ def compute_sms_tau(
     Then apply small conservative increments when fallbacks are used.
     """
 
-    base = (
-        float(tau_0)
-        + 0.15 * r.volatility
-        + 0.10 * (1.0 - r.liquidity)
-        + 0.10 * (1.0 - r.confidence)
-    )
+    # Baseline-centered tau:
+    # Keep tau close to tau_0 in normal conditions; only raise meaningfully when
+    # volatility is elevated / accelerating and data quality is low.
+    base = float(tau_0)
+    base += 0.12 * max(0.0, r.volatility - 0.50)
+    base += 0.06 * max(0.0, 0.70 - r.liquidity)
+    base += 0.06 * max(0.0, 0.70 - r.confidence)
 
     # High-vol hardening:
     # Mean reversion fails most often in "high vol + trending + accelerating" tapes.
@@ -202,14 +203,18 @@ def compute_sms_tau(
         trend_headwind = abs(r.trend)
         dtrend_headwind = abs(r.d_trend)
 
-    base += 0.12 * trend_headwind
-    base += 0.10 * max(0.0, r.d_volatility)      # volatility accelerating -> stricter maturity
-    base += 0.06 * dtrend_headwind               # trend accelerating -> stricter maturity
+    # Selective loosening:
+    # Trend alone should NOT choke mean-reversion. We penalize trend only when
+    # volatility is accelerating (liquidation/cascade signature).
+    vol_accel = max(0.0, r.d_volatility)
+    base += 0.20 * vol_accel
+    base += 0.25 * trend_headwind * vol_accel
+    base += 0.10 * dtrend_headwind * vol_accel
 
     if ofi_proxy_used:
-        base += 0.05
+        base += 0.02
     if bb_missing:
-        base += 0.05
+        base += 0.02
 
     return max(0.35, min(0.80, base))
 

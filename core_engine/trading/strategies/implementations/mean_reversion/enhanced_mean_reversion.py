@@ -538,62 +538,35 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 qty = 0.0
 
             is_entry_long = (signal_type == SignalType.LONG_ENTRY and qty == 0)
-            # Treat reversal-direction signals as exits when a position exists.
-            # For MR in this suite (allow_shorts=false), SHORT_ENTRY is effectively a CLOSE_LONG.
-            is_exit_signal = (
-                (qty > 0 and signal_type == SignalType.SHORT_ENTRY)
-                or (qty < 0 and signal_type == SignalType.LONG_ENTRY)
-                or (signal_type == SignalType.LONG_EXIT)
-            )
-            # For now, only queue BUY/long entries; do not delay exits or short logic
+            # For this strategy, SHORT_ENTRY while holding a long is effectively an exit signal
+            # (shorts are typically disabled in the smoke test configs).
+            is_exit_long = (signal_type == SignalType.SHORT_ENTRY and qty > 0)
+            # For now, only queue BUY/long entries; do not delay exits.
 
             # ADS v3.1 §1: pending/stale maturation
+            #
+            # Selective loosening:
+            # - We keep tau(R) + ERAR as the main hardening knobs.
+            # - If a signal is not mature enough OR it is mature but still below the
+            #   strategy confidence threshold, we *queue it* (bake) instead of discarding.
+            #   This restores normal-regime trade flow while still filtering knives in
+            #   high-vol downtrends (where OFI/trend penalties prevent maturity).
             if is_entry_long and sms_score < sms_threshold_dyn:
-                # Add to pending queue instead of discarding
-                try:
-                    entry_price = float(data['close'].iloc[idx]) if 'close' in data.columns else 0.0
-                except Exception:
-                    entry_price = 0.0
+                should_queue = True
+            else:
+                should_queue = False
 
-                # Store conservative ERAR placeholder; recompute on maturity
-                # NOTE: tail_lambda (risk aversion) is NOT erar_gamma (threshold).
-                erar_stub = ERAR(tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)))
-
-                ctx = PendingSignalContext(
-                    symbol=symbol,
-                    side='BUY',
-                    sms=sms,
-                    erar=erar_stub,
-                    raw_signal_strength=float(abs(zscore)),
-                    timestamp=datetime.now(),
-                    entry_price=entry_price,
-                    metadata={
-                        'ads_regime_vector': {
-                            'volatility': ads_r.volatility,
-                            'trend': ads_r.trend,
-                            'liquidity': ads_r.liquidity,
-                            'microstructure': ads_r.microstructure,
-                            'confidence': ads_r.confidence,
-                        },
-                        'ads_fallbacks_used': ads_diag.get('used', []),
-                        'ads_tau': sms_threshold_dyn,
-                        'ofi_source': 'proxy_volume_ratio',
-                        'bb_missing': bb_missing,
-                    }
-                )
-                self.pending_signals.add(ctx)
-                return None
-
-            # For non-entry signals (or if entry is already mature), keep legacy fixed threshold check
-            if sms_score < sms_threshold:
+            # For non-entry signals (or if entry is already mature), keep legacy fixed threshold check.
+            # Selective loosening: do NOT block exits on SMS threshold; exits should be allowed
+            # to close risk even if maturity metrics are weak.
+            if (not is_entry_long) and (not is_exit_long) and (sms_score < sms_threshold):
                 return None
 
             # ========================================
             # ADS v3.0 §3: ERAR GATE (Risk-Adjusted Return)
             # ========================================
-            # Professional-grade rule: NEVER block risk-reducing exits using ERAR.
-            # ERAR is an entry quality gate; exits are risk management.
-            if (not is_exit_signal) and self.ads_config.get('enable_ads_gates', True):
+            # ERAR is an entry-quality gate; do not use it to block exits.
+            if (not is_exit_long) and self.ads_config.get('enable_ads_gates', True):
                 # Estimate expected PnL (using DRY helpers)
                 atr = self._get_atr(data, idx)
                 price = data['close'].iloc[idx] if 'close' in data.columns else 100.0
@@ -646,13 +619,15 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             # ========================================
             score, score_breakdown = self._calculate_exhaustion_score(data, idx, zscore)
 
-            # Confidence mapping:
-            # - Entries: SMS-driven (strategy-level confidence gate still applies)
-            # - Exits: force high confidence so we don't drop exits in downstream filters
-            if is_exit_signal:
-                confidence = 1.0
-            else:
-                confidence = float(np.clip(0.60 + float(sms_score) * 0.45, 0.55, 0.95))
+            # Confidence mapping (SMS-driven, deterministic)
+            confidence = float(np.clip(0.60 + float(sms_score) * 0.45, 0.55, 0.95))
+
+            # If confidence is below threshold, queue (bake) rather than drop.
+            # This prevents "dead zones" where sms_score >= tau but confidence < min_conf,
+            # which previously resulted in no signals and no queue activity.
+            min_conf = float(getattr(self.config, 'min_signal_confidence', 0.85))
+            if is_entry_long and confidence < min_conf:
+                should_queue = True
 
             # Determine signal reason for logging
             if sms_score >= 0.7:
@@ -851,9 +826,44 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         pass
 
             # Confidence threshold check
-            # Professional-grade rule: do not block exits with confidence gating.
-            min_conf = getattr(self.config, 'min_signal_confidence', 0.85)
-            if (not is_exit_signal) and confidence <= min_conf:
+            # - For entries: if below threshold, we already queued above (should_queue=True).
+            # - For exits: keep the existing conservative behavior (skip low-confidence exits).
+            if (not is_entry_long) and (not is_exit_long) and confidence <= min_conf:
+                return None
+
+            if should_queue:
+                try:
+                    entry_price = float(data['close'].iloc[idx]) if 'close' in data.columns else 0.0
+                except Exception:
+                    entry_price = 0.0
+
+                erar_stub = ERAR(tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)))
+                ctx = PendingSignalContext(
+                    symbol=symbol,
+                    side='BUY',
+                    sms=sms,
+                    erar=erar_stub,
+                    raw_signal_strength=float(abs(zscore)),
+                    timestamp=datetime.now(),
+                    entry_price=entry_price,
+                    metadata={
+                        'ads_regime_vector': {
+                            'volatility': ads_r.volatility,
+                            'trend': ads_r.trend,
+                            'liquidity': ads_r.liquidity,
+                            'microstructure': ads_r.microstructure,
+                            'confidence': ads_r.confidence,
+                        },
+                        'ads_fallbacks_used': ads_diag.get('used', []),
+                        'ads_tau': sms_threshold_dyn,
+                        'ads_tau_reason': 'confidence_below_threshold' if confidence < min_conf else 'sms_below_tau',
+                        'ofi_source': 'proxy_volume_ratio',
+                        'bb_missing': bb_missing,
+                        'sms_score': float(sms_score),
+                        'confidence': float(confidence),
+                    }
+                )
+                self.pending_signals.add(ctx)
                 return None
 
             # Calculate composite signal strength (0-1 scale)
