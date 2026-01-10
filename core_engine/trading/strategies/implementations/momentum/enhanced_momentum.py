@@ -1129,7 +1129,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     tau_0=tau_0,
                     ofi_proxy_used=ofi_proxy_used,
                     bb_missing=bb_missing,
-                    direction="long" if side == "BUY" else "short",
+                    # Use signal_type for direction (side is not defined yet in this scope)
+                    direction="long" if signal_type == SignalType.BUY else "short",
                 )
                 regime_label = self._sms_regime_label(ads_r)
 
