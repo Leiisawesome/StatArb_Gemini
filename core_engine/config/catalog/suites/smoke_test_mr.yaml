@@ -94,8 +94,4 @@ papertest:
     seed: 42
     use_historical_execution_simulator: true
 
-  # debug:
-  #   stop_at_time: "16:00"
-  #   timezone: "America/New_York"
-
 
