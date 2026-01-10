@@ -150,8 +150,55 @@ class MultiStrategySignalAggregator(ISystemComponent):
         self.min_confidence_threshold = self.config.get('min_confidence_threshold', 0.6)
         self.enable_dynamic_weighting = self.config.get('enable_dynamic_weighting', False)  # Disabled by default for stability
 
+        # Performance: logging throttles (avoid per-bar INFO spam)
+        # - INFO is reserved for actionable events (non-zero signals)
+        # - DEBUG heartbeat provides periodic visibility in long runs
+        self._log_heartbeat_bars = int(self.config.get('log_heartbeat_bars', 200))
+        self._bar_counter = 0
+        # Determinism/perf: ensure input DataFrames are time-sorted, but only when needed.
+        # Map id(df) -> last_seen_len, so we re-validate ordering only when the DF grows.
+        self._df_sorted_cache: Dict[int, int] = {}
+
         self.logger.info(f"🎯 MultiStrategySignalAggregator initialized: {self.component_id}")
         self.logger.info(f"   min_confidence_threshold={self.min_confidence_threshold}")
+
+    def _ensure_time_sorted_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Ensure deterministic, time-ordered DataFrames for any iloc-based strategy logic.
+
+        ClickHouse / pipeline joins can occasionally produce non-monotonic ordering; strategies
+        that use iloc windows are sensitive to row order. We sort only if needed and only when
+        the DataFrame length changes.
+        """
+        try:
+            df_id = id(df)
+            n = len(df)
+            prev_n = self._df_sorted_cache.get(df_id)
+            if prev_n == n:
+                return df
+
+            # Prefer sorting by datetime index if present
+            if isinstance(df.index, pd.DatetimeIndex):
+                if not df.index.is_monotonic_increasing:
+                    df.sort_index(inplace=True)
+            else:
+                # Fall back to common timestamp columns
+                ts_col = None
+                for c in ("timestamp", "datetime", "time"):
+                    if c in df.columns:
+                        ts_col = c
+                        break
+                if ts_col is not None:
+                    col = df[ts_col]
+                    # If column is already monotonic, avoid sort
+                    if hasattr(col, "is_monotonic_increasing") and not col.is_monotonic_increasing:
+                        df.sort_values(ts_col, inplace=True, kind="mergesort")
+
+            self._df_sorted_cache[df_id] = n
+            return df
+        except Exception:
+            # Never fail signal collection due to sorting; just continue.
+            return df
 
     async def initialize(self) -> bool:
         """Initialize signal aggregator"""
@@ -297,6 +344,8 @@ class MultiStrategySignalAggregator(ISystemComponent):
         # Store position details for strategies to access
         self._position_details = position_details or {}
         strategy_signals = {}
+        self._bar_counter += 1
+        do_heartbeat = (self._log_heartbeat_bars > 0 and (self._bar_counter % self._log_heartbeat_bars == 0))
 
         # Normalize market_data to dict format for enhanced strategies
         if isinstance(market_data, pd.DataFrame):
@@ -312,6 +361,9 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     symbol: market_data[market_data['symbol'] == symbol].copy()
                     for symbol in symbols
                 }
+                # Determinism: ensure each symbol DF is time-sorted (once)
+                for sym, df in enriched_data.items():
+                    enriched_data[sym] = self._ensure_time_sorted_df(df)
             else:
                 # No symbol column - try to infer from first registered strategy's config
                 inferred_symbol = None
@@ -334,6 +386,12 @@ class MultiStrategySignalAggregator(ISystemComponent):
             self.logger.warning(f"Unexpected market_data type: {type(market_data)}")
             return {}
 
+        # Determinism: best-effort ensure time-sorted input for all symbols (without copying).
+        # (In backtests this should be a no-op once cached; in streaming it re-checks on growth.)
+        for sym, df in list(enriched_data.items()):
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                enriched_data[sym] = self._ensure_time_sorted_df(df)
+
         for strategy_id, registration in self.registered_strategies.items():
             if not registration.is_active:
                 continue
@@ -351,7 +409,11 @@ class MultiStrategySignalAggregator(ISystemComponent):
                     else:
                         raw_signals = await registration.strategy_instance.generate_signals(enriched_data)
 
-                    self.logger.info(f"🔍 Strategy {strategy_id} returned {len(raw_signals) if raw_signals else 0} raw signals")
+                    raw_n = len(raw_signals) if raw_signals else 0
+                    if raw_n > 0:
+                        self.logger.info(f"🔍 Strategy {strategy_id} returned {raw_n} raw signals")
+                    elif do_heartbeat:
+                        self.logger.debug(f"🔍 Strategy {strategy_id} returned 0 raw signals (heartbeat)")
                     
                     # Convert to enhanced signals
                     enhanced_signals = []
@@ -366,7 +428,20 @@ class MultiStrategySignalAggregator(ISystemComponent):
                         else:
                             self.logger.warning(f"🔍 Signal conversion returned None for signal: {signal}")
 
-                    self.logger.info(f"🔍 After filtering: {len(enhanced_signals)} signals passed threshold {self.min_confidence_threshold}")
+                    passed_n = len(enhanced_signals)
+                    if passed_n > 0:
+                        self.logger.info(
+                            f"🔍 After filtering: {passed_n} signals passed threshold {self.min_confidence_threshold}"
+                        )
+                    elif raw_n > 0:
+                        # Interesting case: strategy emitted, but none passed threshold
+                        self.logger.debug(
+                            f"🔍 After filtering: 0 signals passed threshold {self.min_confidence_threshold} (raw={raw_n})"
+                        )
+                    elif do_heartbeat:
+                        self.logger.debug(
+                            f"🔍 After filtering: 0 signals passed threshold {self.min_confidence_threshold} (heartbeat)"
+                        )
                     strategy_signals[strategy_id] = enhanced_signals
 
                     # Update performance tracking
@@ -433,7 +508,12 @@ class MultiStrategySignalAggregator(ISystemComponent):
             # Store aggregated signals
             self.aggregated_signals = aggregated_signals
 
-            self.logger.info(f"📊 Aggregated {len(aggregated_signals)} signals from {len(strategy_signals)} strategies")
+            if len(aggregated_signals) > 0:
+                self.logger.info(f"📊 Aggregated {len(aggregated_signals)} signals from {len(strategy_signals)} strategies")
+            else:
+                do_heartbeat = (self._log_heartbeat_bars > 0 and (self._bar_counter % self._log_heartbeat_bars == 0))
+                if do_heartbeat:
+                    self.logger.debug(f"📊 Aggregated 0 signals from {len(strategy_signals)} strategies (heartbeat)")
             return aggregated_signals
 
         except Exception as e:

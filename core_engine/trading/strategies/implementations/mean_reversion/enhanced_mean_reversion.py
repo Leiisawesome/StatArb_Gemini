@@ -162,6 +162,21 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             'enable_ads_gates': getattr(config, 'enable_ads_gates', True),
         }
 
+        # ==========================================================
+        # Performance: micro-caches for hot loops (backtest-per-bar)
+        # ==========================================================
+        # Cache numpy views / forward-filled arrays per DataFrame instance.
+        # Keyed by (id(df), column_name). Cleared on reset.
+        self._df_array_cache: dict[tuple[int, str], np.ndarray] = {}
+        self._df_ffill_cache: dict[tuple[int, str], np.ndarray] = {}
+        # IMPORTANT: in backtests, the same DataFrame object is often grown in-place (append bars).
+        # We must invalidate cached arrays when len(df) changes to avoid stale-short arrays.
+        self._df_len_cache: dict[int, int] = {}
+        self._df_cache_max: int = 256
+
+        # Throttle per-bar logging in generate_signals()
+        self._bar_log_counter: int = 0
+
         logger.info(f"🧠 Enhanced Mean Reversion Strategy {self.strategy_id} initialized")
         logger.info(f"   ADS v3.0: SMS threshold={self.ads_config['sms_threshold']}, "
                    f"ERAR gamma={self.ads_config['erar_gamma']}")
@@ -317,7 +332,14 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             generation_time = (datetime.now() - start_time).total_seconds()
             self.track_signal_generation_time(generation_time)
 
-            logger.info(f"📊 Mean Reversion: {len(signals)} signals in {generation_time:.3f}s")
+            # Quick win: avoid per-bar INFO log spam (it adds measurable overhead).
+            # Only log at INFO when we actually emit signals.
+            if len(signals) > 0:
+                logger.info(f"📊 Mean Reversion: {len(signals)} signals in {generation_time:.3f}s")
+            else:
+                self._bar_log_counter += 1
+                if self._bar_log_counter % 200 == 0:
+                    logger.debug("📊 Mean Reversion: 0 signals (heartbeat every 200 bars)")
 
             return signals
 
@@ -1366,11 +1388,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         if idx < lookback:
             return 0.0
 
-        if 'close' not in data.columns:
+        close_arr = self._get_cached_array(data, 'close')
+        if close_arr is None:
             return self._get_indicator_value(data, 'zscore', idx, default=0.0)
 
         # Get lookback window of prices
-        prices = data['close'].iloc[max(0, idx - lookback + 1):idx + 1].values
+        start = max(0, idx - lookback + 1)
+        prices = close_arr[start:idx + 1]
 
         if len(prices) < lookback // 2:  # Need at least half the lookback
             return 0.0
@@ -1381,10 +1405,63 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         if std_price < 0.001:  # Avoid division by zero
             return 0.0
 
-        current_price = float(data['close'].iloc[idx])
+        current_price = float(close_arr[idx])
         zscore = (current_price - mean_price) / std_price
 
         return zscore
+
+    def _get_cached_array(self, df: pd.DataFrame, column: str) -> Optional[np.ndarray]:
+        """Return a cached NumPy array view for a column (no forward-fill)."""
+        if column not in df.columns:
+            return None
+        self._invalidate_df_caches_if_grown(df)
+        key = (id(df), column)
+        arr = self._df_array_cache.get(key)
+        if arr is None:
+            if len(self._df_array_cache) >= self._df_cache_max:
+                self._df_array_cache.clear()
+            arr = df[column].to_numpy(copy=False)
+            self._df_array_cache[key] = arr
+        return arr
+
+    def _get_cached_ffill_array(self, df: pd.DataFrame, column: str) -> Optional[np.ndarray]:
+        """Return a cached forward-filled NumPy array for a column (matches _get_indicator_value semantics)."""
+        if column not in df.columns:
+            return None
+        self._invalidate_df_caches_if_grown(df)
+        key = (id(df), column)
+        arr = self._df_ffill_cache.get(key)
+        if arr is None:
+            if len(self._df_ffill_cache) >= self._df_cache_max:
+                self._df_ffill_cache.clear()
+            # Preserve existing behavior: forward fill NaNs at window edges.
+            arr = df[column].ffill().to_numpy(copy=False)
+            self._df_ffill_cache[key] = arr
+        return arr
+
+    def _invalidate_df_caches_if_grown(self, df: pd.DataFrame) -> None:
+        """
+        If this DataFrame object has changed length since we last cached arrays for it,
+        invalidate cached arrays keyed by its id(). This prevents stale arrays causing
+        IndexError when strategies index by bar idx.
+        """
+        try:
+            df_id = id(df)
+            n = len(df)
+            prev_n = self._df_len_cache.get(df_id)
+            if prev_n is None:
+                self._df_len_cache[df_id] = n
+                return
+            if prev_n == n:
+                return
+
+            # Length changed: drop all cached arrays for this df_id
+            self._df_array_cache = {k: v for k, v in self._df_array_cache.items() if k[0] != df_id}
+            self._df_ffill_cache = {k: v for k, v in self._df_ffill_cache.items() if k[0] != df_id}
+            self._df_len_cache[df_id] = n
+        except Exception:
+            # Never fail signal generation due to cache bookkeeping
+            return
 
     def _get_indicator_value(
         self,
@@ -1407,27 +1484,25 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         Returns:
             Indicator value
         """
-        if column not in data.columns:
+        arr = self._get_cached_ffill_array(data, column)
+        if arr is None:
             return default
-
-        series = data[column].ffill()
 
         if idx < 0:
-            idx = len(series) + idx
+            idx = len(arr) + idx
 
-        if idx < 0 or idx >= len(series):
+        if idx < 0 or idx >= len(arr):
             return default
 
-        value = series.iloc[idx]
-
+        value = arr[idx]
+        # Forward-fill should remove NaNs except possibly leading NaNs; preserve fallback behavior.
         if pd.isna(value):
-            # Try to get last valid value
-            valid_values = series.dropna()
-            if len(valid_values) > 0:
-                return valid_values.iloc[-1]
+            valid_mask = ~pd.isna(arr)
+            if valid_mask.any():
+                return float(arr[int(np.flatnonzero(valid_mask)[-1])])
             return default
 
-        return value
+        return float(value)
 
     def _resolve_column_name(self, expected_name: str, data: pd.DataFrame) -> str:
         """Resolve column name using mapping"""
@@ -2170,6 +2245,10 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         self.market_data.clear()
         self.indicators.clear()
         self.regime_data.clear()
+        self._df_array_cache.clear()
+        self._df_ffill_cache.clear()
+        self._df_len_cache.clear()
+        self._bar_log_counter = 0
         for symbol in self.config.symbols:
             self.indicators[symbol] = {}
 

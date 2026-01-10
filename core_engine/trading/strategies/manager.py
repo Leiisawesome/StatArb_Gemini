@@ -3317,7 +3317,21 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             # Aggregate and resolve conflicts
             aggregated_signals = await self.aggregate_strategy_signals(strategy_signals)
 
-            logger.info(f"📊 Generated {len(aggregated_signals)} aggregated signals from {len(strategy_signals)} strategies")
+            # Performance/log-noise: avoid per-bar INFO logs when there are no signals.
+            # INFO should represent actionable events; DEBUG heartbeat provides periodic visibility.
+            if not hasattr(self, "_signal_log_counter"):
+                self._signal_log_counter = 0
+            self._signal_log_counter += 1
+
+            if len(aggregated_signals) > 0:
+                logger.info(
+                    f"📊 Generated {len(aggregated_signals)} aggregated signals from {len(strategy_signals)} strategies"
+                )
+            else:
+                if (self._signal_log_counter % 200) == 0:
+                    logger.debug(
+                        f"📊 Generated 0 aggregated signals from {len(strategy_signals)} strategies (heartbeat)"
+                    )
             return aggregated_signals
 
         except Exception as e:
