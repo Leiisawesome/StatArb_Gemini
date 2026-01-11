@@ -116,9 +116,11 @@ class SmokeTest(BaseExperiment):
             'interval': self.config.get('interval', '1min'),
             'start_date': self.config.get('start_date', '2024-01-02'),
             'end_date': self.config.get('end_date', '2024-01-02'),
+            'warmup_bars': self.config.get('warmup_bars', None),
             'initial_capital': self.config.get('initial_capital', 100000),
             'allow_shorts': self.config.get('allow_shorts', False),
             'max_position_size': self.config.get('max_position_size', 0.10),
+            'max_position_pct': self.config.get('max_position_pct', None),
             'max_concentration': self.config.get('max_concentration', 0.20),
             'min_signal_confidence': self.config.get('min_signal_confidence', 0.60),
             # v5.0: Strategy aggregator minimum confidence threshold

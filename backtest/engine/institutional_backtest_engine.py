@@ -1511,7 +1511,7 @@ class InstitutionalBacktestEngine:
 
                 # Position limits (regime-adjusted) - from flattened config
                 'max_position_size': self.config.max_position_size,  # Default: 0.10 (10% max)
-                'max_position_pct': getattr(self.config, 'max_position_pct', self.config.max_position_size),  # Ensure consistency
+                'max_position_pct': (getattr(self.config, 'max_position_pct', None) or self.config.max_position_size),  # Ensure consistency
                 'max_daily_var': self.config.max_daily_var,  # Default: 0.05 (5% VaR)
                 'max_total_risk': 0.20,  # 20% total
                 'position_concentration_limit': self.config.max_concentration,  # Default: 0.15 (15%)

@@ -79,6 +79,8 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     buffers = pt.get("buffers", {}) or {}
     risk = pt.get("risk", {}) or {}
     execution = pt.get("execution", {}) or {}
+    # Strategy aggregation / coordinator settings (smoke-test knobs)
+    min_confidence_threshold = pt.get("min_confidence_threshold", cfg.get("min_confidence_threshold"))
 
     symbols = data.get("symbols") or []
     interval = data.get("interval")
@@ -92,6 +94,10 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     max_position_size = risk.get("max_position_size")
     if max_position_size is None:
         max_position_size = risk.get("max_position_pct")
+    max_position_pct = risk.get("max_position_pct")
+    if max_position_pct is None:
+        # Backwards compat: if not specified, treat pct cap as the overall max position size.
+        max_position_pct = max_position_size
 
     out: Dict[str, Any] = {
         "experiment_name": cfg.get("experiment_name", "Smoke_Test"),
@@ -104,7 +110,9 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "initial_capital": initial_capital,
         "allow_shorts": risk.get("allow_shorts", False),
         "min_signal_confidence": risk.get("min_signal_confidence", cfg.get("min_signal_confidence", 0.60)),
+        "min_confidence_threshold": min_confidence_threshold if min_confidence_threshold is not None else 0.60,
         "max_position_size": max_position_size if max_position_size is not None else cfg.get("max_position_size", 0.10),
+        "max_position_pct": max_position_pct,
         "strategies": pt.get("strategies", cfg.get("strategies", [])),
     }
 

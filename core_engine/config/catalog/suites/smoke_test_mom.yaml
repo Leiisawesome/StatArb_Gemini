@@ -1,0 +1,92 @@
+# Canonical Smoke Test Suite: Momentum (MOM)
+# =========================================
+# Canonical suite inputs for BT/PT parity iteration (Momentum strategy).
+# Uses papertest schema as the single source of truth.
+#
+# Template source: backtest/configs/smoke_test_momentum.yaml
+#
+
+papertest:
+  data:
+    symbols: ["TSLA"]
+    start_date: "2024-12-18"
+    end_date: "2024-12-20"
+    interval: "1min"
+    replay_speed: "FAST_1000X"
+    simulate_market_hours: false
+
+  buffers:
+    size: 400
+    warmup_required: 200
+
+  session:
+    stall_threshold_seconds: 300.0
+
+  # Smoke-test-only: allow lower-confidence single-day entries through the multi-strategy
+  # aggregator filter (production runs can keep the default 0.60).
+  min_confidence_threshold: 0.40
+
+  regime:
+    enable_per_bar_fast: true
+
+  strategies:
+    - type: "momentum"
+      name: "MOM_State_Machine"
+      allocation_pct: 1.0
+      parameters:
+        # State Machine Settings (Professional Re-architecture)
+        enable_state_machine: true
+        enable_eod_liquidation: true
+        eod_close_time: "15:55"
+        orb_minutes: 15
+        tightness_threshold: 0.9
+        # Smoke-test-only loosening (to avoid "0 trade" dead-runs on single-day samples):
+        # - Most breakouts are being rejected by EXT_TRAP: extension > max_extension_atr (see debug.log).
+        # - Some are also failing volume confirmation by a small margin.
+        max_extension_atr: 2.5
+        setup_expiry_bars: 30
+        breakout_volume_ratio_threshold: 0.95
+        anchor_ma: "sma_20"
+
+        # Core momentum parameters
+        short_period: 10
+        medium_period: 20
+        long_period: 50
+        lookback_period: 60
+        momentum_threshold: 0.02
+        adx_threshold: 25.0
+        volume_threshold: 1.2
+        # Smoke-test-only: avoid sizing collapsing to ~0 due to missing/weak momentum_strength
+        # in single-day samples (state-machine entries are structural; sizing should be non-zero).
+        momentum_scaling: false
+
+        # Position sizing
+        base_position_pct: 0.1
+        max_position_pct: 0.10
+
+  # Align papertest risk sizing behavior with backtest smoke_test_momentum.
+  risk:
+    allow_shorts: false
+    min_signal_confidence: 0.40
+    max_position_size: 0.40
+    max_position_pct: 0.10
+    max_positions: 1
+    position_concentration_limit: 1.0
+    daily_risk_budget_pct: 0.01
+    per_trade_risk_pct: 0.005
+
+  # Deterministic fills (no latency/partial) for parity iteration.
+  execution:
+    test_mode: true
+    initial_cash: 100000.0
+    commission_per_share: 0.005
+    min_commission: 1.0
+    latency_ms_min: 0.0
+    latency_ms_max: 0.0
+    fill_probability: 1.0
+    partial_fill_probability: 0.0
+    slippage_bps_max: 2.0
+    impact_coefficient: 10.0
+    seed: 42
+    use_historical_execution_simulator: true
+

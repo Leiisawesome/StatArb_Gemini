@@ -97,6 +97,12 @@ class BacktestConfig:
     initial_capital: float = 1_000_000.0
     max_position_size: float = 0.10
     """Maximum position size as % of portfolio. Default: 0.10 (10%). Must be <= max_concentration."""
+    max_position_pct: Optional[float] = None
+    """
+    Optional per-trade / per-order position cap as % of portfolio.
+    If None, engines should default this to max_position_size for backwards compatibility.
+    Must be <= max_position_size when provided.
+    """
     max_total_exposure: float = 1.0
     max_concentration: float = 0.20
     """Maximum concentration per position. Default: 0.20 (20%). Single-symbol backtests need max_position_size < this."""
@@ -192,6 +198,16 @@ class BacktestConfig:
 
         if not 0.0 < self.max_position_size <= 1.0:
             errors.append("max_position_size must be between 0 and 1")
+
+        if self.max_position_pct is not None:
+            try:
+                mpp = float(self.max_position_pct)
+                if not 0.0 < mpp <= 1.0:
+                    errors.append("max_position_pct must be between 0 and 1")
+                if mpp > float(self.max_position_size):
+                    errors.append("max_position_pct must be <= max_position_size")
+            except Exception:
+                errors.append("max_position_pct must be a float")
 
         if not 0.0 < self.max_daily_var <= 1.0:
             errors.append("max_daily_var must be between 0 and 1")

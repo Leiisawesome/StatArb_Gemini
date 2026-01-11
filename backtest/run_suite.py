@@ -63,6 +63,11 @@ EXPERIMENTS = {
         'default_config': 'core_engine/config/catalog/suites/smoke_test_mr.yaml',
         'description': 'Quick sanity check (1 symbol, 1 day)'
     },
+    'smoke_test_mom': {
+        'class': SmokeTest,
+        'default_config': 'core_engine/config/catalog/suites/smoke_test_mom.yaml',
+        'description': 'Quick sanity check (momentum state machine)'
+    },
     'baseline': {
         'class': BaselineBacktest,
         'default_config': 'backtest/configs/baseline_backtest.yaml',

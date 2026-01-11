@@ -143,6 +143,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         logger.info(f"  Enhanced Momentum Strategy {self.strategy_id} initialized")
 
+        # Performance/log-noise: avoid per-bar INFO logs in generate_signals().
+        self._bar_log_counter: int = 0
+
+        # Diagnostics: summarize why the state machine didn't trigger entries (no per-bar spam).
+        self._sm_entry_reasons: Dict[str, int] = {}
+        self._sm_entries_triggered: int = 0
+
     # ========================================
     # ADS v3.1: REGIME VECTOR ADAPTER
     # ========================================
@@ -180,6 +187,72 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         if -1.0 <= v <= 1.0:
             v = (v + 1.0) * 50.0
         return float(np.clip(v, 0.0, 100.0))
+
+    def _fallback_compute_composite_signals(
+        self,
+        data: pd.DataFrame,
+        idx: int,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Compute (composite_z, composite_pct) from price history when the enrichment pipeline
+        does not provide them (or provides NaNs).
+
+        This is intentionally lightweight and deterministic (smoke-test focused).
+        """
+        try:
+            if "close" not in data.columns:
+                return None, None
+
+            n = len(data)
+            if idx < 0:
+                idx = n + idx
+            if idx <= 0 or idx >= n:
+                return None, None
+
+            sp = int(getattr(self.config, "short_period", 10))
+            mp = int(getattr(self.config, "medium_period", 20))
+            lp = int(getattr(self.config, "long_period", 50))
+            lookback = int(getattr(self.config, "lookback_period", 60))
+
+            # Need enough history for long_period and rolling window.
+            if idx < max(lp, lookback):
+                return None, None
+
+            close = data["close"].to_numpy(copy=False)
+
+            def m_at(j: int) -> float:
+                # Multi-horizon return blend (weights tuned for stability)
+                r_s = (close[j] / close[j - sp] - 1.0) if j - sp >= 0 else 0.0
+                r_m = (close[j] / close[j - mp] - 1.0) if j - mp >= 0 else 0.0
+                r_l = (close[j] / close[j - lp] - 1.0) if j - lp >= 0 else 0.0
+                return float(0.5 * r_s + 0.3 * r_m + 0.2 * r_l)
+
+            start = max(lp, idx - lookback + 1)
+            window = [m_at(j) for j in range(start, idx + 1)]
+            if len(window) < 10:
+                return None, None
+
+            mu = float(np.mean(window))
+            sd = float(np.std(window))
+            if sd <= 1e-12:
+                return None, None
+
+            m_last = float(window[-1])
+            composite_z = (m_last - mu) / sd
+
+            # Percentile rank within the window (0..100), ties -> upper rank.
+            sorted_w = sorted(window)
+            rank = 0
+            for v in sorted_w:
+                if v <= m_last:
+                    rank += 1
+                else:
+                    break
+            composite_pct = 100.0 * rank / float(len(sorted_w))
+
+            return float(composite_z), float(composite_pct)
+        except Exception:
+            return None, None
 
     @staticmethod
     def _sms_regime_label(r: ADSRegimeVector) -> str:
@@ -575,6 +648,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         try:
             logger.info(f"  Stopping Momentum operations for {self.strategy_id}...")
 
+            # One-line diagnostic summary for smoke-test debugging (no per-bar spam).
+            # Only emit when state machine is enabled and it never triggered an entry.
+            if bool(getattr(self.config, "enable_state_machine", False)) and int(getattr(self, "_sm_entries_triggered", 0)) == 0:
+                reasons = getattr(self, "_sm_entry_reasons", None) or {}
+                if reasons:
+                    top = sorted(reasons.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                    top_str = ", ".join([f"{k}={v}" for k, v in top])
+                    logger.info(f"  StateMachine entry triggers: 0 (top reasons: {top_str})")
+                else:
+                    logger.info("  StateMachine entry triggers: 0 (no reasons recorded)")
+
             # Close all positions
             await self._close_all_positions()
 
@@ -721,7 +805,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             # Summary logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
-            logger.info(f"  Momentum Strategy: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s")
+            # Only log at INFO when we actually emit signals; otherwise heartbeat at DEBUG.
+            if len(signals) > 0:
+                logger.info(f"  Momentum Strategy: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s")
+            else:
+                self._bar_log_counter += 1
+                if self._bar_log_counter % 200 == 0:
+                    logger.debug(f"  Momentum Strategy: {len(symbols_checked)} symbols, 0 signals (heartbeat)")
 
             return signals
 
@@ -1032,8 +1122,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 should_entry, reason = self.state_machine.evaluate(
                     symbol, actual_idx, current_data, data, self.config
                 )
+                if reason:
+                    self._sm_entry_reasons[reason] = int(self._sm_entry_reasons.get(reason, 0)) + 1
                 
                 if should_entry:
+                    self._sm_entries_triggered += 1
                     confidence = self._calculate_signal_confidence(symbol, MomentumSignal.BULLISH_MOMENTUM)
                     state = self.state_machine.get_state(symbol)
                     signal = StrategySignal(
@@ -2225,12 +2318,19 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             raise  # Don't mask unexpected errors
 
         # Check 1: Is composite_z valid?
-        if composite_z is None or pd.isna(composite_z):
-            return False, None
-
-        # Check 2: Is composite_pct valid?
-        if composite_pct is None or pd.isna(composite_pct):
-            return False, None
+        if composite_z is None or pd.isna(composite_z) or composite_pct is None or pd.isna(composite_pct):
+            # Fallback: some enrichment pipelines may not emit composite_z/composite_pct.
+            # For smoke tests, compute a minimal composite signal from price history so the
+            # state machine can be exercised deterministically.
+            if enriched_data is not None and current_idx is not None:
+                cz, cp = self._fallback_compute_composite_signals(enriched_data, current_idx)
+                if cz is not None and cp is not None:
+                    composite_z = cz
+                    composite_pct = cp
+                else:
+                    return False, None
+            else:
+                return False, None
 
         # Normalize composite_pct to [0, 100] (handles signed [-1,1] pipelines too)
         composite_pct = self._normalize_composite_pct(composite_pct)

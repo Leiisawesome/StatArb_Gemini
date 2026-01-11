@@ -160,10 +160,42 @@ class MomentumStateMachine:
                 # Filter 3: Tightness (VCP - Contraction Check)
                 # We synthesize "Volatility Ratio" from ATR
                 atr_col = 'atr' if 'atr' in enriched_data.columns else 'ATR_14'
-                if atr_col in enriched_data.columns:
-                    current_atr = enriched_data[atr_col].iloc[idx]
-                    avg_atr = enriched_data[atr_col].iloc[idx-lookback:idx].mean()
+                atr_series = enriched_data[atr_col] if atr_col in enriched_data.columns else None
+
+                # Fallback: compute a simple ATR(14) from OHLC if not provided by the pipeline
+                # OR if the provided series is NaN at the current point (common in short windows).
+                def _fallback_atr() -> Optional[pd.Series]:
+                    try:
+                        high = enriched_data["high"]
+                        low = enriched_data["low"]
+                        close = enriched_data["close"]
+                        prev_close = close.shift(1)
+                        tr = pd.concat(
+                            [
+                                (high - low).abs(),
+                                (high - prev_close).abs(),
+                                (low - prev_close).abs(),
+                            ],
+                            axis=1,
+                        ).max(axis=1)
+                        return tr.rolling(14, min_periods=14).mean()
+                    except Exception:
+                        return None
+
+                if atr_series is not None:
+                    current_atr = atr_series.iloc[idx]
+                    avg_atr = atr_series.iloc[idx-lookback:idx].mean()
+
+                    if pd.isna(current_atr) or pd.isna(avg_atr):
+                        atr_series2 = _fallback_atr()
+                        if atr_series2 is None:
+                            return False, None
+                        current_atr = atr_series2.iloc[idx]
+                        avg_atr = atr_series2.iloc[idx-lookback:idx].mean()
+
                     vol_ratio = current_atr / avg_atr if avg_atr > 0 else 1.0
+                    if pd.isna(vol_ratio):
+                        return False, None
 
                     if vol_ratio < getattr(config, 'tightness_threshold', 0.75):
                         # SUCCESS: SETUP IDENTIFIED
@@ -173,7 +205,6 @@ class MomentumStateMachine:
                                           setup_low=setup_low, 
                                           idx=idx, 
                                           ts=current_data.name if isinstance(current_data.name, datetime) else None)
-
                         return False, "setup_identified"
             
             return False, None
@@ -184,7 +215,33 @@ class MomentumStateMachine:
             
             # Check for Invalidation (Thesis Broken)
             current_close = current_data['close']
-            if current_close < state.setup_low:
+            # Professional tweak: avoid resetting the setup on small undercuts.
+            # Use an ATR buffer (default 0.25 ATR) so noise doesn't constantly wipe setups.
+            try:
+                atr_col = 'atr' if 'atr' in enriched_data.columns else 'ATR_14'
+                atr = current_data.get(atr_col, None)
+                if atr is None or pd.isna(atr):
+                    # Fallback ATR(14)
+                    high = enriched_data["high"]
+                    low = enriched_data["low"]
+                    close = enriched_data["close"]
+                    prev_close = close.shift(1)
+                    tr = pd.concat(
+                        [
+                            (high - low).abs(),
+                            (high - prev_close).abs(),
+                            (low - prev_close).abs(),
+                        ],
+                        axis=1,
+                    ).max(axis=1)
+                    atr = tr.rolling(14, min_periods=14).mean().iloc[idx]
+                atr = float(atr) if atr is not None and not pd.isna(atr) else float(current_close) * 0.01
+            except Exception:
+                atr = float(current_close) * 0.01
+
+            buf_mult = float(getattr(config, "setup_invalidation_atr", 0.25))
+            breach_level = float(state.setup_low) - buf_mult * atr
+            if current_close < breach_level:
                 self.transition_to(symbol, SymbolStateName.FLAT)
                 return False, "invalidation_price_breach"
             
@@ -195,16 +252,63 @@ class MomentumStateMachine:
             # Check for Trigger (Breakout Expansion)
             if current_close > state.setup_high:
                 # Verification Filter: Volume Surge (Effort)
-                vol_ratio = current_data.get('volume_ratio', 1.0)
+                # NOTE: Different pipelines may define `volume_ratio` differently (or clip it).
+                # For the state machine, we want a robust "effort" proxy. We therefore compute a
+                # local fallback (volume / rolling mean) and take the max of the two.
+                vol_ratio_raw = current_data.get('volume_ratio', None)
+                vr_fallback = 1.0
+                try:
+                    v = enriched_data["volume"]
+                    v_ma = v.rolling(20, min_periods=20).mean()
+                    if idx < len(v_ma) and v_ma.iloc[idx] and not pd.isna(v_ma.iloc[idx]):
+                        vr_fallback = float(v.iloc[idx] / v_ma.iloc[idx])
+                except Exception:
+                    vr_fallback = 1.0
 
-                if vol_ratio > 1.1: # Pro-filter: Volume confirmation
+                if vol_ratio_raw is None or pd.isna(vol_ratio_raw):
+                    vol_ratio = vr_fallback
+                else:
+                    try:
+                        vol_ratio = max(float(vol_ratio_raw), float(vr_fallback))
+                    except Exception:
+                        vol_ratio = vr_fallback
+
+                if vol_ratio > float(getattr(config, "breakout_volume_ratio_threshold", 1.1)):  # Volume confirmation
                     
                     # Verification Filter: Anti-Chase (Extension)
                     ma_col = getattr(config, 'anchor_ma', 'sma_20')
+                    # Anchor MA fallback (default sma_20)
                     if ma_col in enriched_data.columns:
-                        ma_val = current_data[ma_col]
+                        ma_val = current_data.get(ma_col, None)
+                    else:
+                        try:
+                            ma_val = enriched_data["close"].rolling(20, min_periods=20).mean().iloc[idx]
+                        except Exception:
+                            ma_val = None
+
+                    if ma_val is not None and not pd.isna(ma_val):
                         atr_col = 'atr' if 'atr' in enriched_data.columns else 'ATR_14'
-                        atr = current_data.get(atr_col, current_close * 0.01)
+                        atr = current_data.get(atr_col, None)
+                        if atr is None or pd.isna(atr):
+                            # Fallback ATR(14) as above
+                            try:
+                                high = enriched_data["high"]
+                                low = enriched_data["low"]
+                                close = enriched_data["close"]
+                                prev_close = close.shift(1)
+                                tr = pd.concat(
+                                    [
+                                        (high - low).abs(),
+                                        (high - prev_close).abs(),
+                                        (low - prev_close).abs(),
+                                    ],
+                                    axis=1,
+                                ).max(axis=1)
+                                atr = tr.rolling(14, min_periods=14).mean().iloc[idx]
+                            except Exception:
+                                atr = current_close * 0.01
+                        if atr is None or pd.isna(atr) or float(atr) <= 0:
+                            atr = current_close * 0.01
                         extension = (current_close - ma_val) / atr if atr > 0 else 0
                         
                         if extension > getattr(config, 'max_extension_atr', 1.5):
