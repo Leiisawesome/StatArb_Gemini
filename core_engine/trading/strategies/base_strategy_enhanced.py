@@ -524,11 +524,29 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
     async def _check_strategy_health(self) -> Dict[str, Any]:
         """Check strategy-specific health (override in subclass)"""
-        return {'strategy_healthy': True}
+        return {
+            "strategy_healthy": True,
+            "active_positions": self._get_active_position_count(),
+        }
 
     def _get_strategy_config_summary(self) -> Dict[str, Any]:
         """Get strategy-specific configuration summary (override in subclass)"""
-        return {}
+        # Generic best-effort summary. Strategy implementations may extend this,
+        # but should not be required to implement it (Rule 7: keep implementations alpha-only).
+        try:
+            symbols = getattr(self.config, "symbols", None)
+            if isinstance(symbols, (list, tuple)):
+                symbols_count = len(symbols)
+            else:
+                symbols_count = None
+        except Exception:
+            symbols_count = None
+
+        return {
+            "symbols_count": symbols_count,
+            "max_position_size": getattr(self.config, "max_position_size", None),
+            "max_daily_loss": getattr(self.config, "max_daily_loss", None),
+        }
 
     # ========================================
     # INTERNAL HELPER METHODS
@@ -560,6 +578,18 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
     def _validate_strategy_config(self) -> bool:
         """Validate strategy-specific configuration (override in subclass)"""
+        # Generic validation. Strategies may add stricter validation, but should not
+        # need to (Rule 7: keep implementations alpha-only).
+        try:
+            if hasattr(self.config, "symbols"):
+                symbols = getattr(self.config, "symbols", None)
+                if not symbols:
+                    logger.error("No symbols configured")
+                    return False
+        except Exception as e:
+            logger.error(f"Strategy config validation error: {e}")
+            return False
+
         return True
 
     def _initialize_data_structures(self) -> None:

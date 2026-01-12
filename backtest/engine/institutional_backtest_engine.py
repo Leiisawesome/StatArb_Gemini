@@ -3487,21 +3487,8 @@ class InstitutionalBacktestEngine:
                     if close_col in filtered.columns:
                         close_price = float(filtered[close_col].iloc[-1])
 
-            # PROFIT-ONLY LIQUIDATION (User Enhancement)
-            # Only liquidate if the position is currently profitable.
-            # Otherwise, carry it over to the next trading day.
-            entry_price = 0.0
-            if self.pnl_tracker:
-                entry_price = self.pnl_tracker.position_cost_basis.get(symbol, 0.0)
-            
-            pnl_pct = 0.0
-            if entry_price > 0:
-                if position_qty > 0: # Long
-                    pnl_pct = (close_price - entry_price) / entry_price * 100
-                else: # Short
-                    pnl_pct = (entry_price - close_price) / entry_price * 100
-            if pnl_pct <= 0:
-                continue
+            # EOD liquidation closes positions regardless of P&L (intraday risk rule).
+            # This keeps backtests consistent when strategies are entry-intent only (Rule 7).
 
             # Create a liquidation sell order
             side = 'sell' if position_qty > 0 else 'buy'  # Sell longs, buy to cover shorts

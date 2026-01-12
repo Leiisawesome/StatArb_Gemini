@@ -89,7 +89,6 @@ class EnhancedStrategyValidator:
         violations: List[Rule7Violation] = []
 
         strategy_cls = strategy.__class__
-        strategy_name = f"{strategy_cls.__module__}.{strategy_cls.__name__}"
 
         # Runtime reflection: ensure no sizing override
         try:

@@ -38,6 +38,11 @@ papertest:
         enable_state_machine: true
         enable_eod_liquidation: true
         eod_close_time: "15:55"
+        # Risk-side exits (Rule 7): enable centralized multi-exit policy to generate exits
+        # even when the momentum strategy is entry-intent only.
+        enable_ads_multi_exit: true
+        max_holding_minutes: 30
+        enable_forward_vol_stops: true
         orb_minutes: 15
         tightness_threshold: 0.9
         # Smoke-test-only loosening (to avoid "0 trade" dead-runs on single-day samples):
