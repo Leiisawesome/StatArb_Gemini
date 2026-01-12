@@ -2229,41 +2229,6 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         else:
             return 'normal'
 
-    # ========================================
-    # POSITION SIZING
-    # ========================================
-
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-        try:
-            symbol = signal.symbol
-
-            if symbol not in self.market_data or len(self.market_data[symbol]) == 0:
-                return 0.0
-
-            current_price = self.market_data[symbol]['close'].iloc[-1]
-            atr = self._calculate_atr(symbol)
-
-            if atr == 0:
-                return self.config.base_position_pct
-
-            # Volatility-adjusted position size
-            volatility = atr / current_price
-            volatility_adjustment = self.config.volatility_target / max(volatility, 0.01)
-
-            # Apply confidence scaling
-            position_size = (
-                self.config.base_position_pct *
-                volatility_adjustment *
-                signal.confidence
-            )
-
-            return min(position_size, self.config.max_position_pct)
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
-
     def _calculate_atr(self, symbol: str) -> float:
         """Calculate ATR for a symbol"""
         if symbol not in self.market_data:

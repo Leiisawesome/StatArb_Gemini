@@ -417,24 +417,6 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
         except Exception as e:
             self._log_error("Position update failed", e)
 
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-
-        try:
-            if self.config.position_size_method == "fixed":
-                return self._calculate_fixed_position_size(signal)
-            elif self.config.position_size_method == "volatility_adjusted":
-                return self._calculate_volatility_adjusted_size(signal, market_data)
-            elif self.config.position_size_method == "risk_parity":
-                return self._calculate_risk_parity_size(signal, market_data)
-            else:
-                logger.warning(f"Unknown position sizing method: {self.config.position_size_method}")
-                return self._calculate_fixed_position_size(signal)
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
-
     # ========================================
     # COINTEGRATION ANALYSIS
     # ========================================

@@ -348,17 +348,6 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
         except Exception as e:
             self._log_error("Position update failed", e)
 
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-
-        try:
-            # For pairs trading, use configured position size
-            return self.config.position_size_pct
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
-
     # ========================================
     # PAIR SELECTION METHODS
     # ========================================

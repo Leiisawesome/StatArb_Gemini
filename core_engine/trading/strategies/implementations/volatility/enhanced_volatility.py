@@ -50,9 +50,6 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
         # Strategy-specific state
         self.market_data: Dict[str, pd.DataFrame] = {}
         self.volatility_data: Dict[str, Dict[str, float]] = {}
-        # DEPRECATED: active_positions is deprecated. Use PositionBook (SSOT) instead.
-        # Position tracking should be handled by Risk Manager, not strategies.
-        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
 
         logger.info(f"🧠 Enhanced Volatility Strategy {self.strategy_id} initialized")
 
@@ -108,7 +105,7 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             return {
                 'strategy_healthy': True,
                 'symbols_tracked': len(self.config.symbols),
-                'active_positions': len(self.active_positions),
+                'active_positions': self._get_active_position_count(),
                 'volatility_data_available': len(self.volatility_data),
                 'avg_volatility': self._calculate_avg_volatility()
             }
@@ -243,28 +240,6 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
         except Exception as e:
             self._log_error("Position update failed", e)
 
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-
-        try:
-            symbol = signal.symbol
-            base_size = self.config.base_position_pct
-
-            # Volatility-adjusted sizing
-            if self.config.volatility_scaling and symbol in self.volatility_data:
-                vol_data = self.volatility_data[symbol]
-                current_vol = vol_data.get('realized_volatility', 0.02)
-
-                # Inverse volatility scaling
-                vol_adjustment = self.config.vol_target / max(current_vol, 0.01)
-                base_size *= min(vol_adjustment, 2.0)  # Cap adjustment
-
-            return min(base_size, self.config.max_position_pct)
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
-
     # ========================================
     # VOLATILITY CALCULATION METHODS
     # ========================================
@@ -370,7 +345,7 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
                     vol_data = self.volatility_data[symbol]
 
                     # Skip if already have position
-                    if symbol in self.active_positions:
+                    if self._has_position(symbol):
                         continue
 
                     # Generate signals based on volatility conditions
@@ -458,7 +433,6 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
 
         self.market_data.clear()
         self.volatility_data.clear()
-        self.active_positions.clear()
 
     def _calculate_avg_volatility(self) -> float:
         """Calculate average volatility across symbols"""
@@ -473,12 +447,6 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
 
         return np.mean(volatilities) if volatilities else 0.0
 
-    async def _close_all_positions(self) -> None:
-        """Close all active positions"""
-
-        logger.info(f"🔄 Closing {len(self.active_positions)} active positions")
-        self.active_positions.clear()
-
     # ========================================
     # STRATEGY-SPECIFIC METHODS
     # ========================================
@@ -490,7 +458,7 @@ class EnhancedVolatilityStrategy(EnhancedBaseStrategy):
             'strategy_id': self.strategy_id,
             'strategy_type': 'Enhanced Volatility',
             'symbols_tracked': len(self.config.symbols),
-            'active_positions': len(self.active_positions),
+            'active_positions': self._get_active_position_count(),
             'avg_volatility': self._calculate_avg_volatility(),
             'performance_summary': self.get_performance_summary(),
             'volatility_data': self.volatility_data

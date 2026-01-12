@@ -52,9 +52,6 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         self.correlation_matrix: Optional[pd.DataFrame] = None
         self.current_weights: Dict[str, float] = {}
         self.target_weights: Dict[str, float] = {}
-        # DEPRECATED: active_positions is deprecated. Use PositionBook (SSOT) instead.
-        # Position tracking should be handled by Risk Manager, not strategies.
-        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
 
         # Portfolio metrics
         self.portfolio_returns: List[float] = []
@@ -119,7 +116,7 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
                 'strategy_healthy': True,
                 'asset_classes': len(self.config.asset_classes),
                 'total_symbols': len(all_symbols),
-                'active_positions': len(self.active_positions),
+                'active_positions': self._get_active_position_count(),
                 'portfolio_volatility': self.portfolio_volatility,
                 'correlation_matrix_available': self.correlation_matrix is not None
             }
@@ -255,18 +252,6 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
 
         except Exception as e:
             self._log_error("Position update failed", e)
-
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-
-        try:
-            symbol = signal.symbol
-            target_weight = self.target_weights.get(symbol, 0.0)
-            return target_weight
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
 
     # ========================================
     # PORTFOLIO OPTIMIZATION METHODS
@@ -525,7 +510,6 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         self.market_data.clear()
         self.current_weights.clear()
         self.target_weights.clear()
-        self.active_positions.clear()
         self.portfolio_returns.clear()
 
     def _initialize_equal_weights(self) -> None:
@@ -561,13 +545,6 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
         except Exception as e:
             logger.error(f"Portfolio metrics update failed: {e}")
 
-    async def _close_all_positions(self) -> None:
-        """Close all active positions"""
-
-        logger.info(f"🔄 Closing {len(self.active_positions)} active positions")
-        self.active_positions.clear()
-        self.current_weights.clear()
-
     # ========================================
     # STRATEGY-SPECIFIC METHODS
     # ========================================
@@ -582,7 +559,7 @@ class EnhancedMultiAssetStrategy(EnhancedBaseStrategy):
             'strategy_type': 'Enhanced Multi-Asset',
             'asset_classes': len(self.config.asset_classes),
             'total_symbols': len(all_symbols),
-            'active_positions': len(self.active_positions),
+            'active_positions': self._get_active_position_count(),
             'portfolio_volatility': self.portfolio_volatility,
             'performance_summary': self.get_performance_summary(),
             'current_weights': self.current_weights,

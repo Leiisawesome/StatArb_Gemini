@@ -328,23 +328,18 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             }
 
             signal_type = SignalType.BUY if side == "BUY" else SignalType.SELL
+            # Strategy expresses allocation intent as a static target weight hint.
+            # RiskManager remains the final authority for sizing.
+            base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
+            max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
+            target_weight_hint = float(np.clip(base_tw, 0.0, max_tw))
             return StrategySignal(
                 strategy_id=self.strategy_id,
                 symbol=symbol,
                 signal_type=signal_type,
                 strength=min(max(float(ctx.raw_signal_strength), 0.0), 1.0),
                 confidence=min(0.95, max(0.55, 0.50 + sms_score * 0.45)),
-                target_weight=float(self.calculate_position_size(
-                    signal=StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=symbol,
-                        signal_type=signal_type,
-                        strength=min(max(float(ctx.raw_signal_strength), 0.0), 1.0),
-                        confidence=min(0.95, max(0.55, 0.50 + sms_score * 0.45)),
-                        timestamp=ts,
-                    ),
-                    market_data={symbol: data},
-                )),
+                target_weight=target_weight_hint,
                 quantity_type="PERCENTAGE",
                 timestamp=ts,
                 additional_data=additional_data
@@ -739,56 +734,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         """
         return
 
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """
-        Calculate position size for a given signal (FIXED: HIGH #5)
-
-        Returns percentage of portfolio (0.0-1.0) for position sizing.
-        All config values are percentages (0.0-1.0).
-        """
-
-        try:
-            symbol = signal.symbol
-
-            # FIXED: HIGH #5 - Standardize to percentage (0-1) throughout
-            # Use max_position_pct from config (always a percentage 0-1)
-            max_position_pct = getattr(self.config, 'max_position_pct', 0.10)  # Default 10%
-
-            # Base position size (percentage)
-            base_size_pct = self.config.base_position_pct * self.config.position_base_multiplier
-
-            # Ensure base doesn't exceed max
-            base_size_pct = min(base_size_pct, max_position_pct)
-
-            # Scale by momentum strength if enabled
-            if self.config.momentum_scaling and symbol in self.momentum_data:
-                momentum_strength = self.momentum_data[symbol].get('momentum_strength', 1.0)
-                momentum_multiplier = min(momentum_strength / self.config.momentum_threshold, self.config.momentum_multiplier_cap)
-                base_size_pct *= momentum_multiplier
-
-            # Scale by signal confidence
-            confidence_multiplier = signal.confidence
-            base_size_pct *= confidence_multiplier
-
-            # Scale by trend quality (ADX)
-            if symbol in self.market_data and len(self.market_data[symbol]) > 0:
-                current_data = self.market_data[symbol].iloc[-1]
-                adx_col = self._get_column_name('ADX_14', self.market_data[symbol])
-                adx = current_data.get(adx_col, current_data.get('adx', 0.0))
-                if adx > 0:
-                    trend_multiplier = min(adx / self.config.adx_threshold, self.config.trend_multiplier_cap)
-                    base_size_pct *= trend_multiplier
-
-            # Final cap at maximum (all in percentage 0-1)
-            final_pct = min(base_size_pct, max_position_pct)
-
-            # Ensure non-negative
-            return max(final_pct, 0.0)
-
-        except Exception:
-            logger.exception(f"  [{signal.symbol}] Position size calculation failed")
-            return 0.0
-
     # ========================================
     # SIGNAL GENERATION METHODS
     # ========================================
@@ -945,8 +890,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'pattern_mode': 'BREAKOUT_ACCELERATION'
                         }
                     )
-                    target_weight = self.calculate_position_size(signal, {symbol: data})
-                    signal.target_weight = float(target_weight)
+                    base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
+                    max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
+                    signal.target_weight = float(np.clip(base_tw, 0.0, max_tw))
                     signal.quantity_type = "PERCENTAGE"
                     return signal
                 
@@ -1073,18 +1019,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 confidence = self._calculate_signal_confidence(symbol, mom_signal)
 
                 if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
-                    # Emit sizing intent as percentage target_weight (RiskManager is final authority)
-                    target_weight = self.calculate_position_size(
-                        signal=StrategySignal(
-                            strategy_id=self.strategy_id,
-                            symbol=symbol,
-                            signal_type=signal_type,
-                            strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
-                            confidence=confidence,
-                            timestamp=signal_timestamp,
-                        ),
-                        market_data={symbol: data},
-                    )
+                    base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
+                    max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
+                    target_weight = float(np.clip(base_tw, 0.0, max_tw))
 
                     signal = StrategySignal(
                         strategy_id=self.strategy_id,
@@ -1586,12 +1523,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         logger.info("  Momentum performance tracking started")
 
     async def _close_all_positions(self) -> None:
-        """Close all active positions (Logic moved to Risk Manager)"""
-        logger.info(f"  Momentum Strategy closing all positions - signaling intent to Orchestrator")
-        
-        # Legacy support
-        if hasattr(self, 'active_positions'):
-            self.active_positions.clear()
+        """Best-effort close request (authority lives in Risk Manager + PositionBook)."""
+        logger.info("  Momentum Strategy requesting close-all via Risk Manager (best-effort)")
+        await super()._close_all_positions()
 
     def _save_performance_data(self) -> None:
         """Save performance data"""

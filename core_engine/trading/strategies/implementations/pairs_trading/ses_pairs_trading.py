@@ -1577,10 +1577,6 @@ class SESPairsTradingStrategy(EnhancedBaseStrategy):
         self._update_market_data(market_data)
         self._update_spread_calculations()
 
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size"""
-        return self.config.position_size_pct
-
     def get_ses_summary(self) -> Dict[str, Any]:
         """Get comprehensive SES strategy summary"""
         return {

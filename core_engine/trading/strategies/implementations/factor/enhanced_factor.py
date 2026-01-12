@@ -50,9 +50,6 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
         # Strategy-specific state
         self.market_data: Dict[str, pd.DataFrame] = {}
         self.factor_scores: Dict[str, Dict[str, float]] = {}
-        # DEPRECATED: active_positions is deprecated. Use PositionBook (SSOT) instead.
-        # Position tracking should be handled by Risk Manager, not strategies.
-        self.active_positions: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
 
         logger.info(f"🧠 Enhanced Factor Strategy {self.strategy_id} initialized")
 
@@ -108,7 +105,7 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
             return {
                 'strategy_healthy': True,
                 'symbols_tracked': len(self.config.symbols),
-                'active_positions': len(self.active_positions),
+                'active_positions': self._get_active_position_count(),
                 'factors_calculated': len(self.factor_scores)
             }
 
@@ -239,18 +236,6 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
 
         except Exception as e:
             self._log_error("Position update failed", e)
-
-    def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
-        """Calculate position size for a given signal"""
-
-        try:
-            base_size = self.config.base_position_pct
-            factor_strength = signal.strength
-            return min(base_size * factor_strength, self.config.max_position_pct)
-
-        except Exception as e:
-            self._log_error("Position size calculation failed", e)
-            return 0.0
 
     # ========================================
     # FACTOR CALCULATION METHODS
@@ -415,13 +400,6 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
 
         self.market_data.clear()
         self.factor_scores.clear()
-        self.active_positions.clear()
-
-    async def _close_all_positions(self) -> None:
-        """Close all active positions"""
-
-        logger.info(f"🔄 Closing {len(self.active_positions)} active positions")
-        self.active_positions.clear()
 
     # ========================================
     # STRATEGY-SPECIFIC METHODS
@@ -434,7 +412,7 @@ class EnhancedFactorStrategy(EnhancedBaseStrategy):
             'strategy_id': self.strategy_id,
             'strategy_type': 'Enhanced Factor',
             'symbols_tracked': len(self.config.symbols),
-            'active_positions': len(self.active_positions),
+            'active_positions': self._get_active_position_count(),
             'performance_summary': self.get_performance_summary(),
             'factor_scores': self.factor_scores,
             'symbol_rankings': self._rank_symbols_by_factors()
