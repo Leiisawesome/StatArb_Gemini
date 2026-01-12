@@ -93,38 +93,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # State Machine (Professional re-architecture)
         self.state_machine = MomentumStateMachine()
 
-        # ========================================
-        # DEPRECATED: Position Tracking Fields
-        # ========================================
-        # position_tracker is DEPRECATED. Position tracking should be handled by
-        # PositionBook (SSOT) and Risk Manager, not by strategies.
-        #
-        # Migration path:
-        # - Use self._position_book.get_position(symbol) for read-only queries
-        # - Use self._has_position(symbol) helper method
-        # - Let Risk Manager handle trailing stops and high water marks
-        #
-        # This field is kept for backward compatibility only.
-        self.position_tracker: Dict[str, Dict[str, Any]] = {}  # DEPRECATED
-        self._pos_lock = asyncio.Lock()  # DEPRECATED: Used with position_tracker
-        """
-        DEPRECATED: Enhanced position tracking with bar timestamps and high water marks
-
-        This should be migrated to PositionBook (SSOT). Structure:
-        {
-            'SYMBOL': {
-                'direction': 1 or -1,  # 1=LONG, -1=SHORT
-                'avg_entry_price': float,
-                'total_quantity': float,
-                'entry_time': datetime,  # Bar timestamp, NOT datetime.now()
-                'scale_ins': int,
-                'high_water_mark': float,  # Peak price for trailing stops
-                'trailing_stop_activated': bool,
-                'last_update_time': datetime  # Bar timestamp of last update
-            }
-        }
-        """
-
         # Performance tracking
         self.trade_history: List[Dict[str, Any]] = []
         self.momentum_performance: Dict[str, Dict[str, float]] = {}
@@ -134,9 +102,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             max_pending=getattr(config, "sms_max_pending", 50)
         )
         self._ads_regime_prev: Dict[str, ADSRegimeVector] = {}
-
-        # Debug-mode state (do not remove until verified)
-        self._dbg_flags: Dict[str, Any] = {}
 
         # FIXED: MED #8 - Cache column mapping for performance
         self._column_mapping_cache = self._get_column_mapping()
@@ -297,59 +262,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 self.pending_signals.remove(symbol, side)
                 continue
 
-            # Update SMS components using current bar (so SMS can increase, not only decay)
-            # E: setup maturity proxy (multiplicative to avoid linear alpha scoring)
-            thresholds = self._get_regime_adjusted_thresholds(symbol, row if isinstance(row, pd.Series) else pd.Series())
-            z_thresh = float(thresholds.get("long_threshold", getattr(self.config, "composite_z_entry", 1.0)))
-            pct_thresh = float(thresholds.get("pct_threshold", getattr(self.config, "composite_pct_entry", 70.0)))
-
-            z_margin = max(0.0, (abs(composite_z) - z_thresh) / max(z_thresh, 1e-6))
-            z_maturity = 1.0 - float(np.exp(-2.0 * z_margin))
-            pct_margin = max(0.0, (composite_pct - pct_thresh) / max(100.0 - pct_thresh, 1.0))
-            pct_maturity = 1.0 - float(np.exp(-2.0 * pct_margin))
-
-            # Structure quality (best-effort)
-            structure_q = 0.5
-            try:
-                if idx >= 5:
-                    sd = self._detect_price_structure(symbol, data, idx, lookback=5)
-                    structure_q = float(sd.get("structure_quality", 0.5))
-            except Exception:
-                structure_q = 0.5
-
-            E = float(np.clip((max(z_maturity, 1e-3) * max(pct_maturity, 1e-3) * (0.5 + 0.5 * structure_q)) ** (1 / 3), 0.0, 1.0))
-
-            # P_rev component for momentum: use continuation probability (1 - reversal_risk)
-            rsi_col = self._get_column_name("RSI_14", data)
-            rsi = float(row.get(rsi_col, row.get("rsi", 50.0))) if hasattr(row, "get") else 50.0
-            if side == "BUY":
-                p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(rsi - float(getattr(self.config, "rsi_overbought", 70.0))) / 5.0)))
-            else:
-                p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(float(getattr(self.config, "rsi_oversold", 30.0)) - rsi) / 5.0)))
-            continuation_prob = float(np.clip(1.0 - p_rev_rsi, 0.001, 1.0))
-
-            #  OFI proxy: volume_ratio
-            vol_ratio = float(row.get("volume_ratio", 1.0)) if hasattr(row, "get") else 1.0
-            sign = 1.0 if side == "BUY" else -1.0
-            ofi_shift = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
-
-            # VC for momentum: use VC =  _long/ _short so expansion helps (lower VC -> higher score via (1/VC)^ )
-            vol_comp = 1.0
-            try:
-                if "close" in data.columns and idx >= 20:
-                    prices = data["close"].iloc[max(0, idx - 20) : idx + 1]
-                    rets = prices.pct_change()
-                    short_vol = float(rets.tail(5).std()) if len(rets) >= 5 else 0.02
-                    long_vol = float(rets.std()) if len(rets) >= 10 else 0.02
-                    if short_vol > 0:
-                        vol_comp = float(np.clip(long_vol / short_vol, 0.5, 2.0))
-            except Exception:
-                vol_comp = 1.0
-
-            ctx.sms.exhaustion = E
-            ctx.sms.reversal_prob = continuation_prob
-            ctx.sms.ofi_shift = ofi_shift
-            ctx.sms.vol_compression = vol_comp
+            # Consolidated ADS Context Calculation
+            ads_ctx = self._calculate_ads_context(
+                symbol, data, idx, side, 
+                raw_strength=float(ctx.raw_signal_strength)
+            )
+            
+            ctx.sms.exhaustion = ads_ctx["exhaustion"]
+            ctx.sms.reversal_prob = ads_ctx["reversal_prob"]
+            ctx.sms.ofi_shift = ads_ctx["ofi_shift"]
+            ctx.sms.vol_compression = ads_ctx["vol_compression"]
 
             # Tick pending bars + stale kill
             ctx.increment_pending()
@@ -357,63 +279,28 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 self.pending_signals.remove(symbol, side)
                 continue
 
-            # Compute tau(R)
-            ads_r, ads_diag = self._get_ads_regime_vector(symbol)
-            tau_0 = float(getattr(self.config, "tau_0", 0.50))
-            tau = compute_sms_tau(
-                ads_r,
-                tau_0=tau_0,
-                ofi_proxy_used=True,
-                bb_missing=True,
-                direction="long" if side == "BUY" else "short",
-            )
-
-            regime_label = self._sms_regime_label(ads_r)
+            # Compute tau(R) from consolidated context
+            tau = ads_ctx["tau"]
+            regime_label = ads_ctx["regime_label"]
             sms_score = float(ctx.sms.compute(regime_label))
+            
             if sms_score < tau:
                 continue
 
-            # ADS v3.1  3: ERAR gate (strategy-side) at maturity time
+            # ADS v3.1 3: ERAR gate (strategy-side) at maturity time
+            erar = ads_ctx["erar"]
+            gamma = float(getattr(self.config, "erar_gamma", 0.5))
+            if bool(getattr(self.config, "enable_ads_gates", True)):
+                if not erar.should_trade(gamma=gamma):
+                    # Keep pending, do not emit this bar
+                    ctx.erar = erar
+                    ctx.metadata["ads_erar"] = ads_ctx["erar_val"]
+                    ctx.metadata["ads_erar_diag"] = erar.get_diagnostics()
+                    continue
+
+            # Get timestamp for signal
             try:
-                price = float(row.get("close", 0.0)) if hasattr(row, "get") else 0.0
-                atr_col = self._get_column_name("ATR_14", data)
-                atr = float(row.get(atr_col, row.get("atr", 0.0))) if hasattr(row, "get") else 0.0
-                volatility = (atr / price) if (price > 0 and atr > 0) else 0.02
-                holding_minutes = float(getattr(self.config, "time_stop_minutes", 90))
-                holding_days = max(0.05, min(1.0, holding_minutes / 390.0))
-
-                # Conservative continuation PnL proxy in bps
-                expected_move = atr * (0.4 + 0.6 * max(0.0, float(ctx.raw_signal_strength)))
-                expected_pnl_bps = (expected_move / price) * 10000 if price > 0 else 0.0
-
-                cvar_95_bps = estimate_cvar_95(volatility=volatility, holding_days=holding_days)
-                erar = ERAR(
-                    expected_pnl=float(expected_pnl_bps),
-                    cvar_95=float(cvar_95_bps),
-                    skewness=0.0,
-                    spread_bps=float(getattr(self.config, "spread_bps", 2.0)),
-                    participation=0.01,
-                    volatility=float(volatility),
-                    adverse_prob=0.1,
-                    kyle_lambda=0.0001,
-                    holding_days=float(holding_days),
-                    alt_return_bps=float(getattr(self.config, "alt_return_bps", 0.5)),
-                    tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)),
-                )
-                gamma = float(getattr(self.config, "erar_gamma", 0.5))
-                if bool(getattr(self.config, "enable_ads_gates", True)):
-                    if not erar.should_trade(gamma=gamma):
-                        # Keep pending, do not emit this bar
-                        ctx.erar = erar
-                        ctx.metadata["ads_erar"] = erar.compute()
-                        ctx.metadata["ads_erar_diag"] = erar.get_diagnostics()
-                        continue
-            except Exception:
-                # Fail safe: do not emit without ERAR
-                continue
-
-            try:
-                ts = row.get("timestamp", None) if hasattr(row, "get") else None
+                ts = row.get("timestamp", None)
                 if ts is None and isinstance(data.index, pd.DatetimeIndex):
                     ts = data.index[idx].to_pydatetime()
                 elif isinstance(ts, pd.Timestamp):
@@ -423,40 +310,35 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             except Exception:
                 ts = None
             if ts is None:
-                # Fail safe: do not emit without bar timestamp
                 return None
 
             additional_data = {
                 "signal_reason": "ads_sms_matured_pending",
                 "pending_bars": ctx.sms.pending_bars,
-                "composite_z": composite_z,
-                "composite_pct": composite_pct,
+                "composite_z": ads_ctx["composite_z"],
+                "composite_pct": ads_ctx["composite_pct"],
                 "ads_tau": tau,
                 "ads_sms": sms_score,
-                "ads_erar": float(erar.compute()) if "erar" in locals() else None,
-                "ads_erar_diag": erar.get_diagnostics() if "erar" in locals() else None,
-                "ads_regime_vector": {
-                    "volatility": ads_r.volatility,
-                    "trend": ads_r.trend,
-                    "liquidity": ads_r.liquidity,
-                    "microstructure": ads_r.microstructure,
-                    "confidence": ads_r.confidence,
-                },
-                "ads_fallbacks_used": ads_diag.get("used", []),
+                "ads_erar": ads_ctx["erar_val"],
+                "ads_erar_diag": erar.get_diagnostics(),
+                "ads_regime_vector": ads_ctx["ads_regime_vector"],
+                "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
+                "ads_diag": ads_ctx["ads_diag"],
                 "ads_fallbacks": {"ofi_source": "proxy_volume_ratio", "bb_missing": True},
             }
 
+            signal_type = SignalType.BUY if side == "BUY" else SignalType.SELL
             return StrategySignal(
                 strategy_id=self.strategy_id,
                 symbol=symbol,
-                signal_type=SignalType.BUY if side == "BUY" else SignalType.SELL,
+                signal_type=signal_type,
                 strength=min(max(float(ctx.raw_signal_strength), 0.0), 1.0),
                 confidence=min(0.95, max(0.55, 0.50 + sms_score * 0.45)),
                 target_weight=float(self.calculate_position_size(
                     signal=StrategySignal(
                         strategy_id=self.strategy_id,
                         symbol=symbol,
-                        signal_type=SignalType.BUY if side == "BUY" else SignalType.SELL,
+                        signal_type=signal_type,
                         strength=min(max(float(ctx.raw_signal_strength), 0.0), 1.0),
                         confidence=min(0.95, max(0.55, 0.50 + sms_score * 0.45)),
                         timestamp=ts,
@@ -465,7 +347,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 )),
                 quantity_type="PERCENTAGE",
                 timestamp=ts,
-                additional_data=additional_data,
+                additional_data=additional_data
             )
 
         return None
@@ -493,6 +375,22 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             return None
 
         return df.iloc[idx]
+
+    def _is_long_signal(self, signal_type: SignalType) -> bool:
+        """Check if signal is a long entry/buy"""
+        return signal_type in [SignalType.BUY, SignalType.LONG_ENTRY]
+
+    def _is_short_signal(self, signal_type: SignalType) -> bool:
+        """Check if signal is a short entry/sell"""
+        return signal_type in [SignalType.SELL, SignalType.SHORT_ENTRY]
+
+    def _get_side_from_signal(self, signal_type: SignalType) -> str:
+        """Normalize signal type to BUY/SELL string for pending queue"""
+        if self._is_long_signal(signal_type):
+            return "BUY"
+        if self._is_short_signal(signal_type):
+            return "SELL"
+        return "UNKNOWN"
 
     def _get_column_mapping(self) -> Dict[str, str]:
         """
@@ -674,10 +572,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         """Check strategy-specific health"""
 
         try:
+            # ADS v3.1: Use PositionBook SSOT for accurate health metrics
+            active_pos_count = 0
+            if hasattr(self, '_position_book'):
+                active_pos_count = len(self._position_book.get_all_positions())
+
             health_metrics = {
                 'strategy_healthy': True,
                 'symbols_tracked': len(self.config.symbols),
-                'active_positions': len(self.position_tracker),
+                'active_positions': active_pos_count,
                 'indicators_calculated': len(self.indicators),
                 'avg_momentum_strength': self._calculate_avg_momentum_strength(),
                 'trend_quality': self._assess_overall_trend_quality()
@@ -692,10 +595,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     health_metrics['warning'] = "No indicators calculated after 5 minutes"
                 else:
                     health_metrics['warning'] = f"Indicators not yet calculated (grace period: {300-time_since_init:.0f}s remaining)"
-
-            if len(self.position_tracker) > len(self.config.symbols):
-                health_metrics['strategy_healthy'] = False
-                health_metrics['warning'] = "Too many active positions"
 
             return health_metrics
 
@@ -805,13 +704,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             # Summary logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
-            # Only log at INFO when we actually emit signals; otherwise heartbeat at DEBUG.
+            
             if len(signals) > 0:
                 logger.info(f"  Momentum Strategy: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s")
-            else:
-                self._bar_log_counter += 1
-                if self._bar_log_counter % 200 == 0:
-                    logger.debug(f"  Momentum Strategy: {len(symbols_checked)} symbols, 0 signals (heartbeat)")
+            # Heartbeat removed to reduce log noise during long backtests (ADS v3.1 compliance)
 
             return signals
 
@@ -838,105 +734,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
     async def _check_exits_for_all_positions(self, enriched_data_dict: Dict[str, pd.DataFrame]) -> None:
         """
-        Check exit conditions for all active positions (Phase 3)
-
-        Called on every bar update to check if any positions should be closed.
-
-        Args:
-            enriched_data_dict: Dict[symbol, enriched DataFrame with indicators/features]
+        ADS v3.1: Legacy exit path is disabled. 
+        Exits are managed by Risk Manager + PositionBook authority.
         """
-
-        # NOTE: Legacy exit path retained for backward compatibility only.
-        # It is intentionally disabled under ADS v3.1 single-authority design.
         return
-
-        # First, sync with Risk Manager: clear exit_pending positions if they're closed or stale
-        if self.risk_manager:
-            symbols_to_clear = []
-            for symbol in list(self.position_tracker.keys()):
-                pos = self.position_tracker[symbol]
-                if pos.get('exit_pending', False):
-                    # Check for stale exit_pending (timeout after 10 bars)
-                    current_bar = len(enriched_data_dict.get(symbol, []))
-                    exit_signal_bar = pos.get('exit_signal_bar', current_bar)
-                    bars_since_exit = current_bar - exit_signal_bar
-
-                    if bars_since_exit > 10:
-                        logger.warning(f"    {symbol} exit_pending timeout ({bars_since_exit} bars) - force clearing")
-                        symbols_to_clear.append(symbol)
-                        continue
-
-                    # Check if Risk Manager still has this position
-                    try:
-                        position_state = self.risk_manager.get_position_state(symbol)
-                        if position_state is None or position_state.quantity == 0:
-                            logger.info(f"  {symbol} position closed confirmed by Risk Manager - clearing tracking")
-                            symbols_to_clear.append(symbol)
-                    except Exception as e:
-                        logger.warning(f"    {symbol} failed to query Risk Manager position state: {e}")
-
-            # Clear confirmed closed positions
-            for symbol in symbols_to_clear:
-                self._clear_position_tracking(symbol)
-
-        # Make a copy of position keys to avoid modification during iteration
-        symbols_with_positions = list(self.position_tracker.keys())
-
-        for symbol in symbols_with_positions:
-            # Skip positions that are already pending exit
-            if self.position_tracker[symbol].get('exit_pending', False):
-                logger.debug(f"    {symbol} has exit_pending=True, skipping exit check")
-                continue
-
-            if symbol not in enriched_data_dict:
-                logger.warning(f"    {symbol} position exists but no enriched data available")
-                continue
-
-            enriched_data = enriched_data_dict[symbol]
-
-            # Get latest bar timestamp
-            if len(enriched_data) == 0:
-                logger.warning(f"    {symbol} enriched data is empty")
-                continue
-
-            bar_timestamp = enriched_data.index[-1]
-
-            # Update high water mark for trailing stops
-            current_price = enriched_data.loc[bar_timestamp, 'close']
-            self._update_high_water_mark(symbol, current_price)
-
-            # Check exit conditions
-            should_exit, exit_reason = await self._check_exit_conditions_hybrid(
-                symbol, enriched_data, bar_timestamp
-            )
-
-            if should_exit:
-                # Generate exit signal
-                pos_info = self._get_position_info(symbol)
-                exit_signal = await self._generate_exit_signal(
-                    symbol, pos_info, current_price, exit_reason, bar_timestamp
-                )
-
-                # Submit exit signal to risk manager (if available)
-                if self.risk_manager:
-                    try:
-                        await self.risk_manager.process_signal(exit_signal)
-                        logger.info(f"  {symbol} exit signal submitted to risk manager")
-
-                        # Mark position as exit_pending instead of immediately clearing
-                        # This allows Risk Manager to find the position when processing the exit
-                        if symbol in self.position_tracker:
-                            self.position_tracker[symbol]['exit_pending'] = True
-                            self.position_tracker[symbol]['exit_signal_bar'] = len(enriched_data)
-                            logger.info(f"    {symbol} position marked as exit_pending - will clear after Risk Manager confirmation")
-
-                    except Exception as e:
-                        logger.error(f"  {symbol} exit signal submission failed: {e}")
-                        # If submission fails, still clear position to avoid stale tracking
-                        self._clear_position_tracking(symbol)
-                else:
-                    # No risk manager - clear immediately (backward compatibility)
-                    self._clear_position_tracking(symbol)
 
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
         """
@@ -1149,54 +950,53 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     signal.quantity_type = "PERCENTAGE"
                     return signal
                 
-                # If state machine is enabled, we bypass legacy entry logic
+                # If state machine is enabled, it handles its own entry/exit checks.
                 return None
 
-            # --- LEGACY LOGIC (Fallback / Non-State Machine Mode) ---
-            # Get indicators at this index
+            # --- ADS v3.1: ENHANCED COMPOSITE ENTRY LOGIC ---
+            # Use multi-horizon momentum and composite indicators for high-probability setups.
+            
+            # Get indicators for the current bar
             indicators = self.indicators[symbol]
 
-            # Get momentum values from DataFrame features (pre-calculated by FeatureEngineer)
-            # These are per-bar values, not single aggregated values
+            # Extract momentum horizons (short, medium, long)
             momentum_10_col = f'momentum_{self.config.short_period}'
             momentum_20_col = f'momentum_{self.config.medium_period}'
             momentum_50_col = f'momentum_{self.config.long_period}'
 
-            short_momentum = data[momentum_10_col].iloc[actual_idx] if momentum_10_col in data.columns else 0
-            medium_momentum = data[momentum_20_col].iloc[actual_idx] if momentum_20_col in data.columns else 0
-            long_momentum = data[momentum_50_col].iloc[actual_idx] if momentum_50_col in data.columns else 0
+            short_m = data[momentum_10_col].iloc[actual_idx] if momentum_10_col in data.columns else 0
+            medium_m = data[momentum_20_col].iloc[actual_idx] if momentum_20_col in data.columns else 0
+            long_m = data[momentum_50_col].iloc[actual_idx] if momentum_50_col in data.columns else 0
 
-            # Handle NaN values
-            short_momentum = short_momentum if not pd.isna(short_momentum) else 0
-            medium_momentum = medium_momentum if not pd.isna(medium_momentum) else 0
-            long_momentum = long_momentum if not pd.isna(long_momentum) else 0
+            # Handle NaN values gracefully
+            short_momentum = short_m if not pd.isna(short_m) else 0
+            medium_momentum = medium_m if not pd.isna(medium_m) else 0
+            long_momentum = long_m if not pd.isna(long_m) else 0
 
-            # Calculate momentum strength
+            # Calculate weighted momentum strength
             momentum_strength = abs(short_momentum) * self.config.momentum_strength_weight_short + \
                               abs(medium_momentum) * self.config.momentum_strength_weight_medium + \
                               abs(long_momentum) * self.config.momentum_strength_weight_long
 
-            # Get trend indicators at this index (use historical values if available)
+            # Retrieve trend and volume confirmation indicators
             adx_series = indicators.get('adx', pd.Series())
             volume_ratio_series = indicators.get('volume_ratio', pd.Series())
             trend_strength_series = indicators.get('trend_strength', pd.Series())
 
             adx = adx_series.iloc[actual_idx] if len(adx_series) > actual_idx else adx_series.iloc[-1] if len(adx_series) > 0 else 0
-            volume_ratio = volume_ratio_series.iloc[actual_idx] if len(volume_ratio_series) > actual_idx else volume_ratio_series.iloc[-1] if len(volume_ratio_series) > 0 else 1
-            trend_strength = trend_strength_series.iloc[actual_idx] if len(trend_strength_series) > actual_idx else trend_strength_series.iloc[-1] if len(trend_strength_series) > 0 else 0
+            vol_ratio = volume_ratio_series.iloc[actual_idx] if len(volume_ratio_series) > actual_idx else volume_ratio_series.iloc[-1] if len(volume_ratio_series) > 0 else 1
+            trend_str = trend_strength_series.iloc[actual_idx] if len(trend_strength_series) > actual_idx else trend_strength_series.iloc[-1] if len(trend_strength_series) > 0 else 0
 
-            # Handle NaN values
+            # Clean and normalize indicators
             adx = adx if not pd.isna(adx) else 0
-            volume_ratio = volume_ratio if not pd.isna(volume_ratio) else 1
-            trend_strength = trend_strength if not pd.isna(trend_strength) else 0
+            volume_ratio = vol_ratio if not pd.isna(vol_ratio) else 1
+            trend_strength = trend_str if not pd.isna(trend_str) else 0
 
             # ========================================
-            # NEW: Use COMPOSITE SIGNAL ENTRY (Phase 4A + CRITICAL FIXES)
-            # This makes historical scanning consistent with live mode
+            # PHASE 4A: COMPOSITE SIGNAL EVALUATION
             # ========================================
 
-            # Check composite entry conditions (Phase 4A + CRITICAL FIXES)
-            # Pass enriched_data and idx for micro-structure analysis
+            # Check composite entry conditions (normalized thresholds)
             should_enter, signal_type = self._check_composite_entry(
                 symbol, current_data,
                 enriched_data=data,
@@ -1205,79 +1005,26 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             if should_enter and signal_type:
                 # ADS v3.1  1: SMS gate with pending/stale maturation
-                # Compute tau(R) from continuous regime vector (best-effort)
-                ads_r, ads_diag = self._get_ads_regime_vector(symbol)
-                tau_0 = float(getattr(self.config, "tau_0", 0.50))
-                # Compute tau(R) with conservative penalties ONLY when we truly used fallbacks.
-                # Using volume_ratio as an OFI proxy is common in backtests; we apply a small penalty.
-                ofi_proxy_used = True
-                bb_missing = False
-                try:
-                    # If BB columns exist, not missing; if not, we still treat vol_compression as computed via realized vols.
-                    bb_missing = False
-                except Exception:
-                    bb_missing = False
-                tau = compute_sms_tau(
-                    ads_r,
-                    tau_0=tau_0,
-                    ofi_proxy_used=ofi_proxy_used,
-                    bb_missing=bb_missing,
-                    # Use signal_type for direction (side is not defined yet in this scope)
-                    direction="long" if signal_type == SignalType.BUY else "short",
-                )
-                regime_label = self._sms_regime_label(ads_r)
+                side = self._get_side_from_signal(signal_type)
+                
+                # Check if already pending for this symbol/side to avoid logic flooding
+                if self.pending_signals.get(symbol, side):
+                    logger.debug(f"  [{symbol}] {side} signal already pending, skipping redundant enqueue")
+                    return None
 
-                # Build SMS components (momentum-adapted, multiplicative)
-                composite_z = float(current_data.get("composite_z", 0.0))
-                composite_pct_raw = float(current_data.get("composite_pct", 0.0))
-                composite_pct = self._normalize_composite_pct(composite_pct_raw)
-
-                thresholds = self._get_regime_adjusted_thresholds(symbol, current_data)
-                z_thresh = float(thresholds.get("long_threshold", float(getattr(self.config, "composite_z_entry", 1.0))))
-                pct_thresh = float(thresholds.get("pct_threshold", float(getattr(self.config, "composite_pct_entry", 70.0))))
-
-                z_margin = max(0.0, (abs(composite_z) - z_thresh) / max(z_thresh, 1e-6))
-                z_maturity = 1.0 - float(np.exp(-2.0 * z_margin))
-                pct_margin = max(0.0, (composite_pct - pct_thresh) / max(100.0 - pct_thresh, 1.0))
-                pct_maturity = 1.0 - float(np.exp(-2.0 * pct_margin))
-
-                structure_q = 0.5
-                try:
-                    sd = self._detect_price_structure(symbol, data, actual_idx, lookback=5)
-                    structure_q = float(sd.get("structure_quality", 0.5))
-                except Exception:
-                    structure_q = 0.5
-
-                exhaustion = float(np.clip((max(z_maturity, 1e-3) * max(pct_maturity, 1e-3) * (0.5 + 0.5 * structure_q)) ** (1 / 3), 0.0, 1.0))
-
-                rsi_col = self._get_column_name("RSI_14", data)
-                rsi = float(current_data.get(rsi_col, current_data.get("rsi", 50.0)))
-                if signal_type == SignalType.BUY:
-                    p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(rsi - float(getattr(self.config, "rsi_overbought", 70.0))) / 5.0)))
-                else:
-                    p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(float(getattr(self.config, "rsi_oversold", 30.0)) - rsi) / 5.0)))
-                reversal_prob_component = float(np.clip(1.0 - p_rev_rsi, 0.001, 1.0))
-
-                sign = 1.0 if signal_type == SignalType.BUY else -1.0
-                ofi_shift = float(np.clip((volume_ratio - 1.0) * sign, -1.0, 1.0))
-
-                vol_comp = 1.0
-                try:
-                    if "close" in data.columns and actual_idx >= 20:
-                        prices = data["close"].iloc[max(0, actual_idx - 20) : actual_idx + 1]
-                        rets = prices.pct_change()
-                        short_vol = float(rets.tail(5).std()) if len(rets) >= 5 else 0.02
-                        long_vol = float(rets.std()) if len(rets) >= 10 else 0.02
-                        if short_vol > 0:
-                            vol_comp = float(np.clip(long_vol / short_vol, 0.5, 2.0))
-                except Exception:
-                    vol_comp = 1.0
+                # ADS v3.1: Consolidate ADS context (SMS values + ERAR object)
+                raw_strength = float(min(abs(momentum_strength) / self.config.momentum_threshold, 1.0))
+                ads_ctx = self._calculate_ads_context(symbol, data, actual_idx, side, raw_strength=raw_strength)
+                
+                tau = ads_ctx["tau"]
+                regime_label = ads_ctx["regime_label"]
+                ads_diag = ads_ctx["ads_diag"]
 
                 sms = SignalMaturityScore(
-                    exhaustion=exhaustion,
-                    reversal_prob=reversal_prob_component,
-                    ofi_shift=ofi_shift,
-                    vol_compression=vol_comp,
+                    exhaustion=ads_ctx["exhaustion"],
+                    reversal_prob=ads_ctx["reversal_prob"],
+                    ofi_shift=ads_ctx["ofi_shift"],
+                    vol_compression=ads_ctx["vol_compression"],
                     pending_bars=0,
                     decay_rate=0.05,
                     max_pending=int(getattr(self.config, "sms_max_pending", 50)),
@@ -1290,73 +1037,40 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         price = float(current_data.get("close", 0.0))
                     except Exception:
                         price = 0.0
-                    side = "BUY" if signal_type == SignalType.BUY else "SELL"
+                    
                     ctx = PendingSignalContext(
                         symbol=symbol,
                         side=side,
                         sms=sms,
-                        erar=ERAR(tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0))),
-                        raw_signal_strength=float(min(abs(momentum_strength) / self.config.momentum_threshold, 1.0)),
+                        erar=ads_ctx["erar"],
+                        raw_signal_strength=raw_strength,
                         timestamp=signal_timestamp,
                         entry_price=price if price > 0 else 0.0,
                         metadata={
                             "ads_tau": tau,
                             "ads_sms": sms_score,
-                            "ads_regime_vector": thresholds.get("ads_regime_vector", {}),
-                            "ads_fallbacks_used": ads_diag.get("used", []),
+                            "ads_regime_vector": ads_ctx["ads_regime_vector"],
+                            "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
+                            "ads_diag": ads_diag,
                             "ofi_source": "proxy_volume_ratio",
                             "bb_missing": True,
-                            "composite_z": composite_z,
-                            "composite_pct": composite_pct,
+                            "composite_z": ads_ctx["composite_z"],
+                            "composite_pct": ads_ctx["composite_pct"],
                         },
                     )
                     self.pending_signals.add(ctx)
                     return None
 
                 # ADS v3.1  3: ERAR gate (strategy-side)
-                try:
-                    price = float(current_data.get("close", 0.0))
-                    atr_col = self._get_column_name("ATR_14", data)
-                    atr = float(current_data.get(atr_col, current_data.get("atr", 0.0)))
-                    volatility = (atr / price) if (price > 0 and atr > 0) else 0.02
-                    holding_minutes = float(getattr(self.config, "time_stop_minutes", 90))
-                    holding_days = max(0.05, min(1.0, holding_minutes / 390.0))
-
-                    # Continuation PnL proxy in bps
-                    # Tie expected move to *signal strength* so ERAR is not systematically under-estimated
-                    # for very-strong composite setups (otherwise ERAR blocks everything at gamma=0.5).
-                    raw_strength = float(min(abs(momentum_strength) / self.config.momentum_threshold, 1.0))
-                    z_mat = float(locals().get("z_maturity", 0.5))
-                    pct_mat = float(locals().get("pct_maturity", 0.5))
-                    edge_strength = float(np.clip(0.6 * raw_strength + 0.4 * max(z_mat, pct_mat), 0.0, 1.0))
-                    expected_move = atr * (0.35 + 0.95 * edge_strength)
-                    expected_pnl_bps = (expected_move / price) * 10000 if price > 0 else 0.0
-
-                    cvar_95_bps = estimate_cvar_95(volatility=volatility, holding_days=holding_days)
-                    erar = ERAR(
-                        expected_pnl=float(expected_pnl_bps),
-                        cvar_95=float(cvar_95_bps),
-                        skewness=0.0,
-                        spread_bps=float(getattr(self.config, "spread_bps", 2.0)),
-                        participation=0.01,
-                        volatility=float(volatility),
-                        adverse_prob=0.1,
-                        kyle_lambda=0.0001,
-                        holding_days=float(holding_days),
-                        alt_return_bps=float(getattr(self.config, "alt_return_bps", 0.5)),
-                        tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)),
-                    )
-                    gamma = float(getattr(self.config, "erar_gamma", 0.5))
-                    if bool(getattr(self.config, "enable_ads_gates", True)):
-                        if not erar.should_trade(gamma=gamma):
-                            return None
-                except Exception:
-                    # Fail safe: do not trade without ERAR
-                    return None
+                erar = ads_ctx["erar"]
+                gamma = float(getattr(self.config, "erar_gamma", 0.5))
+                if bool(getattr(self.config, "enable_ads_gates", True)):
+                    if not erar.should_trade(gamma=gamma):
+                        return None
 
                 # Generate signal based on composite entry
-                confidence = self._calculate_signal_confidence(symbol,
-                    MomentumSignal.BULLISH_MOMENTUM if signal_type == SignalType.BUY else MomentumSignal.BEARISH_MOMENTUM)
+                mom_signal = MomentumSignal.BULLISH_MOMENTUM if side == "BUY" else MomentumSignal.BEARISH_MOMENTUM
+                confidence = self._calculate_signal_confidence(symbol, mom_signal)
 
                 if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
                     # Emit sizing intent as percentage target_weight (RiskManager is final authority)
@@ -1384,14 +1098,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         additional_data={
                             'signal_reason': 'composite_entry',
                             'entry_method': 'composite_z_pct',
-                            'composite_z': current_data.get('composite_z', 0),
-                            'composite_pct': current_data.get('composite_pct', 0),
-                            'ads_tau': tau,
-                            'ads_sms': sms_score,
-                            'ads_erar': float(erar.compute()) if "erar" in locals() else None,
-                            'ads_erar_diag': erar.get_diagnostics() if "erar" in locals() else None,
-                            'ads_regime_vector': thresholds.get('ads_regime_vector', {}),
-                            'ads_fallbacks_used': ads_diag.get('used', []),
+                            'composite_z': float(ads_ctx['composite_z']),
+                            'composite_pct': float(ads_ctx['composite_pct']),
+                            'ads_tau': float(tau),
+                            'ads_sms': float(sms_score),
+                            'ads_erar': float(ads_ctx['erar_val']),
+                            'ads_erar_diag': erar.get_diagnostics(),
+                            'ads_regime_vector': ads_ctx['ads_regime_vector'],
+                            'ads_fallbacks_used': ads_ctx['ads_fallbacks_used'],
+                            'ads_diag': ads_diag,
                             'ads_fallbacks': {'ofi_source': 'proxy_volume_ratio', 'bb_missing': True},
                             'short_momentum': short_momentum,
                             'medium_momentum': medium_momentum,
@@ -1474,117 +1189,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             signal = await self._evaluate_bar_at_index(symbol, -1)
             if signal is not None:
                 signals.append(signal)
-            return signals
-
-            logger.debug(f"[{symbol}] Data checks passed, proceeding to condition evaluation")
-
-            logger.debug(f"[{symbol}] Starting condition evaluation...")
-
-            try:
-                indicators = self.indicators[symbol]
-                momentum = self.momentum_data[symbol]
-                current_data = self.market_data[symbol].iloc[-1]
-
-                # Use config thresholds directly (not from regime adjustments)
-                momentum_threshold = self.config.momentum_threshold
-                adx_threshold = self.config.adx_threshold
-                volume_threshold = self.config.volume_threshold
-
-                # Check momentum conditions
-                short_momentum = momentum.get('short_momentum', 0)
-                medium_momentum = momentum.get('medium_momentum', 0)
-                long_momentum = momentum.get('long_momentum', 0)
-                momentum_strength = momentum.get('momentum_strength', 0)
-
-                # Get trend quality indicators
-                adx = indicators['adx'].iloc[-1] if 'adx' in indicators and len(indicators['adx']) > 0 else 0
-                volume_ratio = indicators['volume_ratio'].iloc[-1] if 'volume_ratio' in indicators and len(indicators['volume_ratio']) > 0 else 1
-                trend_strength = indicators['trend_strength'].iloc[-1] if 'trend_strength' in indicators and len(indicators['trend_strength']) > 0 else 0
-
-                logger.debug(f"[{symbol}] Successfully extracted values")
-
-            except Exception as e:
-                logger.error(f"[{symbol}] ERROR in condition evaluation: {e}")
-                return signals
-
-            # Log condition values for debugging
-            # Log condition values for debugging (use DEBUG level to reduce verbosity - MED #7)
-            logger.debug(f"[{symbol}]   Checking bullish conditions:")
-            logger.debug(f"     short_momentum: {short_momentum:.6f} (threshold: {momentum_threshold:.6f}, |value| > threshold: {abs(short_momentum) > momentum_threshold})")
-            logger.debug(f"     medium_momentum: {medium_momentum:.6f} (threshold: > 0, |value| > 0: {abs(medium_momentum) > 0})")
-            logger.debug(f"     long_momentum: {long_momentum:.6f} (threshold: > 0, |value| > 0: {abs(long_momentum) > 0})")
-            logger.debug(f"     adx: {adx:.2f} (threshold: {adx_threshold:.2f}, value > threshold: {adx > adx_threshold})")
-            logger.debug(f"     volume_ratio: {volume_ratio:.2f} (threshold: {volume_threshold:.2f}, value > threshold: {volume_ratio > volume_threshold})")
-            logger.debug(f"     trend_strength: {trend_strength:.6f} (threshold: > 0, value > 0: {trend_strength > 0})")
-
-            # ========================================
-            # NEW: COMPOSITE SIGNAL ENTRY (Phase 4A)
-            # Replaces OLD 6-condition logic with composite signals
-            # ========================================
-
-            logger.debug(f"[{symbol}]   About to call _check_composite_entry with composite_z={current_data.get('composite_z', 'N/A')}")
-
-            # Check composite entry conditions (CRITICAL FIXES applied)
-            # Pass enriched_data and idx for micro-structure analysis
-            should_enter, signal_type = self._check_composite_entry(
-                symbol, current_data,
-                enriched_data=data,
-                current_idx=len(data) - 1  # Current bar is last in data
-            )
-
-            if should_enter and signal_type:
-                # Generate signal based on composite entry
-                confidence = self._calculate_signal_confidence(symbol,
-                    MomentumSignal.BULLISH_MOMENTUM if signal_type == SignalType.BUY else MomentumSignal.BEARISH_MOMENTUM)
-
-                # Use configurable confidence threshold (default: 0.30)
-                min_confidence = getattr(self.config, 'min_signal_confidence', 0.30)
-                logger.debug(f"[{symbol}]   Calculated confidence: {confidence:.4f} (threshold: {min_confidence}, {'PASS' if confidence > min_confidence else 'FAIL'})")
-
-                if confidence > min_confidence:  # Minimum confidence threshold (configurable)
-                    logger.info(f"[{symbol}]   Creating {signal_type.value} signal with confidence {confidence:.4f}")
-                    # Bar timestamp (do not use wall-clock time)
-                    signal_timestamp = None
-                    try:
-                        if isinstance(self.market_data[symbol].index, pd.DatetimeIndex):
-                            signal_timestamp = self.market_data[symbol].index[-1].to_pydatetime()
-                        else:
-                            signal_timestamp = self.market_data[symbol].index[-1]
-                    except Exception:
-                        signal_timestamp = None
-                    if not isinstance(signal_timestamp, datetime):
-                        # Fail safe: skip emitting rather than using datetime.now()
-                        logger.error(f"  [{symbol}] Missing bar timestamp for live signal - skipping (ADS A.0)")
-                        return signals
-
-                    signal = StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=symbol,
-                        signal_type=signal_type,
-                        strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
-                        confidence=confidence,
-                        target_weight=self.config.base_position_pct,  # Use target_weight for percentage
-                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
-                        timestamp=signal_timestamp,
-                        additional_data={
-                            'signal_reason': 'composite_entry',
-                            'entry_method': 'composite_z_pct',
-                            'composite_z': current_data.get('composite_z', 0),
-                            'composite_pct': current_data.get('composite_pct', 0),
-                            'short_momentum': short_momentum,
-                            'medium_momentum': medium_momentum,
-                            'long_momentum': long_momentum,
-                            'adx': adx,
-                            'volume_ratio': volume_ratio,
-                            'entry_price': current_data['close']
-                        }
-                    )
-                    signals.append(signal)
-                    logger.debug(f"[{symbol}]   {signal_type.value} signal appended to signals list (total: {len(signals)})")
-                else:
-                    logger.debug(f"[{symbol}]    Confidence below threshold: {confidence:.4f} <= {min_confidence} (signal skipped)")
-
-            logger.debug(f"_generate_symbol_signals returning {len(signals)} signals for {symbol}")
             return signals
 
         except Exception as e:
@@ -1941,16 +1545,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             total_confidence = min(base_confidence + conditions_met_bonus, 0.95)
 
-            logger.debug(f"[{symbol}]   Confidence Calculation Breakdown:")
-            logger.debug(f"     Momentum Strength: {momentum_strength:.6f}   strength_confidence: {strength_confidence:.4f} (weight: 0.3)")
-            logger.debug(f"     Momentum Consistency: {momentum.get('momentum_consistency', 0):.4f}   consistency_confidence: {consistency_confidence:.4f} (weight: 0.2)")
-            logger.debug(f"     Trend Quality (ADX): {adx:.2f}   trend_confidence: {trend_confidence:.4f} (weight: 0.2)")
-            logger.debug(f"     Volume Confirmation: {volume_ratio:.2f}   volume_confidence: {volume_confidence:.4f} (weight: 0.15)")
-            logger.debug(f"     Momentum Acceleration: {acceleration:.6f}   acceleration_confidence: {acceleration_confidence:.4f} (weight: 0.15)")
-            logger.debug(f"     Base Confidence: {base_confidence:.4f}")
-            logger.debug(f"     Conditions Bonus: +{conditions_met_bonus:.4f}")
-            logger.debug(f"     TOTAL CONFIDENCE: {total_confidence:.4f} (capped at 0.95)")
-
             return total_confidence
 
         except Exception as e:
@@ -1979,7 +1573,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         self.market_data.clear()
         self.indicators.clear()
         self.momentum_data.clear()
-        self.position_tracker.clear()  # Phase 2.5: Unified tracking
 
     def _initialize_indicators(self) -> None:
         """Initialize indicators dictionary"""
@@ -1993,15 +1586,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         logger.info("  Momentum performance tracking started")
 
     async def _close_all_positions(self) -> None:
-        """Close all active positions"""
-        logger.info(f"  Closing {len(self.position_tracker)} active positions")
-        self.position_tracker.clear()  # Phase 2.5: Unified tracking
+        """Close all active positions (Logic moved to Risk Manager)"""
+        logger.info(f"  Momentum Strategy closing all positions - signaling intent to Orchestrator")
         
-        # Legacy shim support
+        # Legacy support
         if hasattr(self, 'active_positions'):
             self.active_positions.clear()
-        if hasattr(self, 'entry_prices'):
-            self.entry_prices.clear()
 
     def _save_performance_data(self) -> None:
         """Save performance data"""
@@ -2042,97 +1632,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     # NEW: ENHANCED POSITION TRACKING (Phase 2)
     # ========================================
 
-    def _track_position_entry_enhanced(self,
-                                      symbol: str,
-                                      entry_price: float,
-                                      quantity: float,
-                                      signal_type: SignalType,
-                                      bar_timestamp: datetime) -> None:
-        """
-        Track position entry with enhanced metadata (Phase 2)
-
-        CRITICAL FIX: Uses bar_timestamp from enriched data, NOT datetime.now()
-        This fixes the time stop bug where wall clock time was used.
-
-        Args:
-            symbol: Trading symbol
-            entry_price: Entry price
-            quantity: Position quantity
-            signal_type: BUY or SELL
-            bar_timestamp: Timestamp from bar data (NOT datetime.now()!)
-        """
-
-        if symbol not in self.position_tracker:
-            # New position entry
-            self.position_tracker[symbol] = {
-                'direction': 1 if signal_type == SignalType.BUY else -1,
-                'avg_entry_price': entry_price,
-                'total_quantity': quantity,
-                'entry_time': bar_timestamp,  #   Bar timestamp, not datetime.now()
-                'scale_ins': 0,
-                'high_water_mark': entry_price,  # Initialize at entry price
-                'trailing_stop_activated': False,
-                'last_update_time': bar_timestamp
-            }
-
-            logger.info(
-                f"  Position tracked: {symbol} {signal_type.value} "
-                f"{quantity:.2f} @ ${entry_price:.2f} "
-                f"(Entry time: {bar_timestamp.strftime('%Y-%m-%d %H:%M:%S')})"
-            )
-        else:
-            # Scale-in to existing position
-            pos = self.position_tracker[symbol]
-
-            # Update average entry price
-            total_cost = pos['avg_entry_price'] * pos['total_quantity'] + entry_price * quantity
-            pos['total_quantity'] += quantity
-            pos['avg_entry_price'] = total_cost / pos['total_quantity']
-            pos['scale_ins'] += 1
-            pos['last_update_time'] = bar_timestamp
-
-            logger.info(
-                f"  Scale-in: {symbol} +{quantity:.2f} @ ${entry_price:.2f} "
-                f"(Avg: ${pos['avg_entry_price']:.2f}, Total: {pos['total_quantity']:.2f}, "
-                f"Scale-ins: {pos['scale_ins']})"
-            )
-
-    def _update_high_water_mark(self, symbol: str, current_price: float) -> None:
-        """
-        Update high water mark for trailing stop calculation (Phase 2)
-
-        For LONG positions: Track highest price reached
-        For SHORT positions: Track lowest price reached
-
-        Args:
-            symbol: Trading symbol
-            current_price: Current bar close price
-        """
-
-        if symbol in self.position_tracker:
-            pos = self.position_tracker[symbol]
-
-            if pos['direction'] == 1:  # LONG position
-                old_hwm = pos['high_water_mark']
-                pos['high_water_mark'] = max(pos['high_water_mark'], current_price)
-
-                if pos['high_water_mark'] > old_hwm:
-                    logger.debug(
-                        f"  {symbol} HWM updated: ${old_hwm:.2f}   ${pos['high_water_mark']:.2f}"
-                    )
-            else:  # SHORT position (direction == -1)
-                old_hwm = pos['high_water_mark']
-                pos['high_water_mark'] = min(pos['high_water_mark'], current_price)
-
-                if pos['high_water_mark'] < old_hwm:
-                    logger.debug(
-                        f"  {symbol} HWM updated: ${old_hwm:.2f}   ${pos['high_water_mark']:.2f}"
-                    )
-
     def _get_position_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get enhanced position information (Phase 2)
-        SSOT Compliant: Prefer PositionBook over internal tracker.
+        SSOT Compliant: Use PositionBook as authority.
         """
         if self._position_book:
             pos = self._position_book.get_position(symbol)
@@ -2146,18 +1649,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     'entry_time': pos.opened_at,
                     'trailing_stop_activated': False # Will be updated by stop logic
                 }
-        return self.position_tracker.get(symbol)
-
-    def _clear_position_tracking(self, symbol: str) -> None:
-        """
-        Clear position tracking after exit (Phase 2)
-
-        Args:
-            symbol: Trading symbol
-        """
-        if symbol in self.position_tracker:
-            del self.position_tracker[symbol]
-            logger.debug(f"  Position tracking cleared for {symbol}")
+        return None
 
     # ========================================
     # NEW: REGIME-AWARE ENTRY LOGIC (Phase 4B)
@@ -2246,7 +1738,140 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 "microstructure": ads_r.microstructure,
                 "confidence": ads_r.confidence,
             },
+            "ads_regime_vector_obj": ads_r,
             "ads_fallbacks_used": diag.get("used", []),
+            "ads_diag": diag
+        }
+
+    def _calculate_ads_context(
+        self,
+        symbol: str,
+        data: pd.DataFrame,
+        idx: int,
+        side: str,
+        raw_strength: float = 1.0
+    ) -> Dict[str, Any]:
+        """
+        Consolidate logic for ADS v3.1 gates (SMS/ERAR) to resolve logic overlays.
+        """
+        row = data.iloc[idx]
+        actual_idx = idx if idx >= 0 else len(data) + idx
+
+        # 1. SMS Components
+        composite_z = float(row.get("composite_z", 0.0))
+        composite_pct_raw = float(row.get("composite_pct", 0.0))
+        composite_pct = self._normalize_composite_pct(composite_pct_raw)
+
+        thresholds = self._get_regime_adjusted_thresholds(symbol, row if isinstance(row, pd.Series) else pd.Series())
+        z_thresh = float(thresholds.get("long_threshold", getattr(self.config, "composite_z_entry", 1.0)))
+        pct_thresh = float(thresholds.get("pct_threshold", getattr(self.config, "composite_pct_entry", 70.0)))
+
+        z_margin = max(0.0, (abs(composite_z) - z_thresh) / max(z_thresh, 1e-6))
+        z_maturity = 1.0 - float(np.exp(-2.0 * z_margin))
+        pct_margin = max(0.0, (composite_pct - pct_thresh) / max(100.0 - pct_thresh, 1.0))
+        pct_maturity = 1.0 - float(np.exp(-2.0 * pct_margin))
+
+        structure_q = 0.5
+        try:
+            if actual_idx >= 5:
+                sd = self._detect_price_structure(symbol, data, actual_idx, lookback=5)
+                structure_q = float(sd.get("structure_quality", 0.5))
+        except Exception:
+            structure_q = 0.5
+
+        exhaustion = float(np.clip((max(z_maturity, 1e-3) * max(pct_maturity, 1e-3) * (0.5 + 0.5 * structure_q)) ** (1 / 3), 0.0, 1.0))
+
+        # Reversal Prob
+        rsi_col = self._get_column_name("RSI_14", data)
+        rsi = float(row.get(rsi_col, row.get("rsi", 50.0)))
+        if side == "BUY":
+            p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(rsi - float(getattr(self.config, "rsi_overbought", 70.0))) / 5.0)))
+        else:
+            p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(float(getattr(self.config, "rsi_oversold", 30.0)) - rsi) / 5.0)))
+        reversal_prob = float(np.clip(1.0 - p_rev_rsi, 0.001, 1.0))
+
+        # OFI Proxy
+        vol_ratio = float(row.get("volume_ratio", 1.0))
+        sign = 1.0 if side == "BUY" else -1.0
+        ofi_shift = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
+
+        # Vol Compression
+        vol_comp = 1.0
+        try:
+            if "close" in data.columns and actual_idx >= 20:
+                prices = data["close"].iloc[max(0, actual_idx - 20) : actual_idx + 1]
+                rets = prices.pct_change()
+                short_vol = float(rets.tail(5).std()) if len(rets) >= 5 else 0.02
+                long_vol = float(rets.std()) if len(rets) >= 10 else 0.02
+                if short_vol > 0:
+                    vol_comp = float(np.clip(long_vol / short_vol, 0.5, 2.0))
+        except Exception:
+            vol_comp = 1.0
+
+        # SMS Score logic (consolidated)
+        tau_0 = float(getattr(self.config, "tau_0", 0.50))
+        tau = float(np.clip(
+            0.4 * (1.0 - exhaustion) + 
+            0.3 * (1.0 - reversal_prob) + 
+            0.2 * ofi_shift + 
+            0.1 * vol_comp, 
+            0.0, 1.0))
+        
+        # Adjust tau based on tau_0 baseline
+        tau = min(0.9, max(0.1, tau * (tau_0 / 0.5)))
+        
+        # Get regime label for stateful SMS if needed, but for context we compute a snapshot score
+        ads_r = thresholds.get("ads_regime_vector_obj")
+        regime_label = self._sms_regime_label(ads_r)
+        
+        sms_score = float(np.clip(0.5 * tau + 0.5 * raw_strength, 0.0, 1.0))
+
+        # 2. ERAR Components
+        price = float(row.get("close", 0.0))
+        atr_col = self._get_column_name("ATR_14", data)
+        atr = float(row.get(atr_col, row.get("atr", 0.0)))
+        volatility = (atr / price) if (price > 0 and atr > 0) else 0.02
+        holding_minutes = float(getattr(self.config, "time_stop_minutes", 90))
+        holding_days = max(0.05, min(1.0, holding_minutes / 390.0))
+
+        edge_strength = float(np.clip(0.6 * raw_strength + 0.4 * max(z_maturity, pct_maturity), 0.0, 1.0))
+        expected_move = atr * (0.35 + 0.95 * edge_strength)
+        expected_pnl_bps = (expected_move / price) * 10000 if price > 0 else 0.0
+
+        cvar_95_bps = estimate_cvar_95(volatility=volatility, holding_days=holding_days)
+        erar = ERAR(
+            expected_pnl=float(expected_pnl_bps),
+            cvar_95=float(cvar_95_bps),
+            skewness=0.0,
+            spread_bps=float(getattr(self.config, "spread_bps", 2.0)),
+            participation=0.01,
+            volatility=float(volatility),
+            adverse_prob=0.1,
+            kyle_lambda=0.0001,
+            holding_days=float(holding_days),
+            alt_return_bps=float(getattr(self.config, "alt_return_bps", 0.5)),
+            tail_lambda=float(getattr(self.config, "erar_tail_lambda", 1.0)),
+        )
+
+        return {
+            "composite_z": composite_z,
+            "composite_pct": composite_pct,
+            "exhaustion": exhaustion,
+            "reversal_prob": reversal_prob,
+            "ofi_shift": ofi_shift,
+            "vol_compression": vol_comp,
+            "tau": tau,
+            "sms": sms_score,
+            "regime_label": regime_label,
+            "erar": erar,
+            "erar_val": float(erar.compute()),
+            "z_maturity": z_maturity,
+            "pct_maturity": pct_maturity,
+            "ads_regime_vector": thresholds.get("ads_regime_vector", {}),
+            "ads_regime_vector_obj": ads_r,
+            "ads_fallbacks_used": thresholds.get("ads_fallbacks_used", []),
+            "ads_diag": thresholds.get("ads_diag", {}),
+            "thresholds": thresholds
         }
 
     # ========================================
@@ -2262,56 +1887,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     ) -> Tuple[bool, Optional[SignalType]]:
         """
         Check composite signal entry conditions with CRITICAL FIXES applied
-
-        CRITICAL FIX #1: Entry/Exit Symmetry
-        - Lowered entry threshold from 1.75 to 1.0-1.25 (symmetric with exit)
-
-        CRITICAL FIX #2: Pre-Inflection Entry Triggers
-        - Added momentum inflection detection (slope & acceleration)
-        - Added volatility compression   expansion detection
-
-        CRITICAL FIX #3: Lower Z-score Threshold
-        - Entry at 1.0-1.25 instead of 1.75 (catches moves earlier)
-
-        CRITICAL FIX #4: Price-Path Awareness
-        - Added higher lows detection (bullish structure)
-        - Added pivot validation
-        - Added basing pattern detection
-
-        CRITICAL FIX #5: Faster Trend Indicator
-        - Supplement ADX with momentum slope (3-period regression)
-
-        Entry Logic (NEW):
-        - LONG entry:
-            * composite_z > 1.0 (lowered from 1.75)
-            * composite_pct > 70 (lowered from 92)
-            * momentum_slope > 0 (trending up)
-            * momentum_accel > 0 (accelerating) OR inflection detected
-            * price structure = 'higher_lows' OR pivot confirmed
-
-        Args:
-            symbol: Trading symbol
-            current_bar: Current bar data with composite signals
-            enriched_data: Full enriched DataFrame (for micro-structure analysis)
-            current_idx: Current bar index (for micro-structure analysis)
-
-        Returns:
-            Tuple[should_enter, signal_type]
         """
-
-        logger.debug(f"  [{symbol}] ==== ENTERING _check_composite_entry (CRITICAL FIXES APPLIED) ====")
 
         # FIXED: HIGH #3 - Narrow exception handling for specific errors
         try:
-            logger.debug(f"  [{symbol}] Step 1: Getting composite signals from current_bar...")
             # Get composite signals
             composite_z = current_bar.get('composite_z', None)
-            logger.debug(f"  [{symbol}] Step 1a: Got composite_z = {composite_z}")
             composite_pct = current_bar.get('composite_pct', None)
-            logger.debug(f"  [{symbol}] Step 1b: Got composite_pct = {composite_pct}")
         except (KeyError, AttributeError) as e:
-            logger.error(f"  [{symbol}] Missing required columns in current_bar: {e}", exc_info=True)
-            logger.error(f"   Available columns: {list(current_bar.index) if hasattr(current_bar, 'index') else 'N/A'}")
+            logger.error(f"  [{symbol}] Missing required columns in current_bar: {e}")
             raise  # Re-raise to surface data pipeline issues
         except Exception:
             logger.exception(f"  [{symbol}] Unexpected error getting composite signals")
@@ -2379,17 +1963,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             )
             logger.debug(f"  [{symbol}] Momentum slope: {momentum_slope:.4f}")
 
-        #   DIAGNOSTIC: Log ALL threshold checks (not just high values)
-        logger.debug(f"  [{symbol}] ENTRY CHECK (CRITICAL FIXES APPLIED):")
-        logger.debug(f"   composite_z={composite_z:.4f}")
-        logger.debug(f"   composite_pct={composite_pct:.1f}%")
-        logger.debug(f"   long_threshold={long_threshold:.4f} (BASE={BASE_LONG_THRESHOLD}, was 1.75)")
-        logger.debug(f"   short_threshold={short_threshold:.4f}")
-        logger.debug(f"   pct_threshold={pct_threshold:.1f}% (was 92.0%)")
-        logger.debug(f"   momentum_slope={momentum_slope:.4f}")
-        logger.debug(f"   LONG condition: {composite_z:.4f} > {long_threshold:.4f}? {composite_z > long_threshold}")
-        logger.debug(f"   SHORT condition: {composite_z:.4f} < {-short_threshold:.4f}? {composite_z < -short_threshold}")
-
         # LONG entry: Composite threshold + structure + momentum
         long_condition_met = (
             composite_z > long_threshold and
@@ -2443,786 +2016,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 logger.debug(f"    [{symbol}] SHORT: Weak price structure, reducing confidence")
                 short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
 
-        # ========================================
-        # TEXTBOOK BEST PRACTICES INTEGRATION (P0/P1/P2)
-        # ========================================
-        # Pring's "weight of evidence" methodology:
-        # - P0: Price action MUST confirm momentum
-        # - P1: Volume MUST NOT diverge + End-of-Day + Volume Exhaustion
-        # - P2: Synergy score modulates confidence
-        # ========================================
-
-        # P1a: END-OF-DAY FILTER
-        # IMPORTANT: Only apply EOD blocking when an entry is actually forming.
-        # Otherwise we spam \"ENTRY BLOCKED\" even when neither long nor short condition is met.
-        if (long_condition_met or short_condition_met) and enriched_data is not None and current_idx is not None:
-            eod_blocked, eod_reason = self._check_end_of_day_filter(
-                symbol, enriched_data, current_idx
-            )
-            if eod_blocked:
-                logger.info(f"  [{symbol}] ENTRY BLOCKED: {eod_reason}")
-                return False, None
-
         if long_condition_met:
-            # P0: Price action confirmation (CRITICAL)
-            if enriched_data is not None:
-                price_confirmed, price_reason = self._check_price_action_confirmation(
-                    symbol, enriched_data, SignalType.BUY, current_idx
-                )
-                if not price_confirmed:
-                    logger.info(
-                        f"    [{symbol}] LONG: Momentum alert but NO PRICE CONFIRMATION "
-                        f"(Pring Rule: momentum must be confirmed by price action)"
-                    )
-                    # Don't reject outright - reduce to warning if composite_z is very strong
-                    if composite_z < long_threshold * 1.5:
-                        logger.info(f"  [{symbol}] LONG REJECTED: Requires price confirmation for Z<{long_threshold*1.5:.2f}")
-                        return False, None
-                    else:
-                        logger.info(f"    [{symbol}] LONG: Very strong momentum (Z={composite_z:.2f}) overrides price confirmation")
-
-                # P1: Volume confirmation (reject divergence)
-                vol_confirmed, vol_reason = self._check_volume_confirmation(
-                    symbol, enriched_data, SignalType.BUY, current_idx
-                )
-                if not vol_confirmed:
-                    # Allow very strong composite signals to override strict volume heuristics on intraday bars
-                    if composite_z >= long_threshold * 1.5:
-                        logger.info(
-                            f"    [{symbol}] LONG: Very strong momentum (Z={composite_z:.2f}) overrides volume confirmation "
-                            f"(reason={vol_reason})"
-                        )
-                    else:
-                        logger.info(f"  [{symbol}] LONG REJECTED: {vol_reason} (Pring: volume must corroborate)")
-                        return False, None
-
-                # P2: Synergy scoring (for confidence adjustment)
-                synergy = self._calculate_indicator_synergy(
-                    symbol, enriched_data, SignalType.BUY, current_idx
-                )
-
-                if synergy['weak_consensus']:
-                    # Weak synergy - require higher threshold
-                    if composite_z < long_threshold * 1.3:
-                        logger.info(
-                            f"  [{symbol}] LONG REJECTED: Weak indicator synergy "
-                            f"(score={synergy['synergy_score']:.2f}, need stronger signal)"
-                        )
-                        return False, None
-
-                logger.info(
-                    f"  [{symbol}] LONG ENTRY CONFIRMED (Textbook Validated):\n"
-                    f"   composite_z={composite_z:.2f} > {long_threshold:.2f}\n"
-                    f"   price_confirmation={price_reason}\n"
-                    f"   volume={vol_reason}\n"
-                    f"   synergy_score={synergy['synergy_score']:.2f} ({synergy['confirmations']}/{synergy['max_confirmations']})\n"
-                    f"   breakdown={synergy['breakdown']}"
-                )
-            else:
-                logger.info(
-                    f"  {symbol} LONG_ENTRY: composite_z={composite_z:.2f} > {long_threshold:.2f}, "
-                    f"composite_pct={composite_pct:.1f}% (>{self.config.composite_pct_entry:.1f}%) "
-                    f"(regime-adjusted from {self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
-                )
-
             return True, SignalType.LONG_ENTRY
-
-        # SHORT entry: Strong downward momentum (both Z-score AND percentile confirmation)
         if short_condition_met:
-            # P0: Price action confirmation (CRITICAL)
-            if enriched_data is not None:
-                price_confirmed, price_reason = self._check_price_action_confirmation(
-                    symbol, enriched_data, SignalType.SELL, current_idx
-                )
-                if not price_confirmed:
-                    logger.info(
-                        f"    [{symbol}] SHORT: Momentum alert but NO PRICE CONFIRMATION "
-                        f"(Pring Rule: momentum must be confirmed by price action)"
-                    )
-                    if composite_z > -short_threshold * 1.5:
-                        logger.info(f"  [{symbol}] SHORT REJECTED: Requires price confirmation for Z>{-short_threshold*1.5:.2f}")
-                        return False, None
-                    else:
-                        logger.info(f"    [{symbol}] SHORT: Very strong momentum (Z={composite_z:.2f}) overrides price confirmation")
-
-                # P1: Volume confirmation
-                vol_confirmed, vol_reason = self._check_volume_confirmation(
-                    symbol, enriched_data, SignalType.SELL, current_idx
-                )
-                if not vol_confirmed:
-                    logger.info(f"  [{symbol}] SHORT REJECTED: {vol_reason}")
-                    return False, None
-
-                # P2: Synergy scoring
-                synergy = self._calculate_indicator_synergy(
-                    symbol, enriched_data, SignalType.SELL, current_idx
-                )
-
-                if synergy['weak_consensus']:
-                    if composite_z > -short_threshold * 1.3:
-                        logger.info(
-                            f"  [{symbol}] SHORT REJECTED: Weak indicator synergy "
-                            f"(score={synergy['synergy_score']:.2f})"
-                        )
-                        return False, None
-
-                logger.info(
-                    f"  [{symbol}] SHORT ENTRY CONFIRMED (Textbook Validated):\n"
-                    f"   composite_z={composite_z:.2f} < {-short_threshold:.2f}\n"
-                    f"   price_confirmation={price_reason}\n"
-                    f"   volume={vol_reason}\n"
-                    f"   synergy_score={synergy['synergy_score']:.2f} ({synergy['confirmations']}/{synergy['max_confirmations']})\n"
-                    f"   breakdown={synergy['breakdown']}"
-                )
-            else:
-                logger.info(
-                    f"  {symbol} SHORT_ENTRY: composite_z={composite_z:.2f} < {-short_threshold:.2f}, "
-                    f"composite_pct={composite_pct:.1f}% (<{100 - self.config.composite_pct_entry:.1f}%) "
-                    f"(regime-adjusted from {-self.config.composite_z_entry:.2f}, reason: {adjustment_reason})"
-                )
-
             return True, SignalType.SHORT_ENTRY
 
         return False, None
 
     # ========================================
-    # TEXTBOOK MOMENTUM BEST PRACTICES (P0/P1/P2)
-    # ========================================
-    # Implementing Pring's "weight of evidence" methodology:
-    # - P0: Price action confirmation (MA crossover, pattern completion)
-    # - P1: KST/SPK composite momentum + volume divergence rejection
-    # - P2: Indicator synergy scoring
-    # ========================================
-
-    def _check_price_action_confirmation(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        signal_type: SignalType,
-        current_idx: int = -1
-    ) -> Tuple[bool, str]:
-        """
-        P0 CRITICAL: Textbook momentum confirmation via price action
-
-        Pring's Rule: "Momentum alerts must be confirmed by price action"
-
-        Confirmation types (any ONE is sufficient):
-        1. MA Crossover: SMA_10 crosses SMA_20 in signal direction
-        2. Pattern Completion: Higher high (bull) or lower low (bear)
-        3. Trendline Break: Price breaks recent swing structure
-
-        Args:
-            symbol: Trading symbol
-            data: Enriched DataFrame with MAs
-            signal_type: BUY or SELL
-            current_idx: Current bar index
-
-        Returns:
-            Tuple[confirmed, confirmation_type]
-        """
-        if len(data) < 20:
-            logger.debug(f"[{symbol}] Insufficient data for price confirmation")
-            return False, "insufficient_data"
-
-        # Resolve index
-        idx = current_idx if current_idx >= 0 else len(data) + current_idx
-        if idx < 20:
-            return False, "insufficient_history"
-
-        # Get MA columns (handle naming variations)
-        sma_10_col = self._get_column_name('SMA_10', data)
-        sma_20_col = self._get_column_name('SMA_20', data)
-        sma_50_col = self._get_column_name('SMA_50', data)
-
-        # Check if MAs exist
-        has_sma_10 = sma_10_col in data.columns
-        has_sma_20 = sma_20_col in data.columns
-        has_sma_50 = sma_50_col in data.columns
-
-        confirmations = []
-
-        # ========================================
-        # CONFIRMATION 1: MA Crossover
-        # ========================================
-        if has_sma_10 and has_sma_20:
-            sma_10_curr = data[sma_10_col].iloc[idx]
-            sma_20_curr = data[sma_20_col].iloc[idx]
-            sma_10_prev = data[sma_10_col].iloc[idx - 1]
-            sma_20_prev = data[sma_20_col].iloc[idx - 1]
-
-            if not any(pd.isna([sma_10_curr, sma_20_curr, sma_10_prev, sma_20_prev])):
-                if signal_type == SignalType.BUY:
-                    # Bullish crossover: SMA_10 crosses above SMA_20
-                    ma_cross = (sma_10_prev <= sma_20_prev) and (sma_10_curr > sma_20_curr)
-                else:
-                    # Bearish crossover: SMA_10 crosses below SMA_20
-                    ma_cross = (sma_10_prev >= sma_20_prev) and (sma_10_curr < sma_20_curr)
-
-                if ma_cross:
-                    confirmations.append("ma_crossover")
-                    logger.info(f"  [{symbol}] MA CROSSOVER confirmed ({signal_type.value})")
-
-        # ========================================
-        # CONFIRMATION 2: Higher High / Lower Low Pattern
-        # ========================================
-        lookback = min(10, idx)
-        if lookback >= 5:
-            recent_high = data['high'].iloc[idx-4:idx+1].max()
-            prior_high = data['high'].iloc[idx-9:idx-4].max() if idx >= 9 else data['high'].iloc[:idx-4].max()
-            recent_low = data['low'].iloc[idx-4:idx+1].min()
-            prior_low = data['low'].iloc[idx-9:idx-4].min() if idx >= 9 else data['low'].iloc[:idx-4].min()
-
-            if signal_type == SignalType.BUY:
-                # Bullish: Higher high confirms upward momentum
-                if recent_high > prior_high:
-                    confirmations.append("higher_high")
-                    logger.debug(f"  [{symbol}] HIGHER HIGH pattern confirmed")
-                # Also check: Higher low (base building)
-                if recent_low > prior_low:
-                    confirmations.append("higher_low")
-                    logger.debug(f"  [{symbol}] HIGHER LOW pattern confirmed")
-            else:
-                # Bearish: Lower low confirms downward momentum
-                if recent_low < prior_low:
-                    confirmations.append("lower_low")
-                    logger.debug(f"  [{symbol}] LOWER LOW pattern confirmed")
-                # Also check: Lower high (distribution)
-                if recent_high < prior_high:
-                    confirmations.append("lower_high")
-                    logger.debug(f"  [{symbol}] LOWER HIGH pattern confirmed")
-
-        # ========================================
-        # CONFIRMATION 3: MA Alignment (Trend Structure)
-        # ========================================
-        if has_sma_10 and has_sma_20 and has_sma_50:
-            sma_10 = data[sma_10_col].iloc[idx]
-            sma_20 = data[sma_20_col].iloc[idx]
-            sma_50 = data[sma_50_col].iloc[idx]
-
-            if not any(pd.isna([sma_10, sma_20, sma_50])):
-                if signal_type == SignalType.BUY:
-                    # Bullish alignment: SMA_10 > SMA_20 > SMA_50
-                    if sma_10 > sma_20 > sma_50:
-                        confirmations.append("ma_alignment")
-                        logger.debug(f"  [{symbol}] BULLISH MA ALIGNMENT confirmed")
-                else:
-                    # Bearish alignment: SMA_10 < SMA_20 < SMA_50
-                    if sma_10 < sma_20 < sma_50:
-                        confirmations.append("ma_alignment")
-                        logger.debug(f"  [{symbol}] BEARISH MA ALIGNMENT confirmed")
-
-        # ========================================
-        # RESULT: At least ONE confirmation required
-        # ========================================
-        if confirmations:
-            confirmation_str = "+".join(confirmations)
-            logger.info(f"  [{symbol}] PRICE ACTION CONFIRMED: {confirmation_str}")
-            return True, confirmation_str
-        else:
-            logger.debug(f"  [{symbol}] No price action confirmation found")
-            return False, "no_confirmation"
-
-    def calculate_kst(self, prices: pd.Series, smooth: bool = True) -> pd.Series:
-        """
-        P1: Know Sure Thing (KST) - Pring's Composite Momentum
-
-        KST integrates multiple cycles by summing smoothed ROCs.
-        LONGER periods are weighted MORE HEAVILY to reflect dominant trend.
-
-        Formula:
-        KST = w1*SMA(ROC_10,10) + w2*SMA(ROC_15,10) + w3*SMA(ROC_20,10) + w4*SMA(ROC_30,15)
-
-        Weights: w1=1, w2=2, w3=3, w4=4 (longer = more weight)
-
-        Args:
-            prices: Close price series
-            smooth: Whether to smooth each ROC component
-
-        Returns:
-            KST series
-        """
-        if len(prices) < 50:
-            return pd.Series([0] * len(prices), index=prices.index)
-
-        # ROC periods (representing different cycles)
-        roc_10 = prices.pct_change(10)
-        roc_15 = prices.pct_change(15)
-        roc_20 = prices.pct_change(20)
-        roc_30 = prices.pct_change(30)
-
-        if smooth:
-            # Smooth each ROC (critical for noise reduction)
-            smooth_10 = roc_10.rolling(10, min_periods=5).mean()
-            smooth_15 = roc_15.rolling(10, min_periods=5).mean()
-            smooth_20 = roc_20.rolling(10, min_periods=5).mean()
-            smooth_30 = roc_30.rolling(15, min_periods=7).mean()
-        else:
-            smooth_10, smooth_15, smooth_20, smooth_30 = roc_10, roc_15, roc_20, roc_30
-
-        # Weighted sum: LONGER periods get MORE weight (Pring's principle)
-        kst = (smooth_10 * 1 + smooth_15 * 2 + smooth_20 * 3 + smooth_30 * 4)
-
-        return kst
-
-    def calculate_kst_signal(self, kst: pd.Series, signal_period: int = 9) -> pd.Series:
-        """Calculate KST signal line (SMA of KST)"""
-        return kst.rolling(signal_period, min_periods=5).mean()
-
-    def get_kst_analysis(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        current_idx: int = -1
-    ) -> Dict[str, Any]:
-        """
-        P1: Comprehensive KST analysis for momentum confirmation
-
-        Returns:
-            Dict with KST value, signal, histogram, trend, crossover status
-        """
-        if 'close' not in data.columns or len(data) < 50:
-            return {
-                'kst': 0, 'signal': 0, 'histogram': 0,
-                'trend': 'neutral', 'crossover': None,
-                'valid': False
-            }
-
-        idx = current_idx if current_idx >= 0 else len(data) + current_idx
-        prices = data['close'].iloc[:idx+1]
-
-        kst = self.calculate_kst(prices)
-        kst_signal = self.calculate_kst_signal(kst)
-
-        if len(kst) < 2 or pd.isna(kst.iloc[-1]):
-            return {
-                'kst': 0, 'signal': 0, 'histogram': 0,
-                'trend': 'neutral', 'crossover': None,
-                'valid': False
-            }
-
-        kst_val = kst.iloc[-1]
-        signal_val = kst_signal.iloc[-1] if not pd.isna(kst_signal.iloc[-1]) else 0
-        histogram = kst_val - signal_val
-
-        # Determine trend from KST slope
-        kst_prev = kst.iloc[-2] if len(kst) >= 2 else kst_val
-        trend = 'bullish' if kst_val > kst_prev else ('bearish' if kst_val < kst_prev else 'neutral')
-
-        # Check for crossover
-        crossover = None
-        if len(kst) >= 2 and len(kst_signal) >= 2:
-            kst_prev = kst.iloc[-2]
-            sig_prev = kst_signal.iloc[-2]
-            if not any(pd.isna([kst_prev, sig_prev, kst_val, signal_val])):
-                if kst_prev <= sig_prev and kst_val > signal_val:
-                    crossover = 'bullish'
-                elif kst_prev >= sig_prev and kst_val < signal_val:
-                    crossover = 'bearish'
-
-        return {
-            'kst': kst_val,
-            'signal': signal_val,
-            'histogram': histogram,
-            'trend': trend,
-            'crossover': crossover,
-            'kst_positive': kst_val > 0,
-            'kst_rising': kst_val > kst_prev,
-            'valid': True
-        }
-
-    def _check_volume_confirmation(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        signal_type: SignalType,
-        current_idx: int = -1
-    ) -> Tuple[bool, str]:
-        """
-        P1: Volume divergence rejection per Pring's methodology
-
-        Pring's Rule: "Volume analysis should corroborate price and momentum action.
-        A rise in price accompanied by a trend of falling volume is an abnormal and
-        bearish situation, indicating a weak rally."
-
-        Volume Confirmation Rules:
-        - BUY: Volume should be rising or stable (vol_trend >= 0.85)
-        - SELL: Volume should spike (selling climax) or be rising
-
-        Args:
-            symbol: Trading symbol
-            data: Enriched DataFrame
-            signal_type: BUY or SELL
-            current_idx: Current bar index
-
-        Returns:
-            Tuple[confirmed, reason]
-        """
-        if len(data) < 20:
-            return True, "insufficient_data"  # Allow if can't check
-
-        idx = current_idx if current_idx >= 0 else len(data) + current_idx
-        if idx < 20:
-            return True, "insufficient_history"
-
-        # Calculate volume trend
-        vol_sma_5 = data['volume'].iloc[idx-4:idx+1].mean()
-        vol_sma_20 = data['volume'].iloc[idx-19:idx+1].mean()
-
-        if vol_sma_20 == 0:
-            return True, "no_volume_data"
-
-        vol_trend = vol_sma_5 / vol_sma_20  # >1 = rising, <1 = falling
-
-        # Calculate price trend
-        price_now = data['close'].iloc[idx]
-        price_5ago = data['close'].iloc[idx-5]
-        price_trend = (price_now - price_5ago) / price_5ago if price_5ago != 0 else 0
-
-        # Current volume spike
-        current_vol = data['volume'].iloc[idx]
-        vol_spike = current_vol / vol_sma_20 if vol_sma_20 > 0 else 1
-
-        # ========================================
-        # DIVERGENCE CHECK
-        # ========================================
-        if signal_type == SignalType.BUY:
-            # Bullish: Rising price should have rising or stable volume
-            if price_trend > 0.005 and vol_trend < 0.80:
-                # Rising price with significantly falling volume = WEAK RALLY
-                logger.warning(
-                    f"  [{symbol}] VOLUME DIVERGENCE: Rising price (+{price_trend:.2%}) "
-                    f"with falling volume (ratio={vol_trend:.2f}) - WEAK RALLY REJECTED"
-                )
-                return False, "weak_rally_divergence"
-
-            # Check for volume confirmation on breakout
-            if vol_spike >= 1.2:
-                logger.debug(f"  [{symbol}] Volume spike ({vol_spike:.1f}x avg) confirms BUY")
-                return True, "volume_spike_confirmed"
-
-        else:  # SELL signal
-            # Bearish: Falling price should have rising volume (distribution/panic)
-            if price_trend < -0.005 and vol_trend < 0.70:
-                # Falling price with weak volume = May be exhaustion, not real selling
-                if vol_spike < 1.5:
-                    logger.warning(
-                        f"  [{symbol}] VOLUME DIVERGENCE: Falling price ({price_trend:.2%}) "
-                        f"with weak volume (spike={vol_spike:.1f}x) - NO SELLING CLIMAX"
-                    )
-                    return False, "no_selling_climax"
-
-            # Selling climax confirmation
-            if vol_spike >= 2.0:
-                logger.debug(f"  [{symbol}] Selling climax volume ({vol_spike:.1f}x avg) confirms SELL")
-                return True, "selling_climax_confirmed"
-
-        # No divergence detected - allow the signal
-        return True, "volume_ok"
-
-    def _check_end_of_day_filter(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        current_idx: int
-    ) -> Tuple[bool, str]:
-        """
-        P1a: End-of-Day Entry Filter
-
-        Blocks entries in the last 30 minutes of the trading session (after 15:30).
-        Rationale:
-        - Overnight risk with no opportunity to manage
-        - End-of-day momentum often reverses at next open
-        - Reduces "buying the close" into overnight gaps
-
-        Args:
-            symbol: Trading symbol
-            data: Enriched DataFrame with timestamp column
-            current_idx: Current bar index
-
-        Returns:
-            Tuple[blocked, reason] - (True = block entry, reason)
-        """
-        EOD_CUTOFF_HOUR = 15
-        EOD_CUTOFF_MINUTE = 30  # Block entries after 15:30
-
-        # Safely get the current bar index
-        idx = min(current_idx, len(data) - 1) if current_idx >= 0 else len(data) - 1
-
-        # Try to get timestamp from the data
-        current_ts = None
-
-        # Method 1: Check common timestamp column names
-        ts_columns = ['timestamp', 'regime_timestamp', 'time', 'datetime']
-        for col in ts_columns:
-            if col in data.columns:
-                current_ts = data[col].iloc[idx]
-                break
-
-        # Method 2: Check index if it's datetime
-        if current_ts is None and isinstance(data.index, pd.DatetimeIndex):
-            current_ts = data.index[idx]
-
-        # Parse timestamp if we got one
-        if current_ts is not None and hasattr(current_ts, 'hour'):
-            hour = current_ts.hour
-            minute = current_ts.minute
-
-            # Block entries after 15:30
-            if hour > EOD_CUTOFF_HOUR or (hour == EOD_CUTOFF_HOUR and minute >= EOD_CUTOFF_MINUTE):
-                minutes_to_close = (16 - hour) * 60 - minute
-                reason = (
-                    f"END-OF-DAY BLOCK: {hour}:{minute:02d} "
-                    f"(~{minutes_to_close} min to 16:00) - overnight risk"
-                )
-                logger.warning(f"  [{symbol}] {reason}")
-                return True, reason
-
-            return False, "time_ok"
-
-        # No timestamp available - don't block (let other filters handle it)
-        logger.debug(f"[{symbol}] EOD filter: No timestamp available, skipping check")
-        return False, "no_timestamp"
-
-    def _check_volume_exhaustion(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        current_idx: int,
-        spike_threshold: float = 3.0,
-        lookback: int = 3
-    ) -> Tuple[bool, str]:
-        """
-        P1b: Volume Exhaustion/Blow-off Filter
-
-        Blocks entries following recent volume spikes > 3x average.
-        Per Pring: "Parabolic moves accompanied by volume spikes often mark
-        the END, not the beginning, of a trend."
-
-        Volume exhaustion signals:
-        - Volume spike > 3x 20-bar average in last 3 bars
-        - Often indicates blow-off top or selling climax
-        - Entry AFTER such spike has poor risk/reward
-
-        EXCEPTIONS:
-        - First 30 minutes of trading (9:30-10:00): High volume is normal
-        - Last 30 minutes (handled by EOD filter)
-
-        Args:
-            symbol: Trading symbol
-            data: Enriched DataFrame
-            current_idx: Current bar index
-            spike_threshold: Volume multiple to consider exhaustion (default 3.0x)
-            lookback: How many bars back to check for spike (default 3)
-
-        Returns:
-            Tuple[exhaustion_detected, reason]
-        """
-        # Skip first 30 bars (9:30-10:00) - opening volume is always elevated
-        OPENING_EXCLUSION_BARS = 30
-        if current_idx < OPENING_EXCLUSION_BARS:
-            return False, "opening_period_exempt"
-
-        if len(data) < 25:
-            return False, "insufficient_data"
-
-        idx = current_idx if current_idx >= 0 else len(data) + current_idx
-        if idx < 25:
-            return False, "insufficient_history"
-
-        # Calculate 20-bar volume average (ending before lookback window)
-        vol_sma_20 = data['volume'].iloc[idx-lookback-19:idx-lookback+1].mean()
-
-        if vol_sma_20 == 0:
-            return False, "no_volume_data"
-
-        # Check for volume spikes in the lookback window (last N bars)
-        max_spike = 0
-        spike_bar = None
-
-        for i in range(lookback):
-            check_idx = idx - lookback + i + 1  # bars [idx-2, idx-1, idx] for lookback=3
-            if check_idx >= 0 and check_idx < len(data):
-                vol = data['volume'].iloc[check_idx]
-                spike = vol / vol_sma_20
-                if spike > max_spike:
-                    max_spike = spike
-                    spike_bar = i
-
-        if max_spike >= spike_threshold:
-            bars_ago = lookback - spike_bar
-            reason = (
-                f"VOLUME EXHAUSTION: {max_spike:.1f}x spike detected {bars_ago} bars ago "
-                f"(threshold={spike_threshold}x) - Pring: blow-off/exhaustion signal"
-            )
-            logger.warning(f"  [{symbol}] {reason}")
-            return True, reason
-
-        return False, "volume_healthy"
-
-    def _calculate_indicator_synergy(
-        self,
-        symbol: str,
-        data: pd.DataFrame,
-        signal_type: SignalType,
-        current_idx: int = -1
-    ) -> Dict[str, Any]:
-        """
-        P2: Indicator synergy scoring per Pring's "weight of evidence"
-
-        Combines multiple methodologies:
-        1. Momentum (RSI, composite_z)
-        2. Trend (MA alignment, ADX)
-        3. Volume (confirmation)
-        4. Composite (KST analysis)
-
-        Returns synergy score 0.0 - 1.0 and breakdown
-        """
-        idx = current_idx if current_idx >= 0 else len(data) + current_idx
-        if idx < 20 or len(data) < 20:
-            return {'synergy_score': 0.5, 'confirmations': 0, 'max_confirmations': 6, 'breakdown': {}}
-
-        confirmations = 0
-        max_confirmations = 6
-        breakdown = {}
-
-        current_bar = data.iloc[idx]
-
-        # ========================================
-        # 1. MOMENTUM INDICATOR (RSI in favorable zone)
-        # ========================================
-        rsi_col = self._get_column_name('RSI_14', data)
-        if rsi_col in data.columns:
-            rsi = current_bar.get(rsi_col, 50)
-            if not pd.isna(rsi):
-                if signal_type == SignalType.BUY:
-                    # Bullish: RSI should be rising from oversold or in midrange
-                    if 30 < rsi < 70:
-                        confirmations += 1
-                        breakdown['rsi'] = 'favorable'
-                    elif rsi < 30:
-                        confirmations += 0.5  # Oversold, caution
-                        breakdown['rsi'] = 'oversold'
-                else:
-                    # Bearish: RSI should be falling from overbought or in midrange
-                    if 30 < rsi < 70:
-                        confirmations += 1
-                        breakdown['rsi'] = 'favorable'
-                    elif rsi > 70:
-                        confirmations += 0.5  # Overbought, caution
-                        breakdown['rsi'] = 'overbought'
-
-        # ========================================
-        # 2. MA ALIGNMENT (Trend structure)
-        # ========================================
-        sma_10_col = self._get_column_name('SMA_10', data)
-        sma_20_col = self._get_column_name('SMA_20', data)
-        sma_50_col = self._get_column_name('SMA_50', data)
-
-        if all(col in data.columns for col in [sma_10_col, sma_20_col, sma_50_col]):
-            sma_10 = current_bar.get(sma_10_col, 0)
-            sma_20 = current_bar.get(sma_20_col, 0)
-            sma_50 = current_bar.get(sma_50_col, 0)
-
-            if not any(pd.isna([sma_10, sma_20, sma_50])):
-                if signal_type == SignalType.BUY:
-                    if sma_10 > sma_20 > sma_50:
-                        confirmations += 1
-                        breakdown['ma_alignment'] = 'bullish'
-                    elif sma_10 > sma_20:
-                        confirmations += 0.5
-                        breakdown['ma_alignment'] = 'partial_bullish'
-                else:
-                    if sma_10 < sma_20 < sma_50:
-                        confirmations += 1
-                        breakdown['ma_alignment'] = 'bearish'
-                    elif sma_10 < sma_20:
-                        confirmations += 0.5
-                        breakdown['ma_alignment'] = 'partial_bearish'
-
-        # ========================================
-        # 3. ADX TREND STRENGTH
-        # ========================================
-        adx_col = self._get_column_name('ADX_14', data)
-        if adx_col in data.columns:
-            adx = current_bar.get(adx_col, 0)
-            if not pd.isna(adx):
-                if adx >= 25:
-                    confirmations += 1
-                    breakdown['adx'] = 'strong_trend'
-                elif adx >= 20:
-                    confirmations += 0.5
-                    breakdown['adx'] = 'moderate_trend'
-                else:
-                    breakdown['adx'] = 'weak_trend'
-
-        # ========================================
-        # 4. VOLUME CONFIRMATION
-        # ========================================
-        vol_confirmed, vol_reason = self._check_volume_confirmation(symbol, data, signal_type, idx)
-        if vol_confirmed:
-            if 'spike' in vol_reason or 'climax' in vol_reason:
-                confirmations += 1
-                breakdown['volume'] = vol_reason
-            else:
-                confirmations += 0.5
-                breakdown['volume'] = 'neutral'
-        else:
-            breakdown['volume'] = 'divergence'
-
-        # ========================================
-        # 5. KST ANALYSIS (Composite Momentum)
-        # ========================================
-        kst_data = self.get_kst_analysis(symbol, data, idx)
-        if kst_data['valid']:
-            if signal_type == SignalType.BUY:
-                if kst_data['kst_positive'] and kst_data['kst_rising']:
-                    confirmations += 1
-                    breakdown['kst'] = 'bullish'
-                elif kst_data['crossover'] == 'bullish':
-                    confirmations += 1
-                    breakdown['kst'] = 'bullish_crossover'
-                elif kst_data['kst_rising']:
-                    confirmations += 0.5
-                    breakdown['kst'] = 'improving'
-            else:
-                if not kst_data['kst_positive'] and not kst_data['kst_rising']:
-                    confirmations += 1
-                    breakdown['kst'] = 'bearish'
-                elif kst_data['crossover'] == 'bearish':
-                    confirmations += 1
-                    breakdown['kst'] = 'bearish_crossover'
-                elif not kst_data['kst_rising']:
-                    confirmations += 0.5
-                    breakdown['kst'] = 'deteriorating'
-
-        # ========================================
-        # 6. COMPOSITE Z-SCORE STRENGTH
-        # ========================================
-        composite_z = current_bar.get('composite_z', 0)
-        if not pd.isna(composite_z):
-            if signal_type == SignalType.BUY and composite_z > 1.5:
-                confirmations += 1
-                breakdown['composite_z'] = 'strong_bullish'
-            elif signal_type == SignalType.SELL and composite_z < -1.5:
-                confirmations += 1
-                breakdown['composite_z'] = 'strong_bearish'
-            elif abs(composite_z) > 1.0:
-                confirmations += 0.5
-                breakdown['composite_z'] = 'moderate'
-
-        synergy_score = confirmations / max_confirmations
-
-        return {
-            'synergy_score': synergy_score,
-            'confirmations': confirmations,
-            'max_confirmations': max_confirmations,
-            'breakdown': breakdown,
-            'strong_consensus': synergy_score >= 0.7,
-            'weak_consensus': synergy_score < 0.4
-        }
-
-    # ========================================
-    # HYBRID EXIT LOGIC
+    # POSITION TRACKING & EXIT LOGIC
     # ========================================
 
     async def _check_exit_conditions_hybrid(
@@ -3599,11 +2401,23 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     def get_momentum_summary(self) -> Dict[str, Any]:
         """Get comprehensive momentum strategy summary"""
 
-        return {
+        # ADS v3.1: Retrieve active positions from PositionBook SSOT
+        active_positions = {}
+        if hasattr(self, '_position_book') and self._position_book:
+            for symbol, pos in self._position_book.get_all_positions().items():
+                active_positions[symbol] = {
+                    'direction': 1 if pos.is_long else -1 if pos.is_short else 0,
+                    'avg_entry_price': float(pos.avg_entry_price),
+                    'total_quantity': float(pos.quantity),
+                    'entry_time': pos.opened_at.isoformat() if hasattr(pos, 'opened_at') and pos.opened_at else datetime.now().isoformat(),
+                    'current_price': float(pos.current_price)
+                }
+
+        summary = {
             'strategy_id': self.strategy_id,
             'strategy_type': 'Enhanced Momentum',
             'symbols_tracked': len(self.config.symbols),
-            'active_positions': len(self.position_tracker),  # Phase 2.5: Use NEW tracking
+            'active_positions': len(active_positions),
             'avg_momentum_strength': self._calculate_avg_momentum_strength(),
             'trend_quality': self._assess_overall_trend_quality(),
             'performance_summary': self.get_performance_summary(),
@@ -3617,19 +2431,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 }
                 for symbol, data in self.momentum_data.items()
             },
-            'position_details': {
-                symbol: {
-                    'direction': pos['direction'],
-                    'avg_entry_price': pos['avg_entry_price'],
-                    'total_quantity': pos['total_quantity'],
-                    'entry_time': pos['entry_time'].isoformat(),
-                    'high_water_mark': pos['high_water_mark'],
-                    'trailing_stop_activated': pos['trailing_stop_activated'],
-                    'scale_ins': pos['scale_ins']
-                }
-                for symbol, pos in self.position_tracker.items()  # Phase 2.5: Use NEW tracking
-            }
+            'position_details': active_positions
         }
+        return summary
 
     # ========================================
     # CRITICAL FIX #1-3: MICRO-STRUCTURE & PRE-INFLECTION DETECTION
