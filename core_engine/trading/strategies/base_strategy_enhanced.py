@@ -59,11 +59,9 @@ except ImportError:
         def get_status(self) -> Dict[str, Any]:
             pass
 
-# Import existing strategy types
-from .strategy_engine import (
-    StrategyConfig, StrategySignal,
-    SignalType, StrategyType, StrategyState
-)
+# Strategy contracts (Rule 7)
+from .contracts import StrategySignal, StrategyState
+from core_engine.type_definitions.strategy import SignalType, StrategyType
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +116,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     - Configuration validation
     """
 
-    def __init__(self, config: StrategyConfig):
+    def __init__(self, config: Any):
         """Initialize enhanced base strategy"""
 
         # Basic strategy setup

@@ -3,7 +3,7 @@ import pandas as pd
 
 from core_engine.config import MomentumConfig
 from core_engine.trading.strategies.implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
-from core_engine.trading.strategies.strategy_engine import SignalType
+from core_engine.type_definitions.strategy import SignalType
 
 
 def _make_df(n: int = 60) -> pd.DataFrame:

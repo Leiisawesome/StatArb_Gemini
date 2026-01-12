@@ -51,7 +51,7 @@ from core_engine.regime.engine import EnhancedRegimeEngine
 from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
 from core_engine.trading.strategies.implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
 from core_engine.system.central_risk_manager import CentralRiskManager
-from core_engine.trading.strategies.strategy_engine import SignalType
+from core_engine.type_definitions.strategy import SignalType
 
 @dataclass
 class Trade:

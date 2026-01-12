@@ -44,7 +44,8 @@ class TestCompleteTradingCycle:
         system = complete_system
 
         # STEP 1: Generate signal (simulate strategy)
-        from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
+        from core_engine.trading.strategies.contracts import StrategySignal
+        from core_engine.type_definitions.strategy import SignalType
 
         signal = StrategySignal(
             strategy_id='test_strategy',

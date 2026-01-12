@@ -21,7 +21,8 @@ Date: November 4, 2025
 import pytest
 from datetime import datetime
 
-from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
+from core_engine.trading.strategies.contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
 class TestStrategyRiskDataIntegration:

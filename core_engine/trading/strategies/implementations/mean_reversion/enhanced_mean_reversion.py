@@ -44,7 +44,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 
 from ...base_strategy_enhanced import EnhancedBaseStrategy
-from ...strategy_engine import StrategySignal, SignalType
+from ...contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 from core_engine.config import MeanReversionConfig
 
 # ADS v3.0 Components - Critical fixes per alpha_design_philosophy.mdc

@@ -136,7 +136,8 @@ def create_mock_strategy(
 
     # Mock methods
     if generates_signals:
-        from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
+        from core_engine.trading.strategies.contracts import StrategySignal
+        from core_engine.type_definitions.strategy import SignalType
         mock.generate_signals = AsyncMock(return_value=[
             StrategySignal(
                 signal_id=f'{strategy_id}_signal_1',

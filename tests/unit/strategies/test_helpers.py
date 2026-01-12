@@ -13,7 +13,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List
-from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
+from core_engine.trading.strategies.contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 
 def create_enriched_dataframe(
     symbol: str = 'AAPL',
@@ -159,7 +160,7 @@ def create_mock_strategy_signal(
     quantity: float = 100.0
 ) -> StrategySignal:
     """Create a mock strategy signal for testing"""
-    from core_engine.trading.strategies.strategy_engine import StrategySignal
+    from core_engine.trading.strategies.contracts import StrategySignal
 
     return StrategySignal(
         strategy_id='test_strategy',

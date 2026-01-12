@@ -63,6 +63,7 @@ from .implementations.statistical_arbitrage import StatisticalArbitrageConfig
 # Import base strategy and registry
 from .base_strategy_enhanced import EnhancedBaseStrategy
 from .strategy_registry import StrategyRegistry
+from .strategy_validator import EnhancedStrategyValidator, Rule7ComplianceError
 
 # Import multi-strategy coordination components
 from .multi_strategy_coordinator import (
@@ -316,6 +317,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         # Enhanced strategy integration
         self.strategy_factory = EnhancedStrategyFactory()
         self.strategy_registry: Optional[StrategyRegistry] = None
+        self._rule7_validator = EnhancedStrategyValidator()
 
         # Phase 3: Pipeline orchestrator integration (Rule 3)
         self.pipeline_orchestrator: Optional[ProcessingPipelineOrchestrator] = None
@@ -1261,6 +1263,12 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 # Use enhanced strategy factory
                 strategy_instance = self.strategy_factory.create_strategy(strategy_type, config)
                 if strategy_instance:
+                    # Rule 7 compliance (hard-fail)
+                    try:
+                        self._rule7_validator.enforce_rule7(strategy_instance)
+                    except Rule7ComplianceError as e:
+                        logger.error(str(e))
+                        raise
                     # Initialize the enhanced strategy
                     await strategy_instance.initialize()
                     logger.info(f"✅ Enhanced strategy created and initialized: {config['name']}")
@@ -3080,6 +3088,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             if not strategy_instance:
                 logger.error(f"Failed to create strategy instance: {strategy_type}")
                 return False
+
+            # Rule 7 compliance (hard-fail)
+            try:
+                self._rule7_validator.enforce_rule7(strategy_instance)
+            except Rule7ComplianceError as e:
+                logger.error(str(e))
+                raise
 
             # Initialize strategy
             await strategy_instance.initialize()

@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 from core_engine.config import MeanReversionConfig
 from core_engine.trading.strategies.implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
-from core_engine.trading.strategies.strategy_engine import SignalType
+from core_engine.type_definitions.strategy import SignalType
 from tests.unit.strategies.test_helpers import (
     create_enriched_data_dict,
     create_mock_strategy_signal

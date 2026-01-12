@@ -17,7 +17,7 @@ from .manager import StrategyManager
 from .base_strategy_enhanced import EnhancedBaseStrategy
 from .strategy_registry import EnhancedStrategyRegistry
 from .strategy_validator import EnhancedStrategyValidator
-from .strategy_engine import StrategyExecutionEngine
+from .contracts import StrategySignal, StrategyState
 
 # Multi-Strategy Coordination
 from .multi_strategy_coordinator import (
@@ -41,7 +41,8 @@ __all__ = [
     'EnhancedBaseStrategy',
     'EnhancedStrategyRegistry',
     'EnhancedStrategyValidator',
-    'StrategyExecutionEngine',
+    'StrategySignal',
+    'StrategyState',
 
     # Multi-Strategy Coordination
     'MultiStrategySignalAggregator',

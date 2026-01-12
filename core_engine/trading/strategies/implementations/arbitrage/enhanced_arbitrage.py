@@ -37,9 +37,8 @@ import logging
 
 # Import enhanced base strategy
 from ...base_strategy_enhanced import EnhancedBaseStrategy
-from ...strategy_engine import (
-    StrategySignal, SignalType
-)
+from ...contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 # REQUIRED: Use centralized config only - no local fallback definitions per Rule 1

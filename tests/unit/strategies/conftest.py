@@ -20,7 +20,8 @@ from unittest.mock import Mock, AsyncMock
 
 # Import type definitions
 from core_engine.type_definitions.strategy import TradingSignal
-from core_engine.trading.strategies.strategy_engine import StrategyState, SignalType
+from core_engine.trading.strategies.contracts import StrategyState
+from core_engine.type_definitions.strategy import SignalType
 
 class StrategyTestFixtures:
     """Common fixtures for strategy testing"""

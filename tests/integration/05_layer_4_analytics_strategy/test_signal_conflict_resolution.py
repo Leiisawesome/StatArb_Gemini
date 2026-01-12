@@ -23,7 +23,7 @@ import pytest
 from datetime import datetime
 
 from core_engine.trading.strategies.multi_strategy_coordinator import EnhancedSignal
-from core_engine.trading.strategies.strategy_engine import SignalType
+from core_engine.type_definitions.strategy import SignalType
 import uuid
 
 class TestSignalConflictResolution:

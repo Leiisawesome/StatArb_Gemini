@@ -496,7 +496,7 @@ class TestSignalMetadata(TestPhase3PipelineIntegration):
 
         # Create mock strategy that returns a signal
         from core_engine.trading.strategies.base_strategy_enhanced import EnhancedBaseStrategy
-        from core_engine.trading.strategies.strategy_engine import StrategySignal
+        from core_engine.trading.strategies.contracts import StrategySignal
         from core_engine.type_definitions.strategy import SignalStrength, SignalType
 
         mock_signal = StrategySignal(

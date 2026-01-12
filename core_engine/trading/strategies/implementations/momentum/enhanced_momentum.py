@@ -43,9 +43,8 @@ from .momentum_state_machine import MomentumStateMachine, SymbolStateName
 
 # Import enhanced base strategy
 from ...base_strategy_enhanced import EnhancedBaseStrategy
-from ...strategy_engine import (
-    StrategySignal, SignalType
-)
+from ...contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 
 # ADS v3.1: continuous regime vector + tau(R)
 from core_engine.alpha.ads_regime_vector import ADSRegimeVector, compute_sms_tau
@@ -1521,11 +1520,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     def _start_performance_tracking(self) -> None:
         """Start performance tracking"""
         logger.info("  Momentum performance tracking started")
-
-    async def _close_all_positions(self) -> None:
-        """Best-effort close request (authority lives in Risk Manager + PositionBook)."""
-        logger.info("  Momentum Strategy requesting close-all via Risk Manager (best-effort)")
-        await super()._close_all_positions()
 
     def _save_performance_data(self) -> None:
         """Save performance data"""

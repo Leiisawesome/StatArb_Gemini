@@ -11,7 +11,8 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
-from core_engine.trading.strategies.strategy_engine import StrategySignal, SignalType
+from core_engine.trading.strategies.contracts import StrategySignal
+from core_engine.type_definitions.strategy import SignalType
 from core_engine.system.unified_execution_engine import ExecutionAuthorization, ExecutionRequest, ExecutionAlgorithm, ExecutionUrgency
 
 # ========================================
