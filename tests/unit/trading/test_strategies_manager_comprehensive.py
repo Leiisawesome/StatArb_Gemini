@@ -298,7 +298,8 @@ async def test_multiple_strategy_registration(strategy_manager):
     strategies = [
         ("momentum_1", StrategyType.MOMENTUM),
         ("mean_rev_1", StrategyType.MEAN_REVERSION),
-        ("trend_1", StrategyType.TREND_FOLLOWING)
+        # Trend-following strategy implementation was removed from the codebase.
+        ("pairs_1", StrategyType.PAIRS_TRADING)
     ]
 
     for name, stype in strategies:

@@ -25,15 +25,13 @@ from .multi_strategy_coordinator import (
     SignalConflictResolver
 )
 
-# Strategy Implementations (10 enhanced strategies)
+# Strategy Implementations
 from .implementations.momentum.enhanced_momentum import EnhancedMomentumStrategy
 from .implementations.mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy
 from .implementations.statistical_arbitrage.enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
-from .implementations.trend_following.enhanced_trend_following import EnhancedTrendFollowingStrategy
 from .implementations.pairs_trading.enhanced_pairs_trading import EnhancedPairsTradingStrategy
 from .implementations.factor.enhanced_factor import EnhancedFactorStrategy
 from .implementations.multi_asset.enhanced_multi_asset import EnhancedMultiAssetStrategy
-from .implementations.breakout.enhanced_breakout import EnhancedBreakoutStrategy
 from .implementations.volatility.enhanced_volatility import EnhancedVolatilityStrategy
 from .implementations.arbitrage.enhanced_arbitrage import EnhancedArbitrageStrategy
 
@@ -53,11 +51,9 @@ __all__ = [
     'EnhancedMomentumStrategy',
     'EnhancedMeanReversionStrategy',
     'EnhancedStatisticalArbitrageStrategy',
-    'EnhancedTrendFollowingStrategy',
     'EnhancedPairsTradingStrategy',
     'EnhancedFactorStrategy',
     'EnhancedMultiAssetStrategy',
-    'EnhancedBreakoutStrategy',
     'EnhancedVolatilityStrategy',
     'EnhancedArbitrageStrategy',
 ]

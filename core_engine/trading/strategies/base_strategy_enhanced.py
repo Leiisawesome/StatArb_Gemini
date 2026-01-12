@@ -61,7 +61,7 @@ except ImportError:
 
 # Import existing strategy types
 from .strategy_engine import (
-    StrategyConfig, StrategySignal, StrategyPosition,
+    StrategyConfig, StrategySignal,
     SignalType, StrategyType, StrategyState
 )
 
@@ -145,23 +145,10 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         # Strategies should use this for READ-ONLY position queries.
         self._position_book: Optional['IPositionBook'] = None
 
-        # Strategy data
-        # DEPRECATED: self._positions is deprecated. Use PositionBook via self._position_book instead.
-        # Position tracking is the responsibility of Risk Manager and PositionBook (SSOT).
-        # This field is kept for backward compatibility but will be removed in a future version.
-        self._positions: Dict[str, StrategyPosition] = {}
+        # Strategy data (signals + cached data)
         self._signals: List[StrategySignal] = []
         self._market_data: Dict[str, pd.DataFrame] = {}
         self._indicators: Dict[str, pd.Series] = {}
-
-        # LEGACY ATTRIBUTES (Backward Compatibility for Tests)
-        # These are deprecated and will be removed in future versions.
-        # Use PositionBook (SSOT) for position management.
-        self.active_positions: Dict[str, Any] = {}
-        self.entry_prices: Dict[str, float] = {}
-        self.stop_losses: Dict[str, float] = {}
-        self.trailing_stops: Dict[str, float] = {}
-        self.profit_targets: Dict[str, float] = {}
 
         # Enhanced performance tracking
         self.performance_metrics = StrategyPerformanceMetrics()
@@ -383,7 +370,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
                     'uptime_percentage': self._calculate_uptime_percentage(),
                     'avg_signal_time': self.performance_metrics.avg_signal_generation_time,
                     'health_checks_performed': self.health_checks_performed,
-                    'active_positions': len(self._positions),
+                    'active_positions': self._get_active_position_count(),
                     'signals_generated': len(self._signals)
                 }
             }
@@ -436,7 +423,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
                 'success_rate': self._calculate_success_rate(),
                 'total_return': self.performance_metrics.total_return,
                 'max_drawdown': self.performance_metrics.max_drawdown,
-                'active_positions': len(self._positions),
+                'active_positions': self._get_active_position_count(),
                 'error_count': self.performance_metrics.error_count
             },
             'config_summary': {
@@ -465,7 +452,6 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
             List of StrategySignal objects
         """
 
-    @abstractmethod
     async def update_positions(self, market_data: Dict[str, pd.DataFrame]) -> None:
         """
         DEPRECATED: Position tracking should be handled by PositionBook (SSOT).
@@ -479,9 +465,18 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
         Migration path:
         - Use self._position_book.get_position(symbol) for read-only queries
-        - Remove internal position tracking (self.active_positions, etc.)
+        - Do not implement internal position tracking
         - Let Risk Manager handle position sizing, stops, and targets
         """
+        # Default no-op for forward compatibility: strategies should not track positions.
+        # Kept because some legacy execution paths still call update_positions().
+        warnings.warn(
+            "Strategy.update_positions() is deprecated. Position tracking should be handled by "
+            "Risk Manager + PositionBook. This default implementation is a no-op.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return None
 
     def calculate_position_size(self, signal: StrategySignal, market_data: Dict[str, pd.DataFrame]) -> float:
         """
@@ -505,7 +500,6 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         Returns:
             float: Always returns 0.0 - sizing delegated to Risk Manager
         """
-        import warnings
         warnings.warn(
             f"Strategy.calculate_position_size() is deprecated. "
             f"Position sizing should be handled by Risk Manager. "
@@ -572,7 +566,6 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
     def _initialize_data_structures(self) -> None:
         """Initialize data structures"""
-        self._positions.clear()
         self._signals.clear()
         self._market_data.clear()
         self._indicators.clear()
@@ -584,31 +577,58 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         self._error_log.clear()
         self._warning_log.clear()
 
-    async def _close_all_positions(self) -> None:
-        """Close all open positions"""
+    def _get_active_position_count(self) -> int:
+        """Count active positions using PositionBook (SSOT)."""
+        if not self._position_book:
+            return 0
         try:
-            for position_id, position in self._positions.items():
-                if position.quantity != 0:
-                    # Create close signal
-                    close_signal = StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=position.symbol,
-                        signal_type=SignalType.SELL if position.quantity > 0 else SignalType.BUY,
-                        strength=1.0,
-                        confidence=0.9,
-                        quantity=abs(position.quantity),
-                        timestamp=datetime.now(),
-                        metadata={'reason': 'strategy_stop'}
-                    )
+            positions = self._position_book.get_all_positions()
+            # BookPosition uses quantity + side; treat any non-flat as active.
+            return len([p for p in positions.values() if getattr(p, "is_flat", False) is False])
+        except Exception:
+            return 0
 
-                    # Submit to risk manager if available
-                    if self.risk_manager:
-                        await self.risk_manager.process_signal(close_signal)
+    async def _close_all_positions(self) -> None:
+        """
+        Best-effort close request for all open positions.
 
-                    logger.info(f"Closed position {position_id} on strategy stop")
+        NOTE: Position state is SSOT in PositionBook. This method emits CLOSE intent
+        as StrategySignal(s) to the Risk Manager if one is attached.
+        """
+        if not self._position_book:
+            return
+        if not self.risk_manager:
+            logger.warning(f"No risk_manager attached; cannot request closes for {self.strategy_id}")
+            return
 
+        try:
+            positions = self._position_book.get_all_positions()
+            for symbol, pos in positions.items():
+                if getattr(pos, "is_flat", False):
+                    continue
+
+                # BookPosition.quantity is absolute; side tells direction.
+                is_long = bool(getattr(pos, "is_long", False))
+                signal_type = SignalType.SELL if is_long else SignalType.BUY
+                qty = float(getattr(pos, "quantity", 0.0))
+                if qty <= 0:
+                    continue
+
+                close_signal = StrategySignal(
+                    strategy_id=self.strategy_id,
+                    symbol=symbol,
+                    signal_type=signal_type,
+                    strength=1.0,
+                    confidence=1.0,
+                    quantity_type="ABSOLUTE",
+                    target_quantity=qty,
+                    timestamp=datetime.now(),
+                    signal_reason="strategy_stop_close_all",
+                    additional_data={"reason": "strategy_stop"},
+                )
+                await self.risk_manager.process_signal(close_signal)
         except Exception as e:
-            self._log_error("Failed to close positions", e)
+            self._log_error("Failed to request close-all via Risk Manager", e)
 
     def _update_final_performance_metrics(self) -> None:
         """Update final performance metrics on stop"""
@@ -726,13 +746,12 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         Returns:
             True if position exists with non-zero quantity, False otherwise
         """
-        if self._position_book:
-            pos = self._position_book.get_position(symbol)
-            return pos is not None and pos.quantity != 0
-        # Fallback to deprecated internal tracking
-        if symbol in self._positions:
-            return self._positions[symbol].quantity != 0
-        return False
+        if not self._position_book:
+            return False
+        pos = self._position_book.get_position(symbol)
+        if pos is None:
+            return False
+        return bool(getattr(pos, "is_flat", True) is False)
 
     def _get_position_quantity(self, symbol: str) -> float:
         """
@@ -746,13 +765,15 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         Returns:
             Net quantity (positive for long, negative for short, 0 if no position)
         """
-        if self._position_book:
-            pos = self._position_book.get_position(symbol)
-            return pos.net_quantity if pos else 0.0
-        # Fallback to deprecated internal tracking
-        if symbol in self._positions:
-            return self._positions[symbol].quantity
-        return 0.0
+        if not self._position_book:
+            return 0.0
+        pos = self._position_book.get_position(symbol)
+        if pos is None:
+            return 0.0
+        qty = float(getattr(pos, "quantity", 0.0))
+        if getattr(pos, "is_short", False):
+            return -qty
+        return qty
 
     # ========================================
     # REGIME AWARENESS (IRegimeAware Interface)
@@ -851,119 +872,20 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
     # UTILITY METHODS
     # ========================================
 
-    def get_active_positions(self) -> Dict[str, StrategyPosition]:
-        """
-        DEPRECATED: Get all active positions.
-
-        This method is deprecated. Use PositionBook (SSOT) for position queries instead:
-            positions = self._position_book.get_all_positions()
-
-        Kept for backward compatibility only.
-        """
-        warnings.warn(
-            "get_active_positions() is deprecated. Use PositionBook for position queries.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return {k: v for k, v in self._positions.items() if v.quantity != 0}
-
     def get_recent_signals(self, count: int = 10) -> List[StrategySignal]:
         """Get recent signals"""
         return self._signals[-count:] if self._signals else []
 
-    # ========================================
-    # LEGACY POSITION TRACKING (Backward Compatibility)
-    # ========================================
-
-    def _track_position_entry(self, symbol: str, signal: Any):
-        """
-        DEPRECATED: Track position entry.
-        Position management moved to Risk Manager and PositionBook.
-        """
-        warnings.warn(
-            "_track_position_entry() is deprecated. Position management moved to Risk Manager.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        # Simple tracking for tests
-        self.active_positions[symbol] = signal
-        if hasattr(signal, 'additional_data') and 'entry_price' in signal.additional_data:
-            self.entry_prices[symbol] = signal.additional_data['entry_price']
-        elif hasattr(signal, 'price'):
-            self.entry_prices[symbol] = signal.price
-
-    async def _close_position(self, symbol: str, reason: str = "Exit", price: Optional[float] = None):
-        """
-        DEPRECATED: Close position.
-        Position management moved to Risk Manager and PositionBook.
-        """
-        warnings.warn(
-            "_close_position() is deprecated. Position management moved to Risk Manager.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        if symbol in self.active_positions:
-            del self.active_positions[symbol]
-        if symbol in self.entry_prices:
-            del self.entry_prices[symbol]
-
-    async def _close_all_positions(self, reason: str = "Exit"):
-        """Legacy shim for closing all positions."""
-        warnings.warn(
-            "_close_all_positions() is deprecated. Position management moved to Risk Manager.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        symbols = list(self.active_positions.keys())
-        for symbol in symbols:
-            await self._close_position(symbol, reason)
-
-    def _update_trailing_stops(self) -> None:
-        """Legacy shim for updating trailing stops."""
-        warnings.warn(
-            "_update_trailing_stops() is deprecated. Position management moved to Risk Manager.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        for symbol, position in self.active_positions.items():
-            if symbol not in self.trailing_stops or symbol not in self.market_data:
-                continue
-            
-            current_price = self.market_data[symbol].close
-            # Simple logic to satisfy tests
-            if position.get('side') == 'long':
-                if current_price > self.entry_prices.get(symbol, 0):
-                    new_stop = current_price * (1 - getattr(self.config, 'trailing_stop_pct', 0.02))
-                    if new_stop > self.trailing_stops[symbol]:
-                        self.trailing_stops[symbol] = new_stop
-            elif position.get('side') == 'short':
-                if current_price < self.entry_prices.get(symbol, 0):
-                    new_stop = current_price * (1 + getattr(self.config, 'trailing_stop_pct', 0.02))
-                    if new_stop < self.trailing_stops[symbol]:
-                        self.trailing_stops[symbol] = new_stop
-
-    async def _check_exit_conditions(self) -> List[Any]:
-        """Legacy shim for checking exit conditions."""
-        warnings.warn(
-            "_check_exit_conditions() is deprecated. Position management moved to Risk Manager.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        # This is now handled by RiskManager, but we provide a shim for tests
-        return []
-
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get comprehensive performance summary"""
         # Get position count from PositionBook if available, otherwise fallback
-        active_pos_count = 0
+        active_pos_count = self._get_active_position_count()
         total_pos_count = 0
         if self._position_book:
-            all_positions = self._position_book.get_all_positions()
-            active_pos_count = len([p for p in all_positions.values() if p.net_quantity != 0])
-            total_pos_count = len(all_positions)
-        else:
-            active_pos_count = len([p for p in self._positions.values() if p.quantity != 0])
-            total_pos_count = len(self._positions)
+            try:
+                total_pos_count = len(self._position_book.get_all_positions())
+            except Exception:
+                total_pos_count = 0
 
         return {
             'strategy_id': self.strategy_id,

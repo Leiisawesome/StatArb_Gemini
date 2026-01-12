@@ -11,8 +11,6 @@ Strategy Categories:
 - Statistical Arbitrage Strategies
 - Factor-based Strategies
 - Multi-asset Strategies
-- Trend Following Strategies
-- Breakout Strategies
 - Pairs Trading Strategies
 - Volatility Strategies
 - Arbitrage Strategies
@@ -36,12 +34,6 @@ from .factor.enhanced_factor import EnhancedFactorStrategy, FactorConfig
 # Multi-asset Strategies
 from .multi_asset.enhanced_multi_asset import EnhancedMultiAssetStrategy, MultiAssetConfig
 
-# Trend Following Strategies
-from .trend_following.enhanced_trend_following import EnhancedTrendFollowingStrategy, TrendFollowingConfig
-
-# Breakout Strategies
-from .breakout.enhanced_breakout import EnhancedBreakoutStrategy, BreakoutConfig
-
 # Pairs Trading Strategies
 from .pairs_trading.enhanced_pairs_trading import EnhancedPairsTradingStrategy, PairsConfig
 
@@ -64,10 +56,6 @@ __all__ = [
     'FactorConfig',
     'EnhancedMultiAssetStrategy',
     'MultiAssetConfig',
-    'EnhancedTrendFollowingStrategy',
-    'TrendFollowingConfig',
-    'EnhancedBreakoutStrategy',
-    'BreakoutConfig',
     'EnhancedPairsTradingStrategy',
     'PairsConfig',
     'EnhancedVolatilityStrategy',

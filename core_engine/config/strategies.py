@@ -861,151 +861,6 @@ class MultiAssetConfig(BaseStrategyConfig):
     """Start with equal weights. Default: True"""
 
 @dataclass
-class TrendFollowingConfig(BaseStrategyConfig):
-    """
-    Trend following strategy configuration
-
-    Consolidated from: trading/strategies/implementations/trend_following/enhanced_trend_following.py
-    """
-    strategy_type: StrategyType = StrategyType.TREND_FOLLOWING
-
-    # Trend parameters
-    fast_ma_period: int = 12
-    """Fast moving average period. Default: 12"""
-
-    slow_ma_period: int = 26
-    """Slow moving average period. Default: 26"""
-
-    signal_ma_period: int = 9
-    """Signal line period. Default: 9"""
-
-    ma_type: str = "EMA"
-    """Moving average type: 'SMA', 'EMA', 'TEMA'. Default: 'EMA'"""
-
-    # MACD parameters
-    macd_fast: int = 12
-    """MACD fast period. Default: 12"""
-
-    macd_slow: int = 26
-    """MACD slow period. Default: 26"""
-
-    macd_signal: int = 9
-    """MACD signal period. Default: 9"""
-
-    adx_period: int = 14
-    """ADX period for trend strength. Default: 14"""
-
-    adx_threshold: float = 25.0
-    """Minimum ADX for strong trend. Default: 25"""
-
-    # Position sizing
-    base_position_pct: float = 0.04
-    """Base position size. Default: 4%"""
-
-    max_position_pct: float = 0.10
-    """Maximum position size. Default: 10%"""
-
-    trend_scaling: bool = True
-    """Scale position by trend strength. Default: True"""
-
-    # Risk management
-    atr_period: int = 14
-    """ATR period for stops. Default: 14"""
-
-    atr_stop_multiplier: float = 2.0
-    """Stop loss ATR multiple. Default: 2.0"""
-
-    atr_multiplier: float = 2.0
-    """ATR multiplier for stop loss (alias for atr_stop_multiplier). Default: 2.0"""
-
-    trailing_stop_pct: float = 0.02
-    """Trailing stop percentage. Default: 2%"""
-
-    profit_target_ratio: float = 3.0
-    """Profit target vs stop ratio. Default: 3.0"""
-
-    max_holding_period: int = 50
-    """Maximum holding period in bars. Default: 50"""
-
-    # Trend filtering
-    enable_trend_filter: bool = True
-    """Enable trend filtering. Default: True"""
-
-    min_trend_duration: int = 5
-    """Minimum trend duration in bars. Default: 5"""
-
-    trend_reversal_threshold: float = 0.02
-    """Trend reversal threshold. Default: 0.02"""
-
-    # Volatility filtering
-    enable_volatility_filter: bool = True
-    """Enable volatility filtering. Default: True"""
-
-    volatility_lookback: int = 20
-    """Volatility calculation period. Default: 20"""
-
-    max_volatility_percentile: float = 0.8
-    """Maximum volatility percentile. Default: 0.8"""
-
-    # Position sizing multipliers (moved from hardcoded values)
-    trend_multiplier_cap: float = 2.0
-    """Maximum trend multiplier for position scaling. Default: 2.0"""
-
-    adx_multiplier_cap: float = 2.0
-    """Maximum ADX multiplier for position scaling. Default: 2.0"""
-
-    volatility_adjustment_min: float = 0.5
-    """Minimum volatility adjustment floor. Default: 0.5"""
-
-    volatility_adjustment_cap: float = 2.0
-    """Maximum volatility adjustment cap. Default: 2.0"""
-
-    duration_confidence_multiplier: float = 2.0
-    """Multiplier for trend duration confidence calculation. Default: 2.0"""
-
-@dataclass
-class BreakoutConfig(BaseStrategyConfig):
-    """
-    Breakout strategy configuration
-
-    Consolidated from: trading/strategies/implementations/breakout/enhanced_breakout.py
-    """
-    strategy_type: StrategyType = StrategyType.BREAKOUT
-
-    # Breakout parameters
-    lookback_period: int = 20
-    """Lookback for support/resistance. Default: 20 bars"""
-
-    breakout_threshold: float = 0.02
-    """Breakout confirmation threshold. Default: 2%"""
-
-    volume_confirmation: float = 1.5
-    """Volume confirmation multiplier. Default: 1.5"""
-
-    volume_confirmation_enabled: bool = True
-    """Require volume confirmation. Default: True"""
-
-    volume_multiplier: float = 1.5
-    """Volume must exceed average by this factor. Default: 1.5x"""
-
-    consolidation_periods: int = 10
-    """Periods for consolidation detection. Default: 10"""
-
-    # Position sizing
-    base_position_pct: float = 0.03
-    """Base position size. Default: 3%"""
-
-    max_position_pct: float = 0.08
-    """Maximum position size. Default: 8%"""
-
-    # Risk management
-    stop_loss_pct: float = 0.03
-    """Stop loss percentage. Default: 3%"""
-
-    profit_target_ratio: float = 2.0
-    """Profit target vs stop loss ratio. Default: 2.0"""
-
-@dataclass
 class PairsConfig(BaseStrategyConfig):
     """
     Pairs trading strategy configuration
@@ -1174,8 +1029,6 @@ def create_strategy_config(strategy_type: StrategyType, **kwargs) -> BaseStrateg
         StrategyType.STATISTICAL_ARBITRAGE: StatisticalArbitrageConfig,
         StrategyType.FACTOR: FactorConfig,
         StrategyType.MULTI_ASSET: MultiAssetConfig,
-        StrategyType.TREND_FOLLOWING: TrendFollowingConfig,
-        StrategyType.BREAKOUT: BreakoutConfig,
         StrategyType.PAIRS_TRADING: PairsConfig,
         StrategyType.VOLATILITY: VolatilityConfig,
         StrategyType.ARBITRAGE: ArbitrageConfig,
@@ -1194,10 +1047,22 @@ def get_all_strategy_configs() -> Dict[StrategyType, BaseStrategyConfig]:
     Returns:
         Dictionary mapping strategy types to default configs
     """
-    return {
-        strategy_type: create_strategy_config(strategy_type)
-        for strategy_type in StrategyType
-    }
+    # NOTE: StrategyType enum may include values whose implementations/configs
+    # are not present in this codebase (e.g., strategies deliberately removed).
+    # We only return configs for strategy types supported by create_strategy_config().
+    supported: Dict[StrategyType, BaseStrategyConfig] = {}
+    for strategy_type in (
+        StrategyType.MOMENTUM,
+        StrategyType.MEAN_REVERSION,
+        StrategyType.STATISTICAL_ARBITRAGE,
+        StrategyType.FACTOR,
+        StrategyType.MULTI_ASSET,
+        StrategyType.PAIRS_TRADING,
+        StrategyType.VOLATILITY,
+        StrategyType.ARBITRAGE,
+    ):
+        supported[strategy_type] = create_strategy_config(strategy_type)
+    return supported
 
 # ============================================================================
 # BACKWARD COMPATIBILITY

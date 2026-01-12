@@ -49,8 +49,6 @@ from .implementations import (
     EnhancedStatisticalArbitrageStrategy,
     EnhancedFactorStrategy, FactorConfig,
     EnhancedMultiAssetStrategy, MultiAssetConfig,
-    EnhancedTrendFollowingStrategy, TrendFollowingConfig,
-    EnhancedBreakoutStrategy, BreakoutConfig,
     EnhancedPairsTradingStrategy, PairsConfig,
     EnhancedVolatilityStrategy, VolatilityConfig,
     EnhancedArbitrageStrategy, ArbitrageConfig
@@ -160,8 +158,6 @@ class EnhancedStrategyFactory:
         StrategyType.STATISTICAL_ARBITRAGE: EnhancedStatisticalArbitrageStrategy,
         StrategyType.FACTOR: EnhancedFactorStrategy,
         StrategyType.MULTI_ASSET: EnhancedMultiAssetStrategy,
-        StrategyType.TREND_FOLLOWING: EnhancedTrendFollowingStrategy,
-        StrategyType.BREAKOUT: EnhancedBreakoutStrategy,
         StrategyType.PAIRS_TRADING: EnhancedPairsTradingStrategy,
         StrategyType.SES_PAIRS_TRADING: SESPairsTradingStrategy,  # Advanced SES-based pairs
         StrategyType.VOLATILITY: EnhancedVolatilityStrategy,
@@ -175,8 +171,6 @@ class EnhancedStrategyFactory:
         StrategyType.STATISTICAL_ARBITRAGE: StatisticalArbitrageConfig,
         StrategyType.FACTOR: FactorConfig,
         StrategyType.MULTI_ASSET: MultiAssetConfig,
-        StrategyType.TREND_FOLLOWING: TrendFollowingConfig,
-        StrategyType.BREAKOUT: BreakoutConfig,
         StrategyType.PAIRS_TRADING: PairsConfig,
         StrategyType.SES_PAIRS_TRADING: PairsConfig,  # SES uses same config as pairs
         StrategyType.VOLATILITY: VolatilityConfig,

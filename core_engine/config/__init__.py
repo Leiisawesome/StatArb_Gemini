@@ -101,8 +101,6 @@ from .strategies import (
     StatisticalArbitrageConfig,
     FactorConfig,
     MultiAssetConfig,
-    TrendFollowingConfig,
-    BreakoutConfig,
     PairsConfig,
     VolatilityConfig,
     ArbitrageConfig,
@@ -152,8 +150,8 @@ __all__ = [
     # Strategies
     'StrategyType', 'BaseStrategyConfig', 'StrategyConfig',
     'MomentumConfig', 'MeanReversionConfig', 'StatisticalArbitrageConfig',
-    'FactorConfig', 'MultiAssetConfig', 'TrendFollowingConfig',
-    'BreakoutConfig', 'PairsConfig', 'VolatilityConfig', 'ArbitrageConfig',
+    'FactorConfig', 'MultiAssetConfig',
+    'PairsConfig', 'VolatilityConfig', 'ArbitrageConfig',
     'create_strategy_config', 'get_all_strategy_configs',
 
     # Utilities
