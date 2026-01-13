@@ -171,6 +171,25 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
         logger.info(f"🧠 Enhanced Strategy {self.strategy_id} ({self.strategy_type.value}) initialized")
 
     # ========================================
+    # BACKWARD-COMPAT DATA ACCESSORS (Rule 7)
+    # ========================================
+
+    @property
+    def market_data(self) -> Dict[str, pd.DataFrame]:
+        """
+        Backward-compatible accessor for strategy market data cache.
+
+        Rule 7: the canonical cache lives in the skeleton (`_market_data`). Strategy
+        implementations should not maintain their own parallel stores.
+        """
+        return self._market_data
+
+    @market_data.setter
+    def market_data(self, value: Dict[str, pd.DataFrame]) -> None:
+        # Compatibility: some implementations may assign to market_data directly.
+        self._market_data = value if isinstance(value, dict) else {}
+
+    # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
 
@@ -592,11 +611,76 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
         return True
 
+    def _validate_enriched_data_basic(
+        self,
+        enriched_data: Dict[str, pd.DataFrame],
+        *,
+        required_ohlcv: Optional[List[str]] = None,
+        skip_empty_frames: bool = True,
+    ) -> None:
+        """
+        Skeleton helper: validate the basic enriched-data contract at the strategy boundary.
+
+        Rule 7: strategies MUST validate required inputs, but generic schema checks should
+        live in the skeleton to avoid duplication across implementations.
+
+        This method validates:
+        - enriched_data is a dict[symbol, DataFrame]
+        - required OHLCV columns exist (if provided)
+        - OHLCV columns are numeric
+
+        It may skip empty DataFrames (configurable) to match common backtest behaviors.
+        """
+        if not isinstance(enriched_data, dict):
+            raise TypeError(f"enriched_data must be a dictionary, got {type(enriched_data)}")
+
+        if required_ohlcv is None:
+            required_ohlcv = ["open", "high", "low", "close", "volume"]
+
+        for symbol, data in enriched_data.items():
+            if not isinstance(data, pd.DataFrame):
+                raise TypeError(f"{symbol} data must be a DataFrame, got {type(data)}")
+
+            if data.empty:
+                if skip_empty_frames:
+                    logger.warning(f"    {symbol} has empty DataFrame, skipping")
+                    continue
+                raise ValueError(f"{symbol} has empty DataFrame")
+
+            missing_ohlcv = [col for col in required_ohlcv if col not in data.columns]
+            if missing_ohlcv:
+                raise ValueError(f"{symbol} missing required OHLCV columns: {missing_ohlcv}")
+
+            for col in required_ohlcv:
+                if not pd.api.types.is_numeric_dtype(data[col]):
+                    raise TypeError(f"{symbol}.{col} must be numeric, got {data[col].dtype}")
+
     def _initialize_data_structures(self) -> None:
         """Initialize data structures"""
         self._signals.clear()
         self._market_data.clear()
         self._indicators.clear()
+
+    def _update_market_data_cache(self, market_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Skeleton helper: update the strategy's market-data cache with defensive copies.
+
+        Rule 7: caching/plumbing belongs in the skeleton. Strategy implementations should
+        not own their own market-data cache or mutation/copy policies.
+        """
+        try:
+            symbols = getattr(self.config, "symbols", None)
+        except Exception:
+            symbols = None
+
+        for symbol, data in market_data.items():
+            if symbols and symbol not in symbols:
+                continue
+            try:
+                self._market_data[symbol] = data.copy()
+            except Exception:
+                # Fallback: best-effort assign if copy is unsupported
+                self._market_data[symbol] = data
 
     def _initialize_performance_tracking(self) -> None:
         """Initialize performance tracking"""

@@ -9,8 +9,7 @@ This enhanced strategy provides:
 - ISystemComponent interface compliance
 - Multi-timeframe momentum analysis
 - Trend strength and quality assessment
-- Dynamic position sizing based on momentum strength
-- Professional risk management integration
+- Strategy emits trade intent only (Rule 7); sizing/authorization/exits are handled by CentralRiskManager
 - Comprehensive performance tracking
 
 Key Features:
@@ -18,8 +17,7 @@ Key Features:
 - Trend quality assessment using ADX
 - Volume confirmation for momentum signals
 - Breakout detection and momentum continuation
-- Risk-adjusted position sizing
-- Momentum decay detection for exits
+- Entry-intent signal construction with diagnostics for monitoring
 
 Academic Foundations:
 - Jegadeesh & Titman (1993) momentum strategies
@@ -36,10 +34,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 import logging
-import asyncio  # FIXED: LOW #13 - Add asyncio for Lock
 
 # Professional re-architecture imports
-from .momentum_state_machine import MomentumStateMachine, SymbolStateName
+from .momentum_state_machine import MomentumStateMachine
 
 # Import enhanced base strategy
 from ...base_strategy_enhanced import EnhancedBaseStrategy
@@ -53,6 +50,25 @@ from core_engine.alpha.ads_components import PendingSignalQueue, PendingSignalCo
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 # REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
 from core_engine.config import MomentumConfig
+
+# Skeleton utilities (Rule 7): schema compatibility glue lives outside core alpha.
+from core_engine.trading.strategies.skeleton.enriched_data_utils import (
+    extract_momentum_indicator_series,
+    momentum_default_column_mapping,
+    resolve_expected_or_mapped_column,
+    validate_required_indicator_columns,
+)
+from core_engine.trading.strategies.skeleton.bar_scanner import scan_bars_at_interval
+from core_engine.trading.strategies.skeleton.composite_feature_utils import (
+    CompositeFallbackParams,
+    fallback_compute_composite_signals,
+    normalize_composite_pct,
+)
+from core_engine.trading.strategies.skeleton.ads_sms_utils import sms_regime_label_from_ads_vector
+from core_engine.trading.strategies.skeleton.ads_regime_adapter import ADSRegimeVectorCache
+from core_engine.trading.strategies.skeleton.data_quality_utils import is_ffill_stale
+from core_engine.trading.strategies.skeleton.dataframe_utils import extract_bar_timestamp, safe_iloc
+from core_engine.trading.strategies.skeleton.signal_type_utils import side_from_signal
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +90,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     - ISystemComponent interface compliance
     - Multi-timeframe momentum analysis
     - Trend strength and quality assessment
-    - Dynamic position sizing based on momentum strength
-    - Comprehensive performance tracking and risk management
+    - Trade intent generation only (Rule 7); sizing/authorization/exits are handled by CentralRiskManager
+    - Comprehensive performance tracking (skeleton) + diagnostics in intent additional_data (alpha)
     """
 
     def __init__(self, config: MomentumConfig):
@@ -85,54 +101,36 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         self.config: MomentumConfig = config
 
         # Strategy-specific state
-        self.market_data: Dict[str, pd.DataFrame] = {}
         self.indicators: Dict[str, Dict[str, pd.Series]] = {}
         self.momentum_data: Dict[str, Dict[str, float]] = {}
 
         # State Machine (Professional re-architecture)
         self.state_machine = MomentumStateMachine()
 
-        # Performance tracking
-        self.trade_history: List[Dict[str, Any]] = []
-        self.momentum_performance: Dict[str, Dict[str, float]] = {}
-
         # ADS v3.1: pending signal queue (SMS maturation) + per-symbol regime vector memory
         self.pending_signals = PendingSignalQueue(
             max_pending=getattr(config, "sms_max_pending", 50)
         )
-        self._ads_regime_prev: Dict[str, ADSRegimeVector] = {}
+        self._ads_regime_cache = ADSRegimeVectorCache()
 
         # FIXED: MED #8 - Cache column mapping for performance
-        self._column_mapping_cache = self._get_column_mapping()
+        self._column_mapping_cache = momentum_default_column_mapping()
 
-        logger.info(f"  Enhanced Momentum Strategy {self.strategy_id} initialized")
-
-        # Performance/log-noise: avoid per-bar INFO logs in generate_signals().
-        self._bar_log_counter: int = 0
+        # Avoid noisy init logs from inside alpha implementations; skeleton/orchestrator can own lifecycle logging.
 
         # Diagnostics: summarize why the state machine didn't trigger entries (no per-bar spam).
         self._sm_entry_reasons: Dict[str, int] = {}
         self._sm_entries_triggered: int = 0
 
-    # ========================================
-    # ADS v3.1: REGIME VECTOR ADAPTER
-    # ========================================
-
-    def _get_ads_regime_vector(self, symbol: str) -> Tuple[ADSRegimeVector, Dict[str, Any]]:
+    @property
+    def market_data(self) -> Dict[str, pd.DataFrame]:
         """
-        Best-effort adapter to ADS continuous regime vector.
-        Uses system RegimeContext if available; otherwise falls back to conservative defaults.
-        """
-        regime_context = None
-        try:
-            regime_context = self.get_current_regime_context()
-        except Exception:
-            regime_context = None
+        Backward-compatible alias to the skeleton market-data cache.
 
-        prev = self._ads_regime_prev.get(symbol)
-        r, diag = ADSRegimeVector.from_regime_context(regime_context, prev=prev)
-        self._ads_regime_prev[symbol] = r
-        return r, diag
+        Rule 7: caching/plumbing belongs in the skeleton. Momentum implementation
+        uses this alias to avoid maintaining a second 'truth' store.
+        """
+        return self._market_data
 
     @staticmethod
     def _normalize_composite_pct(x: float) -> float:
@@ -144,13 +142,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
           - If -1 <= x <= 1: treat as signed scale and map to [0,100] via (x+1)/2*100.
           - Else: assume already in percent space (best-effort) and clip.
         """
-        try:
-            v = float(x)
-        except Exception:
-            return 0.0
-        if -1.0 <= v <= 1.0:
-            v = (v + 1.0) * 50.0
-        return float(np.clip(v, 0.0, 100.0))
+        return normalize_composite_pct(x)
 
     def _fallback_compute_composite_signals(
         self,
@@ -163,72 +155,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         This is intentionally lightweight and deterministic (smoke-test focused).
         """
-        try:
-            if "close" not in data.columns:
-                return None, None
-
-            n = len(data)
-            if idx < 0:
-                idx = n + idx
-            if idx <= 0 or idx >= n:
-                return None, None
-
-            sp = int(getattr(self.config, "short_period", 10))
-            mp = int(getattr(self.config, "medium_period", 20))
-            lp = int(getattr(self.config, "long_period", 50))
-            lookback = int(getattr(self.config, "lookback_period", 60))
-
-            # Need enough history for long_period and rolling window.
-            if idx < max(lp, lookback):
-                return None, None
-
-            close = data["close"].to_numpy(copy=False)
-
-            def m_at(j: int) -> float:
-                # Multi-horizon return blend (weights tuned for stability)
-                r_s = (close[j] / close[j - sp] - 1.0) if j - sp >= 0 else 0.0
-                r_m = (close[j] / close[j - mp] - 1.0) if j - mp >= 0 else 0.0
-                r_l = (close[j] / close[j - lp] - 1.0) if j - lp >= 0 else 0.0
-                return float(0.5 * r_s + 0.3 * r_m + 0.2 * r_l)
-
-            start = max(lp, idx - lookback + 1)
-            window = [m_at(j) for j in range(start, idx + 1)]
-            if len(window) < 10:
-                return None, None
-
-            mu = float(np.mean(window))
-            sd = float(np.std(window))
-            if sd <= 1e-12:
-                return None, None
-
-            m_last = float(window[-1])
-            composite_z = (m_last - mu) / sd
-
-            # Percentile rank within the window (0..100), ties -> upper rank.
-            sorted_w = sorted(window)
-            rank = 0
-            for v in sorted_w:
-                if v <= m_last:
-                    rank += 1
-                else:
-                    break
-            composite_pct = 100.0 * rank / float(len(sorted_w))
-
-            return float(composite_z), float(composite_pct)
-        except Exception:
-            return None, None
-
-    @staticmethod
-    def _sms_regime_label(r: ADSRegimeVector) -> str:
-        """Map ADS regime vector to SMS exponent label."""
-        v = float(r.volatility)
-        if v <= 0.30:
-            return "low_vol"
-        if v <= 0.70:
-            return "normal"
-        if v <= 0.90:
-            return "high_vol"
-        return "crisis"
+        params = CompositeFallbackParams(
+            short_period=int(getattr(self.config, "short_period", 10)),
+            medium_period=int(getattr(self.config, "medium_period", 20)),
+            long_period=int(getattr(self.config, "long_period", 50)),
+            lookback_period=int(getattr(self.config, "lookback_period", 60)),
+        )
+        return fallback_compute_composite_signals(data=data, idx=idx, params=params)
 
     def _try_emit_matured_pending(self, symbol: str, data: pd.DataFrame, idx: int) -> Optional[StrategySignal]:
         """
@@ -346,67 +279,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         return None
 
-    def _safe_iloc(self, df: pd.DataFrame, idx: int) -> Optional[pd.Series]:
-        """
-        Safe DataFrame row access with bounds checking (FIXED: HIGH #2)
-
-        Handles negative indices and prevents IndexError from off-by-one errors.
-
-        Args:
-            df: DataFrame to access
-            idx: Index position (can be negative)
-
-        Returns:
-            Row as Series if valid, None if out of bounds
-        """
-        # Convert negative index
-        if idx < 0:
-            idx = len(df) + idx
-
-        # Bounds check
-        if idx < 0 or idx >= len(df):
-            logger.warning(f"    Index {idx} out of bounds for DataFrame with {len(df)} rows")
-            return None
-
-        return df.iloc[idx]
-
-    def _is_long_signal(self, signal_type: SignalType) -> bool:
-        """Check if signal is a long entry/buy"""
-        return signal_type in [SignalType.BUY, SignalType.LONG_ENTRY]
-
-    def _is_short_signal(self, signal_type: SignalType) -> bool:
-        """Check if signal is a short entry/sell"""
-        return signal_type in [SignalType.SELL, SignalType.SHORT_ENTRY]
-
-    def _get_side_from_signal(self, signal_type: SignalType) -> str:
-        """Normalize signal type to BUY/SELL string for pending queue"""
-        if self._is_long_signal(signal_type):
-            return "BUY"
-        if self._is_short_signal(signal_type):
-            return "SELL"
-        return "UNKNOWN"
-
-    def _get_column_mapping(self) -> Dict[str, str]:
-        """
-        Get mapping from expected column names to actual column names in enriched DataFrame
-
-        Returns:
-            Dict mapping expected names to actual names
-        """
-        return {
-            # Moving averages - check for sma_10, sma_20, sma_50 (actual) or SMA_10, SMA_20, SMA_50 (expected)
-            'SMA_10': 'sma_10',  # May not exist if not configured
-            'SMA_20': 'sma_20',  # Actual from indicator engine
-            'SMA_50': 'sma_50',  # Actual from indicator engine
-            # Momentum indicators
-            'RSI_14': 'rsi',     # Actual from indicator engine (period is config-dependent)
-            'ADX_14': 'adx',     # Actual from indicator engine
-            'MACD': 'macd',      # Actual from indicator engine
-            'ATR_14': 'atr',     # Actual from indicator engine
-            # Volume (same name)
-            'volume_ratio': 'volume_ratio'  # Same in both
-        }
-
     def _get_column_name(self, expected_name: str, data: pd.DataFrame) -> str:
         """
         Get actual column name from DataFrame, checking both expected and mapped names
@@ -419,76 +291,39 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         Returns:
             Actual column name if found, otherwise expected_name
         """
-        # First check if expected name exists (backward compatibility)
-        if expected_name in data.columns:
-            return expected_name
-
-        # FIXED: MED #8 - Use cached mapping instead of recreating
-        if expected_name in self._column_mapping_cache:
-            mapped_name = self._column_mapping_cache[expected_name]
-            if mapped_name in data.columns:
-                return mapped_name
-
-        # Return expected name (will cause error in validation if not found)
-        return expected_name
+        # Rule 7: schema compatibility glue belongs in skeleton utilities.
+        # Preserve historical behavior: return expected_name if nothing matches.
+        return resolve_expected_or_mapped_column(
+            data=data,
+            expected_name=expected_name,
+            mapping=self._column_mapping_cache,
+        )
 
     def _validate_enriched_data(self, enriched_data: Dict[str, pd.DataFrame]) -> None:
         """
-        Validate that data is enriched with required indicators (Rule 3 Phase 4)
+        Core-alpha declaration: required indicators for momentum signal generation.
 
-        This method ensures the data has passed through the ProcessingPipelineOrchestrator
-        and contains all indicators required by the momentum strategy.
-
-        Uses flexible column name mapping to handle both expected and actual column names.
-
-        Args:
-            enriched_data: Dict[symbol, enriched DataFrame]
-
-        Raises:
-            ValueError: If data is missing required indicators
+        The mechanics of validation live in skeleton utilities (Rule 7).
         """
-        # Required indicators with flexible naming
         required_indicators = {
-            'SMA_10': ['sma_10', 'SMA_10'],  # Optional - may not be configured
-            'SMA_20': ['sma_20', 'SMA_20'],  # Required
-            'SMA_50': ['sma_50', 'SMA_50'],  # Required
-            'RSI_14': ['rsi', 'RSI_14'],     # Required
-            'ADX_14': ['adx', 'ADX_14'],     # Required
-            'MACD': ['macd', 'MACD'],        # Required
-            'ATR_14': ['atr', 'ATR_14'],     # Required
-            'volume_ratio': ['volume_ratio'] # Required
+            "SMA_10": ["sma_10", "SMA_10"],  # Optional - may not be configured
+            "SMA_20": ["sma_20", "SMA_20"],
+            "SMA_50": ["sma_50", "SMA_50"],
+            "RSI_14": ["rsi", "RSI_14"],
+            "ADX_14": ["adx", "ADX_14"],
+            "MACD": ["macd", "MACD"],
+            "ATR_14": ["atr", "ATR_14"],
+            "volume_ratio": ["volume_ratio"],
         }
 
-        for symbol, data in enriched_data.items():
-            if data.empty:
-                raise ValueError(f"{symbol} has empty DataFrame")
-
-            missing = []
-            for expected_name, possible_names in required_indicators.items():
-                # Check if any of the possible names exist
-                found = any(name in data.columns for name in possible_names)
-                if not found:
-                    # SMA_10 is optional, others are required
-                    if expected_name != 'SMA_10':
-                        missing.append(expected_name)
-
-            if missing:
-                available_cols = list(data.columns[:30])  # Show first 30 columns
-                # Find similar column names
-                similar = {}
-                for missing_col in missing:
-                    mapping = self._get_column_mapping()
-                    if missing_col in mapping:
-                        similar[missing_col] = mapping[missing_col]
-
-                raise ValueError(
-                    f"{symbol} missing required indicators: {missing}. "
-                    f"Expected mappings: {similar}. "
-                    f"Data must be enriched via ProcessingPipelineOrchestrator (Rule 3). "
-                    f"Available columns: {available_cols[:20]}..."
-                )
-
-            logger.debug(f"  {symbol} enriched data validated: {len(required_indicators)} indicators present")
+        validate_required_indicator_columns(
+            enriched_data,
+            required_indicators=required_indicators,
+            optional_expected={"SMA_10"},
+            mapping_suggestions=self._column_mapping_cache,
+            cols_preview=20,
+            logger=logger,
+        )
 
     # NOTE (Rule 7): lifecycle, health, summary, and config validation are provided by
     # `EnhancedBaseStrategy`. This implementation is intentionally core-alpha only.
@@ -504,40 +339,24 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         start_time = datetime.now()
         signals = []
 
-        # FIXED: EXTRA - Comprehensive input validation at strategy boundary
-        if not isinstance(enriched_data, dict):
-            raise TypeError(f"enriched_data must be a dictionary, got {type(enriched_data)}")
-
         if not enriched_data:
-            logger.warning("    generate_signals() called with empty enriched_data")
+            logger.warning("generate_signals() called with empty enriched_data")
             return []
 
-        # Validate all values are DataFrames with numeric dtypes
-        for symbol, data in enriched_data.items():
-            if not isinstance(data, pd.DataFrame):
-                raise TypeError(f"{symbol} data must be a DataFrame, got {type(data)}")
-
-            if data.empty:
-                logger.warning(f"    {symbol} has empty DataFrame, skipping")
-                continue
-
-            # Check for required OHLCV columns
-            required_ohlcv = ['open', 'high', 'low', 'close', 'volume']
-            missing_ohlcv = [col for col in required_ohlcv if col not in data.columns]
-            if missing_ohlcv:
-                raise ValueError(f"{symbol} missing required OHLCV columns: {missing_ohlcv}")
-
-            # Validate numeric dtypes for price/volume
-            for col in required_ohlcv:
-                if not pd.api.types.is_numeric_dtype(data[col]):
-                    raise TypeError(f"{symbol}.{col} must be numeric, got {data[col].dtype}")
+        # Rule 7: generic boundary validation belongs in skeleton (EnhancedBaseStrategy).
+        # Keep momentum-specific indicator validation below.
+        self._validate_enriched_data_basic(
+            enriched_data,
+            required_ohlcv=["open", "high", "low", "close", "volume"],
+            skip_empty_frames=True,
+        )
 
         try:
             # PHASE 4: Validate enriched data (Rule 3)
             self._validate_enriched_data(enriched_data)
 
             # Update market data with enriched data
-            self._update_market_data(enriched_data)
+            self._update_market_data_cache(enriched_data)
 
             # Update momentum analysis (using pre-calculated indicators)
             self._update_momentum_analysis()
@@ -555,8 +374,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Summary logging
             symbols_checked = [s for s in self.config.symbols if s in self.market_data and len(self.market_data[s]) > self.config.long_period]
             
+            # One bounded summary line (acceptable ops visibility, not per-bar spam).
             if len(signals) > 0:
-                logger.info(f"  Momentum Strategy: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s")
+                logger.info(
+                    f"Momentum: {len(symbols_checked)} symbols, {len(signals)} signals in {generation_time:.3f}s"
+                )
             # Heartbeat removed to reduce log noise during long backtests (ADS v3.1 compliance)
 
             return signals
@@ -581,9 +403,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             data = self.market_data[symbol]
 
             # Use safe_iloc for bounds checking
-            current_data = self._safe_iloc(data, idx)
+            current_data = safe_iloc(data, idx, logger=logger)
             if current_data is None:
-                logger.warning(f"    [{symbol}] Cannot evaluate bar at index {idx} - out of bounds")
+                # Defensive guard; avoid log spam in historical scan mode.
                 return None
 
             # Check minimum data requirement
@@ -591,69 +413,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             if actual_idx < self.config.long_period:
                 return None
 
-            # Extract timestamp from DataFrame index (not from column)
-            signal_timestamp = None
-            try:
-                # Try to get from index (most common case - DatetimeIndex)
-                if isinstance(data.index, pd.DatetimeIndex):
-                    signal_timestamp = data.index[actual_idx]
-                elif hasattr(data.index, 'iloc'):
-                    signal_timestamp = data.index.iloc[actual_idx]
-                else:
-                    signal_timestamp = data.index[actual_idx]
-
-                # Convert to datetime if it's a pandas Timestamp
-                if isinstance(signal_timestamp, pd.Timestamp):
-                    signal_timestamp = signal_timestamp.to_pydatetime()
-                elif not isinstance(signal_timestamp, datetime):
-                    # Try to convert if it's a string or other type
-                    if isinstance(signal_timestamp, str):
-                        try:
-                            signal_timestamp = datetime.fromisoformat(signal_timestamp.replace('Z', '+00:00'))
-                        except:
-                            signal_timestamp = None
-                    else:
-                        signal_timestamp = None
-            except Exception as e:
-                logger.debug(f"Could not extract timestamp from index: {e}")
-                signal_timestamp = None
-
-            # Fallback: try to get from timestamp-like columns if index extraction failed
-            if not signal_timestamp:
-                try:
-                    # Prefer DataFrame columns (works even when index is RangeIndex)
-                    for col in ("timestamp", "Timestamp", "datetime", "date", "time"):
-                        if col in data.columns:
-                            ts = data[col].iloc[actual_idx]
-                            if isinstance(ts, pd.Timestamp):
-                                signal_timestamp = ts.to_pydatetime()
-                            elif isinstance(ts, datetime):
-                                signal_timestamp = ts
-                            elif isinstance(ts, str):
-                                try:
-                                    signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                                except Exception:
-                                    signal_timestamp = None
-                            else:
-                                # Best-effort coercion (e.g., numpy datetime64)
-                                try:
-                                    ts2 = pd.Timestamp(ts)
-                                    signal_timestamp = ts2.to_pydatetime()
-                                except Exception:
-                                    signal_timestamp = None
-                            if signal_timestamp:
-                                break
-                except Exception:
-                    signal_timestamp = None
-
-            # Last resort: attempt to coerce the index value at actual_idx into a timestamp
-            if not signal_timestamp:
-                try:
-                    ts2 = pd.Timestamp(data.index[actual_idx])
-                    if not pd.isna(ts2):
-                        signal_timestamp = ts2.to_pydatetime()
-                except Exception:
-                    signal_timestamp = None
+            # Extract timestamp (skeleton utility)
+            signal_timestamp = extract_bar_timestamp(data, actual_idx, logger=logger)
 
             # FIXED: HIGH #4 - Do NOT use datetime.now() fallback for bar timestamps
             if not signal_timestamp:
@@ -759,11 +520,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             if should_enter and signal_type:
                 # ADS v3.1  1: SMS gate with pending/stale maturation
-                side = self._get_side_from_signal(signal_type)
+                side = side_from_signal(signal_type)
                 
                 # Check if already pending for this symbol/side to avoid logic flooding
                 if self.pending_signals.get(symbol, side):
-                    logger.debug(f"  [{symbol}] {side} signal already pending, skipping redundant enqueue")
+                    # Avoid noisy per-bar diagnostics here; pending queue already prevents flooding.
                     return None
 
                 # ADS v3.1: Consolidate ADS context (SMS values + ERAR object)
@@ -874,7 +635,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     async def _generate_symbol_signals(self, symbol: str) -> List[StrategySignal]:
         """Generate signals for a specific symbol"""
 
-        logger.debug(f"_generate_symbol_signals called for {symbol}")
         signals = []
 
         try:
@@ -883,10 +643,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             
 
             # Get current indicators and momentum data
-            logger.debug(f"  [{symbol}] Checking data availability:")
-            logger.debug(f"   symbol in self.indicators: {symbol in self.indicators}")
-            logger.debug(f"   symbol in self.momentum_data: {symbol in self.momentum_data}")
-
             if symbol not in self.indicators:
                 logger.warning(f"  [{symbol}] Missing indicators - cannot generate signals")
                 return signals
@@ -900,31 +656,24 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Check if we should scan all bars (historical mode) or just current bar (live mode)
             if self.config.scan_all_bars and data_length > self.config.long_period:
                 # Historical scanning mode: scan through all bars
-                logger.info(f"[{symbol}]   Historical scanning mode: scanning {data_length} bars "
-                           f"(evaluating every {self.config.scan_interval} bars)")
+                # (No per-symbol scan mode logging; backtest harness can report progress)
 
                 start_idx = self.config.long_period
                 end_idx = data_length
                 scan_interval = max(1, self.config.scan_interval)
 
-                bars_evaluated = 0
-                for idx in range(start_idx, end_idx, scan_interval):
-                    # ADS v3.1: emit any matured pending signals first
-                    matured = self._try_emit_matured_pending(symbol, data, idx)
-                    if matured is not None:
-                        signals.append(matured)
+                # Rule 7: bar-iteration orchestration is skeleton; alpha supplies evaluation callbacks.
+                res = await scan_bars_at_interval(
+                    start_idx=int(start_idx),
+                    end_idx=int(end_idx),
+                    scan_interval=int(scan_interval),
+                    emit_pending_at_index=lambda i: self._try_emit_matured_pending(symbol, data, i),
+                    evaluate_at_index=lambda i: self._evaluate_bar_at_index(symbol, i),
+                )
 
-                    signal = await self._evaluate_bar_at_index(symbol, idx)
-                    if signal:
-                        signals.append(signal)
-                    bars_evaluated += 1
-
-                logger.info(f"[{symbol}]   Historical scan complete: {bars_evaluated} bars evaluated, "
-                           f"{len(signals)} signals generated")
-                return signals
+                return res.signals
 
             # Live mode: Evaluate only current bar (default behavior)
-            logger.debug(f"[{symbol}] Live mode: evaluating current bar only")
 
             matured = self._try_emit_matured_pending(symbol, self.market_data[symbol], -1)
             if matured is not None:
@@ -953,55 +702,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         """
         for symbol in self.config.symbols:
             if symbol in self.market_data:
-                logger.debug(f"  Updating momentum analysis for {symbol} from enriched data")
                 self.momentum_data[symbol] = self._analyze_symbol_momentum(symbol)
                 # Also populate indicators dictionary for signal generation
                 self._extract_indicators_from_data(symbol)
-                logger.debug(f"  Momentum data updated for {symbol}: {list(self.momentum_data[symbol].keys()) if symbol in self.momentum_data else 'FAILED'}")
             else:
                 logger.warning(f"    Cannot update momentum for {symbol} - missing market data")
-
-    def _check_stale_ffill(self, series: pd.Series, max_stale_bars: int = 10) -> bool:
-        """
-        Check if forward-filled data is stale (too many consecutive fills)
-
-        Args:
-            series: The ffilled pandas Series
-            max_stale_bars: Maximum allowed consecutive ffilled bars
-
-        Returns:
-            True if data is stale (too many consecutive fills), False otherwise
-
-        MED #6: Add max_stale_bars check for ffill stale data detection
-        """
-        if series.empty or len(series) < 2:
-            return False
-
-        try:
-            # Count consecutive identical values at the end (indicating ffill)
-            last_value = series.iloc[-1]
-
-            # Skip if NaN
-            if pd.isna(last_value):
-                return True  # NaN is considered stale
-
-            consecutive_same = 1
-            for i in range(len(series) - 2, max(-1, len(series) - max_stale_bars - 2), -1):
-                if pd.isna(series.iloc[i]) or series.iloc[i] != last_value:
-                    break
-                consecutive_same += 1
-
-            # Stale if too many consecutive identical values
-            is_stale = consecutive_same >= max_stale_bars
-
-            if is_stale:
-                logger.warning(f"Stale ffill detected: {consecutive_same} consecutive bars with value {last_value}")
-
-            return is_stale
-
-        except Exception as e:
-            logger.error(f"Error checking stale ffill: {e}")
-            return False
 
     def _analyze_symbol_momentum(self, symbol: str) -> Dict[str, float]:
         """
@@ -1032,7 +737,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 short_momentum_series = data[short_momentum_col].ffill()
 
                 # Check for stale ffill data (MED #6)
-                if self._check_stale_ffill(short_momentum_series, max_stale_bars=10):
+                if is_ffill_stale(short_momentum_series, max_stale_bars=10, logger=logger):
+                    # Data-quality guard; keep as warning because it indicates pipeline/data issues.
                     logger.warning(f"[{symbol}] Stale short momentum data detected, using fallback")
                     short_momentum = current_row.get('momentum_short', 0.0)
                 # If still NaN after forward-fill, check if we have any valid values
@@ -1049,7 +755,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 medium_momentum_series = data[medium_momentum_col].ffill()
 
                 # Check for stale ffill data (MED #6)
-                if self._check_stale_ffill(medium_momentum_series, max_stale_bars=10):
+                if is_ffill_stale(medium_momentum_series, max_stale_bars=10, logger=logger):
                     logger.warning(f"[{symbol}] Stale medium momentum data detected, using fallback")
                     medium_momentum = current_row.get('momentum_medium', 0.0)
                 elif pd.isna(medium_momentum_series.iloc[-1]):
@@ -1064,7 +770,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 long_momentum_series = data[long_momentum_col].ffill()
 
                 # Check for stale ffill data (MED #6)
-                if self._check_stale_ffill(long_momentum_series, max_stale_bars=10):
+                if is_ffill_stale(long_momentum_series, max_stale_bars=10, logger=logger):
                     logger.warning(f"[{symbol}] Stale long momentum data detected, using fallback")
                     long_momentum = current_row.get('momentum_long', 0.0)
                 elif pd.isna(long_momentum_series.iloc[-1]):
@@ -1075,7 +781,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             else:
                 long_momentum = current_row.get('momentum_long', 0.0)
 
-            logger.debug(f"[{symbol}] Momentum values: short={short_momentum:.6f}, medium={medium_momentum:.6f}, long={long_momentum:.6f}")
+            # Avoid per-bar debug logging inside alpha.
 
             # Calculate momentum strength (combination of all timeframes)
             # Use configurable weights from centralized config (Rule 1)
@@ -1128,39 +834,24 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         try:
             data = self.market_data[symbol]
 
-            # Extract indicators as Series for signal generation (using column mapping)
-            adx_col = self._get_column_name('ADX_14', data)
-            volume_ratio_col = self._get_column_name('volume_ratio', data)
-
-            # FIXED: MED #9 - Reindex to data.index to ensure alignment
-            # Get indicators with fallback to last valid value if current is NaN
-            if adx_col in data.columns:
-                adx_series = data[adx_col].reindex(data.index)
-            else:
-                adx_series = pd.Series([25.0] * len(data), index=data.index)
-
-            if volume_ratio_col in data.columns:
-                volume_ratio_series = data[volume_ratio_col].reindex(data.index)
-            else:
-                volume_ratio_series = pd.Series([1.0] * len(data), index=data.index)
-
-            if 'trend_strength' in data.columns:
-                trend_strength_series = data['trend_strength'].reindex(data.index)
-            else:
-                trend_strength_series = pd.Series([0.0] * len(data), index=data.index)
-
-            # Forward fill NaN values with last valid value (for indicators that need lookback)
-            adx_series = adx_series.ffill().fillna(25.0)  # Default ADX if all NaN
-            volume_ratio_series = volume_ratio_series.ffill().fillna(1.0)  # Default 1.0 if all NaN
-            trend_strength_series = trend_strength_series.ffill().fillna(0.0)  # Default 0.0 if all NaN
+            # Rule 7: schema-compatibility glue lives in skeleton utilities.
+            bundle = extract_momentum_indicator_series(
+                data=data,
+                adx_candidates=[self._get_column_name("ADX_14", data), "ADX_14", "adx"],
+                volume_ratio_candidates=[self._get_column_name("volume_ratio", data), "volume_ratio"],
+                trend_strength_candidates=["trend_strength"],
+                default_adx=25.0,
+                default_volume_ratio=1.0,
+                default_trend_strength=0.0,
+            )
 
             self.indicators[symbol] = {
-                'adx': adx_series,
-                'volume_ratio': volume_ratio_series,
-                'trend_strength': trend_strength_series,
+                'adx': bundle.adx,
+                'volume_ratio': bundle.volume_ratio,
+                'trend_strength': bundle.trend_strength,
             }
 
-            logger.debug(f"  Extracted indicators for {symbol}: {list(self.indicators[symbol].keys())}")
+            # Avoid per-symbol debug logging inside alpha.
 
         except Exception as e:
             logger.error(f"Failed to extract indicators for {symbol}: {e}")
@@ -1177,12 +868,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         try:
             if symbol not in self.market_data or symbol not in self.indicators:
-                logger.debug(f"[{symbol}] Breakout check: missing data or indicators")
                 return False
 
             data = self.market_data[symbol]
             if len(data) < self.config.breakout_lookback:
-                logger.debug(f"[{symbol}] Breakout check: insufficient data ({len(data)} < {self.config.breakout_lookback})")
                 return False
 
             current_price = data['close'].iloc[-1]
@@ -1196,15 +885,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 # Check if price broke above recent high
                 breakout_level = recent_high * (1 + self.config.breakout_threshold)
                 breakout_confirmed = current_price > breakout_level
-                logger.debug(f"[{symbol}] Bullish breakout check: price={current_price:.2f}, recent_high={recent_high:.2f}, "
-                           f"breakout_level={breakout_level:.2f}, confirmed={breakout_confirmed}")
                 return breakout_confirmed
             else:  # bearish
                 # Check if price broke below recent low
                 breakout_level = recent_low * (1 - self.config.breakout_threshold)
                 breakout_confirmed = current_price < breakout_level
-                logger.debug(f"[{symbol}] Bearish breakout check: price={current_price:.2f}, recent_low={recent_low:.2f}, "
-                           f"breakout_level={breakout_level:.2f}, confirmed={breakout_confirmed}")
                 return breakout_confirmed
 
         except Exception as e:
@@ -1300,32 +985,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     # HELPER METHODS
     # ========================================
 
-    def _update_market_data(self, market_data: Dict[str, pd.DataFrame]) -> None:
-        """
-        Update market data cache (FIXED: MED #10 - added .copy() for safety)
-
-        Creates defensive copy to prevent external mutations from affecting strategy state.
-        """
-
-        for symbol, data in market_data.items():
-            if symbol in self.config.symbols:
-                # Create defensive copy to prevent mutations
-                self.market_data[symbol] = data.copy()
-
-    def _initialize_data_structures(self) -> None:
-        """Initialize strategy data structures"""
-
-        self.market_data.clear()
-        self.indicators.clear()
-        self.momentum_data.clear()
-
-    def _initialize_indicators(self) -> None:
-        """Initialize indicators dictionary"""
-
-        for symbol in self.config.symbols:
-            self.indicators[symbol] = {}
-            self.momentum_data[symbol] = {}
-
     # ========================================
     # REGIME-AWARE ENTRY LOGIC (Phase 4B)
     # ========================================
@@ -1354,7 +1013,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         base_short = float(getattr(self.config, "composite_z_entry", 0.5))
         base_pct = float(getattr(self.config, "composite_pct_entry", 70.0))
 
-        ads_r, diag = self._get_ads_regime_vector(symbol=symbol)
+        ads_r, diag = self._ads_regime_cache.get_vector(
+            symbol=symbol,
+            get_regime_context=self.get_current_regime_context,
+        )
 
         reason_parts: List[str] = []
 
@@ -1497,7 +1159,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         
         # Get regime label for stateful SMS if needed, but for context we compute a snapshot score
         ads_r = thresholds.get("ads_regime_vector_obj")
-        regime_label = self._sms_regime_label(ads_r)
+        regime_label = sms_regime_label_from_ads_vector(ads_r)
         
         sms_score = float(np.clip(0.5 * tau + 0.5 * raw_strength, 0.0, 1.0))
 
@@ -1614,10 +1276,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             inflection_data = self._detect_momentum_inflection(
                 symbol, enriched_data, current_idx, lookback=5
             )
-            logger.debug(f"  [{symbol}] Inflection: detected={inflection_data.get('inflection_detected')}, "
-                        f"type={inflection_data.get('inflection_type')}, "
-                        f"slope={inflection_data.get('momentum_slope'):.4f}, "
-                        f"accel={inflection_data.get('momentum_accel'):.4f}")
+            # Avoid per-bar debug logging inside alpha.
 
         # CRITICAL FIX #4: Price Structure Detection
         structure_data = None
@@ -1625,10 +1284,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             structure_data = self._detect_price_structure(
                 symbol, enriched_data, current_idx, lookback=5
             )
-            logger.debug(f"  [{symbol}] Structure: type={structure_data.get('structure_type')}, "
-                        f"quality={structure_data.get('structure_quality'):.2f}, "
-                        f"pivot={structure_data.get('pivot_confirmed')}, "
-                        f"basing={structure_data.get('basing_detected')}")
+            # Avoid per-bar debug logging inside alpha.
 
         # CRITICAL FIX #5: Fast Momentum Slope (replaces slow ADX)
         momentum_slope = 0.0
@@ -1636,7 +1292,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             momentum_slope = self._calculate_momentum_slope(
                 symbol, enriched_data, current_idx, lookback=3
             )
-            logger.debug(f"  [{symbol}] Momentum slope: {momentum_slope:.4f}")
+            # Avoid per-bar debug logging inside alpha.
 
         # LONG entry: Composite threshold + structure + momentum
         long_condition_met = (
@@ -1647,7 +1303,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         # Add inflection boost (allows earlier entry if inflection detected)
         if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bullish':
-            logger.info(f"  [{symbol}] BULLISH INFLECTION DETECTED - boosting entry confidence")
+            # Avoid per-bar INFO spam; diagnostic lives in signal additional_data if emitted.
             long_condition_met = (
                 composite_z > long_threshold * 0.8 and  # 20% lower threshold if inflection
                 composite_pct > pct_threshold * 0.9 and  # 10% lower percentile
@@ -1662,7 +1318,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 structure_data.get('basing_detected')
             )
             if not structure_confirms_long:
-                logger.debug(f"    [{symbol}] LONG: Weak price structure, reducing confidence")
+                # Avoid per-bar debug logging inside alpha.
                 long_condition_met = long_condition_met and composite_z > long_threshold * 1.2  # Require stronger signal
 
         # SHORT entry: Composite threshold + structure + momentum
@@ -1674,7 +1330,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
         # Add inflection boost for shorts
         if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bearish':
-            logger.info(f"  [{symbol}] BEARISH INFLECTION DETECTED - boosting entry confidence")
+            # Avoid per-bar INFO spam; diagnostic lives in signal additional_data if emitted.
             short_condition_met = (
                 composite_z < -short_threshold * 0.8 and
                 composite_pct < (100 - pct_threshold * 0.9) and
@@ -1688,7 +1344,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 structure_data.get('pivot_confirmed')
             )
             if not structure_confirms_short:
-                logger.debug(f"    [{symbol}] SHORT: Weak price structure, reducing confidence")
+                # Avoid per-bar debug logging inside alpha.
                 short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
 
         if long_condition_met:
@@ -1805,9 +1461,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     inflection_detected = True
                     inflection_type = 'bearish'
 
-            logger.debug(f"[{symbol}] Inflection check: slope={momentum_slope:.4f}, "
-                        f"accel={momentum_accel:.4f}, detected={inflection_detected}, "
-                        f"type={inflection_type}")
+            # Avoid per-bar debug logging inside alpha.
 
             return {
                 'inflection_detected': inflection_detected,
@@ -1920,8 +1574,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             price_range = (highs.max() - lows.min()) / closes.mean()
             basing_detected = price_range < 0.02  # Less than 2% range = basing
 
-            logger.debug(f"[{symbol}] Structure: type={structure_type}, quality={structure_quality:.2f}, "
-                        f"pivot={pivot_confirmed}, basing={basing_detected}")
+            # Avoid per-bar debug logging inside alpha.
 
             return {
                 'structure_type': structure_type,
