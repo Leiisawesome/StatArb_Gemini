@@ -248,7 +248,8 @@ strategy_registry/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.dbtests/strategy_assessment/results/
+Thumbs.db
+tests/strategy_assessment/results/
 
 # Backtest results (generated output)
 backtest/results/
