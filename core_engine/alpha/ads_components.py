@@ -794,7 +794,7 @@ def estimate_cvar_95(
     period_vol = volatility * np.sqrt(holding_days)
 
     # CVaR95 for normal: E[X | X < VaR95] ≈ -σ × 2.06
-    cvar_95 = period_vol * 2.06 * 10000  # Convert to bps
+    cvar_95 = -period_vol * 2.06 * 10000  # Convert to bps (negative for loss)
 
     return cvar_95
 
