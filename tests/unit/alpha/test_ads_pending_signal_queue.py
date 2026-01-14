@@ -1,16 +1,18 @@
 from datetime import datetime
 
-from core_engine.alpha.ads_components import ERAR, PendingSignalContext, PendingSignalQueue, SignalMaturityScore
+from core_engine.alpha.ads_components import ADSSMSGateInputs, ERAR, PendingSignalContext, PendingSignalQueue, SignalMaturityScore
 
 
 def test_pending_queue_tick_all_removes_stale():
     q = PendingSignalQueue(max_pending=50)
 
-    sms = SignalMaturityScore(
-        exhaustion=0.5,
-        reversal_prob=0.5,
-        ofi_shift=0.0,
-        vol_compression=1.0,
+    sms = SignalMaturityScore.from_inputs(
+        ADSSMSGateInputs(
+            setup_maturity=0.5,
+            setup_validity_prob=0.5,
+            signed_flow_support=0.0,
+            vol_compression=1.0,
+        ),
         pending_bars=0,
         max_pending=1,  # stale when pending_bars > 1
     )
@@ -41,11 +43,13 @@ def test_pending_queue_tick_all_removes_stale():
 def test_pending_queue_get_mature_signals_emits_and_removes():
     q = PendingSignalQueue(max_pending=50)
 
-    sms = SignalMaturityScore(
-        exhaustion=1.0,
-        reversal_prob=1.0,
-        ofi_shift=1.0,
-        vol_compression=0.5,
+    sms = SignalMaturityScore.from_inputs(
+        ADSSMSGateInputs(
+            setup_maturity=1.0,
+            setup_validity_prob=1.0,
+            signed_flow_support=1.0,
+            vol_compression=0.5,
+        ),
         pending_bars=0,
         max_pending=50,
     )

@@ -15,6 +15,7 @@ Author: StatArb_Gemini Core Engine
 """
 
 import asyncio
+import argparse
 from datetime import datetime
 from typing import Dict, Any
 import time
@@ -166,7 +167,7 @@ async def run_smoke_test(config: Dict[str, Any] = None):
     Run smoke test experiment.
 
     Args:
-        config: Optional config dict. If None, loads from smoke_test.yaml
+        config: Optional config dict. If None, loads from YAML.
     """
     if config is None:
         # Load from YAML configuration file
@@ -175,15 +176,12 @@ async def run_smoke_test(config: Dict[str, Any] = None):
 
         try:
             # Allow override without changing defaults:
-            # SMOKE_TEST_CONFIG=/abs/path/to/config.yaml python backtest/experiments/smoke_test.py
+            # - CLI:   python backtest/experiments/smoke_test.py --config /abs/path.yaml
+            # - ENV:   SMOKE_TEST_CONFIG=/abs/path.yaml python backtest/experiments/smoke_test.py
             override = os.environ.get("SMOKE_TEST_CONFIG")
-            if override:
-                config_path = Path(override)
-            else:
-                # Get path to smoke_test.yaml
-                config_path = Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'
+            config_path = Path(override) if override else (Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml')
             config = load_config(str(config_path))
-            print(f"✅ Loaded configuration from {config_path.name}")
+            print(f"✅ Loaded configuration from {config_path}")
             print(f"   Symbols: {config.get('symbols', [])}")
             print(f"   Period: {config.get('start_date')} → {config.get('end_date')}")
         except Exception as e:
@@ -208,7 +206,35 @@ async def run_smoke_test(config: Dict[str, Any] = None):
     return result
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the backtest smoke test experiment.")
+    parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        help="Path to YAML config (supports canonical papertest-suite schema). Overrides SMOKE_TEST_CONFIG.",
+    )
+    parser.add_argument(
+        "--base-config",
+        dest="base_config_path",
+        default=None,
+        help="Optional base YAML config to merge first (papertest schema only).",
+    )
+    args = parser.parse_args()
+
     # Run smoke test directly
-    result = asyncio.run(run_smoke_test())
+    if args.config_path:
+        # Keep all existing behavior in run_smoke_test (including conversion adapters) by
+        # simply setting the existing override pathway.
+        os.environ["SMOKE_TEST_CONFIG"] = args.config_path
+    if args.base_config_path:
+        # Backwards compatible extension point: config_loader supports base merges via API.
+        # We intentionally do not add new global env vars here; keep CLI simple.
+        from backtest.utils.config_loader import load_config
+        from pathlib import Path
+        cfg_path = Path(os.environ.get("SMOKE_TEST_CONFIG") or (Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml'))
+        cfg = load_config(str(cfg_path), base_config_path=args.base_config_path)
+        result = asyncio.run(run_smoke_test(cfg))
+    else:
+        result = asyncio.run(run_smoke_test())
     exit(0 if result.success else 1)
 

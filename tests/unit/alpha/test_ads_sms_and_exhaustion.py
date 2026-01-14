@@ -1,27 +1,19 @@
 import math
 
-from core_engine.alpha.ads_components import SignalMaturityScore, compute_exhaustion
+from core_engine.alpha.ads_components import ADSSMSGateInputs, SignalMaturityScore, compute_exhaustion
 
 
 def test_sms_time_decay_monotone_decreases():
-    sms0 = SignalMaturityScore(
-        exhaustion=0.8,
-        reversal_prob=0.8,
-        ofi_shift=0.2,
+    inputs = ADSSMSGateInputs(
+        setup_maturity=0.8,
+        setup_validity_prob=0.8,
+        signed_flow_support=0.2,
         vol_compression=1.0,
-        pending_bars=0,
-        max_pending=50,
     )
+    sms0 = SignalMaturityScore.from_inputs(inputs, pending_bars=0, max_pending=50)
     s0 = float(sms0.compute("normal"))
 
-    sms1 = SignalMaturityScore(
-        exhaustion=0.8,
-        reversal_prob=0.8,
-        ofi_shift=0.2,
-        vol_compression=1.0,
-        pending_bars=10,
-        max_pending=50,
-    )
+    sms1 = SignalMaturityScore.from_inputs(inputs, pending_bars=10, max_pending=50)
     s1 = float(sms1.compute("normal"))
 
     assert s1 < s0
@@ -30,16 +22,14 @@ def test_sms_time_decay_monotone_decreases():
 def test_sms_flow_factor_is_symmetric_penalty_and_reward():
     # With exp(gamma*ofi), positive OFI increases SMS and negative OFI decreases SMS.
     # In 'normal' regime, gamma=0.20 (see SignalMaturityScore.EXPONENTS).
-    base = dict(
-        exhaustion=0.7,
-        reversal_prob=0.7,
+    base = ADSSMSGateInputs(
+        setup_maturity=0.7,
+        setup_validity_prob=0.7,
         vol_compression=1.0,
-        pending_bars=0,
-        max_pending=50,
     )
-    s_pos = float(SignalMaturityScore(ofi_shift=+0.5, **base).compute("normal"))
-    s_neg = float(SignalMaturityScore(ofi_shift=-0.5, **base).compute("normal"))
-    s_zero = float(SignalMaturityScore(ofi_shift=0.0, **base).compute("normal"))
+    s_pos = float(SignalMaturityScore.from_inputs(ADSSMSGateInputs(**{**base.__dict__, "signed_flow_support": +0.5}), pending_bars=0, max_pending=50).compute("normal"))
+    s_neg = float(SignalMaturityScore.from_inputs(ADSSMSGateInputs(**{**base.__dict__, "signed_flow_support": -0.5}), pending_bars=0, max_pending=50).compute("normal"))
+    s_zero = float(SignalMaturityScore.from_inputs(ADSSMSGateInputs(**{**base.__dict__, "signed_flow_support": 0.0}), pending_bars=0, max_pending=50).compute("normal"))
 
     assert s_neg < s_zero < s_pos
 
@@ -50,16 +40,30 @@ def test_sms_flow_factor_is_symmetric_penalty_and_reward():
 
 def test_sms_is_stale_and_is_mature_respects_max_pending():
     # Even a "perfect" signal must not be mature if it's stale.
-    sms = SignalMaturityScore(
-        exhaustion=1.0,
-        reversal_prob=1.0,
-        ofi_shift=1.0,
-        vol_compression=0.5,
+    sms = SignalMaturityScore.from_inputs(
+        ADSSMSGateInputs(
+            setup_maturity=1.0,
+            setup_validity_prob=1.0,
+            signed_flow_support=1.0,
+            vol_compression=0.5,
+        ),
         pending_bars=6,
         max_pending=5,
     )
     assert sms.is_stale() is True
     assert sms.is_mature(threshold=0.1, regime="normal") is False
+
+
+def test_sms_decay_rate_parameter_changes_time_penalty():
+    inputs = ADSSMSGateInputs(
+        setup_maturity=0.8,
+        setup_validity_prob=0.8,
+        signed_flow_support=0.0,
+        vol_compression=1.0,
+    )
+    slow = float(SignalMaturityScore.from_inputs(inputs, pending_bars=10, decay_rate=0.01).compute("normal"))
+    fast = float(SignalMaturityScore.from_inputs(inputs, pending_bars=10, decay_rate=0.10).compute("normal"))
+    assert fast < slow
 
 
 def test_compute_exhaustion_volume_conviction_is_smooth_and_penalizes_high_volume_at_extremes():

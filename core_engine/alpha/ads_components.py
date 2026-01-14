@@ -35,13 +35,34 @@ logger = logging.getLogger(__name__)
 # §1. SIGNAL MATURITY SCORE (SMS) - Multiplicative Formula
 # =============================================================================
 
+@dataclass
+class ADSSMSGateInputs:
+    """
+    Strategy-independent inputs to ADS §1 Signal Maturity Score (SMS).
+
+    Semantics (SSOT):
+    - setup_maturity: [0, 1]  (how developed/baked the setup is)
+    - setup_validity_prob: [0, 1]  (probability the setup is valid for the intended direction)
+    - signed_flow_support: [-1, 1] (positive supports the intended direction)
+    - vol_compression: [0.5, 2.0] where VC = σ_short / σ_long
+    """
+
+    setup_maturity: float = 0.5
+    setup_validity_prob: float = 0.5
+    signed_flow_support: float = 0.0
+    vol_compression: float = 1.0
+    flow_source: str = "unknown"
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
+
+
 @njit_conditional
 def _compute_sms_core(
     exhaustion: Any,
-    reversal_prob: Any,
-    ofi_shift: Any,
+    setup_validity_prob: Any,
+    signed_flow_support: Any,
     vol_compression: Any,
     pending_bars: Any,
+    decay_rate: Any,
     α: float,
     β: float,
     γ: float,
@@ -51,10 +72,11 @@ def _compute_sms_core(
     # Clamp inputs to valid ranges
     # Using np.minimum/maximum instead of np.clip to handle scalars in Numba
     E = np.minimum(np.maximum(exhaustion, 0.001), 1.0)
-    P_rev = np.minimum(np.maximum(reversal_prob, 0.001), 1.0)
-    ofi = np.minimum(np.maximum(ofi_shift, -1.0), 1.0)
+    P_valid = np.minimum(np.maximum(setup_validity_prob, 0.001), 1.0)
+    flow = np.minimum(np.maximum(signed_flow_support, -1.0), 1.0)
     VC = np.minimum(np.maximum(vol_compression, 0.5), 2.0)
     t = np.maximum(0, pending_bars)
+    λ = np.maximum(0.0, decay_rate)
 
     # Multiplicative SMS formula
     #
@@ -65,10 +87,10 @@ def _compute_sms_core(
     #       flow_factor = exp(γ * ofi)  where ofi in [-1, 1]
     sms = (
         (E ** α) *
-        (P_rev ** β) *
-        (np.exp(γ * ofi)) *
+        (P_valid ** β) *
+        (np.exp(γ * flow)) *
         ((1 / VC) ** δ) *
-        np.exp(-0.05 * t)
+        np.exp(-λ * t)
     )
 
     return np.minimum(np.maximum(sms, 0.0), 1.0)
@@ -79,15 +101,15 @@ class SignalMaturityScore:
     ADS §1: Signal Maturity Score with Multiplicative Formula
 
     Formula:
-        SMS = E^α × P_rev^β × exp(γ × ΔOFI) × VC^(-δ) × e^(-λt)
+        SMS = M^α × P_valid^β × exp(γ × Flow) × VC^(-δ) × e^(-λt)
 
     Where:
-        E = Exhaustion score (Z-score × P(reversal)) [0, 1]
-        P_rev = Reversal probability (logistic) [0, 1]
-        ΔOFI = Order flow shift [-1, 1]
+        M = Setup maturity [0, 1]
+        P_valid = Setup validity probability for intended direction [0, 1]
+        Flow = Signed flow support [-1, 1] (positive supports intended direction)
         VC = Volatility compression (σ_short/σ_long) [0.5, 2.0]
         t = Bars pending (≥ 0)
-        λ = Decay rate (0.05)
+        λ = Decay rate (configurable via decay_rate)
 
     Regime-Adaptive Exponents:
         | Regime   | α    | β    | γ    | δ    |
@@ -108,6 +130,8 @@ class SignalMaturityScore:
     # Configuration
     decay_rate: float = 0.05         # λ: Time decay rate
     max_pending: int = 50            # Maximum bars before signal is stale
+    # Preferred strategy-independent contract (strategies should pass this and keep naming consistent).
+    inputs: Optional[ADSSMSGateInputs] = None
 
     # Regime-adaptive exponents
     EXPONENTS: ClassVar[Dict[str, Tuple[float, float, float, float]]] = {
@@ -127,23 +151,57 @@ class SignalMaturityScore:
         Returns:
             SMS score [0, 1]
         """
+        # Backwards compatibility: if a strategy still passes legacy fields, translate them into
+        # SSOT contract semantics.
+        inputs = self.inputs or ADSSMSGateInputs(
+            setup_maturity=float(self.exhaustion),
+            setup_validity_prob=float(self.reversal_prob),
+            signed_flow_support=float(self.ofi_shift),
+            vol_compression=float(self.vol_compression),
+        )
+
         return self.compute_vectorized(
-            self.exhaustion,
-            self.reversal_prob,
-            self.ofi_shift,
-            self.vol_compression,
+            inputs.setup_maturity,
+            inputs.setup_validity_prob,
+            inputs.signed_flow_support,
+            inputs.vol_compression,
             self.pending_bars,
-            regime
+            self.decay_rate,
+            regime,
+        )
+
+    @classmethod
+    def from_inputs(
+        cls,
+        inputs: ADSSMSGateInputs,
+        *,
+        pending_bars: int = 0,
+        decay_rate: float = 0.05,
+        max_pending: int = 50,
+    ) -> "SignalMaturityScore":
+        """
+        Preferred constructor: strategy supplies strategy-independent inputs, SMS owns only age/decay.
+        """
+        return cls(
+            exhaustion=float(inputs.setup_maturity),
+            reversal_prob=float(inputs.setup_validity_prob),
+            ofi_shift=float(inputs.signed_flow_support),
+            vol_compression=float(inputs.vol_compression),
+            pending_bars=int(pending_bars),
+            decay_rate=float(decay_rate),
+            max_pending=int(max_pending),
+            inputs=inputs,
         )
 
     @classmethod
     def compute_vectorized(
         cls,
         exhaustion: Any,
-        reversal_prob: Any,
-        ofi_shift: Any,
+        setup_validity_prob: Any,
+        signed_flow_support: Any,
         vol_compression: Any,
         pending_bars: Any,
+        decay_rate: Any,
         regime: str = 'normal'
     ) -> Any:
         """
@@ -155,10 +213,11 @@ class SignalMaturityScore:
 
         return _compute_sms_core(
             exhaustion,
-            reversal_prob,
-            ofi_shift,
+            setup_validity_prob,
+            signed_flow_support,
             vol_compression,
             pending_bars,
+            decay_rate,
             α, β, γ, δ
         )
 
@@ -186,8 +245,8 @@ class SignalMaturityScore:
         self.pending_bars += 1
 
     def __repr__(self) -> str:
-        return (f"SMS(E={self.exhaustion:.3f}, P_rev={self.reversal_prob:.3f}, "
-                f"OFI={self.ofi_shift:.3f}, VC={self.vol_compression:.3f}, "
+        return (f"SMS(maturity={self.exhaustion:.3f}, validity={self.reversal_prob:.3f}, "
+                f"flow={self.ofi_shift:.3f}, VC={self.vol_compression:.3f}, "
                 f"bars={self.pending_bars})")
 
 # =============================================================================

@@ -66,6 +66,7 @@ from .simplified_components import (
 # =============================================================================
 from .ads_components import (
     # §1 Signal Maturity Score
+    ADSSMSGateInputs,
     SignalMaturityScore,
 
     # §3 ERAR Gate
@@ -98,6 +99,7 @@ __all__ = [
     'check_structure_confirmation',
     
     # Legacy (backwards compatibility)
+    'ADSSMSGateInputs',
     'SignalMaturityScore',
     'ERAR',
     'Cooldown',

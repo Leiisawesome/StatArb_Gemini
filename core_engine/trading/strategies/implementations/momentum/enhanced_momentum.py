@@ -45,7 +45,15 @@ from core_engine.type_definitions.strategy import SignalType
 
 # ADS v3.1: continuous regime vector + tau(R)
 from core_engine.alpha.ads_regime_vector import ADSRegimeVector, compute_sms_tau
-from core_engine.alpha.ads_components import PendingSignalQueue, PendingSignalContext, SignalMaturityScore, ERAR, estimate_cvar_95
+from core_engine.alpha.ads_components import (
+    ADSSMSGateInputs,
+    PendingSignalQueue,
+    PendingSignalContext,
+    SignalMaturityScore,
+    ERAR,
+    estimate_cvar_95,
+    compute_vol_compression,
+)
 
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 # REQUIRED: Use centralized config only - no local fallback definitions per Rule 1
@@ -200,10 +208,20 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 raw_strength=float(ctx.raw_signal_strength)
             )
             
-            ctx.sms.exhaustion = ads_ctx["exhaustion"]
-            ctx.sms.reversal_prob = ads_ctx["reversal_prob"]
-            ctx.sms.ofi_shift = ads_ctx["ofi_shift"]
-            ctx.sms.vol_compression = ads_ctx["vol_compression"]
+            # Refresh SMS evidence inputs for the pending signal (strategy-independent contract)
+            ctx.sms.inputs = ADSSMSGateInputs(
+                setup_maturity=float(ads_ctx["setup_maturity"]),
+                setup_validity_prob=float(ads_ctx["setup_validity_prob"]),
+                signed_flow_support=float(ads_ctx["signed_flow_support"]),
+                vol_compression=float(ads_ctx["vol_compression"]),
+                flow_source=str(ads_ctx.get("flow_source", "unknown")),
+                diagnostics=dict(ads_ctx.get("sms_diag", {})),
+            )
+            # Keep legacy aliases in sync for older diagnostics/readers.
+            ctx.sms.exhaustion = float(ads_ctx["setup_maturity"])
+            ctx.sms.reversal_prob = float(ads_ctx["setup_validity_prob"])
+            ctx.sms.ofi_shift = float(ads_ctx["signed_flow_support"])
+            ctx.sms.vol_compression = float(ads_ctx["vol_compression"])
 
             # Tick pending bars + stale kill
             ctx.increment_pending()
@@ -479,9 +497,26 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             momentum_20_col = f'momentum_{self.config.medium_period}'
             momentum_50_col = f'momentum_{self.config.long_period}'
 
-            short_m = data[momentum_10_col].iloc[actual_idx] if momentum_10_col in data.columns else 0
-            medium_m = data[momentum_20_col].iloc[actual_idx] if momentum_20_col in data.columns else 0
-            long_m = data[momentum_50_col].iloc[actual_idx] if momentum_50_col in data.columns else 0
+            # Fallback: if enrichment didn't provide momentum_* columns, compute simple returns from close.
+            def _ret_at(period: int) -> float:
+                try:
+                    if "close" not in data.columns:
+                        return 0.0
+                    j = int(actual_idx)
+                    p = int(period)
+                    if j - p < 0:
+                        return 0.0
+                    c0 = float(data["close"].iloc[j - p])
+                    c1 = float(data["close"].iloc[j])
+                    if c0 <= 0:
+                        return 0.0
+                    return (c1 / c0) - 1.0
+                except Exception:
+                    return 0.0
+
+            short_m = data[momentum_10_col].iloc[actual_idx] if momentum_10_col in data.columns else _ret_at(self.config.short_period)
+            medium_m = data[momentum_20_col].iloc[actual_idx] if momentum_20_col in data.columns else _ret_at(self.config.medium_period)
+            long_m = data[momentum_50_col].iloc[actual_idx] if momentum_50_col in data.columns else _ret_at(self.config.long_period)
 
             # Handle NaN values gracefully
             short_momentum = short_m if not pd.isna(short_m) else 0
@@ -536,13 +571,18 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 ads_diag = ads_ctx["ads_diag"]
 
                 sms = SignalMaturityScore(
-                    exhaustion=ads_ctx["exhaustion"],
-                    reversal_prob=ads_ctx["reversal_prob"],
-                    ofi_shift=ads_ctx["ofi_shift"],
-                    vol_compression=ads_ctx["vol_compression"],
+                    # Legacy fields kept for safety, but the SSOT contract drives computation.
                     pending_bars=0,
-                    decay_rate=0.05,
+                    decay_rate=float(getattr(self.config, "sms_decay_rate", 0.05)),
                     max_pending=int(getattr(self.config, "sms_max_pending", 50)),
+                    inputs=ADSSMSGateInputs(
+                        setup_maturity=float(ads_ctx["setup_maturity"]),
+                        setup_validity_prob=float(ads_ctx["setup_validity_prob"]),
+                        signed_flow_support=float(ads_ctx["signed_flow_support"]),
+                        vol_compression=float(ads_ctx["vol_compression"]),
+                        flow_source=str(ads_ctx.get("flow_source", "unknown")),
+                        diagnostics=dict(ads_ctx.get("sms_diag", {})),
+                    ),
                 )
 
                 sms_score = float(sms.compute(regime_label))
@@ -571,6 +611,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             "bb_missing": True,
                             "composite_z": ads_ctx["composite_z"],
                             "composite_pct": ads_ctx["composite_pct"],
+                            "sms_inputs": {
+                                "setup_maturity": float(ads_ctx["setup_maturity"]),
+                                "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
+                                "signed_flow_support": float(ads_ctx["signed_flow_support"]),
+                                "vol_compression": float(ads_ctx["vol_compression"]),
+                                "flow_source": str(ads_ctx.get("flow_source", "unknown")),
+                            },
                         },
                     )
                     self.pending_signals.add(ctx)
@@ -1094,9 +1141,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         row = data.iloc[idx]
         actual_idx = idx if idx >= 0 else len(data) + idx
 
-        # 1. SMS Components
+        # 1. SMS Components (strategy-independent contract inputs)
+        #
+        # If enrichment does not provide composite_z/composite_pct, use the deterministic fallback
+        # (smoke-test focused). This keeps ADS/SMS gating testable even with minimal pipelines.
         composite_z = float(row.get("composite_z", 0.0))
         composite_pct_raw = float(row.get("composite_pct", 0.0))
+        if ("composite_z" not in data.columns) or ("composite_pct" not in data.columns):
+            cz, cp = self._fallback_compute_composite_signals(data, actual_idx)
+            if cz is not None and cp is not None:
+                composite_z = float(cz)
+                composite_pct_raw = float(cp)
         composite_pct = self._normalize_composite_pct(composite_pct_raw)
 
         thresholds = self._get_regime_adjusted_thresholds(symbol, row if isinstance(row, pd.Series) else pd.Series())
@@ -1116,23 +1171,32 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         except Exception:
             structure_q = 0.5
 
-        exhaustion = float(np.clip((max(z_maturity, 1e-3) * max(pct_maturity, 1e-3) * (0.5 + 0.5 * structure_q)) ** (1 / 3), 0.0, 1.0))
+        setup_maturity = float(
+            np.clip(
+                (max(z_maturity, 1e-3) * max(pct_maturity, 1e-3) * (0.5 + 0.5 * structure_q)) ** (1 / 3),
+                0.0,
+                1.0,
+            )
+        )
 
-        # Reversal Prob
+        # Setup validity probability (strategy-independent semantic).
+        #
+        # For momentum, we treat "not over-extended against the intended direction" as validity.
         rsi_col = self._get_column_name("RSI_14", data)
         rsi = float(row.get(rsi_col, row.get("rsi", 50.0)))
         if side == "BUY":
             p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(rsi - float(getattr(self.config, "rsi_overbought", 70.0))) / 5.0)))
         else:
             p_rev_rsi = 1.0 / (1.0 + float(np.exp(-(float(getattr(self.config, "rsi_oversold", 30.0)) - rsi) / 5.0)))
-        reversal_prob = float(np.clip(1.0 - p_rev_rsi, 0.001, 1.0))
+        setup_validity_prob = float(np.clip(1.0 - p_rev_rsi, 0.001, 1.0))
 
-        # OFI Proxy
+        # Flow support proxy (signed by intended direction)
         vol_ratio = float(row.get("volume_ratio", 1.0))
         sign = 1.0 if side == "BUY" else -1.0
-        ofi_shift = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
+        signed_flow_support = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
+        flow_source = "proxy_volume_ratio"
 
-        # Vol Compression
+        # Volatility compression (SSOT): VC = σ_short / σ_long
         vol_comp = 1.0
         try:
             if "close" in data.columns and actual_idx >= 20:
@@ -1140,28 +1204,32 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 rets = prices.pct_change()
                 short_vol = float(rets.tail(5).std()) if len(rets) >= 5 else 0.02
                 long_vol = float(rets.std()) if len(rets) >= 10 else 0.02
-                if short_vol > 0:
-                    vol_comp = float(np.clip(long_vol / short_vol, 0.5, 2.0))
+                vol_comp = float(compute_vol_compression(short_vol=short_vol, long_vol=long_vol))
         except Exception:
             vol_comp = 1.0
 
-        # SMS Score logic (consolidated)
+        # SMS threshold policy: tau(R) should be derived from regime/liquidity/confidence,
+        # not from the same evidence inputs used by the SMS score (avoid circular gating).
         tau_0 = float(getattr(self.config, "tau_0", 0.50))
-        tau = float(np.clip(
-            0.4 * (1.0 - exhaustion) + 
-            0.3 * (1.0 - reversal_prob) + 
-            0.2 * ofi_shift + 
-            0.1 * vol_comp, 
-            0.0, 1.0))
-        
-        # Adjust tau based on tau_0 baseline
-        tau = min(0.9, max(0.1, tau * (tau_0 / 0.5)))
-        
-        # Get regime label for stateful SMS if needed, but for context we compute a snapshot score
         ads_r = thresholds.get("ads_regime_vector_obj")
-        regime_label = sms_regime_label_from_ads_vector(ads_r)
+        bb_missing = ("bb_position" not in data.columns) and ("bb_upper" not in data.columns)
+        tau = float(
+            compute_sms_tau(
+                ads_r,
+                tau_0=tau_0,
+                ofi_proxy_used=True,
+                bb_missing=bb_missing,
+                direction="long" if side == "BUY" else "short",
+            )
+        )
         
-        sms_score = float(np.clip(0.5 * tau + 0.5 * raw_strength, 0.0, 1.0))
+        # Get regime label for regime-adaptive exponents (stateful SMS compute)
+        regime_label = sms_regime_label_from_ads_vector(ads_r)
+        sms_diag = {
+            "tau_0": tau_0,
+            "ofi_proxy_used": True,
+            "bb_missing": bb_missing,
+        }
 
         # 2. ERAR Components
         price = float(row.get("close", 0.0))
@@ -1193,12 +1261,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         return {
             "composite_z": composite_z,
             "composite_pct": composite_pct,
-            "exhaustion": exhaustion,
-            "reversal_prob": reversal_prob,
-            "ofi_shift": ofi_shift,
+            # SSOT SMS contract fields
+            "setup_maturity": setup_maturity,
+            "setup_validity_prob": setup_validity_prob,
+            "signed_flow_support": signed_flow_support,
             "vol_compression": vol_comp,
+            "flow_source": flow_source,
+            "sms_diag": sms_diag,
             "tau": tau,
-            "sms": sms_score,
             "regime_label": regime_label,
             "erar": erar,
             "erar_val": float(erar.compute()),
@@ -1399,7 +1469,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Get momentum series (use short-term momentum for faster response)
             momentum_col = f'momentum_{self.config.short_period}'
             if momentum_col not in enriched_data.columns:
-                # Fallback to composite_z
+                # Fallback to composite_z (if present). If not present, skip inflection detection quietly.
+                if 'composite_z' not in enriched_data.columns:
+                    return {
+                        'inflection_detected': False,
+                        'inflection_type': None,
+                        'momentum_slope': 0.0,
+                        'momentum_accel': 0.0,
+                        'vol_expansion': False
+                    }
                 momentum_series = enriched_data['composite_z'].iloc[current_idx - lookback:current_idx + 1]
             else:
                 momentum_series = enriched_data[momentum_col].iloc[current_idx - lookback:current_idx + 1]
@@ -1472,7 +1550,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             }
 
         except Exception as e:
-            logger.error(f"[{symbol}] Inflection detection failed: {e}")
+            # Non-blocking diagnostic; avoid per-bar error spam in smoke tests.
+            logger.debug(f"[{symbol}] Inflection detection skipped: {e}")
             return {
                 'inflection_detected': False,
                 'inflection_type': None,
@@ -1621,7 +1700,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 if 'composite_z' in enriched_data.columns:
                     momentum_series = enriched_data['composite_z'].iloc[current_idx - lookback + 1:current_idx + 1]
                 else:
-                    return 0.0
+                    # Final fallback (smoke-test / pipeline robustness):
+                    # derive a short-horizon slope from close prices so ADS-gating branch can run even
+                    # when enrichment does not provide momentum_* or composite_z columns.
+                    if 'close' not in enriched_data.columns:
+                        return 0.0
+                    closes = enriched_data['close'].iloc[current_idx - lookback + 1:current_idx + 1]
+                    if len(closes) < 2:
+                        return 0.0
+                    # Use simple returns; slope>0 implies upward drift over the window.
+                    momentum_series = closes.pct_change().fillna(0.0)
             else:
                 momentum_series = enriched_data[momentum_col].iloc[current_idx - lookback + 1:current_idx + 1]
 

@@ -50,6 +50,7 @@ from core_engine.config import MeanReversionConfig
 
 # ADS v3.0 Components - Critical fixes per alpha_design_philosophy.mdc
 from core_engine.alpha import (
+    ADSSMSGateInputs,
     SignalMaturityScore,
     ERAR,
     Cooldown,
@@ -530,14 +531,19 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             )
 
             # Create multiplicative SMS
-            sms = SignalMaturityScore(
-                exhaustion=exhaustion,
-                reversal_prob=reversal_prob,
-                ofi_shift=ofi_shift,
-                vol_compression=vol_compression,
+            sms_inputs = ADSSMSGateInputs(
+                setup_maturity=float(exhaustion),
+                setup_validity_prob=float(reversal_prob),
+                signed_flow_support=float(ofi_shift),
+                vol_compression=float(vol_compression),
+                flow_source="proxy_volume_ratio",
+                diagnostics={"ofi_proxy_used": ofi_proxy_used, "bb_missing": bb_missing},
+            )
+            sms = SignalMaturityScore.from_inputs(
+                sms_inputs,
                 pending_bars=0,  # Fresh signal
-                decay_rate=0.05,
-                max_pending=getattr(self.config, 'sms_max_pending', 50)
+                decay_rate=float(getattr(self.config, "sms_decay_rate", 0.05)),
+                max_pending=int(getattr(self.config, "sms_max_pending", 50)),
             )
 
             # Compute SMS score
