@@ -1,16 +1,13 @@
-# Canonical Smoke Test Suite: Momentum (MOM) - SMS + ERAR Gate Path
-# ================================================================
+# Smoke Test Suite: Momentum (MOM) - SMS + ERAR Gate Path (Universe)
+# ==================================================================
 # Purpose:
-# - Exercise ADS v3.1 gating in EnhancedMomentumStrategy with BOTH:
-#     - SMS gate (pending/mature)
-#     - ERAR gate (expected risk-adjusted return)
-#
-# This complements `smoke_test_mom_sms.yaml` (SMS-only isolation suite).
+# - Re-baseline the TSLA-validated configuration on a broader universe
+# - Keep apple-to-apple parameters, changing only the symbol list
 #
 
 papertest:
   data:
-    symbols: ["TSLA"]
+    symbols: ["TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AMD", "NFLX", "SPY"]
     start_date: "2024-12-18"
     end_date: "2024-12-20"
     interval: "1min"
@@ -24,7 +21,6 @@ papertest:
   session:
     stall_threshold_seconds: 300.0
 
-  # Smoke-test-only: allow lower-confidence entries through the multi-strategy aggregator.
   min_confidence_threshold: 0.40
 
   regime:
@@ -32,37 +28,31 @@ papertest:
 
   strategies:
     - type: "momentum"
-      name: "MOM_SMS_ERAR_Gate"
+      name: "MOM_SMS_ERAR_Gate_Universe"
       allocation_pct: 1.0
       parameters:
-        # Disable state machine so ADS composite/SMS gating path is used.
         enable_state_machine: false
         scan_all_bars: false
         scan_interval: 1
 
-        # EOD liquidation + risk-side exits (Rule 7)
         enable_eod_liquidation: true
         eod_close_time: "15:55"
         enable_ads_multi_exit: true
         max_holding_minutes: 30
         enable_forward_vol_stops: true
 
-        # Momentum feature horizons
         short_period: 10
         medium_period: 20
         long_period: 50
         lookback_period: 60
 
-        # Permissive composite thresholds: focus is gate wiring/coverage, not selectivity.
         composite_z_entry: 0.0
         composite_pct_entry: 50.0
 
-        # Momentum thresholds
         momentum_threshold: 0.02
         adx_threshold: 25.0
         volume_threshold: 1.2
 
-        # ADS gating knobs (explicit)
         enable_ads_gates: true
         tau_0: 0.40
         sms_max_pending: 50
@@ -81,15 +71,12 @@ papertest:
         sms_info_w_volatility: 0.45
         sms_info_cap: 3.0
 
-        # Phase 1: trend persistence filter
         enable_trend_persistence_filter: true
         trend_persistence_lookback: 10
         trend_persistence_min_ratio: 0.6
 
-        # ERAR: permissive gamma so we still trade in a short smoke window.
         erar_gamma: 0.10
 
-        # Position sizing (intent hint only; CentralRiskManager retains authority)
         base_position_pct: 0.10
         max_position_pct: 0.10
 
@@ -112,7 +99,7 @@ papertest:
     latency_ms_max: 0.0
     fill_probability: 1.0
     partial_fill_probability: 0.0
-    slippage_bps_max: 5.0
+    slippage_bps_max: 2.0
     impact_coefficient: 10.0
     seed: 42
     use_historical_execution_simulator: true

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, ClassVar
 from datetime import datetime
 import logging
+import math
 
 # JIT Optimization (Rule: Performance First)
 try:
@@ -249,6 +250,123 @@ class SignalMaturityScore:
                 f"flow={self.ofi_shift:.3f}, VC={self.vol_compression:.3f}, "
                 f"bars={self.pending_bars})")
 
+# =============================================================================
+# §1B. SIGNAL MATURITY SCORE (SMS) - Sequential Log-Odds Updater ("Bayesian-lite")
+# =============================================================================
+
+def _clip(x: float, lo: float, hi: float) -> float:
+    return float(min(max(float(x), float(lo)), float(hi)))
+
+
+def _sigmoid(x: float) -> float:
+    # Numerically-stable sigmoid for typical log-odds ranges
+    x = float(x)
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
+
+
+@dataclass
+class SequentialLogOddsSMS:
+    """
+    ADS §1B: Sequential SMS as a probability interface via log-odds updates.
+
+    - Evidence terms are bounded and treated as log-likelihood contributions.
+    - Information-time accumulates to gate maturation (event-time clock).
+    """
+
+    # State
+    log_odds: float = 0.0
+    pending_bars: int = 0
+    info_clock: float = 0.0
+
+    # Maturation / staleness
+    min_info_to_mature: float = 0.0
+    max_info: float = 12.0
+    max_pending: int = 50
+
+    # Evidence update weights (hand-tuned)
+    w_setup_maturity: float = 1.10
+    w_setup_validity: float = 1.25
+    w_flow_support: float = 0.80
+    w_vol_compression: float = 0.60
+
+    # Delay penalty in log-odds space (opportunity cost of waiting)
+    delay_penalty_per_bar: float = 0.02
+
+    # Transform scales / clipping
+    maturity_scale: float = 2.0
+    validity_scale: float = 2.0
+    flow_scale: float = 1.5
+    vc_scale: float = 1.2
+    evidence_clip: float = 1.0
+
+    def prob(self) -> float:
+        """Current probability estimate P(win)."""
+        return _sigmoid(self.log_odds)
+
+    def is_stale(self) -> bool:
+        """Stale if exceeded either pending bars or information budget."""
+        if self.pending_bars > int(self.max_pending):
+            return True
+        return float(self.info_clock) > float(self.max_info)
+
+    def can_mature(self) -> bool:
+        """Require sufficient information-time accumulation before maturing."""
+        return float(self.info_clock) >= float(self.min_info_to_mature)
+
+    def is_mature(self, threshold: float) -> bool:
+        """Mature if probability exceeds threshold and info-time requirement is satisfied."""
+        if self.is_stale():
+            return False
+        if not self.can_mature():
+            return False
+        return self.prob() >= float(threshold)
+
+    def increment_pending(self):
+        """Increment pending bar count (and apply per-bar delay penalty)."""
+        self.pending_bars += 1
+        self.log_odds -= float(self.delay_penalty_per_bar)
+
+    def update(
+        self,
+        inputs: ADSSMSGateInputs,
+        *,
+        info_increment: float = 0.0,
+    ) -> float:
+        """
+        Update state given new strategy-independent evidence inputs.
+        """
+        # Accumulate information-time first
+        self.info_clock = float(self.info_clock) + float(max(0.0, info_increment))
+
+        # Bounded evidence terms in [-1, 1]
+        m = _clip(inputs.setup_maturity, 0.0, 1.0)
+        v = _clip(inputs.setup_validity_prob, 0.0, 1.0)
+        flow = _clip(inputs.signed_flow_support, -1.0, 1.0)
+        vc = _clip(inputs.vol_compression, 0.5, 2.0)
+
+        phi_m = math.tanh(self.maturity_scale * (2.0 * m - 1.0))
+        phi_v = math.tanh(self.validity_scale * (2.0 * v - 1.0))
+        phi_flow = math.tanh(self.flow_scale * flow)
+        # Vol compression: <1 is supportive (tight), >1 is adverse (expanded)
+        phi_vc = math.tanh(self.vc_scale * (1.0 - vc))
+
+        phi_m = _clip(phi_m, -self.evidence_clip, self.evidence_clip)
+        phi_v = _clip(phi_v, -self.evidence_clip, self.evidence_clip)
+        phi_flow = _clip(phi_flow, -self.evidence_clip, self.evidence_clip)
+        phi_vc = _clip(phi_vc, -self.evidence_clip, self.evidence_clip)
+
+        self.log_odds += (
+            float(self.w_setup_maturity) * phi_m
+            + float(self.w_setup_validity) * phi_v
+            + float(self.w_flow_support) * phi_flow
+            + float(self.w_vol_compression) * phi_vc
+        )
+
+        return self.prob()
 # =============================================================================
 # §3. EXPECTED RISK-ADJUSTED RETURN (ERAR)
 # =============================================================================
@@ -813,10 +931,14 @@ class PendingSignalContext:
     timestamp: datetime
     entry_price: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Optional "Bayesian-lite" sequential SMS state (used by strategies that opt in).
+    bayes_sms: Optional[SequentialLogOddsSMS] = None
 
     def increment_pending(self):
         """Increment pending bar count."""
         self.sms.increment_pending()
+        if self.bayes_sms is not None:
+            self.bayes_sms.increment_pending()
 
 class PendingSignalQueue:
     """

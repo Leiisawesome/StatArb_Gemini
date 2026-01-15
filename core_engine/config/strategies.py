@@ -267,14 +267,54 @@ class MomentumConfig(BaseStrategyConfig):
     """Entry percentile threshold for composite momentum signal. Default: 70.0 (top 30% momentum required for entry).
     Format: 0-100 percentage scale (70.0 = 70th percentile)."""
 
+    # Trend persistence filter (Entry Logic)
+    enable_trend_persistence_filter: bool = False
+    """Require recent return sign consistency before entry. Default: False"""
+
+    trend_persistence_lookback: int = 10
+    """Lookback bars for trend persistence check. Default: 10"""
+
+    trend_persistence_min_ratio: float = 0.6
+    """Minimum fraction of favorable return signs required. Default: 0.6"""
+
     # =====================================================================
     # ADS v3.1 (Core): SMS pending/stale + tau(R) + ERAR gate (strategy-side)
     # =====================================================================
     enable_ads_gates: bool = True
     """Enable ADS gates (SMS + ERAR) for momentum. Default: True"""
 
+    sms_mode: str = "multiplicative"
+    """SMS mode: 'multiplicative' or 'bayes_log_odds'. Default: 'multiplicative'"""
+
     sms_max_pending: int = 50
     """Maximum bars to keep a pending signal before stale-kill. Default: 50"""
+
+    # Bayesian-lite SMS (hand-tuned bridge, no live ML inference)
+    sms_min_info_to_mature: float = 0.5
+    """Minimum information-time required before a pending signal is allowed to mature. Default: 0.5"""
+
+    sms_max_info: float = 12.0
+    """Maximum information-time before stale-kill. Default: 12.0"""
+
+    sms_prior_p0: float = 0.55
+    """Base prior probability used to initialize log-odds when signal first fires. Default: 0.55"""
+
+    sms_prior_strength_coef: float = 0.10
+    """How much to tilt the prior by raw_signal_strength. Default: 0.10"""
+
+    sms_delay_penalty_per_bar: float = 0.02
+    """Per-bar opportunity-cost penalty applied in log-odds space. Default: 0.02"""
+
+    sms_w_setup_maturity: float = 1.10
+    sms_w_setup_validity: float = 1.25
+    sms_w_flow_support: float = 0.80
+    sms_w_vol_compression: float = 0.60
+    """Evidence weights (hand-tuned) for sequential log-odds updates."""
+
+    sms_info_w_volume: float = 0.55
+    sms_info_w_volatility: float = 0.45
+    sms_info_cap: float = 3.0
+    """Information-time clock weights/cap for event-time maturation."""
 
     tau_0: float = 0.50
     """Base SMS threshold used in tau(R) calculation. Default: 0.50"""
@@ -329,9 +369,27 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"composite_z_entry must be non-negative, got {self.composite_z_entry}")
         if not 0 <= self.composite_pct_entry <= 100:
             raise ValueError(f"composite_pct_entry must be [0, 100], got {self.composite_pct_entry}")
+        if self.trend_persistence_lookback <= 1:
+            raise ValueError(f"trend_persistence_lookback must be > 1, got {self.trend_persistence_lookback}")
+        if not 0.0 <= self.trend_persistence_min_ratio <= 1.0:
+            raise ValueError(f"trend_persistence_min_ratio must be [0, 1], got {self.trend_persistence_min_ratio}")
 
         if self.sms_max_pending <= 0:
             raise ValueError(f"sms_max_pending must be positive, got {self.sms_max_pending}")
+        if str(self.sms_mode).lower() not in {"multiplicative", "bayes", "bayes_log_odds", "log_odds", "sequential_log_odds"}:
+            raise ValueError(f"sms_mode must be 'multiplicative' or 'bayes_log_odds', got {self.sms_mode!r}")
+        if self.sms_min_info_to_mature < 0:
+            raise ValueError(f"sms_min_info_to_mature must be >= 0, got {self.sms_min_info_to_mature}")
+        if self.sms_max_info <= 0:
+            raise ValueError(f"sms_max_info must be > 0, got {self.sms_max_info}")
+        if not 0.0 < self.sms_prior_p0 < 1.0:
+            raise ValueError(f"sms_prior_p0 must be (0, 1), got {self.sms_prior_p0}")
+        if self.sms_delay_penalty_per_bar < 0:
+            raise ValueError(f"sms_delay_penalty_per_bar must be >= 0, got {self.sms_delay_penalty_per_bar}")
+        if self.sms_info_w_volume < 0 or self.sms_info_w_volatility < 0:
+            raise ValueError("sms_info_w_volume and sms_info_w_volatility must be >= 0")
+        if self.sms_info_cap <= 0:
+            raise ValueError(f"sms_info_cap must be > 0, got {self.sms_info_cap}")
         if not 0.0 < self.tau_0 <= 1.0:
             raise ValueError(f"tau_0 must be (0, 1.0], got {self.tau_0}")
         if self.spread_bps < 0:

@@ -31,6 +31,7 @@ Version: 2.0.0 (Composite Signal Implementation)
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import math
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 import logging
@@ -50,6 +51,7 @@ from core_engine.alpha.ads_components import (
     PendingSignalQueue,
     PendingSignalContext,
     SignalMaturityScore,
+    SequentialLogOddsSMS,
     ERAR,
     estimate_cvar_95,
     compute_vol_compression,
@@ -72,7 +74,10 @@ from core_engine.trading.strategies.skeleton.composite_feature_utils import (
     fallback_compute_composite_signals,
     normalize_composite_pct,
 )
-from core_engine.trading.strategies.skeleton.ads_sms_utils import sms_regime_label_from_ads_vector
+from core_engine.trading.strategies.skeleton.ads_sms_utils import (
+    sms_regime_label_from_ads_vector,
+    compute_sms_info_increment,
+)
 from core_engine.trading.strategies.skeleton.ads_regime_adapter import ADSRegimeVectorCache
 from core_engine.trading.strategies.skeleton.data_quality_utils import is_ffill_stale
 from core_engine.trading.strategies.skeleton.dataframe_utils import extract_bar_timestamp, safe_iloc
@@ -151,6 +156,48 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
           - Else: assume already in percent space (best-effort) and clip.
         """
         return normalize_composite_pct(x)
+
+    def _passes_trend_persistence_filter(
+        self,
+        data: pd.DataFrame,
+        idx: int,
+        side: str,
+    ) -> bool:
+        """
+        Core-alpha filter: require recent return signs to persist in the intended direction.
+        """
+        if not bool(getattr(self.config, "enable_trend_persistence_filter", False)):
+            return True
+
+        lookback = int(getattr(self.config, "trend_persistence_lookback", 10))
+        min_ratio = float(getattr(self.config, "trend_persistence_min_ratio", 0.6))
+        if lookback <= 1:
+            return True
+
+        # Normalize index
+        if idx < 0:
+            idx = len(data) + idx
+        if idx <= 0 or idx >= len(data):
+            return True
+
+        try:
+            closes = data["close"].iloc[max(0, idx - lookback): idx + 1]
+        except Exception:
+            return True
+        if closes is None or len(closes) < 3:
+            return True
+
+        rets = closes.diff().dropna()
+        if len(rets) == 0:
+            return True
+
+        if side == "BUY":
+            favorable = float((rets > 0).sum())
+        else:
+            favorable = float((rets < 0).sum())
+
+        ratio = favorable / float(len(rets))
+        return ratio >= min_ratio
 
     def _fallback_compute_composite_signals(
         self,
@@ -232,10 +279,38 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             # Compute tau(R) from consolidated context
             tau = ads_ctx["tau"]
             regime_label = ads_ctx["regime_label"]
-            sms_score = float(ctx.sms.compute(regime_label))
-            
-            if sms_score < tau:
-                continue
+            if ctx.bayes_sms is not None:
+                try:
+                    prev_row = data.iloc[idx - 1] if idx > 0 else None
+                except Exception:
+                    prev_row = None
+
+                info_inc = float(
+                    compute_sms_info_increment(
+                        row=row,
+                        prev_row=prev_row,
+                        w_volume=float(getattr(self.config, "sms_info_w_volume", 0.55)),
+                        w_volatility=float(getattr(self.config, "sms_info_w_volatility", 0.45)),
+                        cap=float(getattr(self.config, "sms_info_cap", 3.0)),
+                    )
+                )
+                p_est = float(ctx.bayes_sms.update(ctx.sms.inputs, info_increment=info_inc))
+
+                if ctx.bayes_sms.is_stale():
+                    self.pending_signals.remove(symbol, side)
+                    continue
+
+                sms_score = p_est
+                if not ctx.bayes_sms.is_mature(threshold=float(tau)):
+                    ctx.metadata["ads_sms_prob"] = float(p_est)
+                    ctx.metadata["ads_sms_log_odds"] = float(ctx.bayes_sms.log_odds)
+                    ctx.metadata["ads_sms_info_clock"] = float(ctx.bayes_sms.info_clock)
+                    ctx.metadata["ads_sms_info_inc"] = float(info_inc)
+                    continue
+            else:
+                sms_score = float(ctx.sms.compute(regime_label))
+                if sms_score < tau:
+                    continue
 
             # ADS v3.1 3: ERAR gate (strategy-side) at maturity time
             erar = ads_ctx["erar"]
@@ -276,6 +351,18 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 "ads_diag": ads_ctx["ads_diag"],
                 "ads_fallbacks": {"ofi_source": "proxy_volume_ratio", "bb_missing": True},
             }
+            if ctx.bayes_sms is not None:
+                additional_data.update(
+                    {
+                        "sms_mode": "bayes_log_odds",
+                        "ads_sms_prob": float(ctx.bayes_sms.prob()),
+                        "ads_sms_log_odds": float(ctx.bayes_sms.log_odds),
+                        "ads_sms_info_clock": float(ctx.bayes_sms.info_clock),
+                        "ads_sms_can_mature": bool(ctx.bayes_sms.can_mature()),
+                    }
+                )
+            else:
+                additional_data["sms_mode"] = "multiplicative"
 
             signal_type = SignalType.BUY if side == "BUY" else SignalType.SELL
             # Strategy expresses allocation intent as a static target weight hint.
@@ -557,6 +644,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 # ADS v3.1  1: SMS gate with pending/stale maturation
                 side = side_from_signal(signal_type)
                 
+                # Trend persistence filter (core alpha)
+                if not self._passes_trend_persistence_filter(data=data, idx=actual_idx, side=side):
+                    return None
+
                 # Check if already pending for this symbol/side to avoid logic flooding
                 if self.pending_signals.get(symbol, side):
                     # Avoid noisy per-bar diagnostics here; pending queue already prevents flooding.
@@ -585,43 +676,129 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     ),
                 )
 
-                sms_score = float(sms.compute(regime_label))
-                if sms_score < tau:
-                    # Enqueue pending instead of emitting
+                sms_mode = str(getattr(self.config, "sms_mode", "multiplicative") or "multiplicative").lower()
+                if sms_mode in ("bayes", "bayes_log_odds", "log_odds", "sequential_log_odds"):
+                    # "Bayesian-lite" SMS: sequential log-odds with event-time maturation clock
                     try:
-                        price = float(current_data.get("close", 0.0))
+                        row = data.iloc[actual_idx]
+                        prev_row = data.iloc[actual_idx - 1] if actual_idx > 0 else None
                     except Exception:
-                        price = 0.0
-                    
-                    ctx = PendingSignalContext(
-                        symbol=symbol,
-                        side=side,
-                        sms=sms,
-                        erar=ads_ctx["erar"],
-                        raw_signal_strength=raw_strength,
-                        timestamp=signal_timestamp,
-                        entry_price=price if price > 0 else 0.0,
-                        metadata={
-                            "ads_tau": tau,
-                            "ads_sms": sms_score,
-                            "ads_regime_vector": ads_ctx["ads_regime_vector"],
-                            "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
-                            "ads_diag": ads_diag,
-                            "ofi_source": "proxy_volume_ratio",
-                            "bb_missing": True,
-                            "composite_z": ads_ctx["composite_z"],
-                            "composite_pct": ads_ctx["composite_pct"],
-                            "sms_inputs": {
-                                "setup_maturity": float(ads_ctx["setup_maturity"]),
-                                "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
-                                "signed_flow_support": float(ads_ctx["signed_flow_support"]),
-                                "vol_compression": float(ads_ctx["vol_compression"]),
-                                "flow_source": str(ads_ctx.get("flow_source", "unknown")),
-                            },
-                        },
+                        row = None
+                        prev_row = None
+
+                    p0 = float(getattr(self.config, "sms_prior_p0", 0.55))
+                    coef = float(getattr(self.config, "sms_prior_strength_coef", 0.10))
+                    prior = float(np.clip(p0 + coef * (raw_strength - 0.5), 0.05, 0.95))
+
+                    bayes_sms = SequentialLogOddsSMS(
+                        log_odds=float(math.log(prior / (1.0 - prior))),
+                        pending_bars=0,
+                        info_clock=0.0,
+                        min_info_to_mature=float(getattr(self.config, "sms_min_info_to_mature", 0.5)),
+                        max_info=float(getattr(self.config, "sms_max_info", 12.0)),
+                        max_pending=int(getattr(self.config, "sms_max_pending", 50)),
+                        w_setup_maturity=float(getattr(self.config, "sms_w_setup_maturity", 1.10)),
+                        w_setup_validity=float(getattr(self.config, "sms_w_setup_validity", 1.25)),
+                        w_flow_support=float(getattr(self.config, "sms_w_flow_support", 0.80)),
+                        w_vol_compression=float(getattr(self.config, "sms_w_vol_compression", 0.60)),
+                        delay_penalty_per_bar=float(getattr(self.config, "sms_delay_penalty_per_bar", 0.02)),
                     )
-                    self.pending_signals.add(ctx)
-                    return None
+
+                    info_inc = 0.0
+                    if row is not None:
+                        info_inc = float(
+                            compute_sms_info_increment(
+                                row=row,
+                                prev_row=prev_row,
+                                w_volume=float(getattr(self.config, "sms_info_w_volume", 0.55)),
+                                w_volatility=float(getattr(self.config, "sms_info_w_volatility", 0.45)),
+                                cap=float(getattr(self.config, "sms_info_cap", 3.0)),
+                            )
+                        )
+                    p_est = float(bayes_sms.update(sms.inputs, info_increment=info_inc))
+
+                    if (not bayes_sms.can_mature()) or (p_est < float(tau)):
+                        # Enqueue pending instead of emitting
+                        try:
+                            price = float(current_data.get("close", 0.0))
+                        except Exception:
+                            price = 0.0
+
+                        ctx = PendingSignalContext(
+                            symbol=symbol,
+                            side=side,
+                            sms=sms,
+                            erar=ads_ctx["erar"],
+                            raw_signal_strength=raw_strength,
+                            timestamp=signal_timestamp,
+                            entry_price=price if price > 0 else 0.0,
+                            metadata={
+                                "sms_mode": "bayes_log_odds",
+                                "ads_tau": tau,
+                                "ads_sms_prob": p_est,
+                                "ads_sms_log_odds": float(bayes_sms.log_odds),
+                                "ads_sms_info_clock": float(bayes_sms.info_clock),
+                                "ads_sms_info_inc": float(info_inc),
+                                "ads_regime_vector": ads_ctx["ads_regime_vector"],
+                                "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
+                                "ads_diag": ads_diag,
+                                "ofi_source": "proxy_volume_ratio",
+                                "bb_missing": True,
+                                "composite_z": ads_ctx["composite_z"],
+                                "composite_pct": ads_ctx["composite_pct"],
+                                "sms_inputs": {
+                                    "setup_maturity": float(ads_ctx["setup_maturity"]),
+                                    "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
+                                    "signed_flow_support": float(ads_ctx["signed_flow_support"]),
+                                    "vol_compression": float(ads_ctx["vol_compression"]),
+                                    "flow_source": str(ads_ctx.get("flow_source", "unknown")),
+                                },
+                            },
+                            bayes_sms=bayes_sms,
+                        )
+                        self.pending_signals.add(ctx)
+                        return None
+
+                    sms_score = p_est
+                else:
+                    sms_score = float(sms.compute(regime_label))
+                    if sms_score < tau:
+                        # Enqueue pending instead of emitting
+                        try:
+                            price = float(current_data.get("close", 0.0))
+                        except Exception:
+                            price = 0.0
+                        
+                        ctx = PendingSignalContext(
+                            symbol=symbol,
+                            side=side,
+                            sms=sms,
+                            erar=ads_ctx["erar"],
+                            raw_signal_strength=raw_strength,
+                            timestamp=signal_timestamp,
+                            entry_price=price if price > 0 else 0.0,
+                            metadata={
+                                "sms_mode": "multiplicative",
+                                "ads_tau": tau,
+                                "ads_sms": sms_score,
+                                "ads_regime_vector": ads_ctx["ads_regime_vector"],
+                                "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
+                                "ads_diag": ads_diag,
+                                "ofi_source": "proxy_volume_ratio",
+                                "bb_missing": True,
+                                "composite_z": ads_ctx["composite_z"],
+                                "composite_pct": ads_ctx["composite_pct"],
+                                "sms_inputs": {
+                                    "setup_maturity": float(ads_ctx["setup_maturity"]),
+                                    "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
+                                    "signed_flow_support": float(ads_ctx["signed_flow_support"]),
+                                    "vol_compression": float(ads_ctx["vol_compression"]),
+                                    "flow_source": str(ads_ctx.get("flow_source", "unknown")),
+                                },
+                            },
+                        )
+                        self.pending_signals.add(ctx)
+                        return None
 
                 # ADS v3.1  3: ERAR gate (strategy-side)
                 erar = ads_ctx["erar"]
