@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 
+from core_engine.utils.fast_id import get_fast_id
 from core_engine.exceptions import ConfigurationRequiredError
 from enum import Enum
 from abc import ABC, abstractmethod
@@ -96,7 +97,7 @@ class VenueType(Enum):
 class ExecutionAuthorization:
     """Risk Manager authorization for execution"""
 
-    authorization_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    authorization_id: str = field(default_factory=get_fast_id)
     risk_manager_id: str = ""
 
     # Authorization details
@@ -155,7 +156,7 @@ class ExecutionAuthorization:
 class ExecutionRequest:
     """Execution request with risk authorization"""
 
-    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    request_id: str = field(default_factory=get_fast_id)
     authorization: ExecutionAuthorization = field(default_factory=ExecutionAuthorization)
 
     # Execution parameters

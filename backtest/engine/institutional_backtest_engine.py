@@ -837,7 +837,7 @@ class InstitutionalBacktestEngine:
                 req = base
                 try:
                     for s in (self.config.strategies or []):
-                        st = str((s or {}).get("type") or "").lower()
+                        st = str((s or {}).get("type") or (s or {}).get("strategy_type") or "").lower()
                         params = (s or {}).get("parameters") or {}
                         lb = int(params.get("lookback_period", 0) or 0)
                         if st == "mean_reversion":
@@ -1402,7 +1402,8 @@ class InstitutionalBacktestEngine:
                     # Handle both dict and dataclass strategy configs
                     if isinstance(strategy_config, dict):
                         # Dict-based config (flattened structure)
-                        strategy_type_str = strategy_config.get('type', 'momentum')
+                        # Support 'type' or 'strategy_type' (alias)
+                        strategy_type_str = strategy_config.get('type') or strategy_config.get('strategy_type', 'momentum')
                         strategy_type = StrategyType(strategy_type_str)
 
                         config_dict = {
@@ -3862,7 +3863,11 @@ class InstitutionalBacktestEngine:
                     self.historical_market_data[symbol] = pd.concat([self.historical_market_data[symbol], bar_df], ignore_index=True)
 
                 # Calculate on-the-fly (slower but works)
-                indicators_df = self.indicators_engine.calculate_indicators(bar_df) if self.indicators_engine else bar_df
+                # ✅ FIX: Use accumulated history instead of single bar for proper indicator calculation
+                symbol = self.config.symbols[0]  # Standard for single-asset on-the-fly fallback
+                historical_df = self.historical_market_data.get(symbol, bar_df)
+                
+                indicators_df = self.indicators_engine.calculate_indicators(historical_df) if self.indicators_engine else historical_df
                 features_df = self.feature_engineer.create_features(indicators_df) if self.feature_engineer and indicators_df is not None else indicators_df
 
                 # ✅ CORRECTED FLOW: Even in fallback, use enriched features not raw OHLCV

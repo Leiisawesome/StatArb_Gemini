@@ -37,9 +37,14 @@ except ImportError:
 def njit_conditional(func=None, **kwargs):
     """
     Decorator that applies numba.njit if available, otherwise returns the original function.
+    Default to nogil=True for multi-threaded performance.
     """
     if func is None:
         return lambda f: njit_conditional(f, **kwargs)
+
+    # Professional defaults for high-performance trading
+    if 'nogil' not in kwargs: kwargs['nogil'] = True
+    if 'cache' not in kwargs: kwargs['cache'] = True
 
     if NUMBA_AVAILABLE:
         return njit(**kwargs)(func)
@@ -384,32 +389,134 @@ def jit_ewma_volatility(returns: np.ndarray, lambda_: float) -> float:
     return np.sqrt(max(var, 0.0))
 
 
+
 @njit_conditional
 def jit_correlation(x: np.ndarray, y: np.ndarray) -> float:
-    """
-    JIT-optimized Pearson correlation.
-    """
-    if x.size < 5:
-        return 0.0
-    
+    """JIT-optimized Pearson correlation."""
+    if x.size < 5: return 0.0
     n = x.size
-    sum_x = 0.0
-    sum_y = 0.0
-    sum_xy = 0.0
-    sum_x2 = 0.0
-    sum_y2 = 0.0
-    
+    sum_x = sum_y = sum_xy = sum_x2 = sum_y2 = 0.0
     for i in range(n):
         sum_x += x[i]
         sum_y += y[i]
         sum_xy += x[i] * y[i]
         sum_x2 += x[i] * x[i]
         sum_y2 += y[i] * y[i]
+    num = n * sum_xy - sum_x * sum_y
+    den = np.sqrt((n * sum_x2 - sum_x**2) * (n * sum_y2 - sum_y**2))
+    return num / den if den != 0 else 0.0
+
+@njit_conditional
+def jit_rolling_stats(data: np.ndarray, window: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Consolidated JIT-optimized rolling statistics.
+    Using ddof=1 for parity with Pandas standard deviation.
+    """
+    n = data.shape[0]
+    means = np.full(n, np.nan)
+    stds = np.full(n, np.nan)
+    skews = np.full(n, np.nan)
+    
+    if n < window or window < 2: 
+        if n >= window and window == 1:
+            return data.copy(), np.zeros(n), np.zeros(n)
+        return means, stds, skews
         
-    numerator = n * sum_xy - sum_x * sum_y
-    denominator = np.sqrt((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y))
+    for i in range(window - 1, n):
+        win = data[i - window + 1 : i + 1]
+        
+        # Mean
+        m = 0.0
+        for j in range(window):
+            m += win[j]
+        m /= window
+        means[i] = m
+        
+        # Variance (ddof=1 for Pandas parity)
+        var_sum = 0.0
+        for j in range(window):
+            var_sum += (win[j] - m)**2
+        
+        variance = var_sum / (window - 1)
+        std = np.sqrt(variance)
+        stds[i] = std
+        
+        # Skewness
+        if std > 1e-9:
+            skew_sum = 0.0
+            for j in range(window):
+                skew_sum += (win[j] - m)**3
+            # Biased skewness (matches most financial libs default)
+            skews[i] = (skew_sum / window) / (std**3)
+        else:
+            skews[i] = 0.0
+            
+    return means, stds, skews
+
+@njit_conditional(parallel=NUMBA_AVAILABLE)
+def jit_cs_rank(data: np.ndarray) -> np.ndarray:
+    """
+    JIT-optimized cross-sectional rank (normalized to [0, 1]).
+    Handles NaNs by ignoring them in total count.
+    """
+    n = data.size
+    result = np.full(n, np.nan)
+    mask = ~np.isnan(data)
+    valid_indices = np.where(mask)[0]
+    valid_data = data[valid_indices]
+    m = valid_data.size
     
-    if denominator == 0:
-        return 0.0
+    if m == 0:
+        return result
     
-    return numerator / denominator
+    # We use a simple O(m^2) rank for clarity here, or we could sort
+    # For common CS counts (sub 3000 symbols) this is often okay in JIT
+    # but let's do a sort-based one for better performance
+    order = np.argsort(valid_data)
+    ranks = np.empty(m)
+    
+    # Handle ties with average ranking
+    i = 0
+    while i < m:
+        j = i
+        while j < m and valid_data[order[j]] == valid_data[order[i]]:
+            j += 1
+        
+        # Mean rank for the tie group
+        # ranks are 1 to m
+        # average rank is ( (i+1) + (j) ) / 2
+        avg_rank = (i + j + 1) / 2.0
+        for k in range(i, j):
+            ranks[order[k]] = avg_rank
+        i = j
+
+    # Normalize to [0, 1]
+    if m > 1:
+        result[valid_indices] = (ranks - 1) / (m - 1)
+    else:
+        result[valid_indices] = 0.5
+        
+    return result
+
+@njit_conditional
+def jit_cs_zscore(data: np.ndarray) -> np.ndarray:
+    """
+    JIT-optimized cross-sectional z-score.
+    """
+    mask = ~np.isnan(data)
+    valid_data = data[mask]
+    if valid_data.size < 2:
+        res = np.full(data.size, np.nan)
+        if valid_data.size == 1:
+            res[mask] = 0.0
+        return res
+    
+    mean = np.mean(valid_data)
+    std = np.std(valid_data)
+    
+    res = np.full(data.size, np.nan)
+    if std > 1e-9:
+        res[mask] = (valid_data - mean) / std
+    else:
+        res[mask] = 0.0
+    return res

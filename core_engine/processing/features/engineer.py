@@ -30,8 +30,20 @@ logger = logging.getLogger(__name__)
 # Import centralized configuration (Rule 1 Section 7 - Configuration Management)
 from core_engine.config import FeatureConfig
 
+try:
+    import bottleneck as bn
+    HAS_BOTTLENECK = True
+except ImportError:
+    HAS_BOTTLENECK = False
+
 # Import JIT utilities for performance optimization
-from core_engine.utils.jit_utils import jit_rolling_rank, jit_rolling_mad_zscore
+from core_engine.utils.jit_utils import (
+    jit_rolling_rank, 
+    jit_rolling_mad_zscore, 
+    jit_rolling_stats,
+    jit_cs_rank,
+    jit_cs_zscore
+)
 
 class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     """
@@ -660,30 +672,42 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return df
 
     def _create_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create price-based features"""
+        """Create price-based features with minimal fragmentation (Hotspot 1)"""
+        new_columns = {}
+        
         # Returns at different horizons
         for period in [1, 2, 3, 5, 10]:
             if len(df) > period:
-                df[f'return_{period}d'] = df['close'].pct_change(periods=period, fill_method=None)
-
+                new_columns[f'return_{period}d'] = df['close'].pct_change(periods=period, fill_method=None)
+        
         # Log returns (handle invalid values)
         price_ratio = df['close'] / df['close'].shift(1)
         positive_mask = price_ratio > 0
-        log_return = pd.Series(np.nan, index=df.index)
+        log_return = np.full(len(df), np.nan)
         if positive_mask.any():
-            log_return.loc[positive_mask] = np.log(price_ratio[positive_mask])
-        df['log_return'] = log_return
-
+            log_return[positive_mask] = np.log(price_ratio[positive_mask])
+        new_columns['log_return'] = log_return
+        
         # OHLC ratios
-        df['hl_ratio'] = (df['high'] - df['low']) / df['close']
-        df['oc_ratio'] = (df['open'] - df['close']) / df['close']
-        df['body_size'] = np.abs(df['close'] - df['open']) / df['close']
-        df['upper_shadow'] = (df['high'] - np.maximum(df['open'], df['close'])) / df['close']
-        df['lower_shadow'] = (np.minimum(df['open'], df['close']) - df['low']) / df['close']
-
+        new_columns['hl_range'] = (df['high'] - df['low']) / df['close']
+        new_columns['oc_range'] = (df['open'] - df['close']) / df['close']
+        new_columns['hl_ratio'] = df['high'] / df['low']
+        new_columns['body_size'] = np.abs(df['close'] - df['open']) / df['close']
+        new_columns['upper_shadow'] = (df['high'] - np.maximum(df['open'], df['close'])) / df['close']
+        new_columns['lower_shadow'] = (np.minimum(df['open'], df['close']) - df['low']) / df['close']
+        
+        # Gap features
+        new_columns['gap'] = (df['open'] - df['close'].shift(1)) / df['close'].shift(1)
+        
         # Price momentum
-        df['price_acceleration'] = df['log_return'].diff()
-
+        new_columns['price_acceleration'] = pd.Series(log_return, index=df.index).diff()
+        
+        # Volatility proxies
+        if 'return_1d' in new_columns:
+            new_columns['daily_vol'] = new_columns['return_1d'].rolling(20).std()
+        
+        # Concatenate once to avoid fragmentation
+        df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
         return df
 
     def _create_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -943,129 +967,154 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             return z_score.fillna(0.0)
 
     def _create_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create volatility-based features"""
+        """Create volatility-based features with minimal fragmentation (Hotspot 1)"""
+        new_columns = {}
+        
         # Bollinger Band features
         if 'bb_position' in df.columns:
-            # Calculate zscore from Bollinger Bands (for mean reversion strategies)
-            # zscore = (close - BB_middle) / (BB_width / 2)
-            # This can also be derived from bb_position: zscore = (bb_position - 0.5) * 2
             if 'bb_middle' in df.columns:
                 # Calculate proper z-score: (close - mean) / std
-                # Use rolling calculation for consistency across all regime settings
-                # bb_middle IS the rolling mean, so we just need rolling std
-                lookback = 20  # Match Bollinger Band period
+                lookback = 20
                 rolling_std = df['close'].rolling(window=lookback, min_periods=5).std()
                 mask = rolling_std > 0.001
-                df['zscore'] = 0.0
-                df.loc[mask, 'zscore'] = (df.loc[mask, 'close'] - df.loc[mask, 'bb_middle']) / rolling_std[mask]
-                # Alternative: derive from bb_position (normalized 0-1 to -2 to +2)
-                # df['zscore'] = (df['bb_position'] - 0.5) * 2
+                zscore = pd.Series(0.0, index=df.index)
+                zscore[mask] = (df.loc[mask, 'close'] - df.loc[mask, 'bb_middle']) / rolling_std[mask]
+                new_columns['zscore'] = zscore
             else:
-                # Fallback: derive from bb_position if BB components not available
-                df['zscore'] = (df['bb_position'] - 0.5) * 2
-            df['bb_squeeze'] = (df['bb_width'] < df['bb_width'].rolling(20).quantile(0.2)).astype(int)
-            df['bb_breakout_up'] = ((df['close'] > df['bb_upper']) &
-                                   (df['close'].shift(1) <= df['bb_upper'].shift(1))).astype(int)
-            df['bb_breakout_down'] = ((df['close'] < df['bb_lower']) &
-                                     (df['close'].shift(1) >= df['bb_lower'].shift(1))).astype(int)
+                new_columns['zscore'] = (df['bb_position'] - 0.5) * 2
+            
+            # Use existing bb_width if available from indicators phase
+            if 'bb_width' in df.columns:
+                try:
+                    bbw = pd.to_numeric(df['bb_width'], errors='coerce').fillna(0)
+                    new_columns['bb_squeeze'] = (bbw < bbw.rolling(20).quantile(0.2)).astype(int)
+                except Exception:
+                    new_columns['bb_squeeze'] = 0
 
-        # ATR features
-        if 'atr' in df.columns:
-            df['atr_normalized'] = df['atr'] / df['close']
-            try:
-                # Clean the ATR column before rolling operations
-                clean_atr = pd.to_numeric(df['atr'], errors='coerce').fillna(0)
-                # P0 PERF FIX: Use JIT-optimized rolling rank
-                df['atr_percentile'] = jit_rolling_rank(clean_atr.values, 50)
-                df['atr_percentile'] = df['atr_percentile'].fillna(0.5)
-            except Exception as e:
-                # If any error occurs, set atr_percentile to 0.5
-                self.logger.warning(f"Error calculating ATR percentile: {e}")
-                df['atr_percentile'] = 0.5
+        # ATR features - MOVED: atr_percentile and atr_normalized are handled in _create_indicator_features
+        # to ensure no duplication and single-pass processing.
+        
         # Historical volatility features
         vol_cols = [col for col in df.columns if col.startswith('volatility_')]
         for col in vol_cols:
             period = col.split('_')[1]
             try:
-                # Clean the volatility column before rolling operations
                 clean_vol = pd.to_numeric(df[col], errors='coerce').fillna(0)
                 rolling_quantile = clean_vol.rolling(60).quantile(0.7)
-                rolling_quantile = rolling_quantile.fillna(0)
-                df[f'vol_regime_{period}'] = (clean_vol > rolling_quantile).astype(int)
+                new_columns[f'vol_regime_{period}'] = (clean_vol > rolling_quantile.fillna(0)).astype(int)
             except Exception as e:
-                # If any error occurs, set vol_regime to 0
                 self.logger.warning(f"Error calculating volatility regime for {col}: {e}")
-                df[f'vol_regime_{period}'] = 0
+                new_columns[f'vol_regime_{period}'] = 0
 
         # Volatility clustering
         if 'log_return' in df.columns:
             try:
-                # Handle invalid values in log_return
-                log_returns_abs = df['log_return'].abs()
-                # Replace any _NoValueType or invalid values with 0
-                log_returns_abs = log_returns_abs.fillna(0)
-                # Ensure all values are numeric
-                log_returns_abs = pd.to_numeric(log_returns_abs, errors='coerce').fillna(0)
-
-                # Calculate rolling quantile with error handling
+                log_returns_abs = pd.to_numeric(df['log_return'], errors='coerce').abs().fillna(0)
                 rolling_quantile = log_returns_abs.rolling(20).quantile(0.8)
-                rolling_quantile = rolling_quantile.fillna(0)
-
-                df['vol_clustering'] = (log_returns_abs > rolling_quantile).astype(int)
+                new_columns['vol_clustering'] = (log_returns_abs > rolling_quantile.fillna(0)).astype(int)
             except Exception as e:
-                # If any error occurs, set vol_clustering to 0
                 self.logger.warning(f"Error calculating volatility clustering: {e}")
-                df['vol_clustering'] = 0
+                new_columns['vol_clustering'] = 0
         else:
-            df['vol_clustering'] = 0
+            new_columns['vol_clustering'] = 0
 
+        # Concatenate once to avoid fragmentation
+        if new_columns:
+            df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+            
         return df
 
     def _create_volume_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create volume-based features"""
+        """Create volume-based features with minimal fragmentation (Hotspot 1)"""
         if 'volume' not in df.columns:
             return df
-
+            
+        new_columns = {}
+        
         # Volume momentum
-        df['volume_change'] = df['volume'].pct_change(fill_method=None)
-        df['volume_acceleration'] = df['volume_change'].diff()
+        new_columns['volume_change'] = df['volume'].pct_change(fill_method=None)
+        new_columns['volume_acceleration'] = new_columns['volume_change'].diff()
 
         # Volume-price relationship
-        df['volume_price_trend'] = df['volume_change'] * df['return_1d']
+        if 'return_1d' in df.columns:
+            new_columns['volume_price_trend'] = new_columns['volume_change'] * df['return_1d']
 
         # Volume breakouts
         if 'volume_sma' in df.columns:
-            df['volume_breakout'] = (df['volume'] > 2 * df['volume_sma']).astype(int)
+            new_columns['volume_breakout'] = (df['volume'] > 2 * df['volume_sma']).astype(int)
 
         # OBV features
         if 'obv' in df.columns:
-            df['obv_momentum'] = df['obv'].pct_change(fill_method=None)
-            df['obv_divergence'] = np.sign(df['return_1d']) != np.sign(df['obv_momentum'])
+            new_columns['obv_momentum'] = df['obv'].pct_change(fill_method=None)
+            if 'return_1d' in df.columns:
+                new_columns['obv_divergence'] = np.sign(df['return_1d']) != np.sign(new_columns['obv_momentum'])
 
+        # Concatenate once to avoid fragmentation
+        df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
         return df
 
     def _create_indicator_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create features from technical indicators"""
-        # Moving average features
+        """Create features from technical indicators with minimal fragmentation (Hotspot 1)"""
+        new_columns = {}
+        
         sma_cols = [col for col in df.columns if col.startswith('sma_')]
         ema_cols = [col for col in df.columns if col.startswith('ema_')]
 
         # Distance from moving averages
         for col in sma_cols + ema_cols:
-            df[f'{col}_distance'] = (df['close'] - df[col]) / df[col]
-            df[f'{col}_above'] = (df['close'] > df[col]).astype(int)
+            dist_col = f'{col}_distance'
+            if dist_col not in df.columns:
+                new_columns[dist_col] = (df['close'] - df[col]) / df[col]
+            
+            above_col = f'{col}_above'
+            if above_col not in df.columns:
+                new_columns[above_col] = (df['close'] > df[col]).astype(int)
 
         # Moving average slope
-        for col in sma_cols[:2]:  # Only for shorter periods to avoid overfitting
-            df[f'{col}_slope'] = df[col].pct_change(fill_method=None)
+        for col in sma_cols[:2]:
+            slope_col = f'{col}_slope'
+            if slope_col not in df.columns:
+                new_columns[slope_col] = df[col].pct_change(fill_method=None)
 
         # Golden/Death cross signals
         if 'sma_20' in df.columns and 'sma_50' in df.columns:
-            df['golden_cross'] = ((df['sma_20'] > df['sma_50']) &
-                                 (df['sma_20'].shift(1) <= df['sma_50'].shift(1))).astype(int)
-            df['death_cross'] = ((df['sma_20'] < df['sma_50']) &
-                                (df['sma_20'].shift(1) >= df['sma_50'].shift(1))).astype(int)
+            if 'golden_cross' not in df.columns:
+                new_columns['golden_cross'] = ((df['sma_20'] > df['sma_50']) &
+                                              (df['sma_20'].shift(1) <= df['sma_50'].shift(1))).astype(int)
+            if 'death_cross' not in df.columns:
+                new_columns['death_cross'] = ((df['sma_20'] < df['sma_50']) &
+                                             (df['sma_20'].shift(1) >= df['sma_50'].shift(1))).astype(int)
 
+        # Bollinger Bands features
+        if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
+            # Only add if not already present from technical indicators phase
+            if 'bb_width' not in df.columns:
+                new_columns['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['close']
+            
+            if 'bb_breakout_up' not in df.columns:
+                new_columns['bb_breakout_up'] = ((df['close'] > df['bb_upper']) &
+                                               (df['close'].shift(1) <= df['bb_upper'].shift(1))).astype(int)
+            if 'bb_breakout_down' not in df.columns:
+                new_columns['bb_breakout_down'] = ((df['close'] < df['bb_lower']) &
+                                                 (df['close'].shift(1) >= df['bb_lower'].shift(1))).astype(int)
+
+        # ATR features
+        if 'atr' in df.columns:
+            if 'atr_normalized' not in df.columns:
+                new_columns['atr_normalized'] = df['atr'] / df['close']
+            
+            if 'atr_percentile' not in df.columns:
+                try:
+                    clean_atr = pd.to_numeric(df['atr'], errors='coerce').fillna(0)
+                    new_columns['atr_percentile'] = jit_rolling_rank(clean_atr.values, 50)
+                except Exception as e:
+                    self.logger.warning(f"Error calculating ATR percentile: {e}")
+                    new_columns['atr_percentile'] = 0.5
+
+        # Concatenate once
+        if new_columns:
+            df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+            
         return df
 
     def _create_lag_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1101,29 +1150,29 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
     def _create_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create rolling features for temporal patterns.
-
-        Args:
-            df: DataFrame with input data.
-
-        Returns:
-            DataFrame with rolling features added.
+        Optimized with JIT and Bottleneck (Hotspot 1 & 5).
         """
         key_features = ['close', 'return_1d', 'volume_change', 'hl_ratio']
-
-        # Collect all new columns to avoid fragmentation
         new_columns = {}
 
         for feature in key_features:
             if feature in df.columns:
+                values = df[feature].values
                 for period in self.config.lookback_periods:
                     try:
-                        new_columns[f'{feature}_mean_{period}'] = df[feature].rolling(window=period).mean()
-                        new_columns[f'{feature}_std_{period}'] = df[feature].rolling(window=period).std()
-                        new_columns[f'{feature}_skew_{period}'] = df[feature].rolling(window=period).skew()
+                        # Consistently use JIT kernels for financial calculation parity (ddof=1)
+                        # and proper NaN handling for rolling windows.
+                        m, s, sk = jit_rolling_stats(values, period)
+                        new_columns[f'{feature}_mean_{period}'] = m
+                        new_columns[f'{feature}_std_{period}'] = s
                         
-                        # PERF: avoid pandas rolling.apply (very slow). Use jit_utils implementation.
-                        # If Numba is not installed, njit_conditional returns a pure-Python loop.
-                        new_columns[f'{feature}_rank_{period}'] = jit_rolling_rank(df[feature].values, period)
+                        # Rank and Skew still use Numba as they aren't in Bottleneck
+                        new_columns[f'{feature}_rank_{period}'] = jit_rolling_rank(values, period)
+                        
+                        # Only compute skew for longer windows to ensure stability
+                        if period >= 20:
+                            new_columns[f'{feature}_skew_{period}'] = sk
+
                     except Exception as e:
                         self.logger.warning(f"Error creating rolling feature {feature} for period {period}: {e}")
 
@@ -1134,40 +1183,55 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return df
 
     def _create_cross_sectional_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create cross-sectional (relative) features"""
-        # Group by timestamp for cross-sectional analysis
-        grouped = df.groupby('timestamp')
-
+        """
+        Create cross-sectional (relative) features.
+        Optimized for performance by minimizing groupby operations and using 
+        vectorized transforms (Hotspot 2).
+        """
         # Key features for cross-sectional analysis
         cs_features = ['return_1d', 'rsi', 'volume_ratio', 'atr_normalized']
-
-        # Collect all new columns to avoid fragmentation
         new_columns = {}
+        
+        # Check if we actually have multiple symbols to rank
+        has_multiple_symbols = False
+        if 'symbol' in df.columns and df['symbol'].nunique() > 1:
+            has_multiple_symbols = True
+            
+        if not has_multiple_symbols:
+            # Single symbol case: Cross-sectional features are neutral/placeholders
+            for feature in cs_features:
+                if feature in df.columns:
+                    new_columns[f'{feature}_cs_rank'] = 0.5
+                    new_columns[f'{feature}_cs_zscore'] = 0.0
+                    new_columns[f'{feature}_cs_quintile'] = 3
+            if new_columns:
+                df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+            return df
+
+        # Multi-symbol case: Institutional-grade optimized path
+        grouped = df.groupby('timestamp')
 
         for feature in cs_features:
             if feature in df.columns:
                 try:
-                    # Clean the feature column before cross-sectional operations
-                    clean_feature = pd.to_numeric(df[feature], errors='coerce').fillna(0)
-
-                    # Cross-sectional rank
+                    # PERF: Use .transform with built-in strings is faster than lambda
+                    # Cross-sectional rank (normalized to 0-1)
                     new_columns[f'{feature}_cs_rank'] = grouped[feature].rank(pct=True)
 
-                    # Z-score relative to universe
-                    new_columns[f'{feature}_cs_zscore'] = grouped[feature].transform(
-                        lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
-                    )
+                    # Z-score relative to universe - Vectorized (Hotspot 2 fix)
+                    means = grouped[feature].transform('mean')
+                    stds = grouped[feature].transform('std')
+                    
+                    # Avoid division by zero and handle infinity
+                    zscores = (df[feature] - means) / stds.replace(0, np.nan)
+                    new_columns[f'{feature}_cs_zscore'] = zscores.fillna(0.0)
 
-                    # Quintile assignment
-                    new_columns[f'{feature}_cs_quintile'] = grouped[feature].transform(
-                        lambda x: pd.qcut(x, min(5, len(x.unique())), labels=list(range(1, min(6, len(x.unique())+1))), duplicates='drop') if len(x.unique()) > 1 else 1
-                    )
+                    # Quintile assignment - Vectorized (Hotspot 2 fix)
+                    # Maps 0.0-0.2->1, 0.2-0.4->2, etc.
+                    ranks = new_columns[f'{feature}_cs_rank']
+                    new_columns[f'{feature}_cs_quintile'] = (ranks * 5).apply(np.ceil).fillna(3).astype(int).clip(1, 5)
                 except Exception as e:
-                    # If any error occurs, set all cross-sectional features to 0
                     self.logger.warning(f"Error calculating cross-sectional features for {feature}: {e}")
-                    new_columns[f'{feature}_cs_rank'] = 0
-                    new_columns[f'{feature}_cs_zscore'] = 0
-                    new_columns[f'{feature}_cs_quintile'] = 0
 
         # Add all columns at once to avoid fragmentation
         if new_columns:

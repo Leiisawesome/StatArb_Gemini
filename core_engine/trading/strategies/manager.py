@@ -207,9 +207,9 @@ class EnhancedStrategyFactory:
             else:
                 # Use basic StrategyConfig for strategies without specific config
                 strategy_config = StrategyConfig(
-                    strategy_name=config.get('name', f'{strategy_type.value}_strategy'),
+                    name=config.get('name', f'{strategy_type.value}_strategy'),
                     strategy_type=strategy_type,
-                    **{k: v for k, v in config.items() if k not in ['name', 'type']}
+                    **{k: v for k, v in config.items() if k not in ['name', 'type', 'strategy_type']}
                 )
 
             # Create strategy instance
@@ -886,8 +886,13 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     async def add_strategy(self, strategy_config: Dict[str, Any]) -> bool:
         """Add new trading strategy"""
         try:
-            strategy_name = strategy_config['name']
-            strategy_type = StrategyType(strategy_config['type'])
+            strategy_name = strategy_config.get('name', 'unnamed_strategy')
+            # Support both 'type' and 'strategy_type' (alias)
+            strategy_type_str = strategy_config.get('type') or strategy_config.get('strategy_type')
+            if not strategy_type_str:
+                raise KeyError("'type' or 'strategy_type' must be specified in strategy config")
+            
+            strategy_type = StrategyType(strategy_type_str)
 
             logger.info(f"➕ Adding strategy: {strategy_name} ({strategy_type.value})")
 

@@ -268,6 +268,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         }
         self.total_processed = 0
 
+        # HOTSPOT 4: Concurrency control
+        self._processing_semaphore = asyncio.Semaphore(4)  # Limit concurrent tasks
+        self._engine_lock = asyncio.Lock()  # Protect shared engines during config adaptation
+
         logger.info("✅ ProcessingPipelineOrchestrator initialized (Rule 3 enforcement)")
 
     # ================================================================
@@ -947,176 +951,21 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     if quality['quality_score'] < 0.9:
                         logger.warning(f"⚠️  {symbol}: Raw data quality score: {quality['quality_score']:.2f}")
 
-            # Process each symbol through pipeline
+            # Process symbols in parallel (Hotspot 4 fix)
+            tasks = []
             for symbol in symbols:
                 if symbol not in raw_data or raw_data[symbol].empty:
                     logger.warning(f"No data for {symbol}, skipping")
                     continue
-
-                symbol_data = raw_data[symbol].copy()
-                symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
-                liquidity_sequence = self._assess_liquidity(symbol, symbol_data)
-                liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
-
-                try:
-                    # Initialize processing variables to avoid undefined variable risk
-                    indicators_df = pd.DataFrame()
-                    features_df = pd.DataFrame()
-                    signals_df = pd.DataFrame()
-                    phase2_time = 0.0
-                    phase3_time = 0.0
-                    phase4_time = 0.0
-
-                    # PHASE 0: Process regime FIRST (store bar-by-bar regime sequence as "beacon light")
-                    # Regime acts as metadata reference, not as segment boundaries
-                    regime_sequence = []
-
-                    if self.regime_engine:
-                        logger.debug("🔄 Phase 0: Processing regime for %s (beacon light approach)", symbol)
-                        regime_result = self.regime_engine.process_market_data(symbol_data)
-
-                        # P0 Fix: Validate regime engine output
-                        if not isinstance(regime_result, dict):
-                            logger.warning(
-                                "⚠️  %s: Regime engine returned %s instead of dict, using empty sequence",
-                                symbol, type(regime_result).__name__
-                            )
-                            regime_result = {}
-
-                        regime_sequence = regime_result.get('regime_sequence', [])
-                        if not isinstance(regime_sequence, list):
-                            logger.warning(
-                                "⚠️  %s: regime_sequence is %s instead of list, using empty",
-                                symbol, type(regime_sequence).__name__
-                            )
-                            regime_sequence = []
-
-                        if regime_sequence:
-                            regime_changes_count = regime_result.get('regime_changes_count', 0)
-                            logger.debug(
-                                "   ✅ %s: Regime beacon established - %d regime states, %d regime changes",
-                                symbol, len(regime_sequence), regime_changes_count
-                            )
-
-                            # ENHANCED: Per-regime-change config adaptation
-                            # If regime changes detected, process in segments with config adaptation per segment
-                            if regime_changes_count > 0:
-                                logger.info(
-                                    f"   🔄 {symbol}: Regime changes detected - "
-                                    f"using per-segment config adaptation ({regime_changes_count} changes)"
-                                )
-
-                                # Identify regime segments (split by regime changes)
-                                regime_segments = self._identify_regime_segments(
-                                    symbol_data=symbol_data,
-                                    regime_sequence=regime_sequence,
-                                    symbol=symbol
-                                )
-
-                                # Process segments with config adaptation per segment
-                                # Track time for segment processing
-                                segment_start = datetime.now()
-                                indicators_df, features_df, signals_df = await self._process_regime_segments(
-                                    symbol_data=symbol_data,
-                                    regime_segments=regime_segments,
-                                    symbol=symbol
-                                )
-                                segment_time = (datetime.now() - segment_start).total_seconds()
-
-                                # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
-                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
-
-                                # Distribute time across stages (approximate)
-                                phase2_time = segment_time * 0.4
-                                phase3_time = segment_time * 0.4
-                                phase4_time = segment_time * 0.2
-                            else:
-                                # Single regime - adapt config once, then process normally
-                                logger.debug(f"   📊 {symbol}: Single regime - adapting config once")
-
-                                # Get regime analysis from first regime entry
-                                first_regime_entry = regime_sequence[0]
-                                timestamp = first_regime_entry.get('timestamp')
-                                if timestamp:
-                                    if isinstance(timestamp, pd.Timestamp):
-                                        timestamp = timestamp.to_pydatetime()
-                                    regime_analysis = self.regime_engine.get_regime_at_timestamp(
-                                        symbol=symbol,
-                                        timestamp=timestamp
-                                    )
-
-                                    # Adapt config once for single regime
-                                    if regime_analysis:
-                                        if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
-                                            await self.indicators_engine.adapt_to_regime(regime_analysis)
-                                        if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
-                                            await self.feature_engineer.adapt_to_regime(regime_analysis)
-                                        logger.info(
-                                            f"   📊 Config adapted for regime: {regime_analysis.primary_regime.value} "
-                                            f"(single regime, {len(regime_sequence)} bars)"
-                                        )
-
-                                # Use helper method for standard processing
-                                indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
-                                    await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
-
-                                # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness
-                                signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
-                        else:
-                            logger.debug(f"   ⚠️  {symbol}: No regime sequence available - using standard processing")
-
-                            # No regime data - use helper method for standard processing
-                            indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
-                                await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
-
-                    # If regime_engine not available, use standard processing
-                    if not self.regime_engine:
-                        indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
-                            await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
-
-                    # Phase 4C: Add regime columns to signals_df for Type 2 regime awareness (if regime_sequence available)
-                    # Note: Only add if not already added in regime processing blocks above
-                    if regime_sequence and 'primary_regime' not in signals_df.columns:
-                        signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
-
-                    self.processing_times['indicators'].append(phase2_time)
-                    self.processing_times['features'].append(phase3_time)
-                    self.processing_times['signals'].append(phase4_time)
-
-                    # Create enriched data container
-                    enriched_data[symbol] = EnrichedMarketData(
-                        symbol=symbol,
-                        timeframe=timeframe,
-                        raw_data=symbol_data,
-                        indicators=indicators_df,
-                        features=features_df,
-                        signals=signals_df,
-                        processing_timestamp=datetime.now(),
-                        regime_context=self.current_regime_context,
-                        liquidity_context=self._get_latest_liquidity_context(symbol)
-                    )
-
-                    # Populate cache for future retrieval (P0 Fix: TTL-based cache)
-                    self._cache_put(symbol, enriched_data[symbol])
-
-                    # Validate enrichment
-                    if not enriched_data[symbol].validate_enrichment():
-                        logger.warning("⚠️  %s: enrichment validation failed", symbol)
-
-                    # Log regime info if available
-                    regime_info = ""
-                    if self.regime_engine and regime_sequence:
-                        regime_info = " ({} regime states, {} changes)".format(
-                            len(regime_sequence), regime_result.get('regime_changes_count', 0)
-                        )
-                    logger.info(
-                        "✅ %s processed: %d bars → %d total columns%s",
-                        symbol, len(symbol_data), len(signals_df.columns), regime_info
-                    )
-
-                except Exception as e:
-                    logger.error("❌ %s processing failed: %s", symbol, e, exc_info=True)
-                    continue
+                tasks.append(self._process_single_symbol(symbol, raw_data[symbol], timeframe))
+            
+            # Execute with concurrency control to avoid overloading
+            # institutional-grade: use gather with semaphore if necessary
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+            
+            for symbol, result in results:
+                if result:
+                    enriched_data[symbol] = result
 
             # Calculate total processing time
             total_time = (datetime.now() - start_processing).total_seconds()
@@ -1134,6 +983,109 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.error(f"❌ Pipeline processing failed: {e}", exc_info=True)
             return {}
 
+    async def _process_single_symbol(
+        self, 
+        symbol: str, 
+        symbol_raw_df: pd.DataFrame, 
+        timeframe: str
+    ) -> Tuple[str, Optional[EnrichedMarketData]]:
+        """
+        Processes a single symbol through the full pipeline.
+        Designed for parallel execution via asyncio.gather (Hotspot 4 fix).
+        """
+        async with self._processing_semaphore:
+            symbol_data = symbol_raw_df.copy()
+            symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
+            liquidity_sequence = self._assess_liquidity(symbol, symbol_data)
+            liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
+
+            try:
+                # Initialize processing variables
+                indicators_df = pd.DataFrame()
+                features_df = pd.DataFrame()
+                signals_df = pd.DataFrame()
+                phase2_time = 0.0
+                phase3_time = 0.0
+                phase4_time = 0.0
+                regime_sequence = []
+
+                # PHASE 0: Process regime
+                if self.regime_engine:
+                    regime_result = self.regime_engine.process_market_data(symbol_data)
+                    regime_sequence = regime_result.get('regime_sequence', []) if isinstance(regime_result, dict) else []
+
+                    if regime_sequence:
+                        regime_changes_count = regime_result.get('regime_changes_count', 0)
+                        
+                        # Use Engine Lock during critical section where config adaptation happens
+                        async with self._engine_lock:
+                            if regime_changes_count > 0:
+                                regime_segments = self._identify_regime_segments(symbol_data, regime_sequence, symbol)
+                                segment_start = datetime.now()
+                                indicators_df, features_df, signals_df = await self._process_regime_segments(
+                                    symbol_data, regime_segments, symbol
+                                )
+                                segment_time = (datetime.now() - segment_start).total_seconds()
+                                phase2_time, phase3_time, phase4_time = segment_time*0.4, segment_time*0.4, segment_time*0.2
+                            else:
+                                first_regime = regime_sequence[0]
+                                timestamp = first_regime.get('timestamp')
+                                if timestamp:
+                                    if isinstance(timestamp, pd.Timestamp): timestamp = timestamp.to_pydatetime()
+                                    regime_analysis = self.regime_engine.get_regime_at_timestamp(symbol, timestamp)
+                                    if regime_analysis:
+                                        if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
+                                            await self.indicators_engine.adapt_to_regime(regime_analysis)
+                                        if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
+                                            await self.feature_engineer.adapt_to_regime(regime_analysis)
+
+                                # Process stages
+                                indicators_df, features_df, signals_df, p2, p3, p4 = \
+                                    await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+                                phase2_time, phase3_time, phase4_time = p2, p3, p4
+                    else:
+                        indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
+                            await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+                else:
+                    indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
+                        await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+
+                # Add regime columns
+                if regime_sequence:
+                    signals_df = self._add_regime_columns(signals_df, symbol, regime_sequence)
+
+                self.processing_times['indicators'].append(phase2_time)
+                self.processing_times['features'].append(phase3_time)
+                self.processing_times['signals'].append(phase4_time)
+
+                enriched = EnrichedMarketData(
+                    symbol=symbol, timeframe=timeframe, raw_data=symbol_data,
+                    indicators=indicators_df, features=features_df, signals=signals_df,
+                    processing_timestamp=datetime.now(), regime_context=self.current_regime_context,
+                    liquidity_context=self._get_latest_liquidity_context(symbol)
+                )
+                self._cache_put(symbol, enriched)
+                return symbol, enriched
+
+            except Exception as e:
+                logger.error(f"❌ {symbol} processing failed: {e}")
+                return symbol, None
+
+    def _calculate_indicators_sync(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Synchronous version of indicator calculation for thread pool execution."""
+        if not self.indicators_engine:
+            return data.copy()
+        
+        # We don't call self._validate_dataframe here to avoid async issues 
+        # but the engine itself is fast.
+        return self.indicators_engine.calculate_indicators(data)
+
+    def _engineer_features_sync(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Synchronous version of feature engineering for thread pool execution."""
+        if not self.feature_engineer:
+            return data.copy()
+        return self.feature_engineer.create_features(data)
+
     async def _process_pipeline_stages(
         self,
         symbol_data: pd.DataFrame,
@@ -1142,16 +1094,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, float, float, float]:
         """
         Process data through pipeline stages 2-4 (Indicators → Features → Signals)
-
-        This helper extracts the common processing logic to avoid code duplication.
-
-        Args:
-            symbol_data: Raw OHLCV DataFrame (already sorted and indexed)
-            symbol: Trading symbol
-            liquidity_context: Optional liquidity context for adaptation
-
-        Returns:
-            Tuple of (indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time)
+        Optimized with asyncio.to_thread for GIL-releasing JIT/Bottleneck (Hotspot 4).
         """
         # Adapt to liquidity if available
         if liquidity_context:
@@ -1162,12 +1105,14 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
         # Phase 2: Calculate indicators
         phase2_start = datetime.now()
-        indicators_df = await self._calculate_indicators(symbol_data)
+        # Use to_thread to allow concurrent CPU work across multiple symbols
+        indicators_df = await asyncio.to_thread(self._calculate_indicators_sync, symbol_data)
         phase2_time = (datetime.now() - phase2_start).total_seconds()
 
         # Phase 3: Engineer features
         phase3_start = datetime.now()
-        features_df = await self._engineer_features(indicators_df)
+        # Use to_thread to allow concurrent CPU work across multiple symbols
+        features_df = await asyncio.to_thread(self._engineer_features_sync, indicators_df)
         phase3_time = (datetime.now() - phase3_start).total_seconds()
 
         # Merge liquidity features

@@ -10,6 +10,7 @@ Author: StatArb_Gemini Core Engine
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
+import yaml
 
 from core_engine.utils.config import deep_merge
 from core_engine.config.yaml_loader import load_with_includes
@@ -99,6 +100,9 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         # Backwards compat: if not specified, treat pct cap as the overall max position size.
         max_position_pct = max_position_size
 
+    # Map concentration limit if available
+    max_concentration = risk.get("position_concentration_limit", cfg.get("max_concentration", 0.20))
+
     out: Dict[str, Any] = {
         "experiment_name": cfg.get("experiment_name", "Smoke_Test"),
         "experiment_type": cfg.get("experiment_type", "smoke_test"),
@@ -113,8 +117,25 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "min_confidence_threshold": min_confidence_threshold if min_confidence_threshold is not None else 0.60,
         "max_position_size": max_position_size if max_position_size is not None else cfg.get("max_position_size", 0.10),
         "max_position_pct": max_position_pct,
-        "strategies": pt.get("strategies", cfg.get("strategies", [])),
+        "max_concentration": max_concentration,
+        "strategies": pt.get("strategies") or pt.get("strategy") or cfg.get("strategies") or cfg.get("strategy") or [],
     }
+
+    # Ensure strategies is a list
+    if not isinstance(out["strategies"], list):
+        out["strategies"] = [out["strategies"]]
+
+    # Additional parity checks for strategy-level fields (if provided in PT schema)
+    if out["strategies"]:
+        for s in out["strategies"]:
+            if not isinstance(s, dict):
+                continue
+            # Parity: Map 'risk_limit' to 'max_position_size' at strategy level
+            if "risk_limit" in s and "max_position_size" not in s:
+                s["max_position_size"] = s["risk_limit"]
+            # Parity: Ensure 'type' is set even if only 'strategy_type' exists
+            if "strategy_type" in s and "type" not in s:
+                s["type"] = s["strategy_type"]
 
     # NOTE: We intentionally do not merge arbitrary flat keys here.
     # If you need a flat override, put it into the canonical papertest schema

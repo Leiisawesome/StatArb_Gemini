@@ -643,70 +643,64 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
     def generate_signals(self, df: pd.DataFrame) -> List[TradingSignal]:
         """
         Generate trading signals from features DataFrame
-
-        Args:
-            df: DataFrame with engineered features
-
-        Returns:
-            List of TradingSignal objects
         """
-        if df.empty:
-            return []
+        import traceback
+        try:
+            if df.empty:
+                return []
 
-        self.logger.info(f"Generating signals for {len(df['symbol'].unique())} symbols")
+            self.logger.info(f"Generating signals for {len(df['symbol'].unique())} symbols")
 
-        all_signals = []
+            all_signals = []
 
-        # Process each symbol separately
-        for symbol in df['symbol'].unique():
-            symbol_df = df[df['symbol'] == symbol].copy().sort_values('timestamp')
+            # Process each symbol separately
+            for symbol in df['symbol'].unique():
+                symbol_df = df[df['symbol'] == symbol].copy().sort_values('timestamp')
 
-            if len(symbol_df) < 10:  # Need minimum data for signals
-                continue
+                if len(symbol_df) < 10:  # Need minimum data for signals
+                    continue
 
-            # Generate different types of signals (UNBIASED APPROACH)
-            # Return separate signals per type - strategies pick what they need
-            # This removes bias from fixed-weight combination (mean_rev=0.4, momentum=0.4, volume=0.2)
+                # Generate different types of signals
+                mean_reversion_scores = self._generate_mean_reversion_signals(symbol_df)
+                momentum_scores = self._generate_momentum_signals(symbol_df)
+                volume_scores = self._generate_volume_signals(symbol_df)
 
-            mean_reversion_scores = self._generate_mean_reversion_signals(symbol_df)
-            momentum_scores = self._generate_momentum_signals(symbol_df)
-            volume_scores = self._generate_volume_signals(symbol_df)
+                # Convert score DataFrames to TradingSignal objects
+                mean_rev_signals = self._scores_to_signals(
+                    symbol_df, mean_reversion_scores,
+                    score_column='mean_reversion_score',
+                    signal_source='mean_reversion',
+                    all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
+                )
+                momentum_sig_list = self._scores_to_signals(
+                    symbol_df, momentum_scores,
+                    score_column='momentum_score',
+                    signal_source='momentum',
+                    all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
+                )
+                volume_sig_list = self._scores_to_signals(
+                    symbol_df, volume_scores,
+                    score_column='volume_score',
+                    signal_source='volume',
+                    all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
+                )
 
-            # Convert score DataFrames to TradingSignal objects (separate per type)
-            # No forced combination - truly general, strategy-agnostic signals
-            # Pass all score DataFrames for metadata access
-            mean_rev_signals = self._scores_to_signals(
-                symbol_df, mean_reversion_scores,
-                score_column='mean_reversion_score',
-                signal_source='mean_reversion',
-                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
-            )
-            momentum_sig_list = self._scores_to_signals(
-                symbol_df, momentum_scores,
-                score_column='momentum_score',
-                signal_source='momentum',
-                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
-            )
-            volume_sig_list = self._scores_to_signals(
-                symbol_df, volume_scores,
-                score_column='volume_score',
-                signal_source='volume',
-                all_scores={'mean_reversion': mean_reversion_scores, 'momentum': momentum_scores, 'volume': volume_scores}
-            )
+                all_signals.extend(mean_rev_signals)
+                all_signals.extend(momentum_sig_list)
+                all_signals.extend(volume_sig_list)
 
-            # Return all signal types separately (no bias)
-            all_signals.extend(mean_rev_signals)
-            all_signals.extend(momentum_sig_list)
-            all_signals.extend(volume_sig_list)
+            # Filter and validate signals
+            filtered_signals = self._filter_signals(all_signals, df)
 
-        # Filter and validate signals
-        filtered_signals = self._filter_signals(all_signals, df)
+            # Store in history
+            self._signal_history.extend(filtered_signals)
 
-        # Store in history (using bounded deque)
-        self._signal_history.extend(filtered_signals)
-
-        self.logger.info(f"Generated {len(filtered_signals)} signals from {len(all_signals)} raw signals")
-        return filtered_signals
+            self.logger.info(f"Generated {len(filtered_signals)} signals from {len(all_signals)} raw signals")
+            return filtered_signals
+        except Exception as e:
+            self.logger.error(f"Signal generation error: {e}")
+            self.logger.error(traceback.format_exc())
+            raise e
 
     def _calculate_improved_zscore(self, df: pd.DataFrame, price_col: str = 'close', window: int = 20) -> pd.Series:
         """
@@ -1026,10 +1020,9 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             score_series = score_series.reindex(df.index, fill_value=0.0)
 
         for i, (idx, row) in enumerate(df.iterrows()):
-            if idx not in score_series.index:
-                continue
-
-            score = score_series.loc[idx]
+            # Use iloc[i] instead of loc[idx] to handle potential duplicate indices safely
+            # Since we reindexed score_series to df.index, iloc[i] is guaranteed correct
+            score = score_series.iloc[i]
             raw_confidence = abs(score)
 
             # Only create signals above threshold
