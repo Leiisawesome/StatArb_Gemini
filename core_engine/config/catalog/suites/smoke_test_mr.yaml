@@ -5,9 +5,9 @@
 
 papertest:
   data:
-    symbols: ["TSLA"]
-    start_date: "2024-12-16"
-    end_date: "2024-12-20"
+    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "META"]
+    start_date: "2024-12-02"
+    end_date: "2024-12-31"
     interval: "1min"
     replay_speed: "FAST_1000X"
     simulate_market_hours: false
@@ -34,6 +34,10 @@ papertest:
         scan_all_bars: false
         scan_interval: 1
         enable_regime_filter: false
+        # Step 2: Signal Maturity & Entry Quality
+        tau_0: 0.40
+        erar_gamma: 0.15
+        sms_decay_rate: 0.05
 
         dislocation_minimum: 2.5
         dislocation_moderate: 2.5
@@ -48,25 +52,25 @@ papertest:
         # Backtest uses ~10% sizing per entry for this smoke test.
         base_position_pct: 0.1
 
-        stop_loss_pct: -2.0
+        stop_loss_pct: -2.5
         take_profit_pct: 10.0
         min_profit_to_exit: 0.0
 
         enable_momentum_exit: true
-        momentum_adx_threshold: 20.0
+        momentum_adx_threshold: 15.0
         momentum_rsi_overbought: 70.0
         momentum_rsi_oversold: 30.0
         momentum_volume_ratio: 0.7
         momentum_extended_zscore: 3.0
 
         zscore_entry_threshold: 1.5
-        zscore_exit_threshold: 0.5
+        zscore_exit_threshold: 0.2
 
         enable_eod_liquidation: true
         eod_close_time: "15:55"
         enable_entry_cutoff: true
         entry_cutoff_time: "15:30"
-        min_holding_bars: 5
+        min_holding_bars: 10
 
   # Align papertest risk sizing behavior with backtest smoke_test.
   risk:
@@ -74,7 +78,7 @@ papertest:
     min_signal_confidence: 0.40
     max_position_size: 0.10
     max_position_pct: 0.10
-    max_positions: 1
+    max_positions: 5
     position_concentration_limit: 1.0
     daily_risk_budget_pct: 0.01
     per_trade_risk_pct: 0.005
