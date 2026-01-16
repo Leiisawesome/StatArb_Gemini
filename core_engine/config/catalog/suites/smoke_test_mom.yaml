@@ -1,15 +1,17 @@
-# Canonical Smoke Test Suite: Momentum (MOM)
-# =========================================
-# Canonical suite inputs for BT/PT parity iteration (Momentum strategy).
-# Uses papertest schema as the single source of truth.
+# Canonical Smoke Test Suite: Momentum (MOM) - SMS + ERAR Gate Path
+# ================================================================
+# Purpose:
+# - Exercise ADS v3.1 gating in EnhancedMomentumStrategy with BOTH:
+#     - SMS gate (pending/mature)
+#     - ERAR gate (expected risk-adjusted return)
 #
-# Template source: backtest/configs/smoke_test_momentum.yaml
+# This complements `smoke_test_mom_sms.yaml` (SMS-only isolation suite).
 #
 
 papertest:
   data:
     symbols: ["TSLA"]
-    start_date: "2024-12-18"
+    start_date: "2024-12-16"
     end_date: "2024-12-20"
     interval: "1min"
     replay_speed: "FAST_1000X"
@@ -22,8 +24,7 @@ papertest:
   session:
     stall_threshold_seconds: 300.0
 
-  # Smoke-test-only: allow lower-confidence single-day entries through the multi-strategy
-  # aggregator filter (production runs can keep the default 0.60).
+  # Smoke-test-only: allow lower-confidence entries through the multi-strategy aggregator.
   min_confidence_threshold: 0.40
 
   regime:
@@ -31,47 +32,69 @@ papertest:
 
   strategies:
     - type: "momentum"
-      name: "MOM_State_Machine"
+      name: "MOM_SMS_ERAR_Gate"
       allocation_pct: 1.0
       parameters:
-        # State Machine Settings (Professional Re-architecture)
-        enable_state_machine: true
+        # Disable state machine so ADS composite/SMS gating path is used.
+        enable_state_machine: false
+        scan_all_bars: false
+        scan_interval: 1
+
+        # EOD liquidation + risk-side exits (Rule 7)
         enable_eod_liquidation: true
         eod_close_time: "15:55"
-        # Risk-side exits (Rule 7): enable centralized multi-exit policy to generate exits
-        # even when the momentum strategy is entry-intent only.
         enable_ads_multi_exit: true
         max_holding_minutes: 30
         enable_forward_vol_stops: true
-        orb_minutes: 15
-        tightness_threshold: 0.9
-        # Smoke-test-only loosening (to avoid "0 trade" dead-runs on single-day samples):
-        # - Most breakouts are being rejected by EXT_TRAP: extension > max_extension_atr (see debug.log).
-        # - Some are also failing volume confirmation by a small margin.
-        max_extension_atr: 2.5
-        setup_expiry_bars: 30
-        breakout_volume_ratio_threshold: 0.95
-        anchor_ma: "sma_20"
 
-        # Core momentum parameters
+        # Momentum feature horizons
         short_period: 10
         medium_period: 20
         long_period: 50
         lookback_period: 60
+
+        # Permissive composite thresholds: focus is gate wiring/coverage, not selectivity.
+        composite_z_entry: 0.0
+        composite_pct_entry: 50.0
+
+        # Momentum thresholds
         momentum_threshold: 0.02
         adx_threshold: 25.0
         volume_threshold: 1.2
-        # Smoke-test-only: avoid sizing collapsing to ~0 due to missing/weak momentum_strength
-        # in single-day samples (state-machine entries are structural; sizing should be non-zero).
-        momentum_scaling: false
 
-        # Position sizing
-        base_position_pct: 0.1
+        # ADS gating knobs (explicit)
+        enable_ads_gates: true
+        tau_0: 0.40
+        sms_max_pending: 50
+        sms_decay_rate: 0.05
+        sms_mode: "multiplicative"
+        sms_min_info_to_mature: 0.5
+        sms_max_info: 12.0
+        sms_prior_p0: 0.55
+        sms_prior_strength_coef: 0.10
+        sms_delay_penalty_per_bar: 0.02
+        sms_w_setup_maturity: 1.10
+        sms_w_setup_validity: 1.25
+        sms_w_flow_support: 0.80
+        sms_w_vol_compression: 0.60
+        sms_info_w_volume: 0.55
+        sms_info_w_volatility: 0.45
+        sms_info_cap: 3.0
+
+        # Phase 1: trend persistence filter
+        enable_trend_persistence_filter: true
+        trend_persistence_lookback: 10
+        trend_persistence_min_ratio: 0.6
+
+        # ERAR: permissive gamma so we still trade in a short smoke window.
+        erar_gamma: 0.10
+
+        # Position sizing (intent hint only; CentralRiskManager retains authority)
+        base_position_pct: 0.10
         max_position_pct: 0.10
 
-  # Align papertest risk sizing behavior with backtest smoke_test_momentum.
   risk:
-    allow_shorts: false
+    allow_shorts: true
     min_signal_confidence: 0.40
     max_position_size: 0.40
     max_position_pct: 0.10
@@ -80,7 +103,6 @@ papertest:
     daily_risk_budget_pct: 0.01
     per_trade_risk_pct: 0.005
 
-  # Deterministic fills (no latency/partial) for parity iteration.
   execution:
     test_mode: true
     initial_cash: 100000.0
@@ -90,7 +112,7 @@ papertest:
     latency_ms_max: 0.0
     fill_probability: 1.0
     partial_fill_probability: 0.0
-    slippage_bps_max: 2.0
+    slippage_bps_max: 5.0
     impact_coefficient: 10.0
     seed: 42
     use_historical_execution_simulator: true
