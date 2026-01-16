@@ -365,11 +365,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 additional_data["sms_mode"] = "multiplicative"
 
             signal_type = SignalType.BUY if side == "BUY" else SignalType.SELL
-            # Strategy expresses allocation intent as a static target weight hint.
+            # Strategy expresses allocation intent as a hint.
             # RiskManager remains the final authority for sizing.
             base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
-            max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
-            target_weight_hint = float(np.clip(base_tw, 0.0, max_tw))
+            target_weight_hint = self._calculate_regime_adaptive_weight(
+                symbol=symbol,
+                base_weight=base_tw,
+                side=side,
+                ads_r=ads_ctx.get("ads_regime_vector_obj")
+            )
             return StrategySignal(
                 strategy_id=self.strategy_id,
                 symbol=symbol,
@@ -383,6 +387,69 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             )
 
         return None
+
+    def _calculate_regime_adaptive_weight(
+        self,
+        symbol: str,
+        base_weight: float,
+        side: str,
+        ads_r: Optional[ADSRegimeVector] = None
+    ) -> float:
+        """
+        Calculate regime-adaptive position size based on ADS continuous regime vector R.
+
+        Sizing logic:
+        1. Base: Strategy-defined base_position_pct
+        2. Confidence scaling: size * (0.5 + 0.5 * Confidence)
+        3. Volatility scaling: size * (1.25 - Volatility)
+        4. Liquidity scaling: size * (0.5 + 0.5 * Liquidity)
+        5. Trend alignment:
+           - confirmed: +25% size boost
+           - headwind: -25% size penalty
+        """
+        if not bool(getattr(self.config, "enable_regime_adaptive_sizing", False)):
+            return base_weight
+
+        if ads_r is None:
+            ads_r, _ = self._ads_regime_cache.get_vector(
+                symbol=symbol,
+                get_regime_context=self.get_current_regime_context,
+            )
+
+        weight = float(base_weight)
+
+        # 1. Confidence scaling (0.7 to 1.3)
+        weight *= (0.7 + 0.6 * float(ads_r.confidence))
+
+        # 2. Volatility scaling (0.5 to 1.5)
+        # High vol (1.0) -> 0.5x size; Low vol (0.0) -> 1.5x size
+        vol_penalty = float(ads_r.volatility)
+        
+        # 3. Liquidity scaling (0.7 to 1.1)
+        weight *= (0.7 + 0.4 * float(ads_r.liquidity))
+
+        # 4. Trend alignment boost/penalty
+        is_bullish_signal = (side in ("BUY", "LONG_ENTRY", "bullish_momentum"))
+
+        if is_bullish_signal:
+            if ads_r.trend >= 0.2:  # Bullish regime confirms long signal
+                weight *= 1.5
+                vol_penalty *= 0.5 # Half the vol penalty if trending in our direction
+            elif ads_r.trend <= -0.2:  # Bearish regime headwind for long signal
+                weight *= 0.5
+        else:  # Bearish/Short signal
+            if ads_r.trend <= -0.2:  # Bearish regime confirms short signal
+                weight *= 1.5
+                vol_penalty *= 0.5
+            elif ads_r.trend >= 0.2:  # Bullish regime headwind for short signal
+                weight *= 0.5
+
+        # Apply volatility scaling after adjustment
+        weight *= (1.5 - vol_penalty)
+
+        # Final clip to strategy max
+        max_tw = float(getattr(self.config, "max_position_pct", base_weight * 1.5) or base_weight * 1.5)
+        return float(np.clip(weight, 0.0, max_tw))
 
     def _get_column_name(self, expected_name: str, data: pd.DataFrame) -> str:
         """
@@ -565,8 +632,11 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         }
                     )
                     base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
-                    max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
-                    signal.target_weight = float(np.clip(base_tw, 0.0, max_tw))
+                    signal.target_weight = self._calculate_regime_adaptive_weight(
+                        symbol=symbol,
+                        base_weight=base_tw,
+                        side="LONG_ENTRY"
+                    )
                     signal.quantity_type = "PERCENTAGE"
                     return signal
                 
@@ -813,8 +883,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
                 if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
                     base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
-                    max_tw = float(getattr(self.config, "max_position_pct", base_tw) or base_tw)
-                    target_weight = float(np.clip(base_tw, 0.0, max_tw))
+                    target_weight = self._calculate_regime_adaptive_weight(
+                        symbol=symbol,
+                        base_weight=base_tw,
+                        side=side,
+                        ads_r=ads_ctx.get("ads_regime_vector_obj")
+                    )
 
                     signal = StrategySignal(
                         strategy_id=self.strategy_id,

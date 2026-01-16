@@ -5,7 +5,7 @@
 
 papertest:
   data:
-    symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "META"]
+    symbols: ["TSLA"]
     start_date: "2024-12-02"
     end_date: "2024-12-31"
     interval: "1min"
@@ -34,6 +34,8 @@ papertest:
         scan_all_bars: false
         scan_interval: 1
         enable_regime_filter: false
+        # Regime Adaptive Sizing (ADS v3.1 Logic)
+        enable_regime_adaptive_sizing: true
         # Step 2: Signal Maturity & Entry Quality
         tau_0: 0.40
         erar_gamma: 0.15

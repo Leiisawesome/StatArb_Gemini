@@ -11,8 +11,8 @@
 papertest:
   data:
     symbols: ["TSLA"]
-    start_date: "2024-12-16"
-    end_date: "2024-12-20"
+    start_date: "2024-12-02"
+    end_date: "2024-12-31"
     interval: "1min"
     replay_speed: "FAST_1000X"
     simulate_market_hours: false
@@ -86,8 +86,12 @@ papertest:
         trend_persistence_lookback: 10
         trend_persistence_min_ratio: 0.6
 
+        # Regime Adaptive Sizing (ADS v3.1 Logic)
+        enable_regime_adaptive_sizing: true
+
         # ERAR: permissive gamma so we still trade in a short smoke window.
         erar_gamma: 0.10
+        erar_tail_lambda: 1.0
 
         # Position sizing (intent hint only; CentralRiskManager retains authority)
         base_position_pct: 0.10

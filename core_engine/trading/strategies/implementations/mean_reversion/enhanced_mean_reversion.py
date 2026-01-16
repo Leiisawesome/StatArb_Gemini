@@ -985,7 +985,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 signal_type=signal_type,
                 strength=strength,  # Composite strength from exhaustion + SMS + z-score
                 confidence=confidence,
-                target_weight=self.config.base_position_pct,
+                target_weight=self._calculate_regime_adaptive_weight(
+                    symbol=symbol,
+                    base_weight=self.config.base_position_pct,
+                    side=str(signal_type.value),
+                    ads_r=ads_r
+                ),
                 quantity_type="PERCENTAGE",
                 timestamp=timestamp,
                 additional_data=additional_data
@@ -998,6 +1003,63 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
     # ========================================
     # ADS v3.1: PENDING SIGNAL MATURATION
     # ========================================
+
+    def _calculate_regime_adaptive_weight(
+        self,
+        symbol: str,
+        base_weight: float,
+        side: str,
+        ads_r: Optional[ADSRegimeVector] = None
+    ) -> float:
+        """
+        Calculate regime-adaptive position size for Mean Reversion.
+
+        Sizing logic:
+        1. Base: Strategy-defined base_position_pct
+        2. Confidence scaling: size * (0.7 + 0.6 * Confidence)
+        3. Volatility scaling: size * (1.5 - Volatility)
+        4. Trend alignment:
+           - For BUY (Long):
+             - Strong bear trend (falling knife): 0.5x size
+             - Strong bull trend (recovery): 1.25x size
+           - For SHORT (Short):
+             - Strong bull trend (parabolic): 0.5x size
+             - Strong bear trend (recovery): 1.25x size
+        """
+        if not bool(getattr(self.config, "enable_regime_adaptive_sizing", False)):
+            return base_weight
+
+        if ads_r is None:
+            ads_r, _ = self._get_ads_regime_vector(symbol)
+
+        weight = float(base_weight)
+
+        # 1. Confidence scaling (0.7 to 1.3)
+        weight *= (0.7 + 0.6 * float(ads_r.confidence))
+
+        # 2. Volatility scaling (0.5 to 1.5)
+        # MR is very sensitive to vol cascades.
+        weight *= (1.5 - float(ads_r.volatility))
+
+        # 3. Liquidity scaling (0.7 to 1.1)
+        weight *= (0.7 + 0.4 * float(ads_r.liquidity))
+
+        # 4. Trend alignment
+        is_long = (side in ("BUY", "LONG_ENTRY"))
+        if is_long:
+            if ads_r.trend <= -0.4:  # Strong bear trend (falling knife)
+                weight *= 0.5
+            elif ads_r.trend >= 0.4:  # Strong bull trend (dip in uptrend)
+                weight *= 1.25
+        else:  # Short
+            if ads_r.trend >= 0.4:  # Strong bull trend (shorting parabolic)
+                weight *= 0.5
+            elif ads_r.trend <= -0.4:  # Strong bear trend (rally in downtrend)
+                weight *= 1.25
+
+        # Final clip to strategy max
+        max_tw = float(getattr(self.config, "max_position_pct", base_weight * 1.5) or base_weight * 1.5)
+        return float(np.clip(weight, 0.0, max_tw))
 
     def _get_ads_regime_vector(self, symbol: str) -> Tuple[ADSRegimeVector, Dict[str, Any]]:
         """
@@ -1171,7 +1233,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             signal_type=SignalType.LONG_ENTRY,
             strength=min(float(ctx.raw_signal_strength) / 3.0, 1.0),
             confidence=confidence,
-            target_weight=self.config.base_position_pct,
+            target_weight=self._calculate_regime_adaptive_weight(
+                symbol=symbol,
+                base_weight=self.config.base_position_pct,
+                side="LONG_ENTRY",
+                ads_r=ads_r
+            ),
             quantity_type="PERCENTAGE",
             timestamp=timestamp,
             additional_data=additional_data

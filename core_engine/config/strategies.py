@@ -161,6 +161,9 @@ class MomentumConfig(BaseStrategyConfig):
     max_position_pct: float = 0.08
     """Maximum position size. Default: 8%"""
 
+    enable_regime_adaptive_sizing: bool = False
+    """Enable sizing scaling based on continuous regime vector R. Default: False"""
+
     momentum_scaling: bool = True
     """Scale position by momentum strength. Default: True"""
 
