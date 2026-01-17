@@ -11,8 +11,9 @@ Version: 1.0.0 (Modular Architecture)
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from dataclasses import dataclass
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
@@ -32,6 +33,8 @@ class SystemMetrics:
     cpu_usage: float
     error_rate: float
     throughput: float
+    event_loop_latency_ms: float = 0.0  # Phase 3
+    heartbeat_drift_ms: float = 0.0     # Phase 3
 
 class SystemMonitor(ISystemComponent):
     """
@@ -46,6 +49,11 @@ class SystemMonitor(ISystemComponent):
         self.monitoring_task: Optional[asyncio.Task] = None
         self.started_at: Optional[datetime] = None
         self.is_monitoring: bool = False
+        
+        # Latency tracking (Phase 3)
+        self.last_loop_time: float = time.perf_counter()
+        self.latency_history: List[float] = []
+        self.heartbeat_check_interval: float = 1.0
 
         # ISystemComponent state
         self.is_initialized = False
@@ -89,20 +97,30 @@ class SystemMonitor(ISystemComponent):
         """Continuous system monitoring loop"""
 
         logger.info("📊 System monitoring loop started")
+        self.last_loop_time = time.perf_counter()
 
         try:
             while self.is_monitoring:
+                # Measure loop latency (Phase 3)
+                start_time = time.perf_counter()
+                
                 # Update system metrics
                 self._update_system_metrics()
 
                 # Update performance metrics
                 self._update_performance_metrics()
+                
+                # Calculate latency
+                current_latency = (time.perf_counter() - start_time) * 1000
+                self.latency_history.append(current_latency)
+                if len(self.latency_history) > 100:
+                    self.latency_history.pop(0)
 
                 # Check for performance degradation
                 await self._check_performance_degradation()
 
                 # Wait for next monitoring cycle
-                await asyncio.sleep(5)  # 5-second monitoring interval
+                await asyncio.sleep(self.heartbeat_check_interval)
 
         except asyncio.CancelledError:
             logger.info("📊 System monitoring cancelled")
@@ -122,7 +140,9 @@ class SystemMonitor(ISystemComponent):
                 'uptime_seconds': uptime,
                 'uptime_formatted': str(timedelta(seconds=int(uptime))),
                 'monitoring_active': self.is_monitoring,
-                'last_update': datetime.now().isoformat()
+                'last_update': datetime.now().isoformat(),
+                'avg_loop_latency_ms': sum(self.latency_history) / len(self.latency_history) if self.latency_history else 0,
+                'max_loop_latency_ms': max(self.latency_history) if self.latency_history else 0
             })
 
         except Exception as e:

@@ -84,7 +84,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         self.risk_manager_id: Optional[str] = None
 
         # System coordination and control
-        self.initialization_lock = threading.Lock()
+        self.initialization_lock = asyncio.Lock()
         self.operation_semaphore = asyncio.Semaphore(self.config_manager.system_config.max_concurrent_operations)
 
         # Emergency state
@@ -153,7 +153,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """
 
         try:
-            with self.initialization_lock:
+            async with self.initialization_lock:
                 if self.system_status != SystemStatus.UNINITIALIZED:
                     logger.warning("System already initialized")
                     return True

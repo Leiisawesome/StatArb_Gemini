@@ -166,6 +166,11 @@ class PositionReconciliation:
             severity: 0 for severity in DiscrepancySeverity
         }
 
+        # Temporal persistence tracking
+        # Only auto-correct after N consecutive reconciliation cycles with discrepancy
+        self._discrepancy_counts: Dict[str, int] = {}
+        self.persistence_threshold = self.config.get('persistence_threshold', 3)
+
         self.logger.info("✅ PositionReconciliation initialized")
         self.logger.info(f"   Normal Interval: {self.normal_interval}s")
         self.logger.info(f"   Fast Interval: {self.fast_interval}s")
@@ -341,7 +346,11 @@ class PositionReconciliation:
 
             # Skip if difference is negligible (< 0.01 shares)
             if abs(qty_diff) < 0.01:
+                self._discrepancy_counts[symbol] = 0
                 continue
+
+            # Increment persistence count for discrepancy
+            self._discrepancy_counts[symbol] = self._discrepancy_counts.get(symbol, 0) + 1
 
             # Get current price for value calculation
             current_price = await self._get_current_price(symbol)
@@ -354,7 +363,7 @@ class PositionReconciliation:
             severity = self._classify_severity(abs(value_diff))
 
             # Determine action
-            action = self._determine_action(severity, abs(value_diff))
+            action = self._determine_action(severity, abs(value_diff), symbol)
 
             # Create discrepancy record
             discrepancy = PositionDiscrepancy(
@@ -395,18 +404,22 @@ class PositionReconciliation:
         else:
             return DiscrepancySeverity.CRITICAL
 
-    def _determine_action(self, severity: DiscrepancySeverity, value_diff: float) -> ReconciliationAction:
-        """Determine action based on severity"""
+    def _determine_action(self, severity: DiscrepancySeverity, value_diff: float, symbol: str) -> ReconciliationAction:
+        """Determine action based on severity and temporal persistence"""
+        # Temporal persistence check
+        current_count = self._discrepancy_counts.get(symbol, 0)
+        is_persistent = current_count >= self.persistence_threshold
+
         if severity == DiscrepancySeverity.MINOR:
             return ReconciliationAction.LOG_ONLY
         elif severity == DiscrepancySeverity.MODERATE:
             if self.auto_correct_enabled and value_diff >= self.auto_correct_threshold:
-                return ReconciliationAction.AUTO_CORRECT
+                return ReconciliationAction.AUTO_CORRECT if is_persistent else ReconciliationAction.LOG_ONLY
             else:
                 return ReconciliationAction.ALERT_TEAM
         elif severity in [DiscrepancySeverity.SEVERE, DiscrepancySeverity.CRITICAL]:
             if self.auto_correct_enabled and value_diff >= self.auto_correct_threshold:
-                return ReconciliationAction.AUTO_CORRECT
+                return ReconciliationAction.AUTO_CORRECT if is_persistent else ReconciliationAction.ALERT_TEAM
             else:
                 return ReconciliationAction.MANUAL_REVIEW
         else:
@@ -445,6 +458,9 @@ class PositionReconciliation:
 
             # Update internal position to match broker
             self.risk_manager.current_positions[discrepancy.symbol] = discrepancy.broker_position
+            
+            # Reset discrepancy count after correction
+            self._discrepancy_counts[discrepancy.symbol] = 0
 
             # Record correction
             discrepancy.resolution_notes = (

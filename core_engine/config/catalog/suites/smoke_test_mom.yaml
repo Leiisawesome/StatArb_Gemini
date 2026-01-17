@@ -33,7 +33,7 @@ papertest:
   strategies:
     - type: "momentum"
       name: "MOM_SMS_ERAR_Gate"
-      allocation_pct: 1.0
+      allocation_pct: 2.0
       parameters:
         # Disable state machine so ADS composite/SMS gating path is used.
         enable_state_machine: false
@@ -94,14 +94,14 @@ papertest:
         erar_tail_lambda: 1.0
 
         # Position sizing (intent hint only; CentralRiskManager retains authority)
-        base_position_pct: 0.10
-        max_position_pct: 0.10
+        base_position_pct: 0.20
+        max_position_pct: 0.20
 
   risk:
     allow_shorts: true
     min_signal_confidence: 0.40
     max_position_size: 0.40
-    max_position_pct: 0.10
+    max_position_pct: 0.20
     max_positions: 1
     position_concentration_limit: 1.0
     daily_risk_budget_pct: 0.01

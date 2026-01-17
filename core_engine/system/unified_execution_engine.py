@@ -99,6 +99,7 @@ class ExecutionAuthorization:
 
     authorization_id: str = field(default_factory=get_fast_id)
     risk_manager_id: str = ""
+    root_signal_id: str = ""  # Cascaded from TradingAuthorization for full audit trail
 
     # Authorization details
     symbol: str = ""
@@ -157,6 +158,7 @@ class ExecutionRequest:
     """Execution request with risk authorization"""
 
     request_id: str = field(default_factory=get_fast_id)
+    root_signal_id: str = ""  # Full causal traceability to originating signal
     authorization: ExecutionAuthorization = field(default_factory=ExecutionAuthorization)
 
     # Execution parameters
@@ -184,6 +186,7 @@ class ExecutionResult:
 
     request_id: str = ""
     authorization_id: str = ""
+    root_signal_id: str = ""  # Traceability link
 
     # Execution outcome
     status: ExecutionStatus = ExecutionStatus.PENDING_AUTHORIZATION
@@ -415,6 +418,7 @@ class MarketAlgorithm(IExecutionAlgorithm):
             result = ExecutionResult(
                 request_id=request.request_id,
                 authorization_id=request.authorization.authorization_id,
+                root_signal_id=request.root_signal_id,
                 status=ExecutionStatus.EXECUTING,
                 started_at=datetime.now(),
                 algorithm_used=request.algorithm
@@ -1427,6 +1431,7 @@ class UnifiedExecutionEngine(ISystemComponent):
                     return ExecutionResult(
                         request_id=request.request_id,
                         authorization_id=request.authorization.authorization_id,
+                        root_signal_id=request.root_signal_id,
                         status=ExecutionStatus.REJECTED,
                         execution_log=errors,
                         algorithm_used=request.algorithm
@@ -1439,6 +1444,7 @@ class UnifiedExecutionEngine(ISystemComponent):
                     return ExecutionResult(
                         request_id=request.request_id,
                         authorization_id=request.authorization.authorization_id,
+                        root_signal_id=request.root_signal_id,
                         status=ExecutionStatus.REJECTED,
                         execution_log=[f"Algorithm {request.algorithm} not available"],
                         algorithm_used=request.algorithm
@@ -1452,7 +1458,7 @@ class UnifiedExecutionEngine(ISystemComponent):
             # Execute the trade
             result = await algorithm.execute(request)
 
-            # Post-execution processing
+            # Post-execution processing (Safe locking - GAP 4-5)
             with self.execution_lock:
                 # Remove from active executions
                 self.active_executions.pop(request.request_id, None)
@@ -1463,10 +1469,10 @@ class UnifiedExecutionEngine(ISystemComponent):
                 # Update metrics
                 self._update_metrics(result)
 
-                # ENHANCED: Position tracking integration
-                await self._handle_position_updates(request, result)
+            # ENHANCED: Position tracking integration (OUTSIDE lock to prevent loop blockage)
+            await self._handle_position_updates(request, result)
 
-                logger.info(f"Execution completed: {request.request_id} - Status: {result.status}")
+            logger.info(f"Execution completed: {request.request_id} - Status: {result.status}")
 
             return result
 

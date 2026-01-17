@@ -5,31 +5,23 @@ Optimized for the low-latency critical path in StatArb trading.
 
 import time
 import threading
+import itertools
 
 class FastIDGenerator:
     """
-    Thread-safe, high-speed ID generator.
+    Thread-safe, lock-free (CPython) high-speed ID generator.
     Alternative to uuid.uuid4() for high-frequency operations.
     """
     def __init__(self):
-        self._counter = 0
-        self._last_ts = 0
-        self._lock = threading.Lock()
+        self._iterator = itertools.count()
         
     def generate(self) -> str:
         """
         Generate a unique ID based on timestamp and counter.
         Format: <hex_timestamp>-<hex_counter>
+        Uses nanosecond precision and atomic counter.
         """
-        with self._lock:
-            ts = int(time.time() * 1000) # Millisecond precision
-            if ts == self._last_ts:
-                self._counter += 1
-            else:
-                self._last_ts = ts
-                self._counter = 0
-            
-            return f"{ts:x}-{self._counter:x}"
+        return f"{time.time_ns():x}-{next(self._iterator):x}"
 
 _generator = FastIDGenerator()
 

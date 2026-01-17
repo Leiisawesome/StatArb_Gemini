@@ -31,6 +31,8 @@ Version: 2.0 (Rules Migration)
 
 import logging
 import asyncio
+import os
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta
@@ -99,6 +101,10 @@ class CircuitBreakerConfig:
 
     # Position Concentration
     max_position_concentration: float = 0.20  # 20% max per position
+
+    # External Safety Signals (NEW: Phase 3)
+    external_kill_switch_path: str = ".emergency_stop"
+    external_check_interval_seconds: int = 5
 
     # Emergency Actions
     cancel_pending_orders_on_halt: bool = True
@@ -200,7 +206,15 @@ class TradingCircuitBreakers:
         triggered = []
 
         try:
-            # BREAKER 1: Manual Kill Switch (highest priority)
+            # BREAKER 0: External Signal Watcher (Priority 0 - Phase 3)
+            external_halt = await self._check_external_kill_switch()
+            if external_halt:
+                return self._create_halt_status(
+                    CircuitBreakerType.MANUAL_KILL_SWITCH,
+                    f"External kill switch triggered via file: {self.config.external_kill_switch_path}"
+                )
+
+            # BREAKER 1: Manual Kill Switch (highest internal priority)
             if self.kill_switch_active:
                 return self._create_halt_status(
                     CircuitBreakerType.MANUAL_KILL_SWITCH,
@@ -280,6 +294,26 @@ class TradingCircuitBreakers:
                 CircuitBreakerType.MANUAL_KILL_SWITCH,
                 f"Circuit breaker system error: {str(e)}"
             )
+
+    async def _check_external_kill_switch(self) -> bool:
+        """Check for external kill switch signal (Phase 3)"""
+        try:
+            # Check if override file exists in workspace root
+            # Using path from config, default: .emergency_stop
+            kill_file = Path(self.config.external_kill_switch_path)
+            
+            if kill_file.exists():
+                if not self.kill_switch_active:
+                    self.logger.critical(f"🛑 EXTERNAL KILL SWITCH DETECTED: {kill_file.absolute()}")
+                    self.kill_switch_active = True
+                    self.kill_switch_user = "EXTERNAL_OPERATIONS"
+                    self.kill_switch_timestamp = datetime.now()
+                return True
+            
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking external kill switch: {e}")
+            return False
 
     async def _check_order_rate_limit(self) -> Dict:
         """Check order rate limiting"""

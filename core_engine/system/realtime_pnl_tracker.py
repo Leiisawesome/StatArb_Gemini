@@ -35,6 +35,7 @@ Version: 2.0 (Rules Migration)
 """
 
 import logging
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
@@ -124,6 +125,13 @@ class RealTimePnLTracker:
         self.winning_trades = 0
         self.losing_trades = 0
 
+        # Vectorized State for Performance (GAP 4-5 Enhancement)
+        self._symbols_vec: List[str] = []
+        self._positions_vec: np.ndarray = np.array([])
+        self._costs_vec: np.ndarray = np.array([])
+        self._prices_vec: np.ndarray = np.array([])
+        self._symbol_to_idx: Dict[str, int] = {}
+
         self.logger.info("✅ RealTimePnLTracker initialized")
         self.logger.info(f"   Max History Size: {self.max_history_size}")
 
@@ -139,6 +147,33 @@ class RealTimePnLTracker:
         """
         self.risk_manager = risk_manager
         self.logger.info("✅ RiskManager injected into RealTimePnLTracker")
+
+    def _rebuild_vector_state(self):
+        """
+        Rebuild vectorized state from current positions.
+        Called when positions are opened or closed.
+        """
+        active_symbols = [s for s, q in self.risk_manager.current_positions.items() if abs(q) > 0.001]
+        
+        self._symbols_vec = active_symbols
+        self._symbol_to_idx = {symbol: i for i, symbol in enumerate(active_symbols)}
+        
+        if not active_symbols:
+            self._positions_vec = np.array([])
+            self._costs_vec = np.array([])
+            self._prices_vec = np.array([])
+            self.unrealized_pnl = 0.0
+            self._update_total_pnl()
+            return
+
+        self._positions_vec = np.array([float(self.risk_manager.current_positions[s]) for s in active_symbols])
+        self._costs_vec = np.array([float(self.position_cost_basis.get(s, 0.0)) for s in active_symbols])
+        self._prices_vec = np.array([float(self.risk_manager.current_prices.get(s, self.position_cost_basis.get(s, 0.0))) for s in active_symbols])
+        
+        # Sync unrealized P&L from vector state
+        pnl_vec = (self._prices_vec - self._costs_vec) * self._positions_vec
+        self.unrealized_pnl = float(np.sum(pnl_vec))
+        self._update_total_pnl()
 
     async def update_market_data(self, symbol: str, price: float, timestamp: datetime):
         """
@@ -172,6 +207,12 @@ class RealTimePnLTracker:
                 # Update total unrealized P&L
                 self.unrealized_pnl += (position_pnl - old_pnl)
 
+                # Update vector state without full rebuild for performance
+                if symbol in self._symbol_to_idx:
+                    idx = self._symbol_to_idx[symbol]
+                    # We don't necessarily need to update _costs_vec here as it only changes on entry
+                    pass
+
                 # Note: Strategy P&L is only updated on position close (realized P&L)
 
         # Update total P&L
@@ -189,6 +230,73 @@ class RealTimePnLTracker:
                 f"Total: ${self.total_pnl:,.0f}, "
                 f"Drawdown: {self.current_drawdown:.2%}"
             )
+
+    async def update_market_data_batch(self, prices: Dict[str, float], timestamp: datetime):
+        """
+        Update P&L based on multiple new market prices (Vectorized).
+        Significantly faster for high-universe systems.
+
+        Args:
+            prices: Dict of symbol -> current price
+            timestamp: Price timestamp
+        """
+        if not self._symbols_vec:
+            # Check if we have positions in risk manager that aren't in vector state
+            if self.risk_manager.current_positions:
+                self._rebuild_vector_state()
+            
+            if not self._symbols_vec:
+                return
+
+        self.total_updates += 1
+        await self._check_daily_reset()
+
+        # Identify which tracked symbols are in this price update
+        updated_indices = []
+        updated_prices = []
+        
+        for symbol, price in prices.items():
+            if symbol in self._symbol_to_idx:
+                idx = self._symbol_to_idx[symbol]
+                updated_indices.append(idx)
+                updated_prices.append(float(price))
+                
+                # Update individual position P&L dict (for report attribution/backward compatibility)
+                cost_basis = self._costs_vec[idx]
+                qty = self._positions_vec[idx]
+                position_pnl = (float(price) - cost_basis) * qty
+                self.position_pnl[symbol] = position_pnl
+
+        if not updated_indices:
+            return
+
+        # Vectorized calculation for the subset of updated symbols
+        # We use a copy of the total unrealized P&L and subtract old values, add new ones
+        # Actually, if we have many updates, it's often safer to just sum the whole pnl_vec periodically
+        # or maintain a running total.
+        
+        # Here we perform a partial vectorized update
+        indices = np.array(updated_indices)
+        prices_arr = np.array(updated_prices)
+        
+        # Incremental update logic:
+        # 1. Calculate old contribution to P&L for these symbols
+        # 2. Calculate new contribution to P&L for these symbols
+        # 3. Adjust total unrealized_pnl by the difference
+        
+        old_subset_pnl = (self._prices_vec[indices] - self._costs_vec[indices]) * self._positions_vec[indices]
+        new_subset_pnl = (prices_arr - self._costs_vec[indices]) * self._positions_vec[indices]
+        
+        self.unrealized_pnl += float(np.sum(new_subset_pnl - old_subset_pnl))
+        
+        # Update internal prices vector
+        self._prices_vec[indices] = prices_arr
+
+        self._update_total_pnl()
+        self._update_intraday_high(timestamp)
+
+        if self.total_updates % 100 == 0:
+            self.logger.debug(f"📊 Vectorized P&L Update: {len(updated_indices)} symbols updated")
 
     async def update_position_close(
         self,
@@ -252,6 +360,9 @@ class RealTimePnLTracker:
             if symbol in self.position_entry_time:
                 del self.position_entry_time[symbol]
 
+        # Sync vectorized state
+        self._rebuild_vector_state()
+
         self.logger.info(
             f"💰 Position closed: {symbol} | "
             f"Qty: {quantity:.2f} @ ${exit_price:.2f} | "
@@ -311,6 +422,9 @@ class RealTimePnLTracker:
             f"Qty: {quantity:.2f} @ ${entry_price:.2f} | "
             f"Cost Basis: ${self.position_cost_basis[symbol]:.2f}"
         )
+
+        # Sync vectorized state
+        self._rebuild_vector_state()
 
     def _update_total_pnl(self):
         """Update total P&L"""

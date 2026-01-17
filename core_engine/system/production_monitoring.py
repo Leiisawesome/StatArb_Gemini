@@ -813,12 +813,16 @@ class AuditTrailManager(ISystemComponent):
 
     async def _store_audit_event(self, audit_event: AuditEvent):
         """Store audit event"""
+        should_flush = False
         with self._lock:
             self.audit_buffer.append(audit_event)
 
             # Flush buffer if full
             if len(self.audit_buffer) >= self.buffer_size:
-                await self._flush_audit_buffer()
+                should_flush = True
+
+        if should_flush:
+            await self._flush_audit_buffer()
 
     async def _flush_audit_buffer(self):
         """Flush audit buffer to storage"""

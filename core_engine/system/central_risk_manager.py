@@ -30,6 +30,7 @@ import logging
 import threading
 import uuid
 import time
+import itertools
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
@@ -39,15 +40,11 @@ from collections import deque, defaultdict
 import numpy as np
 
 # Fast ID counters for performance-critical decision requests
-_fast_id_counter = 0
-_fast_id_lock = threading.Lock()
+_fast_id_iterator = itertools.count()
 
 def get_fast_id(prefix: str = "id") -> str:
-    """Fast thread-safe ID generation avoiding expensive UUID calls"""
-    global _fast_id_counter
-    with _fast_id_lock:
-        _fast_id_counter += 1
-        return f"{prefix}_{int(time.time()*1000)}_{_fast_id_counter}"
+    """Lock-free thread-safe ID generation avoiding expensive UUID calls (GAP 4-5)"""
+    return f"{prefix}_{time.time_ns()}_{next(_fast_id_iterator)}"
 
 from core_engine.exceptions import ConfigurationRequiredError
 
@@ -58,6 +55,9 @@ from .unified_execution_engine import (
 )
 from .interfaces import ISystemComponent, RegimeContext
 from .circuit_breakers import CircuitBreakerLevel
+
+# Single source of truth for regimes
+from ..type_definitions.regime import MarketRegime, MarketRegimeState
 
 # PHASE 6: Import centralized RiskConfig (Rule 1, Section 7)
 from ..config.component_config import RiskConfig
@@ -102,6 +102,7 @@ class TradingDecisionRequest:
     """Request for trading decision authorization"""
 
     request_id: str = field(default_factory=lambda: get_fast_id("req"))
+    root_signal_id: str = ""  # Root signal that triggered this request (causal link)
     decision_type: TradingDecisionType = TradingDecisionType.POSITION_ENTRY
 
     # Request details
@@ -139,6 +140,7 @@ class TradingAuthorization:
 
     authorization_id: str = field(default_factory=lambda: get_fast_id("auth"))
     request_id: str = ""
+    root_signal_id: str = ""  # Cascaded signal ID for audit trail
 
     # Authorization result
     authorization_level: AuthorizationLevel = AuthorizationLevel.REJECTED
@@ -445,15 +447,64 @@ class CentralRiskManager(ISystemComponent):
 
     @property
     def regime_risk_multipliers(self) -> Dict[str, float]:
-        """Regime-based risk multipliers"""
+        """
+        Regime-based risk multipliers (affects risk assessment impact)
+        Values > 1.0 increase perceived risk, < 1.0 decrease it.
+        """
         return {
+            # Primary Regimes
+            MarketRegime.BULL_LOW_VOL.value: 0.7,
+            MarketRegime.BULL_HIGH_VOL.value: 1.0,
+            MarketRegime.BEAR_LOW_VOL.value: 1.2,
+            MarketRegime.BEAR_HIGH_VOL.value: 1.6,
+            
+            # Volatility Regimes
+            MarketRegime.LOW_VOLATILITY.value: 0.8,
+            MarketRegime.NORMAL_VOLATILITY.value: 1.0,
+            MarketRegime.HIGH_VOLATILITY.value: 1.4,
+            MarketRegime.EXTREME_VOLATILITY.value: 1.8,
+            
+            # Stress Regimes
+            MarketRegime.CRISIS.value: 2.5,
+            MarketRegime.CHOPPY.value: 1.3,
+            MarketRegime.EUPHORIA.value: 1.5,
+            
+            # Legacy/Fallback
             'bull_market': 0.8,
             'bear_market': 1.3,
             'high_volatility': 1.5,
             'low_volatility': 0.7,
-            'crisis': 2.0,
-            'sideways': 1.0
+            'crisis': 2.5,
+            'sideways': 1.0,
+            'unknown': 1.0
         }
+
+    def _get_regime_scaling_factor(self, regime_str: str) -> float:
+        """
+        Get regime-specific position scaling factor (affects authorized quantity)
+        Values < 1.0 reduce size, > 1.0 increase size (within limits).
+        """
+        scaling_map = {
+            # High-confidence favorable regimes
+            MarketRegime.BULL_LOW_VOL.value: 1.2,
+            MarketRegime.NORMAL_VOLATILITY.value: 1.0,
+            MarketRegime.LOW_VOLATILITY.value: 1.1,
+            
+            # Cautious regimes
+            MarketRegime.BULL_HIGH_VOL.value: 0.8,
+            MarketRegime.BEAR_LOW_VOL.value: 0.7,
+            MarketRegime.RANGE_BOUND.value: 0.9,
+            MarketRegime.WEAK_TRENDING.value: 0.8,
+            
+            # High-risk regimes (Scaling down)
+            MarketRegime.BEAR_HIGH_VOL.value: 0.4,
+            MarketRegime.HIGH_VOLATILITY.value: 0.5,
+            MarketRegime.CHOPPY.value: 0.5,
+            MarketRegime.EUPHORIA.value: 0.6,
+            MarketRegime.EXTREME_VOLATILITY.value: 0.2,
+            MarketRegime.CRISIS.value: 0.1, # Effectively handled by gate too
+        }
+        return scaling_map.get(regime_str, 1.0)
 
     # ========================================================================
     # ISystemComponent Interface Implementation
@@ -1229,29 +1280,28 @@ class CentralRiskManager(ISystemComponent):
                     rejection_reason="Emergency mode"
                 )
 
+            # Store pending request (Safe locking - GAP 4-5)
             with self.authorization_lock:
-                # OPTIMIZATION: Conditional logging
-                # logger.info(f"Processing authorization request: {request.request_id}")
-
-                # Store pending request
                 self.pending_requests[request.request_id] = request
 
-                # Perform comprehensive risk assessment
+            # Perform comprehensive risk assessment (OUTSIDE lock to prevent loop blockage)
+            try:
                 authorization = await self._assess_trading_request(request)
+            finally:
+                # Ensure we clean up even if assessment fails
+                with self.authorization_lock:
+                    self.pending_requests.pop(request.request_id, None)
 
-                # Store authorization
+            # Store result (Safe locking)
+            with self.authorization_lock:
                 if authorization.authorization_level != AuthorizationLevel.REJECTED:
                     self.active_authorizations[authorization.authorization_id] = authorization
 
                 # Add to history only if not in high-performance mode
-                # Or keep it limited to avoid memory leak
                 if len(self.authorization_history) < 10000:
                     self.authorization_history.append(authorization)
 
-                # Clean up pending request
-                self.pending_requests.pop(request.request_id, None)
-
-                return authorization
+            return authorization
 
         except Exception as e:
             logger.error(f"Authorization process failed: {e}")
@@ -1263,7 +1313,10 @@ class CentralRiskManager(ISystemComponent):
         """Comprehensive risk assessment of trading request"""
 
         try:
-            authorization = TradingAuthorization(request_id=request.request_id)
+            authorization = TradingAuthorization(
+                request_id=request.request_id,
+                root_signal_id=request.root_signal_id
+            )
 
             # PHASE 7A: Pre-Trade Compliance Checks (GAP 4-1 - Sprint 0.1)
             # Check compliance BEFORE risk assessment for regulatory validation
@@ -1307,6 +1360,14 @@ class CentralRiskManager(ISystemComponent):
                 authorization.authorization_level = AuthorizationLevel.REJECTED
                 authorization.rejection_reason = validation_error
                 logger.warning(f"Request rejected due to invalid input: {validation_error}")
+                return authorization
+
+            # PHASE 2: Regime Risk Gate (Pre-emptive)
+            regime_error = self._check_regime_gate(request)
+            if regime_error:
+                authorization.authorization_level = AuthorizationLevel.REJECTED
+                authorization.rejection_reason = regime_error
+                logger.warning(f"Request rejected by Regime Gate: {regime_error}")
                 return authorization
 
             # ADS v3.1 §8: PVSI cooldown gate (entry-only)
@@ -1493,12 +1554,14 @@ class CentralRiskManager(ISystemComponent):
                 max_market_impact=authorization.max_market_impact,
                 max_execution_time=authorization.max_execution_time,
                 allowed_algorithms=authorization.allowed_algorithms,
-                expires_at=authorization.expires_at
+                expires_at=authorization.expires_at,
+                root_signal_id=authorization.root_signal_id
             )
 
             # Create execution request
             execution_request = ExecutionRequest(
                 authorization=execution_auth,
+                root_signal_id=authorization.root_signal_id,
                 algorithm=self.get_execution_algorithm(execution_params),
                 urgency=execution_params.get('urgency', ExecutionUrgency.NORMAL) if execution_params else ExecutionUrgency.NORMAL
             )
@@ -1630,6 +1693,37 @@ class CentralRiskManager(ISystemComponent):
 
         return None  # All validations passed
 
+    def _check_regime_gate(self, request: TradingDecisionRequest) -> Optional[str]:
+        """
+        Gate 4: Pre-emptive Regime Risk Gate
+        Blocks or scales entries during high-risk regimes (Crisis, Bear High Vol)
+        """
+        if not self.regime_engine:
+            return None
+
+        # Access current regime context
+        try:
+            regime_state = self.regime_engine.get_current_regime()
+            if not regime_state:
+                return None
+
+            # Check if high risk (Crisis, Extreme Vol, etc.)
+            regime = regime_state.primary_regime
+            
+            # Only block entries, allow exits (important!)
+            is_entry = request.decision_type in (
+                TradingDecisionType.POSITION_ENTRY, 
+                TradingDecisionType.STRATEGY_ACTIVATION
+            )
+            
+            if is_entry and regime.is_high_risk():
+                return f"REGIME_GATE: Current regime {regime.value} is high-risk. Entries blocked."
+
+        except Exception as e:
+            logger.warning(f"Error checking regime gate: {e}")
+            
+        return None
+
     def _check_strategy_limits(self, request: TradingDecisionRequest) -> bool:
         """Check strategy allocation limits"""
 
@@ -1642,12 +1736,35 @@ class CentralRiskManager(ISystemComponent):
             return False
 
     def _get_regime_risk_adjustment(self, request: TradingDecisionRequest) -> float:
-        """Get regime-based risk adjustment"""
+        """
+        Get regime-based risk adjustment multiplier.
+        Prioritizes real-time engine state over request-provided values.
+        """
+        current_regime = request.market_regime
+        confidence = request.regime_confidence
 
-        regime_multiplier = self.regime_risk_multipliers.get(request.market_regime, 1.0)
-        confidence_adjustment = max(0.5, request.regime_confidence)  # Minimum 50% confidence
+        # If request regime is unknown or engine is available, sync with engine
+        if (current_regime == "unknown" or not current_regime) and self.regime_engine:
+            try:
+                regime_state = self.regime_engine.get_current_regime()
+                if regime_state:
+                    current_regime = regime_state.primary_regime.value
+                    confidence = max(confidence, regime_state.confidence)
+            except Exception as e:
+                logger.warning(f"Failed to sync regime from engine: {e}")
 
-        return regime_multiplier * confidence_adjustment
+        regime_multiplier = self.regime_risk_multipliers.get(current_regime, 1.0)
+        
+        # If we still haven't found a match, check for partial matches in the multiplier map
+        if current_regime not in self.regime_risk_multipliers:
+            for key, val in self.regime_risk_multipliers.items():
+                if key in current_regime or current_regime in key:
+                    regime_multiplier = val
+                    break
+
+        confidence_adjustment = max(0.5, confidence)  # Floor at 50% for risk calculation
+
+        return regime_multiplier * (1.1 - confidence_adjustment) # Lower confidence = higher perceived risk impact
 
     def _determine_authorization_level(self, risk_impact: float, position_check: bool,
                                      concentration_check: bool, strategy_check: bool,
@@ -1747,23 +1864,49 @@ class CentralRiskManager(ISystemComponent):
                 risk_reduction = min(0.5, (risk_impact - self.config.auto_approval_threshold) * 2)
                 authorized_qty *= (1.0 - risk_reduction)
 
-            # Apply regime adjustment with enhanced volatility scaling
-            volatility_estimate = getattr(request, 'volatility_estimate', request.metadata.get('volatility_estimate', 0.15))
+            # PROFESSIONAL REGIME-BASED SCALING
+            current_regime = request.market_regime
+            if current_regime == "unknown" and self.regime_engine:
+                try:
+                    regime_state = self.regime_engine.get_current_regime()
+                    if regime_state:
+                        current_regime = regime_state.primary_regime.value
+                except Exception:
+                    pass
 
-            # Enhanced regime-based scaling
-            if request.market_regime == 'high_volatility' or volatility_estimate > 0.30:
-                # High volatility: reduce position significantly
-                volatility_reduction = min(0.6, volatility_estimate * 2.0)  # Up to 60% reduction
-                authorized_qty *= (1.0 - volatility_reduction)
-                logger.info(f"🌊 High volatility scaling applied: {volatility_reduction*100:.1f}% reduction")
-            elif request.market_regime == 'low_volatility' or volatility_estimate < 0.10:
-                # Low volatility: allow slight increase
-                authorized_qty *= 1.1  # 10% increase
-                logger.info(f"🌊 Low volatility scaling applied: 10% increase")
-            elif regime_adjustment > 1.2:  # High risk regime
-                authorized_qty *= 0.8  # Reduce by 20%
-            elif regime_adjustment < 0.8:  # Low risk regime
-                authorized_qty *= 1.1  # Increase by 10%
+            # Phase 1: Direct Regime Scaling Factor
+            regime_scaling = self._get_regime_scaling_factor(current_regime)
+            
+            # Phase 2: Supplemental Volatility Scaling
+            volatility_estimate = getattr(request, 'volatility_estimate', request.metadata.get('volatility_estimate', 0.15))
+            vol_scaling = 1.0
+            if volatility_estimate > 0.40:
+                vol_scaling = 0.5 # 50% haircut for extreme realized vol
+            elif volatility_estimate > 0.25:
+                vol_scaling = 0.8 # 20% haircut for elevated vol
+            elif volatility_estimate < 0.10:
+                vol_scaling = 1.1 # 10% boost for quiet markets
+            
+            # Phase 3: Confidence-Based Scaling (Alpha filter)
+            confidence_scaling = 1.0
+            if request.confidence < 0.6:
+                confidence_scaling = 0.5 # Halve size for marginal signals
+            elif request.confidence > 0.9:
+                confidence_scaling = 1.2 # Turbocharge high confidence
+
+            # Combine scaling factors (multiplicative for compounding safety)
+            combined_scaling = regime_scaling * vol_scaling * confidence_scaling
+            
+            # Absolute max scaling boost is 1.25x for safety
+            combined_scaling = min(1.25, combined_scaling)
+            
+            previous_qty = authorized_qty
+            authorized_qty *= combined_scaling
+            
+            if abs(combined_scaling - 1.0) > 0.01:
+                logger.info(f"🌊 Regime Scaling: {current_regime} | Vol: {volatility_estimate:.2f} | "
+                           f"Conf: {request.confidence:.2f} | Total Scaler: {combined_scaling:.2f} | "
+                           f"Qty: {previous_qty:.2f} -> {authorized_qty:.2f}")
 
             # ADS v3.1: apply cooldown scaling if requested by assessment
             cooldown_scale = float(request.metadata.get("ads_cooldown_scale", 1.0))
@@ -2383,11 +2526,10 @@ class CentralRiskManager(ISystemComponent):
                 if timestamp is None:
                     timestamp = datetime.now()
 
-                # Update each symbol
-                for symbol, price in prices.items():
-                    await self.pnl_tracker.update_market_data(symbol, price, timestamp)
+                # Use vectorized batch update for performance (Sprint 1 Enhancement)
+                await self.pnl_tracker.update_market_data_batch(prices, timestamp)
 
-                logger.debug(f"✅ Market prices updated for {len(prices)} symbols (Sprint 1)")
+                logger.debug(f"✅ Market prices updated for {len(prices)} symbols (Vectorized)")
             except Exception as e:
                 logger.warning(f"⚠️ Market price update failed: {e}")
 
