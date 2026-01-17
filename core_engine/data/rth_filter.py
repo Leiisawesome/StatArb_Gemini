@@ -75,6 +75,17 @@ def filter_bars_to_rth(
     close_t = session.close_time
     mask = (t >= open_t) & (t < close_t)
 
+    # Filter out non-trading days (holidays/weekends)
+    if cal:
+        asset_class = cal.get_asset_class(symbol)
+        unique_dates = ts.dt.date.unique()
+        # Vectorized check for trading days
+        trading_day_map = {
+            d: cal.is_trading_day(datetime.combine(d, datetime.min.time()), asset_class) 
+            for d in unique_dates
+        }
+        mask &= ts.dt.date.map(trading_day_map).astype(bool)
+
     if overrides_by_date:
         d = ts.dt.date
         # Apply overrides by replacing mask values for those dates.

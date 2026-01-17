@@ -118,6 +118,10 @@ class HistoricalDataReplayEngine:
         # Data source
         self.data_manager: Optional[ClickHouseDataManager] = None
 
+        # Market calendar for session detection
+        from core_engine.data.market_calendar import MarketCalendar
+        self._calendar = MarketCalendar()
+
         # Event handling
         self.message_handlers: List[Callable[[FeedMessage], None]] = []
         self.status_handlers: List[Callable[[ReplayStatus], None]] = []
@@ -408,13 +412,26 @@ class HistoricalDataReplayEngine:
         Returns:
             MarketSession enum indicating the session type
         """
-        ts_time = timestamp.time()
+        from core_engine.data.market_calendar import MarketStatus, AssetClass
+        
+        # Use first symbol's asset class for session detection
+        # (Assuming all symbols in a single replay session share an asset class)
+        # Note: If mixed, we might need a per-symbol session check, 
+        # but for the engine's timing control, a primary class is usually sufficient.
+        asset_class = AssetClass.US_EQUITY
+        if self.config.symbols:
+            asset_class = self._calendar.get_asset_class(list(self.config.symbols)[0])
 
-        if self.PRE_MARKET_START <= ts_time < self.REGULAR_OPEN:
-            return MarketSession.PRE_MARKET
-        elif self.REGULAR_OPEN <= ts_time < self.REGULAR_CLOSE:
+        if not self._calendar.is_trading_day(timestamp, asset_class):
+            return MarketSession.CLOSED
+
+        status = self._calendar.get_market_status(timestamp, asset_class)
+        
+        if status == MarketStatus.OPEN:
             return MarketSession.REGULAR
-        elif self.REGULAR_CLOSE <= ts_time < self.AFTER_HOURS_END:
+        elif status == MarketStatus.PRE_MARKET:
+            return MarketSession.PRE_MARKET
+        elif status == MarketStatus.POST_MARKET:
             return MarketSession.AFTER_HOURS
         else:
             return MarketSession.CLOSED

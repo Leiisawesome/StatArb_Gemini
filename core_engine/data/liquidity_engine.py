@@ -305,12 +305,16 @@ class LiquidityAssessmentEngine(ISystemComponent):
             current_low = current_row.get('low', current_row.get('Low', current_close))
             current_volume = current_row.get('volume', current_row.get('Volume', 10000))
 
-            # Calculate volume metrics
+            # Calculate volume metrics (excluding current bar from average to avoid leakage)
             volume_col = 'volume' if 'volume' in window.columns else 'Volume'
-            volumes = window[volume_col].values if volume_col in window.columns else np.ones(len(window)) * 10000
-            avg_volume = np.mean(volumes)
+            all_volumes = window[volume_col].values if volume_col in window.columns else np.ones(len(window)) * 10000
+            
+            # Use preceding bars for baseline average (at least the last 1 if window is small)
+            preceding_volumes = all_volumes[:-1] if len(all_volumes) > 1 else all_volumes
+            avg_volume = np.mean(preceding_volumes)
+            
             volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
-            volume_percentile = self._calculate_percentile(current_volume, volumes)
+            volume_percentile = self._calculate_percentile(current_volume, all_volumes)
 
             # Calculate spread proxy from High-Low range
             spread_proxy_bps = self._calculate_spread_proxy(current_high, current_low, current_close)
@@ -500,7 +504,7 @@ class LiquidityAssessmentEngine(ISystemComponent):
         return np.clip(spread_bps, 0.5, 500.0)
 
     def _calculate_spread_history(self, window: pd.DataFrame) -> np.ndarray:
-        """Calculate spread proxy for historical window."""
+        """Calculate spread proxy for historical window using vectorized operations."""
         high_col = 'high' if 'high' in window.columns else 'High'
         low_col = 'low' if 'low' in window.columns else 'Low'
         close_col = 'close' if 'close' in window.columns else 'Close'
@@ -513,13 +517,17 @@ class LiquidityAssessmentEngine(ISystemComponent):
                     window[close_col].values
                 )
 
-            spreads = []
-            for _, row in window.iterrows():
-                spread = self._calculate_spread_proxy(
-                    row[high_col], row[low_col], row[close_col]
-                )
-                spreads.append(spread)
-            return np.array(spreads) if spreads else np.array([10.0])
+            # Vectorized calculation: (High - Low) / Close * 10000
+            highs = window[high_col].values
+            lows = window[low_col].values
+            closes = window[close_col].values
+            
+            # Avoid division by zero
+            safe_closes = np.where(closes <= 0, 1.0, closes)
+            spreads_bps = (highs - lows) / safe_closes * 10000
+            
+            # Clamp to same range as _calculate_spread_proxy
+            return np.clip(spreads_bps, 0.5, 500.0)
 
         return np.array([10.0])
 

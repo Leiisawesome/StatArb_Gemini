@@ -39,81 +39,59 @@ except ImportError:
 import sys
 import os
 
-# Add paths for core_engine imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
-sys.path.append(os.path.join(current_dir, 'types'))
-
 # Import ISystemComponent for orchestrator integration
 from core_engine.system.interfaces import ISystemComponent
 from core_engine.exceptions import ClickHouseConnectionError, DataUnavailableError
 
 # Import centralized configuration (Rule 1, Section 7)
-try:
-    from core_engine.config import (
-        DataConfig as CentralizedDataConfig,
-        ConnectionConfig,
-        CachingConfig
-    )
-except ImportError:
-    CentralizedDataConfig = None
-    ConnectionConfig = None
-    CachingConfig = None
+from core_engine.config import (
+    DataConfig as CentralizedDataConfig,
+    ConnectionConfig,
+    CachingConfig
+)
 
+# Import base classes with robust error handling for missing definitions
 try:
     from core_engine.type_definitions.data import (
         DataManager as BaseDataManager, DataProvider, DataConfig, MarketData
     )
 except ImportError:
-    # Alternative import approach
-    try:
-        sys.path.append(os.path.dirname(current_dir))
-        from core_engine.type_definitions.data import (
-            DataManager as BaseDataManager, DataProvider, DataConfig, MarketData
-        )
-    except ImportError:
-        # Fallback: define minimal interface
-        from abc import ABC, abstractmethod
+    # Alternative import approach - some environments might have different structures
+    from abc import ABC, abstractmethod
 
-        class BaseDataManager(ABC):
-            def __init__(self, config: Dict[str, Any]):
-                pass
-
-            @abstractmethod
-            def get_historical_data(self, symbol: str, start_date: datetime,
-                                  end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
-                pass
-
-        class DataProvider(ABC):
+    class BaseDataManager(ABC):
+        def __init__(self, config: Dict[str, Any]):
             pass
 
-        class DataConfig:
-            def __init__(self, **kwargs):
-                for k, v in kwargs.items():
-                    setattr(self, k, v)
-
-        class MarketData:
-            def __init__(self, symbol: str, timestamp: datetime, open: float,
-                        high: float, low: float, close: float, volume: int):
-                self.symbol = symbol
-                self.timestamp = timestamp
-                self.open = open
-                self.high = high
-                self.low = low
-                self.close = close
-                self.volume = volume
-
-# Import high-quality data components when available
-try:
-    from data.manager import DataManager as CoreDataManager, IDataSubscriber
-except ImportError:
-    # Fallback definitions for architectural compliance
-    class IDataSubscriber(ABC):
         @abstractmethod
-        async def on_market_data(self, data: Any) -> None:
+        def get_historical_data(self, symbol: str, start_date: datetime,
+                                end_date: datetime, timeframe: str = "1d") -> pd.DataFrame:
             pass
 
-    CoreDataManager = None
+    class DataProvider(ABC):
+        pass
+
+    class DataConfig:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    class MarketData:
+        def __init__(self, symbol: str, timestamp: datetime, open: float,
+                    high: float, low: float, close: float, volume: int):
+            self.symbol = symbol
+            self.timestamp = timestamp
+            self.open = open
+            self.high = high
+            self.low = low
+            self.close = close
+            self.volume = volume
+
+# Interface for data subscribers
+class IDataSubscriber(ABC):
+    @abstractmethod
+    async def on_market_data(self, data: Any) -> None:
+        pass
 
 logger = logging.getLogger(__name__)
 

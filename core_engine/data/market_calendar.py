@@ -51,6 +51,19 @@ class MarketCalendar:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
+        # Define US Market Holidays for 2024-2026 (simplified)
+        self.holidays = {
+            # 2024
+            "2024-01-01", "2024-01-15", "2024-02-19", "2024-03-29", "2024-05-27", 
+            "2024-06-19", "2024-07-04", "2024-09-02", "2024-11-28", "2024-12-25",
+            # 2025
+            "2025-01-01", "2025-01-20", "2025-02-17", "2025-04-18", "2025-05-26", 
+            "2025-06-19", "2025-07-04", "2025-09-01", "2025-11-27", "2025-12-25",
+            # 2026
+            "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", 
+            "2026-06-19"
+        }
+
         # Define standard sessions
         self.sessions = {
             AssetClass.US_EQUITY: MarketSession(
@@ -73,9 +86,30 @@ class MarketCalendar:
             )
         }
 
+    def is_trading_day(self, date: datetime, asset_class: AssetClass = AssetClass.US_EQUITY) -> bool:
+        """Check if a specific date is a trading day for an asset class."""
+        session = self.sessions.get(asset_class)
+        if not session:
+            session = self.sessions[AssetClass.US_EQUITY]
+
+        # Check weekend
+        if date.weekday() not in session.days_of_week:
+            return False
+
+        # Check holiday (US Markets)
+        if asset_class in (AssetClass.US_EQUITY, AssetClass.FUTURES):
+            date_str = date.strftime("%Y-%m-%d")
+            if date_str in self.holidays:
+                return False
+
+        return True
+
     def get_session_times(self, date: datetime, asset_class: AssetClass) -> Tuple[datetime, datetime]:
         """
-        Get open and close datetimes for a specific date and asset class.
+        Get nominal open and close datetimes for a specific date and asset class.
+
+        Note: This returns the standard session times even if the date is a holiday or weekend.
+        Use is_trading_day() to verify if the market is actually open.
 
         Args:
             date: The date to check
@@ -88,13 +122,6 @@ class MarketCalendar:
         if not session:
             # Default to US Equity if unknown
             session = self.sessions[AssetClass.US_EQUITY]
-
-        # Check if trading day
-        if date.weekday() not in session.days_of_week:
-            # Not a trading day - return None or handle appropriately
-            # For backtesting data loading, we might want the "range" for that day even if closed
-            # But technically it's closed.
-            pass
 
         open_dt = date.replace(
             hour=session.open_time.hour,
@@ -111,6 +138,20 @@ class MarketCalendar:
         )
 
         return open_dt, close_dt
+
+    def get_market_status(self, dt: datetime, asset_class: AssetClass = AssetClass.US_EQUITY) -> MarketStatus:
+        """Get current market status for a specific datetime."""
+        open_dt, close_dt = self.get_session_times(dt, asset_class)
+        
+        if open_dt is None:
+            return MarketStatus.CLOSED
+            
+        if dt < open_dt:
+            return MarketStatus.PRE_MARKET
+        elif dt >= close_dt:
+            return MarketStatus.POST_MARKET
+        else:
+            return MarketStatus.OPEN
 
     def get_asset_class(self, symbol: str) -> AssetClass:
         """

@@ -274,18 +274,19 @@ class StreamingDataValidator:
             ))
             self._stats['ohlcv_errors'] += 1
 
-        # Open within [Low, High] (warning only - can happen on gap opens)
+        # Open within [Low, High]
         if open_price > high_price:
             issues.append(DataQualityEvent(
                 event_id=self._next_event_id(),
                 symbol=symbol,
                 timestamp=now,
                 issue=DataQualityIssue.OPEN_ABOVE_HIGH,
-                severity=DataQualitySeverity.WARNING,
+                severity=DataQualitySeverity.ERROR,
                 message=f"Open ({open_price}) > High ({high_price})",
                 details={'open': open_price, 'high': high_price},
                 bar_timestamp=bar_timestamp,
             ))
+            self._stats['ohlcv_errors'] += 1
 
         if open_price < low_price:
             issues.append(DataQualityEvent(
@@ -293,11 +294,12 @@ class StreamingDataValidator:
                 symbol=symbol,
                 timestamp=now,
                 issue=DataQualityIssue.OPEN_BELOW_LOW,
-                severity=DataQualitySeverity.WARNING,
+                severity=DataQualitySeverity.ERROR,
                 message=f"Open ({open_price}) < Low ({low_price})",
                 details={'open': open_price, 'low': low_price},
                 bar_timestamp=bar_timestamp,
             ))
+            self._stats['ohlcv_errors'] += 1
 
         # Volume checks
         if volume < 0:
@@ -354,21 +356,24 @@ class StreamingDataValidator:
                     bar_timestamp=bar_timestamp,
                 ))
             elif gap_seconds > self._expected_interval * self._gap_multiplier:
-                issues.append(DataQualityEvent(
-                    event_id=self._next_event_id(),
-                    symbol=symbol,
-                    timestamp=now,
-                    issue=DataQualityIssue.GAP_DETECTED,
-                    severity=DataQualitySeverity.WARNING,
-                    message=f"Gap detected: {gap_seconds:.0f}s > {self._expected_interval * self._gap_multiplier:.0f}s",
-                    details={
-                        'gap_seconds': gap_seconds,
-                        'expected_max': self._expected_interval * self._gap_multiplier,
-                        'previous': last_time.isoformat(),
-                    },
-                    bar_timestamp=bar_timestamp,
-                ))
-                self._stats['gaps_detected'] += 1
+                # Filter out cross-day/weekend gaps to avoid false positives
+                # Robustness: We only flag gaps within the SAME trading day.
+                if bar_timestamp.date() == last_time.date():
+                    issues.append(DataQualityEvent(
+                        event_id=self._next_event_id(),
+                        symbol=symbol,
+                        timestamp=now,
+                        issue=DataQualityIssue.GAP_DETECTED,
+                        severity=DataQualitySeverity.WARNING,
+                        message=f"Intraday gap detected: {gap_seconds:.0f}s > {self._expected_interval * self._gap_multiplier:.0f}s",
+                        details={
+                            'gap_seconds': gap_seconds,
+                            'expected_max': self._expected_interval * self._gap_multiplier,
+                            'previous': last_time.isoformat(),
+                        },
+                        bar_timestamp=bar_timestamp,
+                    ))
+                    self._stats['gaps_detected'] += 1
 
         # Update last bar time
         self._last_bar_time[symbol] = bar_timestamp
