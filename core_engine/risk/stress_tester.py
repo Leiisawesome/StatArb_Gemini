@@ -672,6 +672,70 @@ class StressTester:
         with self._lock:
             return list(self._test_results)
 
+    async def run_reverse_stress_test(
+        self,
+        target_pnl_loss: float,
+        primary_factor: str,
+        positions: Dict[str, Any],
+        portfolio_value: float,
+        factor_loadings: Optional[Dict[str, Dict[str, float]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Reverse Stress Test: Find the magnitude of a factor shock
+        required to cause a specific target loss in PnL terms.
+        """
+        # Ensure target_pnl_loss is negative for a loss
+        if target_pnl_loss > 0:
+            target_pnl_loss = -target_pnl_loss
+
+        # Probing shock: 1% relative shift
+        probe_shock = MarketShock(
+            factor=primary_factor,
+            shock_type=ShockType.RELATIVE,
+            magnitude=0.01
+        )
+
+        probe_scenario = StressScenario(
+            name="Reverse_Stress_Probe",
+            description="Internal probe for reverse stress test",
+            test_type=StressTestType.REVERSE,
+            shocks=[probe_shock]
+        )
+
+        try:
+            total_probe_pnl = 0.0
+            for position_id, position in positions.items():
+                result = await self._calculate_position_stress(
+                    position_id, position, probe_scenario, factor_loadings
+                )
+                total_probe_pnl += result.pnl
+
+            # Avoid division by zero
+            if abs(total_probe_pnl) < 1e-9:
+                return {
+                    "factor": primary_factor,
+                    "target_loss": target_pnl_loss,
+                    "error": "Portfolio has zero or negligible sensitivity to this factor."
+                }
+
+            # Solve for required shock (assuming linear sensitivity near current point)
+            # shock_needed / probes_shock = target_loss / probe_pnl
+            required_shock = (target_pnl_loss / total_probe_pnl) * 0.01
+
+            logger.info(f"Reverse stress test for {primary_factor} found required shock of {required_shock:.2%}")
+
+            return {
+                "factor": primary_factor,
+                "target_loss": target_pnl_loss,
+                "required_shock_magnitude": required_shock,
+                "probe_pnl_1pct": total_probe_pnl,
+                "is_attainable": True
+            }
+
+        except Exception as e:
+            logger.error(f"Error in reverse stress test: {e}")
+            raise
+
     async def cleanup(self) -> None:
         """Cleanup resources"""
         logger.info("StressTester cleanup completed")

@@ -226,19 +226,44 @@ class CorrelationAnalyzer:
         return pd.DataFrame(corr_matrix, index=returns.columns, columns=returns.columns)
 
     async def _calculate_shrinkage_correlation(self, returns: pd.DataFrame) -> pd.DataFrame:
-        """Calculate shrinkage estimator correlation (Ledoit-Wolf)"""
-
+        """
+        Calculate shrinkage estimator correlation (Ledoit-Wolf approach).
+        Uses dynamic shrinkage intensity instead of a fixed value.
+        """
         # Calculate sample correlation
-        sample_corr = returns.corr()
+        sample_corr = returns.corr().values
+        n_assets = returns.shape[1]
+        t_samples = returns.shape[0]
 
-        # Target matrix (identity matrix)
-        n_assets = len(returns.columns)
+        if n_assets <= 1:
+            return pd.DataFrame(sample_corr, index=returns.columns, columns=returns.columns)
+
+        # Target matrix (Identity - assumes assets are uncorrelated in the prior)
         target = np.eye(n_assets)
 
-        # Simple shrinkage estimator (constant shrinkage intensity)
-        shrinkage_intensity = 0.2  # Could be optimized using Ledoit-Wolf formula
+        # Dynamic Shrinkage Intensity (delta) calculation 
+        # Ref: Ledoit & Wolf (2004) - "Honey, I Shrunk the Covariance Matrix"
+        # A simplified version for the correlation matrix:
+        # delta = sum(var(sample_corr_ij)) / sum((sample_corr_ij - target_ij)^2)
+        
+        # Estimate the variance of the sample correlation elements
+        # (This is a proxy for the estimation error)
+        var_elements = (1.0 - sample_corr**2)**2 / (t_samples - 1)
+        
+        # We only care about off-diagonal elements for the numerator
+        mask = ~np.eye(n_assets, dtype=bool)
+        
+        numerator = np.sum(var_elements[mask])
+        denominator = np.sum((sample_corr[mask] - target[mask])**2)
+        
+        if denominator > 1e-12:
+            shrinkage_intensity = np.clip(numerator / denominator, 0.0, 1.0)
+        else:
+            shrinkage_intensity = 0.0
 
-        shrunk_corr = (1 - shrinkage_intensity) * sample_corr.values + shrinkage_intensity * target
+        logger.debug(f"Dynamic shrinkage intensity calculated: {shrinkage_intensity:.4f}")
+
+        shrunk_corr = (1 - shrinkage_intensity) * sample_corr + shrinkage_intensity * target
 
         return pd.DataFrame(shrunk_corr, index=returns.columns, columns=returns.columns)
 

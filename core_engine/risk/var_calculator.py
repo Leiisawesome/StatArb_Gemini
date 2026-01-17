@@ -127,19 +127,13 @@ class VarCalculator:
         returns: Union[pd.Series, pd.DataFrame],
         method: VarMethod = VarMethod.HISTORICAL,
         confidence_levels: Optional[List[float]] = None,
-        time_horizon: int = 1
+        time_horizon: int = 1,
+        positions: Optional[Dict[str, Any]] = None  # Added for L-VaR
     ) -> Dict[float, VarResult]:
         """
-        Calculate Value at Risk using specified method
+        Calculate Value at Risk with optional Liquidity Adjustment (L-VaR).
 
-        Args:
-            returns: Return series or DataFrame of returns
-            method: VaR calculation method
-            confidence_levels: Confidence levels for VaR calculation
-            time_horizon: Time horizon in days
-
-        Returns:
-            Dictionary mapping confidence levels to VaR results
+        L-VaR = VaR + LiquidationCost
         """
         if confidence_levels is None:
             confidence_levels = self.confidence_levels
@@ -151,7 +145,7 @@ class VarCalculator:
             if len(returns) < self.min_observations:
                 raise ValueError(f"Insufficient data: {len(returns)} < {self.min_observations}")
 
-            # Calculate VaR based on method
+            # Calculate base VaR
             if method == VarMethod.HISTORICAL:
                 var_results = await self._calculate_historical_var(returns, confidence_levels, time_horizon)
             elif method == VarMethod.PARAMETRIC:
@@ -165,6 +159,14 @@ class VarCalculator:
             else:
                 raise ValueError(f"Unsupported VaR method: {method}")
 
+            # Apply Liquidity Adjustment (L-VaR) if positions provided
+            if positions:
+                liquidation_cost = self._calculate_liquidation_cost(positions)
+                for cl in var_results:
+                    var_results[cl].var_value += liquidation_cost
+                    var_results[cl].metadata['liquidation_cost'] = liquidation_cost
+                    var_results[cl].metadata['l_var_adjusted'] = True
+
             # Store calculation in history
             calculation_record = {
                 'timestamp': datetime.now(),
@@ -176,13 +178,42 @@ class VarCalculator:
             }
             self._calculation_history.append(calculation_record)
 
-            logger.info(f"Calculated VaR using {method.value} in {time.time() - start_time:.3f}s")
+            logger.info(f"Calculated VaR ({'L-VaR' if positions else 'Base'}) using {method.value} in {time.time() - start_time:.3f}s")
 
             return var_results
 
         except Exception as e:
             logger.error(f"Error calculating VaR: {e}")
             raise
+
+    def _calculate_liquidation_cost(self, positions: Dict[str, Any]) -> float:
+        """
+        Estimate liquidation cost for L-VaR adjustment.
+        Uses a simplified model: 0.5 * spread + impact(size/adv).
+        """
+        total_cost = 0.0
+        
+        for symbol, pos in positions.items():
+            market_value = abs(pos.get('market_value', 0))
+            if market_value == 0:
+                continue
+                
+            # Spread cost (default 5bps if not provided)
+            # In production, this would come from live market data
+            bid_ask_spread_bps = pos.get('bid_ask_spread_bps', 5) 
+            spread_cost = market_value * (bid_ask_spread_bps / 10000) * 0.5
+            
+            # Market impact cost (e.g., Square root model)
+            # cost = sigma * sqrt(size / ADV)
+            adv = pos.get('adv_usd', 100_000_000)  # Default 100M ADV
+            participation_rate = market_value / adv
+            
+            # 0.1 * sigma * sqrt(participation) - simplified impact
+            impact_cost = market_value * 0.1 * np.sqrt(max(0, participation_rate))
+            
+            total_cost += spread_cost + impact_cost
+            
+        return total_cost
 
     async def _calculate_historical_var(
         self,
@@ -270,7 +301,10 @@ class VarCalculator:
         confidence_levels: List[float],
         time_horizon: int
     ) -> Dict[float, VarResult]:
-        """Calculate Monte Carlo simulation VaR"""
+        """
+        Calculate Monte Carlo simulation VaR using Student-t distribution.
+        This captures "fat tails" (kurtosis) better than standard Normal MC.
+        """
 
         if isinstance(returns, pd.DataFrame):
             portfolio_returns = returns.sum(axis=1)
@@ -281,13 +315,24 @@ class VarCalculator:
         mean_return = portfolio_returns.mean()
         std_return = portfolio_returns.std()
 
+        # Degrees of freedom for Student-t (Fat tails)
+        # Pro-grade default: df=7 to 10 for equity returns.
+        df = self.config.get('monte_carlo_df', 7)
+
+        if df <= 2:
+            logger.warning(f"Degrees of freedom {df} too low for variance scaling. Defaulting to 7.")
+            df = 7
+
         # Generate random simulations
         np.random.seed(42)  # For reproducibility
-        simulated_returns = np.random.normal(
-            mean_return * time_horizon,
-            std_return * np.sqrt(time_horizon),
-            self.mc_simulations
-        )
+        
+        # Standardized Student-t samples (mean=0, scale=sqrt((df-2)/df))
+        # to ensure the resulting distribution has exactly std_return
+        scale_adj = np.sqrt((df - 2.0) / df)
+        t_samples = stats.t.rvs(df, loc=0, scale=scale_adj, size=self.mc_simulations)
+        
+        # Project returns: E[r]*T + sigma*sqrt(T)*t
+        simulated_returns = (mean_return * time_horizon) + (t_samples * std_return * np.sqrt(time_horizon))
 
         var_results = {}
 
@@ -303,7 +348,9 @@ class VarCalculator:
                 metadata={
                     'simulations': self.mc_simulations,
                     'mean_return': mean_return,
-                    'std_return': std_return
+                    'std_return': std_return,
+                    'distribution': 'student-t',
+                    'degrees_of_freedom': df
                 }
             )
 
