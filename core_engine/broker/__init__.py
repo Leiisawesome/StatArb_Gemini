@@ -1,66 +1,26 @@
 """
 Broker Engine Package
-Comprehensive multi-broker connectivity and execution management
+Comprehensive multi-broker connectivity and execution management (Async Refactored)
 """
 
-from .broker_adapter import (
-    BrokerAdapter,
-    BrokerCredentials,
-    BrokerType,
-    ConnectionStatus,
-    StandardOrder,
-    StandardExecution,
-    StandardPosition,
-    StandardAccount,
-    OrderAction,
-    OrderType,
-    TimeInForce
+from .broker_adapter import BrokerAdapter
+from .broker_manager import BrokerManager
+from core_engine.type_definitions.broker_types import (
+    Order, OrderSide, OrderType, OrderStatus, Position, AccountInfo
 )
 
-from .adapters import (
-    IBKRAdapter
-)
-
-# Handle case where IBKRAdapter is not available (ibapi not installed)
-if IBKRAdapter is None:
-    # Create a placeholder class for documentation/testing
-    class IBKRAdapter:
-        """Placeholder IBKRAdapter - requires ibapi package for full functionality"""
-
-from .broker_manager import (
-    BrokerManager,
-    BrokerConfig
-)
+from .adapters.ibkr_adapter import IBKRAdapter
+from .adapters.paper_adapter import PaperBrokerAdapter
 
 __all__ = [
-    # Broker Adapter
     'BrokerAdapter',
-    'BrokerCredentials',
-    'BrokerType',
-    'ConnectionStatus',
-    'StandardOrder',
-    'StandardExecution',
-    'StandardPosition',
-    'StandardAccount',
-    'OrderAction',
-    'OrderType',
-    'TimeInForce',
-
-    # Adapters
-    'IBKRAdapter',
-
-    # Broker Manager
     'BrokerManager',
-    'BrokerConfig',
-    'BrokerInfo',
-    'BrokerStatus',
-    'ExecutionVenue',
-    'OrderRequest',
-    'ExecutionReport',
-    'BrokerSelector',
-    'OrderRouter'
+    'IBKRAdapter',
+    'PaperBrokerAdapter',
+    'Order',
+    'OrderSide',
+    'OrderType',
+    'OrderStatus',
+    'Position',
+    'AccountInfo'
 ]
-
-__version__ = "1.0.0"
-__author__ = "StatArb Gemini Team"
-__description__ = "Institutional-grade multi-broker connectivity and execution management engine"

@@ -437,7 +437,7 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 poll_s = float(self.config.get("ibkr_poll_interval_seconds", 0.25))
 
                 # Submit in a worker thread (IBKRAdapter is blocking/threaded)
-                order = await asyncio.to_thread(self.live_broker.submit_market_order, symbol, quantity, order_side)
+                order = await self.live_broker.submit_market_order(symbol, quantity, order_side)
                 order_id = getattr(order, "order_id", None) or getattr(order, "id", None)
                 if not order_id:
                     raise ConfigurationRequiredError("Live broker did not return order_id")
@@ -447,7 +447,7 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 t0 = _time.time()
                 last = None
                 while _time.time() - t0 < timeout_s:
-                    last = await asyncio.to_thread(self.live_broker.get_order, str(order_id))
+                    last = await self.live_broker.get_order(str(order_id))
                     if last is None:
                         await asyncio.sleep(poll_s)
                         continue
@@ -1936,14 +1936,14 @@ class UnifiedExecutionEngine(ISystemComponent):
                 except Exception:
                     pass
             if order_type == OrderType.LIMIT and hasattr(auth, 'limit_price'):
-                order = paper_broker.submit_limit_order(
+                order = await paper_broker.submit_limit_order(
                     symbol=auth.symbol,
                     quantity=auth.quantity,
                     side=order_side,
                     limit_price=auth.limit_price,
                 )
             else:
-                order = paper_broker.submit_market_order(
+                order = await paper_broker.submit_market_order(
                     symbol=auth.symbol,
                     quantity=auth.quantity,
                     side=order_side,
@@ -1956,7 +1956,7 @@ class UnifiedExecutionEngine(ISystemComponent):
 
             for _ in range(50):  # Wait up to 5 seconds
                 await asyncio.sleep(0.1)
-                updated_order = paper_broker.get_order(str(order_id))
+                updated_order = await paper_broker.get_order(str(order_id))
                 if updated_order:
                     st = getattr(updated_order, "status", None)
                     st_val = getattr(st, "value", None) or getattr(st, "name", None) or str(st)

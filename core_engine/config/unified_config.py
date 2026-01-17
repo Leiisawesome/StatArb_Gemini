@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 import yaml
 
+from core_engine.utils.config import deep_merge
+from core_engine.config.yaml_loader import load_with_includes
+
 logger = logging.getLogger(__name__)
 
 class ConfigFormat(Enum):
@@ -81,12 +84,16 @@ class UnifiedConfig:
 
         config = {}
 
-        for source in self.sources:
+        # Sort sources by priority ascending: low priority first, high priority last
+        # so that high priority sources override lower ones in the deep_merge loop.
+        sorted_sources = sorted(self.sources, key=lambda s: s.priority)
+
+        for source in sorted_sources:
             try:
                 source_config = self._load_source(source)
                 if source_config:
                     # Deep merge with higher priority sources overriding lower
-                    config = self._deep_merge(config, source_config)
+                    config = deep_merge(config, source_config)
             except Exception as e:
                 if source.required:
                     raise RuntimeError(f"Failed to load required config source {source.path}: {e}")
@@ -95,7 +102,7 @@ class UnifiedConfig:
 
         self._config = config
         self._loaded = True
-        logger.info(f"Configuration loaded from {len(self.sources)} sources")
+        logger.info(f"Configuration loaded from {len(self.sources)} sources (priority-ordered)")
         return config.copy()
 
     def _load_source(self, source: ConfigSource) -> Dict[str, Any]:
@@ -110,12 +117,17 @@ class UnifiedConfig:
             raise ValueError(f"Unsupported config format: {source.format}")
 
     def _load_yaml_config(self, path: Optional[Path]) -> Dict[str, Any]:
-        """Load YAML configuration file"""
+        """Load YAML configuration file with recursive includes"""
         if not path or not path.exists():
             return {}
 
-        with open(path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f) or {}
+        try:
+            return load_with_includes(path)
+        except Exception as e:
+            logger.error(f"Failed to load YAML with includes from {path}: {e}")
+            # Fallback to simple load if include loader fails
+            with open(path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f) or {}
 
     def _load_json_config(self, path: Optional[Path]) -> Dict[str, Any]:
         """Load JSON configuration file"""
@@ -150,17 +162,27 @@ class UnifiedConfig:
         final_key = keys[-1]
         current[final_key] = self._convert_value(value)
 
-    def _convert_value(self, value: str) -> Union[str, int, float, bool]:
+    def _convert_value(self, value: str) -> Any:
         """Convert string value to appropriate type"""
+        if value is None:
+            return None
+        
+        # String case-insensitive match
+        v_lower = value.lower().strip()
+        
+        # None/Null conversion
+        if v_lower in ('none', 'null', ''):
+            return None
+
         # Boolean conversion
-        if value.lower() in ('true', 'yes', '1'):
+        if v_lower in ('true', 'yes', 'on', '1'):
             return True
-        elif value.lower() in ('false', 'no', '0'):
+        elif v_lower in ('false', 'no', 'off', '0'):
             return False
 
         # Numeric conversion
         try:
-            if '.' in value:
+            if '.' in value or 'e' in v_lower:
                 return float(value)
             else:
                 return int(value)
@@ -168,18 +190,6 @@ class UnifiedConfig:
             pass
 
         return value
-
-    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-        """Deep merge two dictionaries"""
-        result = base.copy()
-
-        for key, value in override.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                result[key] = self._deep_merge(result[key], value)
-            else:
-                result[key] = value
-
-        return result
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value by key"""

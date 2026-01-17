@@ -7,6 +7,7 @@ and provides full trading functionality for algorithmic trading.
 """
 
 import logging
+import asyncio
 import threading
 import time
 from typing import List, Optional, Dict, Any
@@ -278,7 +279,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Connection Management ====================
 
-    def connect(self) -> bool:
+    async async def connect(self) -> bool:
         """
         Connect to IB Gateway/TWS
 
@@ -303,7 +304,15 @@ class IBKRAdapter(BaseBrokerAdapter):
             self._thread.start()
 
             # Wait for connection confirmation
-            if not self.wrapper.connection_ready.wait(timeout=10):
+            
+            # Async wait for connection
+            start_wait = time.time()
+            while not self.wrapper.connection_ready.is_set():
+                if time.time() - start_wait > 10:
+                    break
+                await asyncio.sleep(0.1)
+            
+            if not self.wrapper.connection_ready.is_set():
                 raise TimeoutError("Connection timeout - IB Gateway/TWS not responding")
 
             self._connected = True
@@ -331,7 +340,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             self.client.reqPositions()
 
             # Give time for initial data
-            time.sleep(1)
+            await asyncio.sleep(1)
 
             logger.info(
                 f"✅ Connected to IBKR "
@@ -345,7 +354,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             self._connected = False
             return False
 
-    def disconnect(self) -> None:
+    async async def disconnect(self) -> None:
         """Disconnect from IB"""
         if self._connected:
             try:
@@ -360,7 +369,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         """Check if connected"""
         return self._connected and self.client.isConnected() and self.wrapper.connected
 
-    def check_connection_health(self) -> Dict[str, Any]:
+    async async def check_connection_health(self) -> Dict[str, Any]:
         """Check connection health"""
         connected = self.is_connected()
         return {
@@ -377,7 +386,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             'timestamp': datetime.now()
         }
 
-    def reconnect(self, max_attempts: int = 3, delay: float = 5.0) -> bool:
+    async async def reconnect(self, max_attempts: int = 3, delay: float = 5.0) -> bool:
         """
         Attempt to reconnect to IBKR with retry logic.
 
@@ -395,7 +404,7 @@ class IBKRAdapter(BaseBrokerAdapter):
                 # Disconnect first if still connected
                 if self.is_connected():
                     self.disconnect()
-                    time.sleep(1)
+                    await asyncio.sleep(1)
 
                 # Clear any error state
                 self.wrapper.errors.clear()
@@ -412,12 +421,12 @@ class IBKRAdapter(BaseBrokerAdapter):
 
             if attempt < max_attempts - 1:
                 logger.info(f"⏳ Waiting {delay}s before next attempt...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         logger.error(f"❌ Failed to reconnect after {max_attempts} attempts")
         return False
 
-    def handle_connection_error(self, error: Exception) -> bool:
+    async def handle_connection_error(self, error: Exception) -> bool:
         """
         Handle connection errors with appropriate recovery actions.
 
@@ -450,7 +459,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             # Request fresh order ID
             try:
                 self.client.reqIds(-1)
-                time.sleep(1)
+                await asyncio.sleep(1)
                 logger.info("📋 Requested fresh order ID")
                 return True
             except Exception as e:
@@ -461,7 +470,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"❓ Unhandled connection error: {error}")
             return False
 
-    def monitor_connection(self, interval: float = 30.0) -> None:
+    async def monitor_connection(self, interval: float = 30.0) -> None:
         """
         Monitor connection health and attempt recovery if needed.
         This method should be run in a separate thread.
@@ -489,11 +498,11 @@ class IBKRAdapter(BaseBrokerAdapter):
                         # Clear handled errors
                         self.wrapper.errors.clear()
 
-                time.sleep(interval)
+                await asyncio.sleep(interval)
 
             except Exception as e:
                 logger.error(f"Connection monitor error: {e}")
-                time.sleep(interval)
+                await asyncio.sleep(interval)
 
         logger.info("👁️  Connection monitor stopped")
 
@@ -519,7 +528,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Market Data ====================
 
-    def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async async def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get latest quote for a symbol
 
@@ -544,10 +553,10 @@ class IBKRAdapter(BaseBrokerAdapter):
                     logger.warning(f"Quote timeout for {symbol}")
                     self.client.cancelMktData(req_id)
                     return None
-                time.sleep(0.05)
+                await asyncio.sleep(0.05)
 
             # Wait a bit more for complete quote
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)
 
             # Cancel market data
             self.client.cancelMktData(req_id)
@@ -572,7 +581,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to get quote for {symbol}: {e}")
             return None
 
-    def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Alias for get_latest_quote() - simpler method name for common use
 
@@ -635,7 +644,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         }
         return status_map.get(ib_status, OrderStatus.PENDING)
 
-    def submit_market_order(
+    async async def submit_market_order(
         self,
         symbol: str,
         quantity: float,
@@ -695,7 +704,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit market order: {e}")
             raise
 
-    def submit_limit_order(
+    async async def submit_limit_order(
         self,
         symbol: str,
         quantity: float,
@@ -755,7 +764,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit limit order: {e}")
             raise
 
-    def submit_stop_order(
+    async async def submit_stop_order(
         self,
         symbol: str,
         quantity: float = None,
@@ -792,7 +801,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         # Call the original implementation
         return self._submit_stop_order_impl(symbol, quantity, side, stop_price)
 
-    def _submit_stop_order_impl(
+    async def _submit_stop_order_impl(
         self,
         symbol: str,
         quantity: float,
@@ -852,7 +861,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit stop order: {e}")
             raise
 
-    def submit_stop_limit_order(
+    async def submit_stop_limit_order(
         self,
         symbol: str,
         quantity: float = None,
@@ -891,7 +900,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         # Call the original implementation
         return self._submit_stop_limit_order_impl(symbol, quantity, side, stop_price, limit_price)
 
-    def _submit_stop_limit_order_impl(
+    async def _submit_stop_limit_order_impl(
         self,
         symbol: str,
         quantity: float,
@@ -955,7 +964,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit stop-limit order: {e}")
             raise
 
-    def submit_bracket_order(
+    async def submit_bracket_order(
         self,
         symbol: str,
         quantity: float,
@@ -996,9 +1005,9 @@ class IBKRAdapter(BaseBrokerAdapter):
 
             # Create parent order
             if entry_price:
-                parent_order = self.submit_limit_order(symbol, quantity, side, entry_price)
+                parent_order = await self.submit_limit_order(symbol, quantity, side, entry_price)
             else:
-                parent_order = self.submit_market_order(symbol, quantity, side)
+                parent_order = await self.submit_market_order(symbol, quantity, side)
 
             parent_order_id = int(parent_order.order_id)
 
@@ -1006,7 +1015,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             profit_taker_order = None
             if profit_target:
                 profit_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
-                profit_taker_order = self.submit_limit_order(
+                profit_taker_order = await self.submit_limit_order(
                     symbol, quantity, profit_side, profit_target
                 )
                 profit_taker_id = int(profit_taker_order.order_id)
@@ -1022,7 +1031,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             stop_loss_order = None
             if stop_loss:
                 stop_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
-                stop_loss_order = self.submit_stop_order(
+                stop_loss_order = await self.submit_stop_order(
                     symbol, quantity, stop_side, stop_loss
                 )
                 stop_loss_id = int(stop_loss_order.order_id)
@@ -1057,7 +1066,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit bracket order: {e}")
             raise
 
-    def submit_trailing_stop_order(
+    async def submit_trailing_stop_order(
         self,
         symbol: str,
         quantity: float,
@@ -1127,7 +1136,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit trailing stop order: {e}")
             raise
 
-    def cancel_order(self, order_id: str) -> bool:
+    async async def cancel_order(self, order_id: str) -> bool:
         """Cancel an order"""
         try:
             self.client.cancelOrder(int(order_id))
@@ -1137,13 +1146,13 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to cancel order {order_id}: {e}")
             return False
 
-    def get_order(self, order_id: str) -> Optional[Order]:
+    async async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order details"""
         try:
             # If order not in cache, request open orders to populate
             if int(order_id) not in self.wrapper.orders:
                 self.client.reqOpenOrders()
-                time.sleep(1)  # Wait for callbacks
+                await asyncio.sleep(1)  # Wait for callbacks
 
             order_data = self.wrapper.orders.get(int(order_id))
             if not order_data:
@@ -1180,12 +1189,12 @@ class IBKRAdapter(BaseBrokerAdapter):
         }
         return type_map.get(ib_type, OrderType.MARKET)
 
-    def get_orders(self, status: str = "open") -> List[Order]:
+    async async async def get_orders(self, status: str = "open") -> List[Order]:
         """Get orders with specified status"""
         try:
             # Request open orders
             self.client.reqOpenOrders()
-            time.sleep(0.5)  # Wait for response
+            await asyncio.sleep(0.5)  # Wait for response
 
             orders = []
             for order_id, order_data in self.wrapper.orders.items():
@@ -1211,12 +1220,12 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Position Management ====================
 
-    def get_positions(self) -> List[Position]:
+    async async async def get_positions(self) -> List[Position]:
         """Get all current positions"""
         try:
             # Request positions
             self.client.reqPositions()
-            time.sleep(1)  # Wait for response
+            await asyncio.sleep(1)  # Wait for response
 
             positions = []
             for symbol, pos_data in self.wrapper.positions.items():
@@ -1258,7 +1267,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to get positions: {e}")
             return []
 
-    def get_position(self, symbol: str) -> Optional[Position]:
+    async async def get_position(self, symbol: str) -> Optional[Position]:
         """Get position for a specific symbol"""
         positions = self.get_positions()
         for pos in positions:
@@ -1266,7 +1275,7 @@ class IBKRAdapter(BaseBrokerAdapter):
                 return pos
         return None
 
-    def close_position(self, symbol: str) -> Order:
+    async def close_position(self, symbol: str) -> Order:
         """Close a position"""
         position = self.get_position(symbol)
         if not position:
@@ -1276,9 +1285,9 @@ class IBKRAdapter(BaseBrokerAdapter):
         side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
         quantity = abs(position.quantity)
 
-        return self.submit_market_order(symbol, quantity, side)
+        return await self.submit_market_order(symbol, quantity, side)
 
-    def close_all_positions(self) -> List[Order]:
+    async def close_all_positions(self) -> List[Order]:
         """Close all positions"""
         positions = self.get_positions()
         orders = []
@@ -1294,7 +1303,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Account Management ====================
 
-    def get_account_info(self) -> AccountInfo:
+    async async def get_account_info(self) -> AccountInfo:
         """Get account information"""
         try:
             # Clear previous account values
@@ -1304,7 +1313,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             self.client.reqAccountUpdates(True, self.config.account_id or "")
 
             # Wait for response
-            time.sleep(3.0)
+            await asyncio.sleep(3.0)
 
             # Extract values
             values = self.wrapper.account_values
@@ -1397,7 +1406,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Convenience Methods for Testing ====================
 
-    def place_order(
+    async def place_order(
         self,
         symbol: str,
         quantity: float,
@@ -1415,15 +1424,15 @@ class IBKRAdapter(BaseBrokerAdapter):
 
         # Submit order based on type
         if order_type.upper() == "MARKET":
-            order = self.submit_market_order(symbol, quantity, order_side)
+            order = await self.submit_market_order(symbol, quantity, order_side)
         elif order_type.upper() == "LIMIT":
             if limit_price is None:
                 raise ValueError("limit_price required for LIMIT orders")
-            order = self.submit_limit_order(symbol, quantity, order_side, limit_price)
+            order = await self.submit_limit_order(symbol, quantity, order_side, limit_price)
         elif order_type.upper() == "STOP":
             if stop_price is None:
                 raise ValueError("stop_price required for STOP orders")
-            order = self.submit_stop_order(symbol, quantity, order_side, stop_price)
+            order = await self.submit_stop_order(symbol, quantity, order_side, stop_price)
         elif order_type.upper() == "STOP_LIMIT":
             if limit_price is None or stop_price is None:
                 raise ValueError("limit_price and stop_price required for STOP_LIMIT orders")
@@ -1433,7 +1442,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
         return order.order_id
 
-    def get_order_status(self, order_id: str) -> dict:
+    async async def get_order_status(self, order_id: str) -> dict:
         """
         Get order status as a dictionary.
         Returns dict with status, filled_qty, avg_fill_price, etc.
@@ -1463,7 +1472,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             'submitted_at': order.timestamp
         }
 
-    def get_open_orders(self) -> List[dict]:
+    async def get_open_orders(self) -> List[dict]:
         """
         Get all open orders as a list of dictionaries.
         """
@@ -1589,7 +1598,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Error getting asset info for {symbol}: {e}")
             return None
 
-    def check_buying_power(self, amount: float) -> bool:
+    async def check_buying_power(self, amount: float) -> bool:
         """
         Check if account has sufficient buying power
 
@@ -1612,7 +1621,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Error checking buying power: {e}")
             return False
 
-    def get_historical_bars(
+    async def get_historical_bars(
         self,
         symbol: str,
         timeframe: str = "1Min",
@@ -1704,7 +1713,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
                 if time.time() - start_time > timeout:
                     raise TimeoutError(f"Timeout waiting for historical data (req_id={req_id})")
-                time.sleep(0.1)
+                await asyncio.sleep(0.1)
 
             # Get the collected data
             bars = self.wrapper.historical_data.get(req_id, [])
