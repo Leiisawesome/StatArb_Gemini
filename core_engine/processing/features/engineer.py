@@ -541,42 +541,44 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             self.logger.warning(f"Engine health check failed: {e}")
             return False
 
-    def create_features(self, data: Union[Dict[str, pd.DataFrame], pd.DataFrame]) -> Union[Dict[str, pd.DataFrame], pd.DataFrame]:
+    def create_features(
+        self,
+        data: Union[Dict[str, pd.DataFrame], pd.DataFrame],
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> Union[Dict[str, pd.DataFrame], pd.DataFrame]:
         """
-        Create trading features for multiple symbols or a single DataFrame.
+        Create trading features for multiple symbols or a single DataFrame with context awareness.
 
         Args:
-            data: Dictionary where keys are symbols and values are DataFrames with indicators,
-                  OR a single DataFrame with indicators.
+            data: Symbol-to-DataFrame mapping or single DataFrame.
+            regime_context: Optional regime context.
+            liquidity_context: Optional liquidity context.
 
         Returns:
-            Dictionary where keys are symbols and values are DataFrames with engineered features,
-            OR a single DataFrame with engineered features.
+            Processed data with engineered features.
         """
         # Handle single DataFrame input
         if isinstance(data, pd.DataFrame):
-            return self._create_features_for_single_df(data)
+            return self._create_features_for_single_df(
+                data,
+                regime_context=regime_context,
+                liquidity_context=liquidity_context
+            )
 
         # Handle dictionary input
         result = {}
 
         for symbol, df in data.items():
             if df.empty:
-                self.logger.warning(f"Data for {symbol} is empty. Skipping feature creation.")
-                continue
-
-            if 'timestamp' not in df.columns:
-                self.logger.error(f"Data for {symbol} must have a 'timestamp' column. Skipping feature creation.")
-                continue
-
-            df = df.sort_values('timestamp')
-
-            if len(df) < 10:
-                self.logger.warning(f"Insufficient data for {symbol}. Skipping feature creation.")
                 continue
 
             # Create features for this symbol
-            df = self._create_symbol_features(df)
+            df = self._create_symbol_features(
+                df,
+                regime_context=regime_context,
+                liquidity_context=liquidity_context
+            )
 
             # Create cross-sectional features if enabled
             if self.config.enable_cross_sectional:
@@ -590,39 +592,30 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
 
         return result
 
-    def _create_features_for_single_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Create features for a single DataFrame.
-
-        Args:
-            df: Single DataFrame with indicators
-
-        Returns:
-            DataFrame with engineered features
-        """
-        # Handle empty DataFrame
+    def _create_features_for_single_df(
+        self,
+        df: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """Create features for a single DataFrame, ensuring timestamp sort."""
         if df.empty:
-            self.logger.warning("DataFrame is empty. Returning empty DataFrame.")
-            return pd.DataFrame()
+            return df
 
-        # Handle missing timestamp
         if 'timestamp' not in df.columns:
-            self.logger.error("DataFrame must have a 'timestamp' column. Returning empty DataFrame.")
-            return pd.DataFrame()
+            return df
+            
+        df = df.sort_values('timestamp')
 
-        # Handle insufficient data
-        if len(df) < 10:
-            self.logger.warning(f"Insufficient data (only {len(df)} rows). Returning original DataFrame.")
-            return df.copy()
+        # Create symbol features
+        df = self._create_symbol_features(
+            df,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
 
-        # Sort by timestamp
-        df = df.sort_values('timestamp').copy()
-
-        # Create features for this symbol
-        df = self._create_symbol_features(df)
-
-        # Create cross-sectional features if enabled
-        if self.config.enable_cross_sectional:
+        # Create cross-sectional features if multiple symbols present
+        if self.config.enable_cross_sectional and 'symbol' in df.columns and df['symbol'].nunique() > 1:
             df = self._create_cross_sectional_features(df)
 
         # Normalize features if enabled
@@ -632,26 +625,23 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return df
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Generate trading features from indicators DataFrame (alias for create_features)
-
-        Args:
-            df: DataFrame with indicators (from TechnicalIndicators)
-
-        Returns:
-            DataFrame with engineered features
-        """
+        """Alias for create_features."""
         return self.create_features(df)
 
-    def _create_symbol_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Create features for a single symbol"""
+    def _create_symbol_features(
+        self,
+        df: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """Create features using a stateless-compatible pattern."""
         # Basic price features
         df = self._create_price_features(df)
 
         # Momentum features
         df = self._create_momentum_features(df)
 
-        # Composite momentum features (Phase 4A - Option A)
+        # Composite momentum features (Phase 4A)
         df = self._create_composite_momentum_features(df)
 
         # Volatility features

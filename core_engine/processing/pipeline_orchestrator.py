@@ -270,7 +270,6 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
         # HOTSPOT 4: Concurrency control
         self._processing_semaphore = asyncio.Semaphore(4)  # Limit concurrent tasks
-        self._engine_lock = asyncio.Lock()  # Protect shared engines during config adaptation
 
         logger.info("✅ ProcessingPipelineOrchestrator initialized (Rule 3 enforcement)")
 
@@ -756,6 +755,49 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
         return df_clean
 
+    def _apply_data_quality_mask(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """
+        Generate and apply a quality bitmask for each bar (Institutional-Grade Phase 4).
+        
+        0: Good data
+        1: Generic NaN / Missing
+        2: Price Outlier (Extreme move)
+        8: Zero Volume / Halt
+        16: Timestamp Gap (>3x Median)
+        """
+        if df.empty:
+            return df
+
+        # Work on a copy to avoid side effects if reused
+        df = df.copy()
+        mask = np.zeros(len(df), dtype=int)
+
+        # Bit 0: NaNs in OHLC
+        ohlc = ['open', 'high', 'low', 'close']
+        for col in ohlc:
+            if col in df.columns:
+                mask |= df[col].isna().astype(int) * 1
+
+        # Bit 1: Price Outliers (relative moves > 50% in 1 bar)
+        if 'close' in df.columns:
+            pct_change = df['close'].pct_change().abs()
+            mask |= (pct_change > 0.50).fillna(False).astype(int) * 2
+
+        # Bit 3: Zero Volume
+        if 'volume' in df.columns:
+            mask |= (df['volume'] == 0).astype(int) * 8
+
+        # Bit 4: Timestamp Gaps
+        if 'timestamp' in df.columns:
+            ts_diff = df['timestamp'].diff()
+            if len(ts_diff) > 1:
+                median_gap = ts_diff.median()
+                if not pd.isna(median_gap):
+                    mask |= (ts_diff > (median_gap * 3)).fillna(False).astype(int) * 16
+
+        df['data_quality_mask'] = mask
+        return df
+
     def _calculate_data_quality_metrics(
         self,
         df: pd.DataFrame,
@@ -994,8 +1036,14 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         Designed for parallel execution via asyncio.gather (Hotspot 4 fix).
         """
         async with self._processing_semaphore:
-            symbol_data = symbol_raw_df.copy()
-            symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
+            # MEMORY OPTIMIZATION: Avoid redundant copies if possible
+            symbol_data = symbol_raw_df
+            if not symbol_data.index.is_monotonic_increasing:
+                symbol_data = symbol_data.sort_values('timestamp').reset_index(drop=True)
+            
+            # PHASE 1.5: Apply Data Quality Mask
+            symbol_data = self._apply_data_quality_mask(symbol_data, symbol)
+            
             liquidity_sequence = self._assess_liquidity(symbol, symbol_data)
             liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
 
@@ -1017,38 +1065,44 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     if regime_sequence:
                         regime_changes_count = regime_result.get('regime_changes_count', 0)
                         
-                        # Use Engine Lock during critical section where config adaptation happens
-                        async with self._engine_lock:
-                            if regime_changes_count > 0:
-                                regime_segments = self._identify_regime_segments(symbol_data, regime_sequence, symbol)
-                                segment_start = datetime.now()
-                                indicators_df, features_df, signals_df = await self._process_regime_segments(
-                                    symbol_data, regime_segments, symbol
-                                )
-                                segment_time = (datetime.now() - segment_start).total_seconds()
-                                phase2_time, phase3_time, phase4_time = segment_time*0.4, segment_time*0.4, segment_time*0.2
-                            else:
-                                first_regime = regime_sequence[0]
-                                timestamp = first_regime.get('timestamp')
-                                if timestamp:
-                                    if isinstance(timestamp, pd.Timestamp): timestamp = timestamp.to_pydatetime()
-                                    regime_analysis = self.regime_engine.get_regime_at_timestamp(symbol, timestamp)
-                                    if regime_analysis:
-                                        if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
-                                            await self.indicators_engine.adapt_to_regime(regime_analysis)
-                                        if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
-                                            await self.feature_engineer.adapt_to_regime(regime_analysis)
-
-                                # Process stages
+                        if regime_changes_count > 0:
+                            # Multi-regime processing: split by segments
+                            regime_segments = self._identify_regime_segments(symbol_data, regime_sequence, symbol)
+                            segment_start = datetime.now()
+                            indicators_df, features_df, signals_df = await self._process_regime_segments(
+                                symbol_data, regime_segments, symbol
+                            )
+                            segment_time = (datetime.now() - segment_start).total_seconds()
+                            phase2_time, phase3_time, phase4_time = segment_time*0.4, segment_time*0.4, segment_time*0.2
+                        else:
+                            # Single regime: use the detected regime for the whole DataFrame
+                            first_regime = regime_sequence[0]
+                            timestamp = first_regime.get('timestamp')
+                            if timestamp:
+                                if isinstance(timestamp, pd.Timestamp): timestamp = timestamp.to_pydatetime()
+                                regime_analysis = self.regime_engine.get_regime_at_timestamp(symbol, timestamp)
+                                
+                                # Process stages with explicit regime context
                                 indicators_df, features_df, signals_df, p2, p3, p4 = \
-                                    await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+                                    await self._process_pipeline_stages(
+                                        symbol_data, 
+                                        symbol, 
+                                        regime_context=regime_analysis,
+                                        liquidity_context=liquidity_context_first
+                                    )
+                                phase2_time, phase3_time, phase4_time = p2, p3, p4
+                            else:
+                                indicators_df, features_df, signals_df, p2, p3, p4 = \
+                                    await self._process_pipeline_stages(symbol_data, symbol, liquidity_context=liquidity_context_first)
                                 phase2_time, phase3_time, phase4_time = p2, p3, p4
                     else:
-                        indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
-                            await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+                        indicators_df, features_df, signals_df, p2, p3, p4 = \
+                            await self._process_pipeline_stages(symbol_data, symbol, liquidity_context=liquidity_context_first)
+                        phase2_time, phase3_time, phase4_time = p2, p3, p4
                 else:
-                    indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time = \
-                        await self._process_pipeline_stages(symbol_data, symbol, liquidity_context_first)
+                    indicators_df, features_df, signals_df, p2, p3, p4 = \
+                        await self._process_pipeline_stages(symbol_data, symbol, liquidity_context=liquidity_context_first)
+                    phase2_time, phase3_time, phase4_time = p2, p3, p4
 
                 # Add regime columns
                 if regime_sequence:
@@ -1071,48 +1125,68 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 logger.error(f"❌ {symbol} processing failed: {e}")
                 return symbol, None
 
-    def _calculate_indicators_sync(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Synchronous version of indicator calculation for thread pool execution."""
+    def _calculate_indicators_sync(
+        self, 
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """Synchronous version of indicator calculation with context support."""
         if not self.indicators_engine:
             return data.copy()
         
-        # We don't call self._validate_dataframe here to avoid async issues 
-        # but the engine itself is fast.
-        return self.indicators_engine.calculate_indicators(data)
+        return self.indicators_engine.calculate_indicators(
+            data,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
 
-    def _engineer_features_sync(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Synchronous version of feature engineering for thread pool execution."""
+    def _engineer_features_sync(
+        self, 
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """Synchronous version of feature engineering with context support."""
         if not self.feature_engineer:
             return data.copy()
-        return self.feature_engineer.create_features(data)
+        return self.feature_engineer.create_features(
+            data,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
 
     async def _process_pipeline_stages(
         self,
         symbol_data: pd.DataFrame,
         symbol: str,
+        regime_context: Optional[Any] = None,
         liquidity_context: Optional[Dict[str, Any]] = None
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, float, float, float]:
         """
         Process data through pipeline stages 2-4 (Indicators → Features → Signals)
-        Optimized with asyncio.to_thread for GIL-releasing JIT/Bottleneck (Hotspot 4).
+        Optimized for concurrent execution with stateless engine calls.
         """
-        # Adapt to liquidity if available
-        if liquidity_context:
-            if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
-                self.indicators_engine.adapt_to_liquidity(liquidity_context)
-            if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
-                self.feature_engineer.adapt_to_liquidity(liquidity_context)
-
         # Phase 2: Calculate indicators
         phase2_start = datetime.now()
-        # Use to_thread to allow concurrent CPU work across multiple symbols
-        indicators_df = await asyncio.to_thread(self._calculate_indicators_sync, symbol_data)
+        # Pass context directly to avoid stateful adaptation
+        indicators_df = await asyncio.to_thread(
+            self._calculate_indicators_sync, 
+            symbol_data,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
         phase2_time = (datetime.now() - phase2_start).total_seconds()
 
         # Phase 3: Engineer features
         phase3_start = datetime.now()
-        # Use to_thread to allow concurrent CPU work across multiple symbols
-        features_df = await asyncio.to_thread(self._engineer_features_sync, indicators_df)
+        # Pass context directly to avoid stateful adaptation
+        features_df = await asyncio.to_thread(
+            self._engineer_features_sync, 
+            indicators_df,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
         phase3_time = (datetime.now() - phase3_start).total_seconds()
 
         # Merge liquidity features
@@ -1192,12 +1266,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.error("Data loading failed: %s", e)
             return {symbol: pd.DataFrame() for symbol in symbols}
 
-    async def _calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+    async def _calculate_indicators(
+        self, 
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """
         Phase 2: Calculate technical indicators (with validation)
 
         Args:
             data: Raw OHLCV DataFrame
+            regime_context: Optional context
+            liquidity_context: Optional context
 
         Returns:
             DataFrame with OHLCV + 29+ indicator columns
@@ -1214,7 +1295,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
         try:
             # Calculate indicators through EnhancedTechnicalIndicators (Rule 3.2)
-            indicators_df = self.indicators_engine.calculate_indicators(data)
+            # Use to_thread to release GIL for concurrent CPU work
+            indicators_df = await asyncio.to_thread(
+                self._calculate_indicators_sync,
+                data,
+                regime_context=regime_context,
+                liquidity_context=liquidity_context
+            )
 
             # Validate output
             is_valid, error = self._validate_dataframe(
@@ -1241,12 +1328,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.error(f"❌ Indicator calculation failed: {e}", exc_info=True)
             return data.copy()
 
-    async def _engineer_features(self, data: pd.DataFrame) -> pd.DataFrame:
+    async def _engineer_features(
+        self, 
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """
         Phase 3: Engineer ML-ready features (with validation)
 
         Args:
             data: DataFrame with OHLCV + indicators
+            regime_context: Optional context
+            liquidity_context: Optional context
 
         Returns:
             DataFrame with OHLCV + indicators + 50+ features
@@ -1263,7 +1357,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
 
         try:
             # Engineer features through EnhancedFeatureEngineer (Rule 3.3)
-            features_df = self.feature_engineer.create_features(data)
+            # Use to_thread to release GIL for concurrent CPU work
+            features_df = await asyncio.to_thread(
+                self._engineer_features_sync,
+                data,
+                regime_context=regime_context,
+                liquidity_context=liquidity_context
+            )
 
             # Validate output
             is_valid, error = self._validate_dataframe(
@@ -1779,34 +1879,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     seg_timestamp = seg_timestamp.to_pydatetime()
                 liquidity_context = self.get_liquidity_at_timestamp(symbol, seg_timestamp)
 
-            # Adapt config for this segment's regime
-            if regime_analysis:
-                regime_name = regime_analysis.primary_regime.value if hasattr(regime_analysis.primary_regime, 'value') else str(regime_analysis.primary_regime)
-                logger.debug(
-                    f"   📊 Segment {segment_idx + 1}/{segment_count} ({start_idx}-{end_idx}): "
-                    f"Regime={regime_name}, Bars={len(segment_data_with_warmup)} (incl. {start_idx - actual_start_idx} warmup)"
-                )
-
-                # Adapt indicator engine config
-                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_regime'):
-                    await self.indicators_engine.adapt_to_regime(regime_analysis)
-
-                # Adapt feature engineer config
-                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_regime'):
-                    await self.feature_engineer.adapt_to_regime(regime_analysis)
-
-            if liquidity_context:
-                if self.indicators_engine and hasattr(self.indicators_engine, 'adapt_to_liquidity'):
-                    self.indicators_engine.adapt_to_liquidity(liquidity_context)
-                if self.feature_engineer and hasattr(self.feature_engineer, 'adapt_to_liquidity'):
-                    self.feature_engineer.adapt_to_liquidity(liquidity_context)
-
-            # Process segment through pipeline
-            # PHASE 2: Calculate indicators for this segment (using warmup data)
-            segment_indicators_full = await self._calculate_indicators(segment_data_with_warmup)
+            # PHASE 2: Calculate indicators for this segment (stateless)
+            segment_indicators_full = await self._calculate_indicators(
+                segment_data_with_warmup,
+                regime_context=regime_analysis,
+                liquidity_context=liquidity_context
+            )
             
-            # PHASE 3: Engineer features for this segment (using full indicators)
-            segment_features_full = await self._engineer_features(segment_indicators_full)
+            # PHASE 3: Engineer features for this segment (stateless)
+            segment_features_full = await self._engineer_features(
+                segment_indicators_full,
+                regime_context=regime_analysis,
+                liquidity_context=liquidity_context
+            )
 
             # Trim back to original segment range (remove warmup bars)
             # We use the original start_idx relative to actual_start_idx

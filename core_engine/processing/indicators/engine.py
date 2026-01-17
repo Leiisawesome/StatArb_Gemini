@@ -39,7 +39,12 @@ class IIndicatorProcessor(ABC):
     """Interface for indicator processing components"""
 
     @abstractmethod
-    def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+    def calculate_indicators(
+        self,
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """Calculate indicators for market data"""
 
     @abstractmethod
@@ -646,56 +651,88 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
             self.logger.warning(f"Engine health check failed: {e}")
             return False
 
-    def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+    def calculate_indicators(
+        self,
+        data: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """
-        Calculate indicators following core_engine interface
+        Calculate indicators following core_engine interface.
 
         Args:
             data: DataFrame with OHLCV data
+            regime_context: Optional regime context for dynamic parameters
+            liquidity_context: Optional liquidity context for dynamic parameters
 
         Returns:
             DataFrame with calculated indicators
         """
-        return self.calculate_all_indicators(data)
+        return self.calculate_all_indicators(
+            data,
+            regime_context=regime_context,
+            liquidity_context=liquidity_context
+        )
 
-    def _process_single_symbol(self, symbol_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    def _process_single_symbol(
+        self,
+        symbol_df: pd.DataFrame,
+        symbol: str,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """
-        Process indicators for a single symbol.
-
-        Args:
-            symbol_df: DataFrame for a single symbol (already sorted by timestamp)
-            symbol: The symbol name (added back after groupby with include_groups=False)
-
-        Returns:
-            DataFrame with all indicators added
+        Process indicators for a single symbol with optional context awareness.
         """
         symbol_df = symbol_df.sort_values('timestamp').copy()
 
-        # Add symbol column back (excluded by include_groups=False)
+        # Add symbol column back
         symbol_df['symbol'] = symbol
 
         if len(symbol_df) < 2:
-            # Insufficient data, return as-is (warning logged in caller)
             return symbol_df
 
-        # Calculate all indicators
+        # Apply parameters from context locally if provided (Statelessness Enhancement #2)
+        # Note: We don't mutate self.config here to remain thread-safe for parallel calls.
+        bb_std = self._base_bb_std
+        bb_period = self._base_bb_period
+        vol_sma_period = self._base_volume_sma_period
+
+        if liquidity_context:
+            score = liquidity_context.get('liquidity_score', 50)
+            if score <= 40:
+                bb_std = min(self._base_bb_std * 1.2, 3.0)
+                bb_period = max(self._base_bb_period, int(self._base_bb_period * 1.2))
+                vol_sma_period = max(self._base_volume_sma_period, int(self._base_volume_sma_period * 1.5))
+            elif score >= 80:
+                bb_std = max(self._base_bb_std * 0.9, 1.5)
+                bb_period = max(5, int(self._base_bb_period * 0.9))
+                vol_sma_period = max(5, int(self._base_volume_sma_period * 0.8))
+
+        # Calculate all indicators using local parameters
         symbol_df = self._calculate_moving_averages(symbol_df)
         symbol_df = self._calculate_momentum_indicators(symbol_df)
-        symbol_df = self._calculate_volatility_indicators(symbol_df)
-        symbol_df = self._calculate_volume_indicators(symbol_df)
+        # Pass local parameters to volatility if needed, but for now we'll stick to 
+        # the structure where we might need to modify _calculate_volatility_indicators
+        symbol_df = self._calculate_volatility_indicators(symbol_df, bb_std=bb_std, bb_period=bb_period)
+        symbol_df = self._calculate_volume_indicators(symbol_df, vol_sma_period=vol_sma_period)
         symbol_df = self._calculate_price_patterns(symbol_df)
 
         return symbol_df
 
-    def calculate_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_all_indicators(
+        self,
+        df: pd.DataFrame,
+        regime_context: Optional[Any] = None,
+        liquidity_context: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
         """
         Calculate all configured indicators for the given DataFrame
 
-        Uses groupby().apply() for vectorized per-symbol processing instead of
-        explicit Python loop for ~2-5x speedup on large datasets.
-
         Args:
-            df: DataFrame with OHLCV data (columns: timestamp, symbol, open, high, low, close, volume)
+            df: DataFrame with OHLCV data
+            regime_context: Optional regime context
+            liquidity_context: Optional liquidity context
 
         Returns:
             DataFrame with all indicators added
@@ -705,26 +742,20 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
 
         n_symbols = df['symbol'].nunique()
 
-        # Check for symbols with insufficient data
-        symbol_counts = df.groupby('symbol').size()
-        insufficient_symbols = symbol_counts[symbol_counts < 2].index.tolist()
-        if insufficient_symbols:
-            for symbol in insufficient_symbols:
-                self.logger.warning(f"Insufficient data for {symbol}, skipping indicators")
-
-        # Use groupby().apply() for vectorized processing (P0 Performance Fix)
-        # group_keys=False prevents adding group keys as index level
-        # include_groups=False excludes 'symbol' column from apply (future pandas behavior)
-        # We pass symbol name as second argument and add it back in _process_single_symbol
+        # Use groupby().apply() for vectorized processing
         result = df.groupby('symbol', group_keys=False).apply(
-            lambda x: self._process_single_symbol(x, x.name), include_groups=False
+            lambda x: self._process_single_symbol(
+                x, x.name,
+                regime_context=regime_context,
+                liquidity_context=liquidity_context
+            ),
+            include_groups=False
         )
 
         # Reset index to ensure clean output
         if not result.empty:
             result = result.reset_index(drop=True)
 
-        self.logger.info(f"Calculated indicators for {n_symbols} symbols")
         return result
 
     def _calculate_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -777,16 +808,24 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
 
         return df
 
-    def _calculate_volatility_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_volatility_indicators(
+        self,
+        df: pd.DataFrame,
+        bb_std: Optional[float] = None,
+        bb_period: Optional[int] = None
+    ) -> pd.DataFrame:
         """Calculate volatility indicators (Bollinger Bands, ATR)"""
-        # Bollinger Bands
-        if len(df) >= self.config.bb_period:
-            sma = df['close'].rolling(window=self.config.bb_period).mean()
-            std = df['close'].rolling(window=self.config.bb_period).std()
+        # Bollinger Bands (with optional context overrides for statelessness)
+        period = bb_period or self.config.bb_period
+        std = bb_std or self.config.bb_std
 
-            df['bb_upper'] = sma + (std * self.config.bb_std)
+        if len(df) >= period:
+            sma = df['close'].rolling(window=period).mean()
+            rolling_std = df['close'].rolling(window=period).std()
+
+            df['bb_upper'] = sma + (rolling_std * std)
             df['bb_middle'] = sma
-            df['bb_lower'] = sma - (std * self.config.bb_std)
+            df['bb_lower'] = sma - (rolling_std * std)
             df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
             df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
 
@@ -795,21 +834,27 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
             df['atr'] = self._calculate_atr(df['high'], df['low'], df['close'], self.config.atr_period)
 
         # Historical Volatility
-        for period in [10, 20, 30]:
-            if len(df) > period:
+        for period_v in [10, 20, 30]:
+            if len(df) > period_v:
                 returns = df['close'].pct_change(fill_method=None)
-                df[f'volatility_{period}'] = returns.rolling(window=period).std() * np.sqrt(252)  # Annualized
+                df[f'volatility_{period_v}'] = returns.rolling(window=period_v).std() * np.sqrt(252)  # Annualized
 
         return df
 
-    def _calculate_volume_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_volume_indicators(
+        self,
+        df: pd.DataFrame,
+        vol_sma_period: Optional[int] = None
+    ) -> pd.DataFrame:
         """Calculate volume-based indicators"""
         if 'volume' not in df.columns:
             return df
 
-        # Volume Moving Average
-        if len(df) >= self.config.volume_sma_period:
-            df['volume_sma'] = df['volume'].rolling(window=self.config.volume_sma_period).mean()
+        # Volume Moving Average (with optional context overrides)
+        period = vol_sma_period or self.config.volume_sma_period
+
+        if len(df) >= period:
+            df['volume_sma'] = df['volume'].rolling(window=period).mean()
             df['volume_ratio'] = df['volume'] / df['volume_sma']
 
         # Volume-Price Trend (VPT)
