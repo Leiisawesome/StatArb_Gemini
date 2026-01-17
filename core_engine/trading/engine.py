@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import threading
+from decimal import Decimal
 
 # Import ISystemComponent for orchestrator integration
 try:
@@ -122,13 +123,13 @@ class ExecutionSlice:
 class TradingEngineConfig:
     """Trading engine configuration"""
     default_execution_strategy: ExecutionStrategy = ExecutionStrategy.SMART_ROUTING
-    max_slice_size: float = 1000.0
-    min_slice_size: float = 10.0
+    max_slice_size: Decimal = Decimal('1000.0')
+    min_slice_size: Decimal = Decimal('10.0')
     twap_duration_minutes: int = 30
-    vwap_participation_rate: float = 0.1
-    iceberg_visible_size: float = 0.2
+    vwap_participation_rate: Decimal = Decimal('0.1')
+    iceberg_visible_size: Decimal = Decimal('0.2')
     enable_smart_routing: bool = True
-    price_improvement_tolerance: float = 0.001  # 0.1%
+    price_improvement_tolerance: Decimal = Decimal('0.001')  # 0.1%
 
 class ITradingSubscriber:
     """Interface for trading event subscribers"""
@@ -207,7 +208,7 @@ class EnhancedTradingEngine(ISystemComponent):
         self.subscribers: List[ITradingSubscriber] = []
 
         # Threading
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
         self.logger.info(f"🚀 Enhanced Trading Engine initialized with component ID: {self.component_id}")
 
@@ -556,12 +557,13 @@ class EnhancedTradingEngine(ISystemComponent):
                 conditions=trade_request.get('conditions', [])
             )
 
-            # Store active plan
-            self.active_plans[plan.plan_id] = plan
+            # Store active plan with lock protection
+            async with self._lock:
+                self.active_plans[plan.plan_id] = plan
 
-            # Create execution slices
-            slices = await self._create_execution_slices(plan)
-            self.execution_slices[plan.plan_id] = slices
+                # Create execution slices
+                slices = await self._create_execution_slices(plan)
+                self.execution_slices[plan.plan_id] = slices
 
             # Notify subscribers
             for subscriber in self.subscribers:
@@ -604,29 +606,30 @@ class EnhancedTradingEngine(ISystemComponent):
     async def cancel_plan(self, plan_id: str) -> bool:
         """Cancel active execution plan"""
         try:
-            if plan_id not in self.active_plans:
-                return False
+            async with self._lock:
+                if plan_id not in self.active_plans:
+                    return False
 
-            plan = self.active_plans[plan_id]
-            logger.info(f"❌ Cancelling plan: {plan_id}")
+                plan = self.active_plans[plan_id]
+                logger.info(f"❌ Cancelling plan: {plan_id}")
 
-            # Cancel pending slices through execution engine
-            if self.execution_engine and plan_id in self.execution_slices:
-                for slice_obj in self.execution_slices[plan_id]:
-                    if slice_obj.status == "pending":
-                        await self.execution_engine.cancel_order(slice_obj.slice_id)
+                # Cancel pending slices through execution engine
+                if self.execution_engine and plan_id in self.execution_slices:
+                    for slice_obj in self.execution_slices[plan_id]:
+                        if slice_obj.status == "pending":
+                            await self.execution_engine.cancel_order(slice_obj.slice_id)
 
-            # Move to completed
-            self.completed_plans[plan_id] = {
-                'plan': plan,
-                'status': 'cancelled',
-                'completed_at': datetime.now()
-            }
+                # Move to completed
+                self.completed_plans[plan_id] = {
+                    'plan': plan,
+                    'status': 'cancelled',
+                    'completed_at': datetime.now()
+                }
 
-            # Cleanup
-            del self.active_plans[plan_id]
-            if plan_id in self.execution_slices:
-                del self.execution_slices[plan_id]
+                # Cleanup
+                del self.active_plans[plan_id]
+                if plan_id in self.execution_slices:
+                    del self.execution_slices[plan_id]
 
             logger.info(f"✅ Plan cancelled: {plan_id}")
             return True
@@ -934,10 +937,9 @@ class EnhancedTradingEngine(ISystemComponent):
 
     async def _monitor_plan_progress(self, plan_id: str):
         """Monitor individual plan progress"""
-        if plan_id not in self.execution_slices:
-            return
-
-        slices = self.execution_slices[plan_id]
+        async with self._lock:
+            if plan_id not in self.execution_slices:
+                return
         completed = sum(1 for s in slices if s.status in ["executed", "failed"])
 
         if completed == len(slices):

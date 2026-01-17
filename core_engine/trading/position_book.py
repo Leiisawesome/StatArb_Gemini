@@ -455,6 +455,8 @@ class PositionBook(IPositionBook):
 
         # Cumulative P&L tracking (realized P&L persists after position closes)
         self._total_realized_pnl = Decimal('0')
+        self._total_unrealized_pnl = Decimal('0')
+        self._positions_value = Decimal('0')
 
         # History
         self._fill_history: List[Fill] = []
@@ -513,23 +515,9 @@ class PositionBook(IPositionBook):
         
         CRITICAL: Short positions are LIABILITIES (owed shares), so their
         market value must be SUBTRACTED from portfolio value, not added.
-        
-        Example:
-        - $100K cash, short 100 TSLA @ $400
-        - Cash becomes $140K (received $40K from short sale)
-        - Short liability = $40K (owe 100 shares @ $400)
-        - Portfolio value = $140K - $40K = $100K (correct!)
         """
         with self._lock:
-            positions_value = Decimal('0')
-            for p in self._positions.values():
-                if p.is_long:
-                    # Long positions are assets - ADD to portfolio value
-                    positions_value += p.market_value
-                elif p.is_short:
-                    # Short positions are liabilities - SUBTRACT from portfolio value
-                    positions_value -= p.market_value
-            return self._cash_balance + positions_value
+            return self._cash_balance + self._positions_value
 
     def get_net_exposure(self, symbol: Optional[str] = None) -> Decimal:
         """
@@ -569,43 +557,45 @@ class PositionBook(IPositionBook):
     def get_unrealized_pnl(self) -> Decimal:
         """Total unrealized P&L across all open positions"""
         with self._lock:
-            return sum(p.unrealized_pnl for p in self._positions.values())
+            return self._total_unrealized_pnl
 
     def get_total_pnl(self) -> Decimal:
         """Total P&L (realized + unrealized)"""
         with self._lock:
-            return self._total_realized_pnl + sum(
-                p.unrealized_pnl for p in self._positions.values()
-            )
+            return self._total_realized_pnl + self._total_unrealized_pnl
 
     def get_snapshot(self) -> PortfolioSnapshot:
         """Get complete portfolio snapshot"""
         with self._lock:
-            positions_copy = {
-                k: copy.deepcopy(v) for k, v in self._positions.items()
-            }
-
-            # CRITICAL: Short positions are liabilities - subtract from portfolio
-            positions_value = Decimal('0')
-            for p in positions_copy.values():
-                if p.is_long:
-                    positions_value += p.market_value
-                elif p.is_short:
-                    positions_value -= p.market_value
+            # Optimized: Avoid deepcopy and use running totals
+            positions_copy = {}
+            long_count = 0
+            short_count = 0
             
-            unrealized_pnl = sum(p.unrealized_pnl for p in positions_copy.values())
-
-            long_count = sum(1 for p in positions_copy.values() if p.is_long)
-            short_count = sum(1 for p in positions_copy.values() if p.is_short)
+            for k, v in self._positions.items():
+                if v.quantity == Decimal('0'):
+                    continue
+                    
+                # Faster copy: shallow copy for the dataclass, 
+                # but explicit shallow copy for the list of fills
+                # to ensure the snapshot list doesn't grow if original does.
+                pos_copy = copy.copy(v)
+                pos_copy.fills = list(v.fills)
+                positions_copy[k] = pos_copy
+                
+                if v.is_long:
+                    long_count += 1
+                elif v.is_short:
+                    short_count += 1
 
             snapshot = PortfolioSnapshot(
                 snapshot_id=str(uuid.uuid4()),
                 timestamp=datetime.now(timezone.utc),
-                total_value=self._cash_balance + positions_value,
+                total_value=self._cash_balance + self._positions_value,
                 cash_balance=self._cash_balance,
-                positions_value=positions_value,
+                positions_value=self._positions_value,
                 total_realized_pnl=self._total_realized_pnl,
-                total_unrealized_pnl=unrealized_pnl,
+                total_unrealized_pnl=self._total_unrealized_pnl,
                 positions=positions_copy,
                 long_count=long_count,
                 short_count=short_count,
@@ -650,6 +640,14 @@ class PositionBook(IPositionBook):
             symbol = fill.symbol
             current = self._positions.get(symbol)
 
+            # Subtract current position from totals before updating
+            if current:
+                self._total_unrealized_pnl -= current.unrealized_pnl
+                if current.is_long:
+                    self._positions_value -= current.market_value
+                elif current.is_short:
+                    self._positions_value += current.market_value
+
             # Track previous state
             prev_quantity = current.quantity if current else Decimal('0')
             prev_avg_price = current.avg_entry_price if current else Decimal('0')
@@ -674,6 +672,14 @@ class PositionBook(IPositionBook):
                     event_type = PositionEventType.UPDATED
                     logger.info(f"🔄 UPDATED {symbol}: {position.quantity} @ "
                                f"${position.avg_entry_price:.2f}")
+
+            # Add new position to totals after updating
+            if event_type != PositionEventType.CLOSED:
+                self._total_unrealized_pnl += position.unrealized_pnl
+                if position.is_long:
+                    self._positions_value += position.market_value
+                elif position.is_short:
+                    self._positions_value -= position.market_value
 
             # Update cumulative realized P&L
             self._total_realized_pnl += realized_pnl
@@ -720,7 +726,30 @@ class PositionBook(IPositionBook):
             for symbol, price in prices.items():
                 if symbol in self._positions:
                     pos = self._positions[symbol]
-                    pos.current_price = Decimal(str(price))
+                    new_price = Decimal(str(price))
+                    
+                    # Calculate deltas to update running totals
+                    price_delta = new_price - pos.current_price
+                    if price_delta == 0:
+                        continue
+                        
+                    # MTM value change: quantity * price_delta
+                    # Long: price up -> market_value up, unrealized up
+                    # Short: price up -> market_value down, unrealized down
+                    value_delta = pos.quantity * price_delta
+                    
+                    if pos.is_long:
+                        self._positions_value += value_delta
+                        self._total_unrealized_pnl += value_delta
+                    else:
+                        # Short: quantity is positive in BookPosition, 
+                        # but liability value increases with price
+                        # value_delta here is (quantity * price_delta)
+                        self._positions_value -= value_delta # Liability value increases, so subtracted from portfolio
+                        self._total_unrealized_pnl -= value_delta # Short P&L is negative when price goes up
+
+                    # Update position object
+                    pos.current_price = new_price
                     pos.market_value = abs(pos.quantity) * pos.current_price
                     pos.unrealized_pnl = self._calculate_unrealized_pnl(pos)
 
@@ -741,6 +770,8 @@ class PositionBook(IPositionBook):
             self._positions.clear()
             self._cash_balance = self._initial_capital
             self._total_realized_pnl = Decimal('0')
+            self._total_unrealized_pnl = Decimal('0')
+            self._positions_value = Decimal('0')
             self._fill_history.clear()
             self._update_history.clear()
             self._snapshots.clear()

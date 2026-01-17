@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from decimal import Decimal
 import numpy as np
 from collections import defaultdict
 import warnings
@@ -55,6 +56,23 @@ class ExecutionStatus(Enum):
     EXPIRED = "expired"
     ERROR = "error"
 
+class ExecutionReasonCode(Enum):
+    """Detailed reason codes for execution results"""
+    SUCCESS = "success"
+    MARKET_CLOSED = "market_closed"
+    INSUFFICIENT_LIQUIDITY = "insufficient_liquidity"
+    MAX_IMPACT_BREACH = "max_impact_breach"
+    PRICE_LIMIT_BREACH = "price_limit_breach"
+    SLIPPAGE_LIMIT_BREACH = "slippage_limit_breach"
+    CIRCUIT_BREAKER_TRIGGERED = "circuit_breaker_triggered"
+    ORD_VAL_LIMIT_BREACH = "order_value_limit_breach"
+    CONCENTRATION_LIMIT_BREACH = "concentration_limit_breach"
+    VENUE_TIMEOUT = "venue_timeout"
+    CONNECTION_LOST = "connection_lost"
+    INTERNAL_ERROR = "internal_error"
+    CANCELLED_BY_USER = "cancelled_by_user"
+    UNKNOWN = "unknown"
+
 @dataclass
 class ExecutionConfig:
     """Execution engine configuration"""
@@ -65,31 +83,31 @@ class ExecutionConfig:
     # Timing controls
     max_execution_time: int = 3600  # 1 hour in seconds
     slice_interval: int = 30  # 30 seconds between slices
-    min_slice_size: float = 0.01  # 1% of order size
-    max_slice_size: float = 0.25  # 25% of order size
+    min_slice_size: Decimal = Decimal('0.01')  # 1% of order size
+    max_slice_size: Decimal = Decimal('0.25')  # 25% of order size
 
     # Market impact controls
-    max_participation_rate: float = 0.20  # 20% of volume
-    impact_threshold: float = 0.005  # 0.5% price impact limit
+    max_participation_rate: Decimal = Decimal('0.20')  # 20% of volume
+    impact_threshold: Decimal = Decimal('0.005')  # 0.5% price impact limit
 
     # Risk controls
     enable_pre_trade_risk: bool = True
     enable_real_time_risk: bool = True
-    max_order_value: float = 10_000_000  # $10M
-    max_position_concentration: float = 0.05  # 5%
+    max_order_value: Decimal = Decimal('10000000')  # $10M
+    max_position_concentration: Decimal = Decimal('0.05')  # 5%
 
     # Liquidity settings
-    min_adv_participation: float = 0.01  # 1% of ADV
-    max_adv_participation: float = 0.10  # 10% of ADV
-    liquidity_buffer: float = 0.20  # 20% liquidity buffer
+    min_adv_participation: Decimal = Decimal('0.01')  # 1% of ADV
+    max_adv_participation: Decimal = Decimal('0.10')  # 10% of ADV
+    liquidity_buffer: Decimal = Decimal('0.20')  # 20% liquidity buffer
 
     # Slippage controls
-    max_acceptable_slippage: float = 0.002  # 20 bps
-    slippage_tolerance: float = 0.001  # 10 bps
+    max_acceptable_slippage: Decimal = Decimal('0.002')  # 20 bps
+    slippage_tolerance: Decimal = Decimal('0.001')  # 10 bps
 
     # Dark pool settings
     enable_dark_pools: bool = True
-    dark_pool_preference: float = 0.30  # 30% to dark pools
+    dark_pool_preference: Decimal = Decimal('0.30')  # 30% to dark pools
 
     # Smart order routing
     enable_smart_routing: bool = True
@@ -100,7 +118,7 @@ class ExecutionConfig:
     benchmark_against_arrival: bool = True
 
     # Emergency controls
-    circuit_breaker_threshold: float = 0.05  # 5% adverse move
+    circuit_breaker_threshold: Decimal = Decimal('0.05')  # 5% adverse move
     emergency_cancel_enabled: bool = True
 
 @dataclass
@@ -110,7 +128,7 @@ class ExecutionRequest:
     request_id: str
     symbol: str
     side: str  # 'BUY' or 'SELL'
-    quantity: float
+    quantity: Decimal
     order_type: str = "MARKET"
 
     # Execution parameters
@@ -124,23 +142,23 @@ class ExecutionRequest:
     max_duration: Optional[int] = None  # seconds
 
     # Price constraints
-    limit_price: Optional[float] = None
-    stop_price: Optional[float] = None
-    benchmark_price: Optional[float] = None
+    limit_price: Optional[Decimal] = None
+    stop_price: Optional[Decimal] = None
+    benchmark_price: Optional[Decimal] = None
 
     # Volume constraints
-    participation_rate: Optional[float] = None  # % of volume
-    min_fill_size: Optional[float] = None
-    max_slice_size: Optional[float] = None
+    participation_rate: Optional[Decimal] = None  # % of volume
+    min_fill_size: Optional[Decimal] = None
+    max_slice_size: Optional[Decimal] = None
 
     # Routing preferences
     preferred_venues: List[str] = field(default_factory=list)
     excluded_venues: List[str] = field(default_factory=list)
-    dark_pool_preference: Optional[float] = None
+    dark_pool_preference: Optional[Decimal] = None
 
     # Risk parameters
-    max_market_impact: Optional[float] = None
-    slippage_tolerance: Optional[float] = None
+    max_market_impact: Optional[Decimal] = None
+    slippage_tolerance: Optional[Decimal] = None
 
     # Metadata
     strategy_id: Optional[str] = None
@@ -166,7 +184,7 @@ class ExecutionSlice:
     # Slice details
     symbol: str
     side: str
-    quantity: float
+    quantity: Decimal
     slice_number: int
     total_slices: int
 
@@ -176,25 +194,26 @@ class ExecutionSlice:
     filled_time: Optional[datetime] = None
 
     # Pricing
-    limit_price: Optional[float] = None
-    avg_fill_price: Optional[float] = None
+    limit_price: Optional[Decimal] = None
+    avg_fill_price: Optional[Decimal] = None
 
     # Status
     status: ExecutionStatus = ExecutionStatus.PENDING
-    filled_quantity: float = 0.0
-    remaining_quantity: float = 0.0
+    reason_code: ExecutionReasonCode = ExecutionReasonCode.SUCCESS
+    filled_quantity: Decimal = Decimal('0')
+    remaining_quantity: Decimal = Decimal('0')
 
     # Venue information
     target_venue: Optional[str] = None
     actual_venue: Optional[str] = None
 
     # Performance metrics
-    slippage: Optional[float] = None
-    market_impact: Optional[float] = None
-    execution_shortfall: Optional[float] = None
+    slippage: Optional[Decimal] = None
+    market_impact: Optional[Decimal] = None
+    execution_shortfall: Optional[Decimal] = None
 
     # Risk metrics
-    risk_score: Optional[float] = None
+    risk_score: Optional[Decimal] = None
     compliance_status: str = "PENDING"
 
 @dataclass
@@ -204,21 +223,21 @@ class ExecutionResult:
     symbol: str
 
     # Execution summary
-    total_quantity: float
-    filled_quantity: float
-    remaining_quantity: float
-    fill_rate: float
+    total_quantity: Decimal
+    filled_quantity: Decimal
+    remaining_quantity: Decimal
+    fill_rate: Decimal
 
     # Pricing metrics
-    avg_fill_price: float
-    benchmark_price: float
-    arrival_price: float
+    avg_fill_price: Decimal
+    benchmark_price: Decimal
+    arrival_price: Decimal
 
     # Performance metrics
-    total_slippage: float
-    market_impact: float
-    implementation_shortfall: float
-    execution_cost: float
+    total_slippage: Decimal
+    market_impact: Decimal
+    implementation_shortfall: Decimal
+    execution_cost: Decimal
 
     # Timing metrics
     start_time: datetime
@@ -226,17 +245,18 @@ class ExecutionResult:
     execution_duration: timedelta
 
     # Quality metrics
-    participation_rate: float
-    venue_breakdown: Dict[str, float]
-    dark_pool_rate: float
+    participation_rate: Decimal
+    venue_breakdown: Dict[str, Decimal]
+    dark_pool_rate: Decimal
 
     # Risk metrics
-    max_adverse_move: float
-    risk_adjusted_cost: float
+    max_adverse_move: Decimal = Decimal('0')
+    risk_adjusted_cost: Decimal = Decimal('0')
 
     # Status
-    final_status: ExecutionStatus
-    completion_reason: str
+    status: ExecutionStatus = ExecutionStatus.PENDING
+    reason_code: ExecutionReasonCode = ExecutionReasonCode.SUCCESS
+    completion_reason: str = ""
 
     # Detailed breakdown
     slice_results: List[ExecutionSlice] = field(default_factory=list)
@@ -258,17 +278,17 @@ class MarketDataProvider:
 
     def __init__(self):
         self._market_data = {}
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
-    def get_current_price(self, symbol: str) -> Optional[float]:
+    async def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current market price"""
-        with self._lock:
+        async with self._lock:
             data = self._market_data.get(symbol, {})
             return data.get('price')
 
-    def get_bid_ask(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
+    async def get_bid_ask(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
         """Get current bid/ask"""
-        with self._lock:
+        async with self._lock:
             data = self._market_data.get(symbol, {})
             return data.get('bid'), data.get('ask')
 
@@ -282,9 +302,9 @@ class MarketDataProvider:
             'liquidity_score': 0.85
         }
 
-    def update_market_data(self, symbol: str, data: Dict[str, Any]) -> None:
+    async def update_market_data(self, symbol: str, data: Dict[str, Any]) -> None:
         """Update market data"""
-        with self._lock:
+        async with self._lock:
             self._market_data[symbol] = data
 
 class VenueRouter:
@@ -478,17 +498,19 @@ class RiskMonitor:
     def __init__(self, config: ExecutionConfig):
         self.config = config
         self._risk_metrics = {}
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
-    def check_pre_trade_risk(self, request: ExecutionRequest) -> Tuple[bool, List[str]]:
+    def check_pre_trade_risk(self, request: ExecutionRequest) -> Tuple[bool, List[str], ExecutionReasonCode]:
         """Pre-trade risk check"""
 
         issues = []
+        reason_code = ExecutionReasonCode.SUCCESS
 
         # Order size check
-        order_value = request.quantity * (request.limit_price or 100)  # Estimate
+        order_value = request.quantity * (request.limit_price or Decimal('100'))  # Estimate
         if order_value > self.config.max_order_value:
             issues.append(f"Order value {order_value:,.0f} exceeds limit {self.config.max_order_value:,.0f}")
+            reason_code = ExecutionReasonCode.ORD_VAL_LIMIT_BREACH
 
         # Concentration check (simplified)
         # In real implementation, would check against current positions
@@ -497,17 +519,19 @@ class RiskMonitor:
         now = datetime.now().time()
         if now.hour < 9 or now.hour >= 16:  # Outside market hours
             issues.append("Order submitted outside market hours")
+            reason_code = ExecutionReasonCode.MARKET_CLOSED
 
-        return len(issues) == 0, issues
+        return len(issues) == 0, issues, reason_code
 
-    def monitor_execution_risk(
+    async def monitor_execution_risk(
         self,
         slice: ExecutionSlice,
         market_data: Dict[str, Any]
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[bool, List[str], ExecutionReasonCode]:
         """Real-time execution risk monitoring"""
 
         alerts = []
+        reason_code = ExecutionReasonCode.SUCCESS
 
         # Price movement check
         current_price = market_data.get('current_price', 0)
@@ -515,21 +539,23 @@ class RiskMonitor:
 
         if current_price and benchmark_price:
             price_move = abs(current_price - benchmark_price) / benchmark_price
-            if price_move > self.config.circuit_breaker_threshold:
+            if price_move > float(self.config.circuit_breaker_threshold):
                 alerts.append(f"Circuit breaker triggered: {price_move:.2%} price move")
+                reason_code = ExecutionReasonCode.CIRCUIT_BREAKER_TRIGGERED
 
         # Slippage check
         if slice.avg_fill_price and benchmark_price:
             slippage = abs(slice.avg_fill_price - benchmark_price) / benchmark_price
-            if slippage > self.config.max_acceptable_slippage:
+            if slippage > float(self.config.max_acceptable_slippage):
                 alerts.append(f"Excessive slippage: {slippage:.4f}")
+                reason_code = ExecutionReasonCode.SLIPPAGE_LIMIT_BREACH
 
-        return len(alerts) == 0, alerts
+        return len(alerts) == 0, alerts, reason_code
 
-    def update_risk_metrics(self, request_id: str, metrics: Dict[str, float]) -> None:
+    async def update_risk_metrics(self, request_id: str, metrics: Dict[str, float]) -> None:
         """Update risk metrics"""
 
-        with self._lock:
+        async with self._lock:
             self._risk_metrics[request_id] = metrics
 
 class ExecutionEngine:
@@ -559,7 +585,7 @@ class ExecutionEngine:
         self._execution_metrics = defaultdict(list)
 
         # Threading and async
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._executor = None
         self._running = False
 
@@ -571,16 +597,25 @@ class ExecutionEngine:
         try:
             # Pre-trade risk check
             if self.config.enable_pre_trade_risk:
-                risk_ok, risk_issues = self.risk_monitor.check_pre_trade_risk(request)
+                risk_ok, risk_issues, reason_code = self.risk_monitor.check_pre_trade_risk(request)
                 if not risk_ok:
-                    raise ValueError(f"Pre-trade risk check failed: {', '.join(risk_issues)}")
+                    logger.error(f"Pre-trade risk check failed for {request.request_id}: {', '.join(risk_issues)} (Reason: {reason_code.name})")
+                    # Track failed request
+                    async with self._lock:
+                        self._active_requests[request.request_id] = {
+                            'request': request,
+                            'status': ExecutionStatus.REJECTED,
+                            'reason_code': reason_code,
+                            'created_at': datetime.now()
+                        }
+                    return request.request_id
 
             # Generate execution slices
             market_conditions = self._get_market_conditions(request.symbol)
             slices = self.slicing_engine.generate_slices(request, market_conditions)
 
             # Store request
-            with self._lock:
+            async with self._lock:
                 self._active_requests[request.request_id] = {
                     'request': request,
                     'slices': slices,
@@ -600,6 +635,46 @@ class ExecutionEngine:
             logger.error(f"Error submitting execution request: {e}")
             raise
 
+    async def execute_order(self, order: Any) -> Any:
+        """
+        Backward compatibility method for single order execution.
+        Used by the legacy-style TradingEngine calls.
+        """
+        request = ExecutionRequest(
+            request_id=order.order_id,
+            symbol=order.symbol,
+            side=order.side.value if hasattr(order.side, 'value') else str(order.side).upper(),
+            quantity=Decimal(str(order.quantity)),
+            order_type="LIMIT" if order.price else "MARKET",
+            limit_price=Decimal(str(order.price)) if order.price else None
+        )
+
+        # Call the modern submission logic
+        await self.submit_execution_request(request)
+
+        # Return a result object compatible with TradingEngine's expectations
+        # Importing locally to avoid circular dependencies if any
+        from core_engine.type_definitions import ExecutionResult as TypeDefExecutionResult
+
+        return TypeDefExecutionResult(
+            order_id=order.order_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=float(order.quantity),
+            price=float(order.price) if order.price else 100.0,
+            commission=0.0,
+            success=True
+        )
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel an active order"""
+        logger.info(f"Cancelling order {order_id}")
+        async with self._lock:
+            if order_id in self._active_requests:
+                self._active_requests[order_id]['status'] = ExecutionStatus.CANCELLED
+                return True
+        return False
+
     async def execute_slice(self, slice: ExecutionSlice) -> ExecutionSlice:
         """Execute individual slice"""
 
@@ -612,10 +687,11 @@ class ExecutionEngine:
 
             # Real-time risk check
             if self.config.enable_real_time_risk:
-                risk_ok, risk_alerts = self.risk_monitor.monitor_execution_risk(slice, market_data)
+                risk_ok, risk_alerts, reason_code = await self.risk_monitor.monitor_execution_risk(slice, market_data)
                 if not risk_ok:
                     slice.status = ExecutionStatus.REJECTED
-                    logger.warning(f"Slice {slice.slice_id} rejected: {', '.join(risk_alerts)}")
+                    slice.reason_code = reason_code
+                    logger.warning(f"Slice {slice.slice_id} rejected: {', '.join(risk_alerts)} (Reason: {reason_code.name})")
                     return slice
 
             # Select venue
@@ -668,22 +744,23 @@ class ExecutionEngine:
         await asyncio.sleep(0.1)
 
         # Mock execution results
-        current_price = market_data.get('current_price', 100.0)
-        bid_ask_spread = market_data.get('spread', 0.01)
+        current_price = market_data.get('current_price', Decimal('100.0'))
+        bid_ask_spread = market_data.get('spread', Decimal('0.01'))
 
         # Simulate partial fill based on market conditions
-        fill_probability = 0.95  # 95% fill rate
+        fill_probability = Decimal('0.95')  # 95% fill rate
         filled_quantity = slice.quantity * fill_probability
 
         # Calculate execution price with slippage
+        random_shock = Decimal(str(round(np.random.normal(0, 0.005), 6)))
         if slice.side == 'BUY':
-            execution_price = current_price + (bid_ask_spread / 2) + np.random.normal(0, 0.005)
+            execution_price = current_price + (bid_ask_spread / Decimal('2')) + random_shock
         else:
-            execution_price = current_price - (bid_ask_spread / 2) + np.random.normal(0, 0.005)
+            execution_price = current_price - (bid_ask_spread / Decimal('2')) + random_shock
 
         # Calculate metrics
         slippage = (execution_price - current_price) / current_price
-        market_impact = abs(slippage) * 0.5  # Simplified market impact
+        market_impact = abs(slippage) * Decimal('0.5')  # Simplified market impact
 
         return {
             'filled_quantity': filled_quantity,
@@ -697,24 +774,25 @@ class ExecutionEngine:
 
         # Mock market conditions
         return {
-            'volatility': np.random.uniform(0.01, 0.05),
-            'liquidity_score': np.random.uniform(0.7, 0.95),
-            'volume_profile': [np.random.uniform(0.8, 1.2) for _ in range(20)],
-            'current_volume': np.random.uniform(500000, 2000000)
+            'volatility': Decimal(str(round(np.random.uniform(0.01, 0.05), 6))),
+            'liquidity_score': Decimal(str(round(np.random.uniform(0.7, 0.95), 6))),
+            'volume_profile': [Decimal(str(round(np.random.uniform(0.8, 1.2), 6))) for _ in range(20)],
+            'current_volume': Decimal(str(round(np.random.uniform(500000, 2000000), 0)))
         }
 
     def _get_current_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get current market data"""
 
         # Mock market data
-        base_price = 100.0
+        base_price = Decimal('100.0')
+        random_move = Decimal(str(round(np.random.normal(0, 1), 6)))
         return {
-            'current_price': base_price + np.random.normal(0, 1),
+            'current_price': base_price + random_move,
             'benchmark_price': base_price,
-            'bid': base_price - 0.005,
-            'ask': base_price + 0.005,
-            'spread': 0.01,
-            'volume': np.random.uniform(10000, 100000)
+            'spread': Decimal('0.01'),
+            'bid': base_price - Decimal('0.005'),
+            'ask': base_price + Decimal('0.005'),
+            'volume': Decimal(str(round(np.random.uniform(10000, 100000), 0)))
         }
 
     def _calculate_slice_priority(self, slice: ExecutionSlice, request: ExecutionRequest) -> int:
@@ -730,10 +808,10 @@ class ExecutionEngine:
         else:
             return 4
 
-    def get_execution_status(self, request_id: str) -> Optional[Dict[str, Any]]:
+    async def get_execution_status(self, request_id: str) -> Optional[Dict[str, Any]]:
         """Get execution status"""
 
-        with self._lock:
+        async with self._lock:
             request_data = self._active_requests.get(request_id)
 
             if not request_data:
@@ -757,11 +835,11 @@ class ExecutionEngine:
                 'execution_time': (datetime.now() - request_data['created_at']).total_seconds()
             }
 
-    def cancel_execution(self, request_id: str) -> bool:
+    async def cancel_execution(self, request_id: str) -> bool:
         """Cancel execution request"""
 
         try:
-            with self._lock:
+            async with self._lock:
                 if request_id in self._active_requests:
                     self._active_requests[request_id]['status'] = ExecutionStatus.CANCELLED
 
@@ -780,10 +858,10 @@ class ExecutionEngine:
             logger.error(f"Error cancelling execution {request_id}: {e}")
             return False
 
-    def get_execution_metrics(self) -> ExecutionMetrics:
+    async def get_execution_metrics(self) -> ExecutionMetrics:
         """Get execution performance metrics"""
 
-        with self._lock:
+        async with self._lock:
             total_requests = len(self._active_requests) + len(self._execution_history)
             completed_requests = len([r for r in self._active_requests.values()
                                    if r['status'] in [ExecutionStatus.FILLED, ExecutionStatus.CANCELLED]])
