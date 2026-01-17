@@ -55,7 +55,7 @@ class InstitutionalBacktestEngine:
     coordination, and centralized risk management.
 
     Initialization Order (Rule 2 - Regime-First):
-        5  - EnhancedRegimeEngine (FIRST!)
+        5  - RegimeManager (FIRST!)
         10 - ClickHouseDataManager
         12 - LiquidityAssessmentEngine
         15 - EnhancedTechnicalIndicators
@@ -341,7 +341,7 @@ class InstitutionalBacktestEngine:
         - Generate regime-specific performance metrics
 
         Args:
-            regime_engine: EnhancedRegimeEngine instance
+            regime_engine: RegimeManager instance
         """
         self.regime_engine = regime_engine
         logger.info("✅ Regime engine injected into BacktestEngine (Rule 2 IRegimeAware)")
@@ -590,7 +590,7 @@ class InstitutionalBacktestEngine:
         Phase 2: Initialize Data & Regime Layer
 
         Components initialized (in order):
-            5  - EnhancedRegimeEngine (FIRST! - Rule 2 Regime-First)
+            5  - RegimeManager (FIRST! - Rule 2 Regime-First)
             10 - ClickHouseDataManager
             12 - LiquidityAssessmentEngine
 
@@ -600,7 +600,7 @@ class InstitutionalBacktestEngine:
         logger.info("📊 PHASE 2: Initializing Data & Regime Layer")
         logger.info("=" * 80)
 
-        # Phase 2.2: Initialize BRICK #1 (EnhancedRegimeEngine - order=5)
+        # Phase 2.2: Initialize BRICK #1 (RegimeManager - order=5)
         # CRITICAL: This MUST be first per Rule 2 (Regime-First) (Regime-First Principle)
         await self._initialize_regime_engine()
 
@@ -618,39 +618,38 @@ class InstitutionalBacktestEngine:
 
     async def _initialize_regime_engine(self) -> None:
         """
-        Phase 2.2: Initialize EnhancedRegimeEngine (BRICK #1)
+        Phase 2.2: Initialize RegimeManager (BRICK #1)
 
         Order: 5 (FIRST! - Rule 2 (Regime-First Principle))
 
-        The regime engine provides market regime classification that all
-        other components will use to adapt their behavior.
+        The regime manager provides comprehensive market regime classification
+        including raw sensors, statistical detectors, and cross-asset analysis.
 
         Implements Rule 2 (Regime-First Principle)
         """
         logger.info("\n" + "-" * 80)
-        logger.info("🔴 BRICK #1: EnhancedRegimeEngine (order=5) - REGIME-FIRST!")
+        logger.info("🔴 BRICK #1: RegimeManager (order=5) - REGIME-FIRST!")
         logger.info("-" * 80)
 
         try:
-            from core_engine.regime.engine import EnhancedRegimeEngine
+            from core_engine.regime.regime_manager import RegimeManager
 
-            # Create regime engine config matching RegimeEngineConfig structure
-            # For backtesting, we use config focused on historical analysis
+            # Create regime engine config matching RegimeConfig structure
             regime_config = {
-                'lookback_window': 60,  # 60 bars for regime assessment
-                'volatility_window': 20,  # 20 bars for volatility calculation
-                'trend_threshold': 0.02,  # 2% threshold for trend detection
-                'regime_change_threshold': 0.7,  # 70% confidence for regime change
-                'update_frequency': 60,  # 60 seconds minimum (validation requirement)
-                'enable_enhanced_detection': True  # Use enhanced regime detection
+                'lookback_window': 60,
+                'volatility_window': 20,
+                'trend_threshold': 0.02,
+                'regime_change_threshold': 0.7,
+                'update_frequency_hours': 1,
+                'enable_enhanced_detection': True
             }
 
-            # Create regime engine
-            self.regime_engine = EnhancedRegimeEngine(regime_config)
+            # Create regime manager (which acts as the high-level engine)
+            self.regime_engine = RegimeManager(regime_config)
 
             # Register with orchestrator (FIRST! order=5)
             component_id = self.orchestrator.register_component(
-                name="EnhancedRegimeEngine",
+                name="RegimeManager",
                 component=self.regime_engine,
                 layer=ComponentLayer.SUPPORT,
                 authority_level=AuthorityLevel.OPERATIONAL,
@@ -660,28 +659,25 @@ class InstitutionalBacktestEngine:
             self.component_ids['regime_engine'] = component_id
             self.components['regime_engine'] = self.regime_engine
 
-            logger.info(f"✅ EnhancedRegimeEngine registered (component_id: {component_id})")
+            logger.info(f"✅ RegimeManager registered (component_id: {component_id})")
             logger.info(f"   Initialization Order: 5 (FIRST!)")
             logger.info(f"   Rule 2 (Regime-First) Compliance: ✅ Regime-First Principle")
-            logger.info(f"   Lookback Window: {regime_config['lookback_window']} bars")
-            logger.info(f"   Volatility Window: {regime_config['volatility_window']} bars")
-            logger.info(f"   Enhanced Detection: {regime_config['enable_enhanced_detection']}")
 
-            # CRITICAL FIX: Initialize and start RegimeEngine immediately (Regime-First!)
-            logger.info("\n🔧 Initializing RegimeEngine (Regime-First)...")
+            # CRITICAL FIX: Initialize and start RegimeManager immediately (Regime-First!)
+            logger.info("\n🔧 Initializing RegimeManager (Regime-First)...")
             init_success = await self.regime_engine.initialize()
             if not init_success:
-                raise RuntimeError("RegimeEngine initialization failed - violates Rule 2 Regime-First")
+                raise RuntimeError("RegimeManager initialization failed - violates Rule 2 Regime-First")
 
             start_success = await self.regime_engine.start()
             if not start_success:
-                raise RuntimeError("RegimeEngine start failed - violates Rule 2 Regime-First")
+                raise RuntimeError("RegimeManager start failed - violates Rule 2 Regime-First")
 
-            logger.info("✅ RegimeEngine operational (Rule 2 Regime-First enforced)")
+            logger.info("✅ RegimeManager operational (Rule 2 Regime-First enforced)")
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize EnhancedRegimeEngine: {e}", exc_info=True)
-            raise RuntimeError(f"CRITICAL: Regime engine initialization failed (Rule 2 Regime-First violation): {e}")
+            logger.error(f"❌ Failed to initialize RegimeManager: {e}", exc_info=True)
+            raise RuntimeError(f"CRITICAL: Regime manager initialization failed (Rule 2 Regime-First violation): {e}")
 
     async def _initialize_data_manager(self) -> None:
         """

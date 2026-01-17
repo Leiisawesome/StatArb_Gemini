@@ -47,12 +47,17 @@ try:
 except ImportError:
     RegimeConfig = None
 
+# Import canonical MarketRegime from type_definitions (Single Source of Truth)
+from ..type_definitions.regime import MarketRegime, MarketRegimeState, TimeframeRegime
+RegimeType = MarketRegime # Alias for backward compatibility
+RegimeState = MarketRegimeState # Alias for backward compatibility
+
 # Lazy import for heavy classifier module (33.85MB sklearn dependency)
 if TYPE_CHECKING:
     from .regime_classifier import RegimeClassification
 
 # Import all regime components
-from .regime_detector import RegimeDetector, RegimeType, RegimeDetection
+from .regime_detector import RegimeDetector, RegimeDetection
 from .market_regime_analyzer import MarketRegimeAnalyzer, CrossAssetRegime
 # Lazy import: regime_classifier (33.85MB sklearn dependency) - import only when needed
 from .regime_indicators import (RegimeIndicatorEngine, RegimeIndicator,
@@ -80,45 +85,6 @@ class AdaptationMode(Enum):
     MODERATE = "moderate"
     AGGRESSIVE = "aggressive"
     CUSTOM = "custom"
-
-@dataclass
-class RegimeState:
-    """Current regime state"""
-
-    timestamp: datetime = field(default_factory=datetime.now)
-
-    # Primary regime information
-    current_regime: RegimeType = RegimeType.UNKNOWN
-    regime_confidence: float = 0.0
-    regime_duration: int = 0  # Days in current regime
-
-    # Secondary regime assessments
-    cross_asset_regime: Optional[CrossAssetRegime] = None
-    classification_result: Optional['RegimeClassification'] = None  # Lazy-loaded type
-
-    # Indicators and signals
-    active_indicators: Dict[str, RegimeIndicator] = field(default_factory=dict)
-    transition_signals: List[TransitionSignal] = field(default_factory=list)
-    regime_strength: Optional[RegimeStrengthMeasure] = None
-
-    # Transition information
-    transition_prediction: Optional[TransitionPrediction] = None
-    transition_probability: float = 0.0
-    predicted_next_regime: RegimeType = RegimeType.UNKNOWN
-
-    # Risk and portfolio implications
-    risk_adjustment_factor: float = 1.0
-    recommended_portfolio_adjustments: Dict[str, float] = field(default_factory=dict)
-    rebalancing_recommendations: List[RebalancingRecommendation] = field(default_factory=list)
-
-    # Performance context
-    regime_performance_attribution: Dict[RegimeType, float] = field(default_factory=dict)
-    current_regime_performance: float = 0.0
-
-    # Metadata
-    last_update: datetime = field(default_factory=datetime.now)
-    update_frequency_achieved: float = 1.0  # Actual vs target frequency
-    confidence_in_state: float = 0.0  # Overall confidence in regime state
 
 @dataclass
 class RegimeAdaptation:
@@ -585,25 +551,28 @@ class RegimeManager(ISystemComponent):
         self.initialization_time: Optional[datetime] = None
         self.analysis_count = 0
 
-        # Lazy import regime_classifier (33.85MB sklearn dependency)
-        from .regime_classifier import RegimeClassifier
+        # Lazy import for heavy modules
+        from .engine import RealTimeRegimeSensor
 
         # Initialize all components with centralized config
         # Note: Sub-components will also be updated to use centralized config
         self.regime_detector = RegimeDetector(self.config)
         self.market_analyzer = MarketRegimeAnalyzer(self.config)
-        self.regime_classifier = RegimeClassifier(self.config)
         self.indicator_engine = RegimeIndicatorEngine(self.config)
         self.transition_manager = RegimeTransitionManager(self.config)
+        self.regime_sensor = RealTimeRegimeSensor(self.config)
 
         # Initialize managers
         self.portfolio_manager = RegimeAwarePortfolioManager(self.config)
         self.performance_attribution = RegimePerformanceAttribution(self.config)
 
         # State management
-        self.current_state: Optional[RegimeState] = None
-        self.state_history: List[RegimeState] = []
+        self.current_state: Optional[MarketRegimeState] = None
+        self.state_history: List[MarketRegimeState] = []
         self.adaptation_history: List[RegimeAdaptation] = []
+
+        # Orchestrator integration
+        self.orchestrator: Optional[Any] = None
 
         # Status and control
         self.status = RegimeManagerStatus.INITIALIZING
@@ -616,14 +585,31 @@ class RegimeManager(ISystemComponent):
         logger.info("Regime manager initialized")
         self.status = RegimeManagerStatus.READY
 
+    def register_with_orchestrator(self, orchestrator) -> str:
+        """Register component with HierarchicalSystemOrchestrator"""
+        from core_engine.system.hierarchical_orchestrator import ComponentLayer, AuthorityLevel
+
+        self.orchestrator = orchestrator
+        self.component_id = orchestrator.register_component(
+            name="RegimeManager",
+            component=self,
+            layer=ComponentLayer.SUPPORT,
+            authority_level=AuthorityLevel.OPERATIONAL,
+            initialization_order=5  # Layer 0: REGIME-FIRST - Foundation for all components
+        )
+
+        logger.info(f"✅ RegimeManager registered with orchestrator: {self.component_id}")
+        return self.component_id
+
     def _get_config_attr(self, attr_name, default):
+
         """Safely get config attribute with default fallback"""
         if self.config is None:
             return default
         return getattr(self.config, attr_name, default)
 
     async def update_regime_analysis(self, market_data: Dict[str, pd.DataFrame],
-                                   portfolio_data: Optional[Dict[str, Any]] = None) -> RegimeState:
+                                   portfolio_data: Optional[Dict[str, Any]] = None) -> MarketRegimeState:
         """Update comprehensive regime analysis"""
 
         try:
@@ -631,13 +617,24 @@ class RegimeManager(ISystemComponent):
                 self.status = RegimeManagerStatus.ANALYZING
                 logger.info("Updating regime analysis")
 
-                # Run all analyses
+                # 1. Update Real-Time Sensor (Low Latency Path)
+                sensor_results = {}
+                for symbol, df in market_data.items():
+                    sensor_results[symbol] = self.regime_sensor.process_market_data(df)
+
+                # Run overall analyses
                 if self._get_config_attr("async_processing", True):
                     # Async analysis
                     regime_state = await self._async_update_analysis(market_data, portfolio_data)
                 else:
                     # Synchronous analysis
                     regime_state = self._sync_update_analysis(market_data, portfolio_data)
+
+                # Link sensor data if available
+                # (Optional: refine regime_state using sensor_results)
+                if self.regime_sensor.current_regime:
+                    regime_state.directional_regime = self.regime_sensor.current_regime.directional_regime
+                    regime_state.volatility_regime = self.regime_sensor.current_regime.volatility_regime
 
                 # Update state
                 self.current_state = regime_state
@@ -650,16 +647,16 @@ class RegimeManager(ISystemComponent):
                 self.last_update = datetime.now()
                 self.status = RegimeManagerStatus.READY
 
-                logger.info(f"Regime analysis updated - Current regime: {regime_state.current_regime.value}")
+                logger.info(f"Regime analysis updated - Current regime: {regime_state.primary_regime.value}")
                 return regime_state
 
         except Exception as e:
             logger.error(f"Error updating regime analysis: {e}")
             self.status = RegimeManagerStatus.ERROR
-            return self.current_state or RegimeState()
+            return self.current_state or MarketRegimeState()
 
     async def _async_update_analysis(self, market_data: Dict[str, pd.DataFrame],
-                                   portfolio_data: Optional[Dict[str, Any]]) -> RegimeState:
+                                   portfolio_data: Optional[Dict[str, Any]]) -> MarketRegimeState:
         """Asynchronous regime analysis update"""
 
         try:
@@ -671,7 +668,7 @@ class RegimeManager(ISystemComponent):
 
             # Detection task
             detection_task = loop.run_in_executor(
-                self.executor,
+                    self.executor,
                 self.regime_detector.detect_regime,
                 returns_data
             )
@@ -705,10 +702,10 @@ class RegimeManager(ISystemComponent):
 
         except Exception as e:
             logger.error(f"Error in async regime analysis: {e}")
-            return RegimeState()
+            return MarketRegimeState()
 
     def _sync_update_analysis(self, market_data: Dict[str, pd.DataFrame],
-                            portfolio_data: Optional[Dict[str, Any]]) -> RegimeState:
+                            portfolio_data: Optional[Dict[str, Any]]) -> MarketRegimeState:
         """Synchronous regime analysis update"""
 
         try:
@@ -733,7 +730,7 @@ class RegimeManager(ISystemComponent):
 
         except Exception as e:
             logger.error(f"Error in sync regime analysis: {e}")
-            return RegimeState()
+            return MarketRegimeState()
 
     def _extract_returns_data(self, market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Extract returns data from market data"""
@@ -769,15 +766,15 @@ class RegimeManager(ISystemComponent):
     def _combine_analysis_results(self, detection_result: Optional[RegimeDetection],
                                 analysis_result: Dict[str, Any],
                                 indicators_result: Dict[str, RegimeIndicator],
-                                portfolio_data: Optional[Dict[str, Any]]) -> RegimeState:
+                                portfolio_data: Optional[Dict[str, Any]]) -> MarketRegimeState:
         """Combine analysis results into regime state"""
 
         try:
-            regime_state = RegimeState()
+            regime_state = MarketRegimeState()
 
             # Primary regime from detection
             if detection_result:
-                regime_state.current_regime = detection_result.regime_type
+                regime_state.primary_regime = detection_result.regime_type
                 regime_state.regime_confidence = detection_result.confidence
 
                 if detection_result.regime_start:
@@ -795,9 +792,9 @@ class RegimeManager(ISystemComponent):
             regime_state.transition_signals = transition_signals
 
             # Regime strength
-            if regime_state.current_regime != RegimeType.UNKNOWN:
+            if regime_state.primary_regime != RegimeType.UNKNOWN:
                 regime_strength = self.indicator_engine.calculate_regime_strength(
-                    regime_state.current_regime, indicators_result
+                    regime_state.primary_regime, indicators_result
                 )
                 regime_state.regime_strength = regime_strength
 
@@ -807,7 +804,7 @@ class RegimeManager(ISystemComponent):
                 transition_analysis = self.transition_manager.analyze_transition_opportunity(
                     portfolio_data['price_data'],
                     indicators_result,
-                    regime_state.current_regime,
+                    regime_state.primary_regime,
                     portfolio_data.get('current_portfolio', {})
                 )
 
@@ -835,10 +832,10 @@ class RegimeManager(ISystemComponent):
 
         except Exception as e:
             logger.error(f"Error combining analysis results: {e}")
-            return RegimeState()
+            return MarketRegimeState()
 
-    def _calculate_portfolio_implications(self, regime_state: RegimeState,
-                                        portfolio_data: Dict[str, Any]) -> RegimeState:
+    def _calculate_portfolio_implications(self, regime_state: MarketRegimeState,
+                                        portfolio_data: Dict[str, Any]) -> MarketRegimeState:
         """Calculate portfolio implications of regime state"""
 
         try:
@@ -847,7 +844,7 @@ class RegimeManager(ISystemComponent):
 
             # Calculate optimal allocation for current regime
             optimal_allocation = self.portfolio_manager.calculate_regime_optimal_allocation(
-                regime_state.current_regime,
+                regime_state.primary_regime,
                 regime_state.regime_confidence,
                 available_assets
             )
@@ -881,7 +878,7 @@ class RegimeManager(ISystemComponent):
             logger.error(f"Error calculating portfolio implications: {e}")
             return regime_state
 
-    def generate_regime_adaptation(self, regime_state: RegimeState,
+    def generate_regime_adaptation(self, regime_state: MarketRegimeState,
                                  current_strategies: Dict[str, float],
                                  force_adaptation: bool = False) -> Optional[RegimeAdaptation]:
         """Generate regime-based strategy adaptation"""
@@ -933,7 +930,7 @@ class RegimeManager(ISystemComponent):
         finally:
             self.status = RegimeManagerStatus.READY
 
-    def _should_adapt(self, regime_state: RegimeState) -> bool:
+    def _should_adapt(self, regime_state: MarketRegimeState) -> bool:
         """Determine if adaptation is needed"""
 
         try:
@@ -966,7 +963,7 @@ class RegimeManager(ISystemComponent):
             logger.error(f"Error checking adaptation need: {e}")
             return False
 
-    def _get_adaptation_reason(self, regime_state: RegimeState) -> str:
+    def _get_adaptation_reason(self, regime_state: MarketRegimeState) -> str:
         """Get reason for adaptation"""
 
         reasons = []
@@ -982,7 +979,7 @@ class RegimeManager(ISystemComponent):
 
         return "; ".join(reasons) if reasons else "Regime-based optimization"
 
-    def _calculate_strategy_adjustments(self, regime_state: RegimeState,
+    def _calculate_strategy_adjustments(self, regime_state: MarketRegimeState,
                                       current_strategies: Dict[str, float]) -> Dict[str, float]:
         """Calculate strategy weight adjustments"""
 
@@ -1022,7 +1019,7 @@ class RegimeManager(ISystemComponent):
             logger.error(f"Error calculating strategy adjustments: {e}")
             return {}
 
-    def _calculate_risk_adjustments(self, regime_state: RegimeState) -> Dict[str, float]:
+    def _calculate_risk_adjustments(self, regime_state: MarketRegimeState) -> Dict[str, float]:
         """Calculate risk budget adjustments"""
 
         try:
@@ -1056,7 +1053,7 @@ class RegimeManager(ISystemComponent):
             return {}
 
     def _set_implementation_details(self, adaptation: RegimeAdaptation,
-                                  regime_state: RegimeState) -> RegimeAdaptation:
+                                  regime_state: MarketRegimeState) -> RegimeAdaptation:
         """Set implementation details for adaptation"""
 
         try:
@@ -1091,7 +1088,7 @@ class RegimeManager(ISystemComponent):
             return adaptation
 
     def _calculate_expected_outcomes(self, adaptation: RegimeAdaptation,
-                                   regime_state: RegimeState) -> RegimeAdaptation:
+                                   regime_state: MarketRegimeState) -> RegimeAdaptation:
         """Calculate expected outcomes of adaptation"""
 
         try:
@@ -1330,6 +1327,14 @@ class RegimeManager(ISystemComponent):
             logger.error(f"❌ RegimeManager stop failed: {e}")
             return False
 
+    def get_current_regime_context(self) -> Optional[MarketRegimeState]:
+        """Get current regime context (SSOT for all components)"""
+        return self.current_state
+
+    def get_current_regime(self) -> Optional[MarketRegimeState]:
+        """Alias for get_current_regime_context for backward compatibility"""
+        return self.current_state
+
     async def health_check(self) -> Dict[str, Any]:
         """
         Perform health check on regime manager
@@ -1351,9 +1356,9 @@ class RegimeManager(ISystemComponent):
             components_healthy = {
                 'regime_detector': hasattr(self, 'regime_detector'),
                 'market_analyzer': hasattr(self, 'market_analyzer'),
-                'regime_classifier': hasattr(self, 'regime_classifier'),
                 'indicator_engine': hasattr(self, 'indicator_engine'),
-                'transition_manager': hasattr(self, 'transition_manager')
+                'transition_manager': hasattr(self, 'transition_manager'),
+                'regime_sensor': hasattr(self, 'regime_sensor')
             }
 
             # Performance metrics

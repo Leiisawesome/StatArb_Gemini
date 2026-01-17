@@ -9,7 +9,7 @@ Professional Grade Market Regime Classification System
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -114,7 +114,132 @@ class MarketRegime(Enum):
 
 # === LEGACY ALIAS for backward compatibility ===
 RegimeType = MarketRegime  # Alias for code using RegimeType
-RegimeState = MarketRegime  # Alias for code using RegimeState
+RegimeState = MarketRegime # Alias for code using RegimeState as Enum
+
+@dataclass
+class TimeframeRegime:
+    """Regime analysis for a specific timeframe"""
+    timeframe: str                               # "5min", "1H", "1D", "1W"
+    regime: MarketRegime
+    confidence: float
+    trend_strength: float
+    volatility: float
+    regime_duration: int                         # periods in current regime
+    transition_probability: float
+
+@dataclass
+class MLTransitionPrediction:
+    """ML-based regime transition prediction"""
+    current_regime: MarketRegime
+    predicted_regime: MarketRegime
+    transition_probability: float               # 0-1 probability of transition
+    confidence: float                          # Model confidence in prediction
+    time_horizon: str                          # "1H", "1D", "1W" prediction horizon
+    contributing_factors: List[str]            # Key factors driving prediction
+    model_accuracy: float                      # Historical model accuracy
+    prediction_timestamp: datetime
+
+@dataclass
+class MarketRegimeState:
+    """
+    Unified market regime state - Strategic Brain and Real-Time Sensor combined.
+    
+    Professional Grade singleton-style state for all engine components.
+    Consolidated from RegimeAnalysis (engine.py) and RegimeState (regime_manager.py).
+    """
+    # === PRIMARY REGIME CLASSIFICATION ===
+    primary_regime: MarketRegime = MarketRegime.UNKNOWN
+    confidence: float = 0.0
+    regime_confidence: float = 0.0  # Legacy field for compatibility
+    regime_duration: int = 0  # days in current regime
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def current_regime(self) -> MarketRegime:
+        """Alias for primary_regime for backward compatibility"""
+        return self.primary_regime
+
+    @current_regime.setter
+    def current_regime(self, value: MarketRegime):
+        self.primary_regime = value
+
+    # === DETAILED REGIME COMPONENTS ===
+    directional_regime: str = "neutral"           # bull/bear/sideways
+    volatility_regime: str = "normal"             # low/normal/high/extreme
+    trend_strength: float = 0.0                  # 0-1 scale
+    stress_level: float = 0.0                    # 0-1 scale (0=calm, 1=crisis)
+    liquidity_regime: str = "normal"             # poor/normal/abundant
+
+    # === REGIME CHARACTERISTICS ===
+    regime_stability: float = 0.0                # How stable is current regime (0-1)
+    transition_probability: float = 0.0          # Probability of regime change (0-1)
+    regime_maturity: float = 0.0                 # How mature is current regime (0-1)
+
+    # === MULTI-TIMEFRAME REGIME ANALYSIS ===
+    timeframe_regimes: Dict[str, TimeframeRegime] = field(default_factory=dict)
+    regime_consensus: float = 0.0                # Agreement across timeframes (0-1)
+    dominant_timeframe: str = "1D"               # Most influential timeframe
+    regime_hierarchy: Dict[str, float] = field(default_factory=lambda: {
+        "5min": 0.15, "1H": 0.25, "1D": 0.40, "1W": 0.20
+    })
+
+    # === TRANSITION PREDICTIONS ===
+    transition_predictions: Dict[str, MLTransitionPrediction] = field(default_factory=dict)
+    ml_transition_probability: float = 0.0
+    transition_confidence: float = 0.0
+    predicted_next_regime: Optional[MarketRegime] = None
+    
+    # Manager-level transition info
+    transition_signals: List[Any] = field(default_factory=list)
+
+    # === RISK & STRATEGY IMPLICATIONS ===
+    strategy_suitability: Dict[str, float] = field(default_factory=dict)
+    risk_adjustment_factor: float = 1.0
+    position_sizing_factor: float = 1.0
+    recommended_portfolio_adjustments: Dict[str, float] = field(default_factory=dict)
+    rebalancing_recommendations: List[Any] = field(default_factory=list)
+
+    # === PERFORMANCE CONTEXT ===
+    # Using Any for Dict keys to avoid circular imports if RegimeType/MarketRegime is used as key
+    # but here MarketRegime is fine as it's defined in this file.
+    regime_performance_attribution: Dict[MarketRegime, float] = field(default_factory=dict)
+    current_regime_performance: float = 0.0
+
+    # === REGIME CONTEXT ===
+    sub_regimes: Dict[str, str] = field(default_factory=dict)
+    regime_drivers: List[str] = field(default_factory=list)
+    regime_outlook: str = "neutral"
+    
+    # Secondary assessments (from Manager)
+    cross_asset_regime: Optional[Any] = None
+    active_indicators: Dict[str, Any] = field(default_factory=dict)
+    regime_strength: Optional[Any] = None
+
+    # Metadata
+    last_update: datetime = field(default_factory=datetime.now)
+    update_frequency_achieved: float = 1.0
+    confidence_in_state: float = 0.0
+
+    def __post_init__(self):
+        """Initialize default values for mutable fields"""
+        if self.strategy_suitability is None:
+            self.strategy_suitability = {}
+        if self.sub_regimes is None:
+            self.sub_regimes = {}
+        if self.regime_drivers is None:
+            self.regime_drivers = []
+        if self.timeframe_regimes is None:
+            self.timeframe_regimes = {}
+        if self.transition_predictions is None:
+            self.transition_predictions = {}
+        if self.transition_signals is None:
+            self.transition_signals = []
+        if self.rebalancing_recommendations is None:
+            self.rebalancing_recommendations = []
+        if self.active_indicators is None:
+            self.active_indicators = {}
+        if self.regime_performance_attribution is None:
+            self.regime_performance_attribution = {}
 
 @dataclass
 class RegimeConfig:

@@ -34,151 +34,66 @@ from core_engine.exceptions import ConfigurationRequiredError
 from ..config.component_config import RegimeConfig
 
 # Import canonical MarketRegime from type_definitions (Single Source of Truth)
-from ..type_definitions.regime import MarketRegime
+from ..type_definitions.regime import MarketRegime, MarketRegimeState, TimeframeRegime, MLTransitionPrediction
+
+# === BACKWARD COMPATIBILITY ALIASES ===
+RegimeAnalysis = MarketRegimeState
+RegimeTransitionPrediction = MLTransitionPrediction
+RegimeType = MarketRegime
 
 logger = logging.getLogger(__name__)
-
-@dataclass
-class TimeframeRegime:
-    """Regime analysis for a specific timeframe"""
-    timeframe: str                               # "5min", "1H", "1D", "1W"
-    regime: MarketRegime
-    confidence: float
-    trend_strength: float
-    volatility: float
-    regime_duration: int                         # periods in current regime
-    transition_probability: float
-
-@dataclass
-class MLTransitionPrediction:
-    """ML-based regime transition prediction (internal to engine.py)"""
-    current_regime: MarketRegime
-    predicted_regime: MarketRegime
-    transition_probability: float               # 0-1 probability of transition
-    confidence: float                          # Model confidence in prediction
-    time_horizon: str                          # "1H", "1D", "1W" prediction horizon
-    contributing_factors: List[str]            # Key factors driving prediction
-    model_accuracy: float                      # Historical model accuracy
-    prediction_timestamp: datetime
-
-@dataclass
-class RegimeAnalysis:
-    """Enhanced regime analysis results - Professional Grade"""
-
-    # === PRIMARY REGIME CLASSIFICATION ===
-    primary_regime: MarketRegime
-    confidence: float
-    regime_duration: int  # days in current regime
-    timestamp: datetime
-
-    # === DETAILED REGIME COMPONENTS ===
-    directional_regime: str = "neutral"           # bull/bear/sideways
-    volatility_regime: str = "normal"             # low/normal/high/extreme
-    trend_strength: float = 0.0                  # 0-1 scale
-    stress_level: float = 0.0                    # 0-1 scale (0=calm, 1=crisis)
-    liquidity_regime: str = "normal"             # poor/normal/abundant
-
-    # === REGIME CHARACTERISTICS ===
-    regime_stability: float = 0.0                # How stable is current regime (0-1)
-    transition_probability: float = 0.0          # Probability of regime change (0-1)
-    regime_maturity: float = 0.0                 # How mature is current regime (0-1)
-
-    # === MULTI-TIMEFRAME REGIME ANALYSIS ===
-    timeframe_regimes: Dict[str, TimeframeRegime] = None  # Regime by timeframe
-    regime_consensus: float = 0.0                # Agreement across timeframes (0-1)
-    dominant_timeframe: str = "1D"               # Most influential timeframe
-    regime_hierarchy: Dict[str, float] = None    # Timeframe importance weights
-
-    # === ML-BASED TRANSITION PREDICTIONS ===
-    transition_predictions: Dict[str, MLTransitionPrediction] = None  # Predictions by horizon
-    ml_transition_probability: float = 0.0       # ML-enhanced transition probability
-    transition_confidence: float = 0.0           # Confidence in transition prediction
-    predicted_next_regime: Optional[MarketRegime] = None  # Most likely next regime
-
-    # === STRATEGY IMPLICATIONS ===
-    strategy_suitability: Dict[str, float] = None  # Strategy performance expectations
-    risk_adjustment: float = 1.0                 # Risk multiplier for current regime
-    position_sizing_factor: float = 1.0          # Position size adjustment
-
-    # === REGIME CONTEXT ===
-    sub_regimes: Dict[str, str] = None           # Detailed sub-regime breakdown
-    regime_drivers: List[str] = None             # Key factors driving current regime
-    regime_outlook: str = "neutral"              # Expected regime evolution
-
-    def __post_init__(self):
-        """Initialize default values for mutable fields"""
-        if self.strategy_suitability is None:
-            self.strategy_suitability = {}
-        if self.sub_regimes is None:
-            self.sub_regimes = {}
-        if self.regime_drivers is None:
-            self.regime_drivers = []
-        if self.timeframe_regimes is None:
-            self.timeframe_regimes = {}
-        if self.regime_hierarchy is None:
-            self.regime_hierarchy = {
-                "5min": 0.15,   # Short-term noise
-                "1H": 0.25,     # Intraday trends
-                "1D": 0.40,     # Primary timeframe
-                "1W": 0.20      # Long-term context
-            }
-        if self.transition_predictions is None:
-            self.transition_predictions = {}
 
 class IRegimeSubscriber:
     """Interface for regime change subscribers"""
 
-    async def on_regime_change(self, regime_analysis: RegimeAnalysis) -> None:
+    async def on_regime_change(self, regime_analysis: MarketRegimeState) -> None:
         """Handle regime change notification"""
 
-class EnhancedRegimeEngine(ISystemComponent):
+class RealTimeRegimeSensor:
     """
-    Enhanced Regime Engine with ISystemComponent Integration
+    Real-Time Market Regime Sensor
 
-    Institutional-grade market regime detection with orchestrator integration:
-    - Implements ISystemComponent for lifecycle management
-    - Market regime detection and classification
-    - Regime change detection with professional standards
-    - Strategy suitability assessment based on regime
-    - Distribution of regime analysis to risk manager and other components
-    - Health monitoring and performance tracking
+    Institutional-grade low-latency market regime detection:
+    - Market regime detection and classification (Real-time path)
+    - Multi-timeframe EWMA-based analysis
+    - Designed for intraday per-bar updates
+    - Feeds data to RegimeManager (Strategic Brain)
     """
 
     def __init__(self, config: Dict[str, Any]):
         # Initialize with centralized RegimeConfig (Rule 1, Section 7)
         if config is None:
+            from ..config.component_config import RegimeConfig
             self.config = RegimeConfig()
         elif isinstance(config, dict):
+            from ..config.component_config import RegimeConfig
             self.config = RegimeConfig(**config)
         elif hasattr(config, '__dict__'):
             # Already a config object
             self.config = config
         else:
-            raise ConfigurationRequiredError("Invalid config type for RegimeEngine")
+            raise ConfigurationRequiredError("Invalid config type for RealTimeRegimeSensor")
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info("✅ Using centralized RegimeConfig (Rule 1, Section 7)")
+        self.logger.info("✅ Real-Time Regime Sensor initialized")
 
-        # Component identification and lifecycle
-        self.component_id = str(uuid.uuid4())
+        # Sensor identification
+        self.sensor_id = str(uuid.uuid4())
         self.is_initialized = False
         self.is_operational = False
-        self.start_time = None
+        self.start_time: Optional[datetime] = None
+        self.component_id: Optional[str] = None
 
-        # Event-driven integration
-        self.subscribers: List[IRegimeSubscriber] = []
-
-        # Orchestrator integration
-        self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
-
-        # Health and performance tracking
+        # Health metrics
         self.health_metrics = {
-            'component_type': 'EnhancedRegimeEngine',
-            'initialization_status': 'pending',
-            'operational_status': 'inactive',
-            'last_health_check': None,
+            'component_type': 'RealTimeRegimeSensor',
+            'last_update': datetime.now(),
             'error_count': 0,
             'warning_count': 0,
+            'regime_count': 0,
+            'average_confidence': 0.0,
+            'latency_ms': 0.0,
+            'initialization_status': 'not_started',
             'performance_metrics': {
                 'total_regime_analyses': 0,
                 'successful_regime_analyses': 0,
@@ -189,16 +104,14 @@ class EnhancedRegimeEngine(ISystemComponent):
         }
 
         # Current regime state
-        self.current_regime: Optional[RegimeAnalysis] = None
-        # P0 Fix: Use bounded deque to prevent memory leak in long-running processes
-        self._regime_history: deque = deque(maxlen=1000)
-
+        self.current_regime: Optional[MarketRegimeState] = None
+        
         # CRITICAL: Bar-by-bar regime sequence persistence (for regime-aware processing)
         # Maps symbol -> deque[Dict] with regime for each bar (timestamp-indexed)
         # P0 Fix: Use bounded deques to prevent memory leak
         self.regime_sequence: Dict[str, deque] = {}
         # Maps symbol -> Dict[timestamp] -> regime for O(1) lookup (bounded by regime_sequence size)
-        self.regime_by_timestamp: Dict[str, Dict[datetime, RegimeAnalysis]] = {}
+        self.regime_by_timestamp: Dict[str, Dict[datetime, MarketRegimeState]] = {}
 
         # Market data for regime analysis
         self.market_data_buffer: Dict[str, List[float]] = {}
@@ -220,16 +133,6 @@ class EnhancedRegimeEngine(ISystemComponent):
             "1W": 10080     # 10080 minutes (7 days)
         }
 
-        self.timeframe_counters: Dict[str, int] = {
-            "5min": 0,
-            "1H": 0,
-            "1D": 0,
-            "1W": 0
-        }
-
-        # Subscribers for regime changes
-        self.subscribers: List[IRegimeSubscriber] = []
-
         # Threading
         self._lock = threading.Lock()
 
@@ -238,7 +141,7 @@ class EnhancedRegimeEngine(ISystemComponent):
         # ------------------------------------------------------------------
         self._fast_state: Dict[str, Dict[str, Any]] = {}
 
-        self.logger.info(f"🚀 Enhanced Regime Engine initialized with component ID: {self.component_id}")
+        self.logger.info(f"🚀 Real-Time Regime Sensor initialized with ID: {self.sensor_id}")
 
     def _fast_regime_enabled(self) -> bool:
         return bool(getattr(self.config, "enable_per_bar_fast", False))
@@ -420,14 +323,14 @@ class EnhancedRegimeEngine(ISystemComponent):
 
         self.orchestrator = orchestrator
         self.component_id = orchestrator.register_component(
-            name="EnhancedRegimeEngine",
+            name="RealTimeRegimeSensor",
             component=self,
             layer=ComponentLayer.SUPPORT,
             authority_level=AuthorityLevel.OPERATIONAL,
             initialization_order=5  # Layer 0: REGIME-FIRST - Foundation for all components
         )
 
-        self.logger.info(f"✅ EnhancedRegimeEngine registered with orchestrator: {self.component_id}")
+        self.logger.info(f"✅ RealTimeRegimeSensor registered with orchestrator: {self.component_id}")
         return self.component_id
 
     async def request_operation_authorization(self, operation: str, details: Dict[str, Any]) -> bool:
@@ -445,9 +348,9 @@ class EnhancedRegimeEngine(ISystemComponent):
     # ========================================
 
     async def initialize(self) -> bool:
-        """Initialize the Enhanced Regime Engine"""
+        """Initialize the Real-Time Regime Sensor"""
         try:
-            self.logger.info("🔄 Initializing Enhanced Regime Engine...")
+            self.logger.info("🔄 Initializing Real-Time Regime Sensor...")
 
             # Initialize regime analysis engines
             await self._initialize_regime_engines()
@@ -459,23 +362,23 @@ class EnhancedRegimeEngine(ISystemComponent):
             self.is_initialized = True
             self.health_metrics['initialization_status'] = 'completed'
 
-            self.logger.info("✅ Enhanced Regime Engine initialization complete")
+            self.logger.info("✅ Real-Time Regime Sensor initialization complete")
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ Enhanced Regime Engine initialization failed: {e}")
+            self.logger.error(f"❌ Real-Time Regime Sensor initialization failed: {e}")
             self.health_metrics['error_count'] += 1
             self.health_metrics['initialization_status'] = 'failed'
             return False
 
     async def start(self) -> bool:
-        """Start the Enhanced Regime Engine"""
+        """Start the Real-Time Regime Sensor"""
         if not self.is_initialized:
-            self.logger.error("Cannot start Enhanced Regime Engine: not initialized")
+            self.logger.error("Cannot start Real-Time Regime Sensor: not initialized")
             return False
 
         try:
-            self.logger.info("🚀 Starting Enhanced Regime Engine...")
+            self.logger.info("🚀 Starting Real-Time Regime Sensor...")
 
             # Start regime analysis
             await self._start_regime_analysis()
@@ -488,18 +391,18 @@ class EnhancedRegimeEngine(ISystemComponent):
             self.start_time = datetime.now()
             self.health_metrics['operational_status'] = 'active'
 
-            self.logger.info("✅ Enhanced Regime Engine started successfully")
+            self.logger.info("✅ Real-Time Regime Sensor started successfully")
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ Enhanced Regime Engine start failed: {e}")
+            self.logger.error(f"❌ Real-Time Regime Sensor start failed: {e}")
             self.health_metrics['error_count'] += 1
             return False
 
     async def stop(self) -> bool:
-        """Stop the Enhanced Regime Engine"""
+        """Stop the Real-Time Regime Sensor"""
         try:
-            self.logger.info("🛑 Stopping Enhanced Regime Engine...")
+            self.logger.info("🛑 Stopping Real-Time Regime Sensor...")
 
             # Stop regime analysis
             await self._stop_regime_analysis()
@@ -519,11 +422,11 @@ class EnhancedRegimeEngine(ISystemComponent):
             self.is_operational = False
             self.health_metrics['operational_status'] = 'inactive'
 
-            self.logger.info("✅ Enhanced Regime Engine stopped successfully")
+            self.logger.info("✅ Real-Time Regime Sensor stopped successfully")
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ Enhanced Regime Engine stop failed: {e}")
+            self.logger.error(f"❌ Real-Time Regime Sensor stop failed: {e}")
             self.health_metrics['error_count'] += 1
             return False
 
@@ -1144,7 +1047,7 @@ class EnhancedRegimeEngine(ISystemComponent):
             'regime_analysis_performed': True,
             'input_data_type': type(data).__name__,
             'processing_timestamp': datetime.now(),
-            'processing_component': 'EnhancedRegimeEngine'
+            'processing_component': 'RealTimeRegimeSensor'
         }
 
     def detect_regime(self, data: Any) -> Dict[str, Any]:
@@ -1159,25 +1062,25 @@ class EnhancedRegimeEngine(ISystemComponent):
     # REGIME ACCESS METHODS (for component integration)
     # ========================================
 
-    def get_current_regime_context(self) -> Optional[RegimeAnalysis]:
+    def get_current_regime_context(self) -> Optional[MarketRegimeState]:
         """
         Get current regime context for components (IRegimeAware interface support)
 
         Returns:
-            Current RegimeAnalysis or None if no regime detected yet
+            Current MarketRegimeState or None if no regime detected yet
         """
         return self.current_regime
 
-    def get_current_regime(self) -> Optional[RegimeAnalysis]:
+    def get_current_regime(self) -> Optional[MarketRegimeState]:
         """
         Alias for get_current_regime_context() for backward compatibility
 
         Returns:
-            Current RegimeAnalysis or None if no regime detected yet
+            Current MarketRegimeState or None if no regime detected yet
         """
         return self.get_current_regime_context()
 
-    def get_regime_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[RegimeAnalysis]:
+    def get_regime_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[MarketRegimeState]:
         """
         Get regime for a specific timestamp (bar-by-bar lookup)
 
@@ -1186,7 +1089,7 @@ class EnhancedRegimeEngine(ISystemComponent):
             timestamp: Timestamp of the bar
 
         Returns:
-            RegimeAnalysis for that timestamp, or None if not found
+            MarketRegimeState for that timestamp, or None if not found
         """
         if symbol not in self.regime_by_timestamp:
             return None
@@ -1217,7 +1120,7 @@ class EnhancedRegimeEngine(ISystemComponent):
         seq = self.regime_sequence.get(symbol)
         return list(seq) if seq else []
 
-    def get_regime_for_dataframe_row(self, symbol: str, row_index: int, dataframe: pd.DataFrame) -> Optional[RegimeAnalysis]:
+    def get_regime_for_dataframe_row(self, symbol: str, row_index: int, dataframe: pd.DataFrame) -> Optional[MarketRegimeState]:
         """
         Get regime for a specific DataFrame row by matching timestamp
 
@@ -1227,7 +1130,7 @@ class EnhancedRegimeEngine(ISystemComponent):
             dataframe: DataFrame with 'timestamp' column
 
         Returns:
-            RegimeAnalysis for that row, or None if not found
+            MarketRegimeState for that row, or None if not found
         """
         if row_index >= len(dataframe) or 'timestamp' not in dataframe.columns:
             return None
@@ -1241,83 +1144,8 @@ class EnhancedRegimeEngine(ISystemComponent):
         return self.get_regime_at_timestamp(symbol, timestamp)
 
     # ========================================
-    # MODEL PERSISTENCE (Phase 2 Architectural Improvement)
-    # ========================================
-
-    def save_models(self, filepath: str) -> bool:
-        """
-        Save trained ML models and state to file.
-
-        Args:
-            filepath: Path to save the model file (e.g., 'regime_engine_models.joblib')
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            import joblib
-
-            model_data = {
-                'transition_models': self.transition_models,
-                'transition_scaler': self.transition_scaler,
-                'models_trained': self.models_trained,
-                'transition_history': list(self.transition_history) if hasattr(self, 'transition_history') else [],
-                'config': {
-                    'lookback_window': self.config.lookback_window,
-                    'volatility_window': self.config.volatility_window,
-                    'trend_threshold': self.config.trend_threshold,
-                    'regime_change_threshold': self.config.regime_change_threshold
-                },
-                'save_timestamp': datetime.now().isoformat()
-            }
-
-            joblib.dump(model_data, filepath)
-            self.logger.info(f"Regime engine models saved to {filepath}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error saving regime engine models: {e}")
-            return False
-
-    def load_models(self, filepath: str) -> bool:
-        """
-        Load trained ML models and state from file.
-
-        Args:
-            filepath: Path to the model file
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            import joblib
-
-            model_data = joblib.load(filepath)
-
-            self.transition_models = model_data['transition_models']
-            self.transition_scaler = model_data['transition_scaler']
-            self.models_trained = model_data['models_trained']
-            self.transition_history = model_data.get('transition_history', [])
-
-            load_timestamp = model_data.get('save_timestamp', 'unknown')
-            self.logger.info(f"Regime engine models loaded from {filepath} (saved: {load_timestamp})")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error loading regime engine models: {e}")
-            return False
-
-    # ========================================
     # CAUSAL-ONLY MODE (Paper Trading Evolution)
     # ========================================
-    #
-    # In streaming/paper trading, we can only use causal (filtered) probabilities.
-    # No smoothed/future-looking probabilities allowed for parity with backtest.
-    #
-    # Confirmation State Machine:
-    # - PENDING: New regime detected, awaiting confirmation
-    # - CONFIRMED: Regime confirmed after 2 consecutive agreeing evaluations
-    # - REJECTED: Pending regime did not confirm, reverted to prior
 
     def enable_causal_only_mode(self) -> None:
         """
@@ -1330,7 +1158,7 @@ class EnhancedRegimeEngine(ISystemComponent):
         """
         self._causal_only_mode = True
         self._confirmation_state = 'CONFIRMED'  # Start with confirmed current regime
-        self._pending_regime: Optional[RegimeAnalysis] = None
+        self._pending_regime: Optional[MarketRegimeState] = None
         self._pending_count = 0
         self._confirmation_required = 2  # Consecutive agreeing evaluations
         self.logger.info("✅ Causal-only mode enabled for paper trading")
@@ -1346,25 +1174,13 @@ class EnhancedRegimeEngine(ISystemComponent):
         """Check if causal-only mode is enabled."""
         return getattr(self, '_causal_only_mode', False)
 
-    def get_confirmation_state(self) -> Optional[str]:
-        """Get current confirmation state (PENDING, CONFIRMED, REJECTED)."""
-        return getattr(self, '_confirmation_state', None)
-
     def evaluate_regime_causal(
         self,
         market_data: pd.DataFrame,
         symbol: Optional[str] = None,
-    ) -> RegimeAnalysis:
+    ) -> MarketRegimeState:
         """
         Evaluate regime using causal-only data (no look-ahead).
-
-        This is the streaming-mode regime evaluation method. Uses only
-        data up to and including the current bar.
-
-        In causal mode, regime changes go through confirmation:
-        1. New regime detected → PENDING state
-        2. Same regime detected again → CONFIRMED
-        3. Different regime detected → REJECTED, stay with prior
 
         Args:
             market_data: DataFrame with OHLCV data up to current bar
@@ -1373,173 +1189,99 @@ class EnhancedRegimeEngine(ISystemComponent):
         Returns:
             Confirmed regime (may be lagged during confirmation)
         """
-        # Get raw regime detection (using only current data, no look-ahead).
-        # Optional fast per-bar mode (single-symbol incremental) is config-gated and disabled by default.
+        # Get raw regime detection
         if symbol and self._fast_regime_enabled():
             raw_regime = self._evaluate_fast_single_symbol(market_data, symbol)
         else:
-            raw_regime = self.process_market_data(market_data)
+            # Fallback to standard process_market_data if needed
+            res = self.process_market_data(market_data)
+            raw_regime = self.current_regime
 
         if not self.is_causal_only_mode():
-            # Not in causal mode, return raw regime
-            return raw_regime if isinstance(raw_regime, RegimeAnalysis) else self.current_regime
-
-        # Convert to RegimeAnalysis if needed
-        if isinstance(raw_regime, dict):
-            raw_analysis = self.current_regime
-        else:
-            raw_analysis = raw_regime
-
-        if raw_analysis is None:
-            return None
+            return raw_regime
 
         # Apply confirmation state machine
-        confirmed_regime = self._apply_confirmation_state_machine(raw_analysis)
-
+        confirmed_regime = self._apply_confirmation_state_machine(raw_regime)
         return confirmed_regime
 
-    def _apply_confirmation_state_machine(
-        self,
-        new_regime: RegimeAnalysis
-    ) -> RegimeAnalysis:
-        """
-        Apply 2-step confirmation state machine for regime changes.
-
-        States:
-        - CONFIRMED: Current regime is confirmed
-        - PENDING: New regime detected, awaiting confirmation
-
-        Transitions:
-        - CONFIRMED + same regime → CONFIRMED (no change)
-        - CONFIRMED + different regime → PENDING (start confirmation)
-        - PENDING + same pending regime → CONFIRMED (regime change confirmed)
-        - PENDING + different regime → CONFIRMED (reject pending, keep current)
-
-        Args:
-            new_regime: Newly detected regime
-
-        Returns:
-            The regime that should be used (confirmed regime)
-        """
+    def _apply_confirmation_state_machine(self, new_regime: MarketRegimeState) -> MarketRegimeState:
+        """Apply 2-step confirmation state machine for regime changes."""
         current_confirmed = self.current_regime
-
-        # Initialize if no current regime
         if current_confirmed is None:
             self._confirmation_state = 'CONFIRMED'
-            self._pending_regime = None
-            self._pending_count = 0
             return new_regime
 
-        # Compare regimes
         current_primary = current_confirmed.primary_regime
         new_primary = new_regime.primary_regime
 
         if self._confirmation_state == 'CONFIRMED':
             if new_primary == current_primary:
-                # Same regime, stay confirmed
-                return new_regime  # Update with fresh data but same regime
+                return new_regime
             else:
-                # Different regime detected, start confirmation
                 self._confirmation_state = 'PENDING'
                 self._pending_regime = new_regime
                 self._pending_count = 1
-                self.logger.info(
-                    f"Regime change PENDING: {current_primary} → {new_primary} "
-                    f"(need {self._confirmation_required - self._pending_count} more confirmations)"
-                )
-                # Return current confirmed regime (not the pending one)
                 return current_confirmed
-
         elif self._confirmation_state == 'PENDING':
             pending_primary = self._pending_regime.primary_regime if self._pending_regime else None
-
             if new_primary == pending_primary:
-                # Same as pending regime, increment count
                 self._pending_count += 1
-
-                if self._pending_count >= self._confirmation_required:
-                    # Regime change confirmed!
-                    self._confirmation_state = 'CONFIRMED'
-                    confirmed_regime = new_regime
-                    self.logger.info(
-                        f"Regime change CONFIRMED: {current_primary} → {new_primary}"
-                    )
-                    self._pending_regime = None
-                    self._pending_count = 0
-                    return confirmed_regime
-                else:
-                    # Still pending, need more confirmations
-                    self.logger.debug(
-                        f"Regime change still PENDING: need "
-                        f"{self._confirmation_required - self._pending_count} more confirmations"
-                    )
-                    return current_confirmed
-            else:
-                # Different from pending, reject the pending regime
-                self.logger.info(
-                    f"Regime change REJECTED: {pending_primary} not confirmed, "
-                    f"detected {new_primary} instead"
-                )
-
-                if new_primary == current_primary:
-                    # Back to confirmed regime
+                if self._pending_count >= 2:
                     self._confirmation_state = 'CONFIRMED'
                     self._pending_regime = None
                     self._pending_count = 0
                     return new_regime
-                else:
-                    # New different regime, start new pending
-                    self._pending_regime = new_regime
-                    self._pending_count = 1
-                    return current_confirmed
+                return current_confirmed
+            else:
+                self._confirmation_state = 'CONFIRMED'
+                self._pending_regime = None
+                self._pending_count = 0
+                return current_confirmed
+        return current_confirmed
 
-        # Fallback
-        return current_confirmed or new_regime
-
-    def get_pending_regime(self) -> Optional[RegimeAnalysis]:
-        """Get the pending regime if in PENDING state."""
-        if self.get_confirmation_state() == 'PENDING':
-            return getattr(self, '_pending_regime', None)
-        return None
-
-    def get_state_for_checkpoint(self) -> Dict[str, Any]:
+    def process_market_data(self, market_data: Any) -> Dict[str, Any]:
         """
-        Get regime engine state for checkpointing.
-
-        Returns serializable state for PaperSessionStateManager.
-        """
-        return {
-            'causal_only_mode': getattr(self, '_causal_only_mode', False),
-            'confirmation_state': getattr(self, '_confirmation_state', None),
-            'pending_count': getattr(self, '_pending_count', 0),
-            'current_regime_primary': (
-                self.current_regime.primary_regime.value
-                if self.current_regime and hasattr(self.current_regime.primary_regime, 'value')
-                else str(self.current_regime.primary_regime) if self.current_regime else None
-            ),
-            'pending_regime_primary': (
-                self._pending_regime.primary_regime.value
-                if getattr(self, '_pending_regime', None) and hasattr(self._pending_regime.primary_regime, 'value')
-                else str(self._pending_regime.primary_regime) if getattr(self, '_pending_regime', None) else None
-            ),
-        }
-
-    def restore_from_checkpoint(self, state: Dict[str, Any]) -> None:
-        """
-        Restore regime engine state from checkpoint.
+        Process market data for regime analysis (Simplified for Sensor)
 
         Args:
-            state: State dict from get_state_for_checkpoint()
+            market_data: Bar data or DataFrame
+
+        Returns:
+            Dict with processing results
         """
-        self._causal_only_mode = state.get('causal_only_mode', False)
-        self._confirmation_state = state.get('confirmation_state', 'CONFIRMED')
-        self._pending_count = state.get('pending_count', 0)
-        self._confirmation_required = 2
+        try:
+            if isinstance(market_data, pd.DataFrame):
+                # Bar-by-bar processing
+                symbol = market_data['symbol'].iloc[0] if 'symbol' in market_data.columns else 'UNKNOWN'
+                last_regime = None
+                
+                for idx, row in market_data.iterrows():
+                    regime_state = self._evaluate_fast_single_symbol(pd.DataFrame([row]), symbol)
+                    
+                    regime_changed = False
+                    if self.current_regime and regime_state.primary_regime != self.current_regime.primary_regime:
+                        regime_changed = True
+                    
+                    self.current_regime = regime_state
+                    self._regime_history.append(regime_state)
+                    
+                    # Persist
+                    if symbol not in self.regime_by_timestamp:
+                        self.regime_by_timestamp[symbol] = {}
+                    self.regime_by_timestamp[symbol][row.get('timestamp', datetime.now())] = regime_state
+                    
+                    last_regime = regime_state
 
-        # Note: Full regime objects need to be reconstructed from market data
-        # after restore. The checkpoint just preserves the state machine state.
+                return {
+                    'market_data_processed': True,
+                    'symbol': symbol,
+                    'regime_detected': last_regime.primary_regime.value if last_regime else None,
+                    'processing_timestamp': datetime.now()
+                }
+            return {'market_data_processed': False, 'error': 'Unsupported data format'}
+        except Exception as e:
+            self.logger.error(f"Error in sensor process_market_data: {e}")
+            return {'market_data_processed': False, 'error': str(e)}
 
-        self.logger.info(
-            f"Restored regime engine state: causal_only={self._causal_only_mode}, "
-            f"confirmation_state={self._confirmation_state}"
-        )
+# === Backward Compatibility Alias ===
+EnhancedRegimeEngine = RealTimeRegimeSensor

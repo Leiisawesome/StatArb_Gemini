@@ -326,12 +326,12 @@ class SystemValidator(ISystemComponent):
         # Test individual enhanced components
         from ..trading.engine import EnhancedTradingEngine
         from ..trading.portfolio.manager_enhanced import EnhancedPortfolioManager
-        from ..regime.engine import EnhancedRegimeEngine
+        from ..regime import RegimeManager
 
         components_to_test = [
             ("EnhancedTradingEngine", EnhancedTradingEngine, config.trading_engine_config),
             ("EnhancedPortfolioManager", EnhancedPortfolioManager, config.portfolio_manager_config),
-            ("EnhancedRegimeEngine", EnhancedRegimeEngine, config.regime_engine_config)
+            ("RegimeManager", RegimeManager, config.regime_engine_config)
         ]
 
         for component_name, component_class, component_config in components_to_test:

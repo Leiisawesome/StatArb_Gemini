@@ -28,7 +28,7 @@ from core_engine.config.component_config import (
     ConnectionConfig, CachingConfig
 )
 from core_engine.data.manager import ClickHouseDataManager
-from core_engine.regime.engine import EnhancedRegimeEngine
+from core_engine.regime import RegimeManager
 from core_engine.data.liquidity_engine import LiquidityAssessmentEngine
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
@@ -94,7 +94,7 @@ async def persist_enriched_data(symbol: str, target_date: str, output_dir: str):
     logger.info("Initializing engines...")
     
     data_manager = ClickHouseDataManager(data_config)
-    regime_engine = EnhancedRegimeEngine(regime_config)
+    regime_engine = RegimeManager(regime_config)
     liquidity_engine = LiquidityAssessmentEngine() # Uses default config or can be extended
     
     indicators_engine = EnhancedTechnicalIndicators(indicator_config)

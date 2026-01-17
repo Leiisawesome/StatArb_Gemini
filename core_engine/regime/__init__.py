@@ -9,13 +9,14 @@ analysis capabilities to enable regime-aware trading strategies and risk managem
 
 Components:
 -----------
-- RegimeManager: Central coordinator for regime-aware strategy adaptation
-- RegimeDetector: Core regime detection using multiple methodologies
-- RegimeClassifier: ML-based regime classification with feature engineering
+- RegimeManager: [AUTHORITY] Central coordinator and primary system brick for regime analysis.
+- RealTimeRegimeSensor: [SENSOR] Low-latency per-bar signal processing (formerly EnhancedRegimeEngine).
+- RegimeDetector: Core regime detection using multiple methodologies.
+- RegimeClassifier: ML-based regime classification with feature engineering.
 
-- EnhancedRegimeEngine: Complete regime engine with multi-timeframe analysis
-- RegimeIndicatorEngine: Regime-specific technical indicators
-- MarketRegimeAnalyzer: Cross-asset and macro regime analysis
+- EnhancedRegimeEngine: [LEGACY ALIAS] Redirects to RealTimeRegimeSensor for backward compatibility.
+- RegimeIndicatorEngine: Regime-specific technical indicators.
+- MarketRegimeAnalyzer: Cross-asset and macro regime analysis.
 - RegimeTransitionManager: Regime transition prediction and management
 
 Type Definitions:
@@ -94,7 +95,6 @@ from .regime_manager import (
     RegimeManager,
     RegimeManagerStatus,
     AdaptationMode,
-    RegimeState,
     RegimeAdaptation
 )
 
@@ -115,7 +115,7 @@ from .regime_classifier import (
     ModelPerformance
 )
 
-from .engine import EnhancedRegimeEngine
+from .engine import RealTimeRegimeSensor, EnhancedRegimeEngine
 
 from .regime_indicators import (
     RegimeIndicatorEngine,
@@ -151,6 +151,7 @@ __all__ = [
     'RegimeManager',
     'RegimeDetector',
     'RegimeClassifier',
+    'RealTimeRegimeSensor',
     'EnhancedRegimeEngine',
     'RegimeIndicatorEngine',
     'MarketRegimeAnalyzer',
@@ -159,6 +160,7 @@ __all__ = [
     # RegimeManager Types
     'RegimeManagerStatus',
     'AdaptationMode',
+    'MarketRegimeState',
     'RegimeState',
     'RegimeAdaptation',
 

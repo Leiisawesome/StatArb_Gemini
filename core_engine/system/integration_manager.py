@@ -738,17 +738,17 @@ class SystemIntegrationManager(ISystemComponent):
         try:
             self.logger.info("📊 Initializing Phase 4: Data & Risk Management Components...")
 
-            # Regime Engine
+            # Regime Manager (formerly Regime Engine)
             try:
-                from ..regime.engine import EnhancedRegimeEngine
-                regime_engine = EnhancedRegimeEngine(self.config.regime_engine_config)
+                from ..regime import RegimeManager
+                regime_engine = RegimeManager(self.config.regime_engine_config)
                 await regime_engine.initialize()
                 self.components['regime_engine'] = regime_engine
                 self.component_status['regime_engine'] = ComponentStatus.INITIALIZED
             except ImportError as e:
-                self.logger.warning(f"EnhancedRegimeEngine not available: {e}")
+                self.logger.warning(f"RegimeManager not available: {e}")
             except Exception as e:
-                self.logger.error(f"Failed to initialize regime engine: {e}")
+                self.logger.error(f"Failed to initialize regime manager: {e}")
 
             self.logger.info("✅ Phase 4 components initialized")
 
