@@ -3604,9 +3604,14 @@ class InstitutionalBacktestEngine:
                 bar_dict = bar.to_dict()
                 bar_dict['timestamp'] = timestamp
 
-                # Process market data through regime engine
+                # Process market data through regime engine or its sensor
                 try:
-                    regime_result = self.regime_engine.process_market_data(bar_dict)
+                    if hasattr(self.regime_engine, "process_market_data"):
+                        regime_result = self.regime_engine.process_market_data(bar_dict)
+                    elif hasattr(self.regime_engine, "regime_sensor"):
+                        regime_result = self.regime_engine.regime_sensor.process_market_data(bar_dict)
+                    else:
+                        raise AttributeError("regime_engine has no process_market_data or regime_sensor")
                 except Exception as e:
                     # Log error but continue - regime engine might not be fully initialized
                     # or might not support this data format
