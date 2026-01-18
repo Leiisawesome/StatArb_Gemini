@@ -23,7 +23,6 @@ from .momentum.enhanced_momentum import EnhancedMomentumStrategy, MomentumConfig
 
 # Mean Reversion Strategies
 from .mean_reversion.enhanced_mean_reversion import EnhancedMeanReversionStrategy, MeanReversionConfig
-from .mean_reversion.simplified_mean_reversion import SimplifiedMeanReversionStrategy
 
 # Statistical Arbitrage Strategies
 from .statistical_arbitrage.enhanced_statistical_arbitrage import EnhancedStatisticalArbitrageStrategy
@@ -50,7 +49,6 @@ __all__ = [
     'MomentumConfig',
     'EnhancedMeanReversionStrategy',
     'MeanReversionConfig',
-    'SimplifiedMeanReversionStrategy',  # v5.0 simplified version
     'EnhancedStatisticalArbitrageStrategy',
     'EnhancedFactorStrategy',
     'FactorConfig',
