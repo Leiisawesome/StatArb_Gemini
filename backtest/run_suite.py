@@ -68,6 +68,11 @@ EXPERIMENTS = {
         'default_config': 'core_engine/config/catalog/suites/smoke_test_mom.yaml',
         'description': 'Quick sanity check (momentum state machine)'
     },
+    'smoke_test_hybrid': {
+        'class': SmokeTest,
+        'default_config': 'core_engine/config/catalog/suites/smoke_test_hybrid.yaml',
+        'description': 'Hybrid MOM + MR exercise (coordinated)'
+    },
     'baseline': {
         'class': BaselineBacktest,
         'default_config': 'backtest/configs/baseline_backtest.yaml',

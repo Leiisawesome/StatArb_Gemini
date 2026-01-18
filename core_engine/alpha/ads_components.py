@@ -22,19 +22,36 @@ from datetime import datetime
 import logging
 import math
 
-# JIT Optimization (Rule: Performance First)
-try:
-    from core_engine.utils.jit_utils import njit_conditional
-except ImportError:
-    def njit_conditional(func=None, **kwargs):
-        if func is None: return lambda f: f
-        return func
+from core_engine.utils.jit_utils import njit_conditional
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # §1. SIGNAL MATURITY SCORE (SMS) - Multiplicative Formula
 # =============================================================================
+
+@dataclass(frozen=True)
+class GateDecision:
+    """ADS §3: Traceable decision object for trade gates."""
+    pass_gate: bool
+    score: float
+    threshold: float
+    cost_bps: float
+    risk_adj_return: float
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class MaturationDecision:
+    """ADS §1: Traceable decision object for signal maturity."""
+    is_mature: bool
+    score: float
+    threshold: float
+    regime: str
+    bars_pending: int
+    is_stale: bool
+    reason: str = ""
+
 
 @dataclass
 class ADSSMSGateInputs:
@@ -134,7 +151,11 @@ class SignalMaturityScore:
     # Preferred strategy-independent contract (strategies should pass this and keep naming consistent).
     inputs: Optional[ADSSMSGateInputs] = None
 
-    # Regime-adaptive exponents
+    # Regime-adaptive exponents (Economic Rationale):
+    # - α (Exhaustion): Increases in High Vol/Crisis as setups need deeper pullback confirmation.
+    # - β (Validity): Decreases in Crisis; probabilistic edge is less reliable than raw flow/vol.
+    # - γ (Flow): Essential across all regimes; increased weight in High Vol for liquidity tracking.
+    # - δ (Vol Comp): Stable signal of "tightness" before expansion.
     EXPONENTS: ClassVar[Dict[str, Tuple[float, float, float, float]]] = {
         'low_vol': (0.30, 0.40, 0.20, 0.10),
         'normal': (0.35, 0.35, 0.20, 0.10),
@@ -222,20 +243,34 @@ class SignalMaturityScore:
             α, β, γ, δ
         )
 
+    def evaluate_maturity(self, threshold: float, regime: str = 'normal') -> MaturationDecision:
+        """
+        Detailed evaluation of signal maturity.
+        """
+        score = self.compute(regime)
+        stale = self.is_stale()
+        
+        reason = ""
+        if stale:
+            reason = f"Stale after {self.pending_bars} bars (max {self.max_pending})"
+        elif score < threshold:
+            reason = f"Score {score:.4f} below threshold {threshold:.4f}"
+        
+        return MaturationDecision(
+            is_mature=(not stale and score >= threshold),
+            score=score,
+            threshold=threshold,
+            regime=regime,
+            bars_pending=self.pending_bars,
+            is_stale=stale,
+            reason=reason
+        )
+
     def is_mature(self, threshold: float, regime: str = 'normal') -> bool:
         """
         Check if signal has matured above threshold.
-
-        Args:
-            threshold: Minimum SMS score to be considered mature
-            regime: Market regime for exponent selection
-
-        Returns:
-            True if signal is mature and not stale
         """
-        if self.pending_bars > self.max_pending:
-            return False  # Stale signal
-        return self.compute(regime) >= threshold
+        return self.evaluate_maturity(threshold, regime).is_mature
 
     def is_stale(self) -> bool:
         """Check if signal has exceeded maximum pending time."""
@@ -254,10 +289,12 @@ class SignalMaturityScore:
 # §1B. SIGNAL MATURITY SCORE (SMS) - Sequential Log-Odds Updater ("Bayesian-lite")
 # =============================================================================
 
+@njit_conditional
 def _clip(x: float, lo: float, hi: float) -> float:
     return float(min(max(float(x), float(lo)), float(hi)))
 
 
+@njit_conditional
 def _sigmoid(x: float) -> float:
     # Numerically-stable sigmoid for typical log-odds ranges
     x = float(x)
@@ -266,6 +303,52 @@ def _sigmoid(x: float) -> float:
         return 1.0 / (1.0 + z)
     z = math.exp(x)
     return z / (1.0 + z)
+
+
+@njit_conditional
+def _update_log_odds_update_core(
+    log_odds: float,
+    m: float,
+    v: float,
+    flow: float,
+    vc: float,
+    w_m: float,
+    w_v: float,
+    w_f: float,
+    w_vc: float,
+    s_m: float,
+    s_v: float,
+    s_f: float,
+    s_vc: float,
+    e_clip: float
+) -> float:
+    """Core log-odds update logic (JIT optimized)"""
+    
+    # Bounded evidence terms in [-1, 1]
+    m_c = _clip(m, 0.0, 1.0)
+    v_c = _clip(v, 0.0, 1.0)
+    flow_c = _clip(flow, -1.0, 1.0)
+    vc_c = _clip(vc, 0.5, 2.0)
+
+    phi_m = math.tanh(s_m * (2.0 * m_c - 1.0))
+    phi_v = math.tanh(s_v * (2.0 * v_c - 1.0))
+    phi_flow = math.tanh(s_f * flow_c)
+    # Vol compression: <1 is supportive (tight), >1 is adverse (expanded)
+    phi_vc = math.tanh(s_vc * (1.0 - vc_c))
+
+    phi_m = _clip(phi_m, -e_clip, e_clip)
+    phi_v = _clip(phi_v, -e_clip, e_clip)
+    phi_flow = _clip(phi_flow, -e_clip, e_clip)
+    phi_vc = _clip(phi_vc, -e_clip, e_clip)
+
+    new_log_odds = log_odds + (
+        w_m * phi_m
+        + w_v * phi_v
+        + w_f * phi_flow
+        + w_vc * phi_vc
+    )
+    
+    return float(new_log_odds)
 
 
 @dataclass
@@ -317,13 +400,35 @@ class SequentialLogOddsSMS:
         """Require sufficient information-time accumulation before maturing."""
         return float(self.info_clock) >= float(self.min_info_to_mature)
 
+    def evaluate_maturity(self, threshold: float) -> MaturationDecision:
+        """
+        Detailed evaluation of sequential signal maturity.
+        """
+        prob = self.prob()
+        stale = self.is_stale()
+        can_mat = self.can_mature()
+        
+        reason = ""
+        if stale:
+            reason = f"Stale (bars={self.pending_bars}, info={self.info_clock:.2f})"
+        elif not can_mat:
+            reason = f"Insufficient info-time (clock={self.info_clock:.2f} < min={self.min_info_to_mature})"
+        elif prob < float(threshold):
+            reason = f"Prob {prob:.4f} below threshold {threshold:.4f}"
+            
+        return MaturationDecision(
+            is_mature=(not stale and can_mat and prob >= float(threshold)),
+            score=prob,
+            threshold=float(threshold),
+            regime="sequential",
+            bars_pending=self.pending_bars,
+            is_stale=stale,
+            reason=reason
+        )
+
     def is_mature(self, threshold: float) -> bool:
         """Mature if probability exceeds threshold and info-time requirement is satisfied."""
-        if self.is_stale():
-            return False
-        if not self.can_mature():
-            return False
-        return self.prob() >= float(threshold)
+        return self.evaluate_maturity(threshold).is_mature
 
     def increment_pending(self):
         """Increment pending bar count (and apply per-bar delay penalty)."""
@@ -342,28 +447,21 @@ class SequentialLogOddsSMS:
         # Accumulate information-time first
         self.info_clock = float(self.info_clock) + float(max(0.0, info_increment))
 
-        # Bounded evidence terms in [-1, 1]
-        m = _clip(inputs.setup_maturity, 0.0, 1.0)
-        v = _clip(inputs.setup_validity_prob, 0.0, 1.0)
-        flow = _clip(inputs.signed_flow_support, -1.0, 1.0)
-        vc = _clip(inputs.vol_compression, 0.5, 2.0)
-
-        phi_m = math.tanh(self.maturity_scale * (2.0 * m - 1.0))
-        phi_v = math.tanh(self.validity_scale * (2.0 * v - 1.0))
-        phi_flow = math.tanh(self.flow_scale * flow)
-        # Vol compression: <1 is supportive (tight), >1 is adverse (expanded)
-        phi_vc = math.tanh(self.vc_scale * (1.0 - vc))
-
-        phi_m = _clip(phi_m, -self.evidence_clip, self.evidence_clip)
-        phi_v = _clip(phi_v, -self.evidence_clip, self.evidence_clip)
-        phi_flow = _clip(phi_flow, -self.evidence_clip, self.evidence_clip)
-        phi_vc = _clip(phi_vc, -self.evidence_clip, self.evidence_clip)
-
-        self.log_odds += (
-            float(self.w_setup_maturity) * phi_m
-            + float(self.w_setup_validity) * phi_v
-            + float(self.w_flow_support) * phi_flow
-            + float(self.w_vol_compression) * phi_vc
+        self.log_odds = _update_log_odds_update_core(
+            float(self.log_odds),
+            float(inputs.setup_maturity),
+            float(inputs.setup_validity_prob),
+            float(inputs.signed_flow_support),
+            float(inputs.vol_compression),
+            float(self.w_setup_maturity),
+            float(self.w_setup_validity),
+            float(self.w_flow_support),
+            float(self.w_vol_compression),
+            float(self.maturity_scale),
+            float(self.validity_scale),
+            float(self.flow_scale),
+            float(self.vc_scale),
+            float(self.evidence_clip)
         )
 
         return self.prob()
@@ -553,17 +651,36 @@ class ERAR:
             expected_pnl, cvar_95, skewness, cost, tail_lambda
         )
 
+    def evaluate_gate(self, gamma: float = 0.5) -> GateDecision:
+        """
+        Detailed evaluation of ERAR gate.
+        """
+        cost = float(self.cost())
+        score = float(self.compute())
+        
+        # Internal risk-adjusted return (numerator)
+        rar = float(self.expected_pnl - self.tail_lambda * abs(self.cvar_95))
+        
+        reason = ""
+        if score < gamma:
+            reason = f"ERAR score {score:.4f} below threshold {gamma:.4f} (Cost={cost:.2f}bps)"
+        elif cost > 50:  # Heuristic warning for extreme costs
+            reason = "Warning: ERAR passed but transaction costs are extremely high (>50bps)"
+            
+        return GateDecision(
+            pass_gate=(score >= gamma),
+            score=score,
+            threshold=gamma,
+            cost_bps=cost,
+            risk_adj_return=rar,
+            reason=reason
+        )
+
     def should_trade(self, gamma: float = 0.5) -> bool:
         """
         Check if trade meets minimum ERAR threshold.
-
-        Args:
-            gamma: Minimum ERAR threshold (default 0.5)
-
-        Returns:
-            True if ERAR >= gamma
         """
-        return self.compute() >= gamma
+        return self.evaluate_gate(gamma).pass_gate
 
     def get_diagnostics(self) -> Dict[str, float]:
         """Get detailed ERAR breakdown."""

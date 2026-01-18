@@ -14,9 +14,25 @@ Version: 2.0.0 (Enhanced with Regime-First Support)
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
 from datetime import datetime
+
+@runtime_checkable
+class IRegimeContext(Protocol):
+    """
+    Structural interface for market regime context.
+    
+    Ensures that any object (dataclass or otherwise) providing regime 
+    information adheres to the expected schema without requiring explicit inheritance.
+    """
+    primary_regime: str
+    regime_confidence: float
+    volatility_regime: str
+    trend_regime: str
+    liquidity_regime: str
+    risk_multiplier: float
+    last_update: datetime
 
 class ISystemComponent(ABC):
     """Interface for system components under orchestrator control"""

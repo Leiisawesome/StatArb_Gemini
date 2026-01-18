@@ -14,12 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-
-try:
-    # Canonical system regime context
-    from core_engine.system.interfaces import RegimeContext
-except Exception:  # pragma: no cover - unit tests may import without full system wiring
-    RegimeContext = Any  # type: ignore
+from core_engine.system.interfaces import IRegimeContext
 
 
 @dataclass(frozen=True)
@@ -52,7 +47,7 @@ class ADSRegimeVector:
     @classmethod
     def from_regime_context(
         cls,
-        regime_context: Optional[RegimeContext],
+        regime_context: Optional[IRegimeContext],
         *,
         liquidity: Optional[float] = None,
         microstructure: Optional[float] = None,
@@ -80,14 +75,14 @@ class ADSRegimeVector:
             return cls._with_velocities(base, prev=prev, ewma_alpha=ewma_alpha), fallbacks
 
         # Confidence
-        conf = getattr(regime_context, "regime_confidence", 0.5)
+        conf = regime_context.regime_confidence
         if conf is None:
             fallbacks["used"].append("regime_confidence_missing")
             conf = 0.5
         conf = cls._clip(conf, 0.0, 1.0)
 
         # Volatility regime mapping to [0, 1]
-        vol_reg = str(getattr(regime_context, "volatility_regime", "normal_volatility") or "normal_volatility").lower()
+        vol_reg = str(regime_context.volatility_regime or "normal_volatility").lower()
         if "extreme" in vol_reg or "crisis" in vol_reg:
             r_vol = 1.0
         elif "high" in vol_reg:
@@ -98,7 +93,7 @@ class ADSRegimeVector:
             r_vol = 0.5
 
         # Trend regime mapping to [-1, 1]
-        tr_reg = str(getattr(regime_context, "trend_regime", "sideways") or "sideways").lower()
+        tr_reg = str(regime_context.trend_regime or "sideways").lower()
         if "strong_up" in tr_reg:
             r_trend = 1.0
         elif "weak_up" in tr_reg:
