@@ -154,10 +154,10 @@ class BaseExperiment(ABC):
                 if trades:
                     print()
                     print("Trade List:")
-                    print(f"  {'#':<3} {'Timestamp':<20} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
+                    print(f"  {'#':<3} {'Timestamp':<20} {'Strat':<6} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
                     print("  " + "-"*90)
 
-                    # Track inventory per symbol using FIFO lots with signed quantities.
+                    # Track inventory per strategy_run + symbol using FIFO lots with signed quantities.
                     #
                     # - Long lot:  +qty at entry_price
                     # - Short lot: -qty at entry_price
@@ -167,9 +167,24 @@ class BaseExperiment(ABC):
                     # - Buy  covers short: pnl += closed_qty * (entry_price - buy_price)
                     #
                     # Any residual quantity beyond closing becomes a new lot (opening/reversing).
-                    positions: Dict[str, List[tuple[float, float]]] = {}  # symbol -> [(signed_qty, entry_price), ...]
+                    positions: Dict[str, Dict[str, List[tuple[float, float]]]] = {}  # strategy_run -> symbol -> lots
 
-                    for i, trade in enumerate(trades, 1):
+                    def _trade_ts_key(trade: Dict[str, Any]):
+                        ts = trade.get('timestamp')
+                        if isinstance(ts, datetime):
+                            return ts
+                        if isinstance(ts, str):
+                            try:
+                                return datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                            except Exception:
+                                return ts
+                        return ts
+
+                    for i, trade in enumerate(sorted(trades, key=_trade_ts_key), 1):
+                        strategy_run = trade.get('strategy_run', 'default')
+                        if strategy_run not in positions:
+                            positions[strategy_run] = {}
+
                         timestamp = str(trade.get('timestamp', 'N/A'))[:19]
                         symbol = trade.get('symbol', 'N/A')
                         action = trade.get('action', trade.get('side', 'N/A'))
@@ -196,8 +211,8 @@ class BaseExperiment(ABC):
                         pnl = 0.0
                         pnl_str = ""
 
-                        if symbol not in positions:
-                            positions[symbol] = []
+                        if symbol not in positions[strategy_run]:
+                            positions[strategy_run][symbol] = []
 
                         try:
                             qty = float(quantity)
@@ -214,19 +229,19 @@ class BaseExperiment(ABC):
                         def _append_lot(q_signed: float, entry_px: float):
                             if abs(q_signed) <= 1e-12:
                                 return
-                            positions[symbol].append((q_signed, entry_px))
+                            positions[strategy_run][symbol].append((q_signed, entry_px))
 
                         def _pop_front():
-                            positions[symbol].pop(0)
+                            positions[strategy_run][symbol].pop(0)
 
                         def _set_front(q_signed: float, entry_px: float):
-                            positions[symbol][0] = (q_signed, entry_px)
+                            positions[strategy_run][symbol][0] = (q_signed, entry_px)
 
                         if side == "buy":
                             qty_to_buy = qty
                             # First cover shorts (FIFO)
-                            while qty_to_buy > 1e-12 and positions[symbol] and positions[symbol][0][0] < 0:
-                                lot_qty, entry_px = positions[symbol][0]  # lot_qty is negative
+                            while qty_to_buy > 1e-12 and positions[strategy_run][symbol] and positions[strategy_run][symbol][0][0] < 0:
+                                lot_qty, entry_px = positions[strategy_run][symbol][0]  # lot_qty is negative
                                 coverable = min(qty_to_buy, abs(lot_qty))
                                 pnl += coverable * (entry_px - px)
                                 lot_qty_new = lot_qty + coverable  # less negative
@@ -246,8 +261,8 @@ class BaseExperiment(ABC):
                         elif side == "sell":
                             qty_to_sell = qty
                             # First close longs (FIFO)
-                            while qty_to_sell > 1e-12 and positions[symbol] and positions[symbol][0][0] > 0:
-                                lot_qty, entry_px = positions[symbol][0]  # lot_qty is positive
+                            while qty_to_sell > 1e-12 and positions[strategy_run][symbol] and positions[strategy_run][symbol][0][0] > 0:
+                                lot_qty, entry_px = positions[strategy_run][symbol][0]  # lot_qty is positive
                                 sellable = min(qty_to_sell, lot_qty)
                                 pnl += sellable * (px - entry_px)
                                 lot_qty_new = lot_qty - sellable
@@ -267,7 +282,16 @@ class BaseExperiment(ABC):
                         if not pnl_str:
                             pnl_str = " " * 12
 
-                        print(f"  {i:<3} {timestamp:<20} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
+                        def _strategy_label(raw: str) -> str:
+                            low = str(raw).lower()
+                            if "mom" in low:
+                                return "MOM"
+                            if "mr" in low or "mean_reversion" in low:
+                                return "MR"
+                            return str(raw)[:6]
+
+                        strat_label = _strategy_label(strategy_run)
+                        print(f"  {i:<3} {timestamp:<20} {strat_label:<6} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
 

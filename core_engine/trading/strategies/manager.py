@@ -992,8 +992,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             # Enhanced filtering with regime and position awareness
             filtered_signals = await self._filter_signals_enhanced(all_signals, regime_info, current_positions)
 
-            # Intelligent signal aggregation with regime weighting
-            aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
+            # Intelligent signal aggregation with regime weighting (optional)
+            if self.config.enable_signal_aggregation:
+                aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
+            else:
+                aggregated_signals = filtered_signals
 
             # Store signals
             for signal in aggregated_signals:
@@ -1185,9 +1188,12 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
                     continue
 
-            # Enhanced filtering and aggregation
+            # Enhanced filtering and aggregation (optional)
             filtered_signals = await self._filter_signals_enhanced(all_signals, regime_info, current_positions)
-            aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
+            if self.config.enable_signal_aggregation:
+                aggregated_signals = await self._aggregate_signals_enhanced(filtered_signals, regime_info)
+            else:
+                aggregated_signals = filtered_signals
 
             # Store signals
             for signal in aggregated_signals:

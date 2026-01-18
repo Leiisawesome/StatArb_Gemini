@@ -114,6 +114,10 @@ class BacktestConfig:
     # Strategy manager settings
     min_confidence_threshold: float = 0.6
     """Minimum confidence threshold for signals in strategy aggregator. Default: 0.6 (60%). For v5.0 simplified strategies, use 0.5."""
+    enable_multi_strategy_coordination: bool = True
+    enable_signal_aggregation: bool = True
+    enable_conflict_resolution: bool = True
+    enable_dynamic_weighting: bool = True
 
     # Risk authorization thresholds (for CentralRiskManager)
     auto_approval_threshold: float = 0.08

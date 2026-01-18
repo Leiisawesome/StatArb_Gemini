@@ -82,6 +82,7 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     execution = pt.get("execution", {}) or {}
     # Strategy aggregation / coordinator settings (smoke-test knobs)
     min_confidence_threshold = pt.get("min_confidence_threshold", cfg.get("min_confidence_threshold"))
+    strategy_manager = pt.get("strategy_manager", {}) or {}
 
     symbols = data.get("symbols") or []
     interval = data.get("interval")
@@ -115,6 +116,12 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "allow_shorts": risk.get("allow_shorts", False),
         "min_signal_confidence": risk.get("min_signal_confidence", cfg.get("min_signal_confidence", 0.60)),
         "min_confidence_threshold": min_confidence_threshold if min_confidence_threshold is not None else 0.60,
+        "enable_multi_strategy_coordination": strategy_manager.get("enable_multi_strategy_coordination", True),
+        "enable_signal_aggregation": strategy_manager.get("enable_signal_aggregation", True),
+        "enable_conflict_resolution": strategy_manager.get("enable_conflict_resolution", True),
+        "enable_dynamic_weighting": strategy_manager.get("enable_dynamic_weighting", True),
+        "isolate_strategy_backtests": strategy_manager.get("isolate_strategy_backtests", False),
+        "external_strategy_configs": strategy_manager.get("external_strategy_configs", []),
         "max_position_size": max_position_size if max_position_size is not None else cfg.get("max_position_size", 0.10),
         "max_position_pct": max_position_pct,
         "max_concentration": max_concentration,

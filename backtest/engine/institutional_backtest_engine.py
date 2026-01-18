@@ -1284,6 +1284,19 @@ class InstitutionalBacktestEngine:
                 # v5.0: Allow min_confidence_threshold from backtest config (default 0.6)
                 'min_confidence_threshold': getattr(self.config, 'min_confidence_threshold', 0.6)
             }
+            # v5.1: Allow backtest config to override multi-strategy coordination behaviors
+            strategy_config['enable_multi_strategy_coordination'] = getattr(
+                self.config, 'enable_multi_strategy_coordination', True
+            )
+            strategy_config['enable_signal_aggregation'] = getattr(
+                self.config, 'enable_signal_aggregation', True
+            )
+            strategy_config['enable_conflict_resolution'] = getattr(
+                self.config, 'enable_conflict_resolution', True
+            )
+            strategy_config['enable_dynamic_weighting'] = getattr(
+                self.config, 'enable_dynamic_weighting', True
+            )
 
             # Convert backtest DataConfig to centralized DataConfig format
             from core_engine.config import DataConfig as CentralizedDataConfig, ConnectionConfig, CachingConfig
