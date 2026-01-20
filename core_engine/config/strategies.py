@@ -82,6 +82,77 @@ class BaseStrategyConfig:
     """Execution timeout in seconds. Default: 30.0s"""
 
 # ============================================================================
+# HYBRID RECOMBINATION CONFIG (MOM/MR)
+# ============================================================================
+
+@dataclass
+class HybridRecombinationConfig:
+    """
+    Hybrid MOM/MR recombination configuration.
+
+    Controls regime-aware dynamic weighting, stability bounds, and
+    statistical blending options for portfolio-layer signal recombination.
+    """
+    enable_hybrid_recombination: bool = False
+    """Enable hybrid MOM/MR recombination. Default: False"""
+
+    hybrid_only: bool = False
+    """If True, emit only hybrid signal (suppress other signals). Default: False"""
+
+    mom_base_weight: float = 0.5
+    """Base MOM weight before adjustments. Default: 0.5"""
+
+    mr_base_weight: float = 0.5
+    """Base MR weight before adjustments. Default: 0.5"""
+
+    weight_min: float = 0.2
+    """Minimum weight per strategy. Default: 0.2"""
+
+    weight_max: float = 0.8
+    """Maximum weight per strategy. Default: 0.8"""
+
+    weight_stability_threshold: float = 0.05
+    """Minimum delta to rebalance weights. Default: 0.05"""
+
+    conflict_penalty_factor: float = 0.5
+    """Penalty factor for conflicting directions. Default: 0.5"""
+
+    rolling_sharpe_window: int = 60
+    """Lookback window (bars/days) for rolling Sharpe. Default: 60"""
+
+    use_probabilistic_regime: bool = True
+    """Use probabilistic regime weights. Default: True"""
+
+    use_covariance_blend: bool = True
+    """Enable covariance-aware blending when history sufficient. Default: True"""
+
+    expected_holding_period_mom: int = 5
+    """Expected holding period for MOM (bars). Default: 5"""
+
+    expected_holding_period_mr: int = 2
+    """Expected holding period for MR (bars). Default: 2"""
+
+    regime_weight_map: Dict[str, Tuple[float, float]] = field(default_factory=lambda: {
+        "trending": (0.7, 0.3),
+        "range_bound": (0.3, 0.7),
+        "volatile": (0.55, 0.45),
+        "unknown": (0.5, 0.5)
+    })
+    """Regime to (MOM, MR) weight mapping. Default: balanced presets"""
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.weight_min <= self.weight_max <= 1.0:
+            raise ValueError("weight_min and weight_max must satisfy 0<=min<=max<=1")
+        if not 0.0 <= self.mom_base_weight <= 1.0 or not 0.0 <= self.mr_base_weight <= 1.0:
+            raise ValueError("mom_base_weight and mr_base_weight must be within [0,1]")
+        if self.weight_stability_threshold < 0:
+            raise ValueError("weight_stability_threshold must be >= 0")
+        if self.rolling_sharpe_window <= 0:
+            raise ValueError("rolling_sharpe_window must be > 0")
+        if self.expected_holding_period_mom <= 0 or self.expected_holding_period_mr <= 0:
+            raise ValueError("expected holding periods must be > 0")
+
+# ============================================================================
 # SPECIFIC STRATEGY CONFIGS
 # ============================================================================
 
@@ -189,6 +260,9 @@ class MomentumConfig(BaseStrategyConfig):
 
     max_holding_period: int = 20
     """Maximum holding period in bars. Default: 20"""
+
+    expected_holding_period_bars: int = 5
+    """Expected holding period (for hybrid blending). Default: 5"""
 
     # Signal confidence
     min_signal_confidence: float = 0.30
@@ -481,6 +555,9 @@ class MeanReversionConfig(BaseStrategyConfig):
 
     max_holding_period: int = 10
     """Maximum holding period in bars. Default: 10"""
+
+    expected_holding_period_bars: int = 2
+    """Expected holding period (for hybrid blending). Default: 2"""
 
     # Price-aware exit parameters (NEW)
     stop_loss_pct: float = -5.0

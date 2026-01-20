@@ -101,6 +101,10 @@ async def strategy_manager(basic_config):
     manager.pending_signals = {}
     manager.signal_history = []
     manager.aggregated_signals = {}
+    manager.hybrid_config = manager.config.hybrid_recombination
+    manager.signal_combiner = Mock()
+    manager._hybrid_weight_cache = {}
+    manager._hybrid_strength_history = {}
 
     # Market context
     manager.current_regime = None

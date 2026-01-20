@@ -25,6 +25,7 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 from backtest.utils.paths import backtest_results_dir
+import numpy as np
 
 class SmokeTest(BaseExperiment):
     """
@@ -254,6 +255,9 @@ class SmokeTest(BaseExperiment):
                 'metrics': run_metrics,
             })
 
+        hypothesis_tests = self._compute_hypothesis_tests(isolated_runs)
+        oos_validation = self._compute_oos_validation(isolated_runs)
+
         # Sort by timestamp for deterministic trade list output
         def _trade_ts_key(trade: Dict[str, Any]):
             ts = trade.get('timestamp')
@@ -288,6 +292,8 @@ class SmokeTest(BaseExperiment):
             "losing_trades": losing_trades,
             "execution_history": combined_execution_history,
             "position_history": [],
+            "hypothesis_tests": hypothesis_tests,
+            "oos_validation": oos_validation,
         }
 
         return {
@@ -300,6 +306,75 @@ class SmokeTest(BaseExperiment):
             'final_capital': combined_final_capital,
             'isolated_runs': isolated_runs,
         }
+
+    def _extract_equity_returns(self, engine_results: Dict[str, Any]) -> List[float]:
+        """Extract per-bar returns from position history."""
+        summary = engine_results.get("summary") if engine_results else {}
+        position_history = summary.get("position_history", []) if summary else []
+        if not position_history:
+            return []
+        equities = [snap.get("equity") for snap in position_history if snap.get("equity") is not None]
+        returns = []
+        for i in range(1, len(equities)):
+            prev = equities[i - 1]
+            curr = equities[i]
+            if prev and prev != 0:
+                returns.append((curr - prev) / prev)
+        return returns
+
+    def _paired_t_test(self, a: List[float], b: List[float]) -> Dict[str, Any]:
+        """Paired t-test with normal approximation fallback."""
+        n = min(len(a), len(b))
+        if n < 2:
+            return {"p_value": None, "t_stat": None, "n": n}
+        diffs = np.array(a[:n]) - np.array(b[:n])
+        mean_diff = float(np.mean(diffs))
+        std_diff = float(np.std(diffs, ddof=1))
+        if std_diff == 0:
+            return {"p_value": 1.0, "t_stat": 0.0, "n": n}
+        t_stat = mean_diff / (std_diff / np.sqrt(n))
+        # Normal approximation for p-value
+        p_value = float(2.0 * (1.0 - 0.5 * (1.0 + np.math.erf(abs(t_stat) / np.sqrt(2)))))
+        return {"p_value": p_value, "t_stat": float(t_stat), "n": n}
+
+    def _compute_hypothesis_tests(self, isolated_runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Compute paired t-tests for hybrid vs MOM/MR if available."""
+        returns_by_name = {}
+        for run in isolated_runs:
+            name = str(run.get("strategy_name", "")).lower()
+            returns_by_name[name] = self._extract_equity_returns(run.get("engine_results", {}) or {})
+
+        hybrid = next((v for k, v in returns_by_name.items() if "hybrid" in k), None)
+        mom = next((v for k, v in returns_by_name.items() if "mom" in k), None)
+        mr = next((v for k, v in returns_by_name.items() if "mr" in k), None)
+
+        results = {}
+        if hybrid and mom:
+            results["hybrid_vs_mom"] = self._paired_t_test(hybrid, mom)
+        if hybrid and mr:
+            results["hybrid_vs_mr"] = self._paired_t_test(hybrid, mr)
+        return results
+
+    def _compute_oos_validation(self, isolated_runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Simple train/test split validation from equity returns."""
+        oos = {}
+        for run in isolated_runs:
+            name = str(run.get("strategy_name", "")).lower()
+            returns = self._extract_equity_returns(run.get("engine_results", {}) or {})
+            if len(returns) < 4:
+                continue
+            split = len(returns) // 2
+            train = returns[:split]
+            test = returns[split:]
+            oos[name] = {
+                "train_mean_return": float(np.mean(train)) if train else 0.0,
+                "test_mean_return": float(np.mean(test)) if test else 0.0,
+                "train_std_return": float(np.std(train)) if train else 0.0,
+                "test_std_return": float(np.std(test)) if test else 0.0,
+                "n_train": len(train),
+                "n_test": len(test),
+            }
+        return oos
 
     async def _run_external_config_backtests(
         self,

@@ -356,6 +356,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
                 "txn_flow_source": ads_ctx.get("txn_flow_source"),
             }
+            additional_data.update(
+                self._build_hybrid_metadata(
+                    signal_source="momentum",
+                    strength=float(ctx.raw_signal_strength),
+                    side=side,
+                    data_row=row,
+                    ads_r=ads_ctx.get("ads_regime_vector_obj"),
+                )
+            )
             if ctx.bayes_sms is not None:
                 additional_data.update(
                     {
@@ -455,6 +464,44 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # Final clip to strategy max
         max_tw = float(getattr(self.config, "max_position_pct", base_weight * 1.5) or base_weight * 1.5)
         return float(np.clip(weight, 0.0, max_tw))
+
+    def _build_hybrid_metadata(
+        self,
+        *,
+        signal_source: str,
+        strength: float,
+        side: Optional[str] = None,
+        data_row: Optional[pd.Series] = None,
+        ads_r: Optional[ADSRegimeVector] = None
+    ) -> Dict[str, Any]:
+        """
+        Build standardized metadata for MOM/MR recombination.
+        """
+        expected_holding = int(getattr(self.config, "expected_holding_period_bars", 5) or 5)
+
+        volatility_norm = float(strength)
+        if data_row is not None:
+            atr_pct = data_row.get("atr_percentile", None)
+            if atr_pct is not None and not pd.isna(atr_pct):
+                pct = max(0.0, min(1.0, float(atr_pct)))
+                volatility_norm = float(strength) * (1.0 - pct)
+
+        regime_alignment = None
+        if ads_r is not None:
+            trend = float(getattr(ads_r, "trend", 0.0))
+            if side in ("BUY", "LONG_ENTRY", "LONG", "bullish_momentum"):
+                regime_alignment = max(0.0, trend)
+            elif side in ("SELL", "SHORT", "SHORT_ENTRY", "bearish_momentum"):
+                regime_alignment = max(0.0, -trend)
+            else:
+                regime_alignment = abs(trend)
+
+        return {
+            "signal_source": signal_source,
+            "expected_holding_period": expected_holding,
+            "volatility_normalized_strength": volatility_norm,
+            "regime_alignment_score": regime_alignment,
+        }
 
     def _get_column_name(self, expected_name: str, data: pd.DataFrame) -> str:
         """
@@ -635,6 +682,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'structural_stop': state.setup_low,
                             'pattern_mode': 'BREAKOUT_ACCELERATION'
                         }
+                    )
+                    signal.additional_data.update(
+                        self._build_hybrid_metadata(
+                            signal_source="momentum",
+                            strength=1.0,
+                            side="LONG_ENTRY",
+                            data_row=current_data if isinstance(current_data, pd.Series) else None,
+                            ads_r=None,
+                        )
                     )
                     base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
                     signal.target_weight = self._calculate_regime_adaptive_weight(
@@ -938,6 +994,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'entry_price': current_data['close'] if isinstance(current_data, pd.Series) else current_data.get('close', 0),
                             'bar_index': idx
                         }
+                    )
+                    signal.additional_data.update(
+                        self._build_hybrid_metadata(
+                            signal_source="momentum",
+                            strength=signal.strength,
+                            side=side,
+                            data_row=current_data if isinstance(current_data, pd.Series) else None,
+                            ads_r=ads_ctx.get("ads_regime_vector_obj"),
+                        )
                     )
                     return signal
 

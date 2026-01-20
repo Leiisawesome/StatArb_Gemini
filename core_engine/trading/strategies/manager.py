@@ -32,7 +32,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable, Type
+from typing import Dict, List, Optional, Any, Callable, Type, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
@@ -78,6 +78,10 @@ from ...system.central_risk_manager import TradingDecisionRequest, TradingDecisi
 
 # Import ProcessingPipelineOrchestrator (Rule 3 - Phase 3 Integration)
 from ...processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
+
+# Hybrid recombination config and combiner
+from core_engine.config import HybridRecombinationConfig
+from core_engine.processing.signals.combiners import SignalCombiner
 
 # Import canonical SignalType and SignalStrength from type_definitions
 from ...type_definitions.strategy import SignalType, SignalStrength
@@ -147,6 +151,9 @@ class StrategyManagerConfig:
     # Phase 3: Pipeline integration settings (Rule 3)
     enable_pipeline_integration: bool = True  # Use ProcessingPipelineOrchestrator
     pipeline_config: Optional[Any] = None      # Pipeline configuration
+
+    # Hybrid MOM/MR recombination (configure via YAML only)
+    hybrid_recombination: Optional[HybridRecombinationConfig] = None
 
 class EnhancedStrategyFactory:
     """Factory for creating enhanced strategy instances"""
@@ -294,7 +301,16 @@ class StrategyManager(ISystemComponent, IRegimeAware):
     """
 
     def __init__(self, config: Dict[str, Any], data_config: Optional[Any] = None):
+        config = config.copy() if config else {}
+        hybrid_payload = config.pop("hybrid_recombination", None)
+        if isinstance(hybrid_payload, dict):
+            hybrid_cfg = HybridRecombinationConfig(**hybrid_payload)
+        elif isinstance(hybrid_payload, HybridRecombinationConfig):
+            hybrid_cfg = hybrid_payload
+        else:
+            hybrid_cfg = None
         self.config = StrategyManagerConfig(**config) if config else StrategyManagerConfig()
+        self.config.hybrid_recombination = hybrid_cfg
         self.data_config = data_config  # Store data config for pipeline orchestrator
         self.component_id = f"strategy_manager_{uuid.uuid4().hex[:8]}"
 
@@ -332,6 +348,14 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         self.pending_signals: Dict[str, TradingSignal] = {}
         self.signal_history: List[TradingSignal] = []
         self.aggregated_signals: Dict[str, TradingSignal] = {}
+
+        # Hybrid recombination
+        self.hybrid_config = self.config.hybrid_recombination or HybridRecombinationConfig(
+            enable_hybrid_recombination=False
+        )
+        self.signal_combiner = SignalCombiner()
+        self._hybrid_weight_cache: Dict[str, Dict[str, float]] = {}
+        self._hybrid_strength_history: Dict[str, List[Tuple[float, float]]] = {}
 
         # Current market context
         self.current_regime: Optional[str] = None
@@ -2091,6 +2115,208 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         logger.info(f"✅ Filtered {len(filtered)}/{len(signals)} signals passed")
         return filtered
 
+    def _strength_to_float(self, strength: SignalStrength) -> float:
+        """Map SignalStrength enum to numeric scale."""
+        if hasattr(strength, "value"):
+            name = str(strength.value).lower()
+        else:
+            name = str(strength).lower()
+        mapping = {
+            "very_weak": 0.1,
+            "weak": 0.3,
+            "medium": 0.5,
+            "moderate": 0.5,
+            "strong": 0.7,
+            "very_strong": 0.9,
+        }
+        return float(mapping.get(name, 0.5))
+
+    def _strength_enum_from_value(self, value: float) -> SignalStrength:
+        """Map numeric strength to SignalStrength enum."""
+        v = abs(float(value))
+        if v >= 0.85:
+            return SignalStrength.VERY_STRONG
+        if v >= 0.65:
+            return SignalStrength.STRONG
+        if v >= 0.45:
+            return SignalStrength.MODERATE
+        if v >= 0.25:
+            return SignalStrength.WEAK
+        return SignalStrength.VERY_WEAK
+
+    def _signal_direction(self, signal: TradingSignal) -> int:
+        """Return +1 for long, -1 for short, 0 otherwise."""
+        st = signal.signal_type
+        if hasattr(st, "value"):
+            st_val = st.value
+        else:
+            st_val = str(st)
+        st_val = str(st_val).lower()
+        if st_val in ("long_entry", "buy", "increase_long", "long"):
+            return 1
+        if st_val in ("short_entry", "sell", "increase_short", "short"):
+            return -1
+        return 0
+
+    def _compute_decorrelation_beta(self, symbol: str, mom_strength: float, mr_strength: float) -> float:
+        """Compute rolling beta for MR vs MOM strengths."""
+        history = self._hybrid_strength_history.get(symbol, [])
+        history = history[-50:]  # cap window
+        if len(history) < 5:
+            return 0.0
+        moms = [pair[0] for pair in history]
+        mrs = [pair[1] for pair in history]
+        mom_mean = sum(moms) / len(moms)
+        mr_mean = sum(mrs) / len(mrs)
+        cov = sum((m - mom_mean) * (r - mr_mean) for m, r in zip(moms, mrs)) / max(1, len(moms) - 1)
+        var = sum((m - mom_mean) ** 2 for m in moms) / max(1, len(moms) - 1)
+        if abs(var) < 1e-9:
+            return 0.0
+        return float(cov / var)
+
+    def _update_strength_history(self, symbol: str, mom_strength: float, mr_strength: float) -> None:
+        """Track recent MOM/MR strength pairs for decorrelation and covariance."""
+        history = self._hybrid_strength_history.setdefault(symbol, [])
+        history.append((float(mom_strength), float(mr_strength)))
+        if len(history) > 200:
+            del history[: len(history) - 200]
+
+    def _recombine_mom_mr_signals(
+        self,
+        symbol: str,
+        symbol_signals: List[TradingSignal],
+        regime_info: Dict[str, Any]
+    ) -> Optional[TradingSignal]:
+        """Recombine MOM/MR signals for a symbol into a single hybrid signal."""
+        if not self.hybrid_config.enable_hybrid_recombination:
+            return None
+
+        mom_candidates = []
+        mr_candidates = []
+        for signal in symbol_signals:
+            source = signal.metadata.get("signal_source") if isinstance(signal.metadata, dict) else None
+            if source == "momentum" or signal.strategy_type == StrategyType.MOMENTUM:
+                mom_candidates.append(signal)
+            elif source == "mean_reversion" or signal.strategy_type == StrategyType.MEAN_REVERSION:
+                mr_candidates.append(signal)
+
+        if not mom_candidates or not mr_candidates:
+            return None
+
+        mom_signal = max(mom_candidates, key=lambda s: s.confidence)
+        mr_signal = max(mr_candidates, key=lambda s: s.confidence)
+
+        mom_dir = self._signal_direction(mom_signal)
+        mr_dir = self._signal_direction(mr_signal)
+        if mom_dir == 0 or mr_dir == 0:
+            return None
+
+        mom_strength = mom_signal.metadata.get(
+            "volatility_normalized_strength",
+            self._strength_to_float(mom_signal.strength)
+        )
+        mr_strength = mr_signal.metadata.get(
+            "volatility_normalized_strength",
+            self._strength_to_float(mr_signal.strength)
+        )
+
+        mom_hold = mom_signal.metadata.get("expected_holding_period", self.hybrid_config.expected_holding_period_mom)
+        mr_hold = mr_signal.metadata.get("expected_holding_period", self.hybrid_config.expected_holding_period_mr)
+        mom_strength = float(mom_strength) / max(1.0, float(mom_hold)) ** 0.5
+        mr_strength = float(mr_strength) / max(1.0, float(mr_hold)) ** 0.5
+
+        # Decorrelation (orthogonalize MR to MOM)
+        beta = self._compute_decorrelation_beta(symbol, mom_strength, mr_strength)
+        mr_strength = float(mr_strength) - float(beta) * float(mom_strength)
+
+        context = {
+            "regime": regime_info.get("regime", "unknown"),
+            "regime_probabilities": regime_info.get("regime_probabilities"),
+            "regime_weight_map": self.hybrid_config.regime_weight_map,
+            "mom_base_weight": self.hybrid_config.mom_base_weight,
+            "mr_base_weight": self.hybrid_config.mr_base_weight,
+            "weight_min": self.hybrid_config.weight_min,
+            "weight_max": self.hybrid_config.weight_max,
+            "weight_stability_threshold": self.hybrid_config.weight_stability_threshold,
+            "rolling_sharpe_window": self.hybrid_config.rolling_sharpe_window,
+            "use_probabilistic_regime": self.hybrid_config.use_probabilistic_regime,
+            "use_covariance_blend": self.hybrid_config.use_covariance_blend,
+            "strategy_performance": self.strategy_performance,
+            "previous_weights": self._hybrid_weight_cache.get(symbol),
+        }
+
+        # Covariance-aware inputs (from rolling strength history)
+        history = self._hybrid_strength_history.get(symbol, [])
+        if len(history) >= 30:
+            moms = [p[0] for p in history]
+            mrs = [p[1] for p in history]
+            mom_mean = sum(moms) / len(moms)
+            mr_mean = sum(mrs) / len(mrs)
+            cov_mm = sum((m - mom_mean) ** 2 for m in moms) / max(1, len(moms) - 1)
+            cov_rr = sum((r - mr_mean) ** 2 for r in mrs) / max(1, len(mrs) - 1)
+            cov_mr = sum((m - mom_mean) * (r - mr_mean) for m, r in zip(moms, mrs)) / max(1, len(moms) - 1)
+            context["covariance_matrix"] = [[cov_mm, cov_mr], [cov_mr, cov_rr]]
+            context["expected_returns"] = [mom_mean, mr_mean]
+
+        weights = self.signal_combiner.calculate_hybrid_weights(mom_signal, mr_signal, context)
+        mom_w = float(weights.get("mom_weight", 0.5))
+        mr_w = float(weights.get("mr_weight", 0.5))
+
+        combined_confidence = (mom_signal.confidence * mom_w) + (mr_signal.confidence * mr_w)
+        conflict_detected = mom_dir != mr_dir
+        conflict_penalty_applied = 0.0
+        if conflict_detected:
+            denom = max(abs(mom_strength), abs(mr_strength), 1e-6)
+            disagreement = min(abs(mom_strength), abs(mr_strength)) / denom
+            conflict_penalty_applied = float(self.hybrid_config.conflict_penalty_factor) * disagreement
+            combined_confidence *= max(0.0, 1.0 - conflict_penalty_applied)
+
+        combined_strength = (mom_strength * mom_w) + (mr_strength * mr_w)
+        if abs(combined_strength) < 1e-3:
+            return None
+
+        combined_direction = SignalType.LONG_ENTRY if combined_strength >= 0 else SignalType.SHORT_ENTRY
+        strength_enum = self._strength_enum_from_value(combined_strength)
+
+        target_weight = None
+        if mom_signal.target_weight is not None or mr_signal.target_weight is not None:
+            mom_tw = float(mom_signal.target_weight or 0.0)
+            mr_tw = float(mr_signal.target_weight or 0.0)
+            target_weight = (mom_tw * mom_w) + (mr_tw * mr_w)
+
+        hybrid_signal = TradingSignal(
+            signal_id=str(uuid.uuid4()),
+            strategy_name="hybrid_mom_mr",
+            strategy_type=StrategyType.MULTI_FACTOR,
+            symbol=symbol,
+            signal_type=combined_direction,
+            strength=strength_enum,
+            confidence=float(combined_confidence),
+            expected_return=(mom_signal.expected_return * mom_w) + (mr_signal.expected_return * mr_w),
+            risk_score=(mom_signal.risk_score * mom_w) + (mr_signal.risk_score * mr_w),
+            quantity=0.0,
+            target_weight=target_weight,
+            quantity_type="PERCENTAGE" if target_weight is not None else "ABSOLUTE",
+            target_price=mom_signal.target_price or mr_signal.target_price,
+            stop_loss=mom_signal.stop_loss or mr_signal.stop_loss,
+            take_profit=mom_signal.take_profit or mr_signal.take_profit,
+            metadata={
+                "signal_source": "hybrid_mom_mr",
+                "mom_contribution": mom_strength * mom_w,
+                "mr_contribution": mr_strength * mr_w,
+                "regime_used": regime_info.get("regime", "unknown"),
+                "covariance_blend_used": bool(self.hybrid_config.use_covariance_blend),
+                "conflict_detected": conflict_detected,
+                "conflict_penalty_applied": conflict_penalty_applied,
+                "decorrelation_beta": beta,
+                "weights": {"mom": mom_w, "mr": mr_w},
+            }
+        )
+
+        self._update_strength_history(symbol, mom_strength, mr_strength)
+        self._hybrid_weight_cache[symbol] = {"mom_weight": mom_w, "mr_weight": mr_w}
+        return hybrid_signal
+
     async def _aggregate_signals_enhanced(self, signals: List[TradingSignal],
                                         regime_info: Dict[str, Any]) -> List[TradingSignal]:
         """Enhanced signal aggregation with regime weighting"""
@@ -2114,6 +2340,22 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         regime_weights = regime_info.get('strategy_weights', {})
 
         for symbol, symbol_signal_list in symbol_signals.items():
+            # Hybrid MOM/MR recombination (optional)
+            hybrid_signal = self._recombine_mom_mr_signals(symbol, symbol_signal_list, regime_info)
+            if hybrid_signal is not None:
+                non_mom_mr = []
+                for s in symbol_signal_list:
+                    source = s.metadata.get("signal_source") if isinstance(s.metadata, dict) else None
+                    if source in ("momentum", "mean_reversion"):
+                        continue
+                    if s.strategy_type in (StrategyType.MOMENTUM, StrategyType.MEAN_REVERSION):
+                        continue
+                    non_mom_mr.append(s)
+                if self.hybrid_config.hybrid_only:
+                    symbol_signal_list = [hybrid_signal]
+                else:
+                    symbol_signal_list = non_mom_mr + [hybrid_signal]
+
             if len(symbol_signal_list) == 1:
                 # Single signal - apply regime weighting (but don't penalize below threshold)
                 signal = symbol_signal_list[0]

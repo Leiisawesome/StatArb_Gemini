@@ -992,6 +992,15 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
                 'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
             }
+            additional_data.update(
+                self._build_hybrid_metadata(
+                    signal_source="mean_reversion",
+                    strength=float(strength),
+                    side=str(signal_type.value),
+                    data_row=current_row if isinstance(current_row, pd.Series) else None,
+                    ads_r=ads_r,
+                )
+            )
 
             # Add available indicators to additional_data
             for indicator in ['rsi', 'bb_position', 'volume_ratio', 'adx', 'macd_histogram']:
@@ -1080,6 +1089,44 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         # Final clip to strategy max
         max_tw = float(getattr(self.config, "max_position_pct", base_weight * 1.5) or base_weight * 1.5)
         return float(np.clip(weight, 0.0, max_tw))
+
+    def _build_hybrid_metadata(
+        self,
+        *,
+        signal_source: str,
+        strength: float,
+        side: Optional[str] = None,
+        data_row: Optional[pd.Series] = None,
+        ads_r: Optional[ADSRegimeVector] = None
+    ) -> Dict[str, Any]:
+        """
+        Build standardized metadata for MOM/MR recombination.
+        """
+        expected_holding = int(getattr(self.config, "expected_holding_period_bars", 2) or 2)
+
+        volatility_norm = float(strength)
+        if data_row is not None:
+            atr_pct = data_row.get("atr_percentile", None)
+            if atr_pct is not None and not pd.isna(atr_pct):
+                pct = max(0.0, min(1.0, float(atr_pct)))
+                volatility_norm = float(strength) * (1.0 - pct)
+
+        regime_alignment = None
+        if ads_r is not None:
+            trend = float(getattr(ads_r, "trend", 0.0))
+            if side in ("BUY", "LONG_ENTRY", "LONG"):
+                regime_alignment = max(0.0, trend)
+            elif side in ("SELL", "SHORT", "SHORT_ENTRY"):
+                regime_alignment = max(0.0, -trend)
+            else:
+                regime_alignment = abs(trend)
+
+        return {
+            "signal_source": signal_source,
+            "expected_holding_period": expected_holding,
+            "volatility_normalized_strength": volatility_norm,
+            "regime_alignment_score": regime_alignment,
+        }
 
     def _get_ads_regime_vector(self, symbol: str) -> Tuple[ADSRegimeVector, Dict[str, Any]]:
         """
@@ -1257,6 +1304,16 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
             'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
         }
+        row = data.iloc[idx] if idx < len(data) else None
+        additional_data.update(
+            self._build_hybrid_metadata(
+                signal_source="mean_reversion",
+                strength=min(float(ctx.raw_signal_strength) / 3.0, 1.0),
+                side="LONG_ENTRY",
+                data_row=row if isinstance(row, pd.Series) else None,
+                ads_r=ads_r,
+            )
+        )
 
         timestamp = data.iloc[idx].get('timestamp', datetime.now()) if isinstance(data.iloc[idx], pd.Series) else datetime.now()
         return StrategySignal(

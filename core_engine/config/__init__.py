@@ -96,6 +96,7 @@ from .strategies import (
     StrategyType,
     BaseStrategyConfig,
     StrategyConfig,  # Backward compatibility alias
+    HybridRecombinationConfig,
     MomentumConfig,
     MeanReversionConfig,
     StatisticalArbitrageConfig,
@@ -149,6 +150,7 @@ __all__ = [
 
     # Strategies
     'StrategyType', 'BaseStrategyConfig', 'StrategyConfig',
+    'HybridRecombinationConfig',
     'MomentumConfig', 'MeanReversionConfig', 'StatisticalArbitrageConfig',
     'FactorConfig', 'MultiAssetConfig',
     'PairsConfig', 'VolatilityConfig', 'ArbitrageConfig',

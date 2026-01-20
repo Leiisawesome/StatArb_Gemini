@@ -1314,6 +1314,121 @@ class SignalCombiner:
 
         return scaled_confidence
 
+    def calculate_hybrid_weights(
+        self,
+        mom_signal: Any,
+        mr_signal: Any,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, float]:
+        """
+        Calculate MOM/MR weights for hybrid recombination using regime, bounds,
+        and rolling performance adjustments.
+        """
+        context = context or {}
+
+        mom_base = float(context.get("mom_base_weight", 0.5))
+        mr_base = float(context.get("mr_base_weight", 0.5))
+        base_sum = mom_base + mr_base
+        if base_sum <= 0:
+            mom_base, mr_base = 0.5, 0.5
+            base_sum = 1.0
+        mom_base /= base_sum
+        mr_base /= base_sum
+
+        weight_min = float(context.get("weight_min", 0.2))
+        weight_max = float(context.get("weight_max", 0.8))
+        stability_threshold = float(context.get("weight_stability_threshold", 0.05))
+
+        regime_weight_map = context.get("regime_weight_map") or {"unknown": (0.5, 0.5)}
+        use_prob = bool(context.get("use_probabilistic_regime", True))
+        regime_prob = context.get("regime_probabilities")
+
+        if use_prob and isinstance(regime_prob, dict) and regime_prob:
+            mom_regime = 0.0
+            mr_regime = 0.0
+            total_p = 0.0
+            for regime_key, prob in regime_prob.items():
+                weights = regime_weight_map.get(regime_key, regime_weight_map.get("unknown", (0.5, 0.5)))
+                mom_regime += float(prob) * float(weights[0])
+                mr_regime += float(prob) * float(weights[1])
+                total_p += float(prob)
+            if total_p > 0:
+                mom_regime /= total_p
+                mr_regime /= total_p
+            else:
+                mom_regime, mr_regime = mom_base, mr_base
+        else:
+            regime = context.get("regime", "unknown")
+            mom_regime, mr_regime = regime_weight_map.get(regime, regime_weight_map.get("unknown", (mom_base, mr_base)))
+            mom_regime = float(mom_regime)
+            mr_regime = float(mr_regime)
+            total_reg = mom_regime + mr_regime
+            if total_reg > 0:
+                mom_regime /= total_reg
+                mr_regime /= total_reg
+
+        # Blend base and regime weights
+        mom_w = 0.5 * mom_base + 0.5 * mom_regime
+        mr_w = 0.5 * mr_base + 0.5 * mr_regime
+
+        # Rolling performance adjustment (Sharpe)
+        perf = context.get("strategy_performance", {}) if isinstance(context.get("strategy_performance", {}), dict) else {}
+        mom_perf = perf.get("momentum", perf.get("Momentum", {}))
+        mr_perf = perf.get("mean_reversion", perf.get("MeanReversion", {}))
+        mom_sharpe = float(mom_perf.get("sharpe_ratio", 0.0)) if isinstance(mom_perf, dict) else 0.0
+        mr_sharpe = float(mr_perf.get("sharpe_ratio", 0.0)) if isinstance(mr_perf, dict) else 0.0
+        avg_sharpe = (mom_sharpe + mr_sharpe) / 2.0 if (mom_sharpe or mr_sharpe) else 0.0
+        if avg_sharpe != 0.0:
+            adapt_rate = 0.1
+            mom_w *= (1.0 + ((mom_sharpe - avg_sharpe) / abs(avg_sharpe)) * adapt_rate)
+            mr_w *= (1.0 + ((mr_sharpe - avg_sharpe) / abs(avg_sharpe)) * adapt_rate)
+
+        # Covariance-aware blend (optional if provided)
+        if bool(context.get("use_covariance_blend", False)):
+            cov = context.get("covariance_matrix")
+            mu = context.get("expected_returns")
+            if cov is not None and mu is not None:
+                try:
+                    import numpy as np
+                    cov_m = np.array(cov, dtype=float)
+                    mu_v = np.array(mu, dtype=float)
+                    inv = np.linalg.pinv(cov_m)
+                    w = inv.dot(mu_v)
+                    denom = float(np.sum(w)) if np.sum(w) != 0 else 1.0
+                    w = w / denom
+                    mom_w = float(w[0])
+                    mr_w = float(w[1])
+                except Exception:
+                    pass
+
+        # Normalize and apply bounds
+        total = mom_w + mr_w
+        if total <= 0:
+            mom_w, mr_w = 0.5, 0.5
+        else:
+            mom_w /= total
+            mr_w /= total
+
+        mom_w = max(weight_min, min(weight_max, mom_w))
+        mr_w = max(weight_min, min(weight_max, mr_w))
+
+        # Re-normalize after bounds
+        total = mom_w + mr_w
+        mom_w /= total
+        mr_w /= total
+
+        prev = context.get("previous_weights")
+        if isinstance(prev, dict):
+            prev_mom = float(prev.get("mom_weight", mom_w))
+            prev_mr = float(prev.get("mr_weight", mr_w))
+            if abs(mom_w - prev_mom) < stability_threshold and abs(mr_w - prev_mr) < stability_threshold:
+                mom_w, mr_w = prev_mom, prev_mr
+
+        return {
+            "mom_weight": mom_w,
+            "mr_weight": mr_w,
+        }
+
     def _select_best_signals(self, signals: List[Any], max_signals: int) -> List[Any]:
         """Select best signals when there are too many"""
 

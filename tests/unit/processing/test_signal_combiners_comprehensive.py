@@ -1677,3 +1677,51 @@ class TestAdvancedSignalCombining:
         # Check that performance metrics are tracked
         assert combiner.performance_metrics['combinations_performed'] > 0
         assert combiner.performance_metrics['avg_combination_time'] > 0
+
+
+class TestSignalCombinerHybridWeights:
+    """Test hybrid MOM/MR weight calculation"""
+
+    @pytest.fixture
+    def combiner(self):
+        return SignalCombiner()
+
+    @pytest.fixture
+    def mock_mom_mr_signals(self):
+        mom = Mock()
+        mom.metadata = {"signal_source": "momentum"}
+        mr = Mock()
+        mr.metadata = {"signal_source": "mean_reversion"}
+        return mom, mr
+
+    def test_calculate_hybrid_weights_default(self, combiner, mock_mom_mr_signals):
+        mom, mr = mock_mom_mr_signals
+        weights = combiner.calculate_hybrid_weights(mom, mr, {})
+        assert pytest.approx(weights["mom_weight"], rel=1e-6) == 0.5
+        assert pytest.approx(weights["mr_weight"], rel=1e-6) == 0.5
+
+    def test_calculate_hybrid_weights_probabilistic_regime(self, combiner, mock_mom_mr_signals):
+        mom, mr = mock_mom_mr_signals
+        context = {
+            "use_probabilistic_regime": True,
+            "regime_probabilities": {"trending": 0.8, "range_bound": 0.2},
+            "regime_weight_map": {
+                "trending": (0.7, 0.3),
+                "range_bound": (0.3, 0.7),
+                "unknown": (0.5, 0.5),
+            },
+        }
+        weights = combiner.calculate_hybrid_weights(mom, mr, context)
+        assert weights["mom_weight"] > weights["mr_weight"]
+
+    def test_calculate_hybrid_weights_stability_threshold(self, combiner, mock_mom_mr_signals):
+        mom, mr = mock_mom_mr_signals
+        context = {
+            "mom_base_weight": 0.52,
+            "mr_base_weight": 0.48,
+            "weight_stability_threshold": 0.1,
+            "previous_weights": {"mom_weight": 0.6, "mr_weight": 0.4},
+        }
+        weights = combiner.calculate_hybrid_weights(mom, mr, context)
+        assert pytest.approx(weights["mom_weight"], rel=1e-6) == 0.6
+        assert pytest.approx(weights["mr_weight"], rel=1e-6) == 0.4
