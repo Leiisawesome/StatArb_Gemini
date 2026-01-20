@@ -650,6 +650,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Volume features
         df = self._create_volume_features(df)
 
+        # Transaction features
+        df = self._create_transaction_features(df)
+
         # Technical indicator features
         df = self._create_indicator_features(df)
 
@@ -1043,6 +1046,48 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
         return df
 
+    def _create_transaction_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create transaction-based features with safe fallbacks."""
+        if not getattr(self.config, "enable_txn_features", True):
+            return df
+
+        if 'transactions' not in df.columns:
+            self.logger.warning("Transactions column missing; skipping transaction features")
+            return df
+
+        new_columns = {}
+        txn_sma_period = int(getattr(self.config, "txn_sma_period", 20))
+        txn_ratio_clip = float(getattr(self.config, "txn_ratio_clip", 5.0))
+
+        transactions = pd.to_numeric(df['transactions'], errors='coerce').fillna(0.0)
+        txn_sma = transactions.rolling(txn_sma_period).mean()
+        txn_sma_safe = txn_sma.where(txn_sma >= 1e-6, 1e-6)
+
+        txn_ratio = transactions / txn_sma_safe
+        txn_ratio = txn_ratio.clip(upper=txn_ratio_clip)
+        txn_ratio = txn_ratio.where(transactions > 0, 1.0).fillna(1.0)
+
+        new_columns['txn_sma'] = txn_sma
+        new_columns['txn_ratio'] = txn_ratio
+
+        avg_trade_size = pd.to_numeric(df.get('volume', 0.0), errors='coerce').fillna(0.0) / transactions.clip(lower=1.0)
+        avg_trade_size_sma = avg_trade_size.rolling(txn_sma_period).mean()
+        avg_trade_size_sma_safe = avg_trade_size_sma.where(avg_trade_size_sma >= 1e-6, 1e-6)
+
+        new_columns['avg_trade_size'] = avg_trade_size
+        new_columns['avg_trade_size_sma'] = avg_trade_size_sma
+        new_columns['avg_trade_size_ratio'] = (avg_trade_size / avg_trade_size_sma_safe).fillna(1.0)
+
+        new_columns['txn_momentum'] = txn_ratio.pct_change(fill_method=None).fillna(0.0)
+
+        if 'volume_ratio' in df.columns:
+            new_columns['txn_volume_divergence'] = (txn_ratio - df['volume_ratio']).fillna(0.0)
+        else:
+            new_columns['txn_volume_divergence'] = 0.0
+
+        df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+        return df
+
     def _create_indicator_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Create features from technical indicators with minimal fragmentation (Hotspot 1)"""
         new_columns = {}
@@ -1179,7 +1224,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         vectorized transforms (Hotspot 2).
         """
         # Key features for cross-sectional analysis
-        cs_features = ['return_1d', 'rsi', 'volume_ratio', 'atr_normalized']
+        cs_features = ['return_1d', 'rsi', 'volume_ratio', 'atr_normalized', 'txn_ratio']
         new_columns = {}
         
         # Check if we actually have multiple symbols to rank
@@ -1235,7 +1280,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         CRITICAL: Preserve raw trading indicators for signal generation
         """
         # Identify feature columns (exclude metadata AND core trading indicators)
-        metadata_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']
+        metadata_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'transactions']
 
         # CRITICAL: Preserve core trading indicators that strategies need
         # Use actual column names from indicators engine
@@ -1253,7 +1298,11 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         ]
 
         # Columns to preserve (don't normalize)
-        preserve_cols = metadata_cols + trading_indicators
+        preserve_cols = metadata_cols + trading_indicators + [
+            'txn_sma',
+            'avg_trade_size',
+            'avg_trade_size_sma'
+        ]
 
         # Only normalize derived features, not core trading indicators
         feature_cols = [col for col in df.columns

@@ -287,6 +287,37 @@ class TestFeatureMethods:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == len(sample_data)
 
+    def test_transaction_feature_creation(self, engineer):
+        """Test transaction feature creation and fallbacks"""
+        engineer.config.use_normalization = False
+        timestamps = pd.date_range(start='2024-01-01', periods=3, freq='1min')
+        df = pd.DataFrame({
+            'timestamp': list(timestamps) * 2,
+            'symbol': ['AAA'] * 3 + ['BBB'] * 3,
+            'open': [100, 101, 102, 200, 201, 202],
+            'high': [101, 102, 103, 201, 202, 203],
+            'low': [99, 100, 101, 199, 200, 201],
+            'close': [100, 101, 102, 200, 201, 202],
+            'volume': [1000, 1100, 900, 1500, 1600, 1400],
+            'transactions': [10, 0, 12, 20, 25, 0]
+        })
+
+        result = engineer.create_features(df)
+
+        for col in [
+            'txn_sma',
+            'txn_ratio',
+            'txn_ratio_cs_rank',
+            'avg_trade_size',
+            'avg_trade_size_ratio',
+            'txn_momentum',
+            'txn_volume_divergence'
+        ]:
+            assert col in result.columns
+
+        zero_txn_mask = result['transactions'] <= 0
+        assert (result.loc[zero_txn_mask, 'txn_ratio'] == 1.0).all()
+
     def test_process_indicators(self, engineer):
         """Test process_indicators method"""
         sample_data = pd.DataFrame({

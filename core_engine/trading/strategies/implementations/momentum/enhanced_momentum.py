@@ -349,7 +349,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 "ads_regime_vector": ads_ctx["ads_regime_vector"],
                 "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
                 "ads_diag": ads_ctx["ads_diag"],
-                "ads_fallbacks": {"ofi_source": "proxy_volume_ratio", "bb_missing": True},
+                "ads_fallbacks": {"ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"), "bb_missing": True},
+                "txn_ratio": ads_ctx.get("txn_ratio"),
+                "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
+                "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
+                "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
+                "txn_flow_source": ads_ctx.get("txn_flow_source"),
             }
             if ctx.bayes_sms is not None:
                 additional_data.update(
@@ -812,10 +817,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                                 "ads_regime_vector": ads_ctx["ads_regime_vector"],
                                 "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
                                 "ads_diag": ads_diag,
-                                "ofi_source": "proxy_volume_ratio",
+                                "ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"),
                                 "bb_missing": True,
                                 "composite_z": ads_ctx["composite_z"],
                                 "composite_pct": ads_ctx["composite_pct"],
+                                "txn_ratio": ads_ctx.get("txn_ratio"),
+                                "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
+                                "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
+                                "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
                                 "sms_inputs": {
                                     "setup_maturity": float(ads_ctx["setup_maturity"]),
                                     "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
@@ -854,10 +863,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                                 "ads_regime_vector": ads_ctx["ads_regime_vector"],
                                 "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
                                 "ads_diag": ads_diag,
-                                "ofi_source": "proxy_volume_ratio",
+                                "ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"),
                                 "bb_missing": True,
                                 "composite_z": ads_ctx["composite_z"],
                                 "composite_pct": ads_ctx["composite_pct"],
+                                "txn_ratio": ads_ctx.get("txn_ratio"),
+                                "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
+                                "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
+                                "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
                                 "sms_inputs": {
                                     "setup_maturity": float(ads_ctx["setup_maturity"]),
                                     "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
@@ -911,12 +924,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'ads_regime_vector': ads_ctx['ads_regime_vector'],
                             'ads_fallbacks_used': ads_ctx['ads_fallbacks_used'],
                             'ads_diag': ads_diag,
-                            'ads_fallbacks': {'ofi_source': 'proxy_volume_ratio', 'bb_missing': True},
+                            'ads_fallbacks': {'ofi_source': ads_ctx.get("txn_flow_source", "proxy_volume_ratio"), 'bb_missing': True},
                             'short_momentum': short_momentum,
                             'medium_momentum': medium_momentum,
                             'long_momentum': long_momentum,
                             'adx': adx,
                             'volume_ratio': volume_ratio,
+                            'txn_ratio': ads_ctx.get("txn_ratio"),
+                            'txn_ratio_cs_rank': ads_ctx.get("txn_ratio_cs_rank"),
+                            'avg_trade_size_ratio': ads_ctx.get("avg_trade_size_ratio"),
+                            'txn_volume_divergence': ads_ctx.get("txn_volume_divergence"),
+                            'txn_flow_source': ads_ctx.get("txn_flow_source"),
                             'entry_price': current_data['close'] if isinstance(current_data, pd.Series) else current_data.get('close', 0),
                             'bar_index': idx
                         }
@@ -1245,6 +1263,17 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             volume_ratio = indicators['volume_ratio'].iloc[-1] if len(indicators['volume_ratio']) > 0 else 1
             volume_confidence = min(volume_ratio / self.config.volume_threshold, 1.0)
 
+            txn_bonus = 0.0
+            if bool(getattr(self.config, "enable_transactions_confirm", False)) and symbol in self.market_data:
+                try:
+                    latest_row = self.market_data[symbol].iloc[-1]
+                    txn_ratio = float(latest_row.get("txn_ratio", 1.0))
+                    avg_size_ratio = float(latest_row.get("avg_trade_size_ratio", 1.0))
+                    if txn_ratio > 1.3 and avg_size_ratio < 1.0:
+                        txn_bonus = 0.05
+                except Exception:
+                    txn_bonus = 0.0
+
             # Momentum acceleration confidence - use configurable scaling factor from centralized config (Rule 1)
             acceleration = momentum.get('momentum_acceleration', 0)
             if signal_type in [MomentumSignal.BULLISH_MOMENTUM]:
@@ -1271,7 +1300,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             if trend_strength > 0:
                 conditions_met_bonus += 0.05  # Trend strength condition met
 
-            total_confidence = min(base_confidence + conditions_met_bonus, 0.95)
+            total_confidence = min(base_confidence + conditions_met_bonus + txn_bonus, 0.95)
 
             return total_confidence
 
@@ -1444,8 +1473,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # Flow support proxy (signed by intended direction)
         vol_ratio = float(row.get("volume_ratio", 1.0))
         sign = 1.0 if side == "BUY" else -1.0
-        signed_flow_support = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
         flow_source = "proxy_volume_ratio"
+        signed_flow_support = float(np.clip((vol_ratio - 1.0) * sign, -1.0, 1.0))
+
+        if bool(getattr(self.config, "enable_txn_sms_flow_blend", False)):
+            txn_ratio = float(row.get("txn_ratio", 1.0))
+            w = float(getattr(self.config, "txn_sms_flow_weight", 0.3))
+            blended_ratio = (1.0 - w) * vol_ratio + w * txn_ratio
+            signed_flow_support = float(np.clip((blended_ratio - 1.0) * sign, -1.0, 1.0))
+            flow_source = "blended_vol_txn"
 
         # Volatility compression (SSOT): VC = σ_short / σ_long
         vol_comp = 1.0
@@ -1529,7 +1565,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             "ads_regime_vector_obj": ads_r,
             "ads_fallbacks_used": thresholds.get("ads_fallbacks_used", []),
             "ads_diag": thresholds.get("ads_diag", {}),
-            "thresholds": thresholds
+            "thresholds": thresholds,
+            "txn_ratio": float(row.get("txn_ratio", 1.0)),
+            "txn_ratio_cs_rank": float(row.get("txn_ratio_cs_rank", 0.5)),
+            "avg_trade_size_ratio": float(row.get("avg_trade_size_ratio", 1.0)),
+            "txn_volume_divergence": float(row.get("txn_volume_divergence", 0.0)),
+            "txn_flow_source": flow_source,
         }
 
     # ========================================
@@ -1666,6 +1707,27 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             )
             if not structure_confirms_short:
                 # Avoid per-bar debug logging inside alpha.
+                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
+
+        # Transaction-based confirmation (optional)
+        if bool(getattr(self.config, "enable_transactions_confirm", False)):
+            txn_ratio = float(current_bar.get("txn_ratio", 1.0))
+            txn_rank = float(current_bar.get("txn_ratio_cs_rank", 0.5))
+            avg_size_ratio = float(current_bar.get("avg_trade_size_ratio", 1.0))
+            txn_ratio_min = float(getattr(self.config, "txn_ratio_min", 1.1))
+            txn_rank_min = float(getattr(self.config, "txn_rank_min", 0.7))
+            avg_size_ratio_max = float(getattr(self.config, "avg_trade_size_ratio_max", 2.0))
+
+            if txn_ratio < txn_ratio_min:
+                long_condition_met = False
+                short_condition_met = False
+
+            if txn_rank < txn_rank_min:
+                long_condition_met = long_condition_met and composite_z > long_threshold * 1.1
+                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.1
+
+            if avg_size_ratio > avg_size_ratio_max:
+                long_condition_met = long_condition_met and composite_z > long_threshold * 1.2
                 short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
 
         if long_condition_met:

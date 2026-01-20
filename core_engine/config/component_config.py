@@ -771,6 +771,16 @@ class FeatureConfig:
     enable_caching: bool = True
     """Enable feature caching. Default: True"""
 
+    # Transaction features
+    enable_txn_features: bool = True
+    """Enable transaction-based features. Default: True"""
+
+    txn_sma_period: int = 20
+    """Rolling period for transactions SMA. Default: 20"""
+
+    txn_ratio_clip: float = 5.0
+    """Max clip for txn_ratio to avoid outliers. Default: 5.0"""
+
 @dataclass
 class SignalConfig:
     """

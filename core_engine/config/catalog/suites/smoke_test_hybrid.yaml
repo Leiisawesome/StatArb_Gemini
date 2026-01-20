@@ -10,7 +10,7 @@
 papertest:
   data:
     symbols: ["TSLA"]
-    start_date: "2024-12-16"
+    start_date: "2024-12-18"
     end_date: "2024-12-20"
     interval: "1min"
     replay_speed: "FAST_1000X"

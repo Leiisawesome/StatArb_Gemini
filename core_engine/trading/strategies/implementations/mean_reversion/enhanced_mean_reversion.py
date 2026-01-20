@@ -512,7 +512,15 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             )
 
             # Order flow imbalance shift (use volume ratio as proxy)
-            ofi_shift = (volume_ratio - 1.0) * -0.5 if is_oversold else (volume_ratio - 1.0) * 0.5
+            flow_source = "proxy_volume_ratio"
+            ratio_for_flow = volume_ratio
+            if bool(getattr(self.config, "enable_txn_sms_flow_blend", False)) and "txn_ratio" in data.columns:
+                txn_ratio = self._get_indicator_value(data, 'txn_ratio', idx, default=1.0)
+                w = float(getattr(self.config, "txn_sms_flow_weight", 0.3))
+                ratio_for_flow = (1.0 - w) * volume_ratio + w * txn_ratio
+                flow_source = "blended_vol_txn"
+
+            ofi_shift = (ratio_for_flow - 1.0) * -0.5 if is_oversold else (ratio_for_flow - 1.0) * 0.5
             ofi_shift = np.clip(ofi_shift, -1.0, 1.0)
             ofi_proxy_used = True  # current strategy uses volume_ratio proxy
 
@@ -536,7 +544,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                 setup_validity_prob=float(reversal_prob),
                 signed_flow_support=float(ofi_shift),
                 vol_compression=float(vol_compression),
-                flow_source="proxy_volume_ratio",
+                flow_source=flow_source,
                 diagnostics={"ofi_proxy_used": ofi_proxy_used, "bb_missing": bb_missing},
             )
             sms = SignalMaturityScore.from_inputs(
@@ -623,10 +631,14 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                         'ads_fallbacks_used': ads_diag.get('used', []),
                         'ads_tau': sms_threshold_dyn,
                         'ads_tau_reason': 'confidence_below_threshold' if confidence < min_conf else 'sms_below_tau',
-                        'ofi_source': 'proxy_volume_ratio',
+                        'ofi_source': flow_source,
                         'bb_missing': bb_missing,
                         'sms_score': float(sms_score),
                         'confidence': float(confidence),
+                        'txn_ratio': self._get_indicator_value(data, 'txn_ratio', idx, default=1.0),
+                        'txn_ratio_cs_rank': self._get_indicator_value(data, 'txn_ratio_cs_rank', idx, default=0.5),
+                        'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
+                        'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
                     }
                 )
                 self.pending_signals.add(ctx)
@@ -718,9 +730,13 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                                 'ads_tau_reason': 'erar_below_gamma',
                                 'ads_erar': float(erar_score),
                                 'ads_erar_gamma': float(erar_gamma),
-                                'ofi_source': 'proxy_volume_ratio',
+                                'ofi_source': flow_source,
                                 'bb_missing': bb_missing,
                                 'sms_score': float(sms_score),
+                                'txn_ratio': self._get_indicator_value(data, 'txn_ratio', idx, default=1.0),
+                                'txn_ratio_cs_rank': self._get_indicator_value(data, 'txn_ratio_cs_rank', idx, default=0.5),
+                                'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
+                                'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
                                 'confidence': float(confidence),
                             }
                         )
@@ -969,8 +985,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
                     'd_microstructure': ads_r.d_microstructure,
                 },
                 'ads_fallbacks_used': ads_diag.get('used', []),
-                'ofi_source': 'proxy_volume_ratio',
+                'ofi_source': flow_source,
                 'bb_missing': bb_missing,
+                'txn_ratio': self._get_indicator_value(data, 'txn_ratio', idx, default=1.0),
+                'txn_ratio_cs_rank': self._get_indicator_value(data, 'txn_ratio_cs_rank', idx, default=0.5),
+                'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
+                'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
             }
 
             # Add available indicators to additional_data
@@ -1131,7 +1151,15 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         else:
             vol_compression = 1.0
 
-        ofi_shift = (volume_ratio - 1.0) * -0.5
+        flow_source = "proxy_volume_ratio"
+        ratio_for_flow = volume_ratio
+        if bool(getattr(self.config, "enable_txn_sms_flow_blend", False)) and "txn_ratio" in data.columns:
+            txn_ratio = self._get_indicator_value(data, 'txn_ratio', idx, default=1.0)
+            w = float(getattr(self.config, "txn_sms_flow_weight", 0.3))
+            ratio_for_flow = (1.0 - w) * volume_ratio + w * txn_ratio
+            flow_source = "blended_vol_txn"
+
+        ofi_shift = (ratio_for_flow - 1.0) * -0.5
         ofi_shift = float(np.clip(ofi_shift, -1.0, 1.0))
 
         ctx.sms.exhaustion = exhaustion
@@ -1222,8 +1250,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             },
             'ads_fallbacks_used': ads_diag.get('used', []),
             'pending_bars': ctx.sms.pending_bars,
-            'ofi_source': 'proxy_volume_ratio',
+            'ofi_source': flow_source,
             'bb_missing': bb_missing,
+            'txn_ratio': self._get_indicator_value(data, 'txn_ratio', idx, default=1.0),
+            'txn_ratio_cs_rank': self._get_indicator_value(data, 'txn_ratio_cs_rank', idx, default=0.5),
+            'avg_trade_size_ratio': self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0),
+            'txn_volume_divergence': self._get_indicator_value(data, 'txn_volume_divergence', idx, default=0.0),
         }
 
         timestamp = data.iloc[idx].get('timestamp', datetime.now()) if isinstance(data.iloc[idx], pd.Series) else datetime.now()
@@ -1280,7 +1312,8 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             'exhaustion': 0.0,
             'candle_structure': 0.0,
             'regime_penalty': 0.0,
-            'confluence': 0.0
+            'confluence': 0.0,
+            'txn_exhaustion': 0.0
         }
 
         # Direction for context
@@ -1432,6 +1465,25 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         breakdown['confluence'] = np.clip(confluence_score, 0, 100)
 
         # ============================================
+        # FACTOR 6: TRANSACTION EXHAUSTION (Optional)
+        # ============================================
+        if bool(getattr(self.config, 'enable_transactions_exhaustion', False)) and 'txn_ratio' in data.columns:
+            txn_exhaustion = 50.0  # Neutral baseline
+            txn_ratio = self._get_indicator_value(data, 'txn_ratio', idx, default=1.0)
+            txn_momentum = self._get_indicator_value(data, 'txn_momentum', idx, default=0.0)
+            avg_size_ratio = self._get_indicator_value(data, 'avg_trade_size_ratio', idx, default=1.0)
+            txn_spike_threshold = float(getattr(self.config, 'txn_spike_threshold', 1.5))
+
+            if txn_ratio > txn_spike_threshold and abs_zscore > self.config.dislocation_minimum:
+                txn_exhaustion += 25
+            if txn_ratio > 1.2 and avg_size_ratio < 0.8:
+                txn_exhaustion += 15
+            if txn_momentum < -0.1:
+                txn_exhaustion += 10
+
+            breakdown['txn_exhaustion'] = np.clip(txn_exhaustion, 0, 100)
+
+        # ============================================
         # FACTOR 6: ALPHA QUALITY (v4.0 Quant Methods)
         # ============================================
         # Only calculate if enabled (adds ~1ms per evaluation)
@@ -1461,6 +1513,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             breakdown['candle_structure'] * self.config.weight_candle_structure * scale_factor +
             breakdown['regime_penalty'] * self.config.weight_regime_penalty * scale_factor +
             breakdown['confluence'] * self.config.weight_confluence * scale_factor +
+            breakdown['txn_exhaustion'] * float(getattr(self.config, 'weight_txn_exhaustion', 0.10)) * scale_factor +
             breakdown['alpha_quality'] * weight_alpha
         )  # Factors are already 0-100, weights sum to ~1.0, so result is 0-100
 
@@ -1471,6 +1524,7 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
             self.config.weight_candle_structure * scale_factor +
             self.config.weight_regime_penalty * scale_factor +
             self.config.weight_confluence * scale_factor +
+            float(getattr(self.config, 'weight_txn_exhaustion', 0.10)) * scale_factor +
             weight_alpha
         )
         if weight_sum > 0:
@@ -1684,6 +1738,12 @@ class EnhancedMeanReversionStrategy(EnhancedBaseStrategy):
         price_threshold = getattr(self.config, 'volume_climax_price_threshold', 0.5)
 
         if volume_ratio >= climax_threshold:
+            if bool(getattr(self.config, 'enable_transactions_exhaustion', False)) and 'txn_ratio' in data.columns:
+                txn_ratio = self._get_indicator_value(data, 'txn_ratio', idx, default=1.0)
+                txn_climax_threshold = getattr(self.config, 'txn_climax_threshold', 2.0)
+                if txn_ratio < txn_climax_threshold:
+                    return False, ""
+
             # Check if price action confirms climax (large candle or gap)
             current_close = data['close'].iloc[idx]
             prev_close = data['close'].iloc[idx-1] if idx > 0 else current_close

@@ -150,6 +150,19 @@ class MomentumConfig(BaseStrategyConfig):
     volume_threshold: float = 1.2
     """Volume confirmation threshold. Default: 1.2x average"""
 
+    # Transactions confirmation
+    enable_transactions_confirm: bool = False
+    """Enable transaction-based confirmation. Default: False"""
+
+    txn_ratio_min: float = 1.1
+    """Minimum txn_ratio for confirmation. Default: 1.1"""
+
+    txn_rank_min: float = 0.7
+    """Minimum txn_ratio_cs_rank for leader check. Default: 0.7"""
+
+    avg_trade_size_ratio_max: float = 2.0
+    """Max avg_trade_size_ratio before penalizing entries. Default: 2.0"""
+
     # Multi-timeframe analysis
     confirmation_timeframes: List[str] = field(default_factory=lambda: ["15min", "1h"])
     """Confirmation timeframes. Default: ['15min', '1h']"""
@@ -233,6 +246,13 @@ class MomentumConfig(BaseStrategyConfig):
 
     regime_adjustment_factor: float = 0.8
     """Multiplier for thresholds in unfavorable regimes (0.8 = 20% reduction). Default: 0.8"""
+
+    # ADS v3.1 SMS flow blend
+    enable_txn_sms_flow_blend: bool = False
+    """Enable txn_ratio blend in SMS flow support. Default: False"""
+
+    txn_sms_flow_weight: float = 0.3
+    """Txn ratio weight in SMS flow blend. Default: 0.3"""
 
     # ATR-based risk management (Exit Logic)
     atr_initial_stop_multiple: float = 1.8
@@ -501,6 +521,16 @@ class MeanReversionConfig(BaseStrategyConfig):
     volume_climax_price_threshold: float = 0.5
     """Price change % threshold for climax detection. Default: 0.5%"""
 
+    # Transaction exhaustion (NEW)
+    enable_transactions_exhaustion: bool = False
+    """Enable transaction-based exhaustion signals. Default: False"""
+
+    txn_spike_threshold: float = 1.5
+    """Txn ratio threshold for exhaustion spikes. Default: 1.5"""
+
+    txn_climax_threshold: float = 2.0
+    """Txn ratio threshold for climax validation. Default: 2.0"""
+
     # Momentum-aware entry parameters (NEW)
     enable_momentum_entry: bool = True
     """Enable momentum-aware entry logic. Prevents buying into falling knives. Default: True"""
@@ -558,6 +588,13 @@ class MeanReversionConfig(BaseStrategyConfig):
     min_signal_confidence: float = 0.85
     """Minimum signal confidence threshold for strategy-level filtering. Default: 0.85"""
 
+    # ADS v3.1 SMS flow blend
+    enable_txn_sms_flow_blend: bool = False
+    """Enable txn_ratio blend in SMS flow support. Default: False"""
+
+    txn_sms_flow_weight: float = 0.3
+    """Txn ratio weight in SMS flow blend. Default: 0.3"""
+
     # =========================================
     # EXHAUSTION-BASED SCORING SYSTEM (v3.0)
     # =========================================
@@ -586,6 +623,9 @@ class MeanReversionConfig(BaseStrategyConfig):
 
     weight_confluence: float = 0.15
     """Weight for supporting indicator confluence. Default: 0.15"""
+
+    weight_txn_exhaustion: float = 0.10
+    """Weight for transaction exhaustion factor. Default: 0.10"""
 
     # Dislocation thresholds
     dislocation_strong: float = 2.0
