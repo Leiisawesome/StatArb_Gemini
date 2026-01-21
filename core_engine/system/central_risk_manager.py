@@ -53,7 +53,7 @@ from .unified_execution_engine import (
     UnifiedExecutionEngine, ExecutionAuthorization, ExecutionRequest,
     ExecutionResult, ExecutionAlgorithm, ExecutionUrgency
 )
-from .interfaces import ISystemComponent, RegimeContext
+from .interfaces import ISystemComponent, IRegimeAware, RegimeContext
 from .circuit_breakers import CircuitBreakerLevel
 
 # Single source of truth for regimes
@@ -175,7 +175,7 @@ class TradingAuthorization:
 # See: core_engine/config/component_config.py → RiskConfig
 # Rationale: Eliminates 60 lines of duplicate configuration (Rule 1, Section 7)
 
-class CentralRiskManager(ISystemComponent):
+class CentralRiskManager(ISystemComponent, IRegimeAware):
     """
     Central Risk Manager - Institutional Governance Hub
 
@@ -707,19 +707,33 @@ class CentralRiskManager(ISystemComponent):
         logger.info(f"🔄 CentralRiskManager adapting to regime change: {regime_name} (vol: {volatility_regime})")
 
         # Adjust risk limits based on regime
-        # High volatility → tighter limits
-        # Low volatility → can afford slightly looser limits
-        if volatility_regime in ['high_volatility', 'extreme_volatility']:
-            self.risk_multiplier = 0.7  # Reduce risk by 30%
-            logger.info(f"  📉 Risk limits tightened (multiplier: 0.7) due to {volatility_regime}")
-        elif volatility_regime == 'low_volatility':
-            self.risk_multiplier = 1.2  # Can increase risk by 20%
-            logger.info(f"  📈 Risk limits relaxed (multiplier: 1.2) due to {volatility_regime}")
+        # Rule: Use provided context multiplier as primary authority (Pro-Grade Integration)
+        if hasattr(new_regime_context, 'risk_multiplier') and new_regime_context.risk_multiplier != 1.0:
+            self.risk_multiplier = new_regime_context.risk_multiplier
+            logger.info(f"  📊 Risk limits scaled by RegimeContext multiplier: {self.risk_multiplier:.2f}")
         else:
-            self.risk_multiplier = 1.0  # Normal risk
-            logger.info(f"  ➡️  Normal risk limits (multiplier: 1.0)")
+            # High volatility → tighter limits
+            # Low volatility → can afford slightly looser limits
+            if volatility_regime in ['high_volatility', 'extreme_volatility', 'high', 'extreme']:
+                self.risk_multiplier = 0.7  # Reduce risk by 30%
+                logger.info(f"  📉 Risk limits tightened (heuristic multiplier: 0.7) due to {volatility_regime}")
+            elif volatility_regime in ['low_volatility', 'low']:
+                self.risk_multiplier = 1.2  # Can increase risk by 20%
+                logger.info(f"  📈 Risk limits relaxed (heuristic multiplier: 1.2) due to {volatility_regime}")
+            else:
+                self.risk_multiplier = 1.0  # Normal risk
+                logger.info(f"  ➡️  Normal risk limits (multiplier: 1.0)")
 
         logger.info(f"✅ Risk limits updated for regime: {regime_name}")
+
+        # Propagate to sub-components if they are subscribers
+        if self.circuit_breakers and hasattr(self.circuit_breakers, 'on_regime_change'):
+            # Convert context to state or just pass context if we unify them
+            # For now, we try to extract the state if possible, or pass context
+            await self.circuit_breakers.on_regime_change(new_regime_context)
+            
+        if self.pnl_tracker and hasattr(self.pnl_tracker, 'on_regime_change'):
+            await self.pnl_tracker.on_regime_change(new_regime_context)
 
     def get_current_regime_context(self) -> Optional['RegimeContext']:
         """
@@ -1738,33 +1752,11 @@ class CentralRiskManager(ISystemComponent):
     def _get_regime_risk_adjustment(self, request: TradingDecisionRequest) -> float:
         """
         Get regime-based risk adjustment multiplier.
-        Prioritizes real-time engine state over request-provided values.
+        Uses the dynamic self.risk_multiplier from the RegimeManager (Rule 1, Section 7).
         """
-        current_regime = request.market_regime
-        confidence = request.regime_confidence
-
-        # If request regime is unknown or engine is available, sync with engine
-        if (current_regime == "unknown" or not current_regime) and self.regime_engine:
-            try:
-                regime_state = self.regime_engine.get_current_regime()
-                if regime_state:
-                    current_regime = regime_state.primary_regime.value
-                    confidence = max(confidence, regime_state.confidence)
-            except Exception as e:
-                logger.warning(f"Failed to sync regime from engine: {e}")
-
-        regime_multiplier = self.regime_risk_multipliers.get(current_regime, 1.0)
-        
-        # If we still haven't found a match, check for partial matches in the multiplier map
-        if current_regime not in self.regime_risk_multipliers:
-            for key, val in self.regime_risk_multipliers.items():
-                if key in current_regime or current_regime in key:
-                    regime_multiplier = val
-                    break
-
-        confidence_adjustment = max(0.5, confidence)  # Floor at 50% for risk calculation
-
-        return regime_multiplier * (1.1 - confidence_adjustment) # Lower confidence = higher perceived risk impact
+        # If we have a system-wide risk multiplier, use it directly
+        # It's already calculated based on primary regime and confidence
+        return self.risk_multiplier
 
     def _determine_authorization_level(self, risk_impact: float, position_check: bool,
                                      concentration_check: bool, strategy_check: bool,
@@ -1812,13 +1804,13 @@ class CentralRiskManager(ISystemComponent):
     def _calculate_authorized_quantity(self, request: TradingDecisionRequest,
                                      risk_impact: float, regime_adjustment: float) -> float:
         """
-        ARCHITECTURAL FIX: Calculate authorized quantity with proper cash and position validation
+        ARCHITECTURAL FIX: Calculate authorized quantity with proper cash, position and regime validation
         """
 
         try:
             # Start with requested quantity
             authorized_qty = request.quantity
-
+            
             # CRITICAL FIX: Enhanced cash availability check for BUY orders
             if request.side.lower() == 'buy':
                 # Get available cash from request metadata or use conservative default
@@ -1874,8 +1866,9 @@ class CentralRiskManager(ISystemComponent):
                 except Exception:
                     pass
 
-            # Phase 1: Direct Regime Scaling Factor
-            regime_scaling = self._get_regime_scaling_factor(current_regime)
+            # Phase 1: Direct Regime Scaling Factor (Regime-First Architecture)
+            # Use the centrally computed regime_adjustment (multiplier)
+            regime_scaling = regime_adjustment
             
             # Phase 2: Supplemental Volatility Scaling
             volatility_estimate = getattr(request, 'volatility_estimate', request.metadata.get('volatility_estimate', 0.15))
@@ -2688,7 +2681,7 @@ class CentralRiskManager(ISystemComponent):
                                     long_window=int(getattr(self.config, "corr_long_window", 60)),
                                 )
                                 params = VolStopParams(
-                                    k=float(getattr(self.config, "stop_k", 2.0)),
+                                    k=float(getattr(self.config, "stop_k", 2.0)) * self.risk_multiplier,
                                     kappa=float(getattr(self.config, "stop_kappa", 0.5)),
                                     overnight_mult=float(getattr(self.config, "stop_overnight_mult", 1.5)),
                                 )
@@ -2719,7 +2712,7 @@ class CentralRiskManager(ISystemComponent):
                             opened_at=opened_at,
                             pnl_pct=pnl_pct,
                             stop_loss_pct=stop_loss_pct_val,
-                            max_holding_minutes=float(getattr(self.config, "max_holding_minutes", 24 * 60)),
+                            max_holding_minutes=float(getattr(self.config, "max_holding_minutes", 24 * 60)) * self.risk_multiplier,
                             liquidity_bad=liquidity_bad,
                             liquidity_details=liquidity_details,
                         )

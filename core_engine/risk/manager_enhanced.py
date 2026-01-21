@@ -15,6 +15,12 @@ from collections import deque
 
 # Import centralized risk utility configs (Rule 1 Section 7)
 
+# Import interfaces for system integration (Rule 1)
+from ..system.interfaces import ISystemComponent, IRegimeAware, RegimeContext
+
+# Import canonical types
+from ..type_definitions.regime import MarketRegime, MarketRegimeState
+
 # Import risk components
 from .exposure_calculator import ExposureCalculator, ExposureType, ExposureBreakdown
 from .var_calculator import VarCalculator, RiskMetrics
@@ -49,7 +55,7 @@ class RiskAlert:
     timestamp: datetime = field(default_factory=datetime.now)
     acknowledged: bool = False
 
-class EnhancedRiskManager:
+class EnhancedRiskManager(ISystemComponent, IRegimeAware):
     """
     Enhanced risk management system
 
@@ -144,7 +150,110 @@ class EnhancedRiskManager:
         # Setup limit monitor alert handler
         self.limit_monitor.add_alert_handler(self._handle_limit_alert)
 
+        # ISystemComponent state
+        self.is_initialized = False
+        self.is_operational = False
+        self.component_id: Optional[str] = None
+        self.start_time: Optional[datetime] = None
+
+        # IRegimeAware state
+        self.regime_engine = None
+        self.current_regime_context: Optional[RegimeContext] = None
+        self.risk_multiplier: float = 1.0
+
         logger.info("EnhancedRiskManager initialized")
+
+    # ========================================
+    # ISYSTEMCOMPONENT INTERFACE
+    # ========================================
+
+    async def initialize(self) -> bool:
+        """Initialize enhanced risk manager"""
+        logger.info("Initializing EnhancedRiskManager...")
+        self.is_initialized = True
+        self.start_time = datetime.now()
+        return True
+
+    async def start(self) -> bool:
+        """Start risk monitoring"""
+        logger.info("Starting EnhancedRiskManager monitoring...")
+        self.is_operational = True
+        if self.enable_real_time_monitoring:
+            await self.start_monitoring()
+        return True
+
+    async def stop(self) -> bool:
+        """Stop risk monitoring"""
+        logger.info("Stopping EnhancedRiskManager monitoring...")
+        self.is_operational = False
+        await self.stop_monitoring()
+        return True
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check"""
+        return {
+            'healthy': self.is_initialized and self.is_operational,
+            'component': 'EnhancedRiskManager',
+            'uptime': str(datetime.now() - self.start_time) if self.start_time else "0",
+            'alerts_count': len(self._risk_alerts),
+            'last_snapshot': self._risk_snapshots[-1].timestamp.isoformat() if self._risk_snapshots else None
+        }
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status"""
+        return {
+            'initialized': self.is_initialized,
+            'operational': self.is_operational,
+            'component_id': self.component_id,
+            'risk_multiplier': self.risk_multiplier,
+            'current_regime': self.current_regime_context.primary_regime if self.current_regime_context else "UNKNOWN"
+        }
+
+    # ========================================
+    # IREGIMEAWARE INTERFACE
+    # ========================================
+
+    def set_regime_engine(self, regime_engine: Any) -> None:
+        """Inject regime engine dependency"""
+        self.regime_engine = regime_engine
+        logger.info("✅ RegimeEngine injected into EnhancedRiskManager")
+
+    async def on_regime_change(self, new_regime_context: RegimeContext) -> None:
+        """Handle regime change event and adapt risk scaling"""
+        if not new_regime_context:
+            return
+
+        self.current_regime_context = new_regime_context
+        
+        # Use provided risk multiplier from regime context if available
+        if hasattr(new_regime_context, 'risk_multiplier'):
+            self.risk_multiplier = new_regime_context.risk_multiplier
+        else:
+            # Fallback heuristic logic
+            if new_regime_context.volatility_regime in ['high', 'extreme', 'high_volatility', 'extreme_volatility']:
+                self.risk_multiplier = 0.7
+            elif new_regime_context.volatility_regime in ['low', 'low_volatility']:
+                self.risk_multiplier = 1.2
+            else:
+                self.risk_multiplier = 1.0
+
+        logger.info(f"🔄 EnhancedRiskManager adapted to {new_regime_context.primary_regime}: multiplier={self.risk_multiplier:.2f}")
+
+    def get_current_regime_context(self) -> Optional[RegimeContext]:
+        """Get current regime context"""
+        return self.current_regime_context
+
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """Adapt risk limits and scoring to current regime"""
+        await self.on_regime_change(regime_context)
+        return {
+            'risk_multiplier': self.risk_multiplier,
+            'primary_regime': regime_context.primary_regime
+        }
+
+    def validate_regime_dependency(self) -> bool:
+        """Validate regime engine is properly configured"""
+        return self.regime_engine is not None
 
     async def calculate_comprehensive_risk(
         self,
@@ -330,7 +439,11 @@ class EnhancedRiskManager:
             breach_score = min(100, critical_breaches * 50 + warning_breaches * 25)
             total_score += breach_score * self.risk_weights.get('limits', 0.15)
 
-        return min(100, max(0, total_score))
+        # Apply regime risk multiplier (Rule: Scale risk score inversely to multiplier)
+        # Low multiplier (e.g. 0.7 during Crisis) increases the perceived risk score
+        effective_score = total_score * (1.0 / self.risk_multiplier) if self.risk_multiplier > 0 else total_score
+
+        return min(100, max(0, effective_score))
 
     def _store_risk_snapshot(self, snapshot: RiskSnapshot) -> None:
         """Store risk snapshot and clean up old ones"""

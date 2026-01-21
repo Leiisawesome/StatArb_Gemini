@@ -34,6 +34,51 @@ class IRegimeContext(Protocol):
     risk_multiplier: float
     last_update: datetime
 
+class IRegimePolicy(ABC):
+    """
+    Interface for Regime Detection Policies.
+    
+    Unifies Strategic (Detector) and Tactical (Sensor) detection modules.
+    Ensures consistent input/output profiles for downstream consumers.
+    """
+    
+    @abstractmethod
+    def detect_regime(self, data: Any, **kwargs) -> Any:
+        """
+        Detect current market regime from data.
+        
+        Args:
+            data: Market data (DataFrame, Series, or Dictionary of symbols)
+            **kwargs: Additional detection parameters (lookback, threshold)
+            
+        Returns:
+            Regime classification result
+        """
+        pass
+
+    @abstractmethod
+    def get_capabilities(self) -> Dict[str, Any]:
+        """Returns metadata about what this policy can detect (e.g. multi-tf, ml-based)."""
+        pass
+
+class IRegimeSubscriber(ABC):
+    """
+    Interface for Regime Change Subscribers.
+    
+    Components that need to be notified of regime changes should implement
+    this interface and register with the RegimeManager/Sensor.
+    """
+    
+    @abstractmethod
+    async def on_regime_change(self, regime_state: Any) -> None:
+        """
+        Handle regime change notification.
+        
+        Args:
+            regime_state: New MarketRegimeState
+        """
+        pass
+
 class ISystemComponent(ABC):
     """Interface for system components under orchestrator control"""
 

@@ -360,6 +360,26 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
                 logger.info(f"✅ RiskManager control established over {len(trading_components)} components")
 
+            # NEW: Establish Regime-First integration (Rule 1, Section 7)
+            regime_manager = None
+            for reg in self.component_registry.values():
+                if "RegimeManager" in reg.name:
+                    regime_manager = reg.component_instance
+                    break
+
+            if regime_manager:
+                logger.info("📡 Wiring Regime-First subscribers...")
+                subscriber_count = 0
+                for reg in self.component_registry.values():
+                    component = reg.component_instance
+                    # Check if component is regime-aware
+                    if hasattr(component, "on_regime_change") and component != regime_manager:
+                        if hasattr(regime_manager, "add_subscriber"):
+                            regime_manager.add_subscriber(component)
+                            subscriber_count += 1
+                
+                logger.info(f"✅ Registered {subscriber_count} regime-aware subscribers")
+
             return True
 
         except Exception as e:

@@ -37,8 +37,10 @@ Version: 2.0 (Rules Migration)
 import logging
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+from core_engine.system.interfaces import IRegimeSubscriber
+from core_engine.type_definitions.regime import MarketRegimeState
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,18 @@ class RealTimePnLTracker:
 
         self.logger.info("✅ RealTimePnLTracker initialized")
         self.logger.info(f"   Max History Size: {self.max_history_size}")
+        self.current_regime_multiplier = 1.0
+        self.current_regime_id = "unknown"
+
+    async def on_regime_change(self, regime_state: MarketRegimeState) -> None:
+        """
+        Respond to regime changes.
+        In the P&L tracker, we mainly store this for metadata attribution
+        and log the current system state.
+        """
+        self.current_regime_multiplier = regime_state.risk_multiplier
+        self.current_regime_id = regime_state.regime_id
+        self.logger.info(f"💹 PnLTracker updated with regime: {regime_state.regime_id} (x{regime_state.risk_multiplier:.2f})")
 
     def set_risk_manager(self, risk_manager) -> None:
         """

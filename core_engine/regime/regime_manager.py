@@ -19,7 +19,7 @@ import json
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
-    from ..system.interfaces import ISystemComponent
+    from ..system.interfaces import ISystemComponent, IRegimePolicy
 except ImportError:
     # Fallback definition for testing
     from abc import ABC, abstractmethod
@@ -34,6 +34,12 @@ except ImportError:
         async def health_check(self) -> Dict[str, Any]: pass
         @abstractmethod
         def get_status(self) -> Dict[str, Any]: pass
+    
+    class IRegimePolicy(ABC):
+        @abstractmethod
+        def detect_regime(self, data: Any, **kwargs) -> Any: pass
+        @abstractmethod
+        def get_capabilities(self) -> Dict[str, Any]: pass
 
 # Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
 try:
@@ -64,6 +70,9 @@ from .regime_indicators import (RegimeIndicatorEngine, RegimeIndicator,
                               TransitionSignal, RegimeStrengthMeasure)
 from .regime_transition_manager import (RegimeTransitionManager, TransitionPrediction,
                                       RebalancingRecommendation)
+# Professional Grade Extraction (Rule 1: Separation of Concerns)
+from .allocation import RegimeAwarePortfolioManager
+from .attribution import RegimePerformanceAttributor
 
 warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
@@ -123,399 +132,16 @@ class RegimeAdaptation:
     adaptation_confidence: float = 0.0
     back_test_validation: Optional[Dict[str, float]] = None
 
-class RegimeAwarePortfolioManager:
-    """Regime-aware portfolio management"""
-
-    def __init__(self, config: Any = None):
-        self.config = config
-
-        logger.info("Regime-aware portfolio manager initialized")
-
-    def calculate_regime_optimal_allocation(self, current_regime: RegimeType,
-                                          regime_confidence: float,
-                                          available_assets: List[str]) -> Dict[str, float]:
-        """Calculate optimal allocation for current regime"""
-
-        try:
-            # Regime-specific allocation logic
-            allocation = {}
-
-            if current_regime == RegimeType.BULL_MARKET:
-                allocation = self._get_bull_market_allocation(available_assets)
-            elif current_regime == RegimeType.BEAR_MARKET:
-                allocation = self._get_bear_market_allocation(available_assets)
-            elif current_regime == RegimeType.HIGH_VOLATILITY:
-                allocation = self._get_high_volatility_allocation(available_assets)
-            elif current_regime == RegimeType.LOW_VOLATILITY:
-                allocation = self._get_low_volatility_allocation(available_assets)
-            elif current_regime == RegimeType.CRISIS:
-                allocation = self._get_crisis_allocation(available_assets)
-            elif current_regime == RegimeType.SIDEWAYS:
-                allocation = self._get_sideways_allocation(available_assets)
-            else:
-                allocation = self._get_neutral_allocation(available_assets)
-
-            # Adjust based on confidence
-            allocation = self._adjust_for_confidence(allocation, regime_confidence)
-
-            # Normalize to sum to 1
-            total_weight = sum(allocation.values())
-            if total_weight > 0:
-                allocation = {asset: weight / total_weight for asset, weight in allocation.items()}
-
-            return allocation
-
-        except Exception as e:
-            logger.error(f"Error calculating regime optimal allocation: {e}")
-            return {}
-
-    def _get_bull_market_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for bull market regime"""
-
-        # Aggressive equity allocation
-        allocation = {}
-        equity_weight = 0.7
-
-        # Prioritize growth assets
-        growth_assets = [asset for asset in assets if any(x in asset.upper() for x in ['QQQ', 'TECH', 'GROWTH'])]
-        value_assets = [asset for asset in assets if any(x in asset.upper() for x in ['VALUE', 'DIVIDEND'])]
-
-        if growth_assets:
-            for asset in growth_assets[:3]:  # Top 3 growth assets
-                allocation[asset] = equity_weight / min(3, len(growth_assets))
-
-        # Add some value exposure
-        remaining_weight = 1.0 - sum(allocation.values())
-        if value_assets and remaining_weight > 0:
-            for asset in value_assets[:2]:
-                allocation[asset] = remaining_weight / min(2, len(value_assets)) * 0.6
-
-        # Small cash position
-        remaining_weight = 1.0 - sum(allocation.values())
-        if remaining_weight > 0:
-            cash_assets = [asset for asset in assets if 'CASH' in asset.upper() or 'BILL' in asset.upper()]
-            if cash_assets:
-                allocation[cash_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_bear_market_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for bear market regime"""
-
-        allocation = {}
-
-        # Defensive allocation
-        defensive_assets = [asset for asset in assets if any(x in asset.upper() for x in ['BOND', 'TREASURY', 'GOLD'])]
-        cash_assets = [asset for asset in assets if any(x in asset.upper() for x in ['CASH', 'BILL'])]
-
-        # High bond/treasury allocation
-        if defensive_assets:
-            for asset in defensive_assets[:3]:
-                allocation[asset] = 0.4 / min(3, len(defensive_assets))
-
-        # Significant cash position
-        if cash_assets:
-            allocation[cash_assets[0]] = 0.3
-
-        # Minimal equity exposure
-        equity_assets = [asset for asset in assets if any(x in asset.upper() for x in ['SPY', 'EQUITY', 'STOCK'])]
-        if equity_assets:
-            allocation[equity_assets[0]] = 0.2
-
-        # Alternative investments
-        remaining_weight = 1.0 - sum(allocation.values())
-        alt_assets = [asset for asset in assets if any(x in asset.upper() for x in ['GOLD', 'COMMODITY'])]
-        if alt_assets and remaining_weight > 0:
-            allocation[alt_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_high_volatility_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for high volatility regime"""
-
-        allocation = {}
-
-        # Risk-off positioning
-        low_vol_assets = [asset for asset in assets if any(x in asset.upper() for x in ['BOND', 'TREASURY', 'UTILITY'])]
-        cash_assets = [asset for asset in assets if any(x in asset.upper() for x in ['CASH', 'BILL'])]
-
-        # Conservative allocation
-        if low_vol_assets:
-            for asset in low_vol_assets[:2]:
-                allocation[asset] = 0.4 / min(2, len(low_vol_assets))
-
-        if cash_assets:
-            allocation[cash_assets[0]] = 0.4
-
-        # Small equity position
-        remaining_weight = 1.0 - sum(allocation.values())
-        if remaining_weight > 0:
-            equity_assets = [asset for asset in assets if 'SPY' in asset.upper()]
-            if equity_assets:
-                allocation[equity_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_low_volatility_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for low volatility regime"""
-
-        allocation = {}
-
-        # Higher risk allocation during low vol
-        equity_assets = [asset for asset in assets if any(x in asset.upper() for x in ['SPY', 'QQQ', 'EQUITY'])]
-
-        if equity_assets:
-            for asset in equity_assets[:3]:
-                allocation[asset] = 0.6 / min(3, len(equity_assets))
-
-        # Some fixed income
-        bond_assets = [asset for asset in assets if any(x in asset.upper() for x in ['BOND', 'TREASURY'])]
-        if bond_assets:
-            allocation[bond_assets[0]] = 0.3
-
-        # Small cash position
-        remaining_weight = 1.0 - sum(allocation.values())
-        if remaining_weight > 0:
-            cash_assets = [asset for asset in assets if 'CASH' in asset.upper()]
-            if cash_assets:
-                allocation[cash_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_crisis_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for crisis regime"""
-
-        allocation = {}
-
-        # Flight to quality
-        treasury_assets = [asset for asset in assets if 'TREASURY' in asset.upper() or 'TLT' in asset.upper()]
-        cash_assets = [asset for asset in assets if any(x in asset.upper() for x in ['CASH', 'BILL'])]
-        gold_assets = [asset for asset in assets if 'GOLD' in asset.upper()]
-
-        # Heavy treasury allocation
-        if treasury_assets:
-            allocation[treasury_assets[0]] = 0.5
-
-        # High cash
-        if cash_assets:
-            allocation[cash_assets[0]] = 0.3
-
-        # Gold hedge
-        if gold_assets:
-            allocation[gold_assets[0]] = 0.15
-
-        # Minimal equity
-        remaining_weight = 1.0 - sum(allocation.values())
-        if remaining_weight > 0:
-            equity_assets = [asset for asset in assets if 'SPY' in asset.upper()]
-            if equity_assets:
-                allocation[equity_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_sideways_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get allocation for sideways regime"""
-
-        allocation = {}
-
-        # Balanced allocation for range-bound markets
-        equity_assets = [asset for asset in assets if any(x in asset.upper() for x in ['SPY', 'EQUITY'])]
-        bond_assets = [asset for asset in assets if any(x in asset.upper() for x in ['BOND', 'TREASURY'])]
-
-        # Equal weight equity/bonds
-        if equity_assets:
-            allocation[equity_assets[0]] = 0.4
-
-        if bond_assets:
-            allocation[bond_assets[0]] = 0.4
-
-        # Cash buffer
-        remaining_weight = 1.0 - sum(allocation.values())
-        if remaining_weight > 0:
-            cash_assets = [asset for asset in assets if 'CASH' in asset.upper()]
-            if cash_assets:
-                allocation[cash_assets[0]] = remaining_weight
-
-        return allocation
-
-    def _get_neutral_allocation(self, assets: List[str]) -> Dict[str, float]:
-        """Get neutral allocation when regime is uncertain"""
-
-        # Conservative balanced allocation
-        allocation = {}
-
-        if len(assets) > 0:
-            # Equal weight among first few assets (up to 5)
-            weight_per_asset = 1.0 / min(5, len(assets))
-            for asset in assets[:5]:
-                allocation[asset] = weight_per_asset
-
-        return allocation
-
-    def _adjust_for_confidence(self, allocation: Dict[str, float], confidence: float) -> Dict[str, float]:
-        """Adjust allocation based on regime confidence"""
-
-        try:
-            if confidence < 0.5:
-                # Low confidence - move toward neutral allocation
-                neutral_weight = 1.0 / len(allocation) if allocation else 0
-                adjustment_factor = confidence * 2  # 0-1 scale
-
-                adjusted_allocation = {}
-                for asset, weight in allocation.items():
-                    adjusted_weight = (weight * adjustment_factor +
-                                     neutral_weight * (1 - adjustment_factor))
-                    adjusted_allocation[asset] = adjusted_weight
-
-                return adjusted_allocation
-            else:
-                # High confidence - use allocation as is
-                return allocation
-
-        except Exception as e:
-            logger.error(f"Error adjusting for confidence: {e}")
-            return allocation
-
-class RegimePerformanceAttribution:
-    """Regime-based performance attribution"""
-
-    def __init__(self, config: Any = None):
-        self.config = config
-        self.regime_performance_history: Dict[RegimeType, List[float]] = {}
-
-        logger.info("Regime performance attribution initialized")
-
-    def calculate_regime_attribution(self, portfolio_returns: pd.Series,
-                                   regime_history: pd.Series,
-                                   benchmark_returns: Optional[pd.Series] = None) -> Dict[str, Any]:
-        """Calculate performance attribution by regime"""
-
-        try:
-            attribution = {}
-
-            # Align data
-            common_index = portfolio_returns.index.intersection(regime_history.index)
-            portfolio_aligned = portfolio_returns.loc[common_index]
-            regime_aligned = regime_history.loc[common_index]
-
-            if benchmark_returns is not None:
-                benchmark_aligned = benchmark_returns.loc[common_index]
-            else:
-                benchmark_aligned = pd.Series(0, index=common_index)
-
-            # Calculate performance by regime
-            regime_performance = {}
-            regime_periods = {}
-
-            for regime_type in RegimeType:
-                if regime_type == RegimeType.UNKNOWN:
-                    continue
-
-                regime_mask = regime_aligned == regime_type
-                if regime_mask.sum() == 0:
-                    continue
-
-                regime_returns = portfolio_aligned[regime_mask]
-                regime_benchmark = benchmark_aligned[regime_mask]
-
-                performance_stats = {
-                    'total_return': (1 + regime_returns).prod() - 1,
-                    'annualized_return': regime_returns.mean() * 252,
-                    'volatility': regime_returns.std() * np.sqrt(252),
-                    'sharpe_ratio': (regime_returns.mean() / regime_returns.std() * np.sqrt(252)
-                                   if regime_returns.std() > 0 else 0),
-                    'max_drawdown': self._calculate_max_drawdown(regime_returns),
-                    'periods': regime_mask.sum(),
-                    'win_rate': (regime_returns > 0).mean(),
-                    'avg_win': regime_returns[regime_returns > 0].mean() if (regime_returns > 0).sum() > 0 else 0,
-                    'avg_loss': regime_returns[regime_returns < 0].mean() if (regime_returns < 0).sum() > 0 else 0
-                }
-
-                # Relative to benchmark
-                if benchmark_returns is not None:
-                    excess_returns = regime_returns - regime_benchmark
-                    performance_stats.update({
-                        'excess_return': excess_returns.mean() * 252,
-                        'tracking_error': excess_returns.std() * np.sqrt(252),
-                        'information_ratio': (excess_returns.mean() / excess_returns.std() * np.sqrt(252)
-                                            if excess_returns.std() > 0 else 0),
-                        'alpha': excess_returns.mean() * 252,
-                        'beta': np.cov(regime_returns, regime_benchmark)[0, 1] / np.var(regime_benchmark)
-                                if np.var(regime_benchmark) > 0 else 1.0
-                    })
-
-                regime_performance[regime_type.value] = performance_stats
-                regime_periods[regime_type.value] = regime_mask.sum()
-
-            # Overall attribution
-            total_periods = len(portfolio_aligned)
-            regime_contributions = {}
-
-            for regime_name, stats in regime_performance.items():
-                weight = regime_periods[regime_name] / total_periods
-                contribution = stats['total_return'] * weight
-                regime_contributions[regime_name] = {
-                    'weight': weight,
-                    'return': stats['total_return'],
-                    'contribution': contribution
-                }
-
-            attribution = {
-                'regime_performance': regime_performance,
-                'regime_contributions': regime_contributions,
-                'total_attribution': sum(contrib['contribution'] for contrib in regime_contributions.values()),
-                'best_regime': max(regime_performance.keys(),
-                                 key=lambda x: regime_performance[x]['total_return']) if regime_performance else None,
-                'worst_regime': min(regime_performance.keys(),
-                                  key=lambda x: regime_performance[x]['total_return']) if regime_performance else None,
-                'most_frequent_regime': max(regime_periods.keys(),
-                                          key=lambda x: regime_periods[x]) if regime_periods else None
-            }
-
-            return attribution
-
-        except Exception as e:
-            logger.error(f"Error calculating regime attribution: {e}")
-            return {}
-
-    def _calculate_max_drawdown(self, returns: pd.Series) -> float:
-        """Calculate maximum drawdown - delegates to core_metrics"""
-        try:
-            if calculate_max_drawdown is not None:
-                return calculate_max_drawdown(returns)
-            # Fallback implementation if import failed
-            cumulative = (1 + returns).cumprod()
-            running_max = cumulative.expanding().max()
-            drawdown = (cumulative - running_max) / running_max
-            return drawdown.min()
-        except Exception as e:
-            logger.error(f"Error calculating max drawdown: {e}")
-            return 0.0
-
-    def update_regime_performance_history(self, regime: RegimeType, performance: float):
-        """Update performance history for regime"""
-
-        try:
-            if regime not in self.regime_performance_history:
-                self.regime_performance_history[regime] = []
-
-            self.regime_performance_history[regime].append(performance)
-
-            # Limit history length
-            max_history = 252  # 1 year of daily data
-            if len(self.regime_performance_history[regime]) > max_history:
-                self.regime_performance_history[regime] = self.regime_performance_history[regime][-max_history:]
-
-        except Exception as e:
-            logger.error(f"Error updating regime performance history: {e}")
-
-class RegimeManager(ISystemComponent):
+class RegimeManager(ISystemComponent, IRegimePolicy):
     """
-    Central Regime Manager
+    Central Regime Manager (Strategic Brain)
 
-    Integrates all regime detection and analysis components to provide
-    comprehensive regime-aware trading and portfolio management.
-
+    Orchestrates the entire regime brick:
+    - Long-term strategic regime detection
+    - Real-time tactical regime sensing
+    - Portfolio parameter adaptation
+    - Multi-timeframe performance attribution
+    
     Implements ISystemComponent for orchestrator integration (Rule 1).
     """
 
@@ -562,9 +188,9 @@ class RegimeManager(ISystemComponent):
         self.transition_manager = RegimeTransitionManager(self.config)
         self.regime_sensor = RealTimeRegimeSensor(self.config)
 
-        # Initialize managers
+        # Initialize specialized managers (Injected dependencies for Rule 1 purity)
         self.portfolio_manager = RegimeAwarePortfolioManager(self.config)
-        self.performance_attribution = RegimePerformanceAttribution(self.config)
+        self.performance_attribution = RegimePerformanceAttributor(self.config)
 
         # State management
         self.current_state: Optional[MarketRegimeState] = None
@@ -578,6 +204,9 @@ class RegimeManager(ISystemComponent):
         self.status = RegimeManagerStatus.INITIALIZING
         self.last_update = datetime.now()
         self.update_lock = threading.Lock()
+
+        # Regime-First Notification System (Rule 1, Section 7)
+        self.subscribers: List[IRegimeAware] = []
 
         # Async support
         self.executor = ThreadPoolExecutor(max_workers=self._get_config_attr("max_workers", 4))
@@ -601,6 +230,37 @@ class RegimeManager(ISystemComponent):
         logger.info(f"✅ RegimeManager registered with orchestrator: {self.component_id}")
         return self.component_id
 
+    def add_subscriber(self, component: Any) -> None:
+        """Add a regime-aware subscriber"""
+        if component not in self.subscribers:
+            self.subscribers.append(component)
+            logger.info(f"Regime subscriber added: {type(component).__name__}")
+
+    async def notify_subscribers(self, regime_state: MarketRegimeState) -> None:
+        """Notify all subscribers of regime change (Rule 1, Section 7)"""
+        from ..system.interfaces import RegimeContext
+        
+        # Convert MarketRegimeState to RegimeContext for public distribution
+        context = RegimeContext(
+            primary_regime=regime_state.primary_regime.value if hasattr(regime_state.primary_regime, 'value') else str(regime_state.primary_regime),
+            regime_confidence=getattr(regime_state, 'regime_confidence', 0.8),
+            regime_start_time=getattr(regime_state, 'transition_timestamp', datetime.now()),
+            regime_duration_minutes=0.0, # Will be calculated on next update
+            volatility_regime=regime_state.volatility_regime.value if hasattr(regime_state.volatility_regime, 'value') else str(regime_state.volatility_regime),
+            trend_regime=regime_state.directional_regime.value if hasattr(regime_state.directional_regime, 'value') else str(regime_state.directional_regime),
+            risk_multiplier=regime_state.risk_multiplier,
+            last_update=datetime.now()
+        )
+
+        tasks = []
+        for subscriber in self.subscribers:
+            if hasattr(subscriber, "on_regime_change"):
+                tasks.append(subscriber.on_regime_change(context))
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info(f"Notified {len(tasks)} subscribers of regime change to {context.primary_regime}")
+
     def _get_config_attr(self, attr_name, default):
 
         """Safely get config attribute with default fallback"""
@@ -618,9 +278,10 @@ class RegimeManager(ISystemComponent):
                 logger.info("Updating regime analysis")
 
                 # 1. Update Real-Time Sensor (Low Latency Path)
+                # Now using standardized IRegimePolicy interface
                 sensor_results = {}
                 for symbol, df in market_data.items():
-                    sensor_results[symbol] = self.regime_sensor.process_market_data(df)
+                    sensor_results[symbol] = self.regime_sensor.detect_regime(df)
 
                 # Run overall analyses
                 if self._get_config_attr("async_processing", True):
@@ -647,6 +308,9 @@ class RegimeManager(ISystemComponent):
                 self.last_update = datetime.now()
                 self.status = RegimeManagerStatus.READY
 
+                # Notify subscribers (Rule 1, Section 7)
+                await self.notify_subscribers(regime_state)
+
                 logger.info(f"Regime analysis updated - Current regime: {regime_state.primary_regime.value}")
                 return regime_state
 
@@ -654,6 +318,29 @@ class RegimeManager(ISystemComponent):
             logger.error(f"Error updating regime analysis: {e}")
             self.status = RegimeManagerStatus.ERROR
             return self.current_state or MarketRegimeState()
+
+    def detect_regime(self, data: Any, **kwargs) -> MarketRegimeState:
+        """Standardized entry point for regime detection (IRegimePolicy interface)"""
+        # Orchestrator-level detection (Synchronous bridge)
+        # Note: In production, use the async update_regime_analysis for real-time updates
+        return self._sync_update_analysis(data, kwargs.get('portfolio_data'))
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        """Returns metadata about what this policy can detect (IRegimePolicy interface)"""
+        return {
+            "policy_type": "Orchestrated (Brain)",
+            "latency_profile": "Mixed (Fast Sensor + Slow Detector)",
+            "sub_components": {
+                "detector": self.regime_detector.get_capabilities(),
+                "sensor": self.regime_sensor.get_capabilities()
+            },
+            "features": [
+                "portfolio_adaptation",
+                "performance_attribution",
+                "consensus_logic",
+                "multi_methodology"
+            ]
+        }
 
     async def _async_update_analysis(self, market_data: Dict[str, pd.DataFrame],
                                    portfolio_data: Optional[Dict[str, Any]]) -> MarketRegimeState:
@@ -733,34 +420,38 @@ class RegimeManager(ISystemComponent):
             return MarketRegimeState()
 
     def _extract_returns_data(self, market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """Extract returns data from market data"""
-
+        """
+        Extract returns data from market data symbols.
+        Optimized vectorized extraction (Professional Grade).
+        """
         try:
-            returns_dict = {}
-
-            for symbol, data in market_data.items():
-                if 'close' in data.columns:
-                    returns = data['close'].pct_change().dropna()
-                elif 'price' in data.columns:
-                    returns = data['price'].pct_change().dropna()
-                else:
-                    # Use first numeric column
-                    numeric_cols = data.select_dtypes(include=[np.number]).columns
-                    if len(numeric_cols) > 0:
-                        returns = data[numeric_cols[0]].pct_change().dropna()
-                    else:
-                        continue
-
-                returns_dict[symbol] = returns
-
-            if not returns_dict:
+            if not market_data:
                 return pd.DataFrame()
 
-            returns_df = pd.DataFrame(returns_dict).dropna()
+            returns_data = {}
+            for symbol, df in market_data.items():
+                if df.empty:
+                    continue
+                
+                # Prioritize 'close' or 'price', then fallback to first numeric
+                target_col = next((c for c in ['close', 'price'] if c in df.columns), None)
+                if not target_col:
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns
+                    if not numeric_cols.empty:
+                        target_col = numeric_cols[0]
+                
+                if target_col:
+                    returns_data[symbol] = df[target_col].pct_change()
+
+            if not returns_data:
+                return pd.DataFrame()
+
+            # Vectorized concatenation is faster than building row-by-row
+            returns_df = pd.DataFrame(returns_data).dropna()
             return returns_df
 
         except Exception as e:
-            logger.error(f"Error extracting returns data: {e}")
+            logger.error(f"Error extracting returns data: {e}", exc_info=True)
             return pd.DataFrame()
 
     def _combine_analysis_results(self, detection_result: Optional[RegimeDetection],

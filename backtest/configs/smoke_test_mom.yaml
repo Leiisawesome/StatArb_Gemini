@@ -1,0 +1,2 @@
+includes:
+  - ../../core_engine/config/catalog/suites/smoke_test_mom.yaml

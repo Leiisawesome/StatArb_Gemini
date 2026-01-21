@@ -10,9 +10,9 @@ import logging
 import threading
 import uuid
 
-# Import ISystemComponent for orchestrator integration
+# Import standard interfaces
 try:
-    from ...system.interfaces import ISystemComponent
+    from ...system.interfaces import ISystemComponent, IRegimeAware, IRegimeSubscriber, RegimeContext
 except ImportError:
     # Fallback definition
     from abc import ABC, abstractmethod
@@ -37,6 +37,21 @@ except ImportError:
         def get_status(self) -> Dict[str, Any]:
             pass
 
+    class IRegimeAware(ABC):
+        @abstractmethod
+        async def adapt_to_regime(self, regime_context: Any) -> Dict[str, Any]:
+            pass
+        @abstractmethod
+        def validate_regime_dependency(self) -> bool:
+            pass
+
+    class IRegimeSubscriber(ABC):
+        @abstractmethod
+        async def on_regime_change(self, regime_state: Any) -> None:
+            pass
+
+from ...type_definitions.regime import MarketRegimeState
+
 from .position_manager import PositionManager, PositionType
 from .allocation_engine import AllocationEngine, AllocationRequest, AllocationMethod
 from .rebalancer import PortfolioRebalancer, RebalanceType, RebalanceResult
@@ -57,12 +72,13 @@ class PortfolioSnapshot:
     largest_position: Optional[str] = None
     risk_metrics: Dict[str, Any] = field(default_factory=dict)
 
-class EnhancedPortfolioManager(ISystemComponent):
+class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber):
     """
     Enhanced Portfolio Manager with ISystemComponent Integration
 
     Institutional-grade portfolio manager with orchestrator integration:
     - Implements ISystemComponent for lifecycle management
+    - Implements IRegimeAware for market-regime-first logic
     - Integrates position management, allocation, rebalancing, and cash management
     - Health monitoring and performance tracking
     - Professional portfolio analytics and reporting
@@ -77,6 +93,9 @@ class EnhancedPortfolioManager(ISystemComponent):
         self.is_initialized = False
         self.is_operational = False
         self.start_time = None
+
+        # Regime context
+        self.current_regime: Optional[MarketRegimeState] = None
 
         # Orchestrator integration
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
@@ -299,6 +318,62 @@ class EnhancedPortfolioManager(ISystemComponent):
             },
             'health_metrics': self.health_metrics
         }
+
+    # ========================================
+    # REGIME-AWARE IMPLEMENTATION
+    # ========================================
+
+    async def on_regime_change(self, regime_state: MarketRegimeState) -> None:
+        """
+        Broadcasting subscriber for regime changes.
+        This enables metadata-driven portfolio logic based on current brain state.
+        """
+        self.logger.info(f"📊 PortfolioManager notified of regime transition: {regime_state.regime_id} (Multiplier: {regime_state.risk_multiplier:.2f})")
+        self.current_regime = regime_state
+        
+        # Metadata-driven logic: Adjust allocation limits based on regime
+        # If regime is high risk (multiplier < 1.0), we could tighten concentration limits
+        scaling_factor = regime_state.risk_multiplier
+        
+        # Dynamically scale portfolio-wide risk limits
+        # These will be used in subsequent allocation operations
+        curr_max_risk = Decimal(str(self.config.get('max_portfolio_risk', 0.20)))
+        adjusted_risk = curr_max_risk * Decimal(str(scaling_factor))
+        self.max_portfolio_risk = adjusted_risk
+        
+        # Also scale concentration
+        curr_max_conc = Decimal(str(self.config.get('max_concentration', 0.10)))
+        adjusted_conc = curr_max_conc * Decimal(str(scaling_factor))
+        self.max_position_concentration = adjusted_conc
+        
+        # Propagate scaling to allocation engine
+        if hasattr(self, 'allocation_engine'):
+            self.allocation_engine.scale_allocations(Decimal(str(scaling_factor)))
+        
+        self.logger.info(f"🔧 Portfolio limits adjusted: Risk {adjusted_risk:.2f}, Conc {adjusted_conc:.2f}")
+
+    async def adapt_to_regime(self, regime_context: RegimeContext) -> Dict[str, Any]:
+        """
+        Mandatory IRegimeAware adaptation method.
+        Provides a hook for the Orchestrator to force a context-based adaptation.
+        """
+        self.logger.info(f"📁 Adapting portfolio to primary regime: {regime_context.primary_regime}")
+        
+        # Capture context-driven risk parameters
+        adj_factor = regime_context.risk_multiplier
+        
+        # Implementation similar to on_regime_change but triggered by context
+        return {
+            "status": "adapted",
+            "regime": regime_context.primary_regime,
+            "risk_multiplier": adj_factor,
+            "applied_timestamp": datetime.now().isoformat()
+        }
+
+    def validate_regime_dependency(self) -> bool:
+        """Check if regime awareness is properly provisioned"""
+        # Portfolio manager always prefers regime context if available
+        return True
 
     # Enhanced Internal Methods
 

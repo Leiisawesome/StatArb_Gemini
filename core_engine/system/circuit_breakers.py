@@ -34,10 +34,23 @@ import asyncio
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from datetime import datetime, timedelta
 from enum import Enum
 from collections import deque
+
+# Import standard interfaces
+try:
+    from .interfaces import IRegimeSubscriber
+except ImportError:
+    from abc import ABC, abstractmethod
+    class IRegimeSubscriber(ABC):
+        @abstractmethod
+        async def on_regime_change(self, regime_state: Any) -> None:
+            pass
+
+# Import regime definitions
+from ..type_definitions.regime import MarketRegimeState
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +128,17 @@ class CircuitBreakerConfig:
     enable_sms_alerts: bool = False
     enable_slack_alerts: bool = False
 
-class TradingCircuitBreakers:
+class TradingCircuitBreakers(IRegimeSubscriber):
     """
     Trading Circuit Breakers - System Safety
 
     Implements 5 emergency protection mechanisms to prevent
     catastrophic losses and system runaway.
+
+    Regime-Aware Integration:
+    - Implements IRegimeSubscriber to dynamically scale safety thresholds.
+    - Tighter limits in high-volatility/low-confidence regimes.
+    - Relaxation in normal/stable regimes.
 
     Integration: Called at START of CentralRiskManager.authorize_trading_decision()
     """
@@ -134,6 +152,12 @@ class TradingCircuitBreakers:
         """
         self.config = config or CircuitBreakerConfig()
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        # Current regime state
+        self.current_regime: Optional[MarketRegimeState] = None
+        self._original_loss_limit = self.config.daily_loss_limit_pct
+        self._original_drawdown_limit = self.config.max_drawdown_from_high_pct
+        self._original_concentration_limit = self.config.max_position_concentration
 
         # Circuit Breaker State
         self.current_level = CircuitBreakerLevel.NORMAL
@@ -175,6 +199,30 @@ class TradingCircuitBreakers:
         self.logger.info(f"   Order Rate Limit: {self.config.max_orders_per_second}/sec")
         self.logger.info(f"   Daily Loss Limit: {self.config.daily_loss_limit_pct:.1%}")
         self.logger.info(f"   Drawdown Limit: {self.config.max_drawdown_from_high_pct:.1%}")
+
+    async def on_regime_change(self, regime_state: Any) -> None:
+        """
+        Dynamically adjust circuit breaker thresholds based on market regime.
+        
+        High risk regime (multiplier < 1.0) -> Tighter (less negative) limits.
+        Low risk regime (multiplier > 1.0) -> Relaxed (more negative) limits.
+        """
+        regime_id = getattr(regime_state, 'regime_id', getattr(regime_state, 'primary_regime', 'unknown'))
+        multiplier = getattr(regime_state, 'risk_multiplier', 1.0)
+        
+        self.logger.info(f"⚠️ CircuitBreakers adapting to regime: {regime_id} (Multiplier: {multiplier:.2f})")
+        
+        # Scale thresholds (keeping their sign)
+        # Loss limit: -2% * 0.5 = -1% (Tighter)
+        self.config.daily_loss_limit_pct = self._original_loss_limit * multiplier
+        
+        # Drawdown limit: -5% * 0.5 = -2.5% (Tighter)
+        self.config.max_drawdown_from_high_pct = self._original_drawdown_limit * multiplier
+        
+        # Concentration limit: 20% * 0.5 = 10% (Tighter)
+        self.config.max_position_concentration = self._original_concentration_limit * multiplier
+        
+        self.logger.info(f"✅ Scaled thresholds: Loss {self.config.daily_loss_limit_pct:.1%}, Drawdown {self.config.max_drawdown_from_high_pct:.1%}, Conc {self.config.max_position_concentration:.1%}")
 
     async def check_circuit_breakers(
         self,

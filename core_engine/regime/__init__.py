@@ -13,6 +13,8 @@ Components:
 - RealTimeRegimeSensor: [SENSOR] Low-latency per-bar signal processing (formerly EnhancedRegimeEngine).
 - RegimeDetector: Core regime detection using multiple methodologies.
 - RegimeClassifier: ML-based regime classification with feature engineering.
+- RegimeAwarePortfolioManager: Metadata-driven asset allocation by regime.
+- RegimePerformanceAttributor: Specialized performance math for regime analysis.
 
 - EnhancedRegimeEngine: [LEGACY ALIAS] Redirects to RealTimeRegimeSensor for backward compatibility.
 - RegimeIndicatorEngine: Regime-specific technical indicators.
@@ -97,6 +99,8 @@ from .regime_manager import (
     AdaptationMode,
     RegimeAdaptation
 )
+from .allocation import RegimeAwarePortfolioManager
+from .attribution import RegimePerformanceAttributor
 
 from .regime_detector import (
     RegimeDetector,
@@ -156,6 +160,8 @@ __all__ = [
     'RegimeIndicatorEngine',
     'MarketRegimeAnalyzer',
     'RegimeTransitionManager',
+    'RegimeAwarePortfolioManager',
+    'RegimePerformanceAttributor',
 
     # RegimeManager Types
     'RegimeManagerStatus',

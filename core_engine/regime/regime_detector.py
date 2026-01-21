@@ -18,7 +18,7 @@ from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
 try:
-    from ..system.interfaces import ISystemComponent
+    from ..system.interfaces import ISystemComponent, IRegimePolicy
 except ImportError:
     from abc import ABC, abstractmethod
     class ISystemComponent(ABC):
@@ -32,6 +32,12 @@ except ImportError:
         async def health_check(self) -> Dict[str, Any]: pass
         @abstractmethod
         def get_status(self) -> Dict[str, Any]: pass
+    
+    class IRegimePolicy(ABC):
+        @abstractmethod
+        def detect_regime(self, data: Any, **kwargs) -> Any: pass
+        @abstractmethod
+        def get_capabilities(self) -> Dict[str, Any]: pass
 
 # Import canonical metric functions from core_metrics (Rule: Single Source of Truth)
 try:
@@ -748,7 +754,7 @@ class ThresholdBasedDetector:
             logger.error(f"Error calculating trend strength: {e}")
             return 0.0
 
-class RegimeDetector(ISystemComponent):
+class RegimeDetector(ISystemComponent, IRegimePolicy):
     """
     Comprehensive Market Regime Detector
 
@@ -757,6 +763,7 @@ class RegimeDetector(ISystemComponent):
     and threshold-based classification.
 
     Implements ISystemComponent for orchestrator integration (Rule 1).
+    Implements IRegimePolicy to unify Strategic detection.
     """
 
     def __init__(self, config: Optional[Any] = None):
@@ -798,6 +805,24 @@ class RegimeDetector(ISystemComponent):
 
         if DetectionMethod.THRESHOLD_BASED in self._get_config_attr("methods", []):
             self.detectors[DetectionMethod.THRESHOLD_BASED] = ThresholdBasedDetector(self.config)
+        
+        if DetectionMethod.MARKOV_SWITCHING in self._get_config_attr("methods", []):
+            self.detectors[DetectionMethod.MARKOV_SWITCHING] = MarkovSwitchingDetector(self.config)
+            
+        if DetectionMethod.GAUSSIAN_MIXTURE in self._get_config_attr("methods", []):
+            self.detectors[DetectionMethod.GAUSSIAN_MIXTURE] = GaussianMixtureDetector(self.config)
+            
+        if DetectionMethod.VOLATILITY_BASED in self._get_config_attr("methods", []):
+            self.detectors[DetectionMethod.VOLATILITY_BASED] = VolatilityBasedDetector(self.config)
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        """Returns metadata about what this policy can detect."""
+        return {
+            "type": "Strategic",
+            "methodologies": list(self.detectors.keys()),
+            "latency": "High (Batch/Historical)",
+            "requires_fitting": True
+        }
 
         # Detection history
         self.detection_history: List[RegimeDetection] = []

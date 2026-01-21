@@ -196,6 +196,18 @@ class MarketRegimeState:
     strategy_suitability: Dict[str, float] = field(default_factory=dict)
     risk_adjustment_factor: float = 1.0
     position_sizing_factor: float = 1.0
+
+    @property
+    def risk_multiplier(self) -> float:
+        """
+        Regime-based risk multiplier for dynamic risk scaling.
+        Scale factor for stops, targets, and position sizes.
+        Typical values: 0.5 (Crisis), 1.0 (Normal), 1.3 (Low Vol)
+        """
+        if self.risk_adjustment_factor == 0:
+            return 1.0
+        return 1.0 / self.risk_adjustment_factor
+
     recommended_portfolio_adjustments: Dict[str, float] = field(default_factory=dict)
     rebalancing_recommendations: List[Any] = field(default_factory=list)
 

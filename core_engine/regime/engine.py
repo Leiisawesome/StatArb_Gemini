@@ -27,7 +27,7 @@ import asyncio
 import math
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
-from ..system.interfaces import ISystemComponent
+from ..system.interfaces import ISystemComponent, IRegimePolicy, IRegimeSubscriber
 from core_engine.exceptions import ConfigurationRequiredError
 
 # Import centralized configuration (Rule 1, Section 7)
@@ -43,13 +43,7 @@ RegimeType = MarketRegime
 
 logger = logging.getLogger(__name__)
 
-class IRegimeSubscriber:
-    """Interface for regime change subscribers"""
-
-    async def on_regime_change(self, regime_analysis: MarketRegimeState) -> None:
-        """Handle regime change notification"""
-
-class RealTimeRegimeSensor:
+class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
     """
     Real-Time Market Regime Sensor
 
@@ -496,6 +490,13 @@ class RealTimeRegimeSensor:
             },
             'health_metrics': self.health_metrics
         }
+
+    async def shutdown(self) -> None:
+        """Shutdown the component (ISystemComponent interface)"""
+        self.logger.info("🛑 Shutting down Real-Time Regime Sensor...")
+        self.is_operational = False
+        self.is_initialized = False
+        self.health_metrics['last_update'] = datetime.now()
 
     # Enhanced Internal Methods
 
@@ -1043,6 +1044,10 @@ class RealTimeRegimeSensor:
 
     def analyze_regime(self, data: Any) -> Dict[str, Any]:
         """Standardized method for regime analysis"""
+        # If data is provided, process it
+        if data is not None:
+            return self.process_market_data(data)
+            
         return {
             'regime_analysis_performed': True,
             'input_data_type': type(data).__name__,
@@ -1050,13 +1055,32 @@ class RealTimeRegimeSensor:
             'processing_component': 'RealTimeRegimeSensor'
         }
 
-    def detect_regime(self, data: Any) -> Dict[str, Any]:
-        """Standardized method for regime detection (alias)"""
-        return self.analyze_regime(data)
+    def detect_regime(self, data: Any, **kwargs) -> Optional[MarketRegimeState]:
+        """Standardized method for regime detection (IRegimePolicy interface)"""
+        # Process data if provided
+        if data is not None:
+            self.analyze_regime(data)
+            
+        return self.current_regime
 
-    def classify_regime(self, data: Any) -> Dict[str, Any]:
+    def get_capabilities(self) -> Dict[str, Any]:
+        """Returns metadata about what this policy can detect (IRegimePolicy interface)"""
+        return {
+            "policy_type": "Tactical",
+            "latency_profile": "Low (Real-Time)",
+            "update_mode": "Incremental/Bar-by-Bar",
+            "capabilities": [
+                "multi_timeframe_analysis",
+                "volatility_regime_detection",
+                "trend_alignment",
+                "ml_transition_prediction"
+            ],
+            "input_formats": ["Dict[BarData]", "pd.DataFrame (Single Symbol)"]
+        }
+
+    def classify_regime(self, data: Any) -> Optional[MarketRegimeState]:
         """Standardized method for regime classification (alias)"""
-        return self.analyze_regime(data)
+        return self.detect_regime(data)
 
     # ========================================
     # REGIME ACCESS METHODS (for component integration)
