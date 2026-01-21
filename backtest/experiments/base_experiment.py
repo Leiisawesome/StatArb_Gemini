@@ -207,80 +207,17 @@ class BaseExperiment(ABC):
                         else:
                             conf_display = "    - "
 
-                        # Calculate realized P&L using long/short FIFO lots
-                        pnl = 0.0
-                        pnl_str = ""
-
-                        if symbol not in positions[strategy_run]:
-                            positions[strategy_run][symbol] = []
-
+                        # Realized P&L: Use engine's calculated P&L (Rule 4 SSOT)
+                        # This ensures accuracy by including commissions, slippage, and correct cost basis.
+                        pnl = trade.get('realized_pnl', 0.0)
+                        pnl_str = " " * 12
+                        
                         try:
-                            qty = float(quantity)
-                        except Exception:
-                            qty = 0.0
-
-                        try:
-                            px = float(price)
-                        except Exception:
-                            px = 0.0
-
-                        side = str(action).strip().lower()
-
-                        def _append_lot(q_signed: float, entry_px: float):
-                            if abs(q_signed) <= 1e-12:
-                                return
-                            positions[strategy_run][symbol].append((q_signed, entry_px))
-
-                        def _pop_front():
-                            positions[strategy_run][symbol].pop(0)
-
-                        def _set_front(q_signed: float, entry_px: float):
-                            positions[strategy_run][symbol][0] = (q_signed, entry_px)
-
-                        if side == "buy":
-                            qty_to_buy = qty
-                            # First cover shorts (FIFO)
-                            while qty_to_buy > 1e-12 and positions[strategy_run][symbol] and positions[strategy_run][symbol][0][0] < 0:
-                                lot_qty, entry_px = positions[strategy_run][symbol][0]  # lot_qty is negative
-                                coverable = min(qty_to_buy, abs(lot_qty))
-                                pnl += coverable * (entry_px - px)
-                                lot_qty_new = lot_qty + coverable  # less negative
-                                qty_to_buy -= coverable
-                                if abs(lot_qty_new) <= 1e-12:
-                                    _pop_front()
-                                else:
-                                    _set_front(lot_qty_new, entry_px)
-                            # Any remainder opens/increases long
-                            if qty_to_buy > 1e-12:
-                                _append_lot(+qty_to_buy, px)
-
-                            # P&L is realized on BUY only if it covered shorts
-                            if abs(pnl) > 1e-12:
-                                pnl_str = f"${pnl:>+11.2f}"
-
-                        elif side == "sell":
-                            qty_to_sell = qty
-                            # First close longs (FIFO)
-                            while qty_to_sell > 1e-12 and positions[strategy_run][symbol] and positions[strategy_run][symbol][0][0] > 0:
-                                lot_qty, entry_px = positions[strategy_run][symbol][0]  # lot_qty is positive
-                                sellable = min(qty_to_sell, lot_qty)
-                                pnl += sellable * (px - entry_px)
-                                lot_qty_new = lot_qty - sellable
-                                qty_to_sell -= sellable
-                                if lot_qty_new <= 1e-12:
-                                    _pop_front()
-                                else:
-                                    _set_front(lot_qty_new, entry_px)
-                            # Any remainder opens/increases short
-                            if qty_to_sell > 1e-12:
-                                _append_lot(-qty_to_sell, px)
-
-                            # P&L is realized on SELL only if it closed longs
-                            if abs(pnl) > 1e-12:
-                                pnl_str = f"${pnl:>+11.2f}"
-
-                        if not pnl_str:
-                            pnl_str = " " * 12
+                            pnl_val = float(pnl)
+                            if abs(pnl_val) > 1e-6:
+                                pnl_str = f"${pnl_val:>+11.2f}"
+                        except (ValueError, TypeError):
+                            pass
 
                         def _strategy_label(raw: str) -> str:
                             low = str(raw).lower()
