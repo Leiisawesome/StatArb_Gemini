@@ -2175,7 +2175,7 @@ class CentralRiskManager(ISystemComponent):
         except Exception as e:
             logger.error(f"Post-execution risk check failed: {e}")
 
-    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None):
+    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None, strategy_id: str = ""):
         """
         Update position with comprehensive cash tracking (Phase 10 per Rule 7.3)
 
@@ -2190,6 +2190,7 @@ class CentralRiskManager(ISystemComponent):
             quantity: Quantity traded
             price: Execution price
             timestamp: Trade timestamp (defaults to now)
+            strategy_id: Optional strategy identifier for attribution
 
         Returns:
             Dict with position update details
@@ -2220,7 +2221,8 @@ class CentralRiskManager(ISystemComponent):
                     quantity=Decimal(str(quantity)),
                     price=Decimal(str(price)),
                     commission=Decimal(str(commission)),
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    strategy_id=strategy_id
                 )
 
                 # Delegate to PositionBook (SSOT)
@@ -2242,7 +2244,7 @@ class CentralRiskManager(ISystemComponent):
                                 symbol=symbol,
                                 quantity=quantity,
                                 entry_price=price,
-                                strategy_id=None,
+                                strategy_id=strategy_id,
                                 timestamp=timestamp
                             )
                         elif side.lower() == 'sell':
@@ -2250,7 +2252,7 @@ class CentralRiskManager(ISystemComponent):
                                 symbol=symbol,
                                 quantity=quantity,
                                 exit_price=price,
-                                strategy_id=None,
+                                strategy_id=strategy_id,
                                 timestamp=timestamp
                             )
                     except Exception as e:

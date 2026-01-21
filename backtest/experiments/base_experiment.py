@@ -154,8 +154,8 @@ class BaseExperiment(ABC):
                 if trades:
                     print()
                     print("Trade List:")
-                    print(f"  {'#':<3} {'Timestamp':<20} {'Strat':<6} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
-                    print("  " + "-"*90)
+                    print(f"  {'#':<3} {'Timestamp':<20} {'Strat':<8} {'Symbol':<8} {'Action':<6} {'Str':>4} {'Conf':>6} {'Qty':>8} {'Price':>10} {'P&L':>12}")
+                    print("  " + "-"*92)
 
                     # Track inventory per strategy_run + symbol using FIFO lots with signed quantities.
                     #
@@ -181,7 +181,7 @@ class BaseExperiment(ABC):
                         return ts
 
                     for i, trade in enumerate(sorted(trades, key=_trade_ts_key), 1):
-                        strategy_run = trade.get('strategy_run', 'default')
+                        strategy_run = trade.get('strategy_run', trade.get('strategy_id', 'default'))
                         if strategy_run not in positions:
                             positions[strategy_run] = {}
 
@@ -288,10 +288,14 @@ class BaseExperiment(ABC):
                                 return "MOM"
                             if "mr" in low or "mean_reversion" in low:
                                 return "MR"
-                            return str(raw)[:6]
+                            if "eod" in low:
+                                return "EOD"
+                            if low == "default":
+                                return "DEF"
+                            return str(raw)[:8]
 
                         strat_label = _strategy_label(strategy_run)
-                        print(f"  {i:<3} {timestamp:<20} {strat_label:<6} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
+                        print(f"  {i:<3} {timestamp:<20} {strat_label:<8} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
         else:
             print(f"❌ Error: {result.error_message}")
 

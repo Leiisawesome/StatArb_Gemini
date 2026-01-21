@@ -3413,37 +3413,54 @@ class InstitutionalBacktestEngine:
         Returns:
             Number of positions liquidated
         """
-        # Get EOD liquidation config from strategy parameters
-        enable_eod = self._get_strategy_param('enable_eod_liquidation', False)
-        if not enable_eod:
-            return 0
-
-        eod_time_str = self._get_strategy_param('eod_close_time', '15:55')
-
-        # Parse EOD time
-        try:
-            eod_hour, eod_minute = map(int, eod_time_str.split(':'))
-        except (ValueError, AttributeError):
-            eod_hour, eod_minute = 15, 55  # Default to 15:55
-
-        # Convert timestamp to comparable format
-        ts = pd.Timestamp(timestamp)
-        if ts.tzinfo is not None:
-            ts = ts.tz_convert('America/New_York')
-
-        current_time_mins = ts.hour * 60 + ts.minute
-        eod_time_mins = eod_hour * 60 + eod_minute
-
-        # Check if we've reached EOD liquidation time
-        if current_time_mins < eod_time_mins:
-            return 0
-
         # Get current positions from CentralRiskManager (Rule 4)
         if not self.risk_manager:
             return 0
 
         positions = self.risk_manager.current_positions.copy()
         if not positions:
+            return 0
+
+        # Convert timestamp to comparable format (EST)
+        ts = pd.Timestamp(timestamp)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert('America/New_York')
+        current_time_mins = ts.hour * 60 + ts.minute
+
+        liquidated_count = 0
+        symbols_to_liquidate = []
+
+        # ✅ ADS v3.1: Contextual EOD check per position to avoid parameter leakage
+        for symbol, qty in positions.items():
+            if abs(qty) < 0.001:
+                continue
+
+            # Need to find the strategy_id for this symbol from PositionBook
+            strat_id = None
+            if self.position_book:
+                pos = self.position_book.get_position(symbol)
+                strat_id = getattr(pos, 'strategy_id', None)
+
+            # Get EOD config for THIS specific strategy or its position
+            enable_eod = self._get_strategy_param('enable_eod_liquidation', False, strategy_id=strat_id)
+            if not enable_eod:
+                continue
+
+            eod_time_str = self._get_strategy_param('eod_close_time', '15:55', strategy_id=strat_id)
+            
+            # Parse EOD time
+            try:
+                eod_hour, eod_minute = map(int, eod_time_str.split(':'))
+            except (ValueError, AttributeError):
+                eod_hour, eod_minute = 15, 55
+
+            eod_time_mins = eod_hour * 60 + eod_minute
+
+            # Check if we've reached EOD liquidation time for THIS strategy
+            if current_time_mins >= eod_time_mins:
+                symbols_to_liquidate.append((symbol, qty, strat_id))
+
+        if not symbols_to_liquidate:
             return 0
 
         # Only liquidate if we haven't already at this timestamp
@@ -3457,16 +3474,13 @@ class InstitutionalBacktestEngine:
             self._eod_flags = {}
         self._eod_flags[eod_key] = True
 
-        logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(positions)} positions")
+        logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(symbols_to_liquidate)} positions contextually")
 
         liquidated = 0
         # Default close price from current bar (fallback for single-symbol)
         default_close_price = bar.get('close', bar.get('Close', 0))
 
-        for symbol, position_qty in positions.items():
-            if position_qty == 0:
-                continue
-
+        for symbol, position_qty, strat_id in symbols_to_liquidate:
             # Get symbol-specific close price (CRITICAL for multi-symbol portfolios)
             # Each symbol should use its own current market price, not another symbol's price
             close_price = default_close_price  # Fallback
@@ -3535,7 +3549,8 @@ class InstitutionalBacktestEngine:
                 'had_rejections': False,
                 'rejection_count': 0,
                 'authorization_id': f'eod_liq_{timestamp}_{symbol}',
-                'strategy_id': 'EOD_LIQUIDATION',
+                'strategy_id': strat_id or 'EOD_LIQUIDATION',
+                'strategy_run': strat_id or 'EOD_LIQUIDATION',
                 'fill_id': f'eod_fill_{timestamp}_{symbol}',
                 'regime': 'eod_close',
                 'liquidity_score': 100.0
@@ -3547,7 +3562,8 @@ class InstitutionalBacktestEngine:
                 side=side,
                 quantity=qty,
                 price=close_price,
-                timestamp=timestamp
+                timestamp=timestamp,
+                strategy_id=strat_id
             )
 
             # Update execution with actual P&L from risk manager
@@ -3557,23 +3573,40 @@ class InstitutionalBacktestEngine:
             self.execution_history.append(execution)
             liquidated += 1
 
-            logger.info(f"   💰 EOD: {side.upper()} {qty:.2f} {symbol} @ ${close_price:.2f}")
+            logger.info(f"   💰 EOD: {side.upper()} {qty:.2f} {symbol} @ ${close_price:.2f} [Strategy: {strat_id}]")
 
         logger.info(f"   ✅ Liquidated {liquidated} positions\n")
         return liquidated
 
-    def _get_strategy_param(self, param_name: str, default: any = None) -> any:
+    def _get_strategy_param(self, param_name: str, default: any = None, strategy_id: str = None) -> any:
         """
-        Get a parameter from the first active strategy's config.
+        Get a parameter from the strategy config.
+        If strategy_id is provided, looks for that specific strategy.
+        Otherwise, defaults to the first strategy in the list.
 
         Args:
             param_name: Parameter name to retrieve
             default: Default value if not found
+            strategy_id: Optional strategy name to look up
 
         Returns:
             Parameter value or default
         """
         if hasattr(self.config, 'strategies') and self.config.strategies:
+            # Try to find specific strategy if provided
+            if strategy_id:
+                for strat in self.config.strategies:
+                    if isinstance(strat, dict) and strat.get('name') == strategy_id:
+                        params = strat.get('parameters', {})
+                        if param_name in params:
+                            return params.get(param_name)
+                        # Specific strategy found, but param missing - do NOT fall back to strategies[0]
+                        # unless strategy_id was strategies[0]'s name.
+                        return default
+                # strategy_id provided but not found in config - return default
+                return default
+            
+            # Fallback to the first strategy ONLY if no strategy_id was provided
             strategy = self.config.strategies[0]
             if isinstance(strategy, dict):
                 params = strategy.get('parameters', {})
@@ -3836,6 +3869,7 @@ class InstitutionalBacktestEngine:
                         if signals_result is not None and len(signals_result) > 0:
                             # Convert list of Signal objects to DataFrame with explicit field extraction
                             signals_df = pd.DataFrame([{
+                                'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
                                 'symbol': s.symbol,
                                 'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
                                 'confidence': s.confidence,
@@ -3958,6 +3992,7 @@ class InstitutionalBacktestEngine:
                             if isinstance(signals_result, list) and len(signals_result) > 0:
                                 # Convert list of Signal objects to DataFrame
                                 signals_df = pd.DataFrame([{
+                                    'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
                                     'symbol': s.symbol,
                                     'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
                                     'confidence': s.confidence,
@@ -3978,6 +4013,7 @@ class InstitutionalBacktestEngine:
                         signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
                         if isinstance(signals_result, list):
                             signals_df = pd.DataFrame([{
+                                'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
                                 'symbol': s.symbol,
                                 'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
                                 'confidence': s.confidence,
@@ -3996,6 +4032,7 @@ class InstitutionalBacktestEngine:
                     signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
                     if isinstance(signals_result, list):
                         signals_df = pd.DataFrame([{
+                            'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
                             'symbol': s.symbol,
                             'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
                             'confidence': s.confidence,
@@ -4079,108 +4116,116 @@ class InstitutionalBacktestEngine:
             # ADS v3.1 exits in backtest: synthesize LONG_EXIT signals when multi-exit rules trigger.
             # Rationale: exits are centralized (risk-side), but backtest execution/reporting expects signals.
             try:
-                if self.risk_manager and self.risk_manager.current_positions:
-                    enable_ads_multi_exit = bool(self._get_strategy_param("enable_ads_multi_exit", False))
-                    max_holding_minutes = float(self._get_strategy_param("max_holding_minutes", 0.0) or 0.0)
-                    if enable_ads_multi_exit and max_holding_minutes > 0 and self.position_book is not None:
-                        from core_engine.risk.multi_exit_engine import decide_exit
-                        from core_engine.risk.volatility_forecast import (
-                            VolStopParams,
-                            correlation_change,
-                            sigma_eff,
-                            stop_distance_pct,
-                        )
+                if self.risk_manager and self.risk_manager.current_positions and self.position_book is not None:
+                    from core_engine.risk.multi_exit_engine import decide_exit
+                    from core_engine.risk.volatility_forecast import (
+                        VolStopParams,
+                        correlation_change,
+                        sigma_eff,
+                        stop_distance_pct,
+                    )
 
-                        enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False))
-                        exit_rows = []
-                        positions = self.position_book.get_all_positions()
-                        for sym, pos in positions.items():
-                            try:
-                                if not getattr(pos, "is_long", True):
-                                    continue
-                                qty = float(getattr(pos, "quantity", 0.0))
-                                if qty <= 0:
-                                    continue
-                                opened_at = getattr(pos, "opened_at", None)
-                                if opened_at is None:
-                                    continue
-                                # Avoid repeatedly queuing exit while one is already pending for this symbol.
-                                if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == "sell") for t in (self.pending_signals or [])):
-                                    continue
+                    exit_rows = []
+                    positions = self.position_book.get_all_positions()
+                    for sym, pos in positions.items():
+                        # CONTEXTUAL PARAMETER LOOKUP (ADS v3.1 §4)
+                        # Avoid parameter leakage by using specific strategy_id for this position
+                        strat_id = getattr(pos, 'strategy_id', None)
+                        enable_ads_multi_exit = bool(self._get_strategy_param("enable_ads_multi_exit", False, strategy_id=strat_id))
+                        max_holding_minutes = float(self._get_strategy_param("max_holding_minutes", 0.0, strategy_id=strat_id) or 0.0)
 
-                                held_mins = (timestamp - opened_at).total_seconds() / 60.0
+                        if not enable_ads_multi_exit or max_holding_minutes <= 0:
+                            continue
 
-                                # Compute pnl_pct using SSOT entry price + current mark from RiskManager (not PositionBook MTM).
-                                avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
-                                px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
-                                pnl_pct = ((px - avg_entry) / avg_entry) * 100.0 if avg_entry > 0 else 0.0
-
-                                # Optional forward-looking vol stop (% distance)
-                                stop_loss_pct_val = None
-                                if enable_forward_vol_stops:
-                                    try:
-                                        sym_prices = list(getattr(self.risk_manager, "_price_history", {}).get(sym, []))
-                                        if len(sym_prices) >= 3:
-                                            sp = np.asarray(sym_prices, dtype=float)
-                                            sym_returns = list(np.diff(sp) / sp[:-1])
-
-                                            benchmark = str(getattr(self.risk_manager.config, "corr_benchmark_symbol", "SPY"))
-                                            bench_prices = list(getattr(self.risk_manager, "_price_history", {}).get(benchmark, []))
-                                            bench_returns = []
-                                            if len(bench_prices) >= 3:
-                                                bp = np.asarray(bench_prices, dtype=float)
-                                                bench_returns = list(np.diff(bp) / bp[:-1])
-
-                                            s_eff, _, _ = sigma_eff(
-                                                sym_returns,
-                                                realized_window=int(getattr(self.risk_manager.config, "vol_realized_window", 20)),
-                                                lambda_=float(getattr(self.risk_manager.config, "vol_ewma_lambda", 0.94)),
-                                            )
-                                            d_rho = correlation_change(
-                                                sym_returns,
-                                                bench_returns,
-                                                short_window=int(getattr(self.risk_manager.config, "corr_short_window", 20)),
-                                                long_window=int(getattr(self.risk_manager.config, "corr_long_window", 60)),
-                                            )
-                                            params = VolStopParams(
-                                                k=float(getattr(self.risk_manager.config, "stop_k", 2.0)),
-                                                kappa=float(getattr(self.risk_manager.config, "stop_kappa", 0.5)),
-                                                overnight_mult=float(getattr(self.risk_manager.config, "stop_overnight_mult", 1.5)),
-                                            )
-                                            sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
-                                            stop_loss_pct_val = float(sl_frac) * 100.0
-                                    except Exception:
-                                        stop_loss_pct_val = None
-
-                                decision = decide_exit(
-                                    now=timestamp,
-                                    opened_at=opened_at,
-                                    pnl_pct=float(pnl_pct),
-                                    stop_loss_pct=stop_loss_pct_val,
-                                    max_holding_minutes=float(max_holding_minutes),
-                                    liquidity_bad=False,
-                                    liquidity_details=None,
-                                )
-
-                                if decision.should_exit:
-                                    exit_rows.append({
-                                        "symbol": sym,
-                                        "signal_type": "long_exit",
-                                        "confidence": 1.0,
-                                        "strength": 1.0,
-                                        "timestamp": timestamp,
-                                        "additional_data": {
-                                            "ads_exit": decision.reason,
-                                            "ads_exit_details": decision.details,
-                                            "held_minutes": held_mins,
-                                            "pnl_pct": float(pnl_pct),
-                                            "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
-                                        },
-                                    })
-                            except Exception:
+                        enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False, strategy_id=strat_id))
+                        
+                        try:
+                            if not getattr(pos, "is_long", True):
+                                continue
+                            qty = float(getattr(pos, "quantity", 0.0))
+                            if qty <= 0:
+                                continue
+                            opened_at = getattr(pos, "opened_at", None)
+                            if opened_at is None:
+                                continue
+                            # Avoid repeatedly queuing exit while one is already pending for this symbol.
+                            if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == "sell") for t in (self.pending_signals or [])):
                                 continue
 
-                        if exit_rows:
+                            held_mins = (timestamp - opened_at).total_seconds() / 60.0
+
+                            # Compute pnl_pct using SSOT entry price + current mark from RiskManager (not PositionBook MTM).
+                            avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
+                            px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
+                            pnl_pct = ((px - avg_entry) / avg_entry) * 100.0 if avg_entry > 0 else 0.0
+
+                            # Optional forward-looking vol stop (% distance)
+                            stop_loss_pct_val = None
+                            if enable_forward_vol_stops:
+                                try:
+                                    sym_prices = list(getattr(self.risk_manager, "_price_history", {}).get(sym, []))
+                                    if len(sym_prices) >= 3:
+                                        sp = np.asarray(sym_prices, dtype=float)
+                                        sym_returns = list(np.diff(sp) / sp[:-1])
+
+                                        benchmark = str(getattr(self.risk_manager.config, "corr_benchmark_symbol", "SPY"))
+                                        bench_prices = list(getattr(self.risk_manager, "_price_history", {}).get(benchmark, []))
+                                        bench_returns = []
+                                        if len(bench_prices) >= 3:
+                                            bp = np.asarray(bench_prices, dtype=float)
+                                            bench_returns = list(np.diff(bp) / bp[:-1])
+
+                                        s_eff, _, _ = sigma_eff(
+                                            sym_returns,
+                                            realized_window=int(getattr(self.risk_manager.config, "vol_realized_window", 20)),
+                                            lambda_=float(getattr(self.risk_manager.config, "vol_ewma_lambda", 0.94)),
+                                        )
+                                        d_rho = correlation_change(
+                                            sym_returns,
+                                            bench_returns,
+                                            short_window=int(getattr(self.risk_manager.config, "corr_short_window", 20)),
+                                            long_window=int(getattr(self.risk_manager.config, "corr_long_window", 60)),
+                                        )
+                                        params = VolStopParams(
+                                            k=float(getattr(self.risk_manager.config, "stop_k", 2.0)),
+                                            kappa=float(getattr(self.risk_manager.config, "stop_kappa", 0.5)),
+                                            overnight_mult=float(getattr(self.risk_manager.config, "stop_overnight_mult", 1.5)),
+                                        )
+                                        sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
+                                        stop_loss_pct_val = float(sl_frac) * 100.0
+                                except Exception:
+                                    stop_loss_pct_val = None
+
+                            decision = decide_exit(
+                                now=timestamp,
+                                opened_at=opened_at,
+                                pnl_pct=float(pnl_pct),
+                                stop_loss_pct=stop_loss_pct_val,
+                                max_holding_minutes=float(max_holding_minutes),
+                                liquidity_bad=False,
+                                liquidity_details=None,
+                            )
+
+                            if decision.should_exit:
+                                exit_rows.append({
+                                    "symbol": sym,
+                                    "signal_type": "long_exit",
+                                    "strategy_id": strat_id,
+                                    "confidence": 1.0,
+                                    "strength": 1.0,
+                                    "timestamp": timestamp,
+                                    "additional_data": {
+                                        "ads_exit": decision.reason,
+                                        "ads_exit_details": decision.details,
+                                        "held_minutes": held_mins,
+                                        "pnl_pct": float(pnl_pct),
+                                        "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
+                                    },
+                                })
+                        except Exception:
+                            continue
+
+                    if exit_rows:
                             exit_df = pd.DataFrame(exit_rows)
                             bar_df_local = pd.DataFrame([bar.to_dict()])
                             authorized_exits = await self._get_authorized_trades_for_bar(bar_df_local, exit_df, timestamp)
@@ -4507,7 +4552,7 @@ class InstitutionalBacktestEngine:
                             symbol=symbol,
                             side=side,
                             quantity=quantity,
-                            strategy_id='backtest_strategy',
+                            strategy_id=signal_row.get('strategy_id', 'backtest_strategy'),
                             confidence=confidence,
                             current_price=current_price,
                             metadata={
@@ -4526,6 +4571,7 @@ class InstitutionalBacktestEngine:
                         if authorization.authorization_level != AuthorizationLevel.REJECTED:
                             # Authorized: add to list for next-bar execution
                             authorized_trades.append({
+                                'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
                                 'symbol': symbol,
                                 'side': side,
                                 'quantity': authorization.authorized_quantity,
@@ -4821,7 +4867,7 @@ class InstitutionalBacktestEngine:
                         decision_price=current_price,  # Use current_price from authorization
                         market_data=market_data,
                         authorization_id=getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
-                        strategy_id=getattr(auth_trade.get('authorization', {}), 'request_id', ''),
+                        strategy_id=auth_trade.get('strategy_id', 'backtest_strategy'),
                         regime_context=regime_dict,
                         liquidity_score=liquidity_score,
                         max_retries=3  # Allow up to 3 retries with modifications
@@ -4879,7 +4925,8 @@ class InstitutionalBacktestEngine:
                                 side=side,
                                 quantity=actual_quantity,  # Use actual quantity (may be reduced)
                                 price=simulated_fill.fill_price,  # Use fill price (includes costs)
-                                timestamp=bar_timestamp
+                                timestamp=bar_timestamp,
+                                strategy_id=auth_trade.get('strategy_id', '')  # Carry over strategy attribution
                             )
                             logger.debug(f"📈 Position updated via RiskManager (Rule 4): {position_update}")
                         except Exception as e:
@@ -4935,7 +4982,8 @@ class InstitutionalBacktestEngine:
 
                         # Metadata
                         'authorization_id': getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
-                        'strategy_id': getattr(auth_trade.get('authorization', {}), 'request_id', ''),
+                        'strategy_id': auth_trade.get('strategy_id', 'backtest_strategy'),
+                        'strategy_run': auth_trade.get('strategy_id', 'backtest_strategy'),
                         'fill_id': simulated_fill.fill_id,
                         'regime': simulated_fill.costs.regime,
                         'liquidity_score': simulated_fill.costs.liquidity_score

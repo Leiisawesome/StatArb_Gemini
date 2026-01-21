@@ -34,7 +34,7 @@ papertest:
   strategy_manager:
     enable_signal_aggregation: true
     enable_conflict_resolution: true
-    enable_dynamic_weighting: true
+    enable_dynamic_weighting: false
     isolate_strategy_backtests: false
     hybrid_recombination:
       enable_hybrid_recombination: true
