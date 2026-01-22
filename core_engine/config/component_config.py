@@ -736,9 +736,6 @@ class FeatureConfig:
     use_normalization: bool = True
     """Enable feature normalization. Default: True"""
 
-    normalization_method: str = "robust"
-    """Normalization method ('standard', 'robust', 'minmax'). Default: 'robust'"""
-
     enable_liquidity_adjustments: bool = True
     """Enable liquidity-based feature adaptation. Default: True"""
 

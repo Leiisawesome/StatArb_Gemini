@@ -14,7 +14,7 @@ import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Any, Union
-from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.preprocessing import StandardScaler
 from scipy import stats
 import warnings
 import threading
@@ -117,7 +117,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         self.logger.info(f"🚀 Enhanced Feature Engineer initialized with component ID: {self.component_id}")
         self.liquidity_engine: Optional[Any] = None
         self.current_liquidity: Optional[Dict[str, Any]] = None
-        self._base_normalization_method = self.config.normalization_method
         self._base_lookback_periods = list(self.config.lookback_periods)
 
     # ========================================
@@ -189,8 +188,8 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         Adapt component behavior to current regime - IRegimeAware interface method
 
         Adaptation strategy:
-        - High volatility → More robust scaling, longer lookback periods
-        - Low volatility → Standard scaling, shorter lookback periods
+        - High volatility → Longer lookback periods
+        - Low volatility → Shorter lookback periods
         - Trending → Momentum features prioritized
         - Range-bound → Mean-reversion features prioritized
 
@@ -212,29 +211,23 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             regime_name = regime_context.primary_regime.value if (hasattr(regime_context, 'primary_regime') and hasattr(regime_context.primary_regime, 'value')) else (regime_context.primary_regime if hasattr(regime_context, 'primary_regime') else str(regime_context))
             volatility_regime = regime_context.volatility_regime if hasattr(regime_context, 'volatility_regime') else 'normal_volatility'
 
-            # Adapt normalization method based on volatility
             if volatility_regime == 'high_volatility':
-                self.config.normalization_method = 'robust'  # More robust to outliers
                 self.config.lookback_periods = [10, 20, 40]  # Longer periods
                 adaptations['adjustments'].append({
-                    'normalization': 'robust',
                     'lookback_periods': [10, 20, 40],
                     'reason': 'high_volatility'
                 })
-                self.logger.info(f"📊 Features adapted for high volatility: robust scaling, longer lookbacks")
+                self.logger.info("📊 Features adapted for high volatility: longer lookbacks")
             elif volatility_regime == 'low_volatility':
-                self.config.normalization_method = 'standard'  # Standard scaling
                 self.config.lookback_periods = [5, 10, 20]  # Shorter periods
                 adaptations['adjustments'].append({
-                    'normalization': 'standard',
                     'lookback_periods': [5, 10, 20],
                     'reason': 'low_volatility'
                 })
-                self.logger.info(f"📊 Features adapted for low volatility: standard scaling, shorter lookbacks")
+                self.logger.info("📊 Features adapted for low volatility: shorter lookbacks")
             else:
                 # Use existing configuration without modification
                 adaptations['adjustments'].append({
-                    'normalization': self.config.normalization_method,
                     'lookback_periods': self.config.lookback_periods,
                     'reason': 'normal_volatility'
                 })
@@ -288,20 +281,16 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             score = 70.0
 
         if score <= 40:
-            self.config.normalization_method = 'robust'
             self.config.lookback_periods = [max(p, p + 5) for p in self._base_lookback_periods]
             adjustments['mode'] = 'low_liquidity'
         elif score >= 80:
-            self.config.normalization_method = self._base_normalization_method
             self.config.lookback_periods = [max(3, int(p * 0.8)) for p in self._base_lookback_periods]
             adjustments['mode'] = 'high_liquidity'
         else:
-            self.config.normalization_method = self._base_normalization_method
             self.config.lookback_periods = list(self._base_lookback_periods)
             adjustments['mode'] = 'normal'
 
         self.current_liquidity = liquidity_context
-        adjustments['normalization_method'] = self.config.normalization_method
         adjustments['lookback_periods'] = self.config.lookback_periods
         return adjustments
 
@@ -449,7 +438,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             'start_time': self.start_time.isoformat() if self.start_time else None,
             'configuration': {
                 'use_normalization': self.config.use_normalization,
-                'normalization_method': self.config.normalization_method,
                 'enable_cross_sectional': self.config.enable_cross_sectional,
                 'max_features': self.config.max_features,
                 'lookback_periods': self.config.lookback_periods,
@@ -465,14 +453,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         try:
             self.logger.info("🔧 Initializing feature engineering engines...")
 
-            # Initialize scalers based on configuration
+            # Initialize scaler for streaming transforms
             if self.config.use_normalization:
-                if self.config.normalization_method == "standard":
-                    self.scalers['default'] = StandardScaler()
-                elif self.config.normalization_method == "robust":
-                    self.scalers['default'] = RobustScaler()
-                else:
-                    raise ValueError(f"Unsupported normalization method: {self.config.normalization_method}")
+                self.scalers['default'] = StandardScaler()
 
             self.logger.info("✅ Feature engineering engines initialized")
 
@@ -671,7 +654,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Returns at different horizons
         for period in [1, 2, 3, 5, 10]:
             if len(df) > period:
-                new_columns[f'return_{period}d'] = df['close'].pct_change(periods=period, fill_method=None)
+                col = f'return_{period}d'
+                if col not in df.columns:
+                    new_columns[col] = df['close'].pct_change(periods=period, fill_method=None)
         
         # Log returns (handle invalid values)
         price_ratio = df['close'] / df['close'].shift(1)
@@ -679,25 +664,36 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         log_return = np.full(len(df), np.nan)
         if positive_mask.any():
             log_return[positive_mask] = np.log(price_ratio[positive_mask])
-        new_columns['log_return'] = log_return
+        if 'log_return' not in df.columns:
+            new_columns['log_return'] = log_return
         
         # OHLC ratios
-        new_columns['hl_range'] = (df['high'] - df['low']) / df['close']
-        new_columns['oc_range'] = (df['open'] - df['close']) / df['close']
-        new_columns['hl_ratio'] = df['high'] / df['low']
-        new_columns['body_size'] = np.abs(df['close'] - df['open']) / df['close']
-        new_columns['upper_shadow'] = (df['high'] - np.maximum(df['open'], df['close'])) / df['close']
-        new_columns['lower_shadow'] = (np.minimum(df['open'], df['close']) - df['low']) / df['close']
+        if 'hl_range' not in df.columns:
+            new_columns['hl_range'] = (df['high'] - df['low']) / df['close']
+        if 'oc_range' not in df.columns:
+            new_columns['oc_range'] = (df['open'] - df['close']) / df['close']
+        if 'hl_ratio' not in df.columns:
+            new_columns['hl_ratio'] = df['high'] / df['low']
+        if 'body_size' not in df.columns:
+            new_columns['body_size'] = np.abs(df['close'] - df['open']) / df['close']
+        if 'upper_shadow' not in df.columns:
+            new_columns['upper_shadow'] = (df['high'] - np.maximum(df['open'], df['close'])) / df['close']
+        if 'lower_shadow' not in df.columns:
+            new_columns['lower_shadow'] = (np.minimum(df['open'], df['close']) - df['low']) / df['close']
         
         # Gap features
-        new_columns['gap'] = (df['open'] - df['close'].shift(1)) / df['close'].shift(1)
+        if 'gap' not in df.columns:
+            new_columns['gap'] = (df['open'] - df['close'].shift(1)) / df['close'].shift(1)
         
         # Price momentum
-        new_columns['price_acceleration'] = pd.Series(log_return, index=df.index).diff()
+        if 'price_acceleration' not in df.columns:
+            new_columns['price_acceleration'] = pd.Series(log_return, index=df.index).diff()
         
         # Volatility proxies
-        if 'return_1d' in new_columns:
-            new_columns['daily_vol'] = new_columns['return_1d'].rolling(20).std()
+        if 'daily_vol' not in df.columns:
+            return_1d_series = df['return_1d'] if 'return_1d' in df.columns else new_columns.get('return_1d')
+            if return_1d_series is not None:
+                new_columns['daily_vol'] = return_1d_series.rolling(20).std()
         
         # Concatenate once to avoid fragmentation
         df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
@@ -1025,12 +1021,17 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         new_columns = {}
         
         # Volume momentum
-        new_columns['volume_change'] = df['volume'].pct_change(fill_method=None)
-        new_columns['volume_acceleration'] = new_columns['volume_change'].diff()
+        if 'volume_change' in df.columns:
+            volume_change = df['volume_change']
+        else:
+            volume_change = df['volume'].pct_change(fill_method=None)
+            new_columns['volume_change'] = volume_change
+        if 'volume_acceleration' not in df.columns:
+            new_columns['volume_acceleration'] = volume_change.diff()
 
         # Volume-price relationship
-        if 'return_1d' in df.columns:
-            new_columns['volume_price_trend'] = new_columns['volume_change'] * df['return_1d']
+        if 'return_1d' in df.columns and 'volume_price_trend' not in df.columns:
+            new_columns['volume_price_trend'] = volume_change * df['return_1d']
 
         # Volume breakouts
         if 'volume_sma' in df.columns:
@@ -1279,6 +1280,8 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         Normalize features using configured method
         CRITICAL: Preserve raw trading indicators for signal generation
         """
+        if not self.config.use_normalization:
+            return df
         # Identify feature columns (exclude metadata AND core trading indicators)
         metadata_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'transactions']
 
@@ -1314,16 +1317,11 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         if not feature_cols:
             return df
 
-        # Choose scaler
-        if self.config.normalization_method == "standard":
-            scaler = StandardScaler()
-        elif self.config.normalization_method == "robust":
-            scaler = RobustScaler()
-        else:  # minmax
-            from sklearn.preprocessing import MinMaxScaler
-            scaler = MinMaxScaler()
+        # Causal normalization (avoid full-sample look-ahead).
+        # Use expanding stats so each row only sees history up to itself.
+        min_periods = 20
 
-        # Fit and transform features
+        # Transform features with expanding stats
         try:
             # Handle NaN and infinity values
             feature_data = df[feature_cols].copy()
@@ -1364,19 +1362,21 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                             self.logger.warning(f"Error calculating median for {col}: {e}, using 0.0")
                             feature_data[col] = feature_data[col].replace([np.inf, -np.inf, np.nan], 0.0)
 
-            # Fit scaler on cleaned data
-            scaled_features = scaler.fit_transform(feature_data)
+            # Always use standard scaling with expanding (causal) stats
+            rmean = feature_data.expanding(min_periods=min_periods).mean()
+            rstd = feature_data.expanding(min_periods=min_periods).std()
+            denom = rstd.replace(0, np.nan)
+            scaled = (feature_data - rmean) / denom
 
-            # Replace original features with scaled versions
-            df[feature_cols] = scaled_features
-
-            # Store scaler for future use
-            self.scalers['main'] = scaler
+            # Replace original features with expanding-normalized versions
+            df[feature_cols] = scaled.fillna(0.0).values
 
             # Data integrity validation after normalization
             self._validate_data_integrity(df)
 
-            self.logger.info(f"Normalized {len(feature_cols)} features using {self.config.normalization_method} scaling")
+            self.logger.info(
+                f"Normalized {len(feature_cols)} features using expanding-standard scaling"
+            )
             self.logger.info(f"Preserved {len(preserve_cols)} core trading indicators")
 
         except Exception as e:
@@ -1571,12 +1571,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             self.logger.warning("No feature columns found for scaler fitting")
             return
 
-        # Fit scalers based on config
+        # Fit standard scaler (streaming mode helper; feature pipeline is causal expanding)
         with self._lock:
-            if self.config.normalization_method == 'zscore':
-                scaler = StandardScaler()
-            else:
-                scaler = RobustScaler()
+            scaler = StandardScaler()
 
             # Extract feature data, drop NaN rows
             feature_data = historical_df[feature_cols].dropna()
@@ -1605,7 +1602,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             state = {
                 'scalers': self.scalers,
                 'feature_columns': self.feature_columns,
-                'config_normalization': self.config.normalization_method,
             }
 
             with open(path, 'wb') as f:

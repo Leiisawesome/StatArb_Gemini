@@ -623,7 +623,6 @@ class TestFeatureConfig:
         """Test FeatureConfig initialization with defaults."""
         config = FeatureConfig()
         assert config.use_normalization is True
-        assert config.normalization_method == "robust"
         assert config.enable_cross_sectional is True
         assert config.cross_sectional_universe is None
         assert config.max_features is None
@@ -637,7 +636,6 @@ class TestFeatureConfig:
         """Test FeatureConfig initialization with custom values."""
         config = FeatureConfig(
             use_normalization=False,
-            normalization_method="standard",
             enable_cross_sectional=False,
             cross_sectional_universe=["AAPL", "TSLA"],
             max_features=50,
@@ -648,7 +646,6 @@ class TestFeatureConfig:
             enable_caching=False
         )
         assert config.use_normalization is False
-        assert config.normalization_method == "standard"
         assert config.enable_cross_sectional is False
         assert config.cross_sectional_universe == ["AAPL", "TSLA"]
         assert config.max_features == 50
@@ -664,7 +661,6 @@ class TestFeatureConfig:
         config = FeatureConfig()
         assert config is not None
         assert hasattr(config, 'use_normalization')
-        assert hasattr(config, 'normalization_method')
         assert hasattr(config, 'enable_cross_sectional')
         assert hasattr(config, 'cross_sectional_universe')
         assert hasattr(config, 'max_features')

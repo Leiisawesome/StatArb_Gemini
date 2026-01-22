@@ -166,7 +166,6 @@ class TestIRegimeAwareCompliance:
         await engineer.on_regime_change(high_vol_regime)
 
         # Verify adaptations
-        assert engineer.config.normalization_method == 'robust'  # More robust
         assert engineer.config.lookback_periods == [10, 20, 40]  # Longer periods
 
     @pytest.mark.asyncio
@@ -185,7 +184,6 @@ class TestIRegimeAwareCompliance:
         await engineer.on_regime_change(low_vol_regime)
 
         # Verify adaptations
-        assert engineer.config.normalization_method == 'standard'  # Standard scaling
         assert engineer.config.lookback_periods == [5, 10, 20]  # Shorter periods
 
     # ========================================
@@ -304,7 +302,6 @@ class TestIRegimeAwareCompliance:
 
         # Verify adaptations are consistent with high volatility
         assert indicators.config.bb_std == 2.5
-        assert engineer.config.normalization_method == 'robust'
         assert generator.config.signal_threshold == 0.5
 
     @pytest.mark.asyncio

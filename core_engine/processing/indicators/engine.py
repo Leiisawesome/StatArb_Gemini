@@ -877,8 +877,9 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
         if len(df) >= 20:
             # Local highs and lows in a rolling window
             window = 10
-            df['local_high'] = df['high'].rolling(window=window, center=True).max()
-            df['local_low'] = df['low'].rolling(window=window, center=True).min()
+            # Causal: use trailing window only (avoid look-ahead from centered windows)
+            df['local_high'] = df['high'].rolling(window=window, center=False).max()
+            df['local_low'] = df['low'].rolling(window=window, center=False).min()
 
             # Distance from local extremes
             df['dist_from_high'] = (df['local_high'] - df['close']) / df['close']
