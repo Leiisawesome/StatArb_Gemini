@@ -49,6 +49,9 @@ def strategy_config():
 def mock_risk_manager():
     """Mock risk manager for testing"""
     risk_manager = Mock()
+    risk_manager.initialize = AsyncMock(return_value=True)
+    risk_manager.start = AsyncMock(return_value=True)
+    risk_manager.stop = AsyncMock(return_value=True)
     risk_manager.authorize_trading_decision = AsyncMock(return_value=Mock(
         authorization_level='STANDARD',
         authorized_quantity=100.0
@@ -63,6 +66,9 @@ def mock_risk_manager():
 def mock_data_manager():
     """Mock data manager for testing"""
     data_manager = Mock()
+    data_manager.initialize = AsyncMock(return_value=True)
+    data_manager.start = AsyncMock(return_value=True)
+    data_manager.stop = AsyncMock(return_value=True)
     data_manager.get_market_data = AsyncMock(return_value=Mock(
         close=[100.0, 101.0, 102.0],
         volume=[1000, 1100, 1200],
@@ -75,6 +81,9 @@ def mock_data_manager():
 def mock_regime_engine():
     """Mock regime engine for testing"""
     regime_engine = Mock()
+    regime_engine.initialize = AsyncMock(return_value=True)
+    regime_engine.start = AsyncMock(return_value=True)
+    regime_engine.stop = AsyncMock(return_value=True)
     regime_engine.get_current_regime = AsyncMock(return_value=Mock(
         primary_regime='normal_volatility',
         confidence=0.8,

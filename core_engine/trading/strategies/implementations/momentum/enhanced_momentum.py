@@ -89,8 +89,6 @@ class MomentumSignal(Enum):
     """Momentum signal types"""
     BULLISH_MOMENTUM = "bullish_momentum"
     BEARISH_MOMENTUM = "bearish_momentum"
-    MOMENTUM_CONTINUATION = "momentum_continuation"
-    MOMENTUM_EXHAUSTION = "momentum_exhaustion"
 
 # Note: MomentumConfig now imported from core_engine.config (Rule 1 Section 7)
 # Local definition removed - use centralized configuration
@@ -134,16 +132,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         # Diagnostics: summarize why the state machine didn't trigger entries (no per-bar spam).
         self._sm_entry_reasons: Dict[str, int] = {}
         self._sm_entries_triggered: int = 0
-
-    @property
-    def market_data(self) -> Dict[str, pd.DataFrame]:
-        """
-        Backward-compatible alias to the skeleton market-data cache.
-
-        Rule 7: caching/plumbing belongs in the skeleton. Momentum implementation
-        uses this alias to avoid maintaining a second 'truth' store.
-        """
-        return self._market_data
 
     @staticmethod
     def _normalize_composite_pct(x: float) -> float:
@@ -614,9 +602,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
     # ========================================
     # SIGNAL GENERATION METHODS
     # ========================================
-
-    # REMOVED: _get_regime_adjusted_thresholds_old (FIXED: LOW #11 - dead code removed)
-    # Use _get_regime_adjusted_thresholds (Phase 4B) instead
 
     async def _evaluate_bar_at_index(self, symbol: str, idx: int) -> Optional[StrategySignal]:
         """
@@ -1243,39 +1228,6 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 'volume_ratio': pd.Series([1.0], index=fallback_index),
                 'trend_strength': pd.Series([0.0], index=fallback_index)
             }
-
-    def _check_breakout(self, symbol: str, direction: str) -> bool:
-        """Check for breakout confirmation"""
-
-        try:
-            if symbol not in self.market_data or symbol not in self.indicators:
-                return False
-
-            data = self.market_data[symbol]
-            if len(data) < self.config.breakout_lookback:
-                return False
-
-            current_price = data['close'].iloc[-1]
-
-            # Get recent high/low
-            lookback_data = data.tail(self.config.breakout_lookback)
-            recent_high = lookback_data['high'].max()
-            recent_low = lookback_data['low'].min()
-
-            if direction == 'bullish':
-                # Check if price broke above recent high
-                breakout_level = recent_high * (1 + self.config.breakout_threshold)
-                breakout_confirmed = current_price > breakout_level
-                return breakout_confirmed
-            else:  # bearish
-                # Check if price broke below recent low
-                breakout_level = recent_low * (1 - self.config.breakout_threshold)
-                breakout_confirmed = current_price < breakout_level
-                return breakout_confirmed
-
-        except Exception as e:
-            logger.error(f"Breakout check failed for {symbol}: {e}")
-            return False
 
     def _calculate_signal_confidence(
         self,
